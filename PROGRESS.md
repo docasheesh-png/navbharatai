@@ -96870,3 +96870,59 @@ needed to reproduce the numbers above.
 **Not a fix, and not claimed as one.** Nothing in the counter changed. `tests/theQueueSaysWhatIsTrue.test.ts`
 still passes 14/14 with the baseline unchanged at 40 — the new BLOCKED row carries all four fields, so it
 adds nothing to the gap count.
+
+---
+
+## 2026-10-17 — Q-1133 RESOLVED: a GitHub failure is answered in our own words, and the hunt found a fifth site
+
+**The defect, as four routes shipped it:**
+
+```ts
+res.status(err.response?.status || 500).json({ error: err.response?.data?.message || err.message });
+```
+
+GitHub's own wording became the **whole** error the user read — *"Not Found"*, *"Bad credentials"*,
+*"Git Repository is empty."* Each is literally true and each tells a non-technical person nothing
+about what to do next. `github.ts` carried three (`fetch`, `file`, `branches`); `cloudsync.ts` the
+fourth.
+
+**THE HUNT FOUND A FIFTH THE ROW NEVER NAMED.** `github.ts`'s push-enhanced catch already had a
+fallback sentence of ours — which is exactly why it looked fixed — but GitHub's message still came
+first, so it read like the other four whenever GitHub supplied one. The row said *"github.ts (×3) and
+cloudsync.ts"*; grepping the SHAPE across the repo said five. The shape was right. This is the third
+absolute rule's point about searching by shape rather than by the row's own count.
+
+**The class is not "four routes forgot a sentence" — it is that writing the sentence was each route's
+own job.** `mobileShip.ts:731` already had the considered form (a curated hint per status, the upstream
+message kept as a secondary `detail`) and it stayed one route's private good habit, because nothing
+required it of anyone else. `src/server/lib/githubApiError.ts` now owns the mapping: a pure
+`githubApiErrorAnswer(err, action)` that names what the user was trying to do and what to do about it,
+plus `sendGithubApiError` which goes through the existing `sendSafeError` door so the raw error is still
+logged server-side and the redactor still runs over everything the client reads.
+
+**One additive change to the shared door.** `sendSafeError` gained an optional `publicDetail`, redacted
+on the same path, sent in production too. It exists for the one case where extra wording genuinely helps:
+a message from a service the USER connected (their own GitHub), which tells them which branch or
+repository was wrong. Without it, `detail` stays exactly what it was — a dev-only echo. 56 existing
+callers are untouched.
+
+**Why GitHub may be named, when the white-label law forbids naming a vendor.** GitHub is not one of OUR
+providers running hidden behind the product; it is a service the user connected with their own account,
+and "reconnect GitHub" is an action they perform on it by name. `httpError.ts`'s redactor lists the model
+vendors that must never surface, and GitHub is deliberately not among them.
+
+**A GitHub outage is no longer reported as the user's bad request.** A 5xx from GitHub, and a call that
+never reached GitHub at all, both answer 502 with wording that says so.
+
+**TWO ROUTES DELETED IN THE SAME CHANGE, under CLAUDE.md's undecided-route rule.** Touching `github.ts`
+meant deciding the `undecided` rows it carried: `POST /api/github/file` and `POST /api/github/branches`.
+Decided by evidence, not by sweep — no client file references either path today, and `git log -S` over
+`src/` excluding `src/server` finds **no commit that ever added one**, so unlike a route an old bundled
+phone app might still carry, these never had a caller to bundle. The repo had already taken this exact
+decision one route below, for the same reason. The baseline shrank 75 → 73 and the two 401 tests for
+them went with them.
+
+**Locked as a class.** `tests/aGithubFailureIsAnsweredInOurWords.test.ts` (8 tests) fails when a NEW
+server file hands the upstream message over as the error a user reads — the sibling that does not exist
+yet — while still allowing it as `detail`, which is the deliberate, useful use. Reversion proof: the raw
+shape restored at one site → 2 fail; the GitHub-outage remap removed → 1 fail; restored → 8 pass.

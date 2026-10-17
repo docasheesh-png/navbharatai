@@ -692,7 +692,7 @@ import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess, summaryAfterRescue } from '../AgentV3/renderRescue';
-import { entryIsStillTheStarter, starterRenderNote } from '../AgentV3/stillTheStarterApp';
+import { entryIsStillTheStarter, starterRenderNote, importNeverTheStarter } from '../AgentV3/stillTheStarterApp';
 import { readProjectElsewhere, shouldAnswerProjectElsewhere, projectElsewhereSteer, projectElsewhereFallback } from '../AgentV3/projectElsewhere';
 import { runProvenApp, verdictHeldMessage, type ProdBuildOutcome, type LateFlip } from '../AgentV3/runProvenApp';
 import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewPort } from '../AgentV3/deliveryProof';
@@ -15075,7 +15075,8 @@ async function noteBuildOutcome(
           : undefined;
         const resumeLookupMs = Date.now() - setupT0;
         const ensureT0 = Date.now();
-        await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId);
+        // An import turn's workspace is the user's project, never our starter plus theirs (build d62bf22d).
+        await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId, hasImportIntent ? { seedStarter: false } : undefined);
         const ensureWorkspaceMs = Date.now() - ensureT0;
         try {
           buildDiag.recordSetupTiming({
@@ -16108,7 +16109,9 @@ async function noteBuildOutcome(
        * blocker uses, so the gate and the proofs cannot disagree about one file. An unreadable entry
        * answers `false` — our own trouble must never veto a real app's proof.
        */
-      const renderIsOnlyTheStarter = (): Promise<boolean> => entryIsStillTheStarter(
+      // 🔴 AN IMPORTED PROJECT IS NEVER "OUR STARTER" (build d62bf22d): a starter file left beside an import is
+      // ours, not the user's entry, so on an import turn the answer is always no (`importNeverTheStarter`).
+      const renderIsOnlyTheStarter = (): Promise<boolean> => importNeverTheStarter(isImportTurn) ? Promise.resolve(false) : entryIsStillTheStarter(
         (path) => withTimeout(actuator.readFile(workspaceId, path), 5_000, 'starter-entry-read'),
       ).catch(() => false);
       let inBuildStarterNoted = false;
@@ -21915,6 +21918,7 @@ async function noteBuildOutcome(
        */
       let starterNoted = false;
       const starterShownOn = async (html: string): Promise<string | null> => {
+        if (importNeverTheStarter(isImportTurn)) return null;
         if (!pageShowsStarter(html)) return null;
         try {
           for (const p of STARTER_ENTRY_PATHS) {

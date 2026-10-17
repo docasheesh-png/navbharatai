@@ -89,17 +89,40 @@ describe('🔒 RATCHET: the four fields a 🟡 BLOCKED row owes, and they may on
   // Q-120 (a physical device), Q-140 (`cloudbuild.yaml:87` already threads the value; one trigger field
   // remains), Q-699 (a real phone). Only four come off this count, because Q-699's row did not TERMINATE
   // — its closing pipe was missing, so no reader that splits on the pipe ever saw it as a row at all.
-  const MISSING_FIELDS_BASELINE = 48;
+  //
+  // 🔴 AND THEN THE DETECTOR ITSELF TURNED OUT TO BE LYING, IN BOTH DIRECTIONS (batch 2, 2026-10-17).
+  // Batch 1 above completed six rows against this `gapsOf`; batch 2 audited `gapsOf`. It had been written
+  // from the four field names as THIS FILE spells them, not as CLAUDE.md spells them — and the sixth rule's
+  // own wording is *"what is **required** to unblock it"*. So:
+  //
+  //   · it FLAGGED six rows that were complete all along, whose only sin was writing `**Required:**` — the
+  //     rule's own word — instead of `**Needs:**`: Q-111, Q-126, Q-133, Q-706, Q-819, Q-1012. Each was
+  //     opened and verified by eye to carry all four. Q-111 is the clearest: *What · Why blocked · Required
+  //     · Already tried*, every one present, counted as a gap. A census that cannot read the vocabulary of
+  //     the rule it enforces is the "lying analyzer" the fifth rule calls a defect in its own right — and
+  //     this one MANUFACTURED work in one place while HIDING it in another:
+  //   · it PASSED one row with a real gap. A bare `/because/` anywhere in the prose counted as a `Why`
+  //     FIELD, so Q-1086 — which never wrote its reason down — read as complete.
+  //   · `/\*\*What/` also matched `**What is required:**`, so one field could satisfy two.
+  //
+  // Corrected to LABELLED FIELDS ONLY, with the synonyms the rows actually use, and `What is required`
+  // excluded from `what` so it cannot count twice. Re-measured on batch 1's own file the honest count was
+  // **42, lower than 48** — so the more truthful detector moved the ratchet in the only direction it may
+  // move. Had it come out higher, the number would have gone up with that reason stated, not been hidden.
+  // Two further fills (Q-008, Q-1086 — see the Q-1126 row) then took it to 40.
+  const MISSING_FIELDS_BASELINE = 40;
 
   const blocked = rows.filter((r) => r.state.startsWith('🟡 BLOCKED'));
-  const gapsOf = (body: string): string[] => {
-    const have = new Set<string>();
-    if (/\*\*What|What is blocked/i.test(body)) have.add('what');
-    if (/\*\*Why|Why blocked|because/i.test(body)) have.add('why');
-    if (/\*\*Needs?\b|Needs:/i.test(body)) have.add('needs');
-    if (/\*\*(Already )?tried|Tried:/i.test(body)) have.add('tried');
-    return ['what', 'why', 'needs', 'tried'].filter((k) => !have.has(k));
-  };
+  /** A bolded field LABEL, never a word in running prose — that distinction is the whole correction above. */
+  const FIELD = {
+    // `(?!\s+is\s+required)` keeps `**What is required:**` out of this one; it belongs to `needs`.
+    what: /\*\*(?:What\b(?!\s+is\s+required)|Blocked\b|Blocker\b|Waiting on\b)/i,
+    why: /\*\*(?:Why\b|Cause\b|Reason\b)/i,
+    needs: /\*\*(?:Needs?\b|Required\b|What is required\b|To unblock\b)/i,
+    tried: /\*\*(?:Already tried\b|Tried\b|Measured\b|Investigated\b|Checked\b|Evidence\b)/i,
+  } as const;
+  const gapsOf = (body: string): string[] =>
+    (['what', 'why', 'needs', 'tried'] as const).filter((k) => !FIELD[k].test(body));
 
   it('there are blocked rows to check — the measurement is live, not a stale number', () => {
     expect(blocked.length).toBeGreaterThan(50);
@@ -123,6 +146,23 @@ describe('🔒 RATCHET: the four fields a 🟡 BLOCKED row owes, and they may on
       `${incomplete.length} blocked rows are missing a required field. The baseline is ${MISSING_FIELDS_BASELINE} `
       + '(Q-1126). It may go DOWN — lower this number when it does — and a NEW incomplete row must not push it up.',
     ).toBeLessThanOrEqual(MISSING_FIELDS_BASELINE);
+  });
+
+  // 🔒 THE DETECTOR'S OWN BEHAVIOUR, on fixtures — so the two ways it lied cannot come back. The count
+  // above would go green again under the old regexes the moment enough rows were filled; these cannot.
+  it('a row using CLAUDE.md\'s own word, `**Required:**`, is COMPLETE — it is not a gap', () => {
+    expect(gapsOf('**What:** x. **Why:** y. **Required:** z. **Already tried:** w.')).toEqual([]);
+    expect(gapsOf('**Blocked:** x. **Cause:** y. **To unblock:** z. **Measured:** w.')).toEqual([]);
+  });
+
+  it('🔴 a reason buried in PROSE is not a `Why` FIELD — the Q-1086 hole', () => {
+    const prose = '**What:** x. It stalls because the vendor is slow. **Needs:** z. **Already tried:** w.';
+    expect(gapsOf(prose)).toEqual(['why']);
+    expect(gapsOf(`${prose} **Why:** the vendor owns it.`)).toEqual([]);
+  });
+
+  it('…and one field never satisfies two: `**What is required:**` is `needs`, not `what`', () => {
+    expect(gapsOf('**What is required:** z. **Why:** y. **Already tried:** w.')).toEqual(['what']);
   });
 
   it('🔴 the gap is RECORDED, not silent — Q-1126 names it with its real number', () => {

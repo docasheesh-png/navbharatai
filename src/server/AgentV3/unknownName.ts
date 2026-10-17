@@ -22,6 +22,8 @@
  * a request that names a real service. Kill switch: `AGENTV3_UNKNOWN_NAME_NOTE=off`. PURE.
  */
 
+import { isCommonEnglishWord } from './commonEnglishWords';
+
 export function unknownNameNoteEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_UNKNOWN_NAME_NOTE ?? '').trim().toLowerCase() !== 'off';
 }
@@ -139,6 +141,11 @@ export function unknownNamesInRequest(prompt: string): string[] {
     const w = m[0];
     if (out.includes(w)) continue;
     if (COMMON_ACRONYMS.has(w) || KNOWN_SERVICES.has(w) || EMPHASIS.has(w)) continue;
+    // 🔴 AN ORDINARY ENGLISH WORD IN CAPITALS IS EMPHASIS, NOT A PRODUCT (autopsy 778d7c58: "CALCULATE" in
+    // the Panchang chip was reported as an unknown service). EMPHASIS above is a hand-kept list, so every
+    // new emphasised word was a new false positive — the class, not the instance. A dictionary of the 10k
+    // most common English words closes it; a coined name (COACT, PRIMECLASH) is still not in it.
+    if (isCommonEnglishWord(w) || isCommonEnglishWord(w.replace(/(?:ING|ED|ES|S)$/, ''))) continue;
     if (namedAsService(text, w)) continue;
     out.push(w);
     if (out.length >= 3) break;

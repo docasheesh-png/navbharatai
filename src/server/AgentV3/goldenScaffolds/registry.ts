@@ -281,7 +281,7 @@ export function goldenBuildPrompt(golden: GoldenScaffold, buildPrompt: string): 
       `Do NOT rewrite what already works, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.`
     : `[VERIFY & FINISH — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested, working "${golden.label}" app template. ` +
       `It already compiles cleanly and fully implements the request below. READ src/App.tsx first. If the request matches the template (it should — the prompt is the template's own), ` +
-      `make at most SMALL polish edits and finish quickly. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists. ` +
+      `make NO edits unless tsc fails or the request asks for something the template does not do — a finished template needs no polish, and every edit is a chance to break it. The live preview has ALREADY been started by the platform. Before any edit_file, read_file the exact region you will change (one read of src/App.tsx, not fragments) — never edit text you have not read. Otherwise run the type check and finish. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists. ` +
       // Autopsy 8257ca59: a polish step replaced the template's working light/dark switch with a
       // hand-rolled one that set a class no stylesheet styles, and a repair pass had to put it back.
       `KEEP the template's own working controls — above all its light/dark switch (ThemeToggle in src/theme.tsx, which cycles Auto → Light → Dark through the data-theme attribute the styles use); improve one in place if you must, never replace it with a hand-rolled copy.`;

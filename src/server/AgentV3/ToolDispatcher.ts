@@ -96,6 +96,13 @@ import { mergeDotEnv, gitignoreWithEnv, dotEnvValue } from '../secrets/appSecret
 import { ensureBootEnv, ENV_SCAN_COMMAND } from './devSecretsBoot';
 import { envNamesFromGrep, detectDatabaseProvider } from './ImportPreview';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
+
+/** PURE. A bash result that says the dev server is UP on a port, with no preview published yet. */
+export function shouldAutoPublishPreview(bashOutput: string, previewPublished: boolean, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (previewPublished || String(env.AGENTV3_AUTO_PREVIEW ?? '').trim().toLowerCase() === 'off') return false;
+  const v = parseDevServerHealthLine(String(bashOutput ?? ''));
+  return !!v && v.up && Number.isInteger(v.port) && (v.port as number) > 0;
+}
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled, modelDesignLine } from './writeTimeQualityCheck';
@@ -907,6 +914,8 @@ export class ToolDispatcher {
   // re-ran update_preview + npm run dev in a loop until the step cap — ~10 min burned on an
   // unreachable preview). Counted per dispatcher (= per build for the Architect).
   private previewFails = 0;
+  /** A live preview was published by this dispatcher (update_preview emitted a `preview` event). */
+  private previewPublished = false;
   /** Per-dispatcher incremental cache, so two builds never share one tsbuildinfo (TD-18). */
   private readonly tsBuildInfoId = randomUUID().slice(0, 8);
 
@@ -4027,6 +4036,19 @@ export class ToolDispatcher {
         this.flushUnrecordedWrites(); // every write this call made reaches the saved project
       }
       // A RECIPE'S DEPENDENCY IS INSTALLED, NOT NAMED (recipeDependencyLine.ts) — one door for every recipe.
+      // 🔴 AUTO PREVIEW (autopsy 778d7c58): a bash that brought the dev server UP used to end with the hint
+      // "call update_preview" — and the user, seeing nothing, pressed Stop at 76 s, one tool call before the
+      // preview. A dev server that is UP and not yet published is published HERE, by the platform, every
+      // time — whichever command started it. Kill switch AGENTV3_AUTO_PREVIEW=off.
+      if (!visual && call.name === 'bash' && shouldAutoPublishPreview(content, this.previewPublished)) {
+        const port = parseDevServerHealthLine(content)!.port!;
+        try {
+          const pv = await this.run({ id: `${call.id}-auto-preview`, name: 'update_preview', input: { port } } as ToolUse, agent);
+          content = `${content}\n\n[platform] The live preview was published automatically on port ${port} — do NOT call update_preview again.\n${pv.slice(0, 400)}`;
+        } catch (e) {
+          content = `${content}\n\n[platform] Automatic preview on port ${port} did not publish (${e instanceof Error ? e.message.slice(0, 200) : String(e)}).`;
+        }
+      }
       const recipeCalled = call.name === 'run_recipe'
         ? String((call.input as Record<string, unknown> | undefined)?.name ?? '')
         : call.name;
@@ -11371,6 +11393,7 @@ export class ToolDispatcher {
         // these same files, carries the signature. Gated by the user's Settings → General toggle;
         // best-effort so it can never break/block a working preview.
         await this.injectAppSignatureIntoIndexHtml();
+        this.previewPublished = true;
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
         // The url is handed to you (not withheld) because your OWN next steps need it — screenshot,
         // curl, a browser check. It must never appear in your reply to the person: they already see
@@ -11511,6 +11534,7 @@ export class ToolDispatcher {
         });
         if (!publishable.ok) throw new Error(publishable.reason);
         const url = await this.deploy(this.workspaceId, files);
+        this.previewPublished = true;
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
         // P-PIPE.78 — honest bundle size from the dist map we already downloaded (zero extra I/O,
         // pure, never throws). Tells the user how heavy their shipped app is.

@@ -662,3 +662,17 @@ Q-1125
 # records: the census I duplicated already existed as aPromiseToTheUserHasAHandler, and my first
 # "one home" refactor blinded it.
 Q-1037
+# Closed 2026-10-17 — Q-888 was FIXED SINCE IT WAS WRITTEN, by work merged under other names (DB-5
+# and the purchase-ledger change), so it has no PR of its own. All four halves verified in the tree
+# before closing, because "it looks fixed" is not a verdict:
+#   (1) classify failed/dropped → FAILED  — purchaseLedger.ts:92 maps FAILED/CANCELLED/USER_DROPPED/
+#       EXPIRED → 'FAILED', and paymentReversal.ts handles the webhook types;
+#   (2) answer 200 so the provider stops re-sending — payment.ts:531/535/542 return 200 (IGNORED/OK),
+#       not the 400 the row described;
+#   (3) expire PENDING — payments.ts:341 sets paymentStatus EXPIRED with expiredAt, inside a
+#       transaction and only while the order is still PENDING, so a concurrent PAID credit wins;
+#   (4) sweep newest-first — payment.ts:423 carries the DB-5 fix in its own words: "newest PENDING
+#       orders first. The old unordered limit(50) returned the 50 OLDEST ids".
+# Recorded in full because an earlier turn of mine left this row open saying two halves were
+# unchecked — which was the right call then and is resolved now, with the evidence rather than a shrug.
+Q-888

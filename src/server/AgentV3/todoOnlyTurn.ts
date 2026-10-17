@@ -118,3 +118,35 @@ export function todoOnlyTurnsLine(tally: { turns: number; latencyMs: number; fir
     message: todoOnlyTurnsNote(tally?.turns ?? 0, tally?.latencyMs ?? 0, tally?.firstInRun),
   };
 }
+
+// 🔴 AND THE HAND-BACK WAS READ AND IGNORED (autopsy ca99778e, 2026-10-17). The architect's first turn and three
+// of the frontend sub-agent's turns (29.7 s) were plan-only, after the steer above. A rule a model may skip is a
+// preference; the structural answer is that a turn CANNOT be plan-only when the plan tool is not on offer. After
+// a plan-only turn, update_todo is withdrawn from the tools of the next turn(s) until the run does real work; a
+// second plan-only turn withdraws it for the rest of the run. The plan keeps advancing by itself as files land
+// (PlanProgress.ts), so nothing the user sees is lost. Kill switch `AGENTV3_TODO_WITHDRAW=off`. PURE.
+
+export type TodoWithdrawal = 'offered' | 'until-work' | 'for-run';
+
+export function todoWithdrawEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_TODO_WITHDRAW ?? '').trim().toLowerCase() !== 'off';
+}
+
+/** The withdrawal state after a turn. `plannedOnlyBefore` = this run already had a plan-only turn. PURE. */
+export function nextTodoWithdrawal(
+  state: TodoWithdrawal,
+  turn: { todoOnly: boolean; didOtherWork: boolean; plannedOnlyBefore: boolean },
+  env: NodeJS.ProcessEnv = process.env,
+): TodoWithdrawal {
+  if (!todoWithdrawEnabled(env)) return 'offered';
+  if (state === 'for-run') return 'for-run';
+  if (turn.todoOnly) return turn.plannedOnlyBefore ? 'for-run' : 'until-work';
+  if (state === 'until-work' && turn.didOtherWork) return 'offered';
+  return state;
+}
+
+/** The tools offered on the next call: update_todo removed while withdrawn (never on a run that cannot write). PURE. */
+export function toolsThisTurn<T extends { name: string }>(tools: readonly T[], state: TodoWithdrawal): T[] {
+  if (state === 'offered' || !runCanWrite(tools.map((t) => t.name))) return tools as T[];
+  return tools.filter((t) => t.name !== 'update_todo');
+}

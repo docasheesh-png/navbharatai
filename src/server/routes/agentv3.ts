@@ -3,6 +3,7 @@ import { clarityGateEnabled, shouldJudgeClarity, judgeClarity, clarifyReply, cat
 import { clarityJudgeAsk } from '../AgentV3/clarityJudgeAsk';
 import { platformVoiceEnabled, voiceOf, voiceRequestedIn, eventInUserVoice } from '../AgentV3/platformVoice';
 import { silenceMemoryEnabled, sharedProviderSilenceMemory } from '../AgentV3/providerSilenceMemory';
+import { soloKeeps, soloArchitectNote, soloInputOf, buildsSolo } from '../AgentV3/soloBuild';
 import { templateInstantPreviewEnabled, shouldUseSlimPrompt, isTemplateVerifyJob, capTemplateVerifyEstimate } from '../AgentV3/templateVerify';
 import { teacherPromoFor } from '../lib/freeChatReplies';
 import { BoundedCache } from '../lib/boundedCache';
@@ -46,7 +47,7 @@ import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContrac
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { isInertCommand } from '../AgentV3/inertCommand';
-import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp } from '../AgentV3/goldenScaffolds/registry';
+import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp, seedableScaffoldFor, chipExtensionTextOf, templateOnlyBuild } from '../AgentV3/goldenScaffolds/registry';
 import { parseKeyPool } from '../lib/keyPool';
 import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
@@ -217,6 +218,7 @@ import {
 import { withoutPlatformCheckTools } from '../AgentV3/repairScope';
 import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
+import { applyGateRedNotice } from '../AgentV3/gateRedNotice';
 import { releaseGate, releaseGateRecord, releaseGateSummary, runtimeProven, runtimeRedFlipEnabled, type RuntimeEvidence, type QualitySignals, type GateState } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary, admittedInertControls } from '../AgentV3/claimAudit';
 import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderStyleVerdict, type RenderStyleEvidence } from '../AgentV3/renderStyle';
@@ -17172,11 +17174,12 @@ async function noteBuildOutcome(
         ...(modularDeferred.length ? [READ_GUIDE_TOOL] : []),
       ];
       const architectToolset = coreToolsetEnabled()
-        ? new DynamicToolset([...catalogForTools(roleConfig('architect').tools), ...architectExtraTools], externalToolDefs(mcpTools), [...CORE_TOOL_NAMES, 'append_file', 'read_guide'])
+        ? new DynamicToolset([...catalogForTools(roleConfig('architect').tools), ...architectExtraTools].filter(soloKeeps(soloInputOf(buildIsComplex, appScope.projectMode, intent, isEditMode))), externalToolDefs(mcpTools), [...CORE_TOOL_NAMES, 'append_file', 'read_guide'])
         : null;
       const architectToolsForBuild = architectToolset
         ? architectToolset.tools
-        : [...catalogForTools(roleConfig('architect').tools), ...externalToolDefs(mcpTools), ...architectExtraTools];
+        : [...catalogForTools(roleConfig('architect').tools), ...externalToolDefs(mcpTools), ...architectExtraTools].filter(soloKeeps(soloInputOf(buildIsComplex, appScope.projectMode, intent, isEditMode)));
+
       try {
         dispatcher.setReliabilityHooks({
           ...(architectToolset ? { loadTools: (names: unknown) => architectToolset.load(names) } : {}),
@@ -17227,7 +17230,9 @@ async function noteBuildOutcome(
         onNote: (note: { code: string; message: string; detail?: string }) => {
           try { buildDiag.record({ phase: 'build', severity: 'info', code: note.code, message: note.message, detail: note.detail, autoResolved: true }); } catch { /* a note must never fail a build */ }
         },
-        system: architectSystem,
+        // A small new app is built by ONE agent (soloBuild.ts, autopsy ca99778e) — the prompt says so beside the tools.
+        system: architectSystem + soloArchitectNote(soloInputOf(buildIsComplex, appScope.projectMode, intent, isEditMode)),
+        soloBuild: buildsSolo(soloInputOf(buildIsComplex, appScope.projectMode, intent, isEditMode)),
         // Built-in tools PLUS anything the user connected. Concatenated with ours FIRST so a
         // connected service can never displace a platform tool in the list the model reads.
         // fix/build-reliability — append_file (P2b), read_guide (P5a) and the 16-core + load_tools set
@@ -18291,7 +18296,8 @@ async function noteBuildOutcome(
       for (const [pp, pc] of pastedSeed) preseededGolden.set(pp, pc); // the user's own pasted page — see pastedSeed
       if (process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         try {
-          const golden = goldenScaffoldForPrompt(prompt);
+          // A chip the user ADDED words to seeds its template too (chipExtensionFor, autopsy ca99778e).
+          const golden = seedableScaffoldFor(prompt);
           if (golden) {
             const existingSrc = (await finalSteps.step('template check', () => actuator.listFiles(workspaceId).catch(() => [] as string[])))
               .filter((p) => p.startsWith('src/'));
@@ -18365,7 +18371,7 @@ async function noteBuildOutcome(
               // HANDOFF FRAMING (same discipline as the fast-lane salvage below): the builder must treat the
               // scaffold as ITS OWN work to verify — never alien clutter to re-plan or rewrite. Tier-aware, and the
               // template's recipe instructions ride along (goldenBuildPrompt, autopsy 303e8a6f).
-              buildPrompt = goldenBuildPrompt(golden, buildPrompt);
+              buildPrompt = goldenBuildPrompt(golden, buildPrompt, chipExtensionTextOf(prompt));
             }
           }
         } catch (seedErr) {
@@ -24158,6 +24164,10 @@ async function noteBuildOutcome(
           });
           }
         }
+        // RED ON RUNTIME EVIDENCE, VERDICT STILL ok (audit P0-1, 2026-10-16): the flip above needs an unresolved ERROR, and a
+        // failed page or journey is a WARNING — so with AGENTV3_RUNTIME_RED_FLIP off the user got the ordinary success summary
+        // from a RED gate. Says so in their summary; `ok` and the bill are not touched (gateRedNotice.ts).
+        result = applyGateRedNotice(result, gate, gateEvidence, buildDiag);
         // ── UNKNOWN MUST REACH THE PERSON WHO IS ABOUT TO TRUST THE APP ──────────────────────────
         //
         // 🔴 THE GAP, and it is structural rather than a bug (audit 2026-09-16). `releaseGate` exists to
@@ -26898,7 +26908,8 @@ async function noteBuildOutcome(
           // `complex_app` average is not pulled down by template polish (autopsy 4a1c0157). Filed through
           // the SAME function the opening ETA reads its slice with (build 46e2d74b): a game is filed as a
           // game, a routed-complex build as complex — never under a key the reader does not use.
-          taskType: etaKeyForBuild(goldenPreseeded, goldenPreseededTier),
+          // A customised chip is a build, not a template check — it is not taught to the verify slice (autopsy ca99778e).
+          taskType: etaKeyForBuild(templateOnlyBuild(goldenPreseeded, prompt), goldenPreseededTier),
           // Record the tier the build was actually DELIVERED on (after any P3 escalation),
           // so per-tier success rates reflect what really ran, not just the start tier.
           startTier: measuredTier,

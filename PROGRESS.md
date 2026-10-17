@@ -96216,6 +96216,10 @@ note beside a fix names the function the fix stopped calling, so a guard reading
 its own documentation. It is a pattern — a source census must read stripped code, and the assertion that
 needs stripping is always the negative one.
 
+## 2026-10-16 — Admin-approved stage 1 of the forensic-audit plan: P0-1 (a RED gate is told to the user) + P1-1 (benchmark evidence)
+**P0-1 — `gateRedNotice.ts`.** Reproduced with the real gate: preview/page/journey `failed` + no ERROR finding → gate RED, `result.ok` true, ordinary success summary (a failed page render or journey is recorded at WARNING, the verdict flip needs an ERROR, and `AGENTV3_RUNTIME_RED_FLIP` is off by default — "D-1 unanswered"). UNKNOWN already had its own line; RED had none. Now the user's summary names what a real browser saw fail and says it was NOT confirmed to work. **Billing semantics are untouched by construction:** only `summary` changes (`ok`, the bill, the wallet debit are returned exactly), it is a no-op when the flip already set `ok:false`, and a RED built only from static findings is never told it failed to run. Admin report gains `RELEASE_GATE_RED_TOLD` (info). 16 tests; three reversions failed the right tests (call removed · notice flips `ok` · …); the fourth reversion (drop the runtime-proven guard) is correctly NOT caught because the evidence-parts check is a second guard on the same property.
+**P1-1 — `reliability/benchEvidence.ts`.** The benchmark now reads from each build's own report: model calls (failed ones counted), input / **cached-input** / output tokens as each provider reported them, build and model seconds, real provider cost, preview evidence (`rendered` / `failed` / `not-proven`, from the platform's observation) and the release-gate state. A missing figure is `null`, never 0. `buildSucceeded` is deliberately unchanged; `verifiedOutcome` (proven / contradicted / unproven) and `falsePositive` sit beside it, so `ok:true` + RED gate is counted as a false positive. Runner prints it per build and in a summary; `bench:compare` prints a per-metric delta table. Fixtures are slices of the REAL reports 398db9f3 and 67a2b0a2. Dry run verified (no build, no spend). 22 tests, four reversions each failed.
+**Not done, by instruction:** no flag enabled, no push, no merge. Stage 2 (the paid A/B, hard cap US$5) and stage 3 (Q-963 template, option A) wait for the admin's go after this report.
 ## 2026-10-16 — Q-1097: a null scene reading is never silent, and the vehicle is identified once (#3763)
 
 `tests/aThreeGameIsReadFromItsScene.test.ts` failed twice in one day under a loaded machine, on two different
@@ -96757,3 +96761,151 @@ shared door must be MORE visible to a census than the copies it replaces, never 
 
 That is what safeguard #5 is for, and why the gate runs LAST on the final state — the change was
 plausible, typechecked clean, and was wrong in a way only the repo's own accumulated rules could see.
+
+---
+
+## 2026-10-17 — Q-1126 batch 2: 48 → 40, and the first thing it audited was batch 1's own measuring stick
+
+**Written after #3781 (batch 1) merged, and deliberately NOT a redo of it.** Two sessions took Q-1126
+within the same hour: #3781 was opened while this one was running its gate, and it merged first, so its
+six completed rows stand and nothing of theirs is reinstated or rewritten here (Q-107, Q-108 and Q-109
+were filled on both branches; theirs is what remains). What this batch adds is the part #3781 did not
+touch — **the detector those six rows were measured with.**
+
+**It was lying in both directions.** `gapsOf` had been written from the four field names as the TEST
+spells them, not as CLAUDE.md spells them. The sixth rule's own wording is *"what is **required** to
+unblock it"*. So:
+
+- It **FLAGGED six rows that were complete all along**, whose only sin was writing `**Required:**` — the
+  rule's own word — instead of `**Needs:**`: Q-111, Q-126, Q-133, Q-706, Q-819, Q-1012. Each was opened
+  and verified by eye to carry all four. Q-111 is the clearest: *What · Why blocked · Required · Already
+  tried*, every one present, counted as a gap.
+- It **PASSED one row with a real gap**: a bare `/because/` anywhere in the prose counted as a `Why`
+  FIELD, so **Q-1086** — which never wrote its reason down — read as complete.
+- And `/\*\*What/` also matched `**What is required:**`, so **one field could satisfy two**.
+
+So it was manufacturing work in one place while hiding it in another. That is the fifth rule's own
+lying-analyzer category, and it is the reason batch 1's "48" was never the real number.
+
+**Corrected to labelled fields only**, with the synonyms the rows actually use (`Required` / `To unblock`
+for needs; `Blocked` / `Blocker` / `Waiting on` for what; `Cause` / `Reason` for why; `Measured` /
+`Investigated` / `Checked` / `Evidence` for tried), and `What is required` excluded from `what` by a
+negative lookahead. Re-measured on batch 1's own unchanged file the honest count was **42 — lower than
+48** — so the more truthful detector moved the ratchet in the only direction it is allowed to move. Had
+it come out higher the number would have gone up with that reason stated, not been hidden; it did not
+have to.
+
+**Two further fills then took it to 40**, each from the row's own evidence rather than plausible prose:
+
+| Row | What the evidence said |
+|---|---|
+| **Q-008** | The admin already gave the decision RULE (2026-10-11) and the trial window has passed. It is not waiting on a decision and not on more time — it waits on somebody READING `byStrictCohort`, which lives in production telemetry no session can reach. |
+| **Q-1086** | Its reason written down as a field: a routing decision reserved to the admin, because it changes behaviour on real builds. The row already had What, Needs and Tried; only the reason was missing, and it was missing precisely where the old detector could not see it. |
+
+**Locked as a CLASS, not a count.** The count assertion alone would go green again under the old regexes
+once enough rows were filled, so three fixtures pin the detector's behaviour directly: a row written with
+`**Required:**` is complete; a reason buried in prose is NOT a `Why` field; and `**What is required:**`
+satisfies `needs` but never `what`.
+
+**Reversion proof.** Old detector restored → 4 tests fail (the count plus all three fixtures). Q-1086's
+reason removed again → the count fails at 41 > 40. Restored → 14 pass.
+
+**Q-1126 stays OPEN with 40 to go.** And one process note worth keeping, because it cost a full gate run:
+the open-PR check that safeguard #6 requires was done at the start of this work and returned only #3779.
+#3781 was opened after that and merged before this branch pushed. Checking once per session is not enough
+on this repo — it has to be immediately before the work, and even then a PR opened mid-gate is invisible.
+The cheap defence that actually worked was comparing the two branches afterwards and keeping only the
+non-overlapping half.
+
+## 2026-10-17 — Q-1137: a named action is reachable on EVERY host of the domain screen (admin report, mitrify.com)
+
+The admin sent two screenshots and four words: *"dns connect hone ke bad bhi live nahi huyi website. dekho"*.
+Two defects, same report, same class — **a check or a screen that can see one part of a task speaking for the
+whole of it.**
+
+**Q-1136 (#3788)** was the sentence: the DNS all-clear said *"Nothing is left for you to do — we are now
+waiting for the hosting service"*, in a GREEN box, printed directly beneath the correct amber headline
+*"Connected — but this app needs its server part deployed first"*. `summarize()` measures exactly one thing —
+are the records correct — and cannot know whether an app was ever published. Scoped to the records now, and the
+pin repointed rather than deleted: the old assertion WAS the defect written down as a requirement.
+
+**Q-1137 (this change)** is the sibling found hunting that class, and it is the half the user needed. The
+amber headline named a real action, `'deploy-backend'`, and rendered its button only `&& onDeployBackend` — an
+OPTIONAL prop. `HostingChooser` passes it. `ConnectMyWebsitePanel` — the ONE real "Connect my website" entry
+point, reached from Settings → App Settings → Domain and from Home → Other AI → Publish & Deploy → "Custom
+Domain" — cannot and does not. So on the surface most users arrive through, the screen said *"Deploy the server
+part first"* and offered nothing at all: an outcome described, with no path to it.
+
+The props doc said so out loud — *"Absent ⇒ the sentence stands alone, as before"*. That is the defect written
+down as a design, and it is why this survived the 2026-09-07 fix that introduced the button.
+
+**The screen owns its completeness now:** a host that can navigate gets the button; a host that cannot gets the
+exact route in words, plus the one line such a user has no other way to know — *your domain stays connected
+while you do it, nothing here needs redoing*. Without that, the safe-looking move is to start the domain over,
+which is the loop this whole screen exists to end. It is the same correction `ConnectMyWebsitePanel` already
+records for `publishResult` (*"it is an input of the screen now, so the button and the answer to pressing it can
+never again live on different surfaces"*), applied in the other direction.
+
+**Locked as a class, not an instance.** `tests/aNamedActionIsReachableOnEveryHost.test.ts` derives every
+optional callback prop from the props interface and fails if ANY `stage.action` branch is gated on one — so a
+future `onRollback`-shaped regression is caught by the same test. Comments are stripped first: the screen's own
+comments quote the old shape, and a check that reads its own documentation is the trap hit three times this
+week. A host census fails when a third host appears and proves both branches are live code.
+
+**What this does NOT fix, said plainly to the admin:** mitrify.com is still not live. The domain is wired
+correctly and nothing was ever deployed to the Firebase site it points at; Publish will not help an app with a
+server half. Both PRs fix what the SCREEN told them — the next user is sent somewhere real instead of being
+told, in green, that they are done.
+---
+
+## 2026-10-17 — Q-1130 MEASURED: long bullets are not features, and the measurement argues against the change
+
+Q-1130 asked a product question and, to its credit, refused to answer it from intuition: *"measure how
+often real prompts lose features this way (the build reports carry the prompts), then either raise the
+limit, or count a long bullet as one feature when the LINE is a bullet, or leave it and keep the honest
+sentence."* That measurement is now done, against **all 13 real prompt fixtures** in
+`tests/fixtures/*prompt*.txt`, using `countEnumeratedFeatures` itself.
+
+**The headline number first, because it is the one that decides the question.** The corpus holds about
+**104 marker lines over the 5-word limit**, and the overwhelming majority are **not features at all**.
+They are build instructions (*"Do NOT create src/main.tsx, package.json, or multiple files"*, *"Everything
+must be inside one index.html"*), styling notes (*"Keep the background elegant and non-distracting"*,
+*"Use subtle blueberry shapes/blobs and glowing particles"*), writing instructions, and pasted assistant
+advice. The 5-word limit is not accidentally dropping features; it is mostly doing its job.
+
+**Two candidate rules were measured, not supposed.**
+
+*(A) Blanket — any long bullet counts one.* Three fixtures cross `SPEC_FEATURE_COUNT` (14), and two of
+them are `autopsy8e124182` (7 → **33**) and `report0311186f` (9 → **20**) — the exact autopsies that exist
+BECAUSE of over-counting. 8e124182 is the one where sixteen counted parts split a six-screen stock app
+into fourteen modules; 0311186f is the one where a pasted assistant reply counted eighteen features and a
+one-screen trading app was split into eight. The blanket rule reverses both shipped fixes. Rejected.
+
+*(B) Head-before-a-gloss — the name before a `:` / em-dash / parenthetical counts one.* Much cleaner, and
+it ignores the instruction and styling lines for a principled reason rather than by luck: those lines are
+sentences and carry no gloss separator. It recovers genuine module names — `autopsy241215d1` 1 → **8**
+(*"Core Simulation Engine (the ledger, transaction math, and accounting rules)"*), `autopsyA2b9c802`
+6 → 8, `autopsy8e124182` 7 → 9, all under the spec line. But it still pushes `report0311186f` 9 → **18**,
+back over the line, and the parenthetical branch produced a false positive (`"getDownloadURL()"`).
+Restricting it to colon/em-dash only is safe on every fixture and then barely helps at all
+(`autopsy241215d1` recovers only 1 → 3), which is the whole case it was meant to fix.
+
+**So the honest finding is that the harm Q-1130 names is real but narrow — 1 of 13 fixtures — and every
+rule measured so far buys that one case by re-creating an over-count somewhere else.** `autopsy241215d1`
+is a genuinely detailed finance-simulator spec that currently reads as one feature, i.e. no scope at all,
+and that is a real user served badly. It is not enough on its own to reverse two autopsies for.
+
+**Why this does not become a session's own decision.** `countEnumeratedFeatures` feeds `statesAScope` →
+complexity routing → which lane a build takes and what the user is charged. The sixth rule reserves a
+money-and-behaviour change to the admin, so Q-1130 moves from OPEN to **🟡 BLOCKED on an admin decision**,
+with all four fields, the three options and a recommendation (**C — leave the counter alone**; Q-1023's
+sentence already tells the user that a long bullet does not count). A blocked row with its reason written
+down is the sixth rule's requirement; "measured and left silent" is the failure mode it was written against.
+
+**The measuring script was deliberately not committed.** It is scratch, not a gate: it asserts nothing and
+would rot the moment the fixtures change. The repo keeps the fixtures and the counter, which is everything
+needed to reproduce the numbers above.
+
+**Not a fix, and not claimed as one.** Nothing in the counter changed. `tests/theQueueSaysWhatIsTrue.test.ts`
+still passes 14/14 with the baseline unchanged at 40 — the new BLOCKED row carries all four fields, so it
+adds nothing to the gap count.

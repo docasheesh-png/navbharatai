@@ -27,13 +27,32 @@ const liveDeps = {
 };
 
 describe('verifyRecordsLive — the real mitrify.com case', () => {
-  it('THE CASE THAT STARTED THIS: every record correct and live ⇒ nothing left for the user to do', () => {
+  it('THE CASE THAT STARTED THIS: every record correct and live ⇒ the RECORDS need nothing further', () => {
     return verifyRecordsLive(REAL, liveDeps).then((r) => {
       expect(r.allSeen).toBe(true);
       expect(r.checks.every((c) => c.seen)).toBe(true);
-      // The sentence whose absence had the admin re-editing correct records.
+      // The sentence whose absence had the admin re-editing correct records. Still here, still plain.
       expect(r.summary).toContain('correct and live');
-      expect(r.summary).toContain('Nothing is left for you to do');
+      expect(r.summary, 'the remaining DNS wait is ours — this is what ends the re-editing loop')
+        .toContain('ours, not yours');
+
+      /**
+       * 🔁 REPOINTED, NOT DELETED (admin report, mitrify.com, 2026-10-17). This used to assert
+       * `'Nothing is left for you to do'`, and that claim is the defect: this function answers ONE
+       * question — are the DNS records correct — and cannot know whether an app was ever published or
+       * whether a server half still needs deploying. The sentence is rendered in a GREEN box, and the
+       * admin's screenshot shows it printed directly beneath the amber headline "Connected — but this
+       * app needs its server part deployed first". Two sentences, opposite meanings, the reassuring
+       * one in green. They read the green one and got Firebase's "Site Not Found".
+       *
+       * So the assertion inverts: the all-clear may never claim the WHOLE task is finished.
+       */
+      expect(r.summary, 'a DNS check may not speak for the whole task')
+        .not.toContain('Nothing is left for you to do');
+      expect(r.summary, 'nor may it claim the only remaining wait is the hosting service')
+        .not.toMatch(/we are now waiting for the hosting service/);
+      expect(r.summary, 'and it says plainly that a step shown above is a different one')
+        .toContain('if a step is shown above, it is a separate one and still needs doing');
     });
   });
 

@@ -96445,7 +96445,7 @@ with the image (10).
 ⚠️ **What to watch:** this PR's own CI run is the **first on Node 22**. That run is the real test of the flip,
 and it is the whole point of the change.
 
-### 2026-10-16 — Q-1127: the workaround outlived the defect (the half #3766 left behind)
+### 2026-10-16 — Q-1129: the workaround outlived the defect (the half #3766 left behind)
 
 **Context, said plainly: this session built Q-1060 and LOST THE RACE.** Another session shipped it as #3766
 while this one was measuring, and the two had reached the same conclusions independently — `ci.yml` and
@@ -96474,7 +96474,7 @@ passes, and the suite's skip count drops accordingly. No new test was added, del
 
 ### 2026-10-16 — Q-1128: the write-time scan that cost 12 seconds a write, found by our own CI
 
-**This one came from nowhere but the gate.** #3769 (Q-1127 above) touches one test file and two docs. Its CI
+**This one came from nowhere but the gate.** #3769 (Q-1129 above) touches one test file and two docs. Its CI
 went red anyway: `AgentRunner.test.ts > recovers from an oversized turn via aggressive compaction` timed out
 at 20 s (run 38967985876). `main` was green on every run that day, so the easy reading was "a flake on a busy
 runner" — and the test would have passed on a re-run. It was not a flake.
@@ -96577,7 +96577,7 @@ disproved — its state is an honest compound ("🟡 BLOCKED — REQUIRES A DECI
 as NOT-A-DEFECT"), and the strict rule would have forced someone to delete that information. It checks the
 leading token instead. Four reversions bite.
 
-⚠️ **Renumbered after the fact: these two were written as Q-1125 / Q-1126 and are Q-1127 / Q-1128.** #3770
+⚠️ **Renumbered after the fact: these two were written as Q-1125 / Q-1126 and are Q-1127 / Q-1128 — and Q-1127 moved again to Q-1129 when main took it (merge resolution).** #3770
 merged while #3769 was in CI and took both IDs for its own rows (the `llmCalls` aux-call gap, and the 52
 blocked rows missing a required field). Their rows are on `main`, so the IDs are theirs; mine moved. The ID
 rule — above every ID in the file AND in open PRs' diffs of it — cannot see a row that is in neither yet,

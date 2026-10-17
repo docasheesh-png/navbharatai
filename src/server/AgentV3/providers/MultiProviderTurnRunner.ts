@@ -29,6 +29,7 @@ import { isStarvedBudgetError, turnStarvedItsBudget } from '../floorBudget';
 import { abandonedTurnUsage } from '../unbilledTurns';
 import { turnDiscardedTruncatedOutput } from '../TruncationRecovery';
 import { reasoningAwareAsk } from '../reasoningAsk';
+import type { ProviderSilenceMemory } from '../providerSilenceMemory';
 import { BuildStoppedError, isBuildStoppedError, raceStop, throwIfStopped } from '../stopSignal';
 import {
   EMPTY_SLOW_RUNG_STATE, canBenchAnother, describeSlowRung, isRungTooSlow, recordSlowSample,
@@ -84,6 +85,12 @@ export interface MultiProviderOptions {
    * every runner it builds. Omitted ⇒ a private registry, exactly today's behaviour.
    */
   bench?: BuildBenchRegistry;
+  /**
+   * CROSS-BUILD silence memory (autopsy eb58abaf — see providerSilenceMemory.ts). When given, a rung that
+   * produced nothing for ANOTHER build within the window is opened past (only when a later rung exists),
+   * and this runner's own silences are recorded into it. Omitted ⇒ no cross-build effect (unit tests).
+   */
+  silenceMemory?: ProviderSilenceMemory;
   /**
    * One attempt produced NOTHING, and this is what it cost in wall clock.
    *
@@ -599,6 +606,8 @@ export interface BuildBenchRegistry {
    * first sticky runner, so a registry built before this field existed stays exactly the same shape.
    */
   sticky?: StickyState;
+  /** Rungs already announced as opened past for a recent cross-build silence (said once per build). */
+  crossBuildSilenceSaid?: Set<string>;
 }
 
 export function createBuildBenchRegistry(): BuildBenchRegistry {
@@ -829,6 +838,20 @@ export function makeMultiProviderTurnRunner(
           fellBackFrom.push(name);
           continue;
         }
+        // 🔴 SILENT FOR ANOTHER BUILD A MOMENT AGO (autopsy eb58abaf). Opened past only when a later rung of a
+        // DIFFERENT key exists, so this can never empty the ladder; when the window ends the rung is tried again.
+        if (opts.silenceMemory) {
+          const silentUntil = opts.silenceMemory.until(benchKey, now());
+          if (silentUntil > now() && chain.slice(i + 1).some((e) => slowKeyFor(e) !== benchKey)) {
+            fellBackFrom.push(name);
+            const said = (bench.crossBuildSilenceSaid ??= new Set());
+            if (!said.has(benchKey)) {
+              said.add(benchKey);
+              try { opts.onProviderBenched?.(reportName, `${chain[i].modelId ? `${chain[i].modelId} ` : ''}sent nothing for a recent build — opened past for ${Math.round((silentUntil - now()) / 1000)}s more, so this build does not wait out the same silence`); } catch { /* telemetry only */ }
+            }
+            continue;
+          }
+        }
         // Retired earlier this run — either the whole provider (account fatal) or just this one model
         // (a rung whose id this account cannot reach). Checked in that order; both mean "do not spend
         // another round-trip re-proving an answer that cannot change".
@@ -898,6 +921,7 @@ export function makeMultiProviderTurnRunner(
           }), params.signal);
           /** This rung's own time — not the rungs tried, skipped or abandoned before it (see TurnResult.attemptMs). */
           const answeredInMs = Math.max(0, now() - attemptStartedAt);
+          try { opts.silenceMemory?.clear(benchKey); } catch { /* best-effort */ }
           timeoutStreak.delete(reportName); // a success resets the family's consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
           cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone
@@ -1050,6 +1074,25 @@ export function makeMultiProviderTurnRunner(
             const kind = wasteKindFor(err);
             if (kind) opts.onAttemptWasted?.(reportName, kind, Math.max(0, now() - attemptStartedAt));
           } catch { /* telemetry only — it must never replace the error below */ }
+          if (providerNeverAnswered(err)) {
+            try { opts.silenceMemory?.record(slowKeyFor(chain[i]), now()); } catch { /* memory is best-effort */ }
+          }
+          // 🔴 A SILENT TIMEOUT IS THE SAME FACT AS A SILENT ABANDON (autopsy eb58abaf). When the call was not
+          // allowed to walk away (one abandon per build already spent), the provider's silence ended at the
+          // ordinary first-answer bound instead — and landed in the timeout branch, which strikes ONE KEY and
+          // benches the family only after two. The next call then opened on another key of the same silent
+          // service. Silence is a property of the rung (family::model), so it is benched exactly like the
+          // crawl bench below: a window, then one re-probe; never the last engine.
+          if (!isSlowStreamAbandon(err) && isTimeoutProviderError(err) && providerNeverAnswered(err) && !isBudgetEndedError(err)) {
+            try {
+              const silentKey = slowKeyFor(chain[i]);
+              if (!slowBenched.has(silentKey) && canBenchAnother(slowBenched.size, distinctSlowRungs)) {
+                slowBenched.add(silentKey);
+                if (crawlWindowMs !== null) bench.slowBenchUntil.set(silentKey, now() + crawlWindowMs);
+                opts.onProviderBenched?.(reportName, `${chain[i].modelId ? `${chain[i].modelId} ` : ''}had not started answering after ${Math.round(Math.max(0, now() - attemptStartedAt) / 1000)}s — skipped on every key${crawlWindowMs !== null ? ` for ${Math.round(crawlWindowMs / 1000)}s, then tried once more` : ' for the rest of this build'}, so the ladder can reach the next engine instead of waiting it out`);
+              }
+            } catch { /* the bench is bookkeeping — it must never replace the error below */ }
+          }
           if (isSlowStreamAbandon(err)) {
             bench.abandonedSlowRung = true;
             try {

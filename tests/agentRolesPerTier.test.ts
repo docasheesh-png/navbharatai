@@ -60,7 +60,7 @@ describe('Plan = the tier\'s plan rung, then its own ladder; Grok no longer plan
     for (const tier of ['weak', 'off', 'mini'] as const) expect(planRunnerChainNames(tier === 'weak', tier)).not.toContain('GROK');
   });
   it('wiring: the plan phase is built by tierPlanRunner from the resolved tier, and grokPlanRunner is gone', () => {
-    expect(route).toContain('tierPlanRunner(powerLevelReqEffective, noClaudeBuild)');
+    expect(route).toContain('tierPlanRunner(powerLevelReqEffective, noClaudeBuild, buildBench, recordProviderBenched)');
     expect(route).not.toContain('grokPlanRunner(');
     // …and the plan runner is assembled by the SAME ladder mapper and guard as the build chain.
     const at = route.indexOf('function tierPlanRunner(');

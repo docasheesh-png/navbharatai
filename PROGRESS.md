@@ -96880,3 +96880,19 @@ inputs, where a well-placed guard cannot satisfy it.
 
 **Watch on the next real build:** an `unknown`-shape app now pays one full-source read at publish and
 on the domain status poll. An `spa` or `static` app pays exactly what it paid before.
+
+### 🔴 A correction inside this same change: my "three became one" was false when I wrote it
+
+The commit claimed three definitions of "needs a server" had become one. They had not — the third,
+`!!planDeployment(appFiles).backend` at the build-completion row, was untouched, **and the census I had
+just written could not see it, because it allowlisted `routes/agentv3.ts` as a whole file.** An exempt
+file is exempt everywhere inside it, which is exactly the shape of hole this repo keeps paying for.
+
+Caught by re-reading my own claim against the code rather than by a test — which is the uncomfortable
+part, and the reason the census is now a **per-file ratchet**: counts with comments stripped, a new
+occurrence fails even inside a file allowed to have some, and the number may only go down. Reversion 5
+restores precisely that miss inside the allowed file; the ratchet and an explicit pin both catch it.
+
+`planDeployment(...).backend?.runtime` at `agentv3.ts:5460` stays, counted and allowed: "which runtime"
+is a different question from "is there a server", and collapsing the two would be a fourth definition
+wearing the shared one's name.

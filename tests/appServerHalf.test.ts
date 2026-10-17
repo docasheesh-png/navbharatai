@@ -159,42 +159,67 @@ describe('readServerHalf — two stages, and the second one is a correctness fix
 });
 
 /**
- * THE CENSUS. One definition is only one definition while nobody writes a fourth. This fails when a
- * NEW place derives "needs a server" inline from `planDeployment`, and it names the two staged readers
- * that remain, with the reason each is still there.
+ * THE CENSUS — and it is a per-file RATCHET, not a list of exempt files, because the file-level
+ * version let a real miss through within an hour of being written.
+ *
+ * 🔴 WHAT IT MISSED. The first version allowed `routes/agentv3.ts` wholesale, "the publish decision".
+ * That file ALSO held the third definition — the build-completion row's
+ * `!!planDeployment(appFiles).backend` — which this change claims to have unified. The claim was
+ * false when it was written, and the census could not say so, because an exempt file is exempt
+ * everywhere inside it. A count per file fails on a NEW occurrence even in a file that is allowed to
+ * have some.
+ *
+ * Counts are of the raw fields with comments stripped: `staticHostingSufficient`, and
+ * `planDeployment(...).backend` read as a value. Reading `.backend?.runtime` (node vs python) is a
+ * DIFFERENT question and is counted but allowed where it lives — the number is what holds the line.
+ *
+ * To change a count you have to say why in this table, which is the whole point.
  */
 describe('🔒 no new inline definition of "needs a server"', () => {
-  /** Files allowed to read the raw fields, each for a stated reason. */
-  const ALLOWED = new Map<string, string>([
-    ['src/server/AgentV3/appServerHalf.ts', 'the definition itself'],
-    ['src/server/AgentV3/deployPlan.ts', 'the planner that produces the fields, and the publish decision'],
-    // The publish route still runs its own staged read because it needs the whole plan (the summary,
-    // the framework name) plus the key and the wiring verdict for the real decision. It consumes the
-    // SAME boolean definition; migrating its staged read is tracked in the queue, not guessed at here.
-    ['src/server/routes/agentv3.ts', 'the publish decision: needs the full plan, the key and the wiring'],
-    ['src/server/routes/nbaiDomains.ts', 'the domain status verdict, migrating next (queue)'],
-    ['src/server/lib/frameworkCapability.ts', 'reads `shape`, never the server-half boolean'],
+  const EXPECTED = new Map<string, { n: number; why: string }>([
+    // Measured, not guessed (a first guess of 4 counted the docblocks, which are stripped).
+    ['src/server/AgentV3/appServerHalf.ts', { n: 1, why: 'the ONE definition — serverHalfFromPlan reads the field' }],
+    ['src/server/AgentV3/deployPlan.ts', { n: 11, why: 'the planner that SETS the field, and the publish decision that branches on it' }],
+    ['src/server/routes/agentv3.ts', { n: 1, why: 'one `.backend?.runtime` read — which runtime, not whether there is a server' }],
+    ['src/server/routes/nbaiDomains.ts', { n: 0, why: 'migrated to readServerHalf' }],
+    ['src/server/lib/frameworkCapability.ts', { n: 0, why: 'reads `.shape`, never the server-half fields' }],
   ]);
 
-  it('every reader of staticHostingSufficient / plan.backend is a known one', () => {
+  const countIn = (code: string): number =>
+    (code.match(/staticHostingSufficient/g) || []).length
+    + (code.match(/planDeployment\([^)]*\)\s*\.backend/g) || []).length;
+
+  it('every file is at its stated count — a new one anywhere fails this', () => {
     const root = resolve(__dirname, '..');
-    const offenders: string[] = [];
+    const found = new Map<string, number>();
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir)) {
         if (entry === 'node_modules' || entry === 'dist') continue;
         const full = join(dir, entry);
         if (statSync(full).isDirectory()) { walk(full); continue; }
         if (!/\.tsx?$/.test(entry) || /\.test\.tsx?$/.test(entry)) continue;
-        const rel = full.slice(root.length + 1);
-        if (ALLOWED.has(rel)) continue;
-        const code = stripCodeComments(readFileSync(full, 'utf8'));
-        if (/staticHostingSufficient/.test(code) || /planDeployment\([^)]*\)\s*\.backend/.test(code)) {
-          offenders.push(rel);
-        }
+        const n = countIn(stripCodeComments(readFileSync(full, 'utf8')));
+        if (n > 0) found.set(full.slice(root.length + 1), n);
       }
     };
     walk(resolve(root, 'src'));
-    expect(offenders, 'use serverHalfFromPlan / serverHalfFromFiles — three definitions is how they drifted')
-      .toEqual([]);
+
+    const over: string[] = [];
+    for (const [file, n] of found) {
+      const allowed = EXPECTED.get(file);
+      if (!allowed) { over.push(`${file}: ${n} (NEW FILE — use serverHalfFromPlan / serverHalfFromFiles)`); continue; }
+      if (n > allowed.n) over.push(`${file}: ${n} > ${allowed.n} (${allowed.why})`);
+    }
+    expect(over, 'three definitions is how they drifted; ask serverHalfFromPlan instead').toEqual([]);
+
+    // And the ratchet only moves DOWN: a file that stopped needing them must lower its number here,
+    // or the count stops meaning anything.
+    const stale = [...EXPECTED].filter(([f, a]) => (found.get(f) ?? 0) < a.n).map(([f, a]) => `${f}: ${found.get(f) ?? 0} < ${a.n}`);
+    expect(stale, 'lower the expected count in this table').toEqual([]);
+  });
+
+  it('the build-completion row uses the shared definition — the one the first census missed', () => {
+    const route = stripCodeComments(readFileSync(resolve(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8'));
+    expect(route).toContain('const needsServer = serverHalfFromFiles(appFiles);');
   });
 });

@@ -329,7 +329,7 @@ import {
 } from '../AgentV3/ShellSessions';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, findingAboutUntouchedCode, type UntouchedCodeReason, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { deployBackendToRender, resolveRenderKey, renderRequirement, findBackendUrl } from '../AgentV3/renderDeploy';
-import { readServerHalf, SHAPE_MANIFESTS } from '../AgentV3/appServerHalf';
+import { readServerHalf, serverHalfFromFiles, SHAPE_MANIFESTS } from '../AgentV3/appServerHalf';
 import { attachRenderCustomDomain } from '../AgentV3/renderCustomDomain';
 import { createRenderService, fetchServiceEnvKeys } from '../AgentV3/renderCreateService';
 import { readDeployVerdict } from '../AgentV3/renderDeployStatus';
@@ -27527,7 +27527,12 @@ async function noteBuildOutcome(
               const supabaseConnected = !!(await getConnection(userId).catch(() => null))?.orgId;
               const appFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
               const database = databaseReadiness({ files: appFiles, vaultSecrets, dbEnvNames: ALL_DB_ENV_VARS, supabaseConnected });
-              const needsServer = !!planDeployment(appFiles).backend;
+              // 🔁 THE THIRD DEFINITION, NOW THE SAME ONE (2026-10-17). This asked
+              // `!!planDeployment(appFiles).backend` while the publish route and the domain status
+              // route asked `!plan.staticHostingSufficient`. The two expressions agree for every
+              // shape the planner returns — pinned in appServerHalf.test.ts — so this is not a
+              // behaviour change; it is the removal of the third place that could drift.
+              const needsServer = serverHalfFromFiles(appFiles);
               let serverPlan: ServerPlanOffer = 'none';
               if (needsServer && hostingPlansEnabled()) {
                 const probe = await probeHostingPlan(userId).catch(() => ({ active: false, known: false as const }));

@@ -20,6 +20,12 @@
 //
 // Pure — no I/O. The caller passes the readiness warnings it already has.
 
+// The reply this notice asks for is REGISTERED, not merely printed (Q-1037): the intent ladder reads
+// the same constants, so the sentence and the recogniser cannot drift. Before that, a user who typed
+// exactly what this line told them to got a chat answer and a fresh offer to build — measured, and
+// written up in platformSuggestedReplies.ts.
+import { ADD_MISSING_FEATURE_REPLY_ONE, ADD_MISSING_FEATURE_REPLY_MANY } from './platformSuggestedReplies';
+
 /** The exact label the readiness scan uses for a CONFIRMED absence. Kept in one place. */
 export const CONFIRMED_MISSING_PREFIX = 'Requested feature NOT BUILT:';
 
@@ -61,6 +67,6 @@ export function missingFeatureNotice(warnings: readonly string[] | undefined): s
   const one = missing.length === 1;
   return (
     `\n\n⚠️ One thing you asked for isn't in the app yet: **${list(missing)}**. `
-    + `Reply "add ${one ? 'it' : 'them'}" and I'll put ${one ? 'it' : 'them'} in.`
+    + `Reply "${one ? ADD_MISSING_FEATURE_REPLY_ONE : ADD_MISSING_FEATURE_REPLY_MANY}" and I'll put ${one ? 'it' : 'them'} in.`
   );
 }

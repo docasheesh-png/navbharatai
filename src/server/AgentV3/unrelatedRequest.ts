@@ -23,6 +23,8 @@
  * Kill switch: `AGENTV3_ASK_UNRELATED=off` restores the old edit-always behaviour.
  */
 import { SCAFFOLD_PATHS, couldBeAppCode } from './userProjectFiles';
+// The suggested reply is registered so the intent ladder reads the same string (Q-1037).
+import { ADD_TO_THIS_APP_REPLY } from './platformSuggestedReplies';
 import { textWords } from './textWords';
 
 export function askUnrelatedEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -161,7 +163,8 @@ export function unrelatedRequestSteer(existingHint: string, hadAttachment: boole
     + 'nothing to do with it. Do NOT build anything and do NOT pretend to. In two or three short sentences, in '
     + 'the user\'s own language: say in a few words what their current app is, and ask which they want — '
     + '(1) add this INTO their current app, or (2) make it as a NEW, separate app. Say exactly how to answer: '
-    + 'for (1) reply "add it to this app"; for (2) tap "New" in the header (on a phone: More → New chat) and send the '
+    + `for (1) reply "${ADD_TO_THIS_APP_REPLY}" — write that phrase EXACTLY as it is, in English, even though the rest of your reply is in the user's language, because the platform recognises those exact words and `
+    + `a translation of them would not be understood; for (2) tap "New" in the header (on a phone: More → New chat) and send the `
     + 'same request there, which keeps the current app untouched.'
     + (hadAttachment ? ' They attached a file with this message: tell them to attach it again with their answer, because a file goes only with the message it was sent with.' : '')
     + ' Be warm and brief.';
@@ -171,5 +174,5 @@ export function unrelatedRequestSteer(existingHint: string, hadAttachment: boole
 export function unrelatedRequestFallback(existingHint: string): string {
   const what = existingHint ? ` (${existingHint})` : '';
   return `Your project already has an app${what}, and this request is for something different. Should I add it to this app, or make it as a new app? `
-    + 'To add it here, reply "add it to this app". To keep this app as it is and make a new one, tap "New" in the header (on a phone: More → New chat) and send the same request there.';
+    + `To add it here, reply "${ADD_TO_THIS_APP_REPLY}". To keep this app as it is and make a new one, tap "New" in the header (on a phone: More → New chat) and send the same request there.`;
 }

@@ -109,7 +109,15 @@ describe('🔒 the server-app verdict carries a way to do the one thing that is 
   it('the screen renders the button and the sheet wires it to the view that holds the controls', () => {
     const screen = src('src/components/agentv3/NbaiDomainConnect.tsx');
     const chooser = src('src/components/agentv3/HostingChooser.tsx');
-    expect(screen).toContain("stage.action === 'deploy-backend' && onDeployBackend && (");
+    /**
+     * 🔁 REPOINTED, NOT DELETED (admin report 2026-10-17). This asserted the branch was
+     * `&& onDeployBackend &&` — i.e. that the way forward existed only when the host happened to
+     * pass the prop. That IS the defect this file's own heading forbids: `ConnectMyWebsitePanel`
+     * cannot pass it, so on that host the verdict carried no way to do the one thing left. The
+     * branch is a ternary now, and the assertion follows the heading instead of the old shape.
+     */
+    expect(screen).toContain("stage.action === 'deploy-backend' && (onDeployBackend ? (");
+    expect(screen).toContain('deployBackendWayForward(false)');
     // The prop must actually reach the component — declared on the interface AND destructured. CI
     // caught exactly this gap on the first push (tsc: "Cannot find name 'onDeployBackend'").
     expect(screen).toMatch(/onUnpublish, onDeployBackend \}: NbaiDomainConnectProps\)/);

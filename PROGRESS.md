@@ -96817,6 +96817,45 @@ on this repo — it has to be immediately before the work, and even then a PR op
 The cheap defence that actually worked was comparing the two branches afterwards and keeping only the
 non-overlapping half.
 
+## 2026-10-17 — Q-1137: a named action is reachable on EVERY host of the domain screen (admin report, mitrify.com)
+
+The admin sent two screenshots and four words: *"dns connect hone ke bad bhi live nahi huyi website. dekho"*.
+Two defects, same report, same class — **a check or a screen that can see one part of a task speaking for the
+whole of it.**
+
+**Q-1136 (#3788)** was the sentence: the DNS all-clear said *"Nothing is left for you to do — we are now
+waiting for the hosting service"*, in a GREEN box, printed directly beneath the correct amber headline
+*"Connected — but this app needs its server part deployed first"*. `summarize()` measures exactly one thing —
+are the records correct — and cannot know whether an app was ever published. Scoped to the records now, and the
+pin repointed rather than deleted: the old assertion WAS the defect written down as a requirement.
+
+**Q-1137 (this change)** is the sibling found hunting that class, and it is the half the user needed. The
+amber headline named a real action, `'deploy-backend'`, and rendered its button only `&& onDeployBackend` — an
+OPTIONAL prop. `HostingChooser` passes it. `ConnectMyWebsitePanel` — the ONE real "Connect my website" entry
+point, reached from Settings → App Settings → Domain and from Home → Other AI → Publish & Deploy → "Custom
+Domain" — cannot and does not. So on the surface most users arrive through, the screen said *"Deploy the server
+part first"* and offered nothing at all: an outcome described, with no path to it.
+
+The props doc said so out loud — *"Absent ⇒ the sentence stands alone, as before"*. That is the defect written
+down as a design, and it is why this survived the 2026-09-07 fix that introduced the button.
+
+**The screen owns its completeness now:** a host that can navigate gets the button; a host that cannot gets the
+exact route in words, plus the one line such a user has no other way to know — *your domain stays connected
+while you do it, nothing here needs redoing*. Without that, the safe-looking move is to start the domain over,
+which is the loop this whole screen exists to end. It is the same correction `ConnectMyWebsitePanel` already
+records for `publishResult` (*"it is an input of the screen now, so the button and the answer to pressing it can
+never again live on different surfaces"*), applied in the other direction.
+
+**Locked as a class, not an instance.** `tests/aNamedActionIsReachableOnEveryHost.test.ts` derives every
+optional callback prop from the props interface and fails if ANY `stage.action` branch is gated on one — so a
+future `onRollback`-shaped regression is caught by the same test. Comments are stripped first: the screen's own
+comments quote the old shape, and a check that reads its own documentation is the trap hit three times this
+week. A host census fails when a third host appears and proves both branches are live code.
+
+**What this does NOT fix, said plainly to the admin:** mitrify.com is still not live. The domain is wired
+correctly and nothing was ever deployed to the Firebase site it points at; Publish will not help an app with a
+server half. Both PRs fix what the SCREEN told them — the next user is sent somewhere real instead of being
+told, in green, that they are done.
 ---
 
 ## 2026-10-17 — Q-1130 MEASURED: long bullets are not features, and the measurement argues against the change

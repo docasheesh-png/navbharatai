@@ -2,6 +2,7 @@ import path from 'path';
 import axios from 'axios';
 import { isLiveEnvFilePath } from '../../lib/envFile';
 import type { Express, Request, Response } from 'express';
+import { githubErrorAnswer } from '../lib/githubErrorHint';
 import { sendSafeError } from '../lib/httpError';
 
 /**
@@ -93,7 +94,10 @@ export function registerGithubRoutes(app: Express): void {
       res.json({ files, tree });
     } catch (err: any) {
       console.error('Fetch Error:', err.response?.data || err.message);
-      res.status(err.response?.status || 500).json({ error: err.response?.data?.message || err.message });
+      // Q-1133: this answered with GitHub's own wording as the whole error ("Not Found"), which tells
+      // a non-technical owner nothing to do — and GitPanel prints it straight into its log line.
+      const answer = githubErrorAnswer(err, { action: 'read that repository', subject: 'that repository' });
+      res.status(answer.status).json({ error: answer.error, ...(answer.detail ? { detail: answer.detail } : {}) });
     }
   });
 
@@ -109,7 +113,8 @@ export function registerGithubRoutes(app: Express): void {
       const content = Buffer.from(response.data.content, 'base64').toString('utf-8');
       res.json({ content, sha: response.data.sha });
     } catch (err: any) {
-      res.status(err.response?.status || 500).json({ error: err.response?.data?.message || err.message });
+      const answer = githubErrorAnswer(err, { action: 'open that file', subject: 'that file' });
+      res.status(answer.status).json({ error: answer.error, ...(answer.detail ? { detail: answer.detail } : {}) });
     }
   });
 
@@ -123,7 +128,8 @@ export function registerGithubRoutes(app: Express): void {
       const response = await axios.get(`https://api.github.com/repos/${owner}/${repo}/branches`, { headers });
       res.json({ branches: response.data.map((b: any) => b.name) });
     } catch (err: any) {
-      res.status(err.response?.status || 500).json({ error: err.response?.data?.message || err.message });
+      const answer = githubErrorAnswer(err, { action: 'list that repository\u2019s branches', subject: 'that repository' });
+      res.status(answer.status).json({ error: answer.error, ...(answer.detail ? { detail: answer.detail } : {}) });
     }
   });
 

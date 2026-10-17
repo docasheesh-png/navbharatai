@@ -96988,3 +96988,45 @@ needed to reproduce the numbers above.
 **Not a fix, and not claimed as one.** Nothing in the counter changed. `tests/theQueueSaysWhatIsTrue.test.ts`
 still passes 14/14 with the baseline unchanged at 40 — the new BLOCKED row carries all four fields, so it
 adds nothing to the gap count.
+
+## 2026-10-17 — Q-1133: one ladder for "GitHub refused", and the row under-counted the class
+
+The row named four sites that answered with the upstream service's own message as the whole error.
+Measuring first turned up something bigger: the same question had **three different answers and four
+non-answers**.
+
+| | |
+|---|---|
+| ❌ `github.ts` ×3, `cloudsync.ts` | `{ error: err.response?.data?.message \|\| err.message }` — GitHub's wording as the whole error. `GitPanel` renders that string into its log line, so the sentence **is** the UI. |
+| ✅ `mobileShip.ts` | the considered form: a hint per status, upstream message as `detail` |
+| ✅ `mobileSetup.ts` | **a second, separately-written ladder** over the same statuses — which the row had not spotted |
+
+**The class: "what to say when GitHub refuses" was a judgement every call site had to make for
+itself.** Four made none; the two that made it made it twice, so improving a rung could never reach
+the others. One ladder now (`src/server/lib/githubErrorHint.ts`); both existing ladders pass their own
+exact wording as overrides, so nothing a user reads today changed.
+
+Three things the ladder adds that no site had:
+
+- **A 403 rate limit is told to WAIT, not to reconnect.** GitHub answers 403 for both "you may not"
+  and "you asked too often", the two need opposite actions, and only the message tells them apart.
+  Reconnecting does nothing about a rate limit.
+- **An unreachable GitHub answers 502** and says *nothing was changed*, instead of a 500 that reads as
+  our own server failing.
+- **The upstream message is redacted** through `toSafeClientMessage` before it rides out as `detail`.
+  It was raw before, and somebody else's error text can carry a token-bearing clone URL.
+
+`mobileSetup`'s deliberate **403-for-a-401** survives as an explicit `status` override rather than a
+line a reader has to notice — on that route a 401 means "your connection may not create
+repositories", not "sign in again", and a client seeing a 401 could throw the user at a sign-in screen
+they do not need.
+
+Locked by `tests/githubRefusalSaysWhatToDo.test.ts` (11 tests), including a **ratchet** census rather
+than a file-level allowlist — that shape hid a real miss earlier the same day — and a pin that both
+migrated ladders kept their sentences. Three reversions bite.
+
+One wording did change, deliberately and noted in the row: `mobileSetup`'s final rung.
+
+**A small process note:** my census first asserted `githubErrorAnswer(` appeared ≥ 4 times in
+`github.ts`. It appears 3 times — the import names it without parentheses. Guessed, measured,
+corrected, rather than adjusted until green.

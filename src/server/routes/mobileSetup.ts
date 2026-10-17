@@ -23,6 +23,7 @@
 // most people stopped. NavBharatAI still keeps no copy, which is the half of the old rule that stands.
 
 import type { Express, Request, Response } from 'express';
+import { githubErrorAnswer } from '../lib/githubErrorHint';
 import axios from 'axios';
 import { loadWorkspaceFiles, mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { loadWorkspaceAssetsWithCompleteness } from '../AgentV3/WorkspaceAssetStore';
@@ -390,25 +391,34 @@ export function registerMobileSetupRoutes(app: Express): void {
         },
       });
     } catch (err) {
-      // Each of these needs a different fix, so they are reported differently rather than as one
-      // vague failure the user cannot act on.
-      const status = (err as { response?: { status?: number } })?.response?.status;
-      if (status === 401 || status === 403) {
-        return res.status(403).json({
-          error: 'Your GitHub connection does not have permission to create repositories or workflows. Reconnect GitHub and allow the "repo" and "workflow" permissions.',
-        });
-      }
-      if (status === 422) {
-        return res.status(422).json({
-          error: `GitHub refused the repository "${repoName}" — the name may already be taken on your account. Try a different name.`,
-        });
-      }
-      if (status === 409) {
-        return res.status(409).json({
-          error: 'That repository changed while we were writing to it. Please try again.',
-        });
-      }
-      return res.status(502).json({ error: 'Could not set up the repository on GitHub. Nothing was changed.' });
+      /**
+       * Each of these needs a different fix, so they are reported differently rather than as one
+       * vague failure the user cannot act on.
+       *
+       * 🔁 ONE LADDER, FROM 2026-10-17 (Q-1133). This was the SECOND separately-written copy of "what
+       * to say when GitHub refuses" — `mobileShip` had the other, and four further sites had no
+       * sentence of their own at all. Every sentence below is unchanged, passed as overrides; the 401
+       * answered as **403** is stated explicitly rather than left to a reader to notice, because on
+       * this route a 401 means "your connection may not create repositories", not "sign in again".
+       *
+       * The only change is the final rung: an unreachable GitHub now says so and says nothing was
+       * changed, instead of the flatter "Could not set up the repository on GitHub." — and the
+       * upstream message rides along as a redacted `detail`, which this route did not pass before.
+       */
+      const answer = githubErrorAnswer(err, {
+        action: 'set up the repository on GitHub',
+        subject: 'that repository',
+        hints: {
+          401: {
+            error: 'Your GitHub connection does not have permission to create repositories or workflows. Reconnect GitHub and allow the "repo" and "workflow" permissions.',
+            status: 403,
+          },
+          403: 'Your GitHub connection does not have permission to create repositories or workflows. Reconnect GitHub and allow the "repo" and "workflow" permissions.',
+          422: `GitHub refused the repository "${repoName}" — the name may already be taken on your account. Try a different name.`,
+          409: 'That repository changed while we were writing to it. Please try again.',
+        },
+      });
+      return res.status(answer.status).json({ error: answer.error, ...(answer.detail ? { detail: answer.detail } : {}) });
     }
   });
 }

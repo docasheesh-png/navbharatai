@@ -9,6 +9,7 @@
 // no drift — rule 4); this module only GENERATES the kit and DISPATCHES the workflow.
 
 import type { Express, Request, Response } from 'express';
+import { githubErrorAnswer } from '../lib/githubErrorHint';
 import { ANDROID_BUILD_FIX_PREFIX } from '../../lib/platformFixRequest';
 import axios from 'axios';
 import { generateShipKit } from '../lib/mobileShipKit';
@@ -727,14 +728,22 @@ export function registerMobileShipRoutes(app: Express): void {
       // 204 No Content on success — GitHub does not return the run, so point the user at the Actions tab.
       res.json({ ok: true, actionsUrl: `https://github.com/${owner}/${repo}/actions/workflows/${workflow}` });
     } catch (err) {
-      const status = (err as { response?: { status?: number } })?.response?.status || 500;
-      const detail = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      const hint =
-        status === 404 ? 'Workflow not found on that branch — push the ship kit to GitHub first.'
-        : status === 403 || status === 401 ? 'GitHub refused the request — reconnect GitHub so the token includes the "workflow" permission.'
-        : status === 422 ? 'GitHub could not start this workflow on that branch. Make sure the pushed workflow is on the branch you selected.'
-        : 'Could not start the build on GitHub.';
-      res.status(status === 500 ? 502 : status).json({ error: hint, detail: detail || undefined });
+      /**
+       * 🔁 ONE LADDER, FROM 2026-10-17 (Q-1133). This was the considered form of "what to say when
+       * GitHub refuses" — and it was one of THREE separately-written copies, while four other sites
+       * had no sentence of their own at all. The wording below is unchanged; it is now passed as
+       * overrides to the shared ladder, so improving a rung reaches every route instead of one.
+       */
+      const answer = githubErrorAnswer(err, {
+        action: 'start the build on GitHub',
+        hints: {
+          404: 'Workflow not found on that branch — push the ship kit to GitHub first.',
+          403: 'GitHub refused the request — reconnect GitHub so the token includes the "workflow" permission.',
+          401: 'GitHub refused the request — reconnect GitHub so the token includes the "workflow" permission.',
+          422: 'GitHub could not start this workflow on that branch. Make sure the pushed workflow is on the branch you selected.',
+        },
+      });
+      res.status(answer.status).json({ error: answer.error, detail: answer.detail || undefined });
     }
   });
 

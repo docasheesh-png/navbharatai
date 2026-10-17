@@ -1,4 +1,9 @@
 import { toSafeClientMessage } from '../lib/httpError';
+import { clarityGateEnabled, shouldJudgeClarity, judgeClarity, clarifyReply, categoryFromWords, bestGuessPrompt, type ClarityCategory, type QuickReply } from '../AgentV3/clarityGate';
+import { clarityJudgeAsk } from '../AgentV3/clarityJudgeAsk';
+import { platformVoiceEnabled, voiceOf, voiceRequestedIn, eventInUserVoice } from '../AgentV3/platformVoice';
+import { silenceMemoryEnabled, sharedProviderSilenceMemory } from '../AgentV3/providerSilenceMemory';
+import { templateInstantPreviewEnabled, shouldUseSlimPrompt, isTemplateVerifyJob, capTemplateVerifyEstimate } from '../AgentV3/templateVerify';
 import { teacherPromoFor } from '../lib/freeChatReplies';
 import { BoundedCache } from '../lib/boundedCache';
 import { FILE_SIZE_RULE, READ_GUIDE_TOOL, fileSizeRuleEnabled, moduleText, modularizePrompt, modularPromptEnabled } from '../AgentV3/reliability/modularPrompt';
@@ -56,6 +61,7 @@ import { unrelatedToExistingApp, unrelatedRequestSteer, unrelatedRequestFallback
 import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary, writeTypecheckCommand } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
 import { answeringModel, answerTimeOf } from '../AgentV3/answeringModel';
+import { recordedTextCall } from '../AgentV3/recordedTextCall';
 import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { ladderDepthUsed, describeLadderDepth } from '../AgentV3/ladderDepth';
 import { streamThinkingToChat } from '../AgentV3/thinkingStream';
@@ -396,7 +402,7 @@ import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSu
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
-import { contractRenameHandoffClause, salvageWhyClause } from '../AgentV3/handoffRule';
+import { contractRenameHandoffClause, contractEnumHandoffClause, salvageWhyClause } from '../AgentV3/handoffRule';
 import { entryFirstHandoffLine, renderWhileBuilding } from '../AgentV3/earlyPreview';
 import { planHandoffText } from '../AgentV3/planHandoff';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, dedupeStylesheetImports, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -602,7 +608,7 @@ import type { FrameworkCoherence } from '../AgentV3/ProjectImport';
 import { attachmentMemoryEnabled, rememberableUid, saveAttachmentMemory, loadAttachmentMemory, deleteAttachmentMemory, shouldRecallAttachment, refersToEarlierAttachment } from '../lib/attachmentMemory';
 import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt, readerlessIntent, describeReaderOutcome, type ReaderOutcome } from '../AgentV3/IntentClassifier';
 import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
-import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, type WasteKind } from '../AgentV3/providerWaste';
+import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, engineTimeDominated, type WasteKind } from '../AgentV3/providerWaste';
 import { readTurnAnswer, answeredWithoutBuilding, modelsOwnWords } from '../AgentV3/turnAnswer';
 import { assessBuildInput, shouldAskWhatToBuild } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
@@ -3794,6 +3800,8 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
     ...(opts.deadRungs ? { deadRungs: opts.deadRungs } : {}),
     ...(opts.bench ? { bench: opts.bench } : {}),
     ...(opts.sticky ? { sticky: opts.sticky } : {}),
+    // Autopsy eb58abaf — a rung silent for another build moments ago is opened past (providerSilenceMemory.ts).
+    ...(silenceMemoryEnabled() ? { silenceMemory: sharedProviderSilenceMemory } : {}),
   });
 }
 
@@ -3957,12 +3965,17 @@ export function workspaceLeaseEnabled(env: NodeJS.ProcessEnv = process.env): boo
  * enforceNoClaude. Null when nothing in it has a key; the caller then plans on the build client, which
  * is the same tier's ladder anyway. Replaces grokPlanRunner (2026-09-14): Grok is the judge now.
  */
-function tierPlanRunner(level: PowerLevel | string | boolean | null | undefined, noClaude: boolean): TurnRunner | null {
+function tierPlanRunner(level: PowerLevel | string | boolean | null | undefined, noClaude: boolean, bench?: BuildBenchRegistry, onProviderBenched?: (family: string, reason: string) => void): TurnRunner | null {
   try {
     const chain = enforceNoClaude(ladderRunners(planLadder(level)), noClaude);
     if (chain.length === 0) return null;
     return makeMultiProviderTurnRunner(chain, {
       onProviderError: (name, err) => console.log(`[AGENTV3] plan ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
+      // Sibling of autopsy eb58abaf: the plan-first planner was the one build runner with a PRIVATE bench, so a
+      // rung it found silent was opened again by the architect, and vice versa. It shares the build's now.
+      ...(bench ? { bench } : {}),
+      ...(onProviderBenched ? { onProviderBenched } : {}),
+      ...(silenceMemoryEnabled() ? { silenceMemory: sharedProviderSilenceMemory } : {}),
     });
   } catch {
     return null; // misconfigured — caller falls back to the normal build client
@@ -6910,9 +6923,11 @@ async function noteBuildOutcome(
         return;
       }
       (rb.steerQueue ??= []).push(message);
+      // "Hindi me bolo" mid-build (autopsy eb58abaf): every platform line from here on follows it.
+      if (platformVoiceEnabled()) { const asked = voiceRequestedIn(message); if (asked) rb.voice = asked; }
       // Instant, honest feedback to EVERY attached device: the message is queued (the runner emits
       // its own "picked up" narration when it actually injects it at the next step boundary).
-      broadcastBuild(rb, { type: 'narration', agent: 'system', text: `📨 Message to the team queued — it will be picked up at the next step: “${message.slice(0, 140)}${message.length > 140 ? '…' : ''}”`, ts: Date.now() });
+      broadcastBuild(rb, eventInUserVoice({ type: 'narration', agent: 'system', text: `📨 Message to the team queued — it will be picked up at the next step: “${message.slice(0, 140)}${message.length > 140 ? '…' : ''}”`, ts: Date.now() }, rb.voice));
       audit('AGENTV3_STEER_QUEUED', { userId, workspaceId: rb.workspaceId }, 'info');
       res.json({ ok: true, queued: rb.steerQueue.length });
       return;
@@ -11198,11 +11213,18 @@ async function noteBuildOutcome(
      * is asymmetric in the same direction it always is here, and a second opinion that can only ever
      * make the gate NARROWER cannot introduce a new way to refuse a real prompt.
      */
+    // CLARITY GATE (clarityGate.ts) — we asked ONCE already and this is the reply: never ask again; build
+    // the best guess from both messages and say what was assumed.
+    const askedClarifyLastTurn = clarityGateEnabled()
+      && lastRequestTurn !== null && lastRequestTurn.lane === 'clarify'
+      && Date.now() - lastRequestTurn.ts <= OFFER_LIFETIME_MS
+      && intent !== 'edit_existing' && rawAttachments.length === 0
+      && zipImports.length === 0 && !(typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '');
     const namesNothingToBuild =
       (!inputCheck.buildable && inputCheck.reason === 'no-object') || readerSaysUnclear;
     // db07e0af: the workspace is judged by CONTENT (our starter is not a project) and the conversation by
     // what it names (a "hi" is not a request) — see `shouldAskWhatToBuild`.
-    const askWhatToBuild = namesNothingToBuild && shouldAskWhatToBuild({
+    const askWhatToBuild = !askedClarifyLastTurn && namesNothingToBuild && shouldAskWhatToBuild({
       namesNothing: true,
       editIntent: intent === 'edit_existing',
       workspaceHoldsOnlyOurStarter: await workspaceHoldsOnlyOurStarter(),
@@ -11213,6 +11235,28 @@ async function noteBuildOutcome(
     if (askWhatToBuild) {
       console.log('[AGENTV3] the prompt orders something built but names nothing — asking the user instead of inventing an app');
       intent = 'chat';
+    }
+    /** Set when this turn answers with the clarity question + chips instead of building. */
+    let clarity: { category: ClarityCategory } | null = askWhatToBuild ? { category: categoryFromWords(prompt) } : null;
+    if (askedClarifyLastTurn && lastRequestTurn) {
+      console.log('[AGENTV3] clarity gate: this is the reply to our one question — building the best guess, no second question');
+      prompt = bestGuessPrompt(lastRequestTurn.text, typedPrompt);
+      intent = 'new_build';
+    } else if (!askWhatToBuild && intent === 'new_build' && shouldJudgeClarity({
+      enabled: clarityGateEnabled(),
+      newBuild: true,
+      workspaceHoldsOnlyOurStarter: await workspaceHoldsOnlyOurStarter(),
+      earlierBuildableRequest: recentRequests.some((t) => typeof t === 'string' && assessBuildInput(t).buildable && t.trim() !== String(prompt ?? '').trim()),
+      importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
+      attachments: rawAttachments.length,
+      askedLastTurn: false,
+      alreadyAsking: false,
+      prompt: String(prompt ?? ''),
+      isStarterPrompt: goldenScaffoldForPrompt(String(prompt ?? '')) !== null,
+    })) {
+      const v = await judgeClarity(prompt, clarityJudgeAsk);
+      console.log(`[AGENTV3] clarity judge: ${v.verdict} (${v.category}, ${v.ms}ms)`);
+      if (v.verdict === 'vague') { clarity = { category: v.category }; intent = 'chat'; }
     }
     /**
      * 🔴 THE APP THEY ASKED ABOUT IS NOT HERE (autopsy 0d297b25). "The WORKNEX app is already developed
@@ -11451,7 +11495,7 @@ async function noteBuildOutcome(
         // say plainly that we did not understand what, and ask. Steering the model (rather than
         // returning the canned `inputCheck.message`) is what keeps the question in the USER'S OWN
         // LANGUAGE, which LANGUAGE_RULE already governs on this path.
-        const clarifyWhatToBuild = askWhatToBuild;
+        const clarifyWhatToBuild = askWhatToBuild || clarity !== null;
         // Q-200: the turn was diverted because a build was not confirmed, and no more specific answer took it.
         // The reply answers, then offers; the turn is remembered as an offer so a "yes" builds this request.
         const answerThenOffer = offerToBuild && !askFramework && !clarifyWhatToBuild && !askUnrelated && !answerProjectElsewhere
@@ -11515,7 +11559,14 @@ async function noteBuildOutcome(
         // persisted turn, so the Download button is there live AND after the chat is reopened.
         let sheetFile: SheetFileRef | null = null;
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
-        if (echoesPlatformNotice) {
+        /** The clarity question's chips, when this turn asks it (clarityGate.ts). */
+        let clarifyChips: QuickReply[] | null = null;
+        if (clarity && !echoesPlatformNotice) {
+          // Written by the PLATFORM, not a model: one short question in the user's language + 3–4 chips. Billed 0.
+          const r = clarifyReply(clarity.category, voiceOf(String(prompt ?? '')));
+          reply = r.text;
+          clarifyChips = r.chips;
+        } else if (echoesPlatformNotice) {
           reply = platformNoticeEchoReply(recentRequests.find((r) => !isPlatformNoticeEcho(r)) ?? null);
         } else if (answerSpreadsheet) {
           // A turn whose whole point is a FILE must never fall through to a build: every outcome of
@@ -11610,7 +11661,8 @@ async function noteBuildOutcome(
           const chatWsId = deriveWorkspaceId(userId, req.body?.sessionId);
           const chatMem = getWorkspaceMemory(chatWsId);
           // Our own notice is not one of the user's requests, and must never become "earlier context".
-          if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, askFramework ? 'framework' : answerThenOffer ? 'offer' : 'chat');
+          if (clarifyChips) { if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, 'clarify'); }
+          else if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, askFramework ? 'framework' : answerThenOffer ? 'offer' : 'chat');
           // Hydration at intent-time is a 3-second RACE, so it can be marked done while the read never
           // landed — `saveWorkspaceMemoryFor` checks the read itself, not the re-entrancy flag.
           void saveWorkspaceMemoryFor(chatWsId, chatMem).catch(() => {});
@@ -11620,6 +11672,7 @@ async function noteBuildOutcome(
         const chatEvents = new AgentEventStream(500, requestArrivedAt);
         chatEvents.subscribe((e) => send(e), false);
         chatEvents.emit({ type: 'narration', agent: 'architect', text: reply, ts: Date.now(), ...(sheetFile ? { file: sheetFile } : {}) });
+        if (clarifyChips && clarifyChips.length > 0) chatEvents.emit({ type: 'quick_replies', chips: clarifyChips, ts: Date.now() });
         chatEvents.emit({ type: 'done', ok: true, summary: reply, ts: Date.now() });
         // billedUsd: 0 — the cheap free router is not billed to the user as a build.
         send({ type: 'result', ok: true, summary: reply, steps: 0, billedUsd: 0, billedInr: 0 });
@@ -11680,7 +11733,7 @@ async function noteBuildOutcome(
     // `key` stays the ACCOUNT key (userId ?? 'anon') for the cross-device LiveChannel (readers already
     // filter by workspaceId), while the registry Map is keyed by `buildKey` (per-workspace when enabled).
     // `userId` lets the per-account cap count this account's live builds across workspaces.
-    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), originTs: requestArrivedAt, key: userId ?? 'anon', userId, workspaceId: intentWorkspaceId, steerQueue: [], powerLevel: powerLevelReqEffective };
+    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), originTs: requestArrivedAt, key: userId ?? 'anon', userId, workspaceId: intentWorkspaceId, steerQueue: [], powerLevel: powerLevelReqEffective, voice: platformVoiceEnabled() ? voiceOf(String(prompt ?? '')) : 'en' };
     const primary: BuildSubscriber = {
       write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
       end: () => { if (!res.writableEnded) res.end(); },
@@ -11712,7 +11765,8 @@ async function noteBuildOutcome(
      * field can be mangled, and `redactSecrets` returns its input unchanged when there is nothing to
      * mask — which is almost every event.
      */
-    const emit = (e: unknown): void => { const ev = redactEventForUser(honestResultEvent(e)); sessionTimeline.record(ev); broadcastBuild(rb, ev); };
+    // Platform lines in the user's language (autopsy eb58abaf, platformVoice.ts) — at the one door every event leaves by.
+    const emit = (e: unknown): void => { const ev = eventInUserVoice(redactEventForUser(honestResultEvent(e)), rb.voice); sessionTimeline.record(ev); broadcastBuild(rb, ev); };
     // Exposed to the finally so the LAST background checkpoint is flushed on every exit path
     // (success, error, abort). Held outside the try because `dispatcher` is block-scoped to it.
     let dispatcherForFlush: { flushCheckpoints: () => Promise<void>; markBuildActive: (active: boolean) => void; flushUnrecordedWrites: () => void } | undefined;
@@ -14478,6 +14532,34 @@ async function noteBuildOutcome(
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
       }), abort.signal));
+      /**
+       * 🧬 Q-1125 (2026-10-17) — THE ONE DOOR for this lane's text-only repair calls.
+       *
+       * The agentic lane's four post-build gates (typecheck, missing-files, syntax, missing-export) each
+       * called `makeFastTextRunner().runTurn(...)` RAW, so NONE of them left a row in `llmCalls` — success
+       * or failure. A repair pass spends an 8000-token answer on a build that is already in trouble, which
+       * is exactly the call an autopsy opens the report to find, and the report had nothing to show.
+       *
+       * It is one door rather than four copied `recordLlmCall` blocks on purpose (fourth absolute rule,
+       * step 2 — fix the CLASS): a copied block is what let the fifth site be written without one, and it
+       * is why `answeringModel.ts` and `fastLaneCallIdentity` had to exist at all. A new repair gate that
+       * calls the raw runner is now the thing `aCallOutsideTheLoopIsStillOnTheRecord` fails on.
+       */
+      const recordedRepairCall = (system: string, user: string) => {
+        // The same binding name the fast lane uses, and for the same reason: it is handed to the request
+        // and to `fastLaneCallIdentity`'s Claude-default parameter, which `claudeRungModelId` answers
+        // first. `aBuildIsNamedByItsLadderNotByClaude` §6(b) classifies the helper by this name.
+        const fbModel = fastBuildModel();
+        return recordedTextCall(
+          {
+            makeRunner: (onUsed) => makeFastTextRunner(onUsed),
+            identify: (reported, used, answered) => fastLaneCallIdentity(reported, used, fbModel, answered),
+            recordLlmCall: (row) => buildDiag.recordLlmCall(row),
+          },
+          { model: fbModel, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000 },
+          { promptPreview: `${system}\n---\n${user}` },
+        );
+      };
       const client = buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
@@ -14784,7 +14866,9 @@ async function noteBuildOutcome(
           if (past.length === 0 && etaFleetKey) {
             try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), etaFleetKey, etaComplexity); } catch { fleetReadFailed = true; /* best-effort — and said so */ }
           }
+          // Autopsy 778d7c58: a seeded finished template is a ~1 min verify, not a from-scratch build.
           const est = estimateBuildTime(etaComplexity, past.length > 0 ? past : fleet.history);
+          Object.assign(est, capTemplateVerifyEstimate(est, scaffoldWillSeed && isTemplateVerifyJob(seededScaffold?.tier ?? null), past.length > 0));
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
           etaBaseMs = est.estimateMs;  // the ORIGINAL estimate — sizes each overrun re-baseline step
           // RECORD WHAT THE USER WAS ACTUALLY TOLD, not the point estimate behind it (autopsy f04421ef).
@@ -16532,7 +16616,8 @@ async function noteBuildOutcome(
       // need move out and stay reachable through read_guide. P2c (AGENTV3_FILE_SIZE_RULE) — the ~200-line rule.
       const fullArchitectPromptForGuides = architectSystem;
       let modularDeferred: string[] = [];
-      if (modularPromptEnabled()) {
+      // Autopsy 778d7c58: a verify-only template job got the full 112k-char prompt — slim it regardless of the flag.
+      if (shouldUseSlimPrompt(modularPromptEnabled(), seededScaffold?.tier ?? null)) {
         try {
           const mp = modularizePrompt(architectSystem, prompt, isEditMode ? ['fullstack'] : []);
           architectSystem = mp.prompt;
@@ -16779,19 +16864,39 @@ async function noteBuildOutcome(
       ) {
         try {
           const bpGenerate = async (system: string, user: string): Promise<string> => {
-            const startedAt = Date.now();
             // Cheap-floor-first like every other build text call (admin 2026-07-11 — no direct-Sonnet path).
             let bpProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
-            const call = makePlanTextRunner((used) => { bpProvider = used; }).runTurn({
-              model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 6000,
-            });
-            // Hard timeout so an up-front step can NEVER hang the build (the losing call is ignored).
-            const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('blueprint step timed out')), 30_000));
-            const t = await Promise.race([call, timeout]);
-            try {
-              const lbl = fastLaneProviderLabel(bpProvider);
-              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: claudeRungModelId(bpProvider) ?? null, family: bpProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ...answerTimeOf(t), ok: true });
-            } catch { /* diagnostics best-effort */ }
+            const fbModel = fastBuildModel();
+            // 🔴 Q-1125 (2026-10-17): this step recorded its call on SUCCESS ONLY, and it hand-rolled its
+            // own `Promise.race` bound — so the 30 s timeout, and every error, left the report with NO row
+            // at all. `recordedTextCall` is the one door now: it owns the bound AND records both outcomes,
+            // so an abandoned blueprint step is a line an autopsy can read instead of a silence.
+            const t = await recordedTextCall(
+              {
+                // This site keeps its OWN capture — `bpProvider` feeds `captureTurnUsage` below, and the
+                // sign-bridge census pins this exact form for all three planners. The door's `onUsed` is
+                // not needed here because `identify` reads the same variable.
+                makeRunner: () => makePlanTextRunner((used) => { bpProvider = used; }),
+                // 🔴 A PLANNER IS NAMED BY THE PLAN LADDER, NOT THE BUILD ONE. An earlier draft of this
+                // change routed the row through `fastLaneCallIdentity`, whose Claude default is
+                // `fastBuildModel()` — the BUILD ladder's rung — and `aBuildIsNamedByItsLadderNotByClaude`
+                // §4 caught it. The three aux planners pin their Claude rung through `claudeRungModelId`,
+                // and this one keeps doing exactly that; only the FAILURE row is new.
+                identify: (_reported, _used, answered) => ({
+                  // Nothing reported means nobody served it — the row names no vendor rather than the
+                  // label's default (autopsy dcce5d26: a default pinned an unmade call on a third party).
+                  provider: bpProvider ? fastLaneProviderLabel(bpProvider) : 'unknown',
+                  model: answeringModel({ answered, planned: claudeRungModelId(bpProvider) ?? null, family: bpProvider }),
+                }),
+                recordLlmCall: (row) => buildDiag.recordLlmCall(row),
+              },
+              // The REQUEST's model parameter, under the repo's name for it (§6(b) classifies the helper
+              // by this binding). Every rung the plan ladder walks overrides it; the row above never
+              // reads it, which is the whole point of §4.
+              { model: fbModel, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 6000 },
+              // Hard bound so an up-front step can NEVER hang the build — now a bound whose expiry is on the record.
+              { promptPreview: `${system}\n---\n${user}`, timeoutMs: 30_000, timeoutMessage: 'blueprint step timed out' },
+            );
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
             buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, cacheReadInputTokens: t.usage.cacheReadInputTokens, cacheCreationInputTokens: t.usage.cacheCreationInputTokens });
@@ -16801,10 +16906,15 @@ async function noteBuildOutcome(
             return t.text;
           };
           const scaffold = (await actuator.listFiles(workspaceId).catch(() => [])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
-          // 🔴 Q-1016: the notes open the request the manifest is planned from. `fileBudgetForPrompt(prompt)`
-          // below still reads the BARE prompt on purpose — Q-991 measured that notes riding the request
-          // take a 13-file budget to 25, which is the user's app being sized by our own instructions.
-          const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework, scaffold), manifestUserPrompt(withRequestNotes(prompt, requestNotesText), scaffold)));
+          // 🔴 Q-1016: the notes open the request the manifest is planned from. BOTH budgets read the BARE
+          // prompt — Q-991 measured that notes riding the request take a 13-file budget to 25, which is the
+          // user's app being sized by our own instructions.
+          //
+          // 🔴 Q-1017 (2026-10-16): the third argument is that rule, and it was missing here. `sizeFrom`
+          // exists for exactly this call — it defaults to the first argument, so omitting it sized the app
+          // the MODEL is told to build from notes+request while the overrun recorded five lines below read
+          // the bare prompt. Two answers to one question; the model's was the wrong one.
+          const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework, scaffold), manifestUserPrompt(withRequestNotes(prompt, requestNotesText), scaffold, prompt)));
           // FILE BUDGET honesty (admin 2026-08-02): the plan is NEVER trimmed — shipping an incomplete app
           // would be far worse than shipping a large one — but an overrun is recorded so "this app planned
           // more files than it should need" is measurable instead of invisible.
@@ -16820,7 +16930,7 @@ async function noteBuildOutcome(
             // The same door as the fast lane (build 9c612cdb): the name split and the enum normaliser run on
             // every generated contract before anything reads it, and a rename is named in the block.
             const prepared = prepareSharedContract(((await bpGenerate(contractSystemPrompt(framework), contractUserPrompt(withRequestNotes(prompt, requestNotesText), manifest))) || '').trim(), manifest);
-            const block = blueprintAdvisoryBlock(manifest, prepared.contract, prepared.renamed);
+            const block = blueprintAdvisoryBlock(manifest, prepared.contract, prepared.renamed, prepared.enumsAsConst);
             if (block) {
               architectSystem = `${block}\n\n---\n\n${architectSystem}`;
               events.emit({ type: 'narration', agent: 'architect', text: 'Sketching a file blueprint & shared contract to keep this larger app consistent…', ts: Date.now() });
@@ -17108,6 +17218,7 @@ async function noteBuildOutcome(
         // pasted page) IS in the workspace — the ending then says so instead of "nothing was written".
         // …and WHICH seed, read with the router's own test, so the way on it names is the one the next turn takes.
         seedState: () => seedStateOf(writtenFiles),
+        providerFaultNow: () => engineTimeDominated(providerWaste, Date.now() - buildStartedAt),
         // Autopsy 95598899 — wording of the build nudge only, never whether it fires. An established
         // project must never be told to "start by writing the entry file". See nudgeToBuild.ts.
         editingExistingApp: isEditMode,
@@ -17836,7 +17947,7 @@ async function noteBuildOutcome(
         // Opus for a Sonnet-pinned tier would be exactly the cross-tier call the admin forbade.
         // Plan on the tier's plan ladder (admin-approved table 2026-09-14). `planGrok` keeps its name
         // for the lines below; it is no longer Grok — Grok judges.
-        const planGrok = tierPlanRunner(powerLevelReqEffective, noClaudeBuild);
+        const planGrok = tierPlanRunner(powerLevelReqEffective, noClaudeBuild, buildBench, recordProviderBenched);
         const planRunner = new AgentRunner({
           client: planGrok ?? client,
           // C2 — the plan runner has tool access too, so it gets the same guard. A planner that
@@ -18014,7 +18125,8 @@ async function noteBuildOutcome(
             const plannerGoal = withRequestNotes(prompt, requestNotesText);
             const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(plannerGoal, ppScaffold)));
             if (modules.length >= MIN_PROJECT_MODULES) {
-              pPlan = createProjectPlan(plannerGoal, framework, modules, Date.now());
+              // Q-1017: the REQUEST and the notes go in apart, so the goal's cap is the request's alone.
+              pPlan = createProjectPlan(prompt, framework, modules, Date.now(), requestNotesText);
               await saveProjectPlan(workspaceId, pPlan);
               events.emit({ type: 'narration', agent: 'architect', text: `📦 Project plan ready: ${modules.length} modules — ${modules.map((m) => m.name).join(' → ')}. I will build them one per round, in dependency order, and the plan survives reloads.`, ts: Date.now() });
             } else {
@@ -18238,6 +18350,17 @@ async function noteBuildOutcome(
               }
               goldenPreseeded = true;
               goldenPreseededTier = golden.tier;
+              // 🔴 SHOW IT NOW, FOR REAL (autopsy 778d7c58): the events above only refresh the in-browser
+              // preview (and only behind AGENTV3_STREAMING_PREVIEW). The user still saw nothing for 76 s and
+              // stopped, because the sandbox preview waited for the MODEL to call update_preview. A finished,
+              // CI-proven template needs no model to be shown: boot its dev server through the same managed
+              // update_preview path now, in the background, while the first model call runs. The managed
+              // launcher is idempotent ("dev server already healthy"), so the builder's own later
+              // `npm run dev` does not start a second server. Kill switch AGENTV3_TEMPLATE_INSTANT_PREVIEW=off.
+              if (templateInstantPreviewEnabled()) {
+                void dispatcher.dispatch({ id: 'template-instant-preview', name: 'update_preview', input: { port: 5173 } }, 'architect', { signal: abort.signal })
+                  .catch(() => { /* the builder's own preview path still runs */ });
+              }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'GOLDEN_SCAFFOLD', message: `Pre-seeded the tested "${golden.label}" template (${Object.keys(goldenFiles).length} files) — the builder verifies & customizes instead of writing from scratch.`, autoResolved: true });
               events.emit({ type: 'narration', agent: 'architect', text: `⚡ Starting from NavBharatAI's tested "${golden.label}" app template — verifying and customizing it for you.`, ts: Date.now() });
               // HANDOFF FRAMING (same discipline as the fast-lane salvage below): the builder must treat the
@@ -19060,6 +19183,10 @@ async function noteBuildOutcome(
             (salvageEntryLine ? ` ${salvageEntryLine}` : '') +
             // 🏷️ Build 9c612cdb (Q-985): a name the lane changed is named to the builder that never saw it.
             contractRenameHandoffClause(sb.contractRenames) +
+            // 🔁 And an enum the same door rewrote (Q-1027). Same reason, same blind spot: the full builder
+            // never saw the contract call, so a member written as a TYPE is a TS2702 it cannot read off the
+            // error. The fact used to reach nobody at all — `enumsAsConst` was returned and never read.
+            contractEnumHandoffClause(sb.contractEnumsAsConst) +
             `\n\n---\n\n${buildPrompt}`;
         }
         // 🔴 A PLAN IS WORK TOO — do not make the full builder buy it twice (autopsy f97eb0ec,
@@ -19860,11 +19987,8 @@ async function noteBuildOutcome(
             const currentFiles = Array.from(writtenFiles.entries()).map(([path, content]) => ({ path, content }));
             // Cheap-floor-first like every other build text call (admin 2026-07-11 — no direct-Sonnet path);
             // Claude still backstops the chain so the repair never fails for lack of a provider.
-            const t = await makeFastTextRunner().runTurn({
-              model: fastBuildModel(), system: repairSystemPrompt(framework),
-              messages: [{ role: 'user', content: repairUserPrompt(prompt, check.errors, currentFiles) }],
-              tools: [], maxTokens: 8000,
-            });
+            // Q-1125: through the one recording door — this pass used to leave no row at all.
+            const t = await recordedRepairCall(repairSystemPrompt(framework), repairUserPrompt(prompt, check.errors, currentFiles));
             // Same guard the fast lane now carries: a REPAIR aimed at a file we own and that has one
             // correct form is replaced with that form. The restore above already put it back once — this
             // is what stops this very pass from immediately undoing that and starting the loop again.
@@ -19999,9 +20123,8 @@ async function noteBuildOutcome(
                 .filter((f) => f.content);
               const createList = trulyMissing.map((m) => `- ${m.missing} (imported by ${m.importedBy})`).join('\n');
               const mispathList = mispaths.map((m) => `- in ${m.importedBy}: the import of "${m.missing}" is a WRONG PATH — that module already exists at ${m.existsAt}; correct the import path to point at it`).join('\n');
-              const t = await makeFastTextRunner().runTurn({
-                model: fastBuildModel(), system: repairSystemPrompt(framework),
-                messages: [{ role: 'user', content:
+              // Q-1125: through the one recording door — this pass used to leave no row at all.
+              const t = await recordedRepairCall(repairSystemPrompt(framework),
                   `The app was built for this request:\n${prompt}\n\n` +
                   `Some LOCAL imports don't resolve, so the app crashes at runtime. Fix EXACTLY these, changing NOTHING else:\n` +
                   (mispathList ? `\nWRONG IMPORT PATHS — the target file ALREADY EXISTS; do NOT create a new file, just correct the import path in the importing file:\n${mispathList}\n` : '') +
@@ -20009,10 +20132,7 @@ async function noteBuildOutcome(
                   `importing file uses it (correct named/default exports, correct hook return shapes, real logic — no TODOs, no empty stubs; ` +
                   `for a *.module.css import, create the stylesheet with the class names the component references):\n${createList}\n` : '') +
                   `\nThe files that import them (match their usage precisely):\n` +
-                  importerFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 4000)}`).join('\n') },
-                ],
-                tools: [], maxTokens: 8000,
-              });
+                  importerFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 4000)}`).join('\n'));
               const created = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
               // `findMissing()` below reads `writtenFiles`, which only a write that LANDED fills (the dispatcher's
               // onFileWrite), so its verdict follows what landed whatever this pass sent.
@@ -20065,19 +20185,15 @@ async function noteBuildOutcome(
               const brokenFiles = brokenPaths
                 .map((p) => ({ path: p, content: writtenFiles.get(p) || '' }))
                 .filter((f) => f.content);
-              const t = await makeFastTextRunner().runTurn({
-                model: fastBuildModel(), system: repairSystemPrompt(framework),
-                messages: [{ role: 'user', content:
+              // Q-1125: through the one recording door — this pass used to leave no row at all.
+              const t = await recordedRepairCall(repairSystemPrompt(framework),
                   `The app was built for this request:\n${prompt}\n\n` +
                   `These files have a SYNTAX ERROR and the app will NOT compile. Rewrite EACH broken file in ` +
                   `full so it parses cleanly — fix ONLY the syntax (a truncated/corrupted region, a stray CSS ` +
                   `declaration inside JSX, an unclosed brace/tag), keep all the real logic and UI. Change ` +
                   `nothing else.\n\nSYNTAX ERRORS:\n${syntaxRepairInstruction(syntaxErrors)}\n\n` +
                   `The broken files (rewrite each one completely and correctly):\n` +
-                  brokenFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 6000)}`).join('\n') },
-                ],
-                tools: [], maxTokens: 8000,
-              });
+                  brokenFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 6000)}`).join('\n'));
               const scopedSyntax = limitRepairToScope(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), brokenPaths);
               recordRepairOutOfScope('syntax', scopedSyntax.dropped);
               const fixed = scopedSyntax.kept;
@@ -20136,9 +20252,8 @@ async function noteBuildOutcome(
               const targetFiles = targets
                 .map((t) => ({ path: t.target, content: writtenFiles.get(t.target) || '' }))
                 .filter((f) => f.content);
-              const t = await makeFastTextRunner().runTurn({
-                model: fastBuildModel(), system: repairSystemPrompt(framework),
-                messages: [{ role: 'user', content:
+              // Q-1125: through the one recording door — this pass used to leave no row at all.
+              const t = await recordedRepairCall(repairSystemPrompt(framework),
                   `The app was built for this request:\n${prompt}\n\n` +
                   `These files are imported by other modules for specific bindings, but they DO NOT export those ` +
                   `bindings (usually a generation that was cut off before the export). Rewrite EACH file in full ` +
@@ -20146,10 +20261,7 @@ async function noteBuildOutcome(
                   `missing export(s) with real implementations (no stubs). Change nothing else.\n\n` +
                   `REQUIRED EXPORTS:\n${exportRegenInstruction(targets)}\n\n` +
                   `The files to rewrite (complete each one, exports included):\n` +
-                  targetFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 6000)}`).join('\n') },
-                ],
-                tools: [], maxTokens: 8000,
-              });
+                  targetFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 6000)}`).join('\n'));
               const scopedExport = limitRepairToScope(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), targetFiles.map((f) => f.path));
               recordRepairOutOfScope('missing-export', scopedExport.dropped);
               const fixed = scopedExport.kept;

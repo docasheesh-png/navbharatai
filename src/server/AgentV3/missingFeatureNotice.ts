@@ -20,6 +20,17 @@
 //
 // Pure — no I/O. The caller passes the readiness warnings it already has.
 
+// ⚠️ THE PHRASE BELOW IS A LITERAL ON PURPOSE, AND MUST STAY ONE (Q-1037).
+//
+// It is REGISTERED in `platformSuggestedReplies.ts`, so the intent ladder reads it with certainty rather
+// than guessing — but it is not interpolated FROM that constant, which is what I tried first.
+// `tests/aPromiseToTheUserHasAHandler.test.ts` is the stronger guard here: it reads every shipped string
+// and demands that each "reply X" it finds has a proven handler. An imported constant is opaque to it —
+// the census saw `Reply "${…}"` and the promise vanished from it, which is fixing one problem by creating
+// another. So the literal stays visible to that census, and
+// `tests/thePlatformKnowsItsOwnSuggestedReplies.test.ts` pins it equal to the constant, so the sentence
+// and its recogniser still cannot drift apart.
+
 /** The exact label the readiness scan uses for a CONFIRMED absence. Kept in one place. */
 export const CONFIRMED_MISSING_PREFIX = 'Requested feature NOT BUILT:';
 

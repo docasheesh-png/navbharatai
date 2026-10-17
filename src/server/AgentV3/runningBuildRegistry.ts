@@ -43,6 +43,8 @@ export interface RunningBuild {
    *  drains this between turns and injects each as a REAL user turn, so the very next model call
    *  acts on it — the Claude-Code-style "talk to the team while it builds" experience. */
   steerQueue?: string[];
+  /** The language platform lines are shown in (platformVoice.ts) — from the prompt, switched by a mid-build ask. */
+  voice?: 'en' | 'hinglish' | 'hindi';
   /** The build's resolved power level — gates mid-build steering to the Full Team ('max') tier. */
   powerLevel?: string;
   /** The channel key (userId) — used to mirror events to the cross-device LiveChannel. Stays the

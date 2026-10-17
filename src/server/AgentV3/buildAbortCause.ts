@@ -28,6 +28,7 @@
 // abort sites already have the controller in hand, and the runner already has the signal.
 
 import { BUDGET_REACHED_MESSAGE } from './turnDeadline';
+import { providerDegradedMessage } from './laneFailure';
 import { BUILD_STOPPED_MESSAGE, stoppedCallServedBy } from './stopSignal';
 
 /** Why a build's abort signal was fired. */
@@ -106,6 +107,12 @@ export interface AbortSummaryContext {
    * edit of it. The route computes this with the router's own test (`seedStateOf`). Ignored when `builtSomething`.
    */
   seed?: SeedState | null;
+  /**
+   * The build's own record says OUR ENGINE took its time (`engineTimeDominated`, autopsy 67a2b0a2). Then the stop is not
+   * the request's doing and the sentence must not send the person back to "add more detail" or "rephrase" — the
+   * same fact the live narration already told them ("this one is on us"). Absent/false = the wording is unchanged.
+   */
+  providerFault?: boolean;
 }
 
 /** What a seeded workspace holds, as the router will read it on the next message. */
@@ -121,6 +128,18 @@ export function seedKeptSentence(seed: SeedState): string {
     : "The starting files are kept in your workspace — send another message and I'll continue from them.";
 }
 
+/**
+ * The ending when our engine, not the request, is why nothing (or not enough) was built. ONE sentence source for
+ * every cause that can meet it, so the summary, the live narration (`providerDegradedMessage`) and the release gate
+ * cannot tell three stories about one build again (autopsy b89ba6f8 named that defect; 67a2b0a2 met it in the
+ * futile and the wall-clock endings). PURE.
+ */
+function engineFaultEnding(saved: boolean, seedKept: string): string {
+  if (saved) return "NavBharatAI's engine was running slowly, so this build could not finish — this one is on us, not on your app. Your files so far are saved — send another message and I'll continue from here.";
+  if (seedKept) return `NavBharatAI's engine was running slowly, so this build could not finish — this one is on us, not on your app. I had not changed anything yet. ${seedKept}`;
+  return providerDegradedMessage();
+}
+
 export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): string {
   const mins = typeof ctx.minutes === 'number' && ctx.minutes > 0 ? ctx.minutes : null;
   const saved = ctx.builtSomething === true;
@@ -132,6 +151,10 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
     : seededOnly
       ? ` I had not changed anything yet. ${SEED_KEPT}`
       : ' Nothing was lost; try again or rephrase.';
+
+  // Our engine's slowness is never the request's fault, whichever clock ended the build (see `providerFault`).
+  // A user's own Stop is the one ending it cannot override: they asked for it.
+  if (ctx.providerFault === true && (cause === 'futile' || cause === 'watchdog')) return engineFaultEnding(saved, SEED_KEPT);
 
   switch (cause) {
     case 'user-stop':
@@ -208,7 +231,8 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
  * The wall-clock cap reached between turns (not an abort): the same sentence source as every other ending, so
  * the three states can never drift apart again. It used to be an inline copy in AgentRunner. PURE.
  */
-export function timedOutSummary(minutes: number, ctx: Pick<AbortSummaryContext, 'builtSomething' | 'seed'> = {}): string {
+export function timedOutSummary(minutes: number, ctx: Pick<AbortSummaryContext, 'builtSomething' | 'seed' | 'providerFault'> = {}): string {
+  if (ctx.providerFault === true) return engineFaultEnding(ctx.builtSomething === true, !ctx.builtSomething && ctx.seed ? seedKeptSentence(ctx.seed) : '');
   if (ctx.builtSomething === true) return `I stopped after about ${minutes} min to avoid an endless loop. Your files so far are saved — send another message and I'll continue from here.`;
   if (ctx.seed) return `I stopped after about ${minutes} min — the build wasn't making progress (often a preview that won't come up), and had not changed anything yet. ${seedKeptSentence(ctx.seed)}`;
   return `I stopped after about ${minutes} min — the build wasn't making progress (often a preview that won't come up). Nothing was lost; try again or rephrase.`;

@@ -311,11 +311,27 @@ export interface EtaTickState {
 
 export interface EtaTickDecision {
   text: string;
-  kind: 'final-checks' | 'app-running' | 'measured-files' | 'measured-steps' | 'unevidenced' | 'rough-countdown' | 'rough-outrun' | 'budget';
+  kind: 'final-checks' | 'app-running' | 'measured-files' | 'measured-steps' | 'no-work-yet' | 'unevidenced' | 'rough-countdown' | 'rough-outrun' | 'budget';
   /** State to carry into the next tick. */
   totalMs: number;
   revisions: number;
   evidenced: boolean;
+}
+
+/** How long a build may run with nothing written before its history-based countdown is withdrawn. */
+export const NO_WORK_MIN_GRACE_MS = 3 * 60_000;
+export const NO_WORK_GRACE_SHARE_OF_PROMISE = 0.35;
+export function noWorkGraceMs(promisedHighMs: number): number {
+  const promised = Number(promisedHighMs);
+  return Math.max(NO_WORK_MIN_GRACE_MS, Number.isFinite(promised) && promised > 0 ? promised * NO_WORK_GRACE_SHARE_OF_PROMISE : 0);
+}
+
+/** The line that replaces a countdown nothing in this build supports. Elapsed time is the one number that is never a promise. PURE. */
+export function noWorkYetLine(elapsedMs: number, budgetMs?: number): string {
+  const inTxt = formatEta(Math.max(0, Number(elapsedMs) || 0)).replace('~', '');
+  const budget = Number(budgetMs);
+  const left = Number.isFinite(budget) && budget > Number(elapsedMs) ? ` I will keep going for up to ${formatEta(budget - Number(elapsedMs)).replace('~', '')} more.` : '';
+  return `⏱️ Still building… ${inTxt} in · nothing has been written yet, so I can't give you a finish time.${left} If it still produces nothing, I will stop and tell you honestly.`;
 }
 
 export function etaTickLine(s: EtaTickState): EtaTickDecision {
@@ -335,6 +351,17 @@ export function etaTickLine(s: EtaTickState): EtaTickDecision {
   const byStep = measuredRemainingFromSteps({ plannedSteps: s.plannedSteps, stepsDone: s.stepsDone, firstStepAt: s.firstStepAt, now: s.now });
   if (byStep !== null) {
     return { text: stepEtaText(elapsedMs, byStep, s.stepsDone, s.plannedSteps), kind: 'measured-steps', totalMs: elapsedMs + byStep, revisions: s.revisions, evidenced: true };
+  }
+  // A FORECAST THIS BUILD HAS ALREADY CONTRADICTED IS NOT COUNTED DOWN (autopsy 67a2b0a2, 2026-10-15).
+  // The opening figure was evidenced — "23 recent builds of this kind averaged 10 min" — and that evidence is
+  // about OTHER builds. This one had written no file and finished no step, and its line still read "~6 min to
+  // go" at minute 4, "~4 min" at 6 and "~2 min" at 8, until the futility breaker stopped it at 10 with nothing
+  // produced: a countdown to a finish nothing observed in THIS build supported. History earns the forecast; the
+  // build's own silence withdraws it. After a grace (a plan and a first file legitimately take minutes) the line
+  // says what is measured — time spent, nothing written — and names no finish.
+  if (s.evidenced && (Number(s.filesDone) || 0) === 0 && (Number(s.stepsDone) || 0) === 0
+      && elapsedMs >= noWorkGraceMs(s.promisedHighMs)) {
+    return { text: noWorkYetLine(elapsedMs, s.budgetMs), kind: 'no-work-yet', ...keep };
   }
   // NO EVIDENCE ⇒ NO COUNTDOWN (autopsy d11ad529): elapsed time, the build's own limit and the labelled band.
   if (!s.evidenced) {

@@ -36,8 +36,15 @@ const RAW = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'u
 const ROUTE = RAW.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ [^\n'`"]*$/gm, '');
 
 /**
- * Every function that writes a note about the REQUEST for the builders. A producer is guilty until listed: any
- * import into the route named `…BuilderNote` / `…BuildRule` is caught by the census below and must be added here.
+ * Every function that writes a note about the REQUEST for the builders.
+ *
+ * ⚠️ THIS LIST IS NO LONGER THE CENSUS'S NET (Q-1020, 2026-10-15). It used to be kept honest by a guard that
+ * matched route imports named `…BuilderNote` / `…BuildRule`, and that guard could not see a producer called
+ * anything else — `requestScopeVerdict`, already listed here, is itself proof: it was added by hand because
+ * no name rule caught it. Widening the rule is not the answer either: `/(?:Note|Rule|Verdict)$/` matches 73
+ * of the route's imports for these 6 real producers, so the net would need a 67-name allowlist nobody would
+ * read. The census now works from the SINKS — the prompts a builder lane actually reads — which needs no
+ * name rule and no allowlist. See `LANE_PROMPT_SINKS`.
  */
 const NOTE_PRODUCERS = [
   // `requestScopeVerdict` since #3692 (the note and its reason, read through `scope?.note`).
@@ -85,6 +92,66 @@ describe('🧭 the census: every request note reaches every lane through ONE lis
 
   it('the list exists', () => {
     expect(agg, 'no `const requestNotes = [...]` aggregator in agentv3.ts').not.toBe('');
+  });
+
+  /**
+   * 🧭 THE CLASS GUARD, REBUILT FROM THE SINKS (Q-1020).
+   *
+   * Every place the route hands a BUILDER its request text. Each entry is matched against the route source;
+   * `reads` is the exact expression that must supply the notes. A lane missing from this list is a lane
+   * nobody checked, so the count is pinned: a SEVENTH prompt sink cannot be added silently.
+   */
+  const LANE_PROMPT_SINKS: ReadonlyArray<{ lane: string; find: RegExp; reads: string }> = [
+    { lane: 'the architect', find: /buildPrompt = \[([^\]]*)\]\.filter\(Boolean\)/, reads: 'requestNotesText' },
+    { lane: 'the fast lane', find: /runSimpleBuild\(\{[^\n]*?requestNotes: (\w+)/, reads: 'requestNotesText' },
+    { lane: 'the one-shot lane', find: /runOneShot\(\{\s*prompt: ([^,]+),/, reads: 'requestNotesSuffix' },
+    { lane: 'the project planner', find: /const plannerGoal = withRequestNotes\(prompt, (\w+)\)/, reads: 'requestNotesText' },
+    { lane: 'the plan-first planner', find: /planRunner\.run\(withRequestNotes\(prompt, (\w+)\)\)/, reads: 'requestNotesText' },
+    { lane: 'every writing sub-agent', find: /childRequestNotes = (\w+);/, reads: 'requestNotesText' },
+  ];
+
+  it('CLASS GUARD: every lane prompt is built from the ONE note list, by name', () => {
+    for (const { lane, find, reads } of LANE_PROMPT_SINKS) {
+      const m = ROUTE.match(find);
+      expect(m, `${lane}: its prompt sink is gone — find it and re-pin it, do not delete the check`).toBeTruthy();
+      expect(m![1], `${lane} must read ${reads}`).toContain(reads);
+    }
+  });
+
+  /**
+   * 🔴 WHAT THE REBUILT CENSUS FOUND ON ITS FIRST RUN, AND THE OLD ONE NEVER COULD — and it was WIDER than
+   * the queue row that predicted it. Q-1016 named the blueprint lane's manifest and contract. Measured,
+   * SIX builder prompts read the bare request:
+   *
+   *   • `manifestUserPrompt(prompt, scaffold)`  — the blueprint lane planned the whole file list blind;
+   *   • `contractUserPrompt(prompt, manifest)`  — and its shared contract, the same lane;
+   *   • `megaRoadmapUserPrompt(prompt, …)` ×2   — the MEGA-APP roadmap planner, which Q-1016 never mentioned:
+   *     a Kotlin, keypad-phone or no-login request shapes a roadmap at least as much as a file list;
+   *   • `repairUserPrompt(prompt, …)` ×2        — a repair pass. It fixes code that already exists rather
+   *     than planning an app, so whether it needs the notes is a judgement, not an obvious yes — but it
+   *     rewrites real files, so "no sign-in" still constrains it. Recorded, not assumed.
+   *
+   * 🔒 AND THE RATCHET DID ITS JOB: the first two are GONE (#3760, Q-1016). The notes are now computed
+   * above every lane — `requestNotesFor(…)` once, `withRequestNotes(prompt, requestNotesText)` at the
+   * manifest and the contract — so the blueprint lane no longer plans blind, and this list is down from
+   * six to four. That is the only direction it may move. A FIFTH builder prompt reading the bare request
+   * fails this test; closing the four that remain is what shrinks it further, never an edit to the list.
+   *
+   * Measured on the merged route when Q-1016 landed, not assumed: the two blueprint entries no longer
+   * match, and leaving them here would have left the ratchet two notches loose while still passing.
+   */
+  const UNWIRED_SINKS = [
+    'megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals)',
+    'megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals)',
+    'repairUserPrompt(prompt, errors, currentFiles, contract, strategy, contractPath)',
+    'repairUserPrompt(prompt, check.errors, currentFiles)',
+  ] as const;
+
+  it('RATCHET: only the known builder prompts still read the bare request', () => {
+    const bare = [...ROUTE.matchAll(/\b(\w+UserPrompt)\(prompt\b([^)]*)\)/g)].map((m) => `${m[1]}(prompt${m[2]})`);
+    const unexpected = bare.filter((b) => !(UNWIRED_SINKS as readonly string[]).includes(b));
+    expect(unexpected, 'a NEW builder prompt reading the bare request — give it the notes, or add it to Q-1016').toEqual([]);
+    expect(bare.length, 'the list may only SHRINK — Q-1016 is what shrinks it').toBeLessThanOrEqual(UNWIRED_SINKS.length);
   });
 
   it('CLASS GUARD: a note producer imported into the module is a listed producer', () => {

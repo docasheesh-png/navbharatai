@@ -32,6 +32,7 @@ import { unrelatedToExistingApp } from '../src/server/AgentV3/unrelatedRequest';
 import { isPictureRequest } from '../src/server/AgentV3/pictureRequest';
 import { sessionRecallContextLine } from '../src/server/AgentV3/SessionTimeline';
 import { reviewNotReadyUserLine, formatPartialReview, salvageReview } from '../src/server/AgentV3/partialReview';
+import { PLATFORM_SUGGESTED_REPLIES, platformSuggestedReply } from '../src/server/AgentV3/platformSuggestedReplies';
 
 const root = process.cwd();
 const read = (rel: string): string => readFileSync(join(root, rel), 'utf8');
@@ -99,6 +100,23 @@ function textsOf(node: ts.Node, sf: ts.SourceFile): string[] {
  * used as a noun ("does not exist on type 'X'") is not an instruction, so a preposition before it excludes it.
  */
 const PROMISE = /(\b\w+\s+)?\b(send|reply|type|say)\b((?:\s+(?:back|me|us|with))*)\s(?:"([^"\n]{1,90})"|“([^”\n]{1,90})”|‘([^’\n]{1,90})’|'([^'\n]{1,90})'|`([^`\n]{1,90})`)/gi;
+/**
+ * 🔴 AND THE PROMISE IS NOT ALWAYS MADE IN ENGLISH (Q-1037, measured 2026-10-17). The pattern above
+ * requires an English verb, so this census — whose FIRST test is named "it is not silently blind" — was
+ * blind to every non-English one. `fakeFeatureScan.ts` makes the same promise in ELEVEN languages, and in
+ * ten of them the verb is the local one: *Key डालने के बाद मुझे “असली बनाओ” **लिखें***, *“உண்மையாக்கு” என்று
+ * **எழுதுங்கள்***. Ten promises to real users, none of them seen here.
+ *
+ * So the quote comes FIRST in this shape and the verb follows it, which is the word order every one of
+ * those sentences uses. The verbs are the ten "write/say it to me" forms this repo actually ships — not a
+ * guess at a language, a reading of our own strings.
+ */
+const PROMISE_SUFFIX_VERB = new RegExp(
+  '(?:“([^”\\n]{1,90})”|"([^"\\n]{1,90})")'
+  + '[^“”"\\n]{0,24}?'
+  + '(?:लिखें|लिखो|बोलो|कहो|লিখুন|লেখো|ਲਿਖੋ|લખો|ଲେଖନ୍ତୁ|எழுதுங்கள்|என்று|రాయండి|ಬರೆಯಿರಿ|എഴുതൂ|لکھیں)',
+  'gu',
+);
 /** …and the other shape the admin line used: '"X" runs a full review on its own'. */
 const CLAIMED_COMMAND = /(?:"([^"\n]{1,40})"|“([^”\n]{1,40})”)\s+(?:runs|starts|resumes|restarts|re-runs|will run|brings)\b/gi;
 const NOUN_USE = /^(?:on|of|to|from|as|the|a|an|file|mime|content)\s+$/i;
@@ -120,6 +138,9 @@ function extractPromises(): Promise_[] {
           if (m[1] && NOUN_USE.test(m[1])) continue;
           const phrase = m[4] ?? m[5] ?? m[6] ?? m[7] ?? m[8];
           found.push({ file, line, phrase: norm(phrase), context: text.slice(Math.max(0, (m.index ?? 0) - 80), (m.index ?? 0) + m[0].length + 40) });
+        }
+        for (const m of text.matchAll(PROMISE_SUFFIX_VERB)) {
+          found.push({ file, line, phrase: norm(m[1] ?? m[2]), context: text.slice(Math.max(0, (m.index ?? 0) - 80), (m.index ?? 0) + m[0].length + 40) });
         }
         for (const m of text.matchAll(CLAIMED_COMMAND)) {
           found.push({ file, line, phrase: norm(m[1] ?? m[2]), context: text.slice(Math.max(0, (m.index ?? 0) - 80), (m.index ?? 0) + m[0].length + 40) });
@@ -175,8 +196,18 @@ const HANDLED_FOLLOW_UPS: Record<string, Handled> = {
   },
   'create the missing files': { handler: BUILD_ROUTE, why: 'a self-describing build order on the imported app (read as an edit there)', proof: () => reachesConfirmedWork('create the missing files') },
   'make it real': { handler: BUILD_ROUTE, why: `a build order on the existing app (read as an edit); the demo line naming the feature is in the conversation; ${RECAP}`, proof: () => reachesConfirmedWork('make it real') },
-  'add it': { handler: `${BUILD_ROUTE} (the intention reader)`, why: `an add order on the existing app, read by the intention reader as an edit; ${RECAP}`, proof: () => reachesReaderAsWork('add it') },
-  'add them': { handler: `${BUILD_ROUTE} (the intention reader)`, why: `an add order on the existing app, read by the intention reader as an edit; ${RECAP}`, proof: () => reachesReaderAsWork('add them') },
+  /**
+   * 🔁 STRENGTHENED, NOT LOOSENED (Q-1037). These two were proven with `reachesReaderAsWork`, and the
+   * comment above it argued the case honestly: an "add …" order is never certain to the keyword pass, so
+   * the intention reader decides it, and with no reader an unconfirmed order is answered with an OFFER
+   * that a "yes" then builds. All true — and it means the sentence *"Reply "add it" and I'll put it in"*
+   * cost the user a second round trip and leaned on a model call, which is a weaker promise than the
+   * words make. These two phrases are OURS: we wrote them into the user's mouth, so nothing has to be
+   * inferred. `platformSuggestedReplies.ts` registers them, and the proof is the strict one every other
+   * entry uses — `buildConfirmation` included.
+   */
+  'add it': { handler: `${BUILD_ROUTE}; src/server/AgentV3/platformSuggestedReplies.ts`, why: `a REGISTERED suggested reply — a phrase this platform told the user to type, read as an edit of the app that is here at high confidence, so no reader and no second round trip; ${RECAP}`, proof: () => reachesConfirmedWork('add it') && !!platformSuggestedReply('add it') },
+  'add them': { handler: `${BUILD_ROUTE}; src/server/AgentV3/platformSuggestedReplies.ts`, why: `as "add it"; ${RECAP}`, proof: () => reachesConfirmedWork('add them') && !!platformSuggestedReply('add them') },
   'add it to this app': {
     handler: `${BUILD_ROUTE}; src/server/AgentV3/unrelatedRequest.ts`,
     why: 'it points at the app that is here, so the unrelated-request question is NOT asked again, and the order is built into this app',
@@ -224,6 +255,19 @@ const HANDLED_FOLLOW_UPS: Record<string, Handled> = {
 };
 
 /** Not something the user is told to send. Keyed `file::phrase`, each with the reason. */
+/**
+ * The non-English suggested replies, derived from `PLATFORM_SUGGESTED_REPLIES` rather than retyped: ten
+ * promises this census could not see until `PROMISE_SUFFIX_VERB` was added above. Each is proven the same
+ * way as its English sibling — the registry recognises it, and the turn reaches confirmed work.
+ */
+const REGISTERED_SUGGESTED_REPLIES: Record<string, Handled> = Object.fromEntries(
+  PLATFORM_SUGGESTED_REPLIES.map(({ phrase, composedBy }) => [norm(phrase), {
+    handler: `${BUILD_ROUTE}; src/server/AgentV3/platformSuggestedReplies.ts (${composedBy})`,
+    why: 'a REGISTERED suggested reply: this platform wrote the phrase and told the user to type it, so the ladder matches it exactly instead of guessing — an edit of the app that is here, at high confidence',
+    proof: () => reachesConfirmedWork(phrase) && !!platformSuggestedReply(phrase),
+  }]),
+);
+
 const NOT_A_FOLLOW_UP: Record<string, string> = {
   'src/server/AgentV3/ToolCatalog.ts::jwt': 'a tool parameter value described to the model',
   'src/server/AgentV3/systemPrompt.ts::jwt': 'a value the builder passes to a recipe',
@@ -275,12 +319,14 @@ describe('§1 census — every follow-up we tell somebody to send has a handler,
 
   it('🔴 every one is registered — a new promise without a handler fails here', () => {
     const unregistered = promises
-      .filter((p) => !HANDLED_FOLLOW_UPS[p.phrase] && !NOT_A_FOLLOW_UP[`${p.file}::${p.phrase}`])
+      .filter((p) => !HANDLED_FOLLOW_UPS[p.phrase] && !REGISTERED_SUGGESTED_REPLIES[p.phrase] && !NOT_A_FOLLOW_UP[`${p.file}::${p.phrase}`])
       .map((p) => `${p.file}:${p.line} — "${p.phrase}" … ${p.context.replace(/\s+/g, ' ')}`);
     expect(unregistered).toEqual([]);
   });
 
-  for (const [phrase, h] of Object.entries(HANDLED_FOLLOW_UPS)) {
+  // ⚠️ BOTH registries' proofs run. A `REGISTERED_SUGGESTED_REPLIES` whose proofs were never executed
+  // would be a measurement with no reader — the very class Q-1027 was raised for, one level down.
+  for (const [phrase, h] of Object.entries({ ...HANDLED_FOLLOW_UPS, ...REGISTERED_SUGGESTED_REPLIES })) {
     it(`"${phrase}" is really handled — ${h.handler}`, () => {
       expect(h.why.length).toBeGreaterThan(20);
       expect(h.proof()).toBe(true);
@@ -291,6 +337,9 @@ describe('§1 census — every follow-up we tell somebody to send has a handler,
     const phrases = new Set(promises.map((p) => p.phrase));
     const keys = new Set(promises.map((p) => `${p.file}::${p.phrase}`));
     expect(Object.keys(HANDLED_FOLLOW_UPS).filter((p) => !phrases.has(p))).toEqual([]);
+    // Every registered suggested reply must still be PROMISED in a shipped string. A phrase dropped from
+    // a notice, or a translation reworded without its registry entry moving, fails here.
+    expect(Object.keys(REGISTERED_SUGGESTED_REPLIES).filter((p) => !phrases.has(p))).toEqual([]);
     expect(Object.keys(NOT_A_FOLLOW_UP).filter((k) => !keys.has(k))).toEqual([]);
   });
 

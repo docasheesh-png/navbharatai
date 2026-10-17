@@ -36,7 +36,8 @@ API call work exactly as on the web. This is a genuine, store-installable app �
 ## 1. One-time prerequisites
 
 **On your build machine (Mac strongly recommended — it can do BOTH Android and iOS):**
-- Node 20+, `npm install` in this repo.
+- Node 22 — the one version `package.json` `engines.node` declares and every workflow now runs (Q-1060,
+  #3766). The Capacitor CLI requires it (`engines: >=22`). `npm install` in this repo.
 - **Android:** [Android Studio](https://developer.android.com/studio) (gives the SDK + `gradle` + emulator).
 - **iOS (Mac only):** Xcode (from the Mac App Store) + `sudo gems install cocoapods` (or `brew install cocoapods`).
 

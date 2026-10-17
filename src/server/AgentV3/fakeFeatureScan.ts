@@ -247,6 +247,19 @@ const ENGLISH: Strings = {
   banner: 'DEMO — not real',
 };
 
+/**
+ * Every language's closing line, so the ONE phrase inside it — the reply this scan tells the user to
+ * type — can be REGISTERED rather than guessed at (Q-1037, `platformSuggestedReplies.ts`).
+ *
+ * Read from these strings instead of retyping the phrases there, for two reasons. The wording lives
+ * here, where a translator edits it, so a copy elsewhere is the drift that bug class is made of; and a
+ * twelfth language added below is picked up with no second edit — which is what makes the registry
+ * COMPLETE by construction instead of complete until someone forgets.
+ */
+export function fakeFeatureTails(): string[] {
+  return [ENGLISH.tail, ...Object.values(STRINGS).map((v) => v.tail)];
+}
+
 const STRINGS: Record<string, Strings> = {
   hi: {
     feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email भेजना', sms: 'SMS', upload: 'Cloud upload' },

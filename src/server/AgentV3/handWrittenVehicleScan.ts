@@ -73,6 +73,16 @@ export interface VehicleShapeHalves {
   axisThrottle: string | null;
   /** The file turns something half a circle (`rotation.y = Math.PI`) — a heading that does not start at 0. */
   flipsHeading: boolean;
+  /**
+   * FORWARD DIRECTION (2026-10-16): a camera placed at a LITERAL z (`camera.position.set(0, 3, 8)`,
+   * `camera.position.z = 8`) — a fixed runner camera, which looks back toward z = 0.
+   */
+  fixedCameras?: Array<{ sign: 1 | -1; line: string }>;
+  /** 2D scroll moves by a speed: `obstacle.x += speed`, `road.y -= speed`. */
+  scrolls2d?: Array<{ obj: string; axis: 'x' | 'y'; sign: 1 | -1; line: string }>;
+  /** The file reads as a side runner (jump / runner / endless) or a top-down racer (road / lane + a car). */
+  sideRunner?: boolean;
+  topDownRacer?: boolean;
 }
 
 const OBJ = '([A-Za-z_$][\\w$]*(?:\\??\\.[A-Za-z_$][\\w$]*)*)';
@@ -90,12 +100,39 @@ const MOVE_Z_ASSIGN = new RegExp(`${OBJ}\\.position\\.z\\s*=\\s*${OBJ}\\.positio
 const MOVE_TRANSLATE = new RegExp(`${OBJ}\\.translateZ\\(\\s*(-?)\\s*([^)]+)\\)`, 'g');
 const SPEED_NAME = /\b(\w*(?:speed|Speed)|velocity|vel)\b/;
 
+/**
+ * 🔴 EVERY PATTERN ABOVE STARTS WITH AN UNBOUNDED IDENTIFIER, AND THAT COSTS O(n²) ON ONE LONG WORD RUN
+ * (Q-1128, 2026-10-16 — found by this repo's own CI, not by a report).
+ *
+ * `OBJ`, `\w*cam\w*` and `\w*(?:speed|Speed)` are greedy word-character prefixes with no anchor. On a
+ * run of word characters the engine matches the whole run at every start position and backtracks out of
+ * it, so the scan costs O(run²) — and the `matchAll` loops below run six such patterns over the raw file.
+ * MEASURED on this machine: a file that is one 10,000-character word run took 577 ms, 40,000 took 7,293 ms,
+ * and the 50,000-character write in `AgentRunner.test.ts` took 11.9 SECONDS — inside `writeSteeringNotes`,
+ * on the agent's critical path, at EVERY write. It is what made that test time out in CI (run 38967985876).
+ *
+ * 🔑 The condition, not the instance: a scan of HAND-WRITTEN code was handed whatever the model wrote, with
+ * nothing saying what hand-written code looks like. Length was never the trigger — measured on the same
+ * machine, 40,000 characters of ordinary code is 3 ms and a 40,000-character MINIFIED line is 5 ms, because
+ * both break into short tokens. Only an unbroken word run is quadratic. So the bound is on the run, and a
+ * file carrying one (an embedded base64 asset, a generated token table, a long data literal) is not a
+ * hand-written vehicle in the first place — it joins `node_modules` and the kit's own library as a file this
+ * scan does not read, the same `empty` and the same precision-first reason. The playtest still PLAYS the
+ * game and reads both facts from its pixels, so nothing is left unchecked, only unguessed.
+ *
+ * `LONG_WORD_RUN` itself is one quantified character class — a single forward pass, no backtracking — so
+ * the guard cannot carry the cost it removes.
+ */
+export const MAX_WORD_RUN = 512;
+const LONG_WORD_RUN = new RegExp(`[\\w$]{${MAX_WORD_RUN + 1},}`);
+
 /** The halves one file contributes. PURE. */
 export function vehicleShapeHalves(path: string, content: string): VehicleShapeHalves {
   const empty: VehicleShapeHalves = { cameras: [], motions: [], zeroSpeeds: [], movingSpeeds: [], raisedSpeeds: [], accelerator: false, vehicle: false, axisThrottle: null, flipsHeading: false };
   const p = String(path ?? '').replace(/^\.?\/+/, '');
   const src = typeof content === 'string' ? content : '';
   if (!src || !CODE_FILE.test(p) || /(^|\/)node_modules\//.test(p) || RECIPE_LIBRARY_PATH.test(p)) return empty;
+  if (LONG_WORD_RUN.test(src)) return empty; // not hand-written code — see MAX_WORD_RUN above
   const out = { ...empty, cameras: [] as CameraHalf[], motions: [] as MotionHalf[], zeroSpeeds: [] as Array<{ name: string; line: string }>, movingSpeeds: [] as string[], raisedSpeeds: [] as string[] };
   out.vehicle = VEHICLE_WORD.test(src);
   out.accelerator = ACCELERATOR.test(src);
@@ -168,10 +205,33 @@ export function vehicleShapeHalves(path: string, content: string): VehicleShapeH
     const t = new RegExp(`\\b(?:throttle|accel\\w*|gas)\\s*=\\s*${v}\\.y\\b|\\b\\w*[sS]peed\\s*\\+=\\s*${v}\\.y\\b`).exec(src);
     if (t) { out.axisThrottle = lineAt(t.index); break; }
   }
+  // FORWARD DIRECTION: a fixed camera at a literal z.
+  out.fixedCameras = [];
+  for (const m of src.matchAll(/\b(\w*cam\w*)(?:\.\w+)*\.position\.set\(\s*-?[\d.]+\s*,\s*-?[\d.]+\s*,\s*(-?\s*\d+(?:\.\d+)?)\s*\)/gi)) {
+    if (/target|look|focus|aim/i.test(m[1])) continue;
+    const z = Number(m[2].replace(/\s+/g, ''));
+    if (z !== 0 && Number.isFinite(z)) out.fixedCameras.push({ sign: z > 0 ? 1 : -1, line: lineAt(m.index ?? 0) });
+  }
+  for (const m of src.matchAll(/\b(\w*cam\w*)(?:\.\w+)*\.position\.z\s*=\s*(-?\s*\d+(?:\.\d+)?)\s*[;\n]/gi)) {
+    const z = Number(m[2].replace(/\s+/g, ''));
+    if (z !== 0 && Number.isFinite(z)) out.fixedCameras.push({ sign: z > 0 ? 1 : -1, line: lineAt(m.index ?? 0) });
+  }
+  // 2D scroll by a speed (canvas runners and top-down racers write plain x / y, not position.x).
+  out.scrolls2d = [];
+  for (const m of src.matchAll(new RegExp(`${OBJ}\\.(x|y)\\s*([+-])=\\s*([^;\\n]+)`, 'g'))) {
+    if (/position$|cam/i.test(m[1]) || !SPEED_NAME.test(m[4])) continue;
+    out.scrolls2d.push({ obj: normObj(m[1]), axis: m[2] as 'x' | 'y', sign: termSign(m[3], m[4]), line: lineAt(m.index ?? 0) });
+  }
+  out.sideRunner = /\b(?:runner|endless|jump(?:ing)?|dino|platform(?:er)?)\b/i.test(src) && !/\b(?:road|lane|traffic)\b/i.test(src);
+  out.topDownRacer = /\b(?:road|lane|traffic|highway)\b/i.test(src) && VEHICLE_WORD.test(src);
   return out;
 }
 
-export type VehicleShapeKind = 'camera-ahead' | 'stalled' | 'axis-throttle';
+/** Names that are the PLAYER, and names that are the WORLD scrolling past it. */
+const PLAYER_OBJ = /(?:^|\.)(?:player|runner|hero|avatar|character|car|bike|kart|vehicle|ship|plane)\w*$/i;
+const WORLD_OBJ = /(?:^|\.)(?:obstacles?|obs|o|e|enem(?:y|ies)\w*|coins?|items?|trees?|rocks?|barriers?|blocks?|tiles?|segments?|ground\w*|road\w*|lanes?|world|track\w*|traffic|props?|pickups?|cones?)$/i;
+
+export type VehicleShapeKind = 'camera-ahead' | 'stalled' | 'axis-throttle' | 'world-backwards' | 'runner-toward-camera' | 'scroll-backwards';
 export interface VehicleShapeFinding { kind: VehicleShapeKind; path: string; line: string }
 
 /**
@@ -209,12 +269,36 @@ export function vehicleShapeFindings(index: ReadonlyMap<string, VehicleShapeHalv
   for (const [path, h] of all) {
     if (h.axisThrottle) { out.push({ kind: 'axis-throttle', path, line: h.axisThrottle }); break; }
   }
+  // FORWARD DIRECTION (2026-10-16). Only with ONE fixed-camera side in the build (two disagreeing literal
+  // cameras — a menu camera and a game camera — are not readable with certainty).
+  const fixedSigns = new Set(all.flatMap(([, h]) => (h.fixedCameras ?? []).map((c) => c.sign)));
+  if (fixedSigns.size === 1) {
+    const camSign = [...fixedSigns][0];
+    const followed = new Set(all.flatMap(([, h]) => h.cameras.map((c) => c.obj)));
+    // The world moving AWAY from a fixed camera: the player seems to run backwards.
+    const away = motions.find((m) => WORLD_OBJ.test(m.obj) && m.sign === -camSign && !m.byHeading);
+    if (away) out.push({ kind: 'world-backwards', path: away.path, line: away.line });
+    // The player moving TOWARD a fixed camera that does not follow it: it runs out of the screen.
+    const toward = motions.find((m) => PLAYER_OBJ.test(m.obj) && m.sign === camSign && !followed.has(m.obj)
+      && !(m.byHeading && headingFlipped));
+    if (toward) out.push({ kind: 'runner-toward-camera', path: toward.path, line: toward.line });
+  }
+  // 2D: a side runner's world scrolls LEFT (x decreases); a top-down racer's road scrolls DOWN (y increases).
+  for (const [path, h] of all) {
+    const bad = (h.scrolls2d ?? []).find((sc) => WORLD_OBJ.test(sc.obj) && (
+      (h.sideRunner && sc.axis === 'x' && sc.sign === 1)
+      || (h.topDownRacer && sc.axis === 'y' && sc.sign === -1)));
+    if (bad) { out.push({ kind: 'scroll-backwards', path, line: bad.line }); break; }
+  }
   return out;
 }
 
 const WHAT: Readonly<Record<VehicleShapeKind, string>> = {
   'camera-ahead': 'the camera sits on the side the car DRIVES TOWARD (its Z offset has the same sign as the car\'s motion along Z), so the player sees the car\'s HEADLIGHTS, and LEFT reads as RIGHT on screen. The camera belongs BEHIND the car: camera = car.position − forward × distance + up × height, where forward is the way the car moves',
   stalled: 'the speed starts at 0 and nothing the build has written ever raises it, so holding the accelerator never moves the car. A vehicle starts moving (speed above zero) and the accelerator raises its speed every frame it is held',
+  'world-backwards': 'the camera is fixed at one side of the track and this moves the WORLD (obstacles, road, coins) AWAY from it, so the player appears to run BACKWARDS. Forward is INTO the screen: obstacles spawn far ahead (three.js: negative z, e.g. −80) and move TOWARD the camera (o.position.z += speed * dt), recycled once they pass it',
+  'runner-toward-camera': 'the camera is fixed and this moves the PLAYER TOWARD it, so the runner comes OUT of the screen at the user and shows its face. Forward is INTO the screen (three.js: −Z, player.position.z -= speed * dt, model rotation.y = Math.PI), with the camera behind and above following at player.z + distance — or keep the player still and scroll the world toward the camera',
+  'scroll-backwards': 'this scrolls the world the wrong way. A side runner runs RIGHT, so the ground and obstacles move LEFT (x -= speed); a top-down racer drives UP, so the road and traffic move DOWN (y += speed)',
   'axis-throttle': 'the kit\'s input.axis() reports UP as y = −1, and this uses axis.y as the throttle without its minus sign, so the accelerator REVERSES the car. Throttle is −axis.y',
 };
 
@@ -225,8 +309,8 @@ const WHAT: Readonly<Record<VehicleShapeKind, string>> = {
 export function handWrittenVehicleNote(findings: readonly VehicleShapeFinding[]): string {
   if (!findings || findings.length === 0) return '';
   const lines = findings.slice(0, 3).map((f) => `- ${f.path}: \`${f.line}\` — ${WHAT[f.kind]}.`);
-  return '\n\n🏎️ HAND-WRITTEN VEHICLE — this will look or drive backwards (admin 2026-10-11, build 46e2d74b: '
-    + '"car ulti chal rahi hai"):\n'
+  return '\n\n🏎️ HAND-WRITTEN VEHICLE / RUNNER — this will look or move backwards (admin 2026-10-11, build 46e2d74b: '
+    + '"car ulti chal rahi hai"; 2026-10-16: the runner comes out of the screen):\n'
     + `${lines.join('\n')}\n`
     + 'The game kit does all of this correctly: run_recipe({ name: "generate_game_3d" }) gives driveVehicle(car, drive, '
     + 'input.axis(), dt) — it starts moving, the accelerator raises its speed, LEFT turns left — and rig.follow(car, dt) '

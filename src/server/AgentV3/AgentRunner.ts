@@ -199,6 +199,11 @@ export interface AgentRunnerOptions {
    */
   seedState?: () => SeedState | null;
   /**
+   * Did the build's own record say OUR ENGINE took its time (`engineTimeDominated`)? Asked once, at the ending, so an
+   * aborted build does not tell the person to rephrase a request that was never the problem (autopsy 67a2b0a2).
+   */
+  providerFaultNow?: () => boolean;
+  /**
    * True when this turn is editing a project that ALREADY EXISTS (the route's `isEditMode`).
    *
    * Used for ONE thing: the build nudge's wording. The old single message told the model to "start
@@ -627,9 +632,11 @@ export class AgentRunner {
     const builtSomethingNow = (): boolean =>
       producingToolUses > 0 || this.opts.hasExistingFiles?.() === true;
     // The third state every ending can be in (autopsy 303e8a6f): nothing of ours, but the platform's seed is there.
-    const endingContext = (): { builtSomething: boolean; seed: SeedState | null } => {
+    const endingContext = (): { builtSomething: boolean; seed: SeedState | null; providerFault: boolean } => {
       const builtSomething = builtSomethingNow();
-      return { builtSomething, seed: builtSomething ? null : this.opts.seedState?.() ?? null };
+      let providerFault = false;
+      try { providerFault = this.opts.providerFaultNow?.() === true; } catch { /* a verdict we cannot read is not an outage */ }
+      return { builtSomething, seed: builtSomething ? null : this.opts.seedState?.() ?? null, providerFault };
     };
     // How many times we've nudged a build that only NARRATED (described its plan / said it would
     // "assign the frontend expert") without calling a single tool. The model often plans out loud

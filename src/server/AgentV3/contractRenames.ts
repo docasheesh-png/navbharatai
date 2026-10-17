@@ -116,24 +116,45 @@ export function suggestedTypeRenames(errors: readonly TscError[], renames: reado
 }
 
 /**
- * The ✏️ advice lines for the write-time typecheck — one per (file, name), every line named. The wording is
- * conditional on purpose: the compiler's `typeof X` is right for the component's own type and wrong for the
- * data. PURE.
+ * The ✏️ advice lines for the write-time typecheck — one per (file, name, POSITION), every line named.
+ *
+ * 🔴 Q-1028: ONE SENTENCE USED TO COVER POSITIONS WHOSE CORRECT FIXES ARE OPPOSITE. Measured on a real
+ * compile of the five shapes a model actually writes, this emitted a single line naming lines 2, 3, 4, 5, 6
+ * together and offering both options for all of them. But at `ComponentProps<X>` the data name is a TS2344
+ * and `typeof X` is right, while at `FC<X>` the data name compiles and `typeof X` compiles into nonsense —
+ * props declared as the component's own function type. Advice that is right for one of those is wrong for
+ * the other, so it is now grouped by position and worded per position, from the same classifier the heal
+ * reads. `sources` is optional: without it the position is unknown and the wording stays conditional, which
+ * is the honest answer rather than a guess.
  */
-export function typeRenameAdvice(suggestions: readonly TypeRenameSuggestion[]): string[] {
-  const groups = new Map<string, { s: TypeRenameSuggestion; lines: number[] }>();
+export function typeRenameAdvice(
+  suggestions: readonly TypeRenameSuggestion[],
+  sources: Readonly<Record<string, string>> = {},
+): string[] {
+  const groups = new Map<string, { s: TypeRenameSuggestion; at: TypeUsePosition; lines: number[] }>();
   for (const s of suggestions) {
-    const key = `${s.file}\u0000${s.from}`;
-    const g = groups.get(key) ?? { s, lines: [] };
+    const at = typeUsePosition(sources[s.file], s.file, s.line, s.col, s.from);
+    const key = `${s.file}\u0000${s.from}\u0000${at}`;
+    const g = groups.get(key) ?? { s, at, lines: [] };
     g.lines.push(s.line);
     groups.set(key, g);
   }
-  return [...groups.values()].map(({ s, lines }) => {
+  return [...groups.values()].map(({ s, at, lines }) => {
     const where = s.component ? ` (${s.component})` : '';
-    const at = `line${lines.length > 1 ? 's' : ''} ${[...new Set(lines)].join(', ')}`;
-    return `✏️ \`${s.from}\` is the COMPONENT${where}. NavBharatAI renamed the shared DATA type to \`${s.to}\` so the two `
-      + `never share a name (the shared types file's header records it). In ${s.file} (${at}): if you mean the data, write `
-      + `\`${s.to}\` and import it from the shared types file; only if you mean the component's own type, write \`typeof ${s.from}\`.`;
+    const at_ = `line${lines.length > 1 ? 's' : ''} ${[...new Set(lines)].join(', ')}`;
+    const head = `✏️ \`${s.from}\` is the COMPONENT${where}. NavBharatAI renamed the shared DATA type to \`${s.to}\` so the two `
+      + `never share a name (the shared types file's header records it). In ${s.file} (${at_}): `;
+    if (at === 'component-arg') {
+      return head + `that is the type argument of a component-taking utility type, so the compiler is right here — write `
+        + `\`typeof ${s.from}\`. \`${s.to}\` would NOT compile there (it is a data type, not a component).`;
+    }
+    if (at === 'props-arg') {
+      return head + `that is the PROPS type argument of a component type, so write \`${s.to}\` and import it from the shared `
+        + `types file. Do NOT write \`typeof ${s.from}\` there: it compiles, and silently declares the component's props to `
+        + `be the component's own function type.`;
+    }
+    return head + `if you mean the data, write \`${s.to}\` and import it from the shared types file; only if you mean the `
+      + `component's own type, write \`typeof ${s.from}\`.`;
   });
 }
 
@@ -142,6 +163,25 @@ const COMPONENT_TAKING_TYPES = new Set([
   'ComponentProps', 'ComponentPropsWithRef', 'ComponentPropsWithoutRef', 'ComponentRef', 'ElementRef',
   'ReturnType', 'Parameters', 'InstanceType', 'ConstructorParameters', 'PropsWithChildren',
 ]);
+
+/**
+ * A type argument of these takes the component's PROPS — so the renamed DATA type belongs there and
+ * `typeof X` does NOT (Q-1028).
+ *
+ * 🔴 WHY THIS IS A SEPARATE SET AND NOT MORE ENTRIES IN THE ONE ABOVE. Q-1028's row said to add `FC`,
+ * `FunctionComponent` and `ComponentType` to COMPONENT_TAKING_TYPES. Measured against the installed
+ * `@types/react` and a real compile, that would have been WRONG in both directions:
+ *
+ *   · `FC<VideoListData>` · `FunctionComponent<VideoListData>` · `ComponentType<VideoListData>` all COMPILE
+ *     (`FunctionComponent<P>` is `(props: P) => ReactNode`, so P is the props), so excluding them would have
+ *     switched OFF a heal that produces correct code;
+ *   · `ComponentProps<VideoListData>` does not compile at all — TS2344, its argument must be a component.
+ *
+ * And the reason they still need naming is worse than the row's: `FC<typeof VideoList>` **also compiles**,
+ * and silently declares the component's props to be the component's own function type. A wrong fix the
+ * compiler accepts is worse than one it rejects, so the advice must not offer `typeof` at this position.
+ */
+const PROPS_TAKING_TYPES = new Set(['FC', 'FunctionComponent', 'ComponentType', 'ComponentClass', 'SFC', 'StatelessComponent']);
 
 function typeRefName(n: ts.TypeReferenceNode): string {
   const t = n.typeName;
@@ -160,14 +200,56 @@ function identifierAt(sf: ts.SourceFile, pos: number): ts.Identifier | null {
   return found;
 }
 
-/** A plain type annotation or generic argument naming `id` — and not inside a component-taking utility type. */
-function isHealableTypeUse(id: ts.Identifier): boolean {
+/**
+ * What the position a name landed in will accept (Q-1028). ONE classifier, read by the heal AND by the
+ * advice — before this, the heal knew the position from the AST and the advice guessed from nothing, which
+ * is how one sentence came to offer `typeof X` for five lines whose correct fixes were not the same.
+ *
+ * · `plain` — an annotation or a plain generic argument: the renamed data type belongs here.
+ * · `props-arg` — inside `FC<…>` and friends: the data type belongs here too, and `typeof X` compiles into
+ *   nonsense, so it must not be offered.
+ * · `component-arg` — inside `ComponentProps<…>` and friends: `typeof X` is right and the data type is a
+ *   compile error, so the heal must not touch it.
+ * · `not-a-type-use` — the name is not a plain type reference at all (it already has type arguments of its
+ *   own, or it is not in a type position): nothing is claimed about it.
+ */
+export type TypeUsePosition = 'plain' | 'props-arg' | 'component-arg' | 'not-a-type-use';
+
+function positionOfIdentifier(id: ts.Identifier): TypeUsePosition {
   const ref = id.parent;
-  if (!ref || !ts.isTypeReferenceNode(ref) || ref.typeName !== id || ref.typeArguments) return false;
+  if (!ref || !ts.isTypeReferenceNode(ref) || ref.typeName !== id || ref.typeArguments) return 'not-a-type-use';
   for (let n: ts.Node | undefined = ref.parent; n && ts.isTypeNode(n); n = n.parent) {
-    if (ts.isTypeReferenceNode(n) && COMPONENT_TAKING_TYPES.has(typeRefName(n))) return false;
+    if (!ts.isTypeReferenceNode(n)) continue;
+    const name = typeRefName(n);
+    if (COMPONENT_TAKING_TYPES.has(name)) return 'component-arg';
+    if (PROPS_TAKING_TYPES.has(name)) return 'props-arg';
   }
-  return true;
+  return 'plain';
+}
+
+/**
+ * The position `from` sits in at `line`:`col` of `source`, or `not-a-type-use` when there is no source to
+ * read or the token there is not that name. PURE — parses, never reads a file, never throws.
+ */
+export function typeUsePosition(
+  source: string | null | undefined,
+  file: string,
+  line: number,
+  col: number,
+  from: string,
+): TypeUsePosition {
+  if (typeof source !== 'string') return 'not-a-type-use';
+  try {
+    const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, /x$/i.test(file) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+    const id = identifierAt(sf, sf.getPositionOfLineAndCharacter(line - 1, col - 1));
+    return id && id.text === from ? positionOfIdentifier(id) : 'not-a-type-use';
+  } catch { return 'not-a-type-use'; }
+}
+
+/** The heal rewrites a plain use and a props argument — never a component argument. */
+function isHealableTypeUse(id: ts.Identifier): boolean {
+  const at = positionOfIdentifier(id);
+  return at === 'plain' || at === 'props-arg';
 }
 
 function declaresType(contractSource: string, name: string): boolean {

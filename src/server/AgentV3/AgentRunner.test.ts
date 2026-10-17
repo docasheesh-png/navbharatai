@@ -407,6 +407,24 @@ describe('AgentRunner persistence (D7)', () => {
     // All 4 transcript messages landed — the oversized turn was persisted in compacted form.
     expect(rec?.messages).toHaveLength(4);
     expect(JSON.stringify(rec?.messages)).toContain('truncated for storage');
+    // 🔴 THIS TEST ONCE TOOK 12 SECONDS, AND IT WAS RIGHT TO (Q-1127 → Q-1128, 2026-10-16).
+    //
+    // It timed out at the global 20 s twice in one day, on #3768 and then on #3769 — both diffs unable to
+    // reach it. #3768 gave it an explicit 60 s and recorded the honest remainder as Q-1127: *why* does the
+    // scaffolding cost 12 s when `compactMessagesForPersist` on this exact turn runs 50 calls in 1 ms?
+    //
+    // ✅ ANSWERED, and the answer was in the PRODUCT, not in this fixture. Q-1127's own first suspect — the
+    // fake store's per-append `JSON.stringify` of a 50 KB payload, i.e. test code — was wrong. Timed through
+    // the real write door: `guardedWrite` 22 ms, `writeSteeringNotes` 12,044 ms, of which `vehicleShapeHalves`
+    // alone was 11,884 ms. Its patterns all begin with an unbounded greedy word-character prefix, which
+    // backtracks out of a long word run once per start position: O(run²) on the 50,000 'x' characters below.
+    // That cost was paid by every real build too, at every write. `handWrittenVehicleScan.ts` now bounds the
+    // run (Q-1128, #3769), and this test went from 12,174 ms to 22 ms — so the 60 s bound is a workaround
+    // whose defect is fixed, and it goes with it. The global 20 s now has a ~900x margin, not 1.65x.
+    //
+    // The assertions above were never the problem and are untouched. This test EARNED its keep: it is the
+    // only place in the suite that writes a file big enough to make that cost visible, and a re-run would
+    // have hidden it.
   });
 
   it('self-heals from a TRANSIENT store outage — no turns are skipped as poison', async () => {

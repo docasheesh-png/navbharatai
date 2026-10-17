@@ -82,7 +82,7 @@ export interface Episode {
  * with an offer to build it (`buildConfirmation.ts`). A "yes" to that offer builds the recorded text.
  */
 /** `framework`: the chat reply asked which framework the project should use (Q-144); the next answer resumes it. */
-export type RequestLane = 'chat' | 'build' | 'offer' | 'framework';
+export type RequestLane = 'chat' | 'build' | 'offer' | 'framework' | 'clarify';
 
 /**
  * Is this recorded error one a clean, whole-project compile makes stale? The texts are the ones this
@@ -497,7 +497,7 @@ export class WorkspaceMemory {
     const ep: Episode = { ts: typeof ts === 'number' && ts > 0 ? ts : Date.now(), kind, text: text.slice(0, kind === 'request' ? REQUEST_EPISODE_MAX : 2000), file };
     // Set only when real: an `undefined` field is a value Firestore refuses to store.
     if (typeof resolvedAt === 'number' && resolvedAt > 0) ep.resolvedAt = resolvedAt;
-    if (lane === 'chat' || lane === 'build' || lane === 'offer' || lane === 'framework') ep.lane = lane;
+    if (lane === 'chat' || lane === 'build' || lane === 'offer' || lane === 'framework' || lane === 'clarify') ep.lane = lane;
     this.episodes.push(ep);
     if (this.episodes.length > MAX_EPISODES) this.episodes.splice(0, this.episodes.length - MAX_EPISODES);
   }

@@ -209,6 +209,8 @@ import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessTimeoutMs, readinessVerdict, unassessedReadinessReport, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { STARTER_ENTRY_CONTENT, STARTER_ENTRY_PATHS, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
 import { isUiComponentPath, entryLateNote, MIN_SCREENS_BEFORE_NOTE, entryFirstWriteNote } from './earlyPreview';
+import { autoStyleFloorEnabled, autoStyleSheet, withAutoStyleImport, AUTO_STYLE_PATH } from './autoStyleFloor';
+import { entryAutoWireEnabled, isAutoWiredEntry, isScreenPath, zeroPropExport, childrenOnlyProvider, autoWiredEntry, autoWiredNote, type WiredExport } from './entryAutoWire';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, droppedRelativeImports, droppedImportOrphanLabel, importStem } from './buildAuthorship';
 import { loadedMissingPackageUses, notInstalledBlockerLabel, undeclaredInstalledLabel, type MissingPackageUse } from './missingPackageBlockers';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
@@ -4336,6 +4338,62 @@ export class ToolDispatcher {
     } catch { return ''; }
   }
 
+  /** The last provisional entry the platform wrote (entryAutoWire.ts) — rewritten only while it is still ours. */
+  private _autoWiredEntry: string | null = null;
+  /**
+   * 🔴 SCREENS ON DISK, STARTER ON SCREEN (autopsy ca99778e). When this agent has written screens and the entry is
+   * still our starter — or our own earlier shell — the platform writes a provisional src/App.tsx that mounts them,
+   * so the user's preview shows the app being built. Never over a real entry; never on a module turn that does not
+   * own the entry. Returns the note the writer reads, or ''.
+   */
+  private async entryAutoWireFor(files: Record<string, string>): Promise<string> {
+    if (!entryAutoWireEnabled() || this._starterExpected) return '';
+    const paths = Object.keys(files ?? {}).map((p) => p.replace(/^\.?\/+/, ''));
+    if (paths.some((p) => STARTER_ENTRY_PATHS.includes(p))) { this._autoWiredEntry = null; return ''; }
+    if (!paths.some(isUiComponentPath)) return '';
+    try {
+      const read = async (path: string): Promise<string> => (path in files ? files[path] : await withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'entry-autowire-read'));
+      let entryPath = '';
+      let current: string | null = null;
+      for (const p of ['src/App.tsx', 'src/App.jsx']) {
+        try {
+          const c = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'entry-autowire-entry');
+          if (typeof c === 'string') { entryPath = p; current = c; break; }
+        } catch { /* try the next */ }
+      }
+      if (!entryPath || typeof current !== 'string') return '';
+      // Ours to (re)write only while it is byte-for-byte our starter, or the exact shell THIS agent last wrote —
+      // a shell another agent wrote lists screens this one never saw, so it is not rewritten from here.
+      const ours = this._autoWiredEntry !== null && current === this._autoWiredEntry;
+      if (!ours && (isAutoWiredEntry(current) || !(await entryIsStillTheStarter(
+        (path) => withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'entry-autowire-starter'),
+      )))) return '';
+      const written = [...this._writtenPaths].map((p) => p.replace(/^\.?\/+/, ''));
+      if (written.filter(isUiComponentPath).length < MIN_SCREENS_BEFORE_NOTE) return '';
+      const screens: WiredExport[] = [];
+      const skipped: string[] = [];
+      let provider: WiredExport | null = null;
+      for (const p of written.filter(isUiComponentPath).sort()) {
+        let content = '';
+        try { content = String(await read(p) ?? ''); } catch { continue; }
+        if (!provider) provider = childrenOnlyProvider(p, content);
+        if (!isScreenPath(p)) continue;
+        const exp = zeroPropExport(p, content);
+        if (exp) screens.push(exp); else skipped.push(p);
+      }
+      if (screens.length === 0) return '';
+      const next = autoWiredEntry(screens.slice(0, 8), entryPath, provider);
+      if (next === current) return '';
+      await this.inPlatformPass('entry-autowire', () => this.actuator.writeFile(this.workspaceId, entryPath, next));
+      this._autoWiredEntry = next;
+      try { this.onFileWrite?.(entryPath, next); } catch { /* durable mirror is best-effort */ }
+      try { this.state?.recordFileChange({ path: entryPath, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
+      // The shell IS the entry write the two notes asked for — neither is said after it.
+      this._entryLateNoted = true; this._entryFirstNoted = true;
+      return autoWiredNote(entryPath, screens.slice(0, 8), skipped);
+    } catch { return ''; }
+  }
+
   private async writeSteeringNotes(files: Record<string, string>): Promise<string> {
     const paths = Object.keys(files ?? {});
     if (paths.length === 0) return '';
@@ -4433,6 +4491,9 @@ export class ToolDispatcher {
     const style = await this.styleWriteNotes(files);
     // Screens written while the entry is still the starter (autopsy 68f0a486) — the user sees none of them.
     // Carried on `shadow` (the "what the preview will not show" notes) so the guarded sum keeps its shape.
+    // The platform wires those screens itself FIRST (autopsy ca99778e): the note alone lost three times, and a
+    // wired entry silences it (the note would ask for a write that has already happened).
+    shadow += await this.entryAutoWireFor(files);
     shadow += await this.entryLateNoteFor(paths);
     // A light/dark switch that sets a class or attribute nothing styles (autopsy 8257ca59) — said while open.
     const theme = await this.deadThemeSwitchNotes(files);
@@ -4755,6 +4816,47 @@ export class ToolDispatcher {
   /** Every project stylesheet a module written this build imports (autopsy 1389f0d5). */
   private readonly _importedSheets = new Set<string>();
 
+  /** Screen → its classes no real stylesheet defines, as last measured (autoStyleFloor.ts). */
+  private readonly _floorMissing = new Map<string, string[]>();
+  private _floorSheet = '';
+  /**
+   * 🔴 SCREENS SHOWN AS RAW HTML FOR A WHOLE BUILD (autopsy ca99778e). Lays the platform's style floor for the
+   * classes still undefined: a plain sheet imported first from the Vite mount, rewritten as the set changes. It is
+   * invisible to the undefined-class question (`collectDefinedClasses` skips it), so every net still asks the
+   * builder for real rules. Vite React only; never throws.
+   */
+  private async layAutoStyleFloor(checked: readonly string[], missingBy: ReadonlyMap<string, string[]>): Promise<void> {
+    if (!autoStyleFloorEnabled() || this._starterExpected) return;
+    try {
+      for (const p of checked) {
+        const m = missingBy.get(p);
+        if (m && m.length) this._floorMissing.set(p, m); else this._floorMissing.delete(p);
+      }
+      const all = new Set<string>();
+      for (const m of this._floorMissing.values()) for (const c of m) all.add(c);
+      const sheet = autoStyleSheet(all);
+      if (sheet === this._floorSheet || (!sheet && !this._floorSheet)) return;
+      let mountPath = '';
+      let mount: string | null = null;
+      for (const p of ['src/main.tsx', 'src/main.jsx']) {
+        try {
+          const c = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'style-floor-mount');
+          if (typeof c === 'string') { mountPath = p; mount = c; break; }
+        } catch { /* try the next */ }
+      }
+      if (!mountPath || typeof mount !== 'string') return;
+      const body = sheet || '/* navbharatai:auto-style-floor — every class has a real rule now. */\n';
+      await this.inPlatformPass('style-floor', () => this.actuator.writeFile(this.workspaceId, AUTO_STYLE_PATH, body));
+      this._floorSheet = sheet;
+      try { this.onFileWrite?.(AUTO_STYLE_PATH, body); } catch { /* durable mirror is best-effort */ }
+      const nextMount = withAutoStyleImport(mount);
+      if (nextMount) {
+        await this.inPlatformPass('style-floor', () => this.actuator.writeFile(this.workspaceId, mountPath, nextMount));
+        try { this.onFileWrite?.(mountPath, nextMount); } catch { /* durable mirror is best-effort */ }
+      }
+    } catch { /* a floor is best-effort — the notes below are unchanged */ }
+  }
+
   private async undefinedClassNotes(files: Record<string, string>): Promise<string> {
     try {
       // What this write teaches about the project: the sheets it writes, and the sheets its modules import.
@@ -4822,7 +4924,7 @@ export class ToolDispatcher {
         }
       };
       recount();
-      if (missingBy.size === 0) return '';
+      if (missingBy.size === 0) { await this.layAutoStyleFloor(screens, missingBy); return ''; }
       // Something is still missing: before saying so, read every stylesheet in the project — a class a
       // parent component's sheet defines is not "undefined". Paid only when there is something to say.
       let listed: Set<string> | null = null;
@@ -4832,6 +4934,8 @@ export class ToolDispatcher {
         await readInto([...listed].filter((p) => isProjectStylesheet(p)).slice(0, 30));
         recount();
       } catch { /* the note then speaks from what was read, as before */ }
+      // The user sees readable screens meanwhile (autopsy ca99778e) — the note below still asks for real rules.
+      await this.layAutoStyleFloor(screens, missingBy);
       // A sheet the screen itself imports that the project does not have (autopsy 120eb52f). Claimed only
       // from a listing we really read — a file we merely failed to read is not "missing".
       const absentImport = (screen: string): string | undefined => {

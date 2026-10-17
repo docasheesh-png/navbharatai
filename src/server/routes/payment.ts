@@ -366,13 +366,32 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         throw new Error(data.message || 'Payment Session ID not generated');
       }
     } catch (error: any) {
+      /**
+       * 🔴 Q-887 — THIS WAS THE ONE SITE IN THIS FILE THAT ANSWERED THE BROWSER BY HAND.
+       *
+       * It returned `details: detailedError` — the payment provider's own response body, whole — plus an
+       * `error` string that interpolated the provider's message and named the provider. The real error
+       * belongs in the server log, and it still goes there; what the browser gets is a sentence written
+       * for the person reading it.
+       *
+       * ⚠️ WHY IT SURVIVED THE SWEEP THAT FIXED THE REST, because that is the class and not the line.
+       * The 2026-07-19 sweep behind `lib/httpError.ts` was shaped around one expression —
+       * `res.status(500).json({ error: err.message })` — and this site had already assembled its own
+       * variable out of `error.response?.data`, so the shape it was hunting was not here. This very file
+       * calls `sendSafeError` at four OTHER sites; only the fifth kept its hand-rolled answer. A door
+       * four of five callers use is not a door, and nothing failed when the fifth walked past it.
+       *
+       * `sendSafeError` logs the full raw detail, strips URLs, secrets and vendor names from what the
+       * client sees, and echoes a redacted detail only outside production.
+       */
       const detailedError = error.response?.data || {};
-      const errorMessage = detailedError.message || error.message;
-      console.error(`[CASHFREE] Order creation failed. Full detailed payload:`, JSON.stringify(detailedError, null, 2));
-      return res.status(500).json({
-        error: `Cashfree integration error: ${errorMessage}`,
-        details: detailedError
-      });
+      return sendSafeError(
+        res,
+        500,
+        'The payment could not be started. Nothing has been charged — please try again in a moment.',
+        detailedError.message ? detailedError : error,
+        'payment create-order',
+      );
     }
   });
 

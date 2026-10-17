@@ -96445,6 +96445,79 @@ with the image (10).
 ⚠️ **What to watch:** this PR's own CI run is the **first on Node 22**. That run is the real test of the flip,
 and it is the whole point of the change.
 
+### 2026-10-16 — Q-1129: the workaround outlived the defect (the half #3766 left behind)
+
+**Context, said plainly: this session built Q-1060 and LOST THE RACE.** Another session shipped it as #3766
+while this one was measuring, and the two had reached the same conclusions independently — `ci.yml` and
+`dast.yml` to Node 22 (the same un-named sibling), `engines.node` as the single source of truth, and a census
+test. That work is theirs and is on `main`; this session's duplicate of it was discarded rather than pushed as
+a competing PR, including its own census (`tests/oneDeclaredRuntime.test.ts` already does that job, and a
+second census would be two answers to one question — the class Q-1017 closed).
+
+**What #3766 left, and this is the 50/50 law's own half.** The Node divergence had already been paid for once,
+as a workaround: `aSeedScriptIsNotABrowser` asserted the sandbox's Node-22 globals, was "green on every
+developer machine, red on every CI run", and was gated behind `it.runIf(nodeMajor >= 22)` — so it SKIPPED in
+the one place it mattered. #3766 removed the gate's REASON (CI now runs 22) but not the gate. Two things were
+therefore still true on `main`: a vestigial condition, and — worse — a comment telling the next reader that
+"CI (`.github/workflows/ci.yml`) runs node 20". A false comment is not cosmetic; it is how a future session
+re-derives a constraint that no longer exists and writes the workaround again.
+
+**The fix.** The condition is gone, so the assertion runs unconditionally and is COUNTED rather than skipped.
+Its comment now records why the gate existed, that #3766 removed its reason, and the measurement behind the
+flip (node 20: 38,958 passed / 2 skipped; node 22: 38,959 passed / 1 skipped; zero failures either side —
+this was the one test that differed). `MOBILE_PUBLISHING.md`'s "Node 20+" was corrected to the one declared
+version. The trailing `nodeMajor >= 20` floor in the last test is kept on purpose: it records what was
+measured, not today's pin, which `oneDeclaredRuntime.test.ts` is the single place that asserts.
+
+**Proof is the test itself.** Before: skipped on a Node-20 runner and counted as a skip. After: it runs and
+passes, and the suite's skip count drops accordingly. No new test was added, deliberately — see above.
+
+### 2026-10-16 — Q-1128: the write-time scan that cost 12 seconds a write, found by our own CI
+
+**This one came from nowhere but the gate.** #3769 (Q-1129 above) touches one test file and two docs. Its CI
+went red anyway: `AgentRunner.test.ts > recovers from an oversized turn via aggressive compaction` timed out
+at 20 s (run 38967985876). `main` was green on every run that day, so the easy reading was "a flake on a busy
+runner" — and the test would have passed on a re-run. It was not a flake.
+
+**Everything in that test is in-memory and fake** — a scripted client, a `Map`-backed actuator — so the
+12 seconds were real work on a 50,000-character `write_file`. Timed stage by stage through the write door:
+`guardedWrite` 22 ms, `removeShadowTwins` 0 ms, and `writeSteeringNotes` **12,044 ms**, of which
+`vehicleShapeHalves` was **11,884 ms**. Every other note stage on the same input was ≤ 5 ms.
+
+**Root cause.** `handWrittenVehicleScan.ts` reads a hand-written vehicle by code shape, and all six of its
+patterns begin with an unbounded greedy word-character prefix (`OBJ`, `\w*cam\w*`, `\w*(?:speed|Speed)`). On
+a run of word characters the engine matches the whole run at every start position and backtracks out of it:
+O(run²), six times, over the raw file. It runs from `writeSteeringNotes`, i.e. on the agent's critical path,
+at EVERY write — and `_vehicleShapeNoted` is only set when a finding EXISTS, so on an app with no vehicle it
+never stops running.
+
+**Length was never the trigger, and that is the whole point.** Measured on one machine: 40,000 characters of
+ordinary code → 3 ms; a 40,000-character MINIFIED line → 5 ms (both break into short tokens); an unbroken
+word run → 577 ms at 10,000, 7,293 ms at 40,000, 11,884 ms at 50,000. A bound on file size or line length
+would have missed the defect entirely while looking like a fix.
+
+**The fix is the condition, not the instance.** A scan of HAND-WRITTEN code was handed whatever the model
+wrote, with nothing saying what hand-written code looks like. The bound is on the RUN (`MAX_WORD_RUN = 512`):
+a file carrying a longer one — an inlined base64 asset, a generated token table, a long data literal — is not
+a hand-written vehicle, and joins `node_modules` and the kit's own library as a file this scan does not read,
+with the same `empty` and the same precision-first reason the module was written on. Nothing is left
+unchecked, only unguessed: the playtest still plays the game and reads both facts from its pixels. The guard
+is one quantified character class — a single forward pass, no backtracking — so it cannot carry the cost it
+removes. The pattern dates to the module's birth (#3708); #3767 widened it.
+
+**Locked by `tests/aWriteTimeScanIsBoundedByHandWrittenCode.test.ts` (5 tests), and the last one is a census.**
+It budgets one real `write_file` through `ToolDispatcher` rather than this scan alone, so a NEW write-time
+scanner with the same defect fails it without ever being named — that is the class, not the instance. The
+others pin what the bound must NOT cost: a real camera-ahead game just under the bound still yields its
+finding, and 60,000 characters of ordinary code — longer than the input that timed out — is still read in
+full. Proven by reversion: with the guard line deleted, 3 of 5 fail (11,832 ms and 12,846 ms against their
+ceilings).
+
+**On the honesty of the original failure (fifth rule, step 5).** The timeout said "test timed out in 20000ms"
+and nothing else. The test was not wrong and its 50,000-character write was not artificial — it is the only
+place in the suite that writes a file big enough to make the cost visible, and it had been sitting at 12 s
+against a 20 s limit since #3708, passing on an idle runner and failing on a loaded one. A re-run would have
+turned it green and buried a 12-second-per-write defect in the real builder.
 ### 2026-10-16 — #3768's CI failure, diagnosed rather than re-run (Q-1127)
 
 `AgentRunner.test.ts > recovers from an oversized turn via aggressive compaction` failed CI with
@@ -96503,3 +96576,9 @@ Also corrected one of my own assertions: the guard first banned ✅ anywhere in 
 disproved — its state is an honest compound ("🟡 BLOCKED — REQUIRES A DECISION … · the meter half is ✅ RESOLVED
 as NOT-A-DEFECT"), and the strict rule would have forced someone to delete that information. It checks the
 leading token instead. Four reversions bite.
+
+⚠️ **Renumbered after the fact: these two were written as Q-1125 / Q-1126 and are Q-1127 / Q-1128 — and Q-1127 moved again to Q-1129 when main took it (merge resolution).** #3770
+merged while #3769 was in CI and took both IDs for its own rows (the `llmCalls` aux-call gap, and the 52
+blocked rows missing a required field). Their rows are on `main`, so the IDs are theirs; mine moved. The ID
+rule — above every ID in the file AND in open PRs' diffs of it — cannot see a row that is in neither yet,
+which is what a concurrent merge is. Nothing else about either change moved.

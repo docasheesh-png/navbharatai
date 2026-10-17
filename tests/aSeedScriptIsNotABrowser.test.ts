@@ -58,11 +58,21 @@ describe('🌐 the list of globals is MEASURED in the running node, not assumed'
     }
   });
 
-  // ⚠️ THE NODE THIS TEST RUNS ON IS NOT ALWAYS THE SANDBOX'S NODE. The sandbox images pin node 22
-  // (asserted below); CI (`.github/workflows/ci.yml`) runs node 20, and the first version of this file
-  // asserted `process.versions.node` is 22 — green on every developer machine, red on every CI run.
-  // `navigator` only exists from node 21, so the two assertions that need the sandbox's node run only
-  // where that node is; the undefined-list measurement above holds on 20 and 22 alike (checked on both).
+  // ⚠️ THIS GUARD WAS A WORKAROUND FOR Q-1060, AND Q-1060 IS FIXED — so the guard goes (2026-10-16).
+  //
+  // The history is worth keeping. The sandbox images pin node 22 (asserted below), `ci.yml` ran node 20,
+  // and the first version of this file asserted `process.versions.node` is 22 — in its own words, "green on
+  // every developer machine, red on every CI run". `navigator` only exists from node 21, so the assertion
+  // that needs the sandbox's node was gated behind `it.runIf(nodeMajor >= 22)`. That made CI green, but it
+  // meant the assertion SKIPPED in the one place it mattered: the gate that guards what ships.
+  //
+  // Gating it was the 🔀 workaround; the defect was a gate running a runtime nobody ships. #3766 fixed that
+  // — `engines.node` is `>=22` and every workflow agrees (`tests/oneDeclaredRuntime.test.ts` keeps them
+  // agreeing) — so the condition is always true now and the assertion runs everywhere, unconditionally.
+  // Measured on one tree before that flip: node 20 gave 38,958 passed / 2 skipped, node 22 gave 38,959 /
+  // 1 skipped, zero failures either side; THIS was the one test that differed.
+  //
+  // `nodeMajor` stays because the last test below reports it, but nothing branches on it any more.
   const nodeMajor = Number(process.versions.node.split('.')[0]);
 
   it('the two that node 22 DOES define are deliberately not on it', () => {
@@ -71,14 +81,16 @@ describe('🌐 the list of globals is MEASURED in the running node, not assumed'
     expect(BROWSER_ONLY_GLOBALS as readonly string[]).not.toContain('fetch');
   });
 
-  it.runIf(nodeMajor >= 22)('…and on the sandbox\'s own major this node really defines both', () => {
+  it('…and on the sandbox\'s own major this node really defines both', () => {
     expect(typeof globalThis.navigator).not.toBe('undefined');
     expect(typeof globalThis.fetch).not.toBe('undefined');
   });
 
   it('matches the node the sandbox images actually pin', () => {
-    // The measurement above is evidence for the sandbox because the list is undefined on every node
-    // major this suite runs on (20 in CI, 22 locally and in the sandbox) — not because CI's node is 22.
+    // The measurement above is evidence for the sandbox because the list is undefined on every node major
+    // this suite has been run on (verified on 20 and 22) — not merely because CI's node now matches the
+    // sandbox's. The floor below stays at 20 deliberately: it records what was measured, not today's pin,
+    // which `tests/oneDeclaredRuntime.test.ts` is the one place that asserts.
     const dockerfile = fs.readFileSync(path.join(__dirname, '../infra/e2b/e2b.Dockerfile'), 'utf8');
     expect(dockerfile).toMatch(/FROM node:22\b/);
     expect(nodeMajor).toBeGreaterThanOrEqual(20);

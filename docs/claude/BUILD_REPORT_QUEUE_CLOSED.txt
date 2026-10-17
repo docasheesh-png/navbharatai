@@ -662,3 +662,22 @@ Q-1125
 # records: the census I duplicated already existed as aPromiseToTheUserHasAHandler, and my first
 # "one home" refactor blinded it.
 Q-1037
+# Nine rows closed 2026-10-17 — every owner PR verified present in origin/main by its merge commit,
+# not by a PR page. None of them was merged by this session: CI has been dying in 3-4 seconds all day
+# (log download HTTP 404, the Q-1082/Q-1131 symptom), so the merges were made elsewhere while this
+# session held the line on "CI green before any merge". Their full ledgers stay in PROGRESS.md.
+#   #3782 Q-887 (no upstream body reaches the browser) · #3784 Q-889 (one encoded redirect value, Host
+#   checked) · #3785 Q-890 (the amount check cannot be skipped) · #3773 Q-1023 (the parenthetical says
+#   what counts) · #3779 Q-1132 (the flow read waits for its frames) · #3788 Q-1136 (the DNS check says
+#   only what it checked) · #3789 Q-1137 (a named action is reachable on every host) · #3791 Q-1138 +
+#   Q-1139 (backend connect without failing first; Q-707 reopened by its own cost gate, and the third
+#   definition my own census could not see).
+Q-887
+Q-889
+Q-890
+Q-1023
+Q-1132
+Q-1136
+Q-1137
+Q-1138
+Q-1139

@@ -96988,3 +96988,27 @@ needed to reproduce the numbers above.
 **Not a fix, and not claimed as one.** Nothing in the counter changed. `tests/theQueueSaysWhatIsTrue.test.ts`
 still passes 14/14 with the baseline unchanged at 40 — the new BLOCKED row carries all four fields, so it
 adds nothing to the gap count.
+
+## 2026-10-17 — nine rows closed: every owner PR verified in `main`, none of them merged by this session
+
+`#3773 · #3779 · #3782 · #3784 · #3785 · #3788 · #3789 · #3791` — all nine confirmed present in
+`origin/main` by their merge commits rather than by a PR page, then their rows moved out of the open
+table and their IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` **in the same commit**
+(the #3543 lesson: a queue edited from a stale copy silently reopens closed rows).
+
+Closed: **Q-887** (no upstream body reaches the browser) · **Q-889** (one encoded redirect value, Host
+shape-checked) · **Q-890** (the paid-vs-recorded check cannot be skipped) · **Q-1023** (the
+parenthetical says what actually counts) · **Q-1132** (the flow read waits for the frames its verdict
+needs) · **Q-1136** (the DNS check says only what it checked) · **Q-1137** (a named action is reachable
+on every host) · **Q-1138 + Q-1139** (backend connect without failing first; Q-707 reopened by its own
+cost gate; and the third definition my own census could not see).
+
+**Stated plainly because it matters for the audit trail: this session merged none of them.** CI has been
+failing in 3–4 seconds all day — every run, `main` included, with log download answering HTTP 404 (the
+Q-1082/Q-1131 symptom) — so the standing rule "CI green before any merge" meant holding. The merges were
+made elsewhere. The nine changes were each gated locally on the full CI-equivalent suite first, and the
+last of them on the merged state after `main` moved mid-change.
+
+Open root cause unchanged: **Q-1131 needs the admin** — GitHub Actions is failing at the platform level,
+not in this repo's workflow (ruled out by measurement: 8 runs, 4 branches, 3–4 s each, no logs, and
+`ci.yml` had 8 passing runs after its last change).

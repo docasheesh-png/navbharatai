@@ -31,6 +31,24 @@ export type BackendKeySource = 'user' | 'server' | null;
  */
 export const DEPLOY_BACKEND_LABEL = 'Deploy backend';
 
+/**
+ * WHERE THAT BUTTON IS, in one sentence, for every surface that has to name it.
+ *
+ * 🔑 THE SAME REASON `DEPLOY_BACKEND_LABEL` IS SHARED, one level up. THREE surfaces now tell a user
+ * with a server-half app where to go — the domain screen's words when its host cannot navigate
+ * (`deployBackendWayForward`), the build's closing "what this app still needs" notice
+ * (`serverNeedText`), and this panel's own steps. Three copies of a route agree only until one of
+ * them is edited, and a route that is subtly wrong in one place is worse than no route: the user
+ * follows it, finds nothing, and stops believing the next instruction too.
+ *
+ * It stays ENGLISH in every language's notice, exactly as `Plans`, `Database` and `Publish` already
+ * do inside the localised strings in buildNeeds.ts — it names buttons whose own labels are English on
+ * the screen the user is being sent to. A translated route would send them looking for a button that
+ * is not there.
+ */
+export const DEPLOY_BACKEND_ROUTE =
+  'NavBharatAI Pro → "Publish" (at the top of the chat, or the More sheet → Publish) → "Deploy backend"';
+
 export interface BackendDeployOffer {
   /** Render the panel at all. False for an ordinary static app, where publish simply works. */
   show: boolean;

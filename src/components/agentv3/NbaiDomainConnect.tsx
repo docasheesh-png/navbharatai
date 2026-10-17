@@ -13,6 +13,7 @@ import { readDomainDraft, writeDomainDraft, clearDomainDraft, draftNotice } from
 import { Globe, ChevronLeft, CheckCircle2, Copy, Check, RefreshCw, Info, ExternalLink, Rocket } from 'lucide-react';
 import { timeAgo, needsPublishDot, type PublishFreshness } from '../../lib/publishFreshness';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { DEPLOY_BACKEND_ROUTE } from '../../lib/backendDeployOffer';
 import { REGISTRARS, registrarById, detectRegistrarId, registrarNameFromRdap } from '../../lib/registrarGuide';
 import { authJsonHeaders as authHeaders } from '../../lib/authHeaders';
 
@@ -475,8 +476,13 @@ export function connectStage(
  * so the button and the answer to pressing it can never again live on different surfaces"* — applied
  * in the other direction.
  */
-export const DEPLOY_BACKEND_PATH =
-  'NavBharatAI Pro → "Publish" (at the top of the chat, or the More sheet → Publish) → "Deploy backend"';
+/**
+ * 🔁 ONE HOME, FROM 2026-10-17. This was a literal here while the build's closing notice needed the
+ * same sentence and the Publish panel named the same button — three copies of one route. It is
+ * re-exported so this module's own callers and tests keep their import, and `src/lib` is the home
+ * because both the client and the server read from there.
+ */
+export const DEPLOY_BACKEND_PATH = DEPLOY_BACKEND_ROUTE;
 
 /**
  * The way forward when this host has no navigation of its own. '' when it has.

@@ -15,6 +15,7 @@
  */
 
 import { HOSTING_TIERS } from '../../lib/hostingTiers';
+import { DEPLOY_BACKEND_ROUTE } from '../../lib/backendDeployOffer';
 import type { UserActionLink } from './userActions';
 
 export type ServerPlanOffer = 'buy' | 'included' | 'none';
@@ -207,23 +208,47 @@ export function databaseNeedText(
   };
 }
 
+/**
+ * 🔴 THE ROW NAMED A NEED AND NEVER THE CONTROL (admin 2026-10-17, finishing *"backend connect ko
+ * simple banao"*).
+ *
+ * All three branches below describe the situation correctly and then stop. `included` said *"publish
+ * it when you are ready"* — and for a bare-server app Publish REFUSES; `none` and `buy` said "host it
+ * yourself", which is true and tells a non-technical owner nothing they can act on. So the one place
+ * that reaches the user without them opening any screen — the build's closing line — was the one
+ * place that did not say where to go.
+ *
+ * This is the same class as Q-1136 and Q-1137 earlier the same day, in the third surface: something
+ * that names an action without a path to it. The route is appended to every branch, from the one
+ * shared constant, so the domain screen, this notice and the Publish panel cannot drift apart.
+ *
+ * ⚠️ WHAT WAS DELIBERATELY NOT BUILT, and the measurement that decided it: a separate DOMAIN row
+ * ("your domain is connected and waiting"). `connectActions.ts` has recorded since 2026-09-20 that
+ * such a row needed a verified domain status, and that fact now exists — but the case it would fire
+ * on (domain linked · not serving · app needs a server) is a strict SUBSET of this row's own case, so
+ * it would have been a second line about one problem, paid for with a live DNS/HTTP probe on every
+ * build. One row that names the route beats two rows that describe the same thing.
+ */
 export function serverNeedText(
   facts: ServerNeedFacts | null | undefined,
   lang?: string | null,
 ): { title: string; why: string; cta?: UserActionLink } | null {
   if (!facts?.needsServer) return null;
   const s = stringsFor(lang);
+  // English on purpose, like `Plans` / `Database` / `Publish` already are inside the localised
+  // strings: it names buttons whose own labels are English on the screen it sends the user to.
+  const where = ` To deploy it: ${DEPLOY_BACKEND_ROUTE}.`;
   if (facts.plan === 'buy') {
     return {
       title: s.serverTitle,
-      why: s.serverBuy(liveHostingPlanList()),
+      why: s.serverBuy(liveHostingPlanList()) + where,
       cta: { view: 'billing', label: s.serverButton },
     };
   }
   if (facts.plan === 'included') {
-    return { title: s.serverTitle, why: s.serverIncluded };
+    return { title: s.serverTitle, why: s.serverIncluded + where };
   }
-  return { title: s.serverTitle, why: s.serverSelf };
+  return { title: s.serverTitle, why: s.serverSelf + where };
 }
 
 /**

@@ -97012,3 +97012,42 @@ last of them on the merged state after `main` moved mid-change.
 Open root cause unchanged: **Q-1131 needs the admin** — GitHub Actions is failing at the platform level,
 not in this repo's workflow (ruled out by measurement: 8 runs, 4 branches, 3–4 s each, no logs, and
 `ci.yml` had 8 passing runs after its last change).
+
+## 2026-10-17 — Q-1140: one route to the deploy control, named by all three surfaces that name it
+
+The last piece of the admin's *"backend connect ko simple banao"*, and the one surface that had been
+missed: the build's closing **"what this app still needs"** notice — the only place that reaches the
+user without them opening any screen. All three of its branches described the situation and stopped.
+`included` read *"publish it when you are ready"*, and for a bare-server app **Publish refuses**;
+`buy` and `none` read *"host it yourself"* — true, and unactionable for a non-technical owner.
+
+Same class as Q-1136 and Q-1137 earlier the same day: **naming an action without a path to it.** Every
+branch now appends the route, and the plans offer is untouched where it was already right — `buy`
+keeps its Billing button; `included` and `none` still offer none, because selling a plan they already
+hold, or one we could not read, is what that row's own docblock forbids.
+
+**And the route now has ONE home.** `DEPLOY_BACKEND_ROUTE` sits in `src/lib` beside
+`DEPLOY_BACKEND_LABEL`, which is shared for exactly this reason. Three surfaces name it — the domain
+screen (Q-1137), this notice, the Publish panel (Q-1139) — and three copies agree only until one is
+edited. A route that is subtly wrong in *one* place is worse than no route: the user follows it, finds
+nothing, and stops believing the next instruction too. A repo-wide census fails on any second literal
+copy.
+
+It stays **English** inside the localised notices, exactly as `Plans` / `Database` / `Publish` already
+do there: it names buttons whose own labels are English on the screen it sends them to, and a
+translated route would send someone hunting for a button that is not there.
+
+### What was measured and deliberately NOT built
+
+A separate **domain row** ("your domain is connected and waiting"). `connectActions.ts` has recorded
+since 2026-09-20 that such a row needed a verified domain status, and **that fact now exists** — so it
+was buildable. It was dropped anyway: its case (domain linked · not serving · app needs a server) is a
+strict **subset** of the server row's own trigger, so it would have been a second line about one
+problem, paid for with a live DNS/HTTP probe on every build. Recorded in the row and in the module, so
+the next session reads the reason rather than rediscovering the idea.
+
+### A process note, because it cost a red test
+
+This row was first numbered **Q-1136** — I took the max id from the OPEN table alone, minutes after
+closing Q-1136–Q-1139 *out* of it. `aClosedQueueRowStaysClosed` failed immediately, which is the guard
+doing precisely its job. A new id is `max(open ∪ closed) + 1`, never the open table alone.

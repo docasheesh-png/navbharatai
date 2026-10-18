@@ -303,3 +303,14 @@ export function starterSummary(modelText: string | null | undefined): string {
 export function isStarterBlocker(blocker: string): boolean {
   return blocker === starterAppBlocker(STARTER_ENTRY_CONTENT);
 }
+
+/**
+ * 🔴 AN IMPORT IS NEVER JUDGED AS OUR STARTER (build d62bf22d, 2026-10-17). A GitHub import (Mitrify, 175
+ * files, an Express server on :3000) landed in a workspace our 11-file Vite starter had been seeded into
+ * first. The project has its own entry elsewhere, so our `src/App.tsx` and root `index.html` stayed —
+ * untouched — and `RENDERED_ONLY_THE_STARTER` fired on an app that was running. On an import turn every
+ * starter file present is OURS, left over, and says nothing about the user's app. PURE.
+ */
+export function importNeverTheStarter(isImportTurn: boolean): boolean {
+  return isImportTurn === true;
+}

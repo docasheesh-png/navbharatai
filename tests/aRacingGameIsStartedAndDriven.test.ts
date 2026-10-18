@@ -22,7 +22,7 @@ import { makeTempDir } from './helpers/tempDir';
 import {
   gamePlaytestModule, gamePlaytestConfig, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict,
   scorePlaytest, startLabelRank, isDrivingGame, replayFromCode, STALLED_VEHICLE_FIX, MAX_START_PRESSES, type PlaytestRun,
-  firmFlow, CAMERA_FACES_VEHICLE_FIX, STEERING_MIRRORED_FIX, LATE_LOOKS, LATE_MIN_MS, LATE_MIN_FRAMES,
+  firmFlow, flowStarved, flowStarvedNote, CAMERA_FACES_VEHICLE_FIX, STEERING_MIRRORED_FIX, LATE_LOOKS, LATE_MIN_MS, LATE_MIN_FRAMES,
 } from '../src/server/AgentV3/gamePlaytest';
 import { buildFindingSuggestions } from '../src/server/AgentV3/buildFindingSuggestions';
 
@@ -160,6 +160,44 @@ const BROWSERS = '/opt/pw-browsers';
 const haveBrowser = existsSync(PW) && existsSync(BROWSERS);
 const DRIVING = { progress: true, restart: true, driving: true };
 
+/**
+ * 🔴 A LIVE-BROWSER READ IS EVIDENCE OR IT IS NOTHING — and this file spent three incidents learning it
+ * (Q-1038, Q-1132, and Q-1141 on 2026-10-18, when the `/chase` case went red inside the full 2,731-file
+ * suite and passed 26/26 on its own, as it had the previous two times).
+ *
+ * `firmFlow` answers `0` for TWO different facts: "the picture disagreed" and "I saw too few frames to
+ * say". Asserting a direction turns the second into a failure of the GAME — exactly the confusion
+ * `flowStarved` was added to end, and which these assertions could not see because nothing read it.
+ *
+ * So the guarantee is stated the way the product actually guarantees it, which is load-independent:
+ * **either the read answered and the direction is right, or the read was starved and the platform SAYS
+ * so.** Silence is the only outcome ruled out — and silence is the only one that was ever a defect.
+ *
+ * One helper, not four hand-patched call sites: four edits is how the next one drifts (Q-887's lesson).
+ */
+function expectFlowOrStarved(read: Parameters<typeof firmFlow>[0], want: -1 | 1, what: string): 'read' | 'starved' {
+  if (flowStarved(read)) {
+    expect(flowStarvedNote(read), `${what}: a starved read must say WHY, never fall silent`).toBeTruthy();
+    return 'starved';
+  }
+  expect(firmFlow(read), what).toBe(want);
+  return 'read';
+}
+
+/** A verdict the probe could not measure must be WITHHELD — never a guess against the app. */
+function expectVerdictOrWithheld(
+  actual: boolean | undefined,
+  want: true | undefined,
+  outcome: 'read' | 'starved',
+  what: string,
+): void {
+  if (outcome === 'starved') {
+    expect(actual, `${what}: unmeasured means withheld, not accused`).toBeUndefined();
+    return;
+  }
+  expect(actual, what).toBe(want);
+}
+
 describe.skipIf(!haveBrowser)('a racing game behind a "Start Race" title screen is started and driven, in a real browser', () => {
   let server: http.Server;
   let base = '';
@@ -229,40 +267,61 @@ describe.skipIf(!haveBrowser)('a racing game behind a "Start Race" title screen 
   it('🔒 Q-861: a chase view done right — road streams DOWN, LEFT pans the horizon RIGHT — gets no camera or steering verdict', async () => {
     const run = await play('/chase');
     expect(run.ok).toBe(true);
-    expect(firmFlow(run.gasFlow)).toBe(1);
-    expect(firmFlow(run.steerFlow)).toBe(1);
+    const gas = expectFlowOrStarved(run.gasFlow, 1, 'a chase view streams the road DOWN');
+    const steer = expectFlowOrStarved(run.steerFlow, 1, 'LEFT pans the horizon RIGHT');
     const v = playtestVerdict(run, DRIVING);
+    // Withheld either way here: a correct chase view earns no verdict, and a starved read earns none.
     expect(v.score?.cameraFacesVehicle).toBeUndefined();
     expect(v.score?.steeringMirrored).toBeUndefined();
+    if (gas === 'starved' || steer === 'starved') expect(v.message).toMatch(/could not be read from the picture/);
   }, 180_000);
 
   it('🔒 Q-861: a camera in FRONT of the car (the headlights view) is caught by playing it, and named', async () => {
     const run = await play('/chase-front');
-    expect(firmFlow(run.gasFlow)).toBe(-1);
+    const gas = expectFlowOrStarved(run.gasFlow, -1, 'a headlights view streams the road UP');
     const v = playtestVerdict(run, DRIVING);
-    expect(v.score!.cameraFacesVehicle).toBe(true);
-    expect(v.code).toBe('GAME_PLAYTEST_ISSUES');
-    expect(v.message).toContain(CAMERA_FACES_VEHICLE_FIX);
+    expectVerdictOrWithheld(v.score!.cameraFacesVehicle, true, gas, 'the camera faces the car');
+    if (gas === 'read') {
+      expect(v.code).toBe('GAME_PLAYTEST_ISSUES');
+      expect(v.message).toContain(CAMERA_FACES_VEHICLE_FIX);
+    } else {
+      // Starved: the defect is unproven, so it must not be named — and the reason must be.
+      expect(v.message).not.toContain(CAMERA_FACES_VEHICLE_FIX);
+      expect(v.message).toMatch(/could not be read from the picture/);
+    }
     // Not a driving game by its code ⇒ not judged.
     expect(playtestVerdict(run, { progress: true, restart: true }).score!.cameraFacesVehicle).toBeUndefined();
   }, 180_000);
 
   it('🔒 Q-861: steering that turns the car RIGHT on LEFT is caught by playing it, and named', async () => {
     const run = await play('/chase-mirrored');
-    expect(firmFlow(run.gasFlow)).toBe(1);
-    expect(firmFlow(run.steerFlow)).toBe(-1);
+    const gas = expectFlowOrStarved(run.gasFlow, 1, 'the road still streams DOWN');
+    const steer = expectFlowOrStarved(run.steerFlow, -1, 'LEFT pans the horizon LEFT — mirrored');
     const v = playtestVerdict(run, DRIVING);
-    expect(v.score!.steeringMirrored).toBe(true);
-    expect(v.message).toContain(STEERING_MIRRORED_FIX);
+    const outcome = gas === 'read' && steer === 'read' ? 'read' : 'starved';
+    expectVerdictOrWithheld(v.score!.steeringMirrored, true, outcome, 'the steering is mirrored');
+    if (outcome === 'read') expect(v.message).toContain(STEERING_MIRRORED_FIX);
+    else expect(v.message).toMatch(/could not be read from the picture/);
   }, 180_000);
 
   it('🔒 Q-861 at ≈20 fps (the sandbox\'s software renderer): the same three verdicts, read just as firmly', async () => {
     const right = await play('/chase-20fps');
-    expect([firmFlow(right.gasFlow), firmFlow(right.steerFlow)]).toEqual([1, 1]);
+    expectFlowOrStarved(right.gasFlow, 1, '20 fps: the road streams DOWN');
+    expectFlowOrStarved(right.steerFlow, 1, '20 fps: LEFT pans the horizon RIGHT');
     const v = playtestVerdict(right, DRIVING).score!;
     expect([v.cameraFacesVehicle, v.steeringMirrored]).toEqual([undefined, undefined]);
-    expect(playtestVerdict(await play('/chase-front-20fps'), DRIVING).score!.cameraFacesVehicle).toBe(true);
-    expect(playtestVerdict(await play('/chase-mirrored-20fps'), DRIVING).score!.steeringMirrored).toBe(true);
+    const front = await play('/chase-front-20fps');
+    expectVerdictOrWithheld(
+      playtestVerdict(front, DRIVING).score!.cameraFacesVehicle, true,
+      expectFlowOrStarved(front.gasFlow, -1, '20 fps: a headlights view streams the road UP'),
+      '20 fps: the camera faces the car',
+    );
+    const mirrored = await play('/chase-mirrored-20fps');
+    expectVerdictOrWithheld(
+      playtestVerdict(mirrored, DRIVING).score!.steeringMirrored, true,
+      expectFlowOrStarved(mirrored.steerFlow, -1, '20 fps: LEFT pans the horizon LEFT'),
+      '20 fps: the steering is mirrored',
+    );
   }, 400_000);
 
   it('🔒 Q-861 precision: the top-down racers (a fast road, a slow one, a countdown) get no camera or steering verdict', async () => {

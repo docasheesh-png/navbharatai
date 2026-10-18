@@ -206,10 +206,38 @@ describe('🔒 the report says which reason it was, and only where the scene was
     expect(m).not.toMatch(/camera could not be read/);
   });
 
-  it('🔒 PRECISION: no scene, and no driving game, stay silent — pixels are the designed path there', () => {
-    expect(playtestVerdict(runWith(undefined) as never, DRIVING).message).not.toMatch(/was not read|could not be read/);
+  /**
+   * 🔁 SPLIT, NOT WEAKENED (Q-1141, 2026-10-18). This asserted that a run with NO SCENE says nothing at
+   * all, on the principle that *"pixels are the designed path there"* — which is true about not having a
+   * three.js scene, and false about the pixel read itself failing. A 2-D canvas game's camera verdict
+   * comes from `firmFlow(gasFlow)`, and when THAT read is starved the verdict is withheld and, until
+   * now, nothing was said: a game whose camera was never measured read exactly like one whose camera is
+   * fine. That is the defect this very file exists to prevent, surviving in the branch it did not cover.
+   *
+   * So the guarantee is kept and made exact: silent when the pixel read is HEALTHY (and for a non-driving
+   * game, unchanged), and explicit when it is starved.
+   */
+  /** A pixel flow read that genuinely answered: enough agreeing pairs, enough frames, no aliasing. */
+  const healthyFlow = { total: 40, pos: 6, neg: 0, pairs: 6, frames: 12, read: 6, edge: 0 };
+
+  it('🔒 PRECISION: no scene with a HEALTHY pixel read, and no driving game, stay silent', () => {
+    const okFlow = { ...runWith(undefined), gasFlow: healthyFlow, steerFlow: healthyFlow };
+    expect(playtestVerdict(okFlow as never, DRIVING).message).not.toMatch(/was not read|could not be read/);
     expect(playtestVerdict(runWith(read({ aim: undefined })) as never, { progress: true, restart: true, driving: false }).message)
       .not.toMatch(/was not read|could not be read/);
+  });
+
+  it('🔒 but a STARVED pixel read is SAID — the same rule, in the branch that had no scene to speak for it', () => {
+    // No scene at all, and a flow read that saw too few frames to call anything.
+    const starved = { ...runWith(undefined), gasFlow: { total: 40, pos: 1, neg: 0, pairs: 1, frames: 2 } };
+    const msg = playtestVerdict(starved as never, DRIVING).message;
+    expect(msg).toMatch(/could not be read from the picture/);
+    expect(msg, 'and it says WHY, in the words a report can print').toMatch(/drew only 2 frame/);
+  });
+
+  it('a starved pixel read costs the app NOTHING — Q-1038\'s division, unchanged', () => {
+    const score = (flow: unknown) => playtestVerdict({ ...runWith(undefined), gasFlow: flow } as never, DRIVING).score!.overall;
+    expect(score({ total: 40, pos: 1, neg: 0, pairs: 1, frames: 2 })).toBe(score(healthyFlow));
   });
 
   it('a reason does not change the SCORE — our instrument, not the app’s defect (Q-1038’s division)', () => {

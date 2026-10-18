@@ -182,6 +182,8 @@ export const PROCESS_ONLY_CODES = new Set([
   'FREE_BUILD_TIME_CAP', 'FREE_BUILD_CHAIN_PAUSED',
   // OUR end-of-turn steer that handed the model its undefined classes (stylePolishResume.ts, autopsy 1be16985).
   'STYLE_RULES_RESUMED',
+  // OUR style pass ended by its own time cap (stylePassCap.ts) — a policy of ours, never the app.
+  'STYLE_PASS_CAPPED',
   // OUR repair pass's closing claim withheld because the pass changed nothing (repairClaim.ts, autopsy 6cd698cc).
   'REPAIR_CLAIM_WITHHELD',
   // OUR end-of-turn hand-back answered with no change (repairClaim.ts, autopsy db07e0af): a struggle of the engine.

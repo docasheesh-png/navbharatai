@@ -893,6 +893,11 @@ export class ToolDispatcher {
    * Has this agent changed the project yet — itself or through a sub-agent? The done signal asks it, so
    * an edit is never judged "complete" by the score of the app it has not touched (autopsy 1389f0d5).
    */
+  /** True once the app's live preview has been published to the user (port verified). */
+  hasPublishedPreview(): boolean {
+    return this.previewPublished;
+  }
+
   wroteAnything(): boolean {
     this.flushUnrecordedWrites();
     return this._writtenPaths.size > 0 || this._delegateWrote;

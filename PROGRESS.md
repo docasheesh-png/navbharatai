@@ -96989,6 +96989,70 @@ needed to reproduce the numbers above.
 still passes 14/14 with the baseline unchanged at 40 — the new BLOCKED row carries all four fields, so it
 adds nothing to the gap count.
 
+## 2026-10-18 — Q-979 measured for the first time, and the row named the wrong function
+
+Q-979 has been open since 2026-10-13 saying *"the `/build` route handler in routes/agentv3.ts"* sits at
+TypeScript's control-flow limit. **There is no `/build` route.** Measured across every `app.get` /
+`app.post` in that file:
+
+```
+/api/agentv3/chat               17,595 raw lines   (2,501 with comments stripped)
+/api/agentv3/publish               444
+/api/agentv3/preview-diagnose      381
+```
+
+The nine modules that carry a comment about this limit — `FastLaneBudget`, `thirdPartyLimits`,
+`gateRedNotice`, `handoffRule`, `finishingPassesAtCap`, `leftoverComponents`, `ProjectPlan` and others
+— all say **"the CHAT handler"**. The row was the odd one out, and a row that misnames its own subject
+sends the next session hunting a function that does not exist. Corrected by adding the measurement to
+the row, not by erasing what it said.
+
+**First real measurement of the margin: 549 branch tokens** (if 147 · && 171 · || 42 · ?? 37 ·
+ternary 152), comments stripped. Nobody had measured it in the five days the row was open.
+
+### The pain is not the size — it is the surprise
+
+TS2563 counts the flow joins for **one reference**, so it trips in whichever PR happens to add the last
+few branches, and lands as a red CI **naming a file that PR never touched**. That happened twice in one
+day (Q-978, then Q-975 on top of #3692). The size is a slow problem; the ambush is the sharp one.
+
+`tests/theChatHandlerHasHeadroom.test.ts` now fails **first**, and its message is the instruction:
+*put the new condition in a module function and call it* — the pattern every TS2563-aware module in
+`src/server/AgentV3` already follows. The budget is a **ratchet**: it may only go down (lower it when a
+block moves out, never raise it to make a PR pass), and it is labelled honestly as a **proxy** — it
+counts branch tokens in the whole handler, not the compiler's own per-reference threshold, and the two
+numbers are not comparable.
+
+Reversion proven: one harmless branch added inside the handler → two tests fail, with the instruction.
+
+**Q-979 stays OPEN.** Its own prescription still stands — headroom, not a mass rewrite, moving
+self-contained blocks out one PR at a time. This change buys none of that headroom; it only makes the
+wall visible before someone walks into it.
+
+### And the shape of Q-979's problem, measured — plus why the refactor was NOT started tonight
+
+The handler is not 17,595 lines of evenly-spread logic. It is **~3,600 lines of setup plus ONE `try`
+block (raw 13860) that holds 13,933 of them**; of its 55 depth-1 blocks the next biggest is 76
+branches / 225 lines. Every candidate the row names lives inside that one try. Its 217 children, ranked:
+
+| # | branches | lines | raw line | what it is |
+|---|---|---|---|---|
+| 1 | 178 | 967 | 20372 | the third-party-limits / ad-serving pass |
+| 2 | 149 | 732 | 18631 | `if (fastLaneWouldRun …)` — the row's own "fast-lane setup" |
+| 3 | 136 | 573 | 24977 | the reviewer / bug-hunt finishing pass |
+| 4 | 126 | 768 | 15051 | the own-repo working-branch (GitHub) storage pass |
+| 5 | 35 | 156 | 26501 | the ₹0-bill rule for a build that wrote nothing |
+
+Take them in that order, one PR each, and **(5) last or never** — it is a money rule, and the first
+absolute rule outranks tidiness. Each PR proves itself by **lowering `BRANCH_BUDGET`** with the full
+suite green, which is the first time this work has had a measurable finish line.
+
+**Not started tonight, on purpose.** Extracting a block from the build engine's main handler is a
+judgement about what that block really touches, and a wrong judgement breaks the core product — while
+CI has been failing in 3–4 seconds all day (Q-1131), so only a local gate could verify it. Safeguard #3
+and the 60-second rule's *"safe ambitious path, never a reckless one"* both say wait for the real
+pipeline. The measurement is the part that costs nothing and makes the refactor fast and safe when it
+does start.
 ## 2026-10-17 — nine rows closed: every owner PR verified in `main`, none of them merged by this session
 
 `#3773 · #3779 · #3782 · #3784 · #3785 · #3788 · #3789 · #3791` — all nine confirmed present in

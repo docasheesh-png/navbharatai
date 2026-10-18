@@ -80,6 +80,13 @@ export function toSafeClientMessage(raw: unknown, fallback = 'Something went wro
  * @param publicMessage  Curated, user-safe message (no internal detail, no vendor name)
  * @param err            The caught error (logged server-side; dev-only echoed, redacted)
  * @param logContext     Optional short context string for the server log line
+ * @param publicDetail   A SECOND, user-safe sentence that is sent in production too — for the one
+ *                       case where extra wording genuinely helps the person: a message from a
+ *                       service THEY connected (their GitHub), which tells them which branch or
+ *                       repository was wrong. It is redacted exactly like `publicMessage`, so a
+ *                       secret or a vendor name still cannot ride along, and the caller — not this
+ *                       module — decides that the text is the user's own service talking. Without
+ *                       it, `detail` stays what it was: a dev-only echo of the raw error.
  */
 export function sendSafeError(
   res: Response,
@@ -87,13 +94,18 @@ export function sendSafeError(
   publicMessage: string,
   err?: unknown,
   logContext?: string,
+  publicDetail?: string,
 ): Response {
   const rawDetail = errToString(err);
   // Server-side log carries the FULL raw detail — this is the right place for it.
   console.error(`[HTTP ${status}] ${logContext ? logContext + ': ' : ''}${publicMessage}${rawDetail ? ' — ' + rawDetail : ''}`);
   const safePublic = toSafeClientMessage(publicMessage, publicMessage);
   const body: { error: string; detail?: string } = { error: safePublic };
+  // A caller-supplied public detail outranks the dev echo: it was chosen deliberately and is safe
+  // in production. Redacted on the same path, so this widens what the user READS, never what leaks.
+  const safeDetail = publicDetail ? toSafeClientMessage(publicDetail, '') : '';
+  if (safeDetail) body.detail = safeDetail;
   // Dev-only debugging echo (still redacted so a leak can't slip through in a shared dev log).
-  if (!isProduction() && rawDetail) body.detail = toSafeClientMessage(rawDetail, rawDetail);
+  else if (!isProduction() && rawDetail) body.detail = toSafeClientMessage(rawDetail, rawDetail);
   return res.status(status).json(body);
 }

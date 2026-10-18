@@ -668,6 +668,7 @@ import { withRequestNotes, requestNotesFor } from '../AgentV3/requestNotes';
 import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
+import { isAnswerOnlyTurn, previewFailedSeverity, previewFailedNarration, decideAnswerOnlyGate } from '../AgentV3/answerOnlyTurn';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
@@ -18474,6 +18475,8 @@ async function noteBuildOutcome(
        * game in it. With no kit seeded this is exactly `writtenFiles.size`.
        */
       const builderWroteCount = (): number => builderWrittenCount(writtenFiles, kitSeededFiles);
+      /** Not asked to build and wrote nothing: the gate describes, it does not judge (build d62bf22d, answerOnlyTurn.ts). */
+      const answerOnlyNow = (): boolean => isAnswerOnlyTurn({ expectsArtifacts, builderWrote: builderWroteCount() });
       /** Why a game build did not get the kit — said in FAST_LANE_SKIPPED_GAME, never left implied. */
       let gameKitSkipReason = '';
       let gameKitSeedFailed = false;
@@ -23015,8 +23018,8 @@ async function noteBuildOutcome(
             // UNRESOLVED ERROR so buildHealthFromDiagnostics marks the build NOT READY — a crashing app must
             // never show "READY". (The syntax gate catches a COMPILE break; this catches the RUNTIME class
             // — an uncaught TypeError / a missing prop called as a function — that the parser can't see.)
-            buildDiag.record({ phase: 'preview', severity: 'error', code: 'OUTCOME_PREVIEW_FAILED', message: `The live preview did not render/run cleanly after ${healMax} repair attempt(s): ${problems.slice(0, 3).join('; ')}`.slice(0, 500), autoResolved: false });
-            events.emit({ type: 'narration', agent: 'architect', text: `⚠️ I checked the live preview and it did not fully render: ${problems.slice(0, 3).join('; ')}. Your files are saved — send a follow-up and I'll fix it.`, ts: Date.now() });
+            buildDiag.record({ phase: 'preview', severity: previewFailedSeverity(answerOnlyNow()), code: 'OUTCOME_PREVIEW_FAILED', message: `The live preview did not render/run cleanly after ${healMax} repair attempt(s): ${problems.slice(0, 3).join('; ')}`.slice(0, 500), autoResolved: false });
+            events.emit({ type: 'narration', agent: 'architect', text: previewFailedNarration(answerOnlyNow(), problems), ts: Date.now() });
             break;
           }
           events.emit({ type: 'narration', agent: 'architect', text: `🔍 I opened the preview and it didn't render correctly (${problems[0]}). Fixing it now…`, ts: Date.now() });
@@ -24129,6 +24132,8 @@ async function noteBuildOutcome(
             }),
           });
         } catch { /* an observation must never affect the verdict it precedes */ }
+        // 🔴 A TURN THAT ONLY ANSWERED IS DESCRIBED BY THE GATE, NOT JUDGED BY IT (build d62bf22d, answerOnlyTurn.ts).
+        const answerOnlyGate = decideAnswerOnlyGate(answerOnlyNow(), gate.state, buildDiag);
         buildDiag.record({
           phase: 'readiness',
           // UNKNOWN is a warning, not an info: "we could not tell" is a finding about our own coverage,
@@ -24153,6 +24158,7 @@ async function noteBuildOutcome(
             // The CORRECTED prediction (autopsy 50378049): a module turn with a live address is not "not yet due".
             awaitsShell: !!gateEvidence.awaitingShell,
           }),
+          ...answerOnlyGate.record, // {} on every turn that was asked to build (answerOnlyTurn.ts)
           code: 'RELEASE_GATE',
           message: releaseGateSummary(gate),
         });
@@ -24214,7 +24220,7 @@ async function noteBuildOutcome(
         //     Off, this block behaves exactly as before. It does not change a price.
         const gateBlockers = buildDiag.shippingIssueCount('error');
         const runtimeRed = runtimeRedFlipEnabled() && runtimeProven(gateEvidence) === 'failed';
-        const settled = result; // captured once — `result` is reassigned in the heal loop above
+        const settled = answerOnlyGate.answerOnly ? undefined : result; // captured once; an answer-only turn has no verdict to correct
         if (gate.state === 'red' && (gateBlockers > 0 || runtimeRed) && settled && settled.ok) {
           // …UNLESS THE APP HAS ALREADY BEEN PROVEN TO RUN (runProvenApp.ts, autopsy e706e068). A RED
           // built from STATIC findings — a placeholder in a stray file, a forecast about the bundle —

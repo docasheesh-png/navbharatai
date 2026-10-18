@@ -354,8 +354,16 @@ export function stoppedCallFields(cause: AbortCause, err: unknown, nominalModel:
 } {
   const ownMessage = err instanceof Error ? err.message : String(err);
   const owner = stoppedCallOwner(cause);
-  if (owner !== 'our-clock' && owner !== 'our-platform') return { model: nominalModel, error: ownMessage, extra: {} };
   const servedBy = stoppedCallServedBy(err);
+  if (owner !== 'our-clock' && owner !== 'our-platform') {
+    // 🔴 A USER STOP NAMES THE ENGINE THAT WAS RUNNING (autopsy 03368870, 2026-10-18). This branch used to
+    // record the chain's NOMINAL first rung, so a KIMI call the user stopped after 66 s was filed under
+    // glm-4.7-flashx — a model benched for that build — and read as "a benched GLM was still called".
+    // The error text is unchanged (still the user's Stop); only the model is the served one, when known.
+    // `AGENTV3_STOP_SERVED_MODEL=off` restores the old record.
+    const useServed = (process.env['AGENTV3_STOP_SERVED_MODEL'] ?? '').trim().toLowerCase() !== 'off';
+    return { model: (useServed ? servedBy?.model : undefined) ?? nominalModel, error: ownMessage, extra: useServed && servedBy ? { provider: servedBy.provider } : {} };
+  }
   return {
     model: servedBy?.model ?? nominalModel,
     error: stoppedCallError(cause, ownMessage),

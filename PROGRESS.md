@@ -97053,6 +97053,68 @@ CI has been failing in 3–4 seconds all day (Q-1131), so only a local gate coul
 and the 60-second rule's *"safe ambitious path, never a reckless one"* both say wait for the real
 pipeline. The measurement is the part that costs nothing and makes the refactor fast and safe when it
 does start.
+## 2026-10-17 — nine rows closed: every owner PR verified in `main`, none of them merged by this session
+
+`#3773 · #3779 · #3782 · #3784 · #3785 · #3788 · #3789 · #3791` — all nine confirmed present in
+`origin/main` by their merge commits rather than by a PR page, then their rows moved out of the open
+table and their IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` **in the same commit**
+(the #3543 lesson: a queue edited from a stale copy silently reopens closed rows).
+
+Closed: **Q-887** (no upstream body reaches the browser) · **Q-889** (one encoded redirect value, Host
+shape-checked) · **Q-890** (the paid-vs-recorded check cannot be skipped) · **Q-1023** (the
+parenthetical says what actually counts) · **Q-1132** (the flow read waits for the frames its verdict
+needs) · **Q-1136** (the DNS check says only what it checked) · **Q-1137** (a named action is reachable
+on every host) · **Q-1138 + Q-1139** (backend connect without failing first; Q-707 reopened by its own
+cost gate; and the third definition my own census could not see).
+
+**Stated plainly because it matters for the audit trail: this session merged none of them.** CI has been
+failing in 3–4 seconds all day — every run, `main` included, with log download answering HTTP 404 (the
+Q-1082/Q-1131 symptom) — so the standing rule "CI green before any merge" meant holding. The merges were
+made elsewhere. The nine changes were each gated locally on the full CI-equivalent suite first, and the
+last of them on the merged state after `main` moved mid-change.
+
+Open root cause unchanged: **Q-1131 needs the admin** — GitHub Actions is failing at the platform level,
+not in this repo's workflow (ruled out by measurement: 8 runs, 4 branches, 3–4 s each, no logs, and
+`ci.yml` had 8 passing runs after its last change).
+
+## 2026-10-17 — Q-1140: one route to the deploy control, named by all three surfaces that name it
+
+The last piece of the admin's *"backend connect ko simple banao"*, and the one surface that had been
+missed: the build's closing **"what this app still needs"** notice — the only place that reaches the
+user without them opening any screen. All three of its branches described the situation and stopped.
+`included` read *"publish it when you are ready"*, and for a bare-server app **Publish refuses**;
+`buy` and `none` read *"host it yourself"* — true, and unactionable for a non-technical owner.
+
+Same class as Q-1136 and Q-1137 earlier the same day: **naming an action without a path to it.** Every
+branch now appends the route, and the plans offer is untouched where it was already right — `buy`
+keeps its Billing button; `included` and `none` still offer none, because selling a plan they already
+hold, or one we could not read, is what that row's own docblock forbids.
+
+**And the route now has ONE home.** `DEPLOY_BACKEND_ROUTE` sits in `src/lib` beside
+`DEPLOY_BACKEND_LABEL`, which is shared for exactly this reason. Three surfaces name it — the domain
+screen (Q-1137), this notice, the Publish panel (Q-1139) — and three copies agree only until one is
+edited. A route that is subtly wrong in *one* place is worse than no route: the user follows it, finds
+nothing, and stops believing the next instruction too. A repo-wide census fails on any second literal
+copy.
+
+It stays **English** inside the localised notices, exactly as `Plans` / `Database` / `Publish` already
+do there: it names buttons whose own labels are English on the screen it sends them to, and a
+translated route would send someone hunting for a button that is not there.
+
+### What was measured and deliberately NOT built
+
+A separate **domain row** ("your domain is connected and waiting"). `connectActions.ts` has recorded
+since 2026-09-20 that such a row needed a verified domain status, and **that fact now exists** — so it
+was buildable. It was dropped anyway: its case (domain linked · not serving · app needs a server) is a
+strict **subset** of the server row's own trigger, so it would have been a second line about one
+problem, paid for with a live DNS/HTTP probe on every build. Recorded in the row and in the module, so
+the next session reads the reason rather than rediscovering the idea.
+
+### A process note, because it cost a red test
+
+This row was first numbered **Q-1136** — I took the max id from the OPEN table alone, minutes after
+closing Q-1136–Q-1139 *out* of it. `aClosedQueueRowStaysClosed` failed immediately, which is the guard
+doing precisely its job. A new id is `max(open ∪ closed) + 1`, never the open table alone.
 ---
 
 ## 2026-10-17 — Q-1133 RESOLVED: a GitHub failure is answered in our own words, and the hunt found a fifth site

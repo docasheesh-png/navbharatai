@@ -10,6 +10,8 @@
 // The numbers are far above what the app itself sends (the client sends at most 40 history turns of
 // 2,000 characters), so no real conversation meets them; they exist to bound what a SCRIPT can send.
 
+import { cleanTurns } from '../../lib/platformTags';
+
 export const CHAT_MAX_MESSAGE_CHARS = 100_000;
 export const CHAT_MAX_ATTACHMENTS = 10;
 export const CHAT_MAX_VISION_ATTACHMENTS = 5;
@@ -38,7 +40,9 @@ export function checkChatInput(input: { message: unknown; fileAttachments: unkno
     return { ok: false, status: 413, reply: `Please attach at most ${CHAT_MAX_VISION_ATTACHMENTS} images or PDFs in one message.` };
   }
   const raw = Array.isArray(input.history) ? input.history : [];
-  const history = raw.slice(-CHAT_MAX_HISTORY_TURNS).map((m) => {
+  // Strip-on-read (admin 2026-10-17): a chat saved while platform tags leaked into turns must not
+  // re-send them to the model, or the model learns to quote them again (lib/platformTags.ts).
+  const history = cleanTurns(raw.slice(-CHAT_MAX_HISTORY_TURNS)).map((m) => {
     if (!m || typeof m !== 'object') return m;
     const t = (m as { text?: unknown }).text;
     return typeof t === 'string' && t.length > CHAT_MAX_HISTORY_TURN_CHARS ? { ...(m as object), text: t.slice(0, CHAT_MAX_HISTORY_TURN_CHARS) } : m;

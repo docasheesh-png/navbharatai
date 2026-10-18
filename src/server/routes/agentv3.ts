@@ -602,6 +602,7 @@ import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
+import { placePlatformContext } from '../lib/platformContext';
 import { previewAutoRepairEnabled, autoRepairPrecheck, autoRepairDecision, autoRepairPrompt, claimAutoRepair } from '../AgentV3/previewAutoRepair';
 import { clearPreviewGaveUp } from '../AgentV3/previewGiveUp';
 import { buildConfirmation, buildConfirmationEnabled, isOfferAcceptance, OFFER_LIFETIME_MS, BUILD_OFFER_STEER } from '../AgentV3/buildConfirmation';
@@ -11563,9 +11564,16 @@ async function noteBuildOutcome(
         // A grounded reply carries TODAY's search results, so it is never served from the prompt-keyed cache
         // below: a cached "aaj ka score" would be up to 15 minutes old (performance audit 2026-10-11).
         let liveGrounded = false;
+        /** Platform context for this chat reply's system prompt ('' when none) — see placePlatformContext. */
+        let chatContextSystem = '';
         try {
           const liveBlock = await liveSearchContext(prompt, { cheap: freeTierBuildActive || powerSpecResolved.cheapOnly });
-          if (liveBlock) { chatPrompt = `${liveBlock}\n\n---\n${chatPrompt}`; liveGrounded = true; }
+          // Through the one door (lib/platformContext.ts): the results go to the SYSTEM prompt of the call
+          // below, never in front of the user's words (admin 2026-10-17 — a model quotes its user turn).
+          if (liveBlock) {
+            ({ system: chatContextSystem, user: chatPrompt } = placePlatformContext({ system: '', user: chatPrompt, blocks: [{ label: 'Live web results', body: liveBlock }] }));
+            liveGrounded = true;
+          }
         } catch { /* live search is best-effort */ }
         // v5.0 used to answer a plain chat question ("kितni files hai?") completely blind — the chat
         // lane never loaded any workspace context. projectFileCount was already computed above for
@@ -11637,7 +11645,7 @@ async function noteBuildOutcome(
                   LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n'
                     + "You are NavBharatAI's assistant. Do not mention which model you are.\n\n"
                     + CREATOR_IDENTITY + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + recencyDirective()
-                    + '\n\n' + SPREADSHEET_FILE_INSTRUCTIONS,
+                    + '\n\n' + SPREADSHEET_FILE_INSTRUCTIONS + chatContextSystem,
                 ),
                 // Longer than a chat reply's 30 s: a sheet of 100 rows is several thousand tokens.
                 90_000,
@@ -11682,7 +11690,7 @@ async function noteBuildOutcome(
                     + "question/comment. Answer it naturally, but if it plausibly could mean \"build/fix "
                     + "this\", ALSO ask a short clarifying question at the end (e.g. \"Would you like me "
                     + "to build/fix this for you?\") so the user can confirm with their next message."
-                  : ''),
+                  : '') + chatContextSystem,
             ),
             30_000,
             'chatRouter.route',

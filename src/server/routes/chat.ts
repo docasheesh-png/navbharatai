@@ -15,6 +15,7 @@ import { groundingStatusFor, firstTokenLog } from '../lib/chatGrounding';
 import { songcraftFor } from '../AI/songcraft';
 import { answerShapeFor } from '../AI/answerShape';
 import { liveSearchContext } from '../lib/liveSearchContext';
+import { placePlatformContext, type PlatformContextBlock } from '../lib/platformContext';
 import { detectImageIntent, imageGenGuidance, imageGenToolPointer } from '../lib/imageIntent';
 import { isFirstChatTurn, sessionGreetingRule } from '../lib/sessionGreeting';
 import { imageMarkdown, IMAGE_REFUSAL_MESSAGE } from '../lib/imageGen';
@@ -440,13 +441,28 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // (admin 2026-07-12: "cricket squad ka 2025 data current bata diya"). Honesty directive, all tiers.
     systemPrompt = `${systemPrompt}\n\n${recencyDirective()}\n\n${LINK_POLICY}`;
 
-    // Build contextual message with canvas app prepended (Pro/VIP only)
-    let contextualMessage = message;
-    if (memorySummary && typeof memorySummary === 'string' && memorySummary.trim().length > 20) {
-      contextualMessage = `[CONVERSATION MEMORY — summary of earlier discussion:\n${memorySummary.trim().slice(0, 2000)}]\n\nCurrent message: ${message}`;
+    // 🔴 PLATFORM CONTEXT NEVER RIDES IN THE USER'S MESSAGE (admin 2026-10-17, the "[Follow-up …]" leak).
+    // Memory and the canvas used to be pasted in front of the message ("[CONVERSATION MEMORY …]\n\nCurrent
+    // message: …", "[CANVAS …] … User request: [MEMORY: …]"), and a model quotes what it finds in the user
+    // turn. They are collected here and placed in the SYSTEM prompt by the one door, `placePlatformContext`
+    // (lib/platformContext.ts); the live web results below go through the same door. `contextualMessage` is
+    // what the person typed (plus their own attachments) and nothing else.
+    const hasMemory = !!(memorySummary && typeof memorySummary === 'string' && memorySummary.trim().length > 20);
+    const platformBlocks: PlatformContextBlock[] = [];
+    if (hasMemory) {
+      platformBlocks.push({ label: 'Conversation memory (summary of earlier discussion in this chat)', body: String(memorySummary).trim().slice(0, 2000) });
     }
     if (hasCanvas) {
-      contextualMessage = `[CANVAS — current app on canvas (${currentApp.length} chars total)]:\n\`\`\`html\n${currentApp.slice(0, 20000)}${currentApp.length > 20000 ? '\n...[truncated — send smaller app for full edit]' : ''}\n\`\`\`\n\nUser request: ${memorySummary && typeof memorySummary === 'string' && memorySummary.trim().length > 20 ? `[MEMORY: ${memorySummary.trim().slice(0, 500)}]\n\n` : ''}${message}`;
+      platformBlocks.push({
+        label: `Canvas — the current app on the user's canvas (${currentApp.length} chars total)`,
+        body: `\`\`\`html\n${currentApp.slice(0, 20000)}${currentApp.length > 20000 ? '\n...[truncated — send smaller app for full edit]' : ''}\n\`\`\``,
+      });
+    }
+    let contextualMessage = message;
+    {
+      const placed = placePlatformContext({ system: systemPrompt, user: message, blocks: platformBlocks });
+      systemPrompt = placed.system;
+      contextualMessage = placed.user;
     }
 
     console.log(`[CHAT] tier=${tier} isFree=${isFree} mode=${mode} intent=${intent} hasCanvas=${hasCanvas} files=${attachments.length}(vision=${visionAttachments.length}) sysprompt=${isFree ? 'FREE' : hasCanvas ? 'EDIT' : isBuildIntent ? 'BUILD' : 'CHAT'}`);
@@ -643,7 +659,12 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     }
     try {
       const liveBlock = await liveSearchContext(message, { cheap: isFree });
-      if (liveBlock) contextualMessage = `${liveBlock}\n\n---\n${contextualMessage}`;
+      // Same door as memory above: the results go to the system prompt, never in front of the message.
+      if (liveBlock) {
+        const placed = placePlatformContext({ system: systemPrompt, user: contextualMessage, blocks: [{ label: 'Live web results', body: liveBlock }] });
+        systemPrompt = placed.system;
+        contextualMessage = placed.user;
+      }
     } catch { /* live search is best-effort */ }
 
     try {

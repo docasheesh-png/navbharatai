@@ -1,3 +1,5 @@
+import { placePlatformContext } from '../lib/platformContext';
+import { cleanTurns } from '../../lib/platformTags';
 import { callProfessionalAIWithUsage, type ProfessionalAnswer } from '../lib/professionalRouting';
 import type { ChatTurnUsage } from '../lib/chatSpend';
 import { retrieveKnowledge, formatKnowledge } from './knowledge';
@@ -206,7 +208,8 @@ export async function runProfessionalChatWithUsage(
   // question/answer can never appear twice in one session (admin: "ek question ek session me double na
   // ho") — a resend, retry, or restore can otherwise repeat a turn and make the professional re-ask.
   const dedupedHistory: ProfessionalTurn[] = [];
-  for (const m of history || []) {
+  // Strip-on-read: a turn saved while platform tags leaked must not be re-sent (lib/platformTags.ts).
+  for (const m of cleanTurns(history || [])) {
     const content = (m?.content || '').trim();
     if (!content) continue;
     if (dedupedHistory.some((p) => p.role === m.role && p.content.trim() === content)) continue; // drop exact repeats
@@ -230,7 +233,9 @@ export async function runProfessionalChatWithUsage(
   const memoryScope = `professional:${config.id}`;
   try {
     const recalled = await retrieveMemoryBlock(verifiedUserId, memoryScope, message, recentTurns.map((m) => m.content), conversationId);
-    if (recalled) prompt = `${recalled}\n\n---\n${prompt}`;
+    // Through the one door (lib/platformContext.ts): recall goes to the SYSTEM prompt, never in front of
+    // the user's words — a model quotes what it finds in the user turn (admin 2026-10-17).
+    if (recalled) ({ system: systemPrompt, user: prompt } = placePlatformContext({ system: systemPrompt, user: prompt, blocks: [{ label: 'Recalled from earlier in this conversation', body: recalled }] }));
   } catch { /* semantic recall is best-effort */ }
 
   // Live web grounding: when the user's question needs current facts (latest rules/rates/results),
@@ -238,7 +243,7 @@ export async function runProfessionalChatWithUsage(
   // cutoff. Gated + bounded + best-effort — never blocks the reply.
   try {
     const liveBlock = await liveSearchContext(message, { cheap: tier === 'free' });
-    if (liveBlock) prompt = `${liveBlock}\n\n---\n${prompt}`;
+    if (liveBlock) ({ system: systemPrompt, user: prompt } = placePlatformContext({ system: systemPrompt, user: prompt, blocks: [{ label: 'Live web results', body: liveBlock }] }));
   } catch { /* live search is best-effort */ }
 
   const { content: raw, spend } = await resilientCall(systemPrompt, prompt, tier);

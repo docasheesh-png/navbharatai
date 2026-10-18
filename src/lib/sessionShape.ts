@@ -24,6 +24,8 @@
 // at the crash site would leave the fourth reader to be found by the next user. Fixing the VALUE where
 // it enters means every reader — including ones not written yet — is safe without knowing any of this.
 
+import { cleanTurns } from './platformTags';
+
 /** One message, reduced to the fields the app's own lists actually read. */
 export interface SessionMessage {
   sender?: string;
@@ -71,7 +73,10 @@ export function messagesOf(session: unknown): SessionMessage[] {
  * returned with its own identity intact and this costs nothing on the normal path.
  */
 export function shapeSession<T extends object>(session: T): T & ShapedSession {
-  const messages = messagesOf(session);
+  // Strip-on-read (admin 2026-10-17): a chat saved while platform tags leaked into turns ("[Follow-up. No
+  // greeting needed…]", "[SESSION MEMORY]…") shows the person's own words only. `cleanTurns` keeps the
+  // same array when nothing matched, so a clean session still costs nothing here (lib/platformTags.ts).
+  const messages = cleanTurns(messagesOf(session));
   const current = (session as { messages?: unknown }).messages;
   if (current === messages) return session as T & ShapedSession;
   return { ...session, messages } as T & ShapedSession;

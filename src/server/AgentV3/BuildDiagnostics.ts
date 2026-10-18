@@ -2146,8 +2146,20 @@ export class BuildDiagnostics {
     // If the build ended NOT-ok with tool calls still in-flight, those are EXACTLY what it hung on
     // — name them so a timeout report points at the real culprit instead of a blank gap.
     if (!ok) {
+      // 🔴 A TOOL THE USER'S STOP CUT OFF DID NOT HANG (autopsy 53ee45b9, 2026-10-18). The platform's own
+      // update_preview was 17 s in flight when the user pressed Stop at 21 s; it was filed as an unresolved
+      // ERROR on a build that had nothing wrong with it. On a user-stopped build the in-flight tool is
+      // recorded as info, resolved, and says what really ended it. Every other not-ok end is unchanged.
+      // `AGENTV3_STUCK_TOOL_STOP_INFO=off` restores the old record.
+      const cutByUser = (process.env['AGENTV3_STUCK_TOOL_STOP_INFO'] ?? '').trim().toLowerCase() !== 'off'
+        && stoppedByUser(this.issues);
       for (const { tool, ts } of this.pending.values()) {
-        this.record({ phase: 'tool', severity: 'error', code: 'STUCK_TOOL', message: `Stuck on '${tool}' — in-flight ${Math.round((this.endedAt - ts) / 1000)}s, never completed.`, autoResolved: false });
+        const secs = Math.round((this.endedAt - ts) / 1000);
+        if (cutByUser) {
+          this.record({ phase: 'tool', severity: 'info', code: 'STUCK_TOOL', message: `'${tool}' was still running (${secs}s) when the user stopped the build — cut off by the Stop, not stuck.`, autoResolved: true });
+        } else {
+          this.record({ phase: 'tool', severity: 'error', code: 'STUCK_TOOL', message: `Stuck on '${tool}' — in-flight ${secs}s, never completed.`, autoResolved: false });
+        }
       }
     }
     this.pending.clear();

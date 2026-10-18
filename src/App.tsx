@@ -159,6 +159,7 @@ import OfflineBanner from './components/OfflineBanner';
 import { Message, ChatSession, ApiKeys, ViewType, SettingsScreen, FileSystem, ErrorContext } from './types';
 import { isEmptyConversation, sameTranscript, sameFileMap, cleanTitle } from './lib/chatHistory';
 import { claimDeviceSessions, readDeviceSessionsFor } from './lib/deviceSessions';
+import { shapeSessions } from './lib/sessionShape';
 import { sanitizeFirestoreData } from './lib/firestoreUtils';
 import { safeLocalJson } from './lib/safeLocalJson';
 
@@ -661,7 +662,9 @@ export default function App() {
     //    account's chats; another account's are removed here, before anything reads them (see
     //    lib/deviceSessions.ts — they used to be loaded into, and synced up for, whoever signed in next).
     claimDeviceSessions(user.uid);
-    const local = readDeviceSessionsFor(user.uid) as ChatSession[];
+    // shapeSessions at the door here too: it also strips platform tags a chat saved while they leaked
+    // (lib/platformTags.ts), so neither the list nor a reopened chat shows them.
+    const local = shapeSessions(readDeviceSessionsFor(user.uid)) as unknown as ChatSession[];
     setSessions(local);
 
     // 2) Cloud: pull cross-device workspace and merge (newer lastUpdated wins)
@@ -670,7 +673,7 @@ export default function App() {
         const res = await fetch(`/api/sync/${user.uid}`, { headers: await authedHeaders() });
         if (res.ok) {
           const data = await res.json();
-          const cloud: ChatSession[] = Array.isArray(data.sessions) ? data.sessions : [];
+          const cloud = shapeSessions(Array.isArray(data.sessions) ? data.sessions : []) as unknown as ChatSession[];
           const byId: Record<string, ChatSession> = {};
           for (const s of local) if (s?.id) byId[s.id] = s;
           for (const s of cloud) {

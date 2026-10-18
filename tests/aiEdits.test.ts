@@ -55,7 +55,7 @@ describe('makeAiEditGenerator', () => {
     expect(edits.filter(e => e.op === 'write').length).toBeGreaterThanOrEqual(2);
   });
 
-  it('injects Claude-Code-style memory (summary + edit log) into the edit prompt', async () => {
+  it('injects Claude-Code-style memory (summary + edit log) into the edit call — in the SYSTEM prompt, never the user turn', async () => {
     const callModel = vi.fn(async () => '[{"op":"patch","path":"src/App.tsx","find":"old","replace":"new"}]');
     const { generate } = makeAiEditGenerator(callModel, {
       summary: 'Building a recipe app in React with a dark theme.',
@@ -67,11 +67,15 @@ describe('makeAiEditGenerator', () => {
       'src/App.tsx': 'export default function App(){ return <div>old</div>; }',
     });
     await generate('make the favorites button red', existing);
+    // Platform context goes through the one door (lib/platformContext.ts): system prompt, not user turn.
+    const systemPrompt = callModel.mock.calls[0][0];
     const userPrompt = callModel.mock.calls[0][1];
-    expect(userPrompt).toContain('PROJECT MEMORY');
-    expect(userPrompt).toContain('recipe app');
-    expect(userPrompt).toContain('CHANGES ALREADY MADE');
-    expect(userPrompt).toContain('RECENT CONVERSATION');
+    expect(systemPrompt).toContain('PROJECT MEMORY');
+    expect(systemPrompt).toContain('recipe app');
+    expect(systemPrompt).toContain('CHANGES ALREADY MADE');
+    expect(systemPrompt).toContain('RECENT CONVERSATION');
+    expect(userPrompt).not.toContain('PROJECT MEMORY');
+    expect(userPrompt).toContain('make the favorites button red');
   });
 
   it('treats the TypeScript scaffold (src/App.tsx) as a fresh build, not an edit', async () => {

@@ -57,12 +57,19 @@ function branchTokens(body: string): number {
 }
 
 /**
- * MEASURED 2026-10-18 on `main` (5d80b4c08): 549 — if 147 · && 171 · || 42 · ?? 37 · ternary 152,
+ * MEASURED 2026-10-18 on `main` (5d80b4c08): **549** — if 147 · && 171 · || 42 · ?? 37 · ternary 152,
  * across 2,501 comment-stripped lines in ONE function.
  *
  * ⬇️ THIS NUMBER MAY ONLY GO DOWN. Lower it when a block moves out; never raise it to make a PR pass.
+ *
+ * 🔻 **546 — LOWERED ON THE GUARD'S FIRST REAL FIRING, the same night it was written.** `main` moved five
+ * times while this branch was gated, and merging it in made this very test fail with the instruction it
+ * exists to give: *"branches came out of the handler (546 < 549) — lower BRANCH_BUDGET to 546"*. The
+ * direction is the good one: somebody else's merge took three branches OUT of the chat handler, which is
+ * Q-979's own prescription happening by itself. Lowered to the measurement, not to a guess — and the
+ * down-only test is what forced it to be noticed at all rather than drifting.
  */
-const BRANCH_BUDGET = 549;
+const BRANCH_BUDGET = 546;
 
 const WHAT_TO_DO = [
   'The chat handler is at or over its branch budget.',

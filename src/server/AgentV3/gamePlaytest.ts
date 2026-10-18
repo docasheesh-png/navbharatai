@@ -1407,9 +1407,43 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
   const unread = replay.driving === true && !score.stalledVehicle && run.scene
     ? sceneUnread(run.scene)
     : { faces: null, mirrored: null };
+  /**
+   * 🔴 AND THE SAME SILENCE SURVIVED IN THE BRANCH WITHOUT A SCENE (Q-1141, found 2026-10-18 when the
+   * racing probe went red under load for the THIRD time — Q-1038, Q-1132, this).
+   *
+   * Everything above reads `sceneUnread`, which can only speak when the app HAS a three.js scene. A 2-D
+   * canvas game has none, so its camera and steering verdicts come from the PIXEL FLOW
+   * (`firmFlow(run.gasFlow)`) — and when that read is starved of frames the verdict is withheld, which is
+   * right, and NOTHING was said, which is the very defect Q-1038 and Q-1097 exist to prevent: *a game
+   * whose camera was never measured reads in the report exactly like a game whose camera is fine.*
+   *
+   * 🔑 AND THE SIGNAL FOR IT ALREADY EXISTED AND WAS WIRED TO NOTHING. Q-1132 — my own change — added
+   * `flowStarved` / `flowStarvedNote` for precisely this, and a repo-wide search found **no consumer**:
+   * not the verdict, not a report, not a test. The lesson this repo already records in
+   * `backendDeployWiring.ts` applies to our own instruments too — *a server that returns an honest field
+   * has not communicated anything until a caller reads it.*
+   *
+   * 🔒 IT COSTS THE APP NOTHING, which is Q-1038's principle unchanged: appended to the HEAD, never to the
+   * score. Our instrument failing to look is our problem, not the app's — no points, no money.
+   * Only where the flow read was the one CONSULTED: a driving game, not stalled, and no scene answer for
+   * that axis — otherwise this would claim "not measured" about an axis the scene had just measured.
+   */
+  const flowConsulted = replay.driving === true && !score.stalledVehicle;
+  const sceneSaid = replay.driving === true && !score.stalledVehicle ? sceneVerdict(run.scene) : { faces: null, mirrored: null };
+  const gasStarved = flowConsulted && sceneSaid.faces === null && flowStarved(run.gasFlow)
+    ? flowStarvedNote(run.gasFlow)
+    : null;
+  const steerStarved = flowConsulted && sceneSaid.mirrored === null && flowStarved(run.steerFlow)
+    ? flowStarvedNote(run.steerFlow)
+    : null;
   const starvedNote = [
     unread.mirrored ? ` Steering was not read — ${unread.mirrored}.` : '',
     unread.faces && unread.faces !== unread.mirrored ? ` The camera could not be read from the scene — ${unread.faces}.` : '',
+    // Said only when the SCENE did not already say it, so a page is never told twice about one axis.
+    gasStarved && !unread.faces ? ` The camera could not be read from the picture — ${gasStarved}.` : '',
+    steerStarved && !unread.mirrored && steerStarved !== gasStarved
+      ? ` Steering could not be read from the picture — ${steerStarved}.`
+      : '',
   ].join('');
   const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${pictureNote}${errNote}.${starvedNote}`;
   if (ok) return { code: 'GAME_PLAYTEST_OK', severity: 'info', autoResolved: true, score, message: head };

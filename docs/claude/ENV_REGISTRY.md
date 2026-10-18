@@ -4338,3 +4338,8 @@ price is not. Recorded as a queue row, not done here.
   throughput grace. Applies to the builder and the fast-lane planner alike (`openAiStream.ts streamIsCrawling`,
   `OpenAiToolRunner.ts` never-opened bound). A started stream is still judged at the throughput grace. Locked in
   `tests/aQueuedRungGetsTimeToStart.test.ts`.
+
+- **`AGENTV3_BUG_HUNT_WAIT_MS`** (NOT set; default **30000**, was a hard-coded 90 s; clamped 5000–120000; junk ⇒
+  default). Owner 2026-10-18, autopsy 2f46a4d8: how long a finished, GREEN build waits for the deep-bug-hunt
+  offer's answer before ending without the hunt. `src/server/AgentV3/optionalBugHunt.ts bugHuntWaitMs`. Locked in
+  `tests/aFinishedBuildIsNotHeldOpen.test.ts`.

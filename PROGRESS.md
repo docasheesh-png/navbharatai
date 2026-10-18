@@ -96988,3 +96988,43 @@ needed to reproduce the numbers above.
 **Not a fix, and not claimed as one.** Nothing in the counter changed. `tests/theQueueSaysWhatIsTrue.test.ts`
 still passes 14/14 with the baseline unchanged at 40 — the new BLOCKED row carries all four fields, so it
 adds nothing to the gap count.
+
+## 2026-10-18 — Q-979 measured for the first time, and the row named the wrong function
+
+Q-979 has been open since 2026-10-13 saying *"the `/build` route handler in routes/agentv3.ts"* sits at
+TypeScript's control-flow limit. **There is no `/build` route.** Measured across every `app.get` /
+`app.post` in that file:
+
+```
+/api/agentv3/chat               17,595 raw lines   (2,501 with comments stripped)
+/api/agentv3/publish               444
+/api/agentv3/preview-diagnose      381
+```
+
+The nine modules that carry a comment about this limit — `FastLaneBudget`, `thirdPartyLimits`,
+`gateRedNotice`, `handoffRule`, `finishingPassesAtCap`, `leftoverComponents`, `ProjectPlan` and others
+— all say **"the CHAT handler"**. The row was the odd one out, and a row that misnames its own subject
+sends the next session hunting a function that does not exist. Corrected by adding the measurement to
+the row, not by erasing what it said.
+
+**First real measurement of the margin: 549 branch tokens** (if 147 · && 171 · || 42 · ?? 37 ·
+ternary 152), comments stripped. Nobody had measured it in the five days the row was open.
+
+### The pain is not the size — it is the surprise
+
+TS2563 counts the flow joins for **one reference**, so it trips in whichever PR happens to add the last
+few branches, and lands as a red CI **naming a file that PR never touched**. That happened twice in one
+day (Q-978, then Q-975 on top of #3692). The size is a slow problem; the ambush is the sharp one.
+
+`tests/theChatHandlerHasHeadroom.test.ts` now fails **first**, and its message is the instruction:
+*put the new condition in a module function and call it* — the pattern every TS2563-aware module in
+`src/server/AgentV3` already follows. The budget is a **ratchet**: it may only go down (lower it when a
+block moves out, never raise it to make a PR pass), and it is labelled honestly as a **proxy** — it
+counts branch tokens in the whole handler, not the compiler's own per-reference threshold, and the two
+numbers are not comparable.
+
+Reversion proven: one harmless branch added inside the handler → two tests fail, with the instruction.
+
+**Q-979 stays OPEN.** Its own prescription still stands — headroom, not a mass rewrite, moving
+self-contained blocks out one PR at a time. This change buys none of that headroom; it only makes the
+wall visible before someone walks into it.

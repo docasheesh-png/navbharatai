@@ -4350,3 +4350,9 @@ price is not. Recorded as a queue row, not done here.
   message a typed stop came from — `abortBuild(…, requestedAt)` / `abortRequestedAtOf`). Otherwise, including an
   unknown render time, it is charged at our real cost (provider + sandbox), never above the decided bill.
   `src/server/AgentV3/cancelledBuildBilling.ts`. Locked in `tests/aStopIsFullPriceOnlyIfTheAppRanFirst.test.ts`.
+
+- **`AGENTV3_STYLE_PASS_STOP_AT_COST`** (NOT set; default **on**; `off` ⇒ only the green-before-stop rule applies).
+  Owner-approved 2026-10-18 (r6–r10 autopsy): a user stop requested while OUR style-floor pass (`STYLE_RULES_RESUMED`
+  → the architect's loop returning) was running is charged at our real cost, never full price.
+  `src/server/AgentV3/cancelledBuildBilling.ts stoppedDuringOurStylePass`. Locked in
+  `tests/aStopDuringOurStylePassIsNotFullPrice.test.ts`.

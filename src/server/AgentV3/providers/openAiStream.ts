@@ -310,6 +310,20 @@ export const STREAM_MIN_CHARS_PER_SEC = 6;
  */
 export const STREAM_THROUGHPUT_GRACE_MS = 15_000;
 
+/**
+ * 🔴 A PROVIDER THAT HAS NOT SENT ITS FIRST BYTE IS QUEUED, NOT CRAWLING (owner request + autopsy 2f46a4d8,
+ * 2026-10-18). With one grace for both states, a call that produced NOTHING was judged at the same 15 s as a
+ * call trickling bytes: glm-4.7-flashx (sent `thinking: disabled`, so its silence is queueing/ingestion, not
+ * slowness) was abandoned at 15 s — in the planner and the builder alike (both judge here) — and benched for
+ * the build and, through silence memory, for the next builds. The owner asked that GLM be given time.
+ *
+ * A zero-byte stream is now judged only after this longer grace; a stream that has started is judged at the
+ * throughput grace exactly as before. 30 s is twice the old wait and half of `STREAM_IDLE_MS_DEFAULT` (60 s),
+ * the silence bound that ends a call outright, so a truly dead rung still leaves well before that.
+ * `AGENTV3_STREAM_FIRST_BYTE_GRACE_MS` overrides it (never below the throughput grace).
+ */
+export const STREAM_FIRST_BYTE_GRACE_MS = 30_000;
+
 function streamNumber(value: string | undefined, min: number): number | null {
   // A BLANK value means UNSET, not zero — `Number('')` is 0 (see slowRungBench's own note on this).
   const text = String(value ?? '').trim();
@@ -326,6 +340,12 @@ export function streamMinCharsPerSec(env: NodeJS.ProcessEnv = process.env): numb
 /** The configured grace period. Never shorter than 5 s — below that the floor is a race, not a reading. */
 export function streamThroughputGraceMs(env: NodeJS.ProcessEnv = process.env): number {
   return streamNumber(env.AGENTV3_STREAM_THROUGHPUT_GRACE_MS, 5_000) ?? STREAM_THROUGHPUT_GRACE_MS;
+}
+
+/** The configured first-byte grace — never shorter than the throughput grace. */
+export function streamFirstByteGraceMs(env: NodeJS.ProcessEnv = process.env): number {
+  const v = streamNumber(env.AGENTV3_STREAM_FIRST_BYTE_GRACE_MS, 0) ?? STREAM_FIRST_BYTE_GRACE_MS;
+  return Math.max(v, streamThroughputGraceMs(env));
 }
 
 /**
@@ -345,6 +365,7 @@ export function streamIsCrawling(
   // Bytes when the caller has them (the script-neutral measure — see `producedBytes`), else characters.
   const raw = Number.isFinite(sample?.producedBytes) ? sample.producedBytes : sample?.producedChars;
   const produced = Number.isFinite(raw) ? Math.max(0, raw as number) : 0;
+  if (produced === 0 && elapsedMs < streamFirstByteGraceMs(env)) return false; // queued, not crawling
   return produced / (elapsedMs / 1000) < floor;
 }
 

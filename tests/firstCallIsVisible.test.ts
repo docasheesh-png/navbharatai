@@ -63,7 +63,9 @@ describe('🔴 1 · the throughput floor — the third state nothing could see',
     // for being new, which is the difference between a measurement and a race.
     expect(streamIsCrawling({ producedChars: 0, elapsedMs: 1_000 })).toBe(false);
     expect(streamIsCrawling({ producedChars: 0, elapsedMs: STREAM_THROUGHPUT_GRACE_MS - 1 })).toBe(false);
-    expect(streamIsCrawling({ producedChars: 0, elapsedMs: STREAM_THROUGHPUT_GRACE_MS })).toBe(true);
+    // A ZERO-byte stream is queued, not crawling: it is judged at the longer first-byte grace (owner, 2026-10-18).
+    expect(streamIsCrawling({ producedChars: 0, elapsedMs: STREAM_THROUGHPUT_GRACE_MS })).toBe(false);
+    expect(streamIsCrawling({ producedChars: 1, elapsedMs: STREAM_THROUGHPUT_GRACE_MS })).toBe(true);
   });
 
   it('a healthy stream is never crawling', () => {

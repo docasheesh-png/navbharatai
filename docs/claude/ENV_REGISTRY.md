@@ -4332,6 +4332,13 @@ price is not. Recorded as a queue row, not done here.
 | `FREE_CHAT_ANSWER_ALL` | **on** | Free chat answers every question itself. The unconditional "lead with NavBharatAI Pro" prompt block is replaced by answer-first rules, and app-navigation context is injected only for messages about NavBharatAI. On a real app-build request the chat explains the idea (no code) and ends with ONE line in the user's language that it can be built in NavBharatAI Pro (the server appends it if the model omits it). |
 | `STUDENT_TEACHER_PROMO` | **on** | A new build whose prompt is a study/exam app gets one narration note, in the user's language: Mode → Teacher AI in NavBharatAI FREE to study and take exams. The build is not changed or blocked. |
 
+- **`AGENTV3_STREAM_FIRST_BYTE_GRACE_MS`** (NOT set; default **30000**; never below `AGENTV3_STREAM_THROUGHPUT_GRACE_MS`;
+  junk ⇒ default). Owner request 2026-10-18 + autopsy 2f46a4d8: a stream (or request) that has produced ZERO bytes
+  is queued, not crawling, so it is abandoned/benched as silent only after this grace instead of the 15 s
+  throughput grace. Applies to the builder and the fast-lane planner alike (`openAiStream.ts streamIsCrawling`,
+  `OpenAiToolRunner.ts` never-opened bound). A started stream is still judged at the throughput grace. Locked in
+  `tests/aQueuedRungGetsTimeToStart.test.ts`.
+
 - **`AGENTV3_BUG_HUNT_WAIT_MS`** (NOT set; default **30000**, was a hard-coded 90 s; clamped 5000–120000; junk ⇒
   default). Owner 2026-10-18, autopsy 2f46a4d8: how long a finished, GREEN build waits for the deep-bug-hunt
   offer's answer before ending without the hunt. `src/server/AgentV3/optionalBugHunt.ts bugHuntWaitMs`. Locked in

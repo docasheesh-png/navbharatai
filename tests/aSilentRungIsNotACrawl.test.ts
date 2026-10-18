@@ -32,6 +32,7 @@ const env = () => {
   process.env.AGENTV3_STREAM_BUILD_CALLS = 'on';
   process.env.AGENTV3_STREAM_IDLE_MS = '12000';
   process.env.AGENTV3_STREAM_THROUGHPUT_GRACE_MS = '5000';
+  process.env.AGENTV3_STREAM_FIRST_BYTE_GRACE_MS = '5000'; // zero-byte grace pinned to the same short window for timing
 };
 const params = { model: 'glm-4.7-flashx', system: 's', messages: [{ role: 'user' as const, content: 'build' }], tools: [], canAbandonSlowStream: () => true, hasNextRung: true };
 

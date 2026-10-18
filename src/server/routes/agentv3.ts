@@ -26688,7 +26688,7 @@ async function noteBuildOutcome(
                 : interrupted
                 ? `Did not ask this user to add credits: our own platform interrupted this build (${abortCauseOf(abort.signal)}) before any engine could be judged. A deploy, a lock takeover or a cleanup is not a capability limit, and a fuller wallet would have changed nothing.`
                 : refused
-                ? 'Did not ask this user to add credits: the engine REFUSED this request on policy grounds. A refusal is an answer, not a capability limit — selling a stronger engine after one offers to do the very thing we just declined to do.'
+                ? 'Did not ask this user to add credits: the engine DECLINED this request and wrote no files — a refusal, or an honest "this cannot be done here" (autopsy 707f8e56: an MP4 video asked of a web-app builder, declined with an HTML5-animation offer). `modelAnswer.declined` does not tell those apart, so neither is called a policy refusal. Either way it is an answer, not a shortfall a stronger engine would fix — no upsell.'
                 : starved
                   // Deliberately NOT the "did not respond" wording below: it responded, inside its clock,
                   // every time. Saying otherwise would send the next reader to a provider status page

@@ -286,6 +286,7 @@ import { runningBuilds, runningBuildCount, __setRunningBuildForTest, type Runnin
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
+import { startImportDurableSave, settleImportDurableSave, IMPORT_DURABLE_SETTLE_MS } from '../AgentV3/importDurableSave';
 import { announceBuildFinished, announceDeploy, serverPublishOutcome } from '../lib/userWebhookEvents';
 // The balance warning goes through ONE door now (admin 2026-09-22). It was a raw push on the block
 // branch with no cooldown — five refused builds were five pushes — and the "running low" half had no
@@ -11955,6 +11956,8 @@ async function noteBuildOutcome(
     // success (not a failed/escalated build), and the mandatory readiness gate must not audit the
     // user's freshly-imported existing code and declare it "NOT READY". Set by the zip + URL landers.
     let isImportTurn = false;
+    /** Durable saves an import started this turn — settled once, bounded, before the report (importDurableSave.ts). */
+    const importDurableSaves: Array<Promise<unknown>> = [];
     // Fix 41: a failed GitHub-URL import (private/no-access/bad-url) recorded here so the architect
     // prompt can acknowledge it instead of re-asking the user for the URL they already gave.
     let failedImport: { url: string; reason: string } | null = null;
@@ -12102,29 +12105,19 @@ async function noteBuildOutcome(
       }
       // DURABLE PERSIST — the half whose absence caused "zip imported but Files/IDE/Preview all
       // empty": without it the import lives only in the ephemeral sandbox.
-      try { opts.diag?.enterPhase?.('saving your project so it survives a restart'); } catch { /* best-effort */ }
       /**
-       * 🔒 THE SAVE IS CHECKED, NOT ASSUMED (autopsy d0b2fcd6, Q-735). This line used to be best-effort and
-       * silent: when the commit timed out, the user's 175-file app stayed out of the durable index and the
-       * whole turn treated it as our starter. A store that did not save it says so — to the admin report and,
-       * in plain words, to the user — instead of the next turn quietly losing it.
+       * 🔒 THE SAVE IS CHECKED, NOT ASSUMED (autopsy d0b2fcd6, Q-735) — and since build d62bf22d it no longer
+       * holds the turn: that save waited ~89 s of a 97 s first model call on four DEADLINE_EXCEEDED. The project
+       * is already in the workspace, so the save runs beside the turn and is settled, bounded, before the report
+       * (`settleImportDurableSave`). A save that did not complete still says so — to the report and the user.
        */
-      try {
-      const durable = await mergeWorkspaceFiles(workspaceId, importedFiles).catch((e) => ({ status: 'failed' as const, indexed: 0, unconfirmed: Object.keys(importedFiles), error: String(e) }));
-      if (durable.status === 'failed' || durable.status === 'partial') {
-        try {
-          opts.diag?.record({
-            phase: 'build', severity: 'warning', code: 'IMPORT_NOT_DURABLE', autoResolved: false,
-            message: `The imported project is in the workspace, but the durable copy holds ${durable.indexed} of ${Object.keys(importedFiles).length} file(s) — ${durable.unconfirmed.length} could not be confirmed saved.`,
-            detail: `${durable.status}${durable.error ? ` · ${durable.error}` : ''} · unconfirmed: ${durable.unconfirmed.slice(0, 20).join(', ')}`,
-          });
-        } catch { /* diagnostics are best-effort */ }
-        emit({
-          type: 'narration', agent: 'architect', ts: Date.now(),
-          text: `⚠️ Your project is here and working in this session, but ${durable.unconfirmed.length} of its ${Object.keys(importedFiles).length} files could not be saved permanently yet. Keep this chat open; if it restarts, import the project again.`,
-        });
-      }
-      } finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
+      const saveImport = () => mergeWorkspaceFiles(workspaceId, importedFiles);
+      importDurableSaves.push(startImportDurableSave({
+        save: saveImport,
+        total: Object.keys(importedFiles).length,
+        record: (r) => { try { opts.diag?.record(r); } catch { /* diagnostics are best-effort */ } },
+        narrate: (text) => emit({ type: 'narration', agent: 'architect', ts: Date.now(), text }),
+      }));
       framework = validation.framework;
       // TELL THE REPORT (autopsy d6deaaf0): the diagnostics object captured `framework` at build
       // start, before the import existed, so it kept the request default while the manifest recorded
@@ -26484,6 +26477,7 @@ async function noteBuildOutcome(
        * pass — build e52cebbf rendered at the in-build check and was stopped before the final one, and
        * was billed as an app that never ran. Both money rules read this one name, never their own copy.
        */
+      await settleImportDurableSave(importDurableSaves, IMPORT_DURABLE_SETTLE_MS, (r) => buildDiag.record(r));
       const appSeenRunningForBill = buildObs.previewRendered === true || renderProvenNow();
       const markupDecision = decideMarkupOnProof({
         decidedBilledUsd: effectiveBilledUsd,

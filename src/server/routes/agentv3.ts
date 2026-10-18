@@ -42,7 +42,7 @@ import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadm
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
 import { requestForChecks } from '../AgentV3/requestForChecks';
-import { offerBugHunt, BUG_HUNT_WAIT_MS } from '../AgentV3/optionalBugHunt';
+import { offerBugHunt, bugHuntWaitMs } from '../AgentV3/optionalBugHunt';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
@@ -25014,7 +25014,7 @@ async function noteBuildOutcome(
         hasUser: !!userId,
         newCallId: () => randomUUID(),
         ask: (gate) => emit({ type: 'permission_request', agent: 'reviewer', ts: Date.now(), ...gate }),
-        wait: (callId) => waitForUser(callId, BUG_HUNT_WAIT_MS),
+        wait: (callId) => waitForUser(callId, bugHuntWaitMs()),
         say: (text) => { try { events.emit({ type: 'narration', agent: 'reviewer', ts: Date.now(), text }); } catch { /* best-effort */ } },
         record: (message) => { try { buildDiag.record({ phase: 'build', severity: 'info', code: 'BUG_HUNT_NOT_RUN', message, autoResolved: true }); } catch { /* best-effort */ } },
       });

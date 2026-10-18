@@ -192,7 +192,7 @@ describe('source guards — the wiring itself, which no unit test can see', () =
   it('the wait goes through waitForUser, THE ONE DOOR (autopsy 1219c639)', () => {
     // Bypassing it makes the live ETA count the user's thinking as build time and the futility
     // breaker read a waiting build as a stalled one. That was five separate bugs once.
-    expect(route).toContain('wait: (callId) => waitForUser(callId, BUG_HUNT_WAIT_MS)');
+    expect(route).toContain('wait: (callId) => waitForUser(callId, bugHuntWaitMs())');
     expect(route).not.toContain('awaitApprovalOutcome(huntCallId');
   });
 

@@ -4343,3 +4343,8 @@ price is not. Recorded as a queue row, not done here.
   default). Owner 2026-10-18, autopsy 2f46a4d8: how long a finished, GREEN build waits for the deep-bug-hunt
   offer's answer before ending without the hunt. `src/server/AgentV3/optionalBugHunt.ts bugHuntWaitMs`. Locked in
   `tests/aFinishedBuildIsNotHeldOpen.test.ts`.
+
+- **`AGENTV3_SKIP_UNCHANGED_PREVIEW`** (NOT set; default **on**; `off` ⇒ old behaviour). r6–r10 autopsy 2026-10-18:
+  `update_preview` on the same port with no file changed since the last successful publish returns at once instead
+  of re-running the secrets write and port probe. `src/server/AgentV3/ToolDispatcher.ts previewRefreshIsRedundant`.
+  Locked in `tests/anUnchangedPreviewIsNotRepublished.test.ts`.

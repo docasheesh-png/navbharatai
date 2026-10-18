@@ -96989,6 +96989,57 @@ needed to reproduce the numbers above.
 still passes 14/14 with the baseline unchanged at 40 — the new BLOCKED row carries all four fields, so it
 adds nothing to the gap count.
 
+## 2026-10-18 — Q-1141: my own Q-1132 fix was half-done — the honest signal was wired to nobody
+
+The racing probe went red inside the full suite for the **third** time (Q-1038, Q-1132, this). Diagnosed
+by measurement, not assumption: it failed inside the 2,731-file run, **passed 26/26 on its own**, and
+the commit under test was two markdown files.
+
+**Measured on `main`: `flowStarved(` appears exactly twice in all of `src`** — its own definition, and a
+call inside `flowStarvedNote`. One orphan was the other's consumer; nothing else read either. Q-1132
+(#3779) added both so a starved pixel read could be told apart from one that measured and disagreed —
+and **wired them to nobody.**
+
+The class is already written down in this repo, and was paid for again: *"a server that returns an
+honest field has not communicated anything until a caller reads it"* (`backendDeployWiring.ts`, after
+the deploy route's `domainPointed` / `domainNote` / `envNote` were parsed and thrown away). **Our own
+instruments are not exempt.**
+
+### Two real consequences
+
+1. **The report stayed silent.** `sceneUnread` can only speak when the app HAS a three.js scene, so a
+   2-D canvas game's camera verdict comes from the pixel flow. A starved flow withheld the verdict
+   (right) and said nothing (wrong) — *a game whose camera was never measured read exactly like a game
+   whose camera is fine*, the very defect Q-1038 and Q-1097 exist to prevent, surviving in the branch
+   they never covered.
+2. **The test could not tell either**, so it demanded a direction the probe cannot guarantee under load
+   and failed as though the GAME were broken.
+
+### Both halves fixed
+
+The verdict now prints `flowStarvedNote` when the flow read was the one consulted (driving · not
+stalled · the scene said nothing for that axis), appended to the **head** and never to the score —
+Q-1038's division, so our instrument failing costs the app no points and no money. And the four
+live-browser assertions go through **one** helper that states the guarantee the product actually makes,
+which is load-independent: **either the read answered and the direction is right, or it was starved and
+the platform says so. Silence is the only outcome ruled out.**
+
+### The census was wrong twice before it was right — recorded, because a guard that cries wolf gets switched off
+
+- **Too loose:** it accepted a sibling as a consumer, so it would have **passed on the exact state it
+  was written for**.
+- **Too strict:** it demanded a call inside `playtestVerdict` and flagged `probeStarved` /
+  `probeStarvedNote`, which do reach it — via `sceneUnread`, measured at `gamePlaytest.ts:1210`.
+- **Right:** the unit is the **pair**, and a sibling never vouches for its own signal.
+
+**Not claimed as a starvation fix.** The probe can still be starved on a loaded machine; what ends is
+the lie about whose fault that is. A sampler that cannot be starved stays Q-1132's open prescription.
+
+**ID note — the third collision shape in one day.** This row first came out Q-1140, because the
+derivation took `max(open ∪ closed)` on this branch and **Q-1140 is already claimed by #3797**, which
+is unmerged and therefore in neither file here. Earlier the same day the same derivation took the open
+table alone and landed on a closed id. A new id must clear the open table, the closed register **and
+the ids claimed by open PRs** — the last of which no file on a branch can see.
 ## 2026-10-18 — Q-979 measured for the first time, and the row named the wrong function
 
 Q-979 has been open since 2026-10-13 saying *"the `/build` route handler in routes/agentv3.ts"* sits at

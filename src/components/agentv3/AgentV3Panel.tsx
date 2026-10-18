@@ -4117,6 +4117,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           busy={running || publishing}
           publishStatus={publishMsg}
           publishRefusalCode={publishRefusal.code}
+          // 🔒 A SEPARATE PROP ON PURPOSE. Merging this into `publishRefusal` would make
+          // `shouldAutoDeployBackend` see a transition and deploy because a panel was opened — in the
+          // user's own Render account. The fact shows the card; only a real refusal auto-deploys.
+          serverHalf={publishState?.serverHalf ?? null}
           deployRepo={deployRepo}
           onRepoPushed={(r) => { if (r.owner && r.repo) setPushedRepo(r); }}
           backendKeySource={publishRefusal.keySource}

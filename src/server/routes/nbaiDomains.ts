@@ -35,6 +35,7 @@ import { checkDomainServing } from '../lib/domainServingCheck';
 import { siteHasRelease } from '../lib/firebaseCustomDomain';
 import { resolvePublishState } from '../AgentV3/publishState';
 import { planDeployment, domainPublishBlockNote } from '../AgentV3/deployPlan';
+import { readServerHalf } from '../AgentV3/appServerHalf';
 import { loadWorkspaceFilesByPath, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { analyzeApiWiring } from '../AgentV3/apiWiring';
 import { isBackendPointed, backendPointedRefusal, backendPointedStage } from '../AgentV3/domainPointing';
@@ -269,12 +270,20 @@ async function formDomainVerdict(
        * app pays exactly what it paid before, and only an app about to be told something
        * discouraging pays for the real read.
        */
-      let plan = planDeployment(manifests);
-      let src: Record<string, string> | null = null;
-      if (!plan.staticHostingSufficient) {
-        src = await loadWorkspaceFiles(workspaceId).catch(() => null);
-        if (src) plan = planDeployment({ ...src, ...manifests });
-      }
+      /**
+       * 🔴 ONE STAGED READ FOR THE WHOLE PRODUCT (2026-10-17). This was the SECOND copy of the
+       * publish route's staged read, and both carried the same hole: stage 2 ran only when the four
+       * manifests already suspected a server, so a plain `node:http` app (manifest shape `unknown`,
+       * `staticHostingSufficient: true`) was never read from source — and this screen cheerfully said
+       * "one last step: press Publish" about an app publish could only ship broken. `readServerHalf`
+       * is the one definition and the one gate; see appServerHalf.ts for the measurement.
+       */
+      const shapeRead = await readServerHalf({
+        manifests: async () => manifests,
+        full: () => loadWorkspaceFiles(workspaceId).catch(() => null),
+      });
+      const plan = shapeRead.plan;
+      const src = shapeRead.files;
       // Only the app's own code can say whether it can be split, and only a real `false` (ship
       // whole) makes a fullstack refusal certain enough to state. See domainPublishBlockNote.
       const splitAdvised = plan.shape === 'fullstack' && src

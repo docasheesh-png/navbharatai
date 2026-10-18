@@ -96,26 +96,34 @@ describe('Publish seeds the sandbox before it builds', () => {
  * silent rot this file exists to catch.
  */
 describe('Publish classifies the app from its real files, not its manifests alone', () => {
-  it('a would-be REFUSAL re-plans with the workspace files before it refuses', () => {
+  /**
+   * 🔁 REPOINTED, NOT DELETED (2026-10-17). These pinned the route's own INLINE staged read —
+   * `planDeployment(planFiles)` … `planDeployment({ ...src, ...planFiles })`. That read was the
+   * second of two copies, and both carried the same hole, so it now lives in ONE place
+   * (`readServerHalf`) and the behaviour each of these protected is pinned there, on real inputs
+   * rather than on source text: `appServerHalf.test.ts` proves the staged order, that the manifests
+   * win over the full read, and the gate that the old code got wrong.
+   *
+   * What remains here is what only THIS file can check: that the publish route uses that read, that
+   * its manifests still come from the SANDBOX, and that the refusal happens after it.
+   */
+  it('a would-be REFUSAL classifies through the shared staged read before it refuses', () => {
     const seg = publishRoute();
-    const firstPlan = seg.indexOf('planDeployment(planFiles)');
-    const load = seg.indexOf('loadWorkspaceFiles(workspaceId)');
-    const rePlan = seg.indexOf('planDeployment({ ...src, ...planFiles })');
+    const read = seg.indexOf('readServerHalf({');
+    const sandbox = seg.indexOf('actuator.readFile(workspaceId, p)');
     const refusal = seg.indexOf('deployDecision(plan');
-    expect(firstPlan).toBeGreaterThan(-1);
-    expect(load).toBeGreaterThan(-1);
-    expect(rePlan).toBeGreaterThan(-1);
+    expect(read, 'the route must not grow its own second copy of this read').toBeGreaterThan(-1);
+    expect(sandbox, 'the manifests come from the live sandbox — the freshest truth mid-build').toBeGreaterThan(-1);
     expect(refusal).toBeGreaterThan(-1);
-    // The order IS the fix: load and re-plan must both happen before anything is refused.
-    expect(firstPlan).toBeLessThan(load);
-    expect(load).toBeLessThan(rePlan);
-    expect(rePlan).toBeLessThan(refusal);
+    expect(read).toBeLessThan(refusal);
+    // The full-source loader is handed to the read, so the re-plan cannot be skipped by this route.
+    expect(seg.slice(read, refusal)).toContain('loadWorkspaceFiles(workspaceId)');
   });
 
-  it('the sandbox manifests still win over the durable copies', () => {
-    // `{ ...src, ...planFiles }` and not the reverse — planFiles is read from the live sandbox and is
-    // the freshest truth about what this app declares.
-    expect(publishRoute()).toContain('planDeployment({ ...src, ...planFiles })');
+  it('the route no longer plans inline — one staged read for the whole product', () => {
+    const seg = publishRoute();
+    expect(seg).not.toContain('planDeployment(planFiles)');
+    expect(seg).not.toContain('planDeployment({ ...src, ...planFiles })');
   });
 
   it('the workspace files are loaded ONCE and reused by the wiring analysis', () => {
@@ -125,11 +133,30 @@ describe('Publish classifies the app from its real files, not its manifests alon
     expect(seg).toContain('analyzeApiWiring(src)');
   });
 
-  it('the ordinary static publish pays NOTHING for this — the load is inside the refusal branch', () => {
+  /**
+   * 🔴 THIS TEST USED TO ENCODE THE BUG AS A REQUIREMENT, which is why the bug survived a fix, a
+   * regression test and two months.
+   *
+   * It asserted `if (!plan.staticHostingSufficient)` came BEFORE the full read — i.e. that the real
+   * files are read ONLY for an app the four manifests already suspect of having a server. Measured on
+   * `main`: a plain `node:http` app's manifest classifies as `unknown` with
+   * `staticHostingSufficient: true`, so that guard was exactly what stopped the source from ever being
+   * read, and the app was published as a static site with its API dead — Q-707, reopened by its own
+   * cost optimisation. A test that pins the guard pins the hole.
+   *
+   * The cost guarantee it was protecting is REAL and is kept — it just has to be stated as the
+   * guarantee rather than as one line of code: an app stage 1 CONCLUDES about (an `spa`, a plain
+   * `static` site — the ordinary case) pays one small manifest read and nothing more. That is pinned
+   * on real inputs in `appServerHalf.test.ts` ("an ordinary static app never pays for the full read"),
+   * where it cannot be satisfied by a guard that happens to sit in the right place.
+   */
+  it('the cost guarantee is kept, and pinned where it can be MEASURED rather than read', () => {
     const seg = publishRoute();
-    const guard = seg.indexOf('if (!plan.staticHostingSufficient)');
-    const load = seg.indexOf('loadWorkspaceFiles(workspaceId)');
-    expect(guard).toBeGreaterThan(-1);
-    expect(guard).toBeLessThan(load);
+    // The route hands the loader to the staged read instead of calling it unconditionally, so the
+    // read's own gate decides — and that gate is tested on inputs, not on text.
+    expect(seg).toContain('full: () => loadWorkspaceFiles(workspaceId)');
+    expect(seg, 'an unconditional load here would charge every static publish').not.toMatch(
+      /const src = await loadWorkspaceFiles/,
+    );
   });
 });

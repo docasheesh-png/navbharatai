@@ -167,6 +167,16 @@ export interface HostingChooserProps {
    * The server has always sent the code; this is the branch that finally reads it.
    */
   publishRefusalCode?: string;
+  /**
+   * 🔴 THE APP'S OWN SHAPE, READ BEFORE ANY PRESS (admin 2026-10-17: "backend connect ko simple
+   * banao"). Without it this panel could only learn about a server half from a publish REFUSAL, so
+   * every such user's first step was a failure. See src/server/AgentV3/appServerHalf.ts.
+   *
+   * ⚠️ It is NOT fed into `publishRefusalCode`: that would fire `shouldAutoDeployBackend`, which
+   * watches the transition into a refusal code so that reopening a panel cannot start a deploy in
+   * someone's own Render account. The fact shows the card; a fresh refusal drives the auto-deploy.
+   */
+  serverHalf?: { canDeploy: boolean; keySource: 'user' | 'server' | null } | null;
   /** Whose backend-hosting key the server resolved, so the offer can name the account honestly. */
   backendKeySource?: BackendKeySource;
   /**
@@ -239,7 +249,7 @@ export function HostingChooser({
   providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr, navActions,
   liveUrl, onUnpublish, onRollback, onLoadMyApps, onUnpublishApp, siteAnalytics, onLoadSiteAnalytics, onLoadRollbackChoices, onLoadSiteConfig, onSaveSiteConfig,
   ownRepo, githubConnected, onConnectGitHub, onRepoPushed, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
-  publishRefusalCode, backendKeySource, deployRepo,
+  publishRefusalCode, backendKeySource, deployRepo, serverHalf,
 }: HostingChooserProps) {
   const [view, setView] = useState<'choose' | 'domain' | 'selfhost' | 'myapps'>('choose');
   // VISITOR COUNTS (ROADMAP §13, 1.1): loaded the moment a live app is on screen, because "did
@@ -306,9 +316,13 @@ export function HostingChooser({
   // IDE's Git panel. So the refusal sent people to a button that, from here, did not exist.
   const backendOffer = backendDeployOffer({
     code: publishRefusalCode,
+    // The fact, as the FALLBACK — a real refusal is fresher and more specific, so it still wins.
+    serverHalf: serverHalf ?? null,
     ownRepo: deployRepo ?? ownRepo ?? null,
     githubConnected,
-    keySource: backendKeySource ?? null,
+    // A refusal names whose key it resolved; before any refusal the status read knows the same thing,
+    // and the card has to say it or it sends the user to a one-time step that cannot close the loop.
+    keySource: backendKeySource ?? serverHalf?.keySource ?? null,
     workspaceId,
   });
   const [backendBusy, setBackendBusy] = useState(false);

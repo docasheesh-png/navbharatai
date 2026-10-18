@@ -162,18 +162,33 @@ describe('🔒 the wiring, end to end', () => {
    * not about whether it may exist — so it is now asserted as such, which is strictly stronger than
    * the blanket ban it replaces.
    */
-  it('🔒 the whole-workspace read happens ONLY for an app already judged non-static', () => {
+  /**
+   * 🔁 REPOINTED A SECOND TIME, AND THE REASON IS THE SAME ONE WRITTEN ABOVE (2026-10-17).
+   *
+   * The docblock above records that an earlier absolute — "the manifests by path, NEVER the whole
+   * workspace" — was what pinned this route to a verdict formed on manifests alone. The replacement
+   * asserted `if (!plan.staticHostingSufficient)` before the full read, and that guard was the NEXT
+   * version of the same mistake: measured on `main`, a plain `node:http` app's manifest classifies as
+   * `unknown` with `staticHostingSufficient: true`, so the guard is precisely what stopped the source
+   * from ever being read. This screen then said "one last step: press Publish" about an app publish
+   * could only ship broken — Q-707 again, through the cost optimisation both routes shared.
+   *
+   * The guarantee stays real and stays asserted: the cheap by-path read runs first for every app, and
+   * the whole-workspace read is handed to the shared staged read rather than called outright, so its
+   * own gate — tested on inputs in `appServerHalf.test.ts`, not on the position of a line — decides.
+   */
+  it('🔒 the cheap read runs first, and the full read is the staged read\'s to make', () => {
     const route = src('src/server/routes/nbaiDomains.ts');
     const blockAt = route.indexOf("if (serving?.state !== 'serving') {");
-    const block = route.slice(blockAt, route.indexOf('return { ...status',blockAt));
-    const guardAt = block.indexOf('if (!plan.staticHostingSufficient) {');
-    // Re-anchored 2026-09-07: the block moved into formDomainVerdict, whose parameter is typed, so the
-    // `as string` cast is gone. The ordering property below is unchanged.
-    const readAt = block.indexOf('loadWorkspaceFiles(workspaceId)');
-    expect(guardAt).toBeGreaterThan(-1);
-    expect(readAt).toBeGreaterThan(guardAt); // inside the escalation, never on the hot path
-    // And the cheap by-path read still runs first, for every app.
-    expect(block.indexOf('loadWorkspaceFilesByPath')).toBeLessThan(guardAt);
+    const block = route.slice(blockAt, route.indexOf('return { ...status', blockAt));
+    const byPathAt = block.indexOf('loadWorkspaceFilesByPath');
+    const readAt = block.indexOf('readServerHalf({');
+    expect(byPathAt, 'the four manifests, by path, for every app').toBeGreaterThan(-1);
+    expect(readAt, 'one staged read for the whole product — never a third copy').toBeGreaterThan(-1);
+    expect(byPathAt).toBeLessThan(readAt);
+    // The loader is PASSED, not called: an unconditional read here would charge every status poll.
+    expect(block).toContain('full: () => loadWorkspaceFiles(workspaceId)');
+    expect(block).not.toMatch(/src = await loadWorkspaceFiles/);
   });
 
   it('the screen hides the button it knows cannot work', () => {

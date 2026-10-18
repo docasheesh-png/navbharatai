@@ -34,6 +34,6 @@ describe('a rung that has not sent its first byte gets time to start', () => {
   });
   it('the never-opened bound (planner and builder) uses the same first-byte grace', () => {
     const src = readFileSync('src/server/AgentV3/providers/OpenAiToolRunner.ts', 'utf8');
-    expect(src).toMatch(/Math\.min\(firstAnswerMs, streamFirstByteGraceMs\(\)\)/);
+    expect(src).toMatch(/Math\.min\(firstAnswerMs, params\.firstByteGraceMs \?\? streamFirstByteGraceMs\(\)\)/); // the earned grace, else the configured one (owner 2026-10-18)
   });
 });

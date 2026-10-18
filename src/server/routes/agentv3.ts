@@ -286,6 +286,7 @@ import { runningBuilds, runningBuildCount, __setRunningBuildForTest, type Runnin
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
+import { startImportDurableSave, settleImportDurableSave, IMPORT_DURABLE_SETTLE_MS } from '../AgentV3/importDurableSave';
 import { announceBuildFinished, announceDeploy, serverPublishOutcome } from '../lib/userWebhookEvents';
 // The balance warning goes through ONE door now (admin 2026-09-22). It was a raw push on the block
 // branch with no cooldown — five refused builds were five pushes — and the "running low" half had no
@@ -668,6 +669,7 @@ import { withRequestNotes, requestNotesFor } from '../AgentV3/requestNotes';
 import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
+import { isAnswerOnlyTurn, previewFailedSeverity, previewFailedNarration, decideAnswerOnlyGate } from '../AgentV3/answerOnlyTurn';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
@@ -11954,6 +11956,8 @@ async function noteBuildOutcome(
     // success (not a failed/escalated build), and the mandatory readiness gate must not audit the
     // user's freshly-imported existing code and declare it "NOT READY". Set by the zip + URL landers.
     let isImportTurn = false;
+    /** Durable saves an import started this turn — settled once, bounded, before the report (importDurableSave.ts). */
+    const importDurableSaves: Array<Promise<unknown>> = [];
     // Fix 41: a failed GitHub-URL import (private/no-access/bad-url) recorded here so the architect
     // prompt can acknowledge it instead of re-asking the user for the URL they already gave.
     let failedImport: { url: string; reason: string } | null = null;
@@ -12101,29 +12105,19 @@ async function noteBuildOutcome(
       }
       // DURABLE PERSIST — the half whose absence caused "zip imported but Files/IDE/Preview all
       // empty": without it the import lives only in the ephemeral sandbox.
-      try { opts.diag?.enterPhase?.('saving your project so it survives a restart'); } catch { /* best-effort */ }
       /**
-       * 🔒 THE SAVE IS CHECKED, NOT ASSUMED (autopsy d0b2fcd6, Q-735). This line used to be best-effort and
-       * silent: when the commit timed out, the user's 175-file app stayed out of the durable index and the
-       * whole turn treated it as our starter. A store that did not save it says so — to the admin report and,
-       * in plain words, to the user — instead of the next turn quietly losing it.
+       * 🔒 THE SAVE IS CHECKED, NOT ASSUMED (autopsy d0b2fcd6, Q-735) — and since build d62bf22d it no longer
+       * holds the turn: that save waited ~89 s of a 97 s first model call on four DEADLINE_EXCEEDED. The project
+       * is already in the workspace, so the save runs beside the turn and is settled, bounded, before the report
+       * (`settleImportDurableSave`). A save that did not complete still says so — to the report and the user.
        */
-      try {
-      const durable = await mergeWorkspaceFiles(workspaceId, importedFiles).catch((e) => ({ status: 'failed' as const, indexed: 0, unconfirmed: Object.keys(importedFiles), error: String(e) }));
-      if (durable.status === 'failed' || durable.status === 'partial') {
-        try {
-          opts.diag?.record({
-            phase: 'build', severity: 'warning', code: 'IMPORT_NOT_DURABLE', autoResolved: false,
-            message: `The imported project is in the workspace, but the durable copy holds ${durable.indexed} of ${Object.keys(importedFiles).length} file(s) — ${durable.unconfirmed.length} could not be confirmed saved.`,
-            detail: `${durable.status}${durable.error ? ` · ${durable.error}` : ''} · unconfirmed: ${durable.unconfirmed.slice(0, 20).join(', ')}`,
-          });
-        } catch { /* diagnostics are best-effort */ }
-        emit({
-          type: 'narration', agent: 'architect', ts: Date.now(),
-          text: `⚠️ Your project is here and working in this session, but ${durable.unconfirmed.length} of its ${Object.keys(importedFiles).length} files could not be saved permanently yet. Keep this chat open; if it restarts, import the project again.`,
-        });
-      }
-      } finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
+      const saveImport = () => mergeWorkspaceFiles(workspaceId, importedFiles);
+      importDurableSaves.push(startImportDurableSave({
+        save: saveImport,
+        total: Object.keys(importedFiles).length,
+        record: (r) => { try { opts.diag?.record(r); } catch { /* diagnostics are best-effort */ } },
+        narrate: (text) => emit({ type: 'narration', agent: 'architect', ts: Date.now(), text }),
+      }));
       framework = validation.framework;
       // TELL THE REPORT (autopsy d6deaaf0): the diagnostics object captured `framework` at build
       // start, before the import existed, so it kept the request default while the manifest recorded
@@ -18474,6 +18468,8 @@ async function noteBuildOutcome(
        * game in it. With no kit seeded this is exactly `writtenFiles.size`.
        */
       const builderWroteCount = (): number => builderWrittenCount(writtenFiles, kitSeededFiles);
+      /** Not asked to build and wrote nothing: the gate describes, it does not judge (build d62bf22d, answerOnlyTurn.ts). */
+      const answerOnlyNow = (): boolean => isAnswerOnlyTurn({ expectsArtifacts, builderWrote: builderWroteCount() });
       /** Why a game build did not get the kit — said in FAST_LANE_SKIPPED_GAME, never left implied. */
       let gameKitSkipReason = '';
       let gameKitSeedFailed = false;
@@ -23015,8 +23011,8 @@ async function noteBuildOutcome(
             // UNRESOLVED ERROR so buildHealthFromDiagnostics marks the build NOT READY — a crashing app must
             // never show "READY". (The syntax gate catches a COMPILE break; this catches the RUNTIME class
             // — an uncaught TypeError / a missing prop called as a function — that the parser can't see.)
-            buildDiag.record({ phase: 'preview', severity: 'error', code: 'OUTCOME_PREVIEW_FAILED', message: `The live preview did not render/run cleanly after ${healMax} repair attempt(s): ${problems.slice(0, 3).join('; ')}`.slice(0, 500), autoResolved: false });
-            events.emit({ type: 'narration', agent: 'architect', text: `⚠️ I checked the live preview and it did not fully render: ${problems.slice(0, 3).join('; ')}. Your files are saved — send a follow-up and I'll fix it.`, ts: Date.now() });
+            buildDiag.record({ phase: 'preview', severity: previewFailedSeverity(answerOnlyNow()), code: 'OUTCOME_PREVIEW_FAILED', message: `The live preview did not render/run cleanly after ${healMax} repair attempt(s): ${problems.slice(0, 3).join('; ')}`.slice(0, 500), autoResolved: false });
+            events.emit({ type: 'narration', agent: 'architect', text: previewFailedNarration(answerOnlyNow(), problems), ts: Date.now() });
             break;
           }
           events.emit({ type: 'narration', agent: 'architect', text: `🔍 I opened the preview and it didn't render correctly (${problems[0]}). Fixing it now…`, ts: Date.now() });
@@ -24129,6 +24125,8 @@ async function noteBuildOutcome(
             }),
           });
         } catch { /* an observation must never affect the verdict it precedes */ }
+        // 🔴 A TURN THAT ONLY ANSWERED IS DESCRIBED BY THE GATE, NOT JUDGED BY IT (build d62bf22d, answerOnlyTurn.ts).
+        const answerOnlyGate = decideAnswerOnlyGate(answerOnlyNow(), gate.state, buildDiag);
         buildDiag.record({
           phase: 'readiness',
           // UNKNOWN is a warning, not an info: "we could not tell" is a finding about our own coverage,
@@ -24153,6 +24151,7 @@ async function noteBuildOutcome(
             // The CORRECTED prediction (autopsy 50378049): a module turn with a live address is not "not yet due".
             awaitsShell: !!gateEvidence.awaitingShell,
           }),
+          ...answerOnlyGate.record, // {} on every turn that was asked to build (answerOnlyTurn.ts)
           code: 'RELEASE_GATE',
           message: releaseGateSummary(gate),
         });
@@ -24214,7 +24213,7 @@ async function noteBuildOutcome(
         //     Off, this block behaves exactly as before. It does not change a price.
         const gateBlockers = buildDiag.shippingIssueCount('error');
         const runtimeRed = runtimeRedFlipEnabled() && runtimeProven(gateEvidence) === 'failed';
-        const settled = result; // captured once — `result` is reassigned in the heal loop above
+        const settled = answerOnlyGate.answerOnly ? undefined : result; // captured once; an answer-only turn has no verdict to correct
         if (gate.state === 'red' && (gateBlockers > 0 || runtimeRed) && settled && settled.ok) {
           // …UNLESS THE APP HAS ALREADY BEEN PROVEN TO RUN (runProvenApp.ts, autopsy e706e068). A RED
           // built from STATIC findings — a placeholder in a stray file, a forecast about the bundle —
@@ -26478,6 +26477,7 @@ async function noteBuildOutcome(
        * pass — build e52cebbf rendered at the in-build check and was stopped before the final one, and
        * was billed as an app that never ran. Both money rules read this one name, never their own copy.
        */
+      await settleImportDurableSave(importDurableSaves, IMPORT_DURABLE_SETTLE_MS, (r) => buildDiag.record(r));
       const appSeenRunningForBill = buildObs.previewRendered === true || renderProvenNow();
       const markupDecision = decideMarkupOnProof({
         decidedBilledUsd: effectiveBilledUsd,

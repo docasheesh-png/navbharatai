@@ -97040,6 +97040,132 @@ derivation took `max(open ∪ closed)` on this branch and **Q-1140 is already cl
 is unmerged and therefore in neither file here. Earlier the same day the same derivation took the open
 table alone and landed on a closed id. A new id must clear the open table, the closed register **and
 the ids claimed by open PRs** — the last of which no file on a branch can see.
+## 2026-10-18 — Q-979 measured for the first time, and the row named the wrong function
+
+Q-979 has been open since 2026-10-13 saying *"the `/build` route handler in routes/agentv3.ts"* sits at
+TypeScript's control-flow limit. **There is no `/build` route.** Measured across every `app.get` /
+`app.post` in that file:
+
+```
+/api/agentv3/chat               17,595 raw lines   (2,501 with comments stripped)
+/api/agentv3/publish               444
+/api/agentv3/preview-diagnose      381
+```
+
+The nine modules that carry a comment about this limit — `FastLaneBudget`, `thirdPartyLimits`,
+`gateRedNotice`, `handoffRule`, `finishingPassesAtCap`, `leftoverComponents`, `ProjectPlan` and others
+— all say **"the CHAT handler"**. The row was the odd one out, and a row that misnames its own subject
+sends the next session hunting a function that does not exist. Corrected by adding the measurement to
+the row, not by erasing what it said.
+
+**First real measurement of the margin: 549 branch tokens** (if 147 · && 171 · || 42 · ?? 37 ·
+ternary 152), comments stripped. Nobody had measured it in the five days the row was open.
+
+### The pain is not the size — it is the surprise
+
+TS2563 counts the flow joins for **one reference**, so it trips in whichever PR happens to add the last
+few branches, and lands as a red CI **naming a file that PR never touched**. That happened twice in one
+day (Q-978, then Q-975 on top of #3692). The size is a slow problem; the ambush is the sharp one.
+
+`tests/theChatHandlerHasHeadroom.test.ts` now fails **first**, and its message is the instruction:
+*put the new condition in a module function and call it* — the pattern every TS2563-aware module in
+`src/server/AgentV3` already follows. The budget is a **ratchet**: it may only go down (lower it when a
+block moves out, never raise it to make a PR pass), and it is labelled honestly as a **proxy** — it
+counts branch tokens in the whole handler, not the compiler's own per-reference threshold, and the two
+numbers are not comparable.
+
+Reversion proven: one harmless branch added inside the handler → two tests fail, with the instruction.
+
+**Q-979 stays OPEN.** Its own prescription still stands — headroom, not a mass rewrite, moving
+self-contained blocks out one PR at a time. This change buys none of that headroom; it only makes the
+wall visible before someone walks into it.
+
+### And the shape of Q-979's problem, measured — plus why the refactor was NOT started tonight
+
+The handler is not 17,595 lines of evenly-spread logic. It is **~3,600 lines of setup plus ONE `try`
+block (raw 13860) that holds 13,933 of them**; of its 55 depth-1 blocks the next biggest is 76
+branches / 225 lines. Every candidate the row names lives inside that one try. Its 217 children, ranked:
+
+| # | branches | lines | raw line | what it is |
+|---|---|---|---|---|
+| 1 | 178 | 967 | 20372 | the third-party-limits / ad-serving pass |
+| 2 | 149 | 732 | 18631 | `if (fastLaneWouldRun …)` — the row's own "fast-lane setup" |
+| 3 | 136 | 573 | 24977 | the reviewer / bug-hunt finishing pass |
+| 4 | 126 | 768 | 15051 | the own-repo working-branch (GitHub) storage pass |
+| 5 | 35 | 156 | 26501 | the ₹0-bill rule for a build that wrote nothing |
+
+Take them in that order, one PR each, and **(5) last or never** — it is a money rule, and the first
+absolute rule outranks tidiness. Each PR proves itself by **lowering `BRANCH_BUDGET`** with the full
+suite green, which is the first time this work has had a measurable finish line.
+
+**Not started tonight, on purpose.** Extracting a block from the build engine's main handler is a
+judgement about what that block really touches, and a wrong judgement breaks the core product — while
+CI has been failing in 3–4 seconds all day (Q-1131), so only a local gate could verify it. Safeguard #3
+and the 60-second rule's *"safe ambitious path, never a reckless one"* both say wait for the real
+pipeline. The measurement is the part that costs nothing and makes the refactor fast and safe when it
+does start.
+## 2026-10-17 — nine rows closed: every owner PR verified in `main`, none of them merged by this session
+
+`#3773 · #3779 · #3782 · #3784 · #3785 · #3788 · #3789 · #3791` — all nine confirmed present in
+`origin/main` by their merge commits rather than by a PR page, then their rows moved out of the open
+table and their IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` **in the same commit**
+(the #3543 lesson: a queue edited from a stale copy silently reopens closed rows).
+
+Closed: **Q-887** (no upstream body reaches the browser) · **Q-889** (one encoded redirect value, Host
+shape-checked) · **Q-890** (the paid-vs-recorded check cannot be skipped) · **Q-1023** (the
+parenthetical says what actually counts) · **Q-1132** (the flow read waits for the frames its verdict
+needs) · **Q-1136** (the DNS check says only what it checked) · **Q-1137** (a named action is reachable
+on every host) · **Q-1138 + Q-1139** (backend connect without failing first; Q-707 reopened by its own
+cost gate; and the third definition my own census could not see).
+
+**Stated plainly because it matters for the audit trail: this session merged none of them.** CI has been
+failing in 3–4 seconds all day — every run, `main` included, with log download answering HTTP 404 (the
+Q-1082/Q-1131 symptom) — so the standing rule "CI green before any merge" meant holding. The merges were
+made elsewhere. The nine changes were each gated locally on the full CI-equivalent suite first, and the
+last of them on the merged state after `main` moved mid-change.
+
+Open root cause unchanged: **Q-1131 needs the admin** — GitHub Actions is failing at the platform level,
+not in this repo's workflow (ruled out by measurement: 8 runs, 4 branches, 3–4 s each, no logs, and
+`ci.yml` had 8 passing runs after its last change).
+
+## 2026-10-17 — Q-1140: one route to the deploy control, named by all three surfaces that name it
+
+The last piece of the admin's *"backend connect ko simple banao"*, and the one surface that had been
+missed: the build's closing **"what this app still needs"** notice — the only place that reaches the
+user without them opening any screen. All three of its branches described the situation and stopped.
+`included` read *"publish it when you are ready"*, and for a bare-server app **Publish refuses**;
+`buy` and `none` read *"host it yourself"* — true, and unactionable for a non-technical owner.
+
+Same class as Q-1136 and Q-1137 earlier the same day: **naming an action without a path to it.** Every
+branch now appends the route, and the plans offer is untouched where it was already right — `buy`
+keeps its Billing button; `included` and `none` still offer none, because selling a plan they already
+hold, or one we could not read, is what that row's own docblock forbids.
+
+**And the route now has ONE home.** `DEPLOY_BACKEND_ROUTE` sits in `src/lib` beside
+`DEPLOY_BACKEND_LABEL`, which is shared for exactly this reason. Three surfaces name it — the domain
+screen (Q-1137), this notice, the Publish panel (Q-1139) — and three copies agree only until one is
+edited. A route that is subtly wrong in *one* place is worse than no route: the user follows it, finds
+nothing, and stops believing the next instruction too. A repo-wide census fails on any second literal
+copy.
+
+It stays **English** inside the localised notices, exactly as `Plans` / `Database` / `Publish` already
+do there: it names buttons whose own labels are English on the screen it sends them to, and a
+translated route would send someone hunting for a button that is not there.
+
+### What was measured and deliberately NOT built
+
+A separate **domain row** ("your domain is connected and waiting"). `connectActions.ts` has recorded
+since 2026-09-20 that such a row needed a verified domain status, and **that fact now exists** — so it
+was buildable. It was dropped anyway: its case (domain linked · not serving · app needs a server) is a
+strict **subset** of the server row's own trigger, so it would have been a second line about one
+problem, paid for with a live DNS/HTTP probe on every build. Recorded in the row and in the module, so
+the next session reads the reason rather than rediscovering the idea.
+
+### A process note, because it cost a red test
+
+This row was first numbered **Q-1136** — I took the max id from the OPEN table alone, minutes after
+closing Q-1136–Q-1139 *out* of it. `aClosedQueueRowStaysClosed` failed immediately, which is the guard
+doing precisely its job. A new id is `max(open ∪ closed) + 1`, never the open table alone.
 ---
 
 ## 2026-10-17 — Q-1133 RESOLVED: a GitHub failure is answered in our own words, and the hunt found a fifth site

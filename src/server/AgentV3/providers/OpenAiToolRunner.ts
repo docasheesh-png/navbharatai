@@ -33,7 +33,7 @@ import {
   streamHardCapMs,
   streamIdleMs,
   streamIsCrawling,
-  streamThroughputGraceMs,
+  streamFirstByteGraceMs,
   type OpenAiStreamChunkLike,
   type StreamStopCause,
 } from './openAiStream';
@@ -521,7 +521,7 @@ export class OpenAiToolRunner implements TurnRunner {
     // a crawling stream is (autopsy 1389f0d5: a silent first rung held the build for 60 s before the next
     // rung was tried). Same message, so the ladder's crawl accounting — not the timeout bench — decides.
     const silentBoundMs = streaming && params.canAbandonSlowStream?.({ peek: true })
-      ? Math.min(firstAnswerMs, streamThroughputGraceMs())
+      ? Math.min(firstAnswerMs, streamFirstByteGraceMs()) // zero bytes = queued: the first-byte grace (owner, 2026-10-18)
       : null;
     const initialBoundMs = silentBoundMs ?? firstAnswerMs;
     const providerWentSilent = streaming && firstAnswerMs < timeoutMs;

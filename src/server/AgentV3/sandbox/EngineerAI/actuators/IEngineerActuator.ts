@@ -18,14 +18,25 @@ export interface BackendProvisionResult {
   dbDiagnostics?: string;
 }
 
+/** Options for `ensureWorkspace`. */
+export interface EnsureWorkspaceOptions {
+  /** Default true. False = do not seed (or complete) our starter template — the import path. */
+  seedStarter?: boolean;
+}
+
 export interface IEngineerActuator {
   /**
    * Prepare the workspace. If `resumeSandboxId` is provided, reconnect to that
    * (possibly paused) sandbox — restoring its files, node_modules, and any
    * running dev server — instead of creating a fresh one. Falls back to a new
    * sandbox if the resume target no longer exists.
+   *
+   * `opts.seedStarter: false` — never write our starter template into a FRESH workspace (and never
+   * "complete" a starter fragment). An import's workspace must hold the user's project and nothing of
+   * ours (build d62bf22d: the 11-file starter seeded before a GitHub import was later judged "the app").
+   * `projectType === 'import'` means the same thing.
    */
-  ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void>;
+  ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string, opts?: EnsureWorkspaceOptions): Promise<void>;
   /**
    * Return (and CLEAR) the scaffold-template files the most recent `ensureWorkspace` seeded into a
    * fresh sandbox, as workspace-relative path→content. These bypass the write-tracking hook, so the

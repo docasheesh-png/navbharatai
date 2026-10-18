@@ -1,3 +1,4 @@
+import { shouldSeedStarter } from './seedStarter';
 import { Sandbox } from 'e2b';
 import { parseNpmAuditSummary } from '../../../npmAuditSummary';
 import { shouldRunAuditFix, AUDIT_FIX_COMMAND, AUDIT_FIX_TIMEOUT_MS } from '../../../npmAuditFix';
@@ -6,7 +7,7 @@ import type { CommandHandle } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
 import { starterFilesToComplete, MAX_FRAGMENT_FILES, isOurStarterFile, starterTemplates } from '../../../starterFragment';
 import { applyStrictTrial } from '../../../strictTrial';
-import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
+import { IEngineerActuator, BackendProvisionResult, EnsureWorkspaceOptions } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
 import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS, buildPrebundleStaleCheckCommand, VITE_PREBUNDLE_DIR } from './devServerHost';
@@ -1754,10 +1755,10 @@ export class E2BActuator implements IEngineerActuator {
    */
   private readonly _ensuring = new Map<string, Promise<void>>();
 
-  async ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
+  async ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string, opts?: EnsureWorkspaceOptions): Promise<void> {
     const inFlight = this._ensuring.get(workspaceId);
     if (inFlight) return inFlight;
-    const run = this._ensureWorkspaceOnce(workspaceId, projectType, resumeSandboxId)
+    const run = this._ensureWorkspaceOnce(workspaceId, projectType, resumeSandboxId, shouldSeedStarter(projectType, opts))
       .finally(() => { if (this._ensuring.get(workspaceId) === run) this._ensuring.delete(workspaceId); });
     this._ensuring.set(workspaceId, run);
     return run;
@@ -1774,18 +1775,18 @@ export class E2BActuator implements IEngineerActuator {
    * whose app then rendered in a real browser 12 minutes later was reported as never having run and
    * made free. So setup gets the same recovery, once: drop the corpse, try again.
    */
-  private async _ensureWorkspaceOnce(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
+  private async _ensureWorkspaceOnce(workspaceId: string, projectType?: string, resumeSandboxId?: string, seedStarter = true): Promise<void> {
     try {
-      return await this._ensureWorkspaceAttempt(workspaceId, projectType, resumeSandboxId);
+      return await this._ensureWorkspaceAttempt(workspaceId, projectType, resumeSandboxId, seedStarter);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (!isDeadSandboxError(msg) && !/ timed out after /.test(msg)) throw e;
       this._dropSandbox(workspaceId);
-      return await this._ensureWorkspaceAttempt(workspaceId, projectType, resumeSandboxId);
+      return await this._ensureWorkspaceAttempt(workspaceId, projectType, resumeSandboxId, seedStarter);
     }
   }
 
-  private async _ensureWorkspaceAttempt(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
+  private async _ensureWorkspaceAttempt(workspaceId: string, projectType?: string, resumeSandboxId?: string, seedStarter = true): Promise<void> {
     // Per SETUP, not per machine (autopsy 3d1bfe2a): a second build on the same machine reprinted the
     // first build's "completed 11 missing template file(s)" although this setup put back nothing.
     this._starterCompleted.delete(workspaceId);
@@ -1801,12 +1802,18 @@ export class E2BActuator implements IEngineerActuator {
       // 🔴 …unless what is there is only a PIECE of our own starter (autopsy 19641ab5, starterFragment.ts):
       // "the directory exists" is not "the project is set up". Best-effort and bounded; a failure here is
       // today's behaviour exactly.
-      await this._completeStarterFragment(sandbox, workspaceId, projectType).catch(() => {});
+      // An import's workspace is the user's project — never completed into our starter (build d62bf22d).
+      if (seedStarter) await this._completeStarterFragment(sandbox, workspaceId, projectType).catch(() => {});
       this._kickoffPlaywright(sandbox, workspaceId);
       return;
     }
 
     await withTimeout(sandbox.files.makeDir(WORKSPACE_ROOT), 15_000, 'files.makeDir');
+
+    // 🔴 AN IMPORT STARTS EMPTY (build d62bf22d). `'import'` used to fall through `_templateFilesFor` to
+    // vite-react, so the "empty" import workspace got our 11-file starter, the import landed beside it, and
+    // the leftover src/App.tsx + root index.html were later judged "the app is still the starter".
+    if (!seedStarter) { this._kickoffPlaywright(sandbox, workspaceId); return; }
 
     // Resolve template: fall back to vite-react for unknown/auto types (`_templateFilesFor`, shared with
     // the starter-fragment completion so the two can never seed different templates).

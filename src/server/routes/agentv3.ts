@@ -286,6 +286,7 @@ import { runningBuilds, runningBuildCount, __setRunningBuildForTest, type Runnin
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
+import { startImportDurableSave, settleImportDurableSave, IMPORT_DURABLE_SETTLE_MS } from '../AgentV3/importDurableSave';
 import { announceBuildFinished, announceDeploy, serverPublishOutcome } from '../lib/userWebhookEvents';
 // The balance warning goes through ONE door now (admin 2026-09-22). It was a raw push on the block
 // branch with no cooldown — five refused builds were five pushes — and the "running low" half had no
@@ -515,7 +516,7 @@ import { estimateTokens, contextUsage, tightestContextModel } from '../AgentV3/T
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, lastGroundingCost } from '../AgentV3/ContextReranker';
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince } from '../AgentV3/renderCheckConsole';
+import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince, splitAuthRefusals } from '../AgentV3/renderCheckConsole';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
 import { fillGateFromLedger, renderProvenInLedger } from '../AgentV3/evidenceLedger';
 import { appRenderedRecord } from '../AgentV3/renderProof';
@@ -668,6 +669,7 @@ import { withRequestNotes, requestNotesFor } from '../AgentV3/requestNotes';
 import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
+import { isAnswerOnlyTurn, previewFailedSeverity, previewFailedNarration, decideAnswerOnlyGate } from '../AgentV3/answerOnlyTurn';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
@@ -692,7 +694,7 @@ import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess, summaryAfterRescue } from '../AgentV3/renderRescue';
-import { entryIsStillTheStarter, starterRenderNote } from '../AgentV3/stillTheStarterApp';
+import { entryIsStillTheStarter, starterRenderNote, importNeverTheStarter } from '../AgentV3/stillTheStarterApp';
 import { readProjectElsewhere, shouldAnswerProjectElsewhere, projectElsewhereSteer, projectElsewhereFallback } from '../AgentV3/projectElsewhere';
 import { runProvenApp, verdictHeldMessage, type ProdBuildOutcome, type LateFlip } from '../AgentV3/runProvenApp';
 import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewPort } from '../AgentV3/deliveryProof';
@@ -11954,6 +11956,8 @@ async function noteBuildOutcome(
     // success (not a failed/escalated build), and the mandatory readiness gate must not audit the
     // user's freshly-imported existing code and declare it "NOT READY". Set by the zip + URL landers.
     let isImportTurn = false;
+    /** Durable saves an import started this turn — settled once, bounded, before the report (importDurableSave.ts). */
+    const importDurableSaves: Array<Promise<unknown>> = [];
     // Fix 41: a failed GitHub-URL import (private/no-access/bad-url) recorded here so the architect
     // prompt can acknowledge it instead of re-asking the user for the URL they already gave.
     let failedImport: { url: string; reason: string } | null = null;
@@ -12101,29 +12105,19 @@ async function noteBuildOutcome(
       }
       // DURABLE PERSIST — the half whose absence caused "zip imported but Files/IDE/Preview all
       // empty": without it the import lives only in the ephemeral sandbox.
-      try { opts.diag?.enterPhase?.('saving your project so it survives a restart'); } catch { /* best-effort */ }
       /**
-       * 🔒 THE SAVE IS CHECKED, NOT ASSUMED (autopsy d0b2fcd6, Q-735). This line used to be best-effort and
-       * silent: when the commit timed out, the user's 175-file app stayed out of the durable index and the
-       * whole turn treated it as our starter. A store that did not save it says so — to the admin report and,
-       * in plain words, to the user — instead of the next turn quietly losing it.
+       * 🔒 THE SAVE IS CHECKED, NOT ASSUMED (autopsy d0b2fcd6, Q-735) — and since build d62bf22d it no longer
+       * holds the turn: that save waited ~89 s of a 97 s first model call on four DEADLINE_EXCEEDED. The project
+       * is already in the workspace, so the save runs beside the turn and is settled, bounded, before the report
+       * (`settleImportDurableSave`). A save that did not complete still says so — to the report and the user.
        */
-      try {
-      const durable = await mergeWorkspaceFiles(workspaceId, importedFiles).catch((e) => ({ status: 'failed' as const, indexed: 0, unconfirmed: Object.keys(importedFiles), error: String(e) }));
-      if (durable.status === 'failed' || durable.status === 'partial') {
-        try {
-          opts.diag?.record({
-            phase: 'build', severity: 'warning', code: 'IMPORT_NOT_DURABLE', autoResolved: false,
-            message: `The imported project is in the workspace, but the durable copy holds ${durable.indexed} of ${Object.keys(importedFiles).length} file(s) — ${durable.unconfirmed.length} could not be confirmed saved.`,
-            detail: `${durable.status}${durable.error ? ` · ${durable.error}` : ''} · unconfirmed: ${durable.unconfirmed.slice(0, 20).join(', ')}`,
-          });
-        } catch { /* diagnostics are best-effort */ }
-        emit({
-          type: 'narration', agent: 'architect', ts: Date.now(),
-          text: `⚠️ Your project is here and working in this session, but ${durable.unconfirmed.length} of its ${Object.keys(importedFiles).length} files could not be saved permanently yet. Keep this chat open; if it restarts, import the project again.`,
-        });
-      }
-      } finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
+      const saveImport = () => mergeWorkspaceFiles(workspaceId, importedFiles);
+      importDurableSaves.push(startImportDurableSave({
+        save: saveImport,
+        total: Object.keys(importedFiles).length,
+        record: (r) => { try { opts.diag?.record(r); } catch { /* diagnostics are best-effort */ } },
+        narrate: (text) => emit({ type: 'narration', agent: 'architect', ts: Date.now(), text }),
+      }));
       framework = validation.framework;
       // TELL THE REPORT (autopsy d6deaaf0): the diagnostics object captured `framework` at build
       // start, before the import existed, so it kept the request default while the manifest recorded
@@ -15075,7 +15069,8 @@ async function noteBuildOutcome(
           : undefined;
         const resumeLookupMs = Date.now() - setupT0;
         const ensureT0 = Date.now();
-        await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId);
+        // An import turn's workspace is the user's project, never our starter plus theirs (build d62bf22d).
+        await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId, hasImportIntent ? { seedStarter: false } : undefined);
         const ensureWorkspaceMs = Date.now() - ensureT0;
         try {
           buildDiag.recordSetupTiming({
@@ -16108,7 +16103,9 @@ async function noteBuildOutcome(
        * blocker uses, so the gate and the proofs cannot disagree about one file. An unreadable entry
        * answers `false` — our own trouble must never veto a real app's proof.
        */
-      const renderIsOnlyTheStarter = (): Promise<boolean> => entryIsStillTheStarter(
+      // 🔴 AN IMPORTED PROJECT IS NEVER "OUR STARTER" (build d62bf22d): a starter file left beside an import is
+      // ours, not the user's entry, so on an import turn the answer is always no (`importNeverTheStarter`).
+      const renderIsOnlyTheStarter = (): Promise<boolean> => importNeverTheStarter(isImportTurn) ? Promise.resolve(false) : entryIsStillTheStarter(
         (path) => withTimeout(actuator.readFile(workspaceId, path), 5_000, 'starter-entry-read'),
       ).catch(() => false);
       let inBuildStarterNoted = false;
@@ -18471,6 +18468,8 @@ async function noteBuildOutcome(
        * game in it. With no kit seeded this is exactly `writtenFiles.size`.
        */
       const builderWroteCount = (): number => builderWrittenCount(writtenFiles, kitSeededFiles);
+      /** Not asked to build and wrote nothing: the gate describes, it does not judge (build d62bf22d, answerOnlyTurn.ts). */
+      const answerOnlyNow = (): boolean => isAnswerOnlyTurn({ expectsArtifacts, builderWrote: builderWroteCount() });
       /** Why a game build did not get the kit — said in FAST_LANE_SKIPPED_GAME, never left implied. */
       let gameKitSkipReason = '';
       let gameKitSeedFailed = false;
@@ -21915,6 +21914,7 @@ async function noteBuildOutcome(
        */
       let starterNoted = false;
       const starterShownOn = async (html: string): Promise<string | null> => {
+        if (importNeverTheStarter(isImportTurn)) return null;
         if (!pageShowsStarter(html)) return null;
         try {
           for (const p of STARTER_ENTRY_PATHS) {
@@ -21936,6 +21936,26 @@ async function noteBuildOutcome(
        * your app instead of the starter page"), so it must not outlive the starter: a later look that sees the APP
        * render — a real render, and not the starter — answers it, exactly as a heal answers the finding it fixed.
        */
+      /**
+       * The console lines a RENDER CHECK may be judged by — a 401/403 echo from a logged-out page is not one
+       * (build d62bf22d; see `splitAuthRefusals`). Noted once per build, for the admin report, so the
+       * exclusion is visible rather than silent.
+       */
+      let authRefusalNoted = false;
+      const renderJudgingConsole = (lines: string[]): string[] => {
+        const { kept, authRefusals } = splitAuthRefusals(lines);
+        if (authRefusals.length > 0 && !authRefusalNoted) {
+          authRefusalNoted = true;
+          try {
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'PREVIEW_AUTH_REFUSAL_IGNORED', autoResolved: true,
+              message: `${authRefusals.length} console line(s) were only a 401/403 answer to a signed-out visitor (our check browser never signs in) — not counted against the render.`,
+              detail: authRefusals.slice(0, 3).join(' | ').slice(0, 400),
+            });
+          } catch { /* diagnostics are best-effort */ }
+        }
+        return kept;
+      };
       const starterChecked = async <V extends { rendered: boolean; inconclusive?: boolean; problems: string[] }>(verdict: V, html: string): Promise<V> => {
         const shown = await starterShownOn(html);
         // Re-armed when answered: if the starter ever came back, a later look would record it again.
@@ -22568,7 +22588,7 @@ async function noteBuildOutcome(
             hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined,
           }), shot.html);
           let consoleErrs: string[] = [];
-          try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: rescueCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
+          try { if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: rescueCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text)); } catch { /* console capture best-effort */ }
           // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the
           // first paint and crashes on a later re-render — a one-shot snapshot can't see it, so it must
           // veto the rescue (real report 8a6e4585: useMemo@useChartData.ts:86 crashed the preview the
@@ -22651,7 +22671,7 @@ async function noteBuildOutcome(
           const verdict = await starterChecked(analyzePreviewHtml(html, { painted: shot.painted, source: shot.source }), html);
           let consoleErrs: string[] = [];
           try {
-            if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: verifyCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text);
+            if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: verifyCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text));
           } catch { /* console capture is best-effort */ }
           if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
           // THE APP RENDERED AND ONLY ITS CONSOLE SPEAKS AGAINST IT: look once more on a fresh load before
@@ -22991,8 +23011,8 @@ async function noteBuildOutcome(
             // UNRESOLVED ERROR so buildHealthFromDiagnostics marks the build NOT READY — a crashing app must
             // never show "READY". (The syntax gate catches a COMPILE break; this catches the RUNTIME class
             // — an uncaught TypeError / a missing prop called as a function — that the parser can't see.)
-            buildDiag.record({ phase: 'preview', severity: 'error', code: 'OUTCOME_PREVIEW_FAILED', message: `The live preview did not render/run cleanly after ${healMax} repair attempt(s): ${problems.slice(0, 3).join('; ')}`.slice(0, 500), autoResolved: false });
-            events.emit({ type: 'narration', agent: 'architect', text: `⚠️ I checked the live preview and it did not fully render: ${problems.slice(0, 3).join('; ')}. Your files are saved — send a follow-up and I'll fix it.`, ts: Date.now() });
+            buildDiag.record({ phase: 'preview', severity: previewFailedSeverity(answerOnlyNow()), code: 'OUTCOME_PREVIEW_FAILED', message: `The live preview did not render/run cleanly after ${healMax} repair attempt(s): ${problems.slice(0, 3).join('; ')}`.slice(0, 500), autoResolved: false });
+            events.emit({ type: 'narration', agent: 'architect', text: previewFailedNarration(answerOnlyNow(), problems), ts: Date.now() });
             break;
           }
           events.emit({ type: 'narration', agent: 'architect', text: `🔍 I opened the preview and it didn't render correctly (${problems[0]}). Fixing it now…`, ts: Date.now() });
@@ -24032,7 +24052,7 @@ async function noteBuildOutcome(
             const verdict = await starterChecked(analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source }), shot.html);
             let consoleErrs: string[] = [];
             try {
-              if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: proofStartedAt, buildStartedAt }))).errors).map((e) => e.text);
+              if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: proofStartedAt, buildStartedAt }))).errors).map((e) => e.text));
             } catch { /* console capture is best-effort — its absence must not invent a verdict */ }
             // The SAME two bars the main verify loop uses, deliberately not a looser pair.
             const starterOnly = verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter();
@@ -24105,6 +24125,8 @@ async function noteBuildOutcome(
             }),
           });
         } catch { /* an observation must never affect the verdict it precedes */ }
+        // 🔴 A TURN THAT ONLY ANSWERED IS DESCRIBED BY THE GATE, NOT JUDGED BY IT (build d62bf22d, answerOnlyTurn.ts).
+        const answerOnlyGate = decideAnswerOnlyGate(answerOnlyNow(), gate.state, buildDiag);
         buildDiag.record({
           phase: 'readiness',
           // UNKNOWN is a warning, not an info: "we could not tell" is a finding about our own coverage,
@@ -24129,6 +24151,7 @@ async function noteBuildOutcome(
             // The CORRECTED prediction (autopsy 50378049): a module turn with a live address is not "not yet due".
             awaitsShell: !!gateEvidence.awaitingShell,
           }),
+          ...answerOnlyGate.record, // {} on every turn that was asked to build (answerOnlyTurn.ts)
           code: 'RELEASE_GATE',
           message: releaseGateSummary(gate),
         });
@@ -24190,7 +24213,7 @@ async function noteBuildOutcome(
         //     Off, this block behaves exactly as before. It does not change a price.
         const gateBlockers = buildDiag.shippingIssueCount('error');
         const runtimeRed = runtimeRedFlipEnabled() && runtimeProven(gateEvidence) === 'failed';
-        const settled = result; // captured once — `result` is reassigned in the heal loop above
+        const settled = answerOnlyGate.answerOnly ? undefined : result; // captured once; an answer-only turn has no verdict to correct
         if (gate.state === 'red' && (gateBlockers > 0 || runtimeRed) && settled && settled.ok) {
           // …UNLESS THE APP HAS ALREADY BEEN PROVEN TO RUN (runProvenApp.ts, autopsy e706e068). A RED
           // built from STATIC findings — a placeholder in a stray file, a forecast about the bundle —
@@ -26454,6 +26477,7 @@ async function noteBuildOutcome(
        * pass — build e52cebbf rendered at the in-build check and was stopped before the final one, and
        * was billed as an app that never ran. Both money rules read this one name, never their own copy.
        */
+      await settleImportDurableSave(importDurableSaves, IMPORT_DURABLE_SETTLE_MS, (r) => buildDiag.record(r));
       const appSeenRunningForBill = buildObs.previewRendered === true || renderProvenNow();
       const markupDecision = decideMarkupOnProof({
         decidedBilledUsd: effectiveBilledUsd,

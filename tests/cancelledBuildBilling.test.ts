@@ -15,6 +15,7 @@ const facts = (o: Partial<Parameters<typeof decideCancelledBuildBill>[0]> = {}) 
   abortCause: 'user-stop' as AbortCause,
   filesWritten: 12,
   appRendered: true,
+  appRenderedAt: 1, stopRequestedAt: 2, // seen running BEFORE the stop (owner 2026-10-18)
   decidedBilledUsd: 1.00,
   ...o,
 });

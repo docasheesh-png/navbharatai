@@ -667,7 +667,7 @@ import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
 import { restateDesignAfterRepair } from '../AgentV3/designAfterRepair';
 import { withRequestNotes, requestNotesFor } from '../AgentV3/requestNotes';
-import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort } from '../AgentV3/buildAbortCause';
+import { abortBuild, abortCauseOf, abortRequestedAtOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { isAnswerOnlyTurn, previewFailedSeverity, previewFailedNarration, decideAnswerOnlyGate } from '../AgentV3/answerOnlyTurn';
@@ -6928,6 +6928,7 @@ async function noteBuildOutcome(
         return;
       }
       (rb.steerQueue ??= []).push(message);
+      rb.lastSteerAt = Date.now();
       // "Hindi me bolo" mid-build (autopsy eb58abaf): every platform line from here on follows it.
       if (platformVoiceEnabled()) { const asked = voiceRequestedIn(message); if (asked) rb.voice = asked; }
       // Instant, honest feedback to EVERY attached device: the message is queued (the runner emits
@@ -16374,7 +16375,8 @@ async function noteBuildOutcome(
               : undefined,
           });
         } catch { /* the record must never be what prevents the stop */ }
-        abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'user-stop');
+        // The STOP WAS REQUESTED when the person's message arrived, not when the model acted on it.
+        abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'user-stop', rb.lastSteerAt);
       });
       // C2 — load the project's own "never touch this" list and ARM THE GUARD before any tool runs.
       // Reading the file into the prompt alone would be a wish, not a rule: a model told nicely still
@@ -21854,6 +21856,8 @@ async function noteBuildOutcome(
       // but was never confirmed to render, so nothing here was proven to RUN" — 1.4 seconds after the
       // same build had watched it render. Nothing failed, nothing logged; the report simply lied.
       let previewVerifiedRendered = false;
+      /** When THIS pass first saw the app render (epoch ms) — compared with the stop request (cancelledBuildBilling). */
+      let appFirstRenderedAt: number | null = null;
       // When a real-browser render check last came back CLEAN (its start time). Every console line logged
       // before it has been answered by it, so the runtime auto-fix loop does not hand those to a repair
       // (autopsy 12511a9c — `runtimeAutofixSince`).
@@ -21897,6 +21901,7 @@ async function noteBuildOutcome(
        */
       const markAppRendered = (source: 'browser' | 'curl' | undefined, where: string): void => {
         previewVerifiedRendered = true; // the eyes SAW it render — the runtime verdict must not deny it
+        if (appFirstRenderedAt === null) appFirstRenderedAt = Date.now();
         buildObs.previewRendered = true; // the same observation, readable by the deadline finalizer
         // …and the third copy, on the stricter rule it has always had: a curl fallback's empty-shell
         // "render" is not proof, so only a real browser may hold a late flip (the Green Freeze rule).
@@ -26732,6 +26737,10 @@ async function noteBuildOutcome(
           // render rescue both read its size and mean something different by it.
           preseededUnchanged: [...preseededGolden].filter(([p, c]) => writtenFiles.get(p) === c).length,
           appRendered: appSeenRunningForBill,
+          // WAS IT RUNNING BEFORE THEY ASKED TO STOP? (r6–r10 autopsy, owner 2026-10-18.) A ledger-only proof
+          // has no time, so it cannot show it came first — that case is billed at cost, not in full.
+          appRenderedAt: appFirstRenderedAt,
+          stopRequestedAt: abortRequestedAtOf(abort.signal),
           // An unverified EDIT may have left the user's working app worse than it started — see
           // `editingExistingApp` (autopsy 95598899). Read after appRendered, so a verified edit is
           // still charged in full.

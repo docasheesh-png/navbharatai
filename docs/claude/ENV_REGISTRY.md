@@ -4343,3 +4343,10 @@ price is not. Recorded as a queue row, not done here.
   default). Owner 2026-10-18, autopsy 2f46a4d8: how long a finished, GREEN build waits for the deep-bug-hunt
   offer's answer before ending without the hunt. `src/server/AgentV3/optionalBugHunt.ts bugHuntWaitMs`. Locked in
   `tests/aFinishedBuildIsNotHeldOpen.test.ts`.
+
+- **`AGENTV3_STOP_FULL_NEEDS_GREEN_FIRST`** (NOT set; default **on**; `off` ⇒ "rendered at all ⇒ full price" as
+  before). Owner-approved 2026-10-18 (r6–r10 autopsy): a user-stopped build is charged in full only when this pass
+  saw the app render strictly BEFORE the stop was requested (Stop button time, or the arrival time of the mid-build
+  message a typed stop came from — `abortBuild(…, requestedAt)` / `abortRequestedAtOf`). Otherwise, including an
+  unknown render time, it is charged at our real cost (provider + sandbox), never above the decided bill.
+  `src/server/AgentV3/cancelledBuildBilling.ts`. Locked in `tests/aStopIsFullPriceOnlyIfTheAppRanFirst.test.ts`.

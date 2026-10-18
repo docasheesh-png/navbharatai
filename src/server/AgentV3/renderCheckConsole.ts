@@ -114,3 +114,37 @@ export function runtimeAutofixSince(opts: { now: number; lastCleanBrowserCheckAt
   const clean = opts.lastCleanBrowserCheckAt;
   return clean != null && Number.isFinite(clean) ? Math.max(fixed, clean) : fixed;
 }
+
+/**
+ * 🔴 A LOGGED-OUT PAGE BEING TOLD "NOT LOGGED IN" IS NOT A RENDER FAILURE (build d62bf22d, 2026-10-17).
+ *
+ * An imported app (Mitrify) booted cleanly — db:push ok, Express serving, 1,594 CSS rules, 19 styled
+ * buttons on screen — and was recorded PREVIEW_NOT_RENDERED → OUTCOME_PREVIEW_FAILED, gate RED, ₹0.
+ * The only evidence against it was ONE console line:
+ *
+ *     Failed to load resource: the server responded with a status of 401 (Unauthorized)
+ *
+ * That is Chromium's URL-less echo of an auth probe (`/api/auth/me`-style) answering a visitor who is
+ * not signed in — which every render check is, because our browser never signs in. A 401/403 is the
+ * app's server WORKING: it answered, and it answered correctly.
+ *
+ * Precise on purpose:
+ *   • only 401 and 403, never 404/5xx (a missing asset or a crashing server stays evidence);
+ *   • only the response-status echo — an uncaught error, a thrown fetch, a React crash still count;
+ *   • it removes CONSOLE evidence only. If a refused request really kept the app from painting, the
+ *     DOM verdict says "not rendered" on its own, exactly as it would with no console at all.
+ */
+export const AUTH_REFUSAL_ECHO_RE = /Failed to load resource: the server responded with a status of 40[13]\b/i;
+
+/** True when a console line is only a 401/403 response echo. PURE. */
+export function isAuthRefusalEcho(text: unknown): boolean {
+  return AUTH_REFUSAL_ECHO_RE.test(String(text ?? ''));
+}
+
+/** Split render-check console lines into the ones that may judge the render and the 401/403 echoes. PURE. */
+export function splitAuthRefusals(lines: readonly string[]): { kept: string[]; authRefusals: string[] } {
+  const kept: string[] = [];
+  const authRefusals: string[] = [];
+  for (const l of Array.isArray(lines) ? lines : []) (isAuthRefusalEcho(l) ? authRefusals : kept).push(l);
+  return { kept, authRefusals };
+}

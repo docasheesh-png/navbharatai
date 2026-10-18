@@ -312,10 +312,23 @@ export interface MergeStore {
   read(paths: readonly string[]): Promise<Map<string, string | undefined>>;
   readIndex(): Promise<string[]>;
   writeIndex(paths: string[]): Promise<void>;
+  /** Optional: run the read → union → write of the index one at a time (see withIndexQueue). */
+  serialize?<T>(fn: () => Promise<T>): Promise<T>;
 }
 
-/** Bytes per Firestore batch — well under the 10 MiB request limit, so one commit cannot outrun its deadline. */
-export const MERGE_BATCH_BYTES = 4 * 1024 * 1024;
+/**
+ * Bytes per Firestore batch — well under the 10 MiB request limit, so one commit cannot outrun its deadline.
+ * 1 MiB, not 4 (build d62bf22d, 2026-10-17): a 175-file import still hit `DEADLINE_EXCEEDED` four times at
+ * 4 MiB a batch and confirmed 1 file. Smaller batches commit in parallel (MERGE_COMMIT_CONCURRENCY) and a
+ * slow one costs a quarter of the work when it is retried.
+ */
+export const MERGE_BATCH_BYTES = 1 * 1024 * 1024;
+
+/**
+ * How many times entries a batch could not CONFIRM are re-committed, each round in batches half the size of
+ * the last. Bounded: a store that is really down fails in a few rounds, never forever.
+ */
+export const MERGE_RETRY_ROUNDS = 2;
 
 /** Split entries into batches bounded by count AND bytes. PURE. */
 export function mergeBatches(entries: ReadonlyArray<readonly [string, string]>, maxDocs = BATCH, maxBytes = MERGE_BATCH_BYTES): Array<Array<readonly [string, string]>> {
@@ -346,31 +359,63 @@ export function mergeBatches(entries: ReadonlyArray<readonly [string, string]>, 
  */
 export async function mergeIntoStore(store: MergeStore, entries: ReadonlyArray<readonly [string, string]>, concurrency = MERGE_COMMIT_CONCURRENCY): Promise<MergeResult> {
   if (entries.length === 0) return { status: 'nothing', indexed: 0, unconfirmed: [] };
-  const batches = mergeBatches(entries);
   const confirmed: string[] = [];
-  const failed: Array<Array<readonly [string, string]>> = [];
   let lastError = '';
-  for (let i = 0; i < batches.length; i += concurrency) {
-    const slice = batches.slice(i, i + concurrency);
-    const results = await Promise.allSettled(slice.map((b) => store.commit(b)));
-    results.forEach((r, k) => {
-      if (r.status === 'fulfilled') confirmed.push(...slice[k].map(([p]) => p));
-      else { failed.push(slice[k]); lastError = String((r.reason as Error)?.message ?? r.reason).slice(0, 200); }
-    });
+  /** One round: commit `batches` (bounded parallel), read back every failed one, return what is still unconfirmed. */
+  const round = async (batches: Array<Array<readonly [string, string]>>): Promise<Array<readonly [string, string]>> => {
+    const failed: Array<Array<readonly [string, string]>> = [];
+    for (let i = 0; i < batches.length; i += concurrency) {
+      const slice = batches.slice(i, i + concurrency);
+      const results = await Promise.allSettled(slice.map((b) => store.commit(b)));
+      results.forEach((r, k) => {
+        if (r.status === 'fulfilled') confirmed.push(...slice[k].map(([p]) => p));
+        else { failed.push(slice[k]); lastError = String((r.reason as Error)?.message ?? r.reason).slice(0, 200); }
+      });
+    }
+    const still: Array<readonly [string, string]> = [];
+    for (const b of failed) {
+      const stored = await store.read(b.map(([p]) => p)).catch(() => new Map<string, string | undefined>());
+      for (const e of b) { if (stored.get(e[0]) === e[1]) confirmed.push(e[0]); else still.push(e); }
+    }
+    return still;
+  };
+  let pending = await round(mergeBatches(entries));
+  // 🔁 RETRY WHAT COULD NOT BE CONFIRMED, SMALLER EACH TIME (build d62bf22d). A deadline on one big commit
+  // used to be final for every file in it; now those files go again in batches half the size.
+  let maxDocs = Math.max(1, Math.ceil(Math.min(BATCH, pending.length) / 2));
+  let maxBytes = MERGE_BATCH_BYTES / 2;
+  for (let r = 0; r < MERGE_RETRY_ROUNDS && pending.length > 0; r++) {
+    pending = await round(mergeBatches(pending, maxDocs, maxBytes));
+    maxDocs = Math.max(1, Math.ceil(maxDocs / 2));
+    maxBytes = Math.max(64 * 1024, maxBytes / 2);
   }
-  const unconfirmed: string[] = [];
-  for (const b of failed) {
-    const stored = await store.read(b.map(([p]) => p)).catch(() => new Map<string, string | undefined>());
-    for (const [p, c] of b) (stored.get(p) === c ? confirmed : unconfirmed).push(p);
-  }
+  const unconfirmed = pending.map(([p]) => p);
   if (confirmed.length === 0) return { status: 'failed', indexed: 0, unconfirmed, error: lastError };
-  try {
+  const updateIndex = async (): Promise<void> => {
     const existing = liveIndexPaths(await store.readIndex());
     await store.writeIndex(Array.from(new Set([...existing, ...confirmed])));
+  };
+  try {
+    await (store.serialize ? store.serialize(updateIndex) : updateIndex());
   } catch (e) {
     return { status: 'failed', indexed: 0, unconfirmed: entries.map(([p]) => p), error: String((e as Error)?.message ?? e).slice(0, 200) };
   }
   return { status: unconfirmed.length === 0 ? 'saved' : 'partial', indexed: confirmed.length, unconfirmed, ...(lastError ? { error: lastError } : {}) };
+}
+
+/**
+ * 🔒 ONE INDEX UPDATE AT A TIME PER WORKSPACE (this instance). The index update is read → union → write; an
+ * import's save now runs in the background beside the turn's own saves, and two of those interleaved would
+ * let the later write drop the earlier one's paths. Commits stay parallel; only the index step queues.
+ */
+const indexQueues = new Map<string, Promise<unknown>>();
+export function withIndexQueue<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = indexQueues.get(key) ?? Promise.resolve();
+  const run = prev.catch(() => undefined).then(fn);
+  const tail = run.catch(() => undefined);
+  indexQueues.set(key, tail);
+  void tail.then(() => { if (indexQueues.get(key) === tail) indexQueues.delete(key); });
+  return run;
 }
 
 /**
@@ -414,6 +459,7 @@ export async function mergeWorkspaceFiles(workspaceId: string, partial: Record<s
       if (safe.capped > 0) notePersistenceFailure('workspace_files', 'write', new Error(`durable path index capped: ${safe.capped} of ${paths.length} paths exceeded the 1MB metadata-doc limit (files remain in the sandbox / git)`));
       await root.set({ paths: safe.paths, count: safe.paths.length, savedAt: Date.now() }, { merge: true });
     },
+    serialize: (fn) => withIndexQueue(workspaceId, fn),
   };
   const result = await mergeIntoStore(store, entries);
   if (result.status === 'failed' || result.status === 'partial') {

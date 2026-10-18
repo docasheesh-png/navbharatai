@@ -193,7 +193,9 @@ describe('REVERSION GUARDS — every producer of the render proof asks the one q
   const route = src('src/server/routes/agentv3.ts');
 
   it('the helper exists once and reads through the shared module', () => {
-    expect(route).toContain('const renderIsOnlyTheStarter = (): Promise<boolean> => entryIsStillTheStarter(');
+    // An import turn answers "no" before reading (build d62bf22d, anImportIsNeverTheStarter.test.ts); every
+    // other turn still reads through the shared module.
+    expect(route).toMatch(/const renderIsOnlyTheStarter = \(\): Promise<boolean> => (?:importNeverTheStarter\(isImportTurn\) \? Promise\.resolve\(false\) : )?entryIsStillTheStarter\(/);
   });
 
   it.each(['in-build green', 'render rescue', 'preview verify loop', 'last-chance proof'])('%s records the veto', (where) => {

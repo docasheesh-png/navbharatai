@@ -24,7 +24,7 @@ describe('the model\'s stop_build is the same stop as the button', () => {
     expect(at).toBeGreaterThan(0);
     const body = route.slice(at, at + 2500);
     const recorded = body.indexOf("code: 'USER_STOPPED_BUILD'");
-    const aborted = body.indexOf("'user-stop'") // the typed stop now also passes when it was requested (owner 2026-10-18);
+    const aborted = body.indexOf("'user-stop'"); // the typed stop also passes its request time (owner 2026-10-18)
     expect(recorded).toBeGreaterThan(0);
     expect(aborted).toBeGreaterThan(recorded);
   });

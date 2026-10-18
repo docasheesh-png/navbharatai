@@ -682,3 +682,8 @@ Q-1137
 Q-1138
 Q-1139
 Q-1133
+# Q-1140 closed 2026-10-18 — #3797 verified present in origin/main by its merge commit (505211709).
+# One route to the deploy control, named by all three surfaces that name it, plus the nine row closures
+# that PR carried. Merged elsewhere, not by this session: CI has been failing in 3-4 s at the platform
+# level all day (Q-1131), so "CI green before any merge" meant holding. Ledger in PROGRESS.md.
+Q-1140

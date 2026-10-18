@@ -97106,3 +97106,22 @@ them went with them.
 server file hands the upstream message over as the error a user reads — the sibling that does not exist
 yet — while still allowing it as `detail`, which is the deliberate, useful use. Reversion proof: the raw
 shape restored at one site → 2 fail; the GitHub-outage remap removed → 1 fail; restored → 8 pass.
+
+## 2026-10-18 — Q-1140 closed: #3797 is in `main`
+
+Verified by its merge commit (`505211709`), not by a PR page. It carried the one-route fix and the nine
+earlier row closures. **Merged elsewhere, not by this session** — CI has been failing in 3–4 seconds at
+the platform level all day (Q-1131), so "CI green before any merge" meant holding, every time.
+
+`main` moved **six times** in the hours either side of this, from other sessions. Two consequences worth
+recording for whoever reads this next:
+
+- **A full local gate takes about as long as the gap between merges.** Re-merging and re-gating after
+  every move is a treadmill that produces no progress; the discipline that matters is a merge + re-gate
+  **immediately before a merge**, which is the moment the staleness actually costs something. That is
+  written on #3799 and #3800 rather than chased all night.
+- **Two sessions took Q-1133 inside the same hour.** Theirs (#3792) shipped first and is better on the
+  overlap — it *deleted* two dead routes instead of decorating them, and routes through `sendSafeError`.
+  Mine (#3798) is closed, with the comparison recorded on it and the genuinely non-overlapping half
+  (the two remaining ladders in `mobileShip` / `mobileSetup`, and the 403 split) left as a follow-up that
+  will extend their module rather than compete with it.

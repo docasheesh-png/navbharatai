@@ -516,7 +516,7 @@ import { estimateTokens, contextUsage, tightestContextModel } from '../AgentV3/T
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, lastGroundingCost } from '../AgentV3/ContextReranker';
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince, splitAuthRefusals } from '../AgentV3/renderCheckConsole';
+import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince, splitAuthRefusals, splitAssetMisses } from '../AgentV3/renderCheckConsole';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
 import { fillGateFromLedger, renderProvenInLedger } from '../AgentV3/evidenceLedger';
 import { appRenderedRecord } from '../AgentV3/renderProof';
@@ -21950,8 +21950,21 @@ async function noteBuildOutcome(
        * exclusion is visible rather than silent.
        */
       let authRefusalNoted = false;
+      let assetMissNoted = false;
       const renderJudgingConsole = (lines: string[]): string[] => {
-        const { kept, authRefusals } = splitAuthRefusals(lines);
+        const { kept: notAuth, authRefusals } = splitAuthRefusals(lines);
+        // A 404 for a favicon / manifest / icon / sw.js / font cannot stop a page painting (build 19e5f6fb).
+        const { kept, assetMisses } = splitAssetMisses(notAuth);
+        if (assetMisses.length > 0 && !assetMissNoted) {
+          assetMissNoted = true;
+          try {
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'PREVIEW_ASSET_404_IGNORED', autoResolved: true,
+              message: `${assetMisses.length} console line(s) were only a 404 for a static asset (icon / manifest / service worker / font) — not counted against the render; the DOM verdict still decides.`,
+              detail: assetMisses.slice(0, 3).join(' | ').slice(0, 400),
+            });
+          } catch { /* diagnostics are best-effort */ }
+        }
         if (authRefusals.length > 0 && !authRefusalNoted) {
           authRefusalNoted = true;
           try {

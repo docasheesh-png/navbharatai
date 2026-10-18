@@ -515,7 +515,7 @@ import { estimateTokens, contextUsage, tightestContextModel } from '../AgentV3/T
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, lastGroundingCost } from '../AgentV3/ContextReranker';
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince } from '../AgentV3/renderCheckConsole';
+import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince, splitAuthRefusals } from '../AgentV3/renderCheckConsole';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
 import { fillGateFromLedger, renderProvenInLedger } from '../AgentV3/evidenceLedger';
 import { appRenderedRecord } from '../AgentV3/renderProof';
@@ -21940,6 +21940,26 @@ async function noteBuildOutcome(
        * your app instead of the starter page"), so it must not outlive the starter: a later look that sees the APP
        * render — a real render, and not the starter — answers it, exactly as a heal answers the finding it fixed.
        */
+      /**
+       * The console lines a RENDER CHECK may be judged by — a 401/403 echo from a logged-out page is not one
+       * (build d62bf22d; see `splitAuthRefusals`). Noted once per build, for the admin report, so the
+       * exclusion is visible rather than silent.
+       */
+      let authRefusalNoted = false;
+      const renderJudgingConsole = (lines: string[]): string[] => {
+        const { kept, authRefusals } = splitAuthRefusals(lines);
+        if (authRefusals.length > 0 && !authRefusalNoted) {
+          authRefusalNoted = true;
+          try {
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'PREVIEW_AUTH_REFUSAL_IGNORED', autoResolved: true,
+              message: `${authRefusals.length} console line(s) were only a 401/403 answer to a signed-out visitor (our check browser never signs in) — not counted against the render.`,
+              detail: authRefusals.slice(0, 3).join(' | ').slice(0, 400),
+            });
+          } catch { /* diagnostics are best-effort */ }
+        }
+        return kept;
+      };
       const starterChecked = async <V extends { rendered: boolean; inconclusive?: boolean; problems: string[] }>(verdict: V, html: string): Promise<V> => {
         const shown = await starterShownOn(html);
         // Re-armed when answered: if the starter ever came back, a later look would record it again.
@@ -22572,7 +22592,7 @@ async function noteBuildOutcome(
             hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined,
           }), shot.html);
           let consoleErrs: string[] = [];
-          try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: rescueCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
+          try { if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: rescueCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text)); } catch { /* console capture best-effort */ }
           // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the
           // first paint and crashes on a later re-render — a one-shot snapshot can't see it, so it must
           // veto the rescue (real report 8a6e4585: useMemo@useChartData.ts:86 crashed the preview the
@@ -22655,7 +22675,7 @@ async function noteBuildOutcome(
           const verdict = await starterChecked(analyzePreviewHtml(html, { painted: shot.painted, source: shot.source }), html);
           let consoleErrs: string[] = [];
           try {
-            if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: verifyCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text);
+            if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: verifyCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text));
           } catch { /* console capture is best-effort */ }
           if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
           // THE APP RENDERED AND ONLY ITS CONSOLE SPEAKS AGAINST IT: look once more on a fresh load before
@@ -24036,7 +24056,7 @@ async function noteBuildOutcome(
             const verdict = await starterChecked(analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source }), shot.html);
             let consoleErrs: string[] = [];
             try {
-              if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: proofStartedAt, buildStartedAt }))).errors).map((e) => e.text);
+              if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: proofStartedAt, buildStartedAt }))).errors).map((e) => e.text));
             } catch { /* console capture is best-effort — its absence must not invent a verdict */ }
             // The SAME two bars the main verify loop uses, deliberately not a looser pair.
             const starterOnly = verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter();

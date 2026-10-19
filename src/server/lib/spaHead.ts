@@ -44,6 +44,13 @@ export function spaRouteHead(p: string): RouteHead | null | 'noindex' {
   return 'noindex';
 }
 
+/** Remove the homepage's JSON-LD block(s). Only the <head> is searched, so the body is never touched. */
+function stripHomeJsonLd(html: string): string {
+  const end = html.search(/<\/head>/i);
+  if (end < 0) return html;
+  return html.slice(0, end).replace(/\s*<script type="application\/ld\+json">[\s\S]*?<\/script>/gi, '') + html.slice(end);
+}
+
 const setMeta = (html: string, re: RegExp, replacement: string) => (re.test(html) ? html.replace(re, replacement) : html);
 
 /** Rewrite the shell's head for this path. PURE. Never throws: on any surprise it returns the shell. */
@@ -52,8 +59,15 @@ export function spaHeadFor(reqPath: string, shell: string, origin: string): stri
     const head = spaRouteHead(typeof reqPath === 'string' ? reqPath : '');
     if (head === null) return shell;
     if (head === 'noindex') {
-      // A canonical pointing at the homepage on a noindex page is a contradiction — drop it.
-      const out = shell.replace(/\s*<link rel="canonical"[^>]*>/i, '');
+      // A noindex page must not claim to BE the homepage in any machine-readable way (SEO verification
+      // 2026-10-18, P2-4). So it loses all three homepage identity markers:
+      //   • the canonical (a canonical to the homepage on a noindex page is a contradiction);
+      //   • og:url — a share of /store/app/<id> must preview as THAT link, not as navbharatai.com/
+      //     (with no og:url, link-preview crawlers use the URL they actually fetched);
+      //   • the homepage's WebSite/Organization JSON-LD, which belongs on the homepage only.
+      let out = shell.replace(/\s*<link rel="canonical"[^>]*>/i, '');
+      out = out.replace(/\s*<meta property="og:url"[^>]*>/i, '');
+      out = stripHomeJsonLd(out);
       return out.replace(/<\/head>/i, '    <meta name="robots" content="noindex, follow" />\n  </head>');
     }
     const url = escapeHtml(`${origin}${head.canonicalPath}`);
@@ -69,8 +83,7 @@ export function spaHeadFor(reqPath: string, shell: string, origin: string): stri
     out = setMeta(out, /<meta name="twitter:title" content="[^"]*"\s*\/?>/i, `<meta name="twitter:title" content="${t}" />`);
     out = setMeta(out, /<meta name="twitter:description" content="[^"]*"\s*\/?>/i, `<meta name="twitter:description" content="${d}" />`);
     // The homepage's WebSite/Organization graph belongs on the homepage only.
-    out = out.replace(/\s*<script type="application\/ld\+json">[\s\S]*?<\/script>/i, '');
-    return out;
+    return stripHomeJsonLd(out);
   } catch {
     return shell;
   }

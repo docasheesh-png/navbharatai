@@ -182,17 +182,45 @@ export function publicFooterHtml(): string {
  * "<title> for NavBharatAI — what we collect, why, and your rights." — which is a privacy-policy
  * sentence printed on the Terms, the Refund policy and the Contact page alike.
  */
-export function renderLegalPageHtml(doc: { title: string; updated: string; body: string; description?: string }): string {
+/**
+ * Link-preview tags for a public page (SEO verification 2026-10-18, P2-3: a shared legal link showed
+ * no card). META only — nothing here makes the page fetch a resource, so the "loads no linked
+ * resource" contract of these pages still holds. Given only when the caller knows the page's
+ * canonical URL; without it no og:url is invented.
+ */
+function shareMetaHtml(i: { title: string; description: string; url?: string }): string {
+  const origin = i.url ? /^(https:\/\/[a-z0-9.-]+)\//i.exec(i.url)?.[1] : undefined;
+  if (!i.url || !origin) return '';
+  const img = escapeHtml(`${origin}/og-image.png`);
+  return [
+    '<meta property="og:site_name" content="NavBharatAI">',
+    '<meta property="og:type" content="article">',
+    '<meta property="og:locale" content="en_IN">',
+    `<meta property="og:title" content="${i.title}">`,
+    `<meta property="og:description" content="${i.description}">`,
+    `<meta property="og:url" content="${escapeHtml(i.url)}">`,
+    `<meta property="og:image" content="${img}">`,
+    '<meta property="og:image:width" content="1200">',
+    '<meta property="og:image:height" content="630">',
+    '<meta name="twitter:card" content="summary_large_image">',
+    `<meta name="twitter:title" content="${i.title}">`,
+    `<meta name="twitter:description" content="${i.description}">`,
+    `<meta name="twitter:image" content="${img}">`,
+  ].join('\n') + '\n';
+}
+
+export function renderLegalPageHtml(doc: { title: string; updated: string; body: string; description?: string; url?: string }): string {
   const title = escapeHtml(doc.title);
   const description = escapeHtml((doc.description || `${doc.title} for NavBharatAI.`).trim());
+  const fullTitle = /NavBharatAI/.test(doc.title) ? title : `${title} — NavBharatAI`;
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${/NavBharatAI/.test(doc.title) ? title : `${title} — NavBharatAI`}</title>
+<title>${fullTitle}</title>
 <meta name="description" content="${description}">
-<style>
+${shareMetaHtml({ title: fullTitle, description, url: doc.url })}<style>
   :root { color-scheme: light dark; }
   body { margin: 0; background: #ffffff; color: #16161d;
     font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }

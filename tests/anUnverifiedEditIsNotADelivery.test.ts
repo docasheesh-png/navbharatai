@@ -117,7 +117,7 @@ describe('🔒 the wiring — a rule the route never feeds is not a fix', () => 
     // away. A wiring test that any call site can satisfy tests nothing.
     const route = readFileSync(resolve(__dirname, '../src/server/routes/agentv3.ts'), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '')).join('\n');
-    const at = route.indexOf('decideCancelledBuildBill({');
+    const at = route.indexOf('const stopSettlement = settleStopOrFailure({');
     expect(at, 'the billing call is gone entirely').toBeGreaterThan(-1);
     const call = route.slice(at, route.indexOf('})', at));
     expect(call).toContain('editingExistingApp: isEditMode,');

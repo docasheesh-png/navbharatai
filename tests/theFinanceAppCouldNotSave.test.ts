@@ -168,7 +168,10 @@ describe('6 · a stop after the app rendered in a real browser is billed as a wo
     expect(route).toContain('previewProven: appSeenRunningForBill,');
     expect(route).toContain('appRendered: appSeenRunningForBill,');
     // The watchdog decides the same build's bill on a long run, so it reads the same ledger.
-    expect(route).toContain('previewProven: buildObs.previewRendered === true || (buildDiagRef ? renderProvenInLedger(buildDiagRef.evidenceLedger()) : false),');
+    expect(route).toContain('const wdPreviewProven = buildObs.previewRendered === true || (buildDiagRef ? renderProvenInLedger(buildDiagRef.evidenceLedger()) : false);');
+    expect(route).toContain('previewProven: wdPreviewProven,');
+    // Round 4: the watchdog's Stop rules read the SAME fact as its markup.
+    expect(route).toContain('appRendered: wdPreviewProven,');
     // No money site still reads the final-check flag alone.
     expect(route).not.toMatch(/previewProven: buildObs\.previewRendered === true,/);
     expect(route).not.toMatch(/appRendered: buildObs\.previewRendered === true,\s*\/\/ An unverified EDIT/);

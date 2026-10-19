@@ -4396,3 +4396,9 @@ price is not. Recorded as a queue row, not done here.
   `write_file` relocates only a NEW file whose importers use extension-less specifiers (otherwise unchanged).
   Detection is high-precision (closing tag, fragment, or self-closing component) so generics never match.
   `src/server/AgentV3/LanguageCoherence.ts tsFileHasJsx / tsxRelocationFor`. Locked in `tests/jsxInATsFileBecomesTsx.test.ts`.
+
+- `AGENTV3_POST_GREEN_RECHECK` (default on; `off` disables). After the finishing passes (e2e scaffold, architecture
+  note, production defaults) on a build already proven green, the preview is checked once; only a CONCLUSIVE
+  non-render rolls back exactly the finishing files to the last green snapshot (files it lacks are removed), then
+  re-checks. Records `POST_GREEN_RECHECK_OK` / `_INCONCLUSIVE` / `POST_GREEN_ROLLBACK` / `_SKIPPED`. No billing effect.
+  `src/server/AgentV3/finishingRecheck.ts`. Locked in `tests/finishingWritesAfterGreenAreRecheckedAndRolledBack.test.ts`.

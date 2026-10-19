@@ -218,3 +218,12 @@ describe('P2-10 — no plan implies that free accounts see ads', () => {
     for (const t of HOSTING_TIERS) for (const line of t.includes) expect(line, t.id).not.toMatch(/\bno ads\b/i);
   });
 });
+
+describe('a real /favicon.ico — pages without an icon link no longer log a 404', () => {
+  it('public/favicon.ico is a small ICO file (served by express.static before the 404 rule)', () => {
+    const ico = readFileSync(join(root, 'public/favicon.ico'));
+    expect([...ico.subarray(0, 4)]).toEqual([0, 0, 1, 0]); // ICONDIR: reserved 0, type 1 = icon
+    expect(ico.readUInt16LE(4)).toBeGreaterThanOrEqual(2);  // more than one size
+    expect(ico.length).toBeLessThan(16_000);
+  });
+});

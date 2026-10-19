@@ -86,6 +86,9 @@ export function computePenaltyMs(violations: number, capMs = 30_000): number {
  */
 export function isGuardedPath(path: string): boolean {
   if (!path.startsWith('/api/')) return false;
+  // External MCP/OAuth clients are automated by design. These endpoints enforce their own
+  // bounded rate limits and authentication; a bot-User-Agent heuristic would block real clients.
+  if (/^\/api\/(?:v1\/)?failedbr\/(?:mcp|reports|oauth)(?:\/|$)/.test(path)) return false;
   if (path.startsWith('/api/agentv3/')) return false; // interactive v5.0 build surface — exempt
   return true;
 }
@@ -301,3 +304,4 @@ export function adaptiveGuard(options: AdaptiveGuardOptions = {}) {
     next();
   };
 }
+

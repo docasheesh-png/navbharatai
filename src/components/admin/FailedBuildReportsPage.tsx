@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
+import { FailedReportOAuthConsent } from './FailedReportOAuthConsent';
 import { isFailedBuildPage, type FailedBuildPage, type FailedReportAccess } from '../../lib/failedBuildReports';
 
 const API = '/api/v1/failedbr';
@@ -88,6 +89,7 @@ export function FailedBuildReportsPage({ token, onLogout }: { token: string; onL
       <div className="flex gap-2"><a href="https://navbharatai.com/admin" className={button}>Admin console</a><button className={button} onClick={onLogout}>Sign out</button></div>
     </header>
     <p className="text-sm text-muted">Reports come automatically from retained build history, including failures before a later successful build. This page refreshes its current batch every minute. Browse every batch to see all retained failures; batches are in workspace/history order.</p>
+    <FailedReportOAuthConsent token={token} />
     {error && <p role="alert" className="rounded-xl border border-line p-4 text-danger">{error}</p>}
     {message && <p role="status" className="text-success">{message}</p>}
     <section className="rounded-2xl border border-line bg-card p-4 space-y-4" aria-label="Reports">
@@ -101,6 +103,7 @@ export function FailedBuildReportsPage({ token, onLogout }: { token: string; onL
     </section>
     <section className="rounded-2xl border border-line bg-card p-4 space-y-4" aria-label="AI access">
       <h2 className="text-xl font-serif text-ink">Read-only AI connections</h2>
+      <p>For an AI client that supports remote MCP and OAuth, add <code className="break-all">https://navbharatai.com/api/v1/failedbr/mcp</code> as a custom server and choose <strong>OAuth</strong>. Sign in here and approve read-only access when the client opens the connection page. OAuth connections appear below and can be revoked here.</p>
       <p className="text-sm text-muted">Create a separate credential for each AI tool. It expires after 30 days and cannot access the admin console or change a build. Share it only with tools you trust. Creating a credential does not connect an AI account automatically.</p>
       <form onSubmit={createAccess} className="flex flex-wrap gap-3">
         <label className="flex-1 min-w-48 text-sm">Connection name<input className="mt-1 w-full rounded-xl border border-line bg-well p-3 text-ink" value={label} onChange={(e) => setLabel(e.target.value)} minLength={2} maxLength={60} required placeholder="My analysis tool" /></label>
@@ -109,7 +112,8 @@ export function FailedBuildReportsPage({ token, onLogout }: { token: string; onL
       </form>
       {credential && <div className="rounded-xl border border-line bg-well p-4 space-y-2"><p className="text-warn">Save this credential now. It is shown only once; the server stores its hash.</p><input aria-label="New read-only credential" type={showCredential ? 'text' : 'password'} readOnly value={credential} className="w-full bg-card text-ink p-3 rounded-xl" onFocus={(e) => e.target.select()} /><button className={button} onClick={() => { void (navigator.clipboard ? navigator.clipboard.writeText(credential) : Promise.reject(new Error('Clipboard unavailable'))).then(() => setMessage('Credential copied. Store it securely in your AI connection settings.')).catch(() => setError('Clipboard unavailable. Select and copy the credential field.')); }}>Copy credential</button><button className={button} onClick={() => setShowCredential((v) => !v)}>{showCredential ? 'Mask credential' : 'Show credential'}</button><button className={button} onClick={() => setCredential('')}>Hide credential</button></div>}
       <ul className="space-y-2">{access.map((a) => <li key={a.id} className="flex flex-wrap justify-between gap-2 border-b border-line py-2"><span>{a.label} <span className="text-sm text-muted">· {a.expiresAt <= Date.now() ? 'expired' : 'expires'} {new Date(a.expiresAt).toLocaleString()}</span></span><button className={button} disabled={busy} onClick={() => void revoke(a.id)}>Revoke access</button></li>)}</ul>
-      <div className="text-sm space-y-2"><p>REST endpoint: <code>/api/v1/failedbr/reports</code></p><p>MCP endpoint: <code>/api/v1/failedbr/mcp</code></p><p>Configure your compatible HTTP/MCP client with <code>Authorization: Bearer &lt;credential&gt;</code>. Never put credentials in the URL or share your admin token. Clients that require OAuth instead of an authorization header need a separate adapter.</p><p>Ask your connected tool: “Read every batch of failed builds, open the full reports, and analyze common root causes.” This grants on-demand access; it does not start paid background AI analysis.</p></div>
+      <div className="text-sm space-y-2"><p>REST endpoint: <code>/api/v1/failedbr/reports</code></p><p>MCP endpoint: <code>/api/v1/failedbr/mcp</code></p><p>Clients that support a manually configured credential can still use <code>Authorization: Bearer &lt;credential&gt;</code>. Never put credentials in the URL or share your admin token. Availability of custom remote MCP connections depends on the AI service and your plan.</p><p>Ask your connected tool: “Read every batch of failed builds, open the full reports, and analyze common root causes.” This grants on-demand access; it does not start paid background AI analysis.</p></div>
     </section>
   </section>;
 }
+

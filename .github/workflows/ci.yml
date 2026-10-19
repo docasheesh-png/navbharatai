@@ -93,6 +93,9 @@ jobs:
       - name: Typecheck (server modules - strict guardrail)
         run: npm run typecheck:server
 
+      - name: Failed-report OAuth protocol and security checks
+        run: node --experimental-strip-types scripts/failedReportOAuth.check.mjs
+
       # ONE test run, not two (2026-08-06). This job ran `npm test` (`vitest run`) and then
       # `npm run test:coverage` (`vitest run --coverage`) — the SAME 12,400 tests twice, the second time
       # with coverage instrumentation, which is the slower of the two. The coverage run already produces
@@ -125,3 +128,4 @@ jobs:
       # requires survive that prune?" — via esbuild's own AST-accurate metafile, no Docker needed.
       - name: Server production-dependency gate (every runtime import must survive `npm prune --omit=dev`)
         run: npm run deps:server-gate
+

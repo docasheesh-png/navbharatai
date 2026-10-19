@@ -3,24 +3,29 @@ import express from 'express';
 import { request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
 const mocked = vi.hoisted(() => ({ page: vi.fn(), detail: vi.fn(), create: vi.fn(), list: vi.fn(), revoke: vi.fn(), tokenOk: vi.fn() }));
+const oauth = vi.hoisted(() => ({ register: vi.fn(), authorize: vi.fn(), pending: vi.fn(), decide: vi.fn(), token: vi.fn(), tokenOk: vi.fn(), revoke: vi.fn() }));
+vi.mock('../src/server/lib/failedReportOAuth', async original => ({ ...await original<any>(), reportOAuthService: () => oauth }));
 vi.mock('../src/server/lib/failedReportAccess', () => ({ createReportAccess: mocked.create, listReportAccess: mocked.list, revokeReportAccess: mocked.revoke, reportTokenOk: mocked.tokenOk }));
 vi.mock('../src/server/lib/failedBuildReports', async (original) => ({ ...await original<any>(), readFailedBuildPage: mocked.page, readFailedBuild: mocked.detail }));
 import { registerFailedReportRoutes } from '../src/server/routes/failedReports';
 import { apiVersionMiddleware } from '../src/server/routes/apiVersion';
+import { formBodyParser, jsonBodyParser } from '../src/server/lib/requestBodyLimits';
 import { mintAdminToken } from '../src/server/lib/adminAuth';
 
 let server: Server; let port: number; let adminToken: string;
 function request(path: string, opts: { method?: string; headers?: Record<string, string>; body?: unknown } = {}): Promise<{ status: number; headers: any; body: any }> {
+  const payload = typeof opts.body === 'string' ? opts.body : opts.body === undefined ? undefined : JSON.stringify(opts.body);
   return new Promise((resolve, reject) => {
-    const r = httpRequest({ hostname: '127.0.0.1', port, path, method: opts.method ?? 'GET', headers: { 'Content-Type': 'application/json', ...(opts.body ? { 'Content-Length': String(Buffer.byteLength(JSON.stringify(opts.body))) } : {}), ...opts.headers } }, (s) => {
+    const r = httpRequest({ hostname: '127.0.0.1', port, path, method: opts.method ?? 'GET', headers: { 'Content-Type': 'application/json', ...(payload !== undefined ? { 'Content-Length': String(Buffer.byteLength(payload)) } : {}), ...opts.headers } }, (s) => {
       let body = ''; s.on('data', (b) => { body += b; }); s.on('end', () => resolve({ status: s.statusCode!, headers: s.headers, body: body ? JSON.parse(body) : null }));
-    }); r.on('error', reject); if (opts.body) r.write(JSON.stringify(opts.body)); r.end();
+    }); r.on('error', reject); if (payload !== undefined) r.write(payload); r.end();
   });
 }
 beforeAll(async () => {
   vi.stubEnv('ADMIN_USERNAME', 'owner'); vi.stubEnv('ADMIN_PASSWORD', 'test-private-password');
   adminToken = mintAdminToken('test-private-password', 'owner', Date.now());
-  const app = express(); app.use(express.json()); app.use(apiVersionMiddleware); registerFailedReportRoutes(app);
+  // The same body parsers, in the same order, as server.ts — the OAuth form bodies are parsed there, not by the route.
+  const app = express(); app.use(jsonBodyParser()); app.use(formBodyParser()); app.use(apiVersionMiddleware); registerFailedReportRoutes(app);
   server = await new Promise<Server>((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
   port = (server.address() as { port: number }).port;
 });
@@ -72,3 +77,57 @@ describe('private report HTTP boundary', () => {
     expect((await call(rpc('tools/call', { name: 'list_failed_builds' }))).body.error.code).toBe(-32603);
   });
 });
+
+describe('OAuth MCP integration', () => {
+  beforeEach(() => { oauth.tokenOk.mockReset().mockImplementation(async h => h === 'Bearer oauth-test'); });
+  it('exposes dynamic registration and parses standard OAuth form token/revoke requests', async () => {
+    oauth.register.mockResolvedValue({ client_id: 'registered', token_endpoint_auth_method: 'none' });
+    const registration = await request('/api/v1/failedbr/oauth/register', { method: 'POST', body: { redirect_uris: ['https://client.example/callback'], token_endpoint_auth_method: 'none' } });
+    expect(registration.status).toBe(201);
+    expect(registration.body.client_id).toBe('registered');
+    oauth.token.mockResolvedValue({ access_token: 'test-access', token_type: 'Bearer', expires_in: 3600 });
+    const formHeaders = { 'Content-Type': 'application/x-www-form-urlencoded' };
+    const token = await request('/api/v1/failedbr/oauth/token', { method: 'POST', headers: formHeaders, body: 'grant_type=authorization_code&client_id=registered&code=test-code&code_verifier=test-verifier' });
+    expect(token.status).toBe(200);
+    expect(token.headers['cache-control']).toBe('no-store');
+    expect(oauth.token).toHaveBeenCalledWith({ grant_type: 'authorization_code', client_id: 'registered', code: 'test-code', code_verifier: 'test-verifier' }, undefined);
+    expect((await request('/api/v1/failedbr/oauth/revoke', { method: 'POST', headers: formHeaders, body: 'client_id=registered&token=test-access' })).status).toBe(200);
+    expect(oauth.revoke).toHaveBeenCalledWith({ client_id: 'registered', token: 'test-access' }, undefined);
+  });
+  it('discovers the pinned issuer/resource and challenges unauthenticated MCP requests', async () => {
+    const metadata = await request('/.well-known/oauth-protected-resource/api/v1/failedbr/mcp');
+    expect(metadata.status).toBe(200);
+    expect(metadata.body.resource).toBe('https://navbharatai.com/api/v1/failedbr/mcp');
+    const issuer = await request('/.well-known/oauth-authorization-server/api/v1/failedbr/oauth');
+    expect(issuer.body.code_challenge_methods_supported).toEqual(['S256']);
+    expect(issuer.body.grant_types_supported).toContain('refresh_token');
+    const unauthorized = await request('/api/v1/failedbr/mcp', { method: 'POST', body: rpc('initialize') });
+    expect(unauthorized.status).toBe(401);
+    expect(unauthorized.headers['www-authenticate']).toContain('resource_metadata="https://navbharatai.com/.well-known/oauth-protected-resource/api/v1/failedbr/mcp"');
+  });
+  it('accepts OAuth only for report reads and supports known client origins/protocol versions', async () => {
+    const headers = { Authorization: 'Bearer oauth-test', Origin: 'https://chatgpt.com' };
+    expect((await request('/api/v1/failedbr/reports', { headers })).status).toBe(200);
+    const init = await request('/api/v1/failedbr/mcp', { method: 'POST', headers, body: rpc('initialize', { protocolVersion: '2025-11-25' }) });
+    expect(init.body.result.protocolVersion).toBe('2025-11-25');
+    expect(init.headers['access-control-allow-origin']).toBe('https://chatgpt.com');
+    expect((await request('/api/v1/admin/failedbr/access', { headers })).status).toBe(401);
+    const preflight = await request('/api/v1/failedbr/mcp', { method: 'OPTIONS', headers: { Origin: 'https://claude.ai' } });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers['access-control-allow-headers']).toContain('Authorization');
+  });
+  it('keeps OAuth request details and consent behind the existing admin gate', async () => {
+    const path = '/api/v1/admin/failedbr/oauth/request/' + 'a'.repeat(64);
+    expect((await request(path)).status).toBe(401);
+    expect((await request(path, { method: 'POST', headers: { Authorization: 'Bearer oauth-test' }, body: { approve: true } })).status).toBe(401);
+    const headers = { 'x-admin-token': adminToken };
+    oauth.pending.mockResolvedValue({ clientName: 'Test AI', redirectUri: 'https://client.example/callback' });
+    expect((await request(path, { headers })).body.clientName).toBe('Test AI');
+    expect((await request(path, { method: 'POST', headers, body: {} })).status).toBe(400);
+    expect((await request(path, { method: 'POST', headers: { ...headers, Origin: 'https://attacker.example' }, body: { approve: true } })).status).toBe(403);
+    oauth.decide.mockResolvedValue('https://client.example/callback?code=test');
+    expect((await request(path, { method: 'POST', headers, body: { approve: true } })).body.redirect).toContain('callback?code=');
+    expect(oauth.decide).toHaveBeenCalledWith('a'.repeat(64), true);
+  });
+});
+

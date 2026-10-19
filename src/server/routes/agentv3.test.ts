@@ -2509,7 +2509,11 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      `!isImportTurn`. It rewrites ONLY padding/margin/gap px values, ONLY in files this build wrote,
     //      ONLY above the `DESIGN_CONSISTENCY` finding's own threshold, and never on a file whose spacing
     //      is coherently on another rhythm. Considered ✓.
-    expect(count).toBe(33);
+    //   1× the POST-GREEN FINISHING ROLLBACK (owner item 2, finishingRecheck.ts) — runs only when this build
+    //      was proven green AND the finishing passes wrote files; those passes are gated on `result.ok &&
+    //      expectsArtifacts` (false on every import/survey turn), so it never writes on a read-only turn. It
+    //      writes back only the last green snapshot's own content for those files. Considered ✓.
+    expect(count).toBe(34);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

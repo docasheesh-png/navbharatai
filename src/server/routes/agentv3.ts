@@ -22673,15 +22673,16 @@ async function noteBuildOutcome(
         },
         loadSnapshot: () => loadWorkspaceFiles(greenWorkspaceKey(workspaceId)),
         restore: async (plan) => {
+          const restoredFiles: Record<string, string> = {}; // only what actually landed is persisted
           await runInPass('green-guard-restore', async () => {
             for (const [path, content] of Object.entries(plan.write)) {
-              try { await actuator.writeFile(workspaceId, path, content); writtenFiles.set(path, content); } catch { /* per-file best-effort */ }
+              try { await actuator.writeFile(workspaceId, path, content); writtenFiles.set(path, content); noteFinishingWrite(path); restoredFiles[path] = content; } catch { /* per-file best-effort */ }
             }
           });
           const rm = buildRemoveCommand(plan.remove);
           if (rm) await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'post-green-remove').catch(() => null);
           for (const path of plan.remove) writtenFiles.delete(path);
-          if (Object.keys(plan.write).length > 0) await saveWorkspaceFiles(workspaceId, plan.write).catch(() => {});
+          if (Object.keys(restoredFiles).length > 0) await saveWorkspaceFiles(workspaceId, restoredFiles).catch(() => {});
           if (plan.remove.length > 0) await removeWorkspaceFiles(workspaceId, plan.remove).catch(() => {});
         },
         record: (note) => { try { buildDiag.record({ phase: 'preview', ...note }); } catch { /* best-effort */ } },

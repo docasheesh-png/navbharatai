@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import {
   mayStayOnReasoningRung, wavesFor, reasoningStayNote, reasoningStayEnabled, REASONING_STAY_MAX_FILES, REASONING_WAVE_MS, laneOutcomeWords, recordReasoningStays,
 } from '../src/server/AgentV3/FastLaneBudget';
+import { fileBudgetForPrompt } from '../src/server/AgentV3/fileBudget';
 import { runSimpleBuild } from '../src/server/AgentV3/SimpleBuilder';
 import { PROCESS_ONLY_CODES } from '../src/server/AgentV3/BuildDiagnostics';
 
@@ -58,11 +59,11 @@ describe('1 · the decision', () => {
 
 describe('2 · in the lane: only per-file calls may carry on, decided from what is left', () => {
   type Seen = { kind: 'plan' | 'contract' | 'file'; mayReason: boolean; path?: string };
-  async function lane(files: number) {
+  async function lane(files: number, prompt = 'a todo app') {
     const seen: Seen[] = [];
     const paths = Array.from({ length: files }, (_, i) => (i === 0 ? 'src/App.tsx' : `src/components/Part${i}.tsx`));
     await runSimpleBuild({
-      prompt: 'a todo app', framework: 'vite-react', scaffoldPaths: ['src/App.tsx', 'src/main.tsx', 'index.html'],
+      prompt, framework: 'vite-react', scaffoldPaths: ['src/App.tsx', 'src/main.tsx', 'index.html'],
       maxRepairs: 0,
       generate: async (_s: string, user: string, opts?: { mayReason?: boolean }) => {
         const kind: Seen['kind'] = user.includes('Plan the file list') ? 'plan' : user.includes('Design the shared contract') ? 'contract' : 'file';
@@ -85,7 +86,12 @@ describe('2 · in the lane: only per-file calls may carry on, decided from what 
     expect(seen.filter((s) => s.kind !== 'file').every((s) => !s.mayReason)).toBe(true);
   });
   it('a plan past the cap: its big tier hands off as today; once what is left is small, the last tier may carry on', async () => {
-    const seen = await lane(REASONING_STAY_MAX_FILES + 4);
+    // A todo prompt folds a 24-file plan under the reasoning cap before any file call (the file
+    // budget). This lock is the plan that is STILL past the cap after that fold: a large app whose
+    // ceiling is high enough that these files are all written, so the components tier still sees 24.
+    const prompt = 'Build a hospital management system with a patients dashboard, a doctors dashboard, a pharmacy dashboard, a laboratory dashboard, a billing dashboard, appointment screens, ward screens, and an admin dashboard, with auth, login, search, payments and reports';
+    expect(fileBudgetForPrompt(prompt).maxFiles).toBeGreaterThanOrEqual(REASONING_STAY_MAX_FILES + 4);
+    const seen = await lane(REASONING_STAY_MAX_FILES + 4, prompt);
     const parts = seen.filter((s) => s.kind === 'file' && s.path !== 'src/App.tsx');
     const root = seen.filter((s) => s.kind === 'file' && s.path === 'src/App.tsx');
     expect(parts.length).toBeGreaterThan(0);

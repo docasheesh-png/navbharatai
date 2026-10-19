@@ -16,9 +16,10 @@
 //     subtlest call.
 // So the size is decided ONCE, up front, where it is free and safe: in the plan.
 //
-// The budget is a CEILING, never a target — a genuinely simple app should come in far under it. Nothing
-// is ever trimmed silently: a plan that exceeds the budget still builds (an incomplete app is far worse
-// than a large one), it is just recorded honestly so the overrun is measurable.
+// The budget is a CEILING, never a target — a genuinely simple app should come in far under it. An
+// over-budget plan is not silently trimmed and not given one model call per extra file: the extra
+// paths are folded into a file that is already being written (`foldPlanToBudget`), so the app stays
+// complete and the generation count stays at the ceiling.
 //
 // Pure + deterministic — no I/O, no clock.
 
@@ -69,9 +70,8 @@ export function fileBudgetInstruction(budget: FileBudget): string {
 }
 
 /**
- * An honest diagnostics note when a plan exceeds its budget, or null when it is within it. The plan is
- * never silently trimmed — shipping an incomplete app would be far worse than shipping a large one — so
- * this exists to make the overrun visible and measurable. Pure.
+ * An honest diagnostics note when a plan exceeds its budget, or null when it is within it.
+ * Pure.
  */
 export function overBudgetNote(plannedFiles: number, budget: FileBudget): string | null {
   if (!Number.isFinite(plannedFiles) || plannedFiles <= budget.maxFiles) return null;
@@ -80,4 +80,67 @@ export function overBudgetNote(plannedFiles: number, budget: FileBudget): string
     `(${budget.label} app). The build proceeds in full — nothing was trimmed — but this plan is larger ` +
     `than this app should need, which costs build time and adds bug surface.`
   );
+}
+
+const PROTECTED_PLAN_FILE = /^(src\/App\.tsx|src\/main\.tsx|src\/main\.jsx|src\/index\.css|index\.html)$/;
+
+export interface FoldedPlan<T> {
+  files: T[];
+  /** Paths whose own generation call was not made. Their purpose was copied into a kept file. */
+  folded: string[];
+  note: string | null;
+}
+
+/**
+ * A plan over the ceiling is not dropped and not built as N extra model calls. Entry files stay.
+ * Every extra path is named inside the last kept file's purpose, so that one call writes them
+ * in place. Nothing the plan asked for is discarded. Pure.
+ */
+export function foldPlanToBudget<T extends { path: string; purpose: string }>(
+  files: readonly T[],
+  budget: FileBudget,
+): FoldedPlan<T> {
+  const list = [...files];
+  if (!Number.isFinite(budget.maxFiles) || budget.maxFiles < 1 || list.length <= budget.maxFiles) {
+    return { files: list, folded: [], note: null };
+  }
+  const protectedIdx: number[] = [];
+  const rest: number[] = [];
+  list.forEach((f, i) => (PROTECTED_PLAN_FILE.test(f.path) ? protectedIdx : rest).push(i));
+  const room = budget.maxFiles - protectedIdx.length;
+  if (room <= 0) {
+    return { files: list, folded: [], note: overBudgetNote(list.length, budget) };
+  }
+  const keepRest = rest.slice(0, room);
+  const foldIdx = rest.slice(room);
+  if (foldIdx.length === 0) return { files: list, folded: [], note: overBudgetNote(list.length, budget) };
+  const host = keepRest.length ? keepRest[keepRest.length - 1] : protectedIdx[protectedIdx.length - 1];
+  const folded = foldIdx.map((i) => list[i].path);
+  const extra = foldIdx.map((i) => `${list[i].path} — ${list[i].purpose}`).join('; ');
+  const hostFile: T = {
+    ...list[host],
+    purpose: `${list[host].purpose} ALSO INCLUDE IN THIS SAME FILE (do not create the separate files): ${extra}`,
+  };
+  const keep = new Set<number>([...protectedIdx, ...keepRest]);
+  const out: T[] = [];
+  for (let i = 0; i < list.length; i++) {
+    if (i === host) out.push(hostFile);
+    else if (keep.has(i)) out.push(list[i]);
+  }
+  const note =
+    `${folded.length} planned file(s) were folded into ${list[host].path} so they are still written, ` +
+    `without a separate generation call each: ${folded.join(', ')}.`;
+  return { files: out, folded, note };
+}
+
+/** The one line the blueprint records: the overrun, plus the fold when one happened. Pure. */
+export function fileBudgetReport(
+  plannedFiles: number,
+  budget: FileBudget,
+  folded: { note: string | null },
+): string | null {
+  const over = overBudgetNote(plannedFiles, budget);
+  if (!over) return null;
+  if (!folded.note || folded.note === over) return over;
+  return `${over} ${folded.note}`;
 }

@@ -628,9 +628,15 @@ export default function App() {
     return id;
   });
 
-  // G1.2 — on mount, try to restore the last completed build for this session.
+  // G1.2 — once signed in, try to restore the last completed build for this session.
   // Best-effort: any failure is silent so the normal empty-state UI shows instead.
+  // ONLY FOR A SIGNED-IN USER, AND ONCE: the route now requires the session's owner (Q-780 rule), so a
+  // signed-out visitor's request could only be refused — it used to hit the server on every first visit
+  // and log a 404 in the console of every visitor to the homepage.
+  const buildSessionRestoreTried = useRef(false);
   useEffect(() => {
+    if (!user?.uid || buildSessionRestoreTried.current) return;
+    buildSessionRestoreTried.current = true;
     let cancelled = false;
     fetchBuildSession(currentProSessionId).then((saved) => {
       if (cancelled || !saved || !saved.files || Object.keys(saved.files).length === 0) return;
@@ -643,7 +649,7 @@ export default function App() {
     }).catch(() => {});
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // run once on mount only
+  }, [user?.uid]); // once, when a signed-in user is first known
 
   // Tracks whether the initial cloud load finished — guards the auto-save effect
   // so we never overwrite cloud data before we've pulled it in.

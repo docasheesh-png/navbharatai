@@ -4378,3 +4378,10 @@ price is not. Recorded as a queue row, not done here.
   does not start the starter preview for it, and no "engine slow"/upsell line is shown. The bill stays ₹0 (the
   empty-build rule). `src/server/AgentV3/answerOnlyTurn.ts answeredInsteadOfBuilding`. Locked in
   `tests/aQuestionTurnIsAnAnswerNotAFailedBuild.test.ts`.
+- **`AGENTV3_FIRST_BYTE_GRACE_NEEDS_RECENT`** (NOT set; default **on**; `off` ⇒ every rung gets the first-byte grace,
+  #3810 as merged) and **`AGENTV3_FIRST_BYTE_GRACE_RECENT_MS`** (NOT set; default **1800000** = 30 min). Owner-approved
+  2026-10-18 (r6–r10 autopsy): the zero-byte first-byte grace (`AGENTV3_STREAM_FIRST_BYTE_GRACE_MS`, 30 s) is given
+  only to a rung that answered within the window (silence memory `answeredAt`, set when the ladder clears a rung on
+  an answer); otherwise the old throughput grace (15 s) applies. Instance-local: a fresh instance, or silence memory
+  off, gives 15 s until the rung answers once. `src/server/AgentV3/providers/openAiStream.ts firstByteGraceFor`.
+  Locked in `tests/theFirstByteGraceIsEarned.test.ts`.

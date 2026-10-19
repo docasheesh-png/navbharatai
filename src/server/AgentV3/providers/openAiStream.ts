@@ -348,6 +348,29 @@ export function streamFirstByteGraceMs(env: NodeJS.ProcessEnv = process.env): nu
   return Math.max(v, streamThroughputGraceMs(env));
 }
 
+/** How recently a rung must have answered to earn the first-byte grace. Default 30 min; `AGENTV3_FIRST_BYTE_GRACE_RECENT_MS`. */
+export const FIRST_BYTE_GRACE_RECENT_MS_DEFAULT = 30 * 60_000;
+
+/**
+ * 🔴 THE FIRST-BYTE GRACE IS EARNED (owner 2026-10-18, r6–r10 autopsy). #3810 gave every zero-byte stream 30 s
+ * before it is judged. For a rung that has been answering, that is patience with a queue; for one that has NOT
+ * answered recently, it is 15 extra seconds of the user watching nothing before the next rung is tried. So the
+ * longer grace goes only to a rung that answered within the recency window (the silence memory's own answer
+ * record, `ProviderSilenceMemory.answeredAt`); otherwise the old throughput grace (15 s) applies. PURE.
+ * AGENTV3_FIRST_BYTE_GRACE_NEEDS_RECENT=off ⇒ every rung gets the first-byte grace (#3810 as merged).
+ */
+export function firstByteGraceFor(
+  lastAnsweredAt: number | null | undefined,
+  nowMs: number,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const full = streamFirstByteGraceMs(env);
+  if (String(env.AGENTV3_FIRST_BYTE_GRACE_NEEDS_RECENT ?? '').trim().toLowerCase() === 'off') return full;
+  const recentMs = streamNumber(env.AGENTV3_FIRST_BYTE_GRACE_RECENT_MS, 1) ?? FIRST_BYTE_GRACE_RECENT_MS_DEFAULT;
+  const at = Number(lastAnsweredAt);
+  return Number.isFinite(at) && at > 0 && nowMs - at <= recentMs ? full : streamThroughputGraceMs(env);
+}
+
 /**
  * Is this stream crawling — past its grace period and below the floor? PURE.
  *
@@ -355,7 +378,7 @@ export function streamFirstByteGraceMs(env: NodeJS.ProcessEnv = process.env): nu
  * forced-reasoning model thinking hard before it writes is never mistaken for a dead one.
  */
 export function streamIsCrawling(
-  sample: { producedChars?: number; producedBytes?: number; elapsedMs: number },
+  sample: { producedChars?: number; producedBytes?: number; elapsedMs: number; firstByteGraceMs?: number },
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const floor = streamMinCharsPerSec(env);
@@ -365,7 +388,8 @@ export function streamIsCrawling(
   // Bytes when the caller has them (the script-neutral measure — see `producedBytes`), else characters.
   const raw = Number.isFinite(sample?.producedBytes) ? sample.producedBytes : sample?.producedChars;
   const produced = Number.isFinite(raw) ? Math.max(0, raw as number) : 0;
-  if (produced === 0 && elapsedMs < streamFirstByteGraceMs(env)) return false; // queued, not crawling
+  const firstByteGrace = Number.isFinite(sample?.firstByteGraceMs) ? (sample.firstByteGraceMs as number) : streamFirstByteGraceMs(env);
+  if (produced === 0 && elapsedMs < firstByteGrace) return false; // queued, not crawling
   return produced / (elapsedMs / 1000) < floor;
 }
 

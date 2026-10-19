@@ -187,7 +187,7 @@ describe('the wiring — each half reaches the place that was blank', () => {
 
   it('the read loop judges throughput, and only when the caller allows it', () => {
     // Crawling is judged FIRST and the caller asked only then: asking claims the abandon (autopsy d382b398).
-    expect(runner).toContain('streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt }) && opts.canAbandon?.()');
+    expect(runner).toContain('streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt, firstByteGraceMs: opts.firstByteGraceMs }) && opts.canAbandon?.()');
     expect(runner).toContain("return 'slow';");
   });
 

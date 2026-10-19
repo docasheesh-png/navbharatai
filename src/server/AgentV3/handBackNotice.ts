@@ -15,8 +15,19 @@
 export type HandBackKind = 'style' | 'unfinished';
 
 /** The line shown in the chat when a turn is handed back, or null when nothing needs correcting. */
-export function handBackNotice(kind: HandBackKind, shownText: string | null | undefined): string | null {
+export function handBackNotice(
+  kind: HandBackKind,
+  shownText: string | null | undefined,
+  opts: { previewLive?: boolean; env?: NodeJS.ProcessEnv } = {},
+): string | null {
   if (!String(shownText ?? '').trim()) return null; // nothing was claimed, so there is nothing to correct
+  // 🔴 r6–r10 autopsy: the preview was ALREADY open when this said "before the preview opens". When it is
+  // live, say what is true — the app is open and the styling pass will refresh it. AGENTV3_STYLE_NOTICE_LIVE=off
+  // restores the old single sentence.
+  const liveAware = String((opts.env ?? process.env).AGENTV3_STYLE_NOTICE_LIVE ?? '').trim().toLowerCase() !== 'off';
+  if (kind === 'style' && opts.previewLive === true && liveAware) {
+    return '⏳ Almost done — your preview is already open. I am polishing the styling of the screens now; the preview will refresh when it is done.';
+  }
   return kind === 'style'
     ? '⏳ Not finished yet — I am styling the screens before the preview opens. This takes a minute; please keep this open.'
     : '⏳ Not finished yet — a few things still need fixing, and I am continuing. Please keep this open.';

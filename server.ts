@@ -118,6 +118,7 @@ import { handleSonicUpgrade } from './src/server/sonic/sonicWs';
 import { registerSonicRoutes } from './src/server/sonic/sonicRoute';
 import { serverStats } from './src/server/lib/serverStats';
 import { registerAdminRoutes } from './src/server/routes/admin';
+import { registerFailedReportRoutes } from './src/server/routes/failedReports';
 import { attachMetricsTimeline } from './src/server/lib/metricsTimeline';
 import { serverLoad } from './src/server/lib/serverLoad';
 import { registerSyncRoutes } from './src/server/routes/sync';
@@ -446,6 +447,12 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   // internally rewritten to the existing `/api/...` handlers (canonical), while
   // bare `/api/...` keeps working as a deprecated shim (Deprecation + Link headers).
   app.use(apiVersionMiddleware);
+  // The private report screen serves only a sign-in shell before its authenticated API reads.
+  app.use('/failedbr', (_req, res, next) => {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+    res.setHeader('Cache-Control', 'private, no-store');
+    next();
+  });
 
   // Cashfree Configuration
   if (process.env.CASHFREE_APP_ID) (Cashfree as any).XClientId = process.env.CASHFREE_APP_ID;
@@ -738,6 +745,7 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   registerSyncRoutes(app);
   registerPaymentRoutes(app, paymentLimiter);
   registerAdminRoutes(app, adminLimiter);
+  registerFailedReportRoutes(app);
   // MONITOR — point the shared metrics registry at the time-series store, ONCE. Every existing
   // getMetrics().recordBuild/recordModelCall call site then feeds the admin Monitor's charts with no
   // change at those call sites (see metricsTimeline.ts for why it is a sink and not a direct import).

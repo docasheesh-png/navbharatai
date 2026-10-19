@@ -203,6 +203,7 @@ import { looksLikeDbUnreachable } from './sandbox/EngineerAI/actuators/sandboxHe
 import { extractMissingPrismaExports, isEnumConsumerFile, fixDanglingEnumConsumer } from './prismaEnumConsumers';
 import type { BackendProvisionResult } from './sandbox/EngineerAI/actuators/IEngineerActuator';
 import { nextBuildRepairHint, nextMiddlewareCorrectPath } from './frameworkBuildHints';
+import { tsxRelocationFor, tsFileHasJsx, tsJsxRenameEnabled } from './LanguageCoherence';
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
@@ -5294,6 +5295,28 @@ export class ToolDispatcher {
             try { getWorkspaceMemory(this.workspaceId).recordAudit(`[NEXT-MW] relocated misplaced middleware ${path} → ${corrected}`); } catch { /* audit best-effort */ }
             path = corrected;
           }
+        }
+        // JSX IN A `.ts` FILE (owner item 3): esbuild/tsc reject JSX under `.ts`, so the build dies on a
+        // valid component. Write it as `.tsx` instead — only for a NEW file whose importers (if any) use
+        // extension-less specifiers, so nothing is clobbered and no import needs rewriting. Otherwise the
+        // write proceeds unchanged. Kill switch AGENTV3_TS_JSX_RENAME=off.
+        if (tsJsxRenameEnabled() && /\.ts$/.test(path) && tsFileHasJsx(reqStr(input, 'content'))) {
+          try {
+            const listed = await this.actuator.listFiles(this.workspaceId).catch(() => null);
+            const rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT);
+            const importers = getWorkspaceMemory(this.workspaceId).impactRadius(rel).direct;
+            const importerContents: string[] = [];
+            for (const imp of importers.slice(0, 20)) {
+              const c = await this.actuator.readFile(this.workspaceId, imp).catch(() => null);
+              if (typeof c === 'string') importerContents.push(c);
+              else { importerContents.push(`'./${rel.split('/').pop()}'`); break; } // unreadable importer → treat as unsafe
+            }
+            const to = tsxRelocationFor(rel, reqStr(input, 'content'), listed ? new Set(listed) : null, importerContents);
+            if (to) {
+              try { getWorkspaceMemory(this.workspaceId).recordAudit(`[TS-JSX] wrote ${rel} as ${to} (contains JSX)`); } catch { /* audit best-effort */ }
+              path = to;
+            }
+          } catch { /* best-effort — the write proceeds at the original path */ }
         }
         // Middleware relocation (above) can change the path. guardedWrite applies the config pin,
         // preview-bridge strip, probe, package pin, import dedupe and design-kit keep — once.

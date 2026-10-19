@@ -207,6 +207,36 @@ describe('AutoFix flags (R4 §2.3)', () => {
 });
 
 describe('filterActionableErrors', () => {
+  it('does not repair Chromium refusing autofocus inside a cross-origin preview frame', () => {
+    const errs = ['textarea', 'input', 'select', 'button'].map((tag) => ({
+      t: 1, kind: 'console', text: `Blocked autofocusing on a <${tag}> element in a cross-origin subframe.`,
+    }));
+    expect(filterActionableErrors(errs)).toEqual([]);
+    expect(errs).toHaveLength(4); // observations are retained; only the repair input is filtered
+  });
+
+  it('keeps thrown errors and other cross-origin failures actionable', () => {
+    const errs: RuntimeError[] = [
+      { t: 1, kind: 'pageerror', text: 'Blocked autofocusing on a <textarea> element in a cross-origin subframe.' },
+      { t: 2, kind: 'console', text: 'Blocked a frame with origin from accessing a cross-origin frame.' },
+      { t: 3, kind: 'console', text: "Uncaught TypeError: Cannot read properties of null (reading 'focus')" },
+      { t: 4, kind: 'console', text: "The requested module '/src/engine.ts' does not provide an export named 'createScene'" },
+      { t: 5, kind: 'httperror', text: 'HTTP 500 from /api/items' },
+      { t: 6, kind: 'console', text: 'Blocked autofocusing on a <textarea> element in a cross-origin subframe. App crashed.' },
+    ];
+    expect(filterActionableErrors(errs)).toEqual(errs);
+  });
+
+  it('removes the autofocus notice without hiding a real error in the same observation', () => {
+    const crash: RuntimeError = { t: 2, kind: 'pageerror', text: 'ReferenceError: renderScene is not defined', stack: 'at /src/scene.ts:4:2' };
+    const errs: RuntimeError[] = [
+      { t: 1, kind: 'console', text: 'Blocked autofocusing on a <input> element in a cross-origin subframe.' },
+      crash,
+    ];
+    expect(filterActionableErrors(errs)).toEqual([crash]);
+    expect(errs).toHaveLength(2);
+  });
+
   it('drops benign noise (favicon, sourcemap, ResizeObserver, vite hmr)', () => {
     const errs: RuntimeError[] = [
       { t: 1, kind: 'request-failed', text: 'GET /favicon.ico 404' },
@@ -293,3 +323,4 @@ describe('repair prompt + warning', () => {
     expect(w).toContain('TypeError: x is not a function');
   });
 });
+

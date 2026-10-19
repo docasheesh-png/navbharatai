@@ -3,6 +3,7 @@ import { renderMarketingPage, renderAboutPage } from '../lib/marketingPages';
 import { readAboutOverridesForPage } from '../lib/siteAbout';
 import { noteWebsiteVisit } from '../lib/ownAudience';
 import { siteOrigin } from '../lib/siteIndex';
+import { useStaticPageCsp } from '../lib/securityHeaders';
 import { MARKETING_PAGES, ABOUT_PATH } from '../../content/marketing';
 
 /**
@@ -31,6 +32,7 @@ export function registerMarketingRoutes(app: Express): void {
     app.get(page.path, (req: Request, res: Response) => {
       countVisit(req);
       res.set('Cache-Control', 'public, max-age=600');
+      useStaticPageCsp(res);
       res.type('html').send(renderMarketingPage(page, siteOrigin()));
     });
   }
@@ -40,6 +42,7 @@ export function registerMarketingRoutes(app: Express): void {
     // degrades to the last good overrides, or to the full shipped page (lib/siteAbout.ts).
     const overrides = await readAboutOverridesForPage();
     res.set('Cache-Control', 'public, max-age=600');
+    useStaticPageCsp(res);
     res.type('html').send(renderAboutPage(siteOrigin(), overrides));
   });
 }

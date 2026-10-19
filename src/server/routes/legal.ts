@@ -21,6 +21,7 @@ import { grievanceOfficer } from '../lib/grievanceOfficer';
 import { grievanceDoc, GRIEVANCE_TITLE, GRIEVANCE_UPDATED } from '../../content/legal/grievance';
 import { contactDoc, CONTACT_TITLE, CONTACT_UPDATED } from '../../content/legal/contact';
 import { siteOrigin } from '../lib/siteIndex';
+import { useStaticPageCsp } from '../lib/securityHeaders';
 
 // Re-exported so existing importers (and the tests that pin these paths) keep one import site.
 export { PUBLIC_LEGAL_ROUTES, DELETE_ACCOUNT_PATH, CONTACT_PATH, LEGAL_PATH_ALIASES } from '../lib/legalPaths';
@@ -65,6 +66,7 @@ export function registerLegalRoutes(app: Express): void {
   app.get(CONTACT_PATH, (_req: Request, res: Response) => {
     res.set('Cache-Control', 'public, max-age=600');
     setCanonical(res, CONTACT_PATH);
+    useStaticPageCsp(res);
     res.type('html').send(renderLegalPageHtml({
       title: CONTACT_TITLE,
       updated: CONTACT_UPDATED,
@@ -77,6 +79,7 @@ export function registerLegalRoutes(app: Express): void {
   app.get(DELETE_ACCOUNT_PATH, (_req: Request, res: Response) => {
     res.set('Cache-Control', 'public, max-age=600');
     setCanonical(res, DELETE_ACCOUNT_PATH);
+    useStaticPageCsp(res);
     res.type('html').send(renderLegalPageHtml({
       title: ACCOUNT_DELETION_TITLE,
       updated: ACCOUNT_DELETION_UPDATED,
@@ -99,6 +102,7 @@ export function registerLegalRoutes(app: Express): void {
          */
         if (docId === 'legal_grievance') {
           res.set('Cache-Control', 'public, max-age=600');
+          useStaticPageCsp(res);
           res.type('html').send(renderLegalPageHtml({
             title: GRIEVANCE_TITLE,
             updated: GRIEVANCE_UPDATED,
@@ -123,6 +127,7 @@ export function registerLegalRoutes(app: Express): void {
         // A legal page must be current: a stale cached copy could show a reader terms that no longer
         // apply. Ten minutes is enough to absorb a crawl, short enough that an update is visible fast.
         res.set('Cache-Control', 'public, max-age=600');
+        useStaticPageCsp(res);
         res.type('html').send(renderLegalPageHtml({ title: doc.title, updated: doc.updated, body: doc.body, description: PUBLIC_PAGE_DESCRIPTIONS[path], url: `${siteOrigin()}${path}` }));
       } catch {
         res.status(500).type('text/plain').send(

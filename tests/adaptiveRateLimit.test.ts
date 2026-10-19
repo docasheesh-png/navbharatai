@@ -58,6 +58,12 @@ describe('adaptiveRateLimit — isBurst', () => {
 });
 
 describe('adaptiveRateLimit — isGuardedPath', () => {
+  it('leaves machine-facing failed-report APIs to their own limiters without exempting admin or lookalikes', () => {
+    for (const prefix of ['/api', '/api/v1']) {
+      for (const route of ['/failedbr/mcp', '/failedbr/reports', '/failedbr/reports/workspace/history', '/failedbr/oauth/token', '/failedbr/oauth/register']) expect(isGuardedPath(prefix + route)).toBe(false);
+      for (const route of ['/admin/failedbr/access', '/failedbr/mcpevil', '/failedbr/oauth-evil']) expect(isGuardedPath(prefix + route)).toBe(true);
+    }
+  });
   it('guards the general /api/ surface', () => {
     expect(isGuardedPath('/api/pro-chat')).toBe(true);
     expect(isGuardedPath('/api/admin/users')).toBe(true);
@@ -96,3 +102,4 @@ describe('adaptiveRateLimit — computePenaltyMs', () => {
     expect(computePenaltyMs(20, 5_000)).toBe(5_000);
   });
 });
+

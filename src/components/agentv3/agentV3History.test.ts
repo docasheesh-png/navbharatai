@@ -271,35 +271,37 @@ describe('sessionStatusMeta (history-menu status dot)', () => {
   });
 });
 
+// Buckets are LOCAL calendar days (what the user sees), so fixtures use local-time constructors —
+// UTC instants made 'Yesterday' fail in any zone east of UTC (23:00Z is already tomorrow there).
 describe('sessionDateBucket (history-menu date grouping)', () => {
-  const now = new Date('2026-07-01T12:00:00Z').getTime();
+  const now = new Date(2026, 6, 1, 12, 0).getTime();
   it('buckets same-calendar-day as Today', () => {
-    expect(sessionDateBucket(new Date('2026-07-01T00:30:00Z').getTime(), now)).toBe('Today');
+    expect(sessionDateBucket(new Date(2026, 6, 1, 0, 30).getTime(), now)).toBe('Today');
   });
   it('buckets the previous calendar day as Yesterday', () => {
-    expect(sessionDateBucket(new Date('2026-06-30T23:00:00Z').getTime(), now)).toBe('Yesterday');
+    expect(sessionDateBucket(new Date(2026, 5, 30, 23, 0).getTime(), now)).toBe('Yesterday');
   });
   it('buckets 2-7 days ago as Previous 7 days', () => {
-    expect(sessionDateBucket(new Date('2026-06-27T12:00:00Z').getTime(), now)).toBe('Previous 7 days');
+    expect(sessionDateBucket(new Date(2026, 5, 27, 12, 0).getTime(), now)).toBe('Previous 7 days');
   });
   it('buckets 8-30 days ago as Previous 30 days', () => {
-    expect(sessionDateBucket(new Date('2026-06-10T12:00:00Z').getTime(), now)).toBe('Previous 30 days');
+    expect(sessionDateBucket(new Date(2026, 5, 10, 12, 0).getTime(), now)).toBe('Previous 30 days');
   });
   it('buckets anything older as Older', () => {
-    expect(sessionDateBucket(new Date('2026-01-01T12:00:00Z').getTime(), now)).toBe('Older');
+    expect(sessionDateBucket(new Date(2026, 0, 1, 12, 0).getTime(), now)).toBe('Older');
   });
 });
 
 interface TestSession { id: string; updatedAt?: number }
 
 describe('groupSessionsByDate (history-menu grouping — a real session list, not flat text)', () => {
-  const now = new Date('2026-07-01T12:00:00Z').getTime();
+  const now = new Date(2026, 6, 1, 12, 0).getTime();
   it('groups items into ordered date buckets, preserving each bucket\'s relative order', () => {
     const items: TestSession[] = [
-      { id: 'a', updatedAt: new Date('2026-07-01T10:00:00Z').getTime() }, // Today
-      { id: 'b', updatedAt: new Date('2026-06-30T10:00:00Z').getTime() }, // Yesterday
-      { id: 'c', updatedAt: new Date('2026-07-01T02:00:00Z').getTime() }, // Today (older than a)
-      { id: 'd', updatedAt: new Date('2026-01-01T10:00:00Z').getTime() }, // Older
+      { id: 'a', updatedAt: new Date(2026, 6, 1, 10, 0).getTime() }, // Today
+      { id: 'b', updatedAt: new Date(2026, 5, 30, 10, 0).getTime() }, // Yesterday
+      { id: 'c', updatedAt: new Date(2026, 6, 1, 2, 0).getTime() }, // Today (older than a)
+      { id: 'd', updatedAt: new Date(2026, 0, 1, 10, 0).getTime() }, // Older
     ];
     const groups = groupSessionsByDate(items, now);
     expect(groups.map((g) => g.label)).toEqual(['Today', 'Yesterday', 'Older']);

@@ -98,7 +98,7 @@ describe('server-rendered product pages', () => {
     expect(new Set(titles).size).toBe(titles.length);
     expect(new Set(descs).size).toBe(descs.length);
     for (const t of titles) expect(t.length, t).toBeLessThanOrEqual(65);
-    for (const d of descs) { expect(d.length, d).toBeGreaterThan(70); expect(d.length, d).toBeLessThanOrEqual(170); }
+    for (const d of descs) { expect(d.length, d).toBeGreaterThan(70); expect(d.length, d).toBeLessThanOrEqual(160); }
   });
 
   it('is not thin: every page carries real content', () => {

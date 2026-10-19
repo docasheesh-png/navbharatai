@@ -40,6 +40,7 @@ import { decideBuildNudge, standDownNote } from './nudgeToBuild';
 import { decideUnfinishedResume, unfinishedResumeStandDownNote, unfinishedResumeNote } from './unfinishedResume';
 import { decideStyleResume, doneStyleNote, styleResumeEnabled, styleResumeNote } from './stylePolishResume';
 import { handBackNotice } from './handBackNotice';
+import { stylePassCapHit } from './stylePassCap';
 import { asPlatformRequest } from './platformRequest';
 import { repairClaimWithoutChange, repairClaimNote, NO_CHANGE_LINE, handBackIgnoredNote } from './repairClaim';
 import { streamThinkingToChat } from './thinkingStream';
@@ -662,6 +663,10 @@ export class AgentRunner {
      * ("Done — I added all the missing CSS rules to src/index.css …") and replaced it as the build's summary.
      */
     let summaryBeforeStyleResume: string | null = null;
+    /** When OUR style hand-back started its pass, and the READY health it started from (stylePassCap.ts). */
+    let styleResumeStartedAt: number | null = null;
+    let styleResumeHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string; unassessed?: boolean } | undefined;
+    const previewLiveNow = (): boolean => { try { return typeof (dispatcher as any).hasPublishedPreview === 'function' && (dispatcher as any).hasPublishedPreview() === true; } catch { return false; } };
     const MAX_BUILD_NUDGES = 2;
 
     const messages: unknown[] = [{ role: 'user', content: this.opts.platformRequest ? asPlatformRequest(userPrompt) : userPrompt }];
@@ -959,6 +964,18 @@ export class AgentRunner {
           await persist(builtSomething ? 'complete' : 'stopped');
           events.emit({ type: 'done', ok: builtSomething, summary, ts: Date.now() });
           return { ok: builtSomething, summary, steps, usage, billedUsd: billed(), timedOut: true };
+        }
+
+        // OUR STYLE PASS HAS A CAP OF ITS OWN (stylePassCap.ts, r6–r10 autopsy). It only ever starts on a build
+        // the gate already judged READY, so on expiry the build ends as that READY build, with the model's own
+        // summary of the app — not a step-limit or timeout message about polish nobody asked for.
+        if (stylePassCapHit(styleResumeStartedAt, Date.now())) {
+          const passMs = Date.now() - (styleResumeStartedAt as number);
+          try { this.opts.onNote?.({ code: 'STYLE_PASS_CAPPED', message: `style pass ended by its time cap after ${Math.round(passMs / 1000)}s` }); } catch { /* a note never fails a build */ }
+          const summary = summaryBeforeStyleResume ?? 'Build complete.';
+          await persist('complete');
+          events.emit({ type: 'done', ok: true, summary, ts: Date.now(), ...(styleResumeHealth ? { readiness: styleResumeHealth } : {}) });
+          return { ok: true, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
         }
 
         // Full Team mid-build steering (Fix 60): drain the messages the user sent while the team was
@@ -1346,7 +1363,9 @@ export class AgentRunner {
                   summaryBeforeStyleResume = turn.text.trim() || null;
                   // Keep main's hand-back narration (#3470); spacing is no longer handed back at all
                   // (autopsy 536c8189 — it is snapped deterministically in `spacingSnap.ts`).
-                  const styleNotice = handBackNotice('style', turn.text);
+                  styleResumeStartedAt = Date.now();
+                  styleResumeHealth = buildHealth;
+                  const styleNotice = handBackNotice('style', turn.text, { previewLive: previewLiveNow() });
                   if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
                   try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, style.orphans?.length ?? 0, style.a11y?.length ?? 0, style.noTokens?.colours ?? 0), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.orphans ?? []).map((o) => `${o}:unimported`), ...(style.noTokens ? [`${style.noTokens.colours}-colours:no-tokens`] : [])].join(' ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(decision.message);
@@ -1424,7 +1443,8 @@ export class AgentRunner {
                 styleResumes++;
                 summaryBeforeStyleResume = turn.text.trim() || null;
                 // A specialist's text is forwarded to the chat too (SubAgent re-emits narration).
-                const styleNotice = handBackNotice('style', turn.text);
+                styleResumeStartedAt = Date.now();
+                const styleNotice = handBackNotice('style', turn.text, { previewLive: previewLiveNow() });
                 if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
                 try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: `${agentRole}:${styleResumeNote(style.missing.length, style.pages.length, 0, style.a11y?.length ?? 0)}`, detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
                 pushPlatformTurn(decision.message);

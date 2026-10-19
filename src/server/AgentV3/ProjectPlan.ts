@@ -712,7 +712,11 @@ export function nextBuildableModule(plan: ProjectPlan): ProjectModule | null {
   const done = new Set(plan.modules.filter((m) => m.status === 'done').map((m) => m.id));
   const inProgress = plan.modules.find((m) => m.status === 'in_progress');
   if (inProgress) return inProgress;
-  return plan.modules.find((m) => m.status === 'pending' && m.dependsOn.every((d) => done.has(d))) ?? null;
+  const ready = plan.modules.filter((m) => m.status === 'pending' && m.dependsOn.every((d) => done.has(d)));
+  // A types-only module that is also ready must not go first when a screen is ready too. The shell
+  // that owns src/App.tsx stays last in the PLAN (it imports the others); this only picks among
+  // modules the dependency graph already allows.
+  return ready.find((m) => m.files.some((f) => f.endsWith('.tsx'))) ?? ready[0] ?? null;
 }
 
 /** True when every module is done. PURE. */
@@ -1231,6 +1235,7 @@ export function projectPlanSystemPrompt(framework: string): string {
     '  comment. The whole answer must fit in one reply — a plan cut off mid-list cannot be used at all.',
     '- files: relative paths from the project root; each file belongs to exactly ONE module.',
     '- Exactly ONE module — the app shell, last — lists the app entry (src/App.tsx) in its files. Earlier modules never list it: until the shell is built the app is not assembled, and that is expected.',
+    '- The FIRST module must depend on nothing and must own at least one .tsx screen the user can see. Do not make the first module types-only.',
     '- Do NOT list node_modules, lockfiles, or build output.',
     `- SIZE BUDGET — HARD LIMITS, because the whole answer must fit in one reply: at most ${PLANNER_BUDGET.modules} modules`,
     `  (merge related features into one module rather than adding a 15th), at most ${PLANNER_BUDGET.filesPerModule} files per module,`,

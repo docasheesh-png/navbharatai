@@ -4,7 +4,7 @@ import { clarityJudgeAsk } from '../AgentV3/clarityJudgeAsk';
 import { platformVoiceEnabled, voiceOf, voiceRequestedIn, eventInUserVoice } from '../AgentV3/platformVoice';
 import { silenceMemoryEnabled, sharedProviderSilenceMemory } from '../AgentV3/providerSilenceMemory';
 import { soloKeeps, soloArchitectNote, soloInputOf, buildsSolo } from '../AgentV3/soloBuild';
-import { templateInstantPreviewEnabled, shouldUseSlimPrompt, isTemplateVerifyJob, capTemplateVerifyEstimate } from '../AgentV3/templateVerify';
+import { templateInstantPreviewEnabled, shouldUseSlimPrompt, isTemplateVerifyJob, capTemplateVerifyEstimate, verbatimTemplateSkipsModel, settleVerbatimTemplate, startTemplatePreview, templateRunResult, templateCountsAsGated } from '../AgentV3/templateVerify';
 import { teacherPromoFor } from '../lib/freeChatReplies';
 import { BoundedCache } from '../lib/boundedCache';
 import { FILE_SIZE_RULE, READ_GUIDE_TOOL, fileSizeRuleEnabled, moduleText, modularizePrompt, modularPromptEnabled } from '../AgentV3/reliability/modularPrompt';
@@ -52,7 +52,7 @@ import { parseKeyPool } from '../lib/keyPool';
 import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
-import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
+import { fileBudgetForPrompt, foldPlanToBudget, fileBudgetReport } from '../AgentV3/fileBudget';
 import { firstEtaLine, formatEtaRange, fleetEtaLine, etaTickLine, etaPhaseLine } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity } from '../AgentV3/complexityRouting';
@@ -1699,9 +1699,12 @@ export function reviewerShouldRun(opts: {
   fastLaneGated: boolean;
   reviewFastlaneForced: boolean;
   startTierSonnet: boolean;
+  /** A verbatim chip already delivered its tested template (Q-963). No model review of a file we wrote. */
+  templateDelivered?: boolean;
 }): boolean {
   return opts.wroteFiles
     && !opts.isImportTurn
+    && !opts.templateDelivered
     && (!opts.fastLaneGated || opts.reviewFastlaneForced || opts.startTierSonnet);
 }
 
@@ -17032,12 +17035,14 @@ async function noteBuildOutcome(
           // exists for exactly this call — it defaults to the first argument, so omitting it sized the app
           // the MODEL is told to build from notes+request while the overrun recorded five lines below read
           // the bare prompt. Two answers to one question; the model's was the wrong one.
-          const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework, scaffold), manifestUserPrompt(withRequestNotes(prompt, requestNotesText), scaffold, prompt)));
-          // FILE BUDGET honesty (admin 2026-08-02): the plan is NEVER trimmed — shipping an incomplete app
-          // would be far worse than shipping a large one — but an overrun is recorded so "this app planned
-          // more files than it should need" is measurable instead of invisible.
+          const parsedForBudget = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework, scaffold), manifestUserPrompt(withRequestNotes(prompt, requestNotesText), scaffold, prompt)));
+          const foldedManifest = foldPlanToBudget(parsedForBudget, fileBudgetForPrompt(prompt));
+          const manifest = foldedManifest.files;
+          // FILE BUDGET honesty (admin 2026-08-02): an overrun is recorded against the RAW plan, and the
+          // files past the ceiling are folded into a kept file (`foldPlanToBudget`) instead of each
+          // becoming its own model call. Nothing is deleted.
           try {
-            const overNote = overBudgetNote(manifest.length, fileBudgetForPrompt(prompt));
+            const overNote = fileBudgetReport(parsedForBudget.length, fileBudgetForPrompt(prompt), foldedManifest);
             if (overNote) buildDiag.record({ phase: 'plan', severity: 'warning', code: 'FILE_BUDGET_EXCEEDED', message: overNote, autoResolved: true });
           } catch { /* budget telemetry is best-effort */ }
           // THE ETA'S FIRST REAL FACT. Up to this point the estimate came from counting words in the
@@ -19432,6 +19437,18 @@ async function noteBuildOutcome(
           try { await saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* durable save is best-effort */ }
         }
       }
+
+      // Q-963 — a verbatim chip whose tested template parsed is the app. No architect loop, no review.
+      // The decision lives in templateVerify.ts so this handler grows no branch (Q-979).
+      const verbatimTemplate = await settleVerbatimTemplate({
+        skip: verbatimTemplateSkipsModel({ preseeded: goldenPreseeded, tier: goldenPreseededTier, prompt }),
+        files: Object.fromEntries(preseededGolden),
+        startPreview: () => startTemplatePreview(templateInstantPreviewEnabled(), () => dispatcher.dispatch({ id: 'template-verify-preview', name: 'update_preview', input: { port: 5173 } }, 'architect', { signal: abort.signal }).then(() => undefined)),
+        narrate: (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }),
+        record: (row) => { try { buildDiag.record({ phase: 'build', severity: row.severity, code: row.code, message: row.message, autoResolved: true }); } catch { /* best-effort */ } },
+      });
+      result = templateRunResult(result, verbatimTemplate);
+      fastLaneGated = templateCountsAsGated(fastLaneGated, verbatimTemplate.deliver);
 
       // FREE-TIER: never escalate a free build — escalation climbs to Sonnet/Claude, and a not-yet-
       // paying user's build must never spend that budget. A failed free build converts to paid (upsell).
@@ -25059,6 +25076,7 @@ async function noteBuildOutcome(
         fastLaneGated,
         reviewFastlaneForced: envFlag('AGENTV3_REVIEW_FASTLANE'),
         startTierSonnet: analysis?.startTier === 'sonnet',
+        templateDelivered: verbatimTemplate.deliver,
       });
       // A Project Mode module that a later module assembles is not reviewed as an app: the reviewer would
       // read a half-built project and report the starter page as the product. The shell turn reviews the

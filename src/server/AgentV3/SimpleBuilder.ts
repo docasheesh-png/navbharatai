@@ -32,7 +32,7 @@ import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports
 import { parseTscErrors, endgameDeterministicPass, endgameRepairEnabled, ensureReactValueImport } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import type { FastLanePhases } from './fastLanePhases';
-import { fileBudgetForPrompt, fileBudgetInstruction } from './fileBudget';
+import { fileBudgetForPrompt, fileBudgetInstruction, foldPlanToBudget } from './fileBudget';
 import { generateMissingCssModules } from './CssModuleGenerator';
 import { missingViteEnvTypes } from './viteEnvTypes';
 import { generateMissingBarrels } from './BarrelGenerator';
@@ -2221,6 +2221,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         }
         v2Contract = validateManifestContract(manifest.map((m) => m.path), raw);
         if (v2Contract.dropped.length) deps.log?.(`Ignoring ${v2Contract.dropped.length} planned import(s) of files not in the plan: ${v2Contract.dropped.slice(0, 6).join('; ')}.`);
+      }
+      const foldedPlan = foldPlanToBudget(manifest, fileBudgetForPrompt(request));
+      if (foldedPlan.folded.length) {
+        deps.log?.(foldedPlan.note ?? '');
+        manifest.splice(0, manifest.length, ...foldedPlan.files);
       }
       plannedFiles = manifest.length;
       plannedPaths = manifest.map((f) => f.path);

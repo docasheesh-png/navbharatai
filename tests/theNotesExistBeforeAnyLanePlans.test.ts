@@ -131,7 +131,7 @@ describe('🔴 THE WIRING — the blueprint lane no longer plans from the bare r
   it('🔒 BOTH file budgets measure the user\'s request, not our notes (Q-991 measured 13 → 25; Q-1017)', () => {
     // The notes open the prompt the manifest is PLANNED from, and NEITHER budget may be sized from them.
     // The one recorded as telemetry reads the bare prompt:
-    expect(ROUTE).toContain('overBudgetNote(manifest.length, fileBudgetForPrompt(prompt))');
+    expect(ROUTE).toContain('fileBudgetReport(parsedForBudget.length, fileBudgetForPrompt(prompt), foldedManifest)');
     // ...and so does the one spliced into the prompt the MODEL reads. `manifestUserPrompt`'s third argument
     // (`sizeFrom`) defaults to its first, so omitting it sized the user's app from our own instructions —
     // the same question answered twice, differently (Q-1017, 2026-10-16).

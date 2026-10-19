@@ -79,9 +79,59 @@ describe('a missing figure is null, NEVER zero', () => {
   });
   it('garbage fields are ignored, not summed', () => {
     const ev = evidenceFromResult({ diagnostics: { providerTokens: { X: { inputTokens: 'lots', outputTokens: -4, cacheReadInputTokens: Number.NaN } }, llmCalls: 'no' } });
-    expect(ev.inputTokens).toBe(0);
+    expect(ev.inputTokens).toBeNull();
+    expect(ev.outputTokens).toBeNull();
     expect(ev.cachedInputTokens).toBeNull();
     expect(ev.llmCalls).toBeNull();
+  });
+  it('withholds incomplete provider totals independently instead of rewarding partial telemetry', () => {
+    const ev = evidenceFromResult({ diagnostics: { providerTokens: {
+      A: { inputTokens: 10, outputTokens: 2 }, B: { outputTokens: 3 },
+    } } });
+    expect(ev.inputTokens).toBeNull();
+    expect(ev.outputTokens).toBe(5);
+  });
+  it('does not drop malformed provider rows from the cost comparison', () => {
+    const ev = evidenceFromResult({ diagnostics: { providerTokens: {
+      A: { inputTokens: 10, outputTokens: 2 }, B: null,
+    } } });
+    expect(ev.inputTokens).toBeNull();
+    expect(ev.outputTokens).toBeNull();
+  });
+  it('does not drop malformed calls from token and latency totals', () => {
+    const ev = evidenceFromResult({ diagnostics: { llmCalls: [
+      { inputTokens: 10, outputTokens: 2, latencyMs: 5 }, null,
+    ] } });
+    expect(ev.inputTokens).toBeNull();
+    expect(ev.outputTokens).toBeNull();
+    expect(ev.modelMs).toBeNull();
+  });
+  it('withholds partial per-call totals and latency, retaining independently complete fields', () => {
+    const ev = evidenceFromResult({ diagnostics: { llmCalls: [
+      { inputTokens: 10, outputTokens: 2, latencyMs: 5, ok: true },
+      { outputTokens: 0, ok: false },
+    ] } });
+    expect(ev.inputTokens).toBeNull();
+    expect(ev.modelMs).toBeNull();
+    expect(ev.outputTokens).toBe(2);
+    expect(ev.llmCalls).toBe(2);
+    expect(ev.llmCallsFailed).toBe(1);
+  });
+  it('explicit zero is measured; absent, invalid and overflowing figures are unknown', () => {
+    const zero = evidenceFromResult({ diagnostics: { llmCalls: [{ inputTokens: 0, outputTokens: 0, latencyMs: 0 }] } });
+    expect(zero.inputTokens).toBe(0);
+    expect(zero.outputTokens).toBe(0);
+    expect(zero.modelMs).toBe(0);
+    for (const value of [undefined, null, -1, '10', Number.NaN, Number.POSITIVE_INFINITY]) {
+      const ev = evidenceFromResult({ diagnostics: { llmCalls: [{ inputTokens: value, outputTokens: value, latencyMs: value }] } });
+      expect(ev.inputTokens).toBeNull();
+      expect(ev.outputTokens).toBeNull();
+      expect(ev.modelMs).toBeNull();
+    }
+    const overflow = evidenceFromResult({ diagnostics: { llmCalls: [
+      { inputTokens: Number.MAX_VALUE }, { inputTokens: Number.MAX_VALUE },
+    ] } });
+    expect(overflow.inputTokens).toBeNull();
   });
 });
 
@@ -194,3 +244,4 @@ describe('the summary and the A/B comparison', () => {
     expect(s.cachedShare).toBeNull();
   });
 });
+

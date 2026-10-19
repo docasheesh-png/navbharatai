@@ -4391,6 +4391,11 @@ price is not. Recorded as a queue row, not done here.
   The whole pass now has this budget, every browser step is clipped to what remains, and every run records
   `REDTEAM_RAN` (cases, seconds, crashes). `90000` restores the old budget. `src/server/AgentV3/FuzzProbe.ts`.
   Locked in `tests/theRedTeamPassIsBoundedAndSaysSo.test.ts`.
+- `AGENTV3_TS_JSX_RENAME` (default on; `off` disables). JSX written into a `.ts` file is moved to `.tsx`:
+  the per-file builder's pre-write reconcile renames it and rewrites explicit `./X.ts` references; the agent's
+  `write_file` relocates only a NEW file whose importers use extension-less specifiers (otherwise unchanged).
+  Detection is high-precision (closing tag, fragment, or self-closing component) so generics never match.
+  `src/server/AgentV3/LanguageCoherence.ts tsFileHasJsx / tsxRelocationFor`. Locked in `tests/jsxInATsFileBecomesTsx.test.ts`.
 
 - `AGENTV3_POST_GREEN_RECHECK` (default on; `off` disables). After the finishing passes (e2e scaffold, architecture
   note, production defaults) on a build already proven green, the preview is checked once; only a CONCLUSIVE

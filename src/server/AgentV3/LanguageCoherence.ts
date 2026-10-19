@@ -71,6 +71,57 @@ function tsExtensionFor(path: string, code: string): string | null {
   return null;
 }
 
+/**
+ * JSX written into a `.ts` file (owner item 3): esbuild/tsc refuse JSX under `.ts`, so the build dies on
+ * an otherwise-valid component. `containsJsx` above is too loose for `.ts` (it matches generics such as
+ * `Array<string>`), so this uses HIGH-PRECISION markers only, on code with strings/comments stripped: a
+ * closing tag `</div>`, a fragment `</>`, or a self-closing capitalised component `<Foo />`. Generics
+ * never produce `</` or `/>`. Pure; never throws.
+ */
+export function tsFileHasJsx(code: string): boolean {
+  if (typeof code !== 'string' || !code) return false;
+  let s: string;
+  try { s = stripStringsAndComments(code); } catch { return false; }
+  return /<\/[A-Za-z][\w.:-]*\s*>/.test(s) || /<\/>/.test(s) || /<[A-Z][\w.]*(?:\s[^<>]*)?\/>/.test(s);
+}
+
+/** Kill switch for the `.ts`→`.tsx` JSX rename. Default ON. */
+export function tsJsxRenameEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return (env.AGENTV3_TS_JSX_RENAME || '').trim().toLowerCase() !== 'off';
+}
+
+/**
+ * Write-time `.ts`→`.tsx` relocation for the agent's `write_file` (owner item 3). Returns the `.tsx`
+ * path to write instead, or null to leave the write alone. Only renames when it is provably safe:
+ *   - the kill switch is on, the path is `.ts` (not `.d.ts`) and the content has JSX (`tsFileHasJsx`);
+ *   - the workspace listing is known, and NEITHER the `.ts` nor the `.tsx` path exists yet (a new file,
+ *     so no stale twin is left behind and nothing is clobbered);
+ *   - no known importer spells the `.ts` extension (`'./Foo.ts'`), so no import needs rewriting —
+ *     extension-less imports resolve to `.tsx` on their own.
+ * Pure; never throws.
+ */
+export function tsxRelocationFor(
+  path: string,
+  content: string,
+  tree: ReadonlySet<string> | null,
+  importerContents: readonly string[],
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  try {
+    if (!tsJsxRenameEnabled(env)) return null;
+    if (typeof path !== 'string' || !/\.ts$/.test(path) || /\.d\.ts$/.test(path)) return null;
+    if (!tsFileHasJsx(content)) return null;
+    if (!tree) return null;
+    const to = path.replace(/\.ts$/, '.tsx');
+    const norm = (p: string) => p.replace(/^\.?\//, '');
+    for (const f of tree) { const n = norm(f); if (n === norm(path) || n === norm(to)) return null; }
+    const base = path.split('/').pop()!;
+    const explicit = new RegExp(`[\\/'"]${escapeRe(base)}(?=['"?#])`);
+    if (importerContents.some((c) => typeof c === 'string' && explicit.test(c))) return null;
+    return to;
+  } catch { return null; }
+}
+
 /** Escape a string for use as a literal inside a RegExp. */
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -99,12 +150,21 @@ function rewriteReferences(content: string, renames: { from: string; to: string 
  * is renamed to its `.ts`/`.tsx` sibling and all explicit references are updated. Pure; never throws.
  * Returns the input unchanged (new object) when nothing needs renaming.
  */
-export function reconcileLanguageExtensions(input: Record<string, string>): LanguageReconcileResult {
+export function reconcileLanguageExtensions(
+  input: Record<string, string>,
+  env: Record<string, string | undefined> = process.env,
+): LanguageReconcileResult {
   const renames: { from: string; to: string; reason: string }[] = [];
   if (!input || typeof input !== 'object') return { files: {}, renames };
 
+  const jsxRename = tsJsxRenameEnabled(env);
   for (const [path, code] of Object.entries(input)) {
     if (typeof code !== 'string') continue;
+    if (jsxRename && /\.ts$/.test(path) && !/\.d\.ts$/.test(path) && tsFileHasJsx(code)) {
+      const to = path.replace(/\.ts$/, '.tsx');
+      if (input[to] === undefined) renames.push({ from: path, to, reason: 'contains JSX in a .ts file' });
+      continue;
+    }
     if (!/\.(jsx|js|mjs|cjs)$/.test(path)) continue;
     if (!hasTsOnlySyntax(code)) continue;
     const to = tsExtensionFor(path, code);

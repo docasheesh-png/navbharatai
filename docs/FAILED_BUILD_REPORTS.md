@@ -23,7 +23,7 @@ Issuer: `https://navbharatai.com/api/v1/failedbr/oauth`. Its `/register`, `/auth
 
 Server-to-server clients normally omit `Origin`. Browser requests allow exact NavBharatAI, ChatGPT, Claude and Grok origins; additional trusted HTTPS origins can be configured as comma-separated `FAILED_REPORT_MCP_ORIGINS` (no wildcards). The bot-User-Agent heuristic excludes these machine endpoints; their own rate limits remain enforced. No-auth mode cannot read private reports.
 
-Validate with `node --experimental-strip-types scripts/failedReportOAuth.check.mjs`. CI also runs the HTTP/report regression suite, frontend/server typechecks and build. After deployment, verify discovery returns JSON, unauthenticated MCP returns 401 with `WWW-Authenticate`, and perform a real provider consent/read/revoke round trip. Unit checks do not establish live provider compatibility.
+Validate with `node --experimental-strip-types scripts/failedReportOAuth.test.mjs`. CI also runs the HTTP/report regression suite, frontend/server typechecks and build. After deployment, verify discovery returns JSON, unauthenticated MCP returns 401 with `WWW-Authenticate`, and perform a real provider consent/read/revoke round trip. Unit checks do not establish live provider compatibility.
 
 ### Manually configured report-only credentials
 

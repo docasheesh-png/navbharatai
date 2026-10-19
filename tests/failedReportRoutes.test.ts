@@ -10,6 +10,7 @@ vi.mock('../src/server/lib/failedBuildReports', async (original) => ({ ...await 
 import { registerFailedReportRoutes } from '../src/server/routes/failedReports';
 import { apiVersionMiddleware } from '../src/server/routes/apiVersion';
 import { mintAdminToken } from '../src/server/lib/adminAuth';
+import { jsonBodyParser } from '../src/server/lib/requestBodyLimits';
 
 let server: Server; let port: number; let adminToken: string;
 function request(path: string, opts: { method?: string; headers?: Record<string, string>; body?: unknown } = {}): Promise<{ status: number; headers: any; body: any }> {
@@ -23,7 +24,7 @@ function request(path: string, opts: { method?: string; headers?: Record<string,
 beforeAll(async () => {
   vi.stubEnv('ADMIN_USERNAME', 'owner'); vi.stubEnv('ADMIN_PASSWORD', 'test-private-password');
   adminToken = mintAdminToken('test-private-password', 'owner', Date.now());
-  const app = express(); app.use(express.json()); app.use(apiVersionMiddleware); registerFailedReportRoutes(app);
+  const app = express(); app.use(jsonBodyParser()); app.use(apiVersionMiddleware); registerFailedReportRoutes(app);
   server = await new Promise<Server>((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
   port = (server.address() as { port: number }).port;
 });

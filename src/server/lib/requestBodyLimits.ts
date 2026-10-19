@@ -231,6 +231,9 @@ const keepRawBytes = (req: unknown, _res: unknown, buf: Buffer): void => {
  * the parser it replaced.
  */
 export function jsonBodyParser(opts: JsonBodyParserOptions = {}): RequestHandler {
+  // Only OAuth token/revocation accept form bodies. Keep this at the first parser boundary,
+  // alongside their JSON limits, rather than adding another parser inside a route module.
+  const oauthForm = express.urlencoded({ extended: false, limit: '16kb', parameterLimit: 20 });
   const parsers = {
     small: express.json({ limit: DEFAULT_JSON_LIMIT }),
     smallRaw: express.json({ limit: DEFAULT_JSON_LIMIT, verify: keepRawBytes }),
@@ -243,7 +246,8 @@ export function jsonBodyParser(opts: JsonBodyParserOptions = {}): RequestHandler
     const large = isLargeBodyRoute(req.path);
     const raw = needsRawBody(req.path);
     const tiny = !large && !raw ? smallBodyLimit(req.path) : null;
-    const parser = tiny ? smaller.get(tiny)! : large ? (raw ? parsers.largeRaw : parsers.large) : (raw ? parsers.smallRaw : parsers.small);
+    const form = req.is('application/x-www-form-urlencoded') && /^\/api\/failedbr\/oauth\/(?:token|revoke)\/?$/i.test(routingPath(req.path));
+    const parser = form ? oauthForm : tiny ? smaller.get(tiny)! : large ? (raw ? parsers.largeRaw : parsers.large) : (raw ? parsers.smallRaw : parsers.small);
     parser(req, res, (err?: unknown) => {
       const e = err as { type?: string; status?: number; length?: number; limit?: number } | undefined;
       if (e && (e.type === 'entity.too.large' || e.status === 413)) {

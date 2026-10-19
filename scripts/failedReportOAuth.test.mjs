@@ -1,4 +1,4 @@
-// Dependency-free protocol/security checks: node --experimental-strip-types --test scripts/failedReportOAuth.check.mjs
+// Dependency-free protocol/security checks: node --experimental-strip-types --test scripts/failedReportOAuth.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';

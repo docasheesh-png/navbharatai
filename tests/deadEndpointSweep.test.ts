@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
+import { canonicalApiPath } from './apiRouteCallers';
 
 /**
  * EVERY ENDPOINT THE APP CALLS MUST EXIST.
@@ -74,7 +75,7 @@ function registeredPaths(): string[] {
 }
 
 /** `/api/wallet/:userId` → a matcher for one concrete path. */
-const routeMatcher = (path: string) => new RegExp(`^${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/:[A-Za-z0-9_]+/g, '[^/]+')}$`);
+const routeMatcher = (path: string) => new RegExp(`^${canonicalApiPath(path).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/:[A-Za-z0-9_]+/g, '[^/]+')}$`);
 
 // ── Client side ─────────────────────────────────────────────────────────────
 
@@ -102,7 +103,7 @@ function clientCalls(): Array<{ path: string; file: string }> {
   for (const file of files) {
     const src = stripMultilineTemplates(stripComments(readFileSync(file, 'utf8')));
     for (const m of [...src.matchAll(CALL)]) {
-      const path = m[1].replace(/\$\{[^}]*\}/g, SEGMENT).split('?')[0].replace(/\/$/, '');
+      const path = canonicalApiPath(m[1]).replace(/\$\{[^}]*\}/g, SEGMENT).split('?')[0].replace(/\/$/, '');
       if (!path || path === '/api') continue;
       calls.push({ path, file: file.replace(process.cwd() + '/', '') });
     }
@@ -111,6 +112,10 @@ function clientCalls(): Array<{ path: string; file: string }> {
 }
 
 describe('the client never calls an endpoint the server does not have', () => {
+  it('recognizes v1 aliases without claiming future versions exist', () => {
+    expect(routeMatcher('/api/failedbr/oauth/token').test(canonicalApiPath('/api/v1/failedbr/oauth/token'))).toBe(true);
+    expect(routeMatcher('/api/failedbr/oauth/token').test(canonicalApiPath('/api/v2/failedbr/oauth/token'))).toBe(false);
+  });
   const routes = registeredPaths();
 
   it('finds the routes and the calls at all', () => {
@@ -165,3 +170,4 @@ describe('the client never calls an endpoint the server does not have', () => {
     expect(existsSync(join(process.cwd(), 'src/server/BuildEngine'))).toBe(false);
   });
 });
+

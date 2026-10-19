@@ -177,7 +177,6 @@ export const HOSTING_TIERS: readonly HostingTier[] = [
       'No "Made with NavBharatAI" badge',
       '15 GB of visitor traffic each month, and 5 GB for your server apps',
       'Remix any app in the Gallery or App Mart',
-      'No ads on NavBharatAI, ever, while the plan is on',
     ],
   },
   {
@@ -199,7 +198,6 @@ export const HOSTING_TIERS: readonly HostingTier[] = [
       'No "Made with NavBharatAI" badge',
       '50 GB of visitor traffic each month, and 12 GB for your server apps',
       'Remix any app in the Gallery or App Mart',
-      'No ads on NavBharatAI, ever, while the plan is on',
     ],
   },
 ];

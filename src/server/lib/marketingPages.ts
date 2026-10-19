@@ -47,7 +47,7 @@ function pageShell(i: ShellInput): string {
 <title>${t}</title>
 <meta name="description" content="${d}">
 <link rel="canonical" href="${escapeHtml(url)}">
-<link rel="icon" type="image/png" href="/logo.png">
+<link rel="icon" type="image/png" href="/logo-160.png">
 <meta name="theme-color" content="#4f46e5">
 <meta property="og:site_name" content="NavBharatAI">
 <meta property="og:type" content="website">

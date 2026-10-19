@@ -144,5 +144,5 @@ export function languageInstruction(hint: IndicHint): string {
   if (hint.evidence === 'romanized') {
     return `Language: the user appears to be writing ${hint.name} in Roman script. Generate ALL user-facing text in the app (labels, buttons, headings, placeholders, messages) in ${hint.name}, using ${hint.name}'s own script. Reply to the user in ${hint.name} too, in Roman letters the way they wrote — never in English. If the request is actually in another language, follow the user's words rather than this hint. Keep code identifiers and comments in English.`;
   }
-  return `Language: the user is writing in ${hint.name}. Generate ALL user-facing text in the app (labels, buttons, headings, placeholders, messages) in ${hint.name}, and reply to the user in ${hint.name}. Keep code identifiers and comments in English.`;
+  return `Language: the user is writing in ${hint.name}. Generate ALL user-facing text in the app (labels, buttons, headings, placeholders, messages) in ${hint.name}, and reply to the user in ${hint.name} written in ${hint.name}'s own native script — the same script the user typed — never transliterated into Roman/Latin letters. Keep code identifiers and comments in English.`;
 }

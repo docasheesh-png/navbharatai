@@ -136,10 +136,12 @@ describe('🔒 the wiring — a rule on one settle path is a rule a long build e
 
   it('both read the SAME render proof — the final check OR the ledger\'s in-build green (admin 2026-10-06, Q-727 = b)', () => {
     expect(route).toContain('const appSeenRunningForBill = buildObs.previewRendered === true || renderProvenNow();');
+    // Round 4 (2026-10-19): the finalizer names its proof once, so its markup decision and its Stop rules read the same value.
+    expect(route).toContain('const wdPreviewProven = buildObs.previewRendered === true || (buildDiagRef ? renderProvenInLedger(buildDiagRef.evidenceLedger()) : false);');
     const at = route.split('decideMarkupOnProof(');
     expect(at.length).toBeGreaterThanOrEqual(3);
     for (const frag of at.slice(1)) {
-      expect(frag.slice(0, 600)).toMatch(/previewProven: (?:appSeenRunningForBill,|buildObs\.previewRendered === true \|\| \(buildDiagRef \? renderProvenInLedger\(buildDiagRef\.evidenceLedger\(\)\) : false\),)/);
+      expect(frag.slice(0, 600)).toMatch(/previewProven: (?:appSeenRunningForBill,|wdPreviewProven,|buildObs\.previewRendered === true \|\| \(buildDiagRef \? renderProvenInLedger\(buildDiagRef\.evidenceLedger\(\)\) : false\),)/);
     }
   });
 

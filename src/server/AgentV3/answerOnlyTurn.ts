@@ -76,3 +76,21 @@ export function answerOnlyPreviewNarration(problems: readonly string[]): string 
   const what = problems.slice(0, 2).join('; ');
   return `ℹ️ I opened your app's preview and it did not fully render${what ? ` (${what})` : ''}. I have not changed any files. Tell me if you want me to look into it.`;
 }
+
+/**
+ * 🔴 A BUILD TURN WHOSE WHOLE OUTPUT WAS A QUESTION OR A DECLINE (r6–r10 autopsy, owner 2026-10-18).
+ *
+ * `isAnswerOnlyTurn` needs `expectsArtifacts === false`, so a turn that WAS asked to build, wrote nothing, and
+ * answered with a question (`readTurnAnswer().asked`) or an honest decline (`.declined`) was judged as a build:
+ * the gate filed RED as an ERROR, the platform started the starter preview to "check it runs", and the free-tier
+ * block could read provider noise as "engine slow". It is an answer, and is described like one. The bill is
+ * untouched (₹0: the empty-build rule zeroes every build that wrote nothing). PURE.
+ * AGENTV3_ANSWER_TURN_NOT_BUILD=off restores the old judgement.
+ */
+export function answeredInsteadOfBuilding(
+  f: { builderWrote: number; asked?: boolean; declined?: boolean },
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (String(env.AGENTV3_ANSWER_TURN_NOT_BUILD ?? '').trim().toLowerCase() === 'off') return false;
+  return Number(f.builderWrote) === 0 && (f.asked === true || f.declined === true);
+}

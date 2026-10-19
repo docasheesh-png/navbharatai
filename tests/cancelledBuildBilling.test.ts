@@ -15,6 +15,7 @@ const facts = (o: Partial<Parameters<typeof decideCancelledBuildBill>[0]> = {}) 
   abortCause: 'user-stop' as AbortCause,
   filesWritten: 12,
   appRendered: true,
+  appRenderedAt: 1, stopRequestedAt: 2, // seen running BEFORE the stop (owner 2026-10-18)
   decidedBilledUsd: 1.00,
   ...o,
 });
@@ -144,16 +145,22 @@ describe('the wiring — this moves real money, so every link is asserted', () =
   });
 
   it('🔒 runs BEFORE the blanket zero — after it, there would be nothing left to charge', () => {
-    const decide = route.indexOf('decideCancelledBuildBill({');
-    const blanket = route.indexOf('zeroBillForFailedBuild(result.ok)');
-    expect(decide).toBeGreaterThan(-1);
+    // Round 4: the order lives in ONE function both billing points call (`settleStopOrFailure`).
+    const mod = readFileSync(resolve(__dirname, '../src/server/AgentV3/cancelledBuildBilling.ts'), 'utf8');
+    const fn = mod.slice(mod.indexOf('export function settleStopOrFailure('));
+    const charge = fn.indexOf("kind: 'cancel-charge'");
+    const blanket = fn.indexOf("kind: 'failed-free'");
+    expect(charge).toBeGreaterThan(-1);
     expect(blanket).toBeGreaterThan(-1);
-    expect(decide).toBeLessThan(blanket);
+    expect(charge).toBeLessThan(blanket);
+    expect(route).toContain('failed: zeroBillForFailedBuild(result.ok),');
   });
 
   it('has a kill switch, because a money change must revert without a deploy', () => {
-    expect(route).toContain('AGENTV3_BILL_CANCELLED');
-    expect(route).toMatch(/AGENTV3_BILL_CANCELLED[\s\S]{0,120}!==\s*'off'/);
+    const mod = readFileSync(resolve(__dirname, '../src/server/AgentV3/cancelledBuildBilling.ts'), 'utf8');
+    expect(mod).toContain('env.AGENTV3_BILL_CANCELLED');
+    expect(mod).toMatch(/const on = \(v: string \| undefined\) => \(v \?\? ''\)\.trim\(\)\.toLowerCase\(\) !== 'off';/);
+    expect(route).toContain('switches: stopBillingSwitches(process.env),');
   });
 
   it('records the reasoning for the admin, not just a number', () => {

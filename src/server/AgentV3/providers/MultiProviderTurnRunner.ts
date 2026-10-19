@@ -15,6 +15,7 @@
 // move a build UP the ladder on quality signals; off by default.) PURE control flow; the runners are
 // injected, so this is fully unit-testable without any provider key.
 
+import { firstByteGraceFor } from './openAiStream';
 import { createStickyState, recordStickySuccess, stickyStartIndex, type StickyState } from '../reliability/stickyRung';
 import { crawlBenchWindowMs, mayAbandonCrawl, benchUntilAfterAbandon, silenceBenchIsSticky } from '../crawlBench';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
@@ -921,6 +922,8 @@ export function makeMultiProviderTurnRunner(
           // its own; a streaming runner additionally closes its stream (it receives the same signal).
           const result = await raceStop(runner.runTurn({
             ...params, canAbandonSlowStream, hasNextRung: i + 1 < chain.length,
+            // The first-byte grace is EARNED by answering recently (firstByteGraceFor, owner 2026-10-18).
+            firstByteGraceMs: firstByteGraceFor(opts.silenceMemory?.answeredAt?.(benchKey) ?? 0, now()),
             maxTokens: reasoningAwareAsk(params.maxTokens, chain[i].modelId),
           }), params.signal);
           /** This rung's own time — not the rungs tried, skipped or abandoned before it (see TurnResult.attemptMs). */

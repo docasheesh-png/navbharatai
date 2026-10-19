@@ -66,7 +66,8 @@ export function categoryFromWords(prompt: string): ClarityCategory {
   const p = String(prompt ?? '').toLowerCase();
   if (/\b(game|games|khel|khelne)\b|गेम|खेल/.test(p)) return 'game';
   if (/\b(business|biz|dukaan|dukan|shop|store|vyapar|vyapaar|dhandha|company|startup|restaurant|kirana)\b|व्यापार|दुकान|बिज़नेस|बिजनेस/.test(p)) return 'business';
-  if (/\b(school|study|padhai|students?|exam|coaching|college|tuition)\b|पढ़ाई|स्कूल/.test(p)) return 'education';
+  // "Sonu online clases" (build 19e5f6fb) fell to 'general', whose first chip is Shop billing. Typos included.
+  if (/\b(school|study|padhai|students?|exam|coaching|college|tuition|class|classes|clases|classs|classroom|course|courses|teacher|teachers|lecture|lectures|lesson|lessons|e-?learning)\b|पढ़ाई|स्कूल|क्लास|कक्षा|शिक्षक|कोर्स/.test(p)) return 'education';
   if (/\b(health|doctor|clinic|hospital|fitness|gym|yoga|dawai)\b|डॉक्टर|स्वास्थ्य/.test(p)) return 'health';
   if (/\b(website|site|portfolio|blog|landing)\b|वेबसाइट/.test(p)) return 'website';
   return 'general';
@@ -221,5 +222,5 @@ export function bestGuessPrompt(firstRequest: string, reply: string): string {
   return `${String(firstRequest ?? '').trim()}\n${String(reply ?? '').trim()}\n\n`
     + '[PLATFORM NOTE] The user was already asked once what to build. Do not ask again: choose the single most likely concrete app '
     + 'from what they said, build it with sensible defaults, and begin your first message with ONE short line, in the user\'s language, '
-    + 'saying what you assumed (e.g. "Maine ise ek billing app maan kar banaya hai").';
+    + 'saying what you assumed (e.g. "Maine ise ek <app type> maan kar banaya hai" — name the app type you chose from THEIR words; never default to a billing/shop app unless they asked for one).';
 }

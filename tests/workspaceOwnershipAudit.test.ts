@@ -117,7 +117,9 @@ describe('CENSUS TRIPWIRE — a new workspace route must consider ownership', ()
      *             workspaceFiles.ts do this, and it is the stronger of the two — there is no check to
      *             forget because there is nothing to check.
      */
-    const OWNERSHIP = /ownedByVerifiedUid|verifiedWorkspaceReadOk|workspaceOwnershipOk|verifyAdminToken|verifyFirebaseIdentity|verifiedIdentity|ANON_WORKSPACE_PREFIX|sessionWorkspaceId|workspacePrefixFor|workspaceIdFor/;
+    // The shared admin session gate permits cross-workspace administration. The report API's
+    // separately scoped delegate is exercised at the HTTP boundary in failedReportRoutes.test.ts.
+    const OWNERSHIP = /ownedByVerifiedUid|verifiedWorkspaceReadOk|workspaceOwnershipOk|verifyAdminToken|adminRequestOk|verifyFirebaseIdentity|verifiedIdentity|ANON_WORKSPACE_PREFIX|sessionWorkspaceId|workspacePrefixFor|workspaceIdFor/;
     const USES_ID = /params\.workspaceId|body[\s\S]{0,40}workspaceId|query[\s\S]{0,40}workspaceId/;
     const offenders: string[] = [];
     for (const f of readdirSync(routesDir)) {

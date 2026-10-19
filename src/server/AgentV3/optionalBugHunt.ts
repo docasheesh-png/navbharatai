@@ -35,7 +35,19 @@ import type { ApprovalOutcome } from './Approvals';
  * worth holding the build for, while this one is an extra look at an app that is already finished and
  * working. A user who has walked away gets their app, not a stalled build.
  */
-export const BUG_HUNT_WAIT_MS = 90_000;
+export const BUG_HUNT_WAIT_MS = 30_000;
+
+/**
+ * ⏱️ CUT FROM 90 s TO 30 s (owner, 2026-10-18; autopsy 2f46a4d8). The app had passed its GREEN gate at 231 s and
+ * the build then sat open ~60–90 s on an unanswered offer — the user waits through every second of a build that
+ * is already done. Thirty seconds is enough to tap a button that is on screen; a user who has walked away gets
+ * their app sooner. `AGENTV3_BUG_HUNT_WAIT_MS` overrides it (5 s–120 s; junk ⇒ default).
+ */
+export function bugHuntWaitMs(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(String(env.AGENTV3_BUG_HUNT_WAIT_MS ?? '').trim());
+  if (!String(env.AGENTV3_BUG_HUNT_WAIT_MS ?? '').trim() || !Number.isFinite(n)) return BUG_HUNT_WAIT_MS;
+  return Math.min(120_000, Math.max(5_000, n));
+}
 
 /** Kill switch. `off` restores today's behaviour exactly: the hunt runs, unasked, as it always has. */
 export function bugHuntAskEnabled(env: NodeJS.ProcessEnv = process.env): boolean {

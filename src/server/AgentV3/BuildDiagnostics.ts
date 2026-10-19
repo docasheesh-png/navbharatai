@@ -182,6 +182,10 @@ export const PROCESS_ONLY_CODES = new Set([
   'FREE_BUILD_TIME_CAP', 'FREE_BUILD_CHAIN_PAUSED',
   // OUR end-of-turn steer that handed the model its undefined classes (stylePolishResume.ts, autopsy 1be16985).
   'STYLE_RULES_RESUMED',
+  // OUR style pass ended by its own time cap (stylePassCap.ts) — a policy of ours, never the app.
+  'STYLE_PASS_CAPPED',
+  // OUR red-team pass's own timing line (FuzzProbe.redTeamRunNote) — a measurement of ours, never the app.
+  'REDTEAM_RAN',
   // OUR repair pass's closing claim withheld because the pass changed nothing (repairClaim.ts, autopsy 6cd698cc).
   'REPAIR_CLAIM_WITHHELD',
   // OUR end-of-turn hand-back answered with no change (repairClaim.ts, autopsy db07e0af): a struggle of the engine.
@@ -680,6 +684,12 @@ export interface BuildBillingRecord {
   billedInr?: number;
   /** Wallet tokens actually debited (absent when billing is off / nothing was charged). */
   walletTokensDebited?: number;
+  /** ₹ that actually left the wallet (after the overdraft floor). See lib/chargeRecord.ts. */
+  walletDebitedInr?: number;
+  /** ₹ the overdraft floor made the platform absorb on this charge. */
+  absorbedInr?: number;
+  /** True when the floor capped the debit below the bill. */
+  partialDebit?: true;
   /**
    * What the PROVIDERS really cost NavBharatAI for this build (USD, tokens only, at settle time's
    * rate card) — recorded on success AND failure, because a failed build still cost us. ADMIN-ONLY:
@@ -2146,8 +2156,20 @@ export class BuildDiagnostics {
     // If the build ended NOT-ok with tool calls still in-flight, those are EXACTLY what it hung on
     // — name them so a timeout report points at the real culprit instead of a blank gap.
     if (!ok) {
+      // 🔴 A TOOL THE USER'S STOP CUT OFF DID NOT HANG (autopsy 53ee45b9, 2026-10-18). The platform's own
+      // update_preview was 17 s in flight when the user pressed Stop at 21 s; it was filed as an unresolved
+      // ERROR on a build that had nothing wrong with it. On a user-stopped build the in-flight tool is
+      // recorded as info, resolved, and says what really ended it. Every other not-ok end is unchanged.
+      // `AGENTV3_STUCK_TOOL_STOP_INFO=off` restores the old record.
+      const cutByUser = (process.env['AGENTV3_STUCK_TOOL_STOP_INFO'] ?? '').trim().toLowerCase() !== 'off'
+        && stoppedByUser(this.issues);
       for (const { tool, ts } of this.pending.values()) {
-        this.record({ phase: 'tool', severity: 'error', code: 'STUCK_TOOL', message: `Stuck on '${tool}' — in-flight ${Math.round((this.endedAt - ts) / 1000)}s, never completed.`, autoResolved: false });
+        const secs = Math.round((this.endedAt - ts) / 1000);
+        if (cutByUser) {
+          this.record({ phase: 'tool', severity: 'info', code: 'STUCK_TOOL', message: `'${tool}' was still running (${secs}s) when the user stopped the build — cut off by the Stop, not stuck.`, autoResolved: true });
+        } else {
+          this.record({ phase: 'tool', severity: 'error', code: 'STUCK_TOOL', message: `Stuck on '${tool}' — in-flight ${secs}s, never completed.`, autoResolved: false });
+        }
       }
     }
     this.pending.clear();
@@ -4353,7 +4375,10 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
       const inr = typeof r.billing.billedInr === 'number' ? `₹${r.billing.billedInr.toFixed(2)} ` : '';
       const wallet = typeof r.billing.walletTokensDebited === 'number' && r.billing.walletTokensDebited > 0
         ? ` · ${r.billing.walletTokensDebited.toLocaleString()} wallet tokens debited` : '';
-      lines.push(`Charged to user: ${inr}($${r.billing.billedUsd.toFixed(4)})${r.billing.billedUsd === 0 ? ' — FREE build' : ''}${wallet}`);
+      // A capped debit says so: the bill above is NOT what the wallet paid (lib/chargeRecord.ts).
+      const capped = r.billing.partialDebit && typeof r.billing.walletDebitedInr === 'number'
+        ? ` · PARTIAL DEBIT: wallet paid ₹${r.billing.walletDebitedInr.toFixed(2)}, ₹${(r.billing.absorbedInr ?? 0).toFixed(2)} absorbed by the overdraft floor` : '';
+      lines.push(`Charged to user: ${inr}($${r.billing.billedUsd.toFixed(4)})${r.billing.billedUsd === 0 ? ' — FREE build' : ''}${wallet}${capped}`);
     } else if (typeof r.billing.walletTokensDebited === 'number' && r.billing.walletTokensDebited > 0) {
       lines.push(`Charged to user: ${r.billing.walletTokensDebited.toLocaleString()} wallet tokens debited`);
     }

@@ -35,6 +35,8 @@ export interface ProviderSilenceMemory {
   until(key: string, nowMs: number): number;
   /** The rung answered — lift its silence verdict (the history stays, so a repeat is judged as one). */
   clear(key: string, nowMs?: number): void;
+  /** When this rung last answered on this instance (ms), or 0 when it has not (firstByteGraceFor). */
+  answeredAt?(key: string): number;
   /** Pull other instances' silences in, in the background. Never throws, never blocks a build. */
   refresh?(nowMs?: number): Promise<void>;
 }
@@ -148,6 +150,7 @@ export function createProviderSilenceMemory(opts: SilenceMemoryOptions | (() => 
       return end > nowMs ? end : 0;
     },
     clear(key, nowMs) { okAt.set(key, nowMs ?? clock()); },
+    answeredAt(key) { return okAt.get(key) ?? 0; },
     refresh,
   };
 }

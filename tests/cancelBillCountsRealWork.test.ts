@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { decideCancelledBuildBill } from '../src/server/AgentV3/cancelledBuildBilling';
+import { decideCancelledBuildBill, preseededUnchangedCount } from '../src/server/AgentV3/cancelledBuildBilling';
 
 /**
  * AUTOPSY 2b0a3ed5 — the twelve files the user was billed for and never asked for.
@@ -19,7 +19,7 @@ import { decideCancelledBuildBill } from '../src/server/AgentV3/cancelledBuildBi
  * stopped at 90% of a real build is charged exactly as before.
  */
 
-const base = { abortCause: 'user-stop' as const, appRendered: false, decidedBilledUsd: 0.006754 };
+const base = { abortCause: 'user-stop' as const, appRendered: false, appRenderedAt: 1, stopRequestedAt: 2, decidedBilledUsd: 0.006754 };
 
 describe('🔴 the reported case', () => {
   it('12 template files, none touched by the build → FREE', () => {
@@ -122,7 +122,12 @@ describe('🔒 the wiring — the count must reach the rule', () => {
   });
 
   it('the bill compares CONTENT, so a rewritten template file is still paid for', () => {
-    expect(route).toContain('preseededUnchanged: [...preseededGolden].filter(([p, c]) => writtenFiles.get(p) === c).length');
+    // Round 4: one formula for both billing points, and it compares content.
+    expect(route).toContain('preseededUnchanged: preseededUnchangedCount(preseededGolden, writtenFiles),');
+    expect(route).toContain('preseededUnchanged: preseededUnchangedCount(billingCtx.preseededGolden, writtenFiles),');
+    const seeded = new Map([['a', 'A'], ['b', 'B'], ['c', 'C']]);
+    expect(preseededUnchangedCount(seeded, new Map([['a', 'A'], ['b', 'B-rewritten']]))).toBe(1);
+    expect(preseededUnchangedCount(undefined, new Map())).toBe(0);
   });
 
   it('🔒 `writtenFiles` itself is NOT filtered — other readers mean something different by it', () => {

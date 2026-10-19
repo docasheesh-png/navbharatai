@@ -8,6 +8,7 @@
  */
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
+import { CURRENT_API_VERSION } from '../src/server/routes/apiVersion';
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const n of readdirSync(dir)) {
@@ -65,7 +66,16 @@ export function expandBaseConstants(src: string): string {
   return src.replace(/\$\{\s*(?:this\.|[A-Z][\w$]*\.)?([A-Za-z_$][\w$]*)\s*\}/g, (all, name: string) => bases.get(name) ?? all);
 }
 
+/** The supported version is an alias of the bare handler; future versions are not. */
+export function canonicalApiPath(value: string): string {
+  return value.replaceAll(`/api/${CURRENT_API_VERSION}/`, '/api/');
+}
+
 export function isCalled(path: string, client: string): boolean {
+  // Canonical versioned calls reach the same registered route through apiVersionMiddleware.
+  // Unknown/future versions are deliberately NOT normalized.
+  client = canonicalApiPath(client);
+  path = canonicalApiPath(path);
   const cut = path.search(/[:*]/);
   if (cut === -1) return [`${path}'`, `${path}"`, `${path}\``, `${path}?`, `${path}/`, `${path}$`].some((s) => client.includes(s));
   return client.includes(path.slice(0, cut).replace(/\/$/, ''));

@@ -3,7 +3,9 @@ import { adminHeaders } from '../../lib/adminFetch';
 
 /** Rendered after existing admin login/MFA. A connection always needs explicit consent. */
 export function FailedReportOAuthConsent({ token }: { token: string }) {
-  const id = new URLSearchParams(window.location.search).get('oauth_request');
+  // Read once, and only in a browser: the page is also rendered on the server (renderToStaticMarkup),
+  // where there is no `window` and therefore no pending OAuth request to show.
+  const [id] = useState(() => (typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('oauth_request')));
   const [request, setRequest] = useState<{ clientName: string; redirectUri: string } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);

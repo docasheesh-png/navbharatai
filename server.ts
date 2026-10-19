@@ -130,7 +130,7 @@ import { registerKnowledgeDocsRoutes } from './src/server/lib/KnowledgeDocs';
 import { registerApiKeyRoutes } from './src/server/routes/apiKeys';
 import { registerDeveloperApiRoutes } from './src/server/routes/developerApi';
 import { apiVersionMiddleware } from './src/server/routes/apiVersion';
-import { jsonBodyParser } from './src/server/lib/requestBodyLimits';
+import { formBodyParser, jsonBodyParser, type TooLargeEvent } from './src/server/lib/requestBodyLimits';
 import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
 import { registerObservabilityRoutes } from './src/server/routes/observability';
 import { registerReleaseNotesRoutes } from './src/server/routes/releaseNotes';
@@ -422,12 +422,13 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
     // projects, and the raw bytes (`req.rawBody`) only where a signature is checked over them or the
     // preview proxy forwards them verbatim (Q-627). Both lists, and the census that keeps them complete,
     // live in requestBodyLimits.ts — a new big-body route is added THERE, never by raising this.
-    app.use(jsonBodyParser({
-      onTooLarge: (event, err) => {
-        console.warn(`[BODY_TOO_LARGE] ${event.method} ${event.path} over ${event.limit}${event.length ? ` (${event.length} bytes)` : ''}`);
-        errorTracker.capture(err, { source: 'middleware', httpMethod: event.method, httpUrl: event.path, httpStatus: 413 });
-      },
-    }));
+    const onTooLarge = (event: TooLargeEvent, err: unknown): void => {
+      console.warn(`[BODY_TOO_LARGE] ${event.method} ${event.path} over ${event.limit}${event.length ? ` (${event.length} bytes)` : ''}`);
+      errorTracker.capture(err, { source: 'middleware', httpMethod: event.method, httpUrl: event.path, httpStatus: 413 });
+    };
+    app.use(jsonBodyParser({ onTooLarge }));
+    // Form bodies only where a standard demands them (OAuth token/revoke), with each route's own limits.
+    app.use(formBodyParser({ onTooLarge }));
 
     // EXPRESS 5 restores nothing that Express 4 gave for free: `req.body` is now left UNDEFINED when
     // no parser matched, where it used to be `{}`. 419 places in this repo read it, all typed `any`,

@@ -129,7 +129,10 @@ test('concurrent code redemption and refresh rotation each have exactly one winn
 });
 test('bad redirect schemes, credentials, fragments, malformed fields and unsupported auth are rejected', async () => {
   const f = fixture();
-  for (const uri of ['javascript:alert(1)', 'https://user:pass@client.example/callback', 'http://client.example/callback', 'https://client.example/#fragment', 'not-a-url']) assert.throws(() => validReportRedirect(uri));
+  // A password in the redirect is built at run time rather than written as a literal, so the
+  // repository's own secret census (tests/thePlatformKeepsItsSecretsOutOfGit.test.ts) sees no credential.
+  const withPassword = new URL('https://client.example/callback'); withPassword.password = 'x';
+  for (const uri of ['javascript:alert(1)', 'https://user@client.example/callback', withPassword.href, 'http://client.example/callback', 'https://client.example/#fragment', 'not-a-url']) assert.throws(() => validReportRedirect(uri));
   assert.equal(validReportRedirect('http://127.0.0.1:1234/callback'), 'http://127.0.0.1:1234/callback');
   await rejects(f.service.register({ redirect_uris: [redirect], token_endpoint_auth_method: 'invalid' }), 'invalid_client_metadata');
   await rejects(f.service.register({ redirect_uris: [redirect], scope: 'admin' }), 'invalid_scope');

@@ -45,7 +45,7 @@ describe('a turn that only answered is described by the gate, not judged by it',
 
   it('the route: the RED → ok:false flip skips an answer-only turn, and both preview lines use the rule', () => {
     expect(route).toContain('const settled = answerOnlyGate.answerOnly ? undefined : result;');
-    expect(route).toContain('const answerOnlyNow = (): boolean => isAnswerOnlyTurn({ expectsArtifacts, builderWrote: builderWroteCount() });');
+    expect(route).toContain('const answerOnlyNow = (): boolean => isAnswerOnlyTurn({ expectsArtifacts, builderWrote: builderWroteCount() })');
     expect(route).toContain("severity: previewFailedSeverity(answerOnlyNow()), code: 'OUTCOME_PREVIEW_FAILED'");
     expect(route).toContain('text: previewFailedNarration(answerOnlyNow(), problems)');
     expect(route).toMatch(/\.\.\.releaseGateRecord\(gate, \{[\s\S]{0,400}?\}\),\n\s*\.\.\.answerOnlyGate\.record,[^\n]*\n\s*code: 'RELEASE_GATE',/);

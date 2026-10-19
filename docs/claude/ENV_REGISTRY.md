@@ -4372,3 +4372,9 @@ price is not. Recorded as a queue row, not done here.
   → the architect's loop returning) was running is charged at our real cost, never full price.
   `src/server/AgentV3/cancelledBuildBilling.ts stoppedDuringOurStylePass`. Locked in
   `tests/aStopDuringOurStylePassIsNotFullPrice.test.ts`.
+- **`AGENTV3_ANSWER_TURN_NOT_BUILD`** (NOT set; default **on**; `off` ⇒ old judgement). Owner-approved 2026-10-18
+  (r6–r10 autopsy): a build turn that wrote no files and only asked a question or declined (`readTurnAnswer`
+  `.asked`/`.declined`) is treated as an answer: the release gate is recorded as info (not RED/ERROR), the platform
+  does not start the starter preview for it, and no "engine slow"/upsell line is shown. The bill stays ₹0 (the
+  empty-build rule). `src/server/AgentV3/answerOnlyTurn.ts answeredInsteadOfBuilding`. Locked in
+  `tests/aQuestionTurnIsAnAnswerNotAFailedBuild.test.ts`.

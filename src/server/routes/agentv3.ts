@@ -671,7 +671,7 @@ import { withRequestNotes, requestNotesFor } from '../AgentV3/requestNotes';
 import { abortBuild, abortCauseOf, abortRequestedAtOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
-import { isAnswerOnlyTurn, previewFailedSeverity, previewFailedNarration, decideAnswerOnlyGate } from '../AgentV3/answerOnlyTurn';
+import { isAnswerOnlyTurn, answeredInsteadOfBuilding, previewFailedSeverity, previewFailedNarration, decideAnswerOnlyGate } from '../AgentV3/answerOnlyTurn';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
@@ -13052,6 +13052,8 @@ async function noteBuildOutcome(
     // temporal dead zone. A crash inside the watchdog would lose the whole finalization, so the
     // finalizer reads this ref instead and never the later binding.
     const buildObs: { previewRendered: boolean; telemetryRecorded: boolean } = { previewRendered: false, telemetryRecorded: false };
+    /** What the model's last answer was (readTurnAnswer), carried to `answerOnlyNow` (answeredInsteadOfBuilding). */
+    const answeredHolder: { asked: boolean; declined: boolean } = { asked: false, declined: false };
     /** OUR style-floor pass window (STYLE_RULES_RESUMED → the architect's loop returning), for the stop bill. */
     const stylePassWindow: { startedAt: number | null; endedAt: number | null } = { startedAt: null, endedAt: null };
     // ONE build must count ONCE. `finalizeOnDeadline` is guarded by `rb.ended`, but the advisory cap
@@ -18484,7 +18486,10 @@ async function noteBuildOutcome(
        */
       const builderWroteCount = (): number => builderWrittenCount(writtenFiles, kitSeededFiles);
       /** Not asked to build and wrote nothing: the gate describes, it does not judge (build d62bf22d, answerOnlyTurn.ts). */
-      const answerOnlyNow = (): boolean => isAnswerOnlyTurn({ expectsArtifacts, builderWrote: builderWroteCount() });
+      // …or a build turn whose output was only a question or a decline (answeredInsteadOfBuilding). Read after the
+      // last model run: every caller sits below `modelAnswer`, which `answeredHolder` carries up to here.
+      const answerOnlyNow = (): boolean => isAnswerOnlyTurn({ expectsArtifacts, builderWrote: builderWroteCount() })
+        || answeredInsteadOfBuilding({ builderWrote: builderWroteCount(), ...answeredHolder });
       /** Why a game build did not get the kit — said in FAST_LANE_SKIPPED_GAME, never left implied. */
       let gameKitSkipReason = '';
       let gameKitSeedFailed = false;
@@ -19806,6 +19811,7 @@ async function noteBuildOutcome(
       // at their own moment, and the platform had by then overwritten it: the upsell found no refusal
       // in our own "please try again" and asked a user whose request the engine had declined for money.
       const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt, adAnswerFacts);
+      Object.assign(answeredHolder, { asked: modelAnswer.asked === true, declined: modelAnswer.declined === true });
       // 🔴 Q-1019 — and the same line for the turn whose honest answer was the whole job. Recorded on its
       // own condition rather than folded into the one below, so the report says WHICH kind of answer ended
       // the turn; `recordAnsweredNotBuilt` carries its own try, so the handler gains no branch (TS2563).
@@ -22033,11 +22039,12 @@ async function noteBuildOutcome(
         const remainingForProof = effectiveBuildSeconds > 0
           ? effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt)
           : null;
-        const presentFiles = (!lastPreviewUrl && !abort.signal.aborted && expectsArtifacts && !isImportTurn)
+        // A turn that only asked or declined has no app of its own to check — never start the starter for it.
+        const presentFiles = (!lastPreviewUrl && !abort.signal.aborted && expectsArtifacts && !isImportTurn && !answerOnlyNow())
           ? await withTimeout(actuator.listFiles(workspaceId), 15_000, 'platform-preview-list').catch(() => [] as string[])
           : [];
         const proofDecision = shouldAttemptPlatformPreview({
-          expectsArtifacts,
+          expectsArtifacts: expectsArtifacts && !answerOnlyNow(),
           hasPreviewUrl: Boolean(lastPreviewUrl),
           aborted: abort.signal.aborted,
           isImportTurn,
@@ -26678,7 +26685,7 @@ async function noteBuildOutcome(
           // service — and tested last only because the readings above are strictly more specific.
           const starved = !stopped && !refused && !degraded && !misconfigured
             && buildStarvedItsOutputBudget(buildDiag.providerFailureBreakdown());
-          if (!refused && !stopped && !interrupted) {
+          if (!refused && !stopped && !interrupted && !answerOnlyNow()) {
             const emptyCause = misconfigured || starved
               ? 'our-configuration'
               : assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';

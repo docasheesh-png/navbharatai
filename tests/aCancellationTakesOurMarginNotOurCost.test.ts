@@ -29,7 +29,8 @@ const module_ = readFileSync(resolve(__dirname, '../src/server/AgentV3/cancelled
 const facts = (o: Partial<Parameters<typeof decideCancelledBuildBill>[0]> = {}) => ({
   abortCause: 'user-stop' as AbortCause,
   filesWritten: 12,
-  appRendered: false,      // the state in which BOTH rules fire — the whole subject of this suite
+  appRendered: false,
+  appRenderedAt: 1, stopRequestedAt: 2, // seen running BEFORE the stop (owner 2026-10-18) — so appRendered: true means a full-price stop      // the state in which BOTH rules fire — the whole subject of this suite
   decidedBilledUsd: 1.00,
   ...o,
 });

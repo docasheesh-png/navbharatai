@@ -211,6 +211,8 @@ export interface RunTurnParams {
    * d382b398: two concurrent calls each got "yes" before either abandon was counted).
    */
   canAbandonSlowStream?: (o?: { peek?: boolean }) => boolean;
+  /** The zero-byte grace THIS rung has earned (openAiStream `firstByteGraceFor`); absent ⇒ the configured grace. */
+  firstByteGraceMs?: number;
   /**
    * Set by the multi-provider ladder: is there another rung after the one running this call? A call
    * bounded by our own deadline then waits less for its first answer (autopsy 12c642ed — see

@@ -25,6 +25,7 @@ const theRealBuild: CancelledBuildFacts = {
   filesWritten: 4,
   preseededUnchanged: 0,
   appRendered: false,
+  appRenderedAt: 1, stopRequestedAt: 2, // seen running BEFORE the stop (owner 2026-10-18)
   editingExistingApp: true,
   decidedBilledUsd: 0.248124,   // the exact billedUsd from that report
 };

@@ -33,7 +33,7 @@ import {
   streamHardCapMs,
   streamIdleMs,
   streamIsCrawling,
-  streamThroughputGraceMs,
+  streamFirstByteGraceMs,
   type OpenAiStreamChunkLike,
   type StreamStopCause,
 } from './openAiStream';
@@ -130,6 +130,8 @@ async function readStream(
      * judged crawling — never on every poll.
      */
     canAbandon?: () => boolean;
+    /** The zero-byte grace this rung earned (firstByteGraceFor); absent ⇒ the configured grace. */
+    firstByteGraceMs?: number;
     /**
      * The build's stop signal. A stop CLOSES the stream — the provider stops generating and stops
      * billing — and throws `BuildStoppedError`, never a timeout the chain would bench a vendor for.
@@ -201,7 +203,7 @@ async function readStream(
         const answerOver = opts.answerBy !== undefined && !acc.hasAnswer() && opts.answerBy - now() <= 0;
         if (answerOver && !idleOver && !ceilingOver) { disarm(); abort(); return 'no-answer'; }
         if (!idleOver && !ceilingOver) {
-          if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt }) && opts.canAbandon?.()) {
+          if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt, firstByteGraceMs: opts.firstByteGraceMs }) && opts.canAbandon?.()) {
             disarm();
             abort();
             return 'slow';
@@ -243,7 +245,7 @@ async function readStream(
       }
       // …and the THIRD state: answering, but so slowly that waiting costs more than moving on. Judged
       // only when the caller says another rung is available — see `canAbandon`.
-      if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt }) && opts.canAbandon?.()) {
+      if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt, firstByteGraceMs: opts.firstByteGraceMs }) && opts.canAbandon?.()) {
         abort();
         return 'slow';
       }
@@ -521,7 +523,7 @@ export class OpenAiToolRunner implements TurnRunner {
     // a crawling stream is (autopsy 1389f0d5: a silent first rung held the build for 60 s before the next
     // rung was tried). Same message, so the ladder's crawl accounting — not the timeout bench — decides.
     const silentBoundMs = streaming && params.canAbandonSlowStream?.({ peek: true })
-      ? Math.min(firstAnswerMs, streamThroughputGraceMs())
+      ? Math.min(firstAnswerMs, params.firstByteGraceMs ?? streamFirstByteGraceMs()) // zero bytes = queued: the grace this rung EARNED (owner, 2026-10-18)
       : null;
     const initialBoundMs = silentBoundMs ?? firstAnswerMs;
     const providerWentSilent = streaming && firstAnswerMs < timeoutMs;
@@ -579,6 +581,7 @@ export class OpenAiToolRunner implements TurnRunner {
         onReasoning: params.onThinking,
         // Only the ladder knows whether there is somewhere else to go; absent ⇒ never abandon.
         canAbandon: params.canAbandonSlowStream,
+        firstByteGraceMs: params.firstByteGraceMs,
         signal: params.signal,
         answerBy,
       });

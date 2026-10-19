@@ -42,7 +42,7 @@ import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadm
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
 import { requestForChecks } from '../AgentV3/requestForChecks';
-import { offerBugHunt, BUG_HUNT_WAIT_MS } from '../AgentV3/optionalBugHunt';
+import { offerBugHunt, bugHuntWaitMs } from '../AgentV3/optionalBugHunt';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
@@ -286,6 +286,7 @@ import { runningBuilds, runningBuildCount, __setRunningBuildForTest, type Runnin
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
+import { chargeRecordFields } from '../lib/chargeRecord';
 import { startImportDurableSave, settleImportDurableSave, IMPORT_DURABLE_SETTLE_MS } from '../AgentV3/importDurableSave';
 import { announceBuildFinished, announceDeploy, serverPublishOutcome } from '../lib/userWebhookEvents';
 // The balance warning goes through ONE door now (admin 2026-09-22). It was a raw push on the block
@@ -426,7 +427,7 @@ import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState, lastAssistantText } from '../AgentV3/ProjectContext';
 import { refersToConversation, CONVERSATION_REPLY_MAX } from '../AgentV3/conversationReference';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
-import { freeCancellationMessage, settleStopOrFailure, stopBillingSwitches, preseededUnchangedCount } from '../AgentV3/cancelledBuildBilling';
+import { freeCancellationMessage, settleStopOrFailure, stopBillingSwitches, preseededUnchangedCount, stopFellInWindow, closeStylePassWindow } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
@@ -516,7 +517,7 @@ import { estimateTokens, contextUsage, tightestContextModel } from '../AgentV3/T
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, lastGroundingCost } from '../AgentV3/ContextReranker';
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince, splitAuthRefusals } from '../AgentV3/renderCheckConsole';
+import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince, splitAuthRefusals, splitAssetMisses } from '../AgentV3/renderCheckConsole';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
 import { fillGateFromLedger, renderProvenInLedger } from '../AgentV3/evidenceLedger';
 import { appRenderedRecord } from '../AgentV3/renderProof';
@@ -667,10 +668,10 @@ import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
 import { restateDesignAfterRepair } from '../AgentV3/designAfterRepair';
 import { withRequestNotes, requestNotesFor } from '../AgentV3/requestNotes';
-import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort } from '../AgentV3/buildAbortCause';
+import { abortBuild, abortCauseOf, abortRequestedAtOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
-import { isAnswerOnlyTurn, previewFailedSeverity, previewFailedNarration, decideAnswerOnlyGate } from '../AgentV3/answerOnlyTurn';
+import { isAnswerOnlyTurn, answeredInsteadOfBuilding, previewFailedSeverity, previewFailedNarration, decideAnswerOnlyGate } from '../AgentV3/answerOnlyTurn';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
@@ -6928,6 +6929,7 @@ async function noteBuildOutcome(
         return;
       }
       (rb.steerQueue ??= []).push(message);
+      rb.lastSteerAt = Date.now();
       // "Hindi me bolo" mid-build (autopsy eb58abaf): every platform line from here on follows it.
       if (platformVoiceEnabled()) { const asked = voiceRequestedIn(message); if (asked) rb.voice = asked; }
       // Instant, honest feedback to EVERY attached device: the message is queued (the runner emits
@@ -13028,7 +13030,7 @@ async function noteBuildOutcome(
     // `expectsArtifacts` rides here for the same reason the ledger does: it is computed deep inside
     // the build block, and the deadline finalizer — defined above it, called after it — needs the
     // same fact the settle path uses, or the two would price one build by different rules.
-    const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number; cacheReadInputTokens?: number; expectsArtifacts?: boolean; preseededGolden?: Map<string, string> } = {};
+    const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number; cacheReadInputTokens?: number; expectsArtifacts?: boolean; preseededGolden?: Map<string, string>; appFirstRenderedAt?: number | null } = {};
     /**
      * Phases this build has POSITIVELY ESTABLISHED delivered nothing a caller could use, so their
      * spend is ours and not the user's (see `billingPhase.ts`).
@@ -13050,6 +13052,10 @@ async function noteBuildOutcome(
     // temporal dead zone. A crash inside the watchdog would lose the whole finalization, so the
     // finalizer reads this ref instead and never the later binding.
     const buildObs: { previewRendered: boolean; telemetryRecorded: boolean } = { previewRendered: false, telemetryRecorded: false };
+    /** What the model's last answer was (readTurnAnswer), carried to `answerOnlyNow` (answeredInsteadOfBuilding). */
+    const answeredHolder: { asked: boolean; declined: boolean } = { asked: false, declined: false };
+    /** OUR style-floor pass window (STYLE_RULES_RESUMED → the architect's loop returning), for the stop bill. */
+    const stylePassWindow: { startedAt: number | null; endedAt: number | null } = { startedAt: null, endedAt: null };
     // ONE build must count ONCE. `finalizeOnDeadline` is guarded by `rb.ended`, but the advisory cap
     // fires 120s after a SUCCESSFUL result, so a long post-build tail can race the normal settle and
     // both exits can reach a recorder. Billing survives that on its idempotent buildRef; a counter has
@@ -13217,6 +13223,11 @@ async function noteBuildOutcome(
                   filesWritten: writtenFiles.size,
                   preseededUnchanged: preseededUnchangedCount(billingCtx.preseededGolden, writtenFiles),
                   appRendered: wdPreviewProven,
+                  // Same (g)/(h) facts as the normal settle (#3820/#3821): running BEFORE the stop request, and
+                  // whether the stop fell inside OUR style pass — so both billing points still decide alike.
+                  appRenderedAt: billingCtx.appFirstRenderedAt ?? null,
+                  stopRequestedAt: abortRequestedAtOf(abort.signal),
+                  stoppedDuringOurStylePass: stopFellInWindow(abortRequestedAtOf(abort.signal), stylePassWindow.startedAt, stylePassWindow.endedAt),
                   editingExistingApp: isEditMode,
                   decidedBilledUsd: watchdogBilledUsd,
                   realCostUsd: decided.realCostUsd,
@@ -16421,7 +16432,8 @@ async function noteBuildOutcome(
               : undefined,
           });
         } catch { /* the record must never be what prevents the stop */ }
-        abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'user-stop');
+        // The STOP WAS REQUESTED when the person's message arrived, not when the model acted on it.
+        abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'user-stop', rb.lastSteerAt);
       });
       // C2 — load the project's own "never touch this" list and ARM THE GUARD before any tool runs.
       // Reading the file into the prompt alone would be a wish, not a rule: a model told nicely still
@@ -17333,6 +17345,8 @@ async function noteBuildOutcome(
         // are built. The done signal must not tell a module turn it may stop (autopsy 50378049).
         projectModule: () => projectModuleRef?.name ?? null,
         onNote: (note: { code: string; message: string; detail?: string }) => {
+          // OUR style pass starts here (cancelledBuildBilling `stoppedDuringOurStylePass`).
+          if (note.code === 'STYLE_RULES_RESUMED' && stylePassWindow.startedAt === null) stylePassWindow.startedAt = Date.now();
           try { buildDiag.record({ phase: 'build', severity: 'info', code: note.code, message: note.message, detail: note.detail, autoResolved: true }); } catch { /* a note must never fail a build */ }
         },
         // A small new app is built by ONE agent (soloBuild.ts, autopsy ca99778e) — the prompt says so beside the tools.
@@ -18525,7 +18539,10 @@ async function noteBuildOutcome(
        */
       const builderWroteCount = (): number => builderWrittenCount(writtenFiles, kitSeededFiles);
       /** Not asked to build and wrote nothing: the gate describes, it does not judge (build d62bf22d, answerOnlyTurn.ts). */
-      const answerOnlyNow = (): boolean => isAnswerOnlyTurn({ expectsArtifacts, builderWrote: builderWroteCount() });
+      // …or a build turn whose output was only a question or a decline (answeredInsteadOfBuilding). Read after the
+      // last model run: every caller sits below `modelAnswer`, which `answeredHolder` carries up to here.
+      const answerOnlyNow = (): boolean => isAnswerOnlyTurn({ expectsArtifacts, builderWrote: builderWroteCount() })
+        || answeredInsteadOfBuilding({ builderWrote: builderWroteCount(), ...answeredHolder });
       /** Why a game build did not get the kit — said in FAST_LANE_SKIPPED_GAME, never left implied. */
       let gameKitSkipReason = '';
       let gameKitSeedFailed = false;
@@ -19584,6 +19601,8 @@ async function noteBuildOutcome(
       }
       // result is always set here (OneShot, escalation, or the loop above).
       if (!result) result = await runner.run(buildPrompt);
+      // …and the architect's loop, and with it OUR style pass, is over.
+      closeStylePassWindow(stylePassWindow, Date.now());
 
       // ── EVERY WAY A BUILD IS STOPPED MUST REACH THE TIMELINE (autopsy b89ba6f8, 2026-09-17) ──────
       //
@@ -19845,6 +19864,7 @@ async function noteBuildOutcome(
       // at their own moment, and the platform had by then overwritten it: the upsell found no refusal
       // in our own "please try again" and asked a user whose request the engine had declined for money.
       const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt, adAnswerFacts);
+      Object.assign(answeredHolder, { asked: modelAnswer.asked === true, declined: modelAnswer.declined === true });
       // 🔴 Q-1019 — and the same line for the turn whose honest answer was the whole job. Recorded on its
       // own condition rather than folded into the one below, so the report says WHICH kind of answer ended
       // the turn; `recordAnsweredNotBuilt` carries its own try, so the handler gains no branch (TS2563).
@@ -21902,6 +21922,8 @@ async function noteBuildOutcome(
       // but was never confirmed to render, so nothing here was proven to RUN" — 1.4 seconds after the
       // same build had watched it render. Nothing failed, nothing logged; the report simply lied.
       let previewVerifiedRendered = false;
+      /** When THIS pass first saw the app render (epoch ms) — compared with the stop request (cancelledBuildBilling). */
+      let appFirstRenderedAt: number | null = null;
       // When a real-browser render check last came back CLEAN (its start time). Every console line logged
       // before it has been answered by it, so the runtime auto-fix loop does not hand those to a repair
       // (autopsy 12511a9c — `runtimeAutofixSince`).
@@ -21945,6 +21967,8 @@ async function noteBuildOutcome(
        */
       const markAppRendered = (source: 'browser' | 'curl' | undefined, where: string): void => {
         previewVerifiedRendered = true; // the eyes SAW it render — the runtime verdict must not deny it
+        if (appFirstRenderedAt === null) appFirstRenderedAt = Date.now();
+        billingCtx.appFirstRenderedAt = appFirstRenderedAt; // merge with #3820 — the deadline finalizer reads the same render time
         buildObs.previewRendered = true; // the same observation, readable by the deadline finalizer
         // …and the third copy, on the stricter rule it has always had: a curl fallback's empty-shell
         // "render" is not proof, so only a real browser may hold a late flip (the Green Freeze rule).
@@ -21998,8 +22022,21 @@ async function noteBuildOutcome(
        * exclusion is visible rather than silent.
        */
       let authRefusalNoted = false;
+      let assetMissNoted = false;
       const renderJudgingConsole = (lines: string[]): string[] => {
-        const { kept, authRefusals } = splitAuthRefusals(lines);
+        const { kept: notAuth, authRefusals } = splitAuthRefusals(lines);
+        // A 404 for a favicon / manifest / icon / sw.js / font cannot stop a page painting (build 19e5f6fb).
+        const { kept, assetMisses } = splitAssetMisses(notAuth);
+        if (assetMisses.length > 0 && !assetMissNoted) {
+          assetMissNoted = true;
+          try {
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'PREVIEW_ASSET_404_IGNORED', autoResolved: true,
+              message: `${assetMisses.length} console line(s) were only a 404 for a static asset (icon / manifest / service worker / font) — not counted against the render; the DOM verdict still decides.`,
+              detail: assetMisses.slice(0, 3).join(' | ').slice(0, 400),
+            });
+          } catch { /* diagnostics are best-effort */ }
+        }
         if (authRefusals.length > 0 && !authRefusalNoted) {
           authRefusalNoted = true;
           try {
@@ -22056,11 +22093,12 @@ async function noteBuildOutcome(
         const remainingForProof = effectiveBuildSeconds > 0
           ? effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt)
           : null;
-        const presentFiles = (!lastPreviewUrl && !abort.signal.aborted && expectsArtifacts && !isImportTurn)
+        // A turn that only asked or declined has no app of its own to check — never start the starter for it.
+        const presentFiles = (!lastPreviewUrl && !abort.signal.aborted && expectsArtifacts && !isImportTurn && !answerOnlyNow())
           ? await withTimeout(actuator.listFiles(workspaceId), 15_000, 'platform-preview-list').catch(() => [] as string[])
           : [];
         const proofDecision = shouldAttemptPlatformPreview({
-          expectsArtifacts,
+          expectsArtifacts: expectsArtifacts && !answerOnlyNow(),
           hasPreviewUrl: Boolean(lastPreviewUrl),
           aborted: abort.signal.aborted,
           isImportTurn,
@@ -25049,7 +25087,7 @@ async function noteBuildOutcome(
         hasUser: !!userId,
         newCallId: () => randomUUID(),
         ask: (gate) => emit({ type: 'permission_request', agent: 'reviewer', ts: Date.now(), ...gate }),
-        wait: (callId) => waitForUser(callId, BUG_HUNT_WAIT_MS),
+        wait: (callId) => waitForUser(callId, bugHuntWaitMs()),
         say: (text) => { try { events.emit({ type: 'narration', agent: 'reviewer', ts: Date.now(), text }); } catch { /* best-effort */ } },
         record: (message) => { try { buildDiag.record({ phase: 'build', severity: 'info', code: 'BUG_HUNT_NOT_RUN', message, autoResolved: true }); } catch { /* best-effort */ } },
       });
@@ -26701,7 +26739,7 @@ async function noteBuildOutcome(
           // service — and tested last only because the readings above are strictly more specific.
           const starved = !stopped && !refused && !degraded && !misconfigured
             && buildStarvedItsOutputBudget(buildDiag.providerFailureBreakdown());
-          if (!refused && !stopped && !interrupted) {
+          if (!refused && !stopped && !interrupted && !answerOnlyNow()) {
             const emptyCause = misconfigured || starved
               ? 'our-configuration'
               : assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
@@ -26723,7 +26761,7 @@ async function noteBuildOutcome(
                 : interrupted
                 ? `Did not ask this user to add credits: our own platform interrupted this build (${abortCauseOf(abort.signal)}) before any engine could be judged. A deploy, a lock takeover or a cleanup is not a capability limit, and a fuller wallet would have changed nothing.`
                 : refused
-                ? 'Did not ask this user to add credits: the engine REFUSED this request on policy grounds. A refusal is an answer, not a capability limit — selling a stronger engine after one offers to do the very thing we just declined to do.'
+                ? 'Did not ask this user to add credits: the engine DECLINED this request and wrote no files — a refusal, or an honest "this cannot be done here" (autopsy 707f8e56: an MP4 video asked of a web-app builder, declined with an HTML5-animation offer). `modelAnswer.declined` does not tell those apart, so neither is called a policy refusal. Either way it is an answer, not a shortfall a stronger engine would fix — no upsell.'
                 : starved
                   // Deliberately NOT the "did not respond" wording below: it responded, inside its clock,
                   // every time. Saying otherwise would send the next reader to a provider status page
@@ -26774,6 +26812,11 @@ async function noteBuildOutcome(
           // render rescue both read its size and mean something different by it.
           preseededUnchanged: preseededUnchangedCount(preseededGolden, writtenFiles),
           appRendered: appSeenRunningForBill,
+          // WAS IT RUNNING BEFORE THEY ASKED TO STOP? (r6–r10 autopsy, owner 2026-10-18.) A ledger-only proof
+          // has no time, so it cannot show it came first — that case is billed at cost, not in full.
+          appRenderedAt: appFirstRenderedAt,
+          stopRequestedAt: abortRequestedAtOf(abort.signal),
+          stoppedDuringOurStylePass: stopFellInWindow(abortRequestedAtOf(abort.signal), stylePassWindow.startedAt, stylePassWindow.endedAt),
           // An unverified EDIT may have left the user's working app worse than it started — see
           // `editingExistingApp` (autopsy 95598899). Read after appRendered, so a verified edit is
           // still charged in full.
@@ -26911,7 +26954,7 @@ async function noteBuildOutcome(
       // The display-only monthly cost (userCostStore) still records always — it is an internal
       // estimate surface, not a money movement.
       const billingActive = billingAppliesTo(userId, email);
-      let walletDebit: { tokensDebited: number; tokenBalance: number } | null = null;
+      let walletDebit: { tokensDebited: number; tokenBalance: number; debitedInr?: number; absorbedInr?: number } | null = null;
       if (userId && effectiveBilledUsd > 0) {
         userCostStore.record(userId, effectiveBilledUsd).catch(() => {});
       }
@@ -26957,7 +27000,7 @@ async function noteBuildOutcome(
             description: 'NavBharatAI Pro build',
           });
           if (debitRes.ok) {
-            walletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance };
+            walletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance, ...(typeof debitRes.debitedInr === 'number' ? { debitedInr: debitRes.debitedInr } : {}), ...(typeof debitRes.absorbedInr === 'number' ? { absorbedInr: debitRes.absorbedInr } : {}) };
           } else {
             console.error(`[AGENTV3 BILLING] Wallet debit FAILED for user ${userId} (build ${workspaceId}): ${debitRes.error} — cost was recorded but the balance was not decremented.`);
           }
@@ -27198,6 +27241,8 @@ async function noteBuildOutcome(
             realCostUsd: Math.round(decidedRealCostUsd * 1_000_000) / 1_000_000,
             sandboxCostUsd: Math.round(decidedSandboxUsd * 1_000_000) / 1_000_000,
             ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited } : {}),
+            // The HONEST charge (r6–r10): what left the wallet, and what the overdraft floor absorbed. billedInr above stays the bill.
+            ...chargeRecordFields(walletDebit),
             ...(zeroBillReason ? { zeroBillReason } : {}),
             powerMode: onlyOpus,
             powerLevel: powerLevelReqEffective,
@@ -27675,7 +27720,7 @@ async function noteBuildOutcome(
       // no way to tell a broken app from a working one carrying a wrong verdict, so it offered to
       // "fix" both — and fixing a working app is how we broke it. See failedButRunning.ts.
       // Additive and optional: an older BUNDLED Android client ignores the field entirely.
-      emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, appRendered: buildObs.previewRendered === true, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
+      emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, appRendered: buildObs.previewRendered === true, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...chargeRecordFields(walletDebit), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
       // Native push notification (admin 2026-07-26): fire-and-forget — never delays or fails the
       // response the client already has. A resumable module turn is an intermediate step, not a
       // finished build, so it's excluded (the user is mid-flow inside the app already).

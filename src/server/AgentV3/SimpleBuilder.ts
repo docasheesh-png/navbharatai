@@ -452,6 +452,13 @@ function entryFilesHint(framework: string): string {
 /** Words that say the APP ITSELF uses AI (not that the user wants an AI to build it). */
 const IN_APP_AI_RE = /\b(?:ai|a\.i\.|artificial intelligence|gpt|chatgpt|openai|llm|gemini|chatbot|ai[- ]powered|machine learning|smart (?:suggestions?|replies|categori[sz]ation))\b/i;
 
+/**
+ * Words that say the user does NOT want AI / network calls in the app (r6–r10 autopsy, 2026-10-18): "no API",
+ * "without AI", "offline", "bina AI", "AI nahi". `IN_APP_AI_RE` fired on the bare word "AI" in prompts like
+ * "simple notes app, no AI, no API, works offline", and the lane wired src/lib/ai.ts anyway. PURE.
+ */
+export const NO_AI_RE = /\b(?:no|without|not?\s+using|don'?t\s+(?:use|want|need)|bina|without\s+any)\s+(?:any\s+)?(?:ai|a\.i\.|api|apis|gpt|llm|internet|network|backend)\b|\b(?:ai|api)\s+(?:nahi|nahin|mat|na)\b|\b(?:fully\s+)?offline\b|\bno[- ]internet\b/i;
+
 /** Where NavBharatAI's keyless AI client lives in a browser app (the `generate_ai` recipe writes the same file). */
 export const LANE_AI_CLIENT_PATH = 'src/lib/ai.ts';
 
@@ -473,6 +480,7 @@ export function laneAiClient(prompt: string, framework: string | undefined, env:
   if (!appAiGatewayEnabled(env)) return null;
   if (!frameworkSupportsContractFile(framework)) return null;
   if (!IN_APP_AI_RE.test(String(prompt ?? ''))) return null;
+  if (NO_AI_RE.test(String(prompt ?? '')) && (env.AGENTV3_LANE_AI_NEGATION ?? '').trim().toLowerCase() !== 'off') return null; // the user said no AI / no API / offline
   const content = generateAiIntegration('navbharat').files[LANE_AI_CLIENT_PATH];
   return content ? { path: LANE_AI_CLIENT_PATH, content } : null;
 }

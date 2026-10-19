@@ -19,7 +19,7 @@ import { decideCancelledBuildBill, preseededUnchangedCount } from '../src/server
  * stopped at 90% of a real build is charged exactly as before.
  */
 
-const base = { abortCause: 'user-stop' as const, appRendered: false, decidedBilledUsd: 0.006754 };
+const base = { abortCause: 'user-stop' as const, appRendered: false, appRenderedAt: 1, stopRequestedAt: 2, decidedBilledUsd: 0.006754 };
 
 describe('🔴 the reported case', () => {
   it('12 template files, none touched by the build → FREE', () => {

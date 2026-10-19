@@ -4343,3 +4343,7 @@ price is not. Recorded as a queue row, not done here.
   default). Owner 2026-10-18, autopsy 2f46a4d8: how long a finished, GREEN build waits for the deep-bug-hunt
   offer's answer before ending without the hunt. `src/server/AgentV3/optionalBugHunt.ts bugHuntWaitMs`. Locked in
   `tests/aFinishedBuildIsNotHeldOpen.test.ts`.
+
+- **`AGENTV3_LANE_AI_NEGATION`** (NOT set; default **on**; `off` ⇒ old behaviour). r6–r10 autopsy 2026-10-18: the fast
+  lane's `laneAiClient` no longer adds an in-app AI client when the prompt says "no AI" / "no API" / "offline"
+  (`NO_AI_RE`). `src/server/AgentV3/SimpleBuilder.ts laneAiClient`. Locked in `tests/noAiMeansNoAiClient.test.ts`.

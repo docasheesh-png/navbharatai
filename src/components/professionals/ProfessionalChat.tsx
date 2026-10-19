@@ -247,6 +247,9 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
         }),
       });
       const data = await res.json().catch(() => ({}));
+      if (data?.maintenance === true && typeof data.reply === 'string') {
+        setMessages(m => [...m, { role: 'assistant', content: data.reply }]); return;
+      }
       // Professional Pass gate: show the paywall / login prompt instead of a raw error bubble.
       if (data?.code === 'wallet_empty') { setWalletFreeUsedUp(data?.freeUsedUp === true); setPaywall('wallet'); refreshPass(); return; }
       if (res.status === 402 || data?.code === 'professional_paywall') { setPaywall('paywall'); refreshPass(); return; }

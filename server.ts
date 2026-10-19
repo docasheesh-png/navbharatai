@@ -117,6 +117,7 @@ import { sanitizeProxyRequestHeaders, sanitizeUpgradeResponseHeaders } from './s
 import { handleSonicUpgrade } from './src/server/sonic/sonicWs';
 import { registerSonicRoutes } from './src/server/sonic/sonicRoute';
 import { serverStats } from './src/server/lib/serverStats';
+import { aiMaintenanceGuard } from './src/server/lib/aiMaintenanceGuard';
 import { registerAdminRoutes } from './src/server/routes/admin';
 import { registerFailedReportRoutes } from './src/server/routes/failedReports';
 import { attachMetricsTimeline } from './src/server/lib/metricsTimeline';
@@ -315,6 +316,8 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   serverLoad.start();
   app.use(serverLoad.middleware);
   app.use(corsMiddleware());
+  // Refuse before body parsing, quota reservation, billing or any model call.
+  app.use(aiMaintenanceGuard());
 
   // ── Rate Limiters (4.3) ──────────────────────────────────────────────────
   // 🔴 FORENSIC AUDIT 2026-10-04 — until this change NONE of these limited anything. Each was keyed

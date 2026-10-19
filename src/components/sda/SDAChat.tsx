@@ -831,7 +831,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
             : 'Doctor AI could not respond right now. Please try again in a moment.');
         setMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
-          text: noCredit ? honest : `⚠️ ${honest}`,
+          text: noCredit || errData?.maintenance === true ? honest : `⚠️ ${honest}`,
           sender: 'sda',
           timestamp: new Date(),
           needsCredit: !!noCredit,

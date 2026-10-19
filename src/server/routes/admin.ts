@@ -1,3 +1,4 @@
+import { registerAiMaintenanceRoutes } from './aiMaintenance';
 import crypto from 'crypto';
 import { AggregateField } from 'firebase-admin/firestore';
 import { WALLET_SUMMARY_FIELDS, USAGE_LOG_FIELDS, revenueToday } from '../lib/adminReadFields';
@@ -383,6 +384,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
     next();
   };
+
+  registerAiMaintenanceRoutes(app, verifyAdminToken);
 
   // ── P-SEC.3 — Admin MFA management (TOTP enrol / verify / disable / status) ──
   // All require a valid admin session (verifyAdminToken). Self-service enrolment

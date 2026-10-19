@@ -147,6 +147,14 @@ export interface CancelledBuildFacts {
   appRenderedAt?: number | null;
   stopRequestedAt?: number | null;
   /**
+   * The stop was requested while OUR style-floor pass (`STYLE_RULES_RESUMED`) was running — after the model had
+   * already declared the app finished. Owner 2026-10-18 (r6–r10 autopsy): never full price. At cost, not free:
+   * the app had already passed the gate and the work was real, but the user stopped polish they never asked for,
+   * often right after being told "Not finished yet", so our margin on it is ours to lose.
+   * AGENTV3_STYLE_PASS_STOP_AT_COST=off restores the (g) rule alone.
+   */
+  stoppedDuringOurStylePass?: boolean;
+  /**
    * Was this turn EDITING an app that already existed, rather than building a new one?
    *
    * 🔴 THE CASE THIS MODULE COULD NOT SEE (autopsy 95598899, 2026-09-18). A user with a working
@@ -234,6 +242,17 @@ export function renderedBeforeStop(f: Pick<CancelledBuildFacts, 'appRenderedAt' 
   return typeof r === 'number' && Number.isFinite(r) && typeof s === 'number' && Number.isFinite(s) && r < s;
 }
 
+/** Close an open style-pass window (no-op when it never opened or is already closed). */
+export function closeStylePassWindow(w: { startedAt: number | null; endedAt: number | null }, now: number): void {
+  if (w.startedAt !== null && w.endedAt === null) w.endedAt = now;
+}
+
+/** Was the stop requested inside [start, end)? An open end means the window was still running. PURE. */
+export function stopFellInWindow(stopAt: number | null, start: number | null, end: number | null): boolean {
+  if (stopAt === null || start === null || !Number.isFinite(stopAt) || !Number.isFinite(start)) return false;
+  return stopAt >= start && (end === null || stopAt < end);
+}
+
 const FREE: Omit<CancelledBuildBill, 'reason'> = {
   billedUsd: 0, discountPct: 100, delivery: null, applies: false, userMessage: null,
   costFloorApplied: false,
@@ -282,7 +301,9 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
   //
   // RULE 3 is structural: every branch from here starts from `decided`, so the charge can only ever
   // be reduced. There is no path that computes a number of its own.
-  if (f.appRendered === true && !renderedBeforeStop(f) && greenFirstRuleOn()) {
+  const ourPassStopped = f.stoppedDuringOurStylePass === true
+    && String(process.env.AGENTV3_STYLE_PASS_STOP_AT_COST ?? '').trim().toLowerCase() !== 'off';
+  if (f.appRendered === true && ((!renderedBeforeStop(f) && greenFirstRuleOn()) || ourPassStopped)) {
     // It renders now, but it was not running when they asked to stop: the rest was finished after the request.
     // At cost — our margin goes, our cost never does (the same floor as below, without the half).
     const ourCost = money(f.realCostUsd) + money(f.sandboxUsd);
@@ -291,7 +312,9 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
       billedUsd,
       discountPct: decided > 0 ? Math.round(((decided - billedUsd) / decided) * 100) : 100,
       delivery: 'running-not-before-stop', applies: true, costFloorApplied: billedUsd > 0,
-      reason: 'user stopped the build before the app was seen running (it rendered only after the stop request, or when is unknown) — charged at our cost, no service charge',
+      reason: ourPassStopped
+        ? 'user stopped the build during OUR style-floor pass, after the model had finished — charged at our cost, never full price'
+        : 'user stopped the build before the app was seen running (it rendered only after the stop request, or when is unknown) — charged at our cost, no service charge',
       userMessage: billedUsd > 0
         ? 'You stopped this build before the app was running. Your app is saved and you can keep using it. You have been charged only what the work actually cost to run — no service charge on top.'
         : null,

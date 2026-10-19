@@ -427,7 +427,7 @@ import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState, lastAssistantText } from '../AgentV3/ProjectContext';
 import { refersToConversation, CONVERSATION_REPLY_MAX } from '../AgentV3/conversationReference';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
-import { decideCancelledBuildBill, freeCancellationMessage } from '../AgentV3/cancelledBuildBilling';
+import { decideCancelledBuildBill, stopFellInWindow, closeStylePassWindow, freeCancellationMessage } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
@@ -13052,6 +13052,8 @@ async function noteBuildOutcome(
     // temporal dead zone. A crash inside the watchdog would lose the whole finalization, so the
     // finalizer reads this ref instead and never the later binding.
     const buildObs: { previewRendered: boolean; telemetryRecorded: boolean } = { previewRendered: false, telemetryRecorded: false };
+    /** OUR style-floor pass window (STYLE_RULES_RESUMED → the architect's loop returning), for the stop bill. */
+    const stylePassWindow: { startedAt: number | null; endedAt: number | null } = { startedAt: null, endedAt: null };
     // ONE build must count ONCE. `finalizeOnDeadline` is guarded by `rb.ended`, but the advisory cap
     // fires 120s after a SUCCESSFUL result, so a long post-build tail can race the normal settle and
     // both exits can reach a recorder. Billing survives that on its idempotent buildRef; a counter has
@@ -17289,6 +17291,8 @@ async function noteBuildOutcome(
         // are built. The done signal must not tell a module turn it may stop (autopsy 50378049).
         projectModule: () => projectModuleRef?.name ?? null,
         onNote: (note: { code: string; message: string; detail?: string }) => {
+          // OUR style pass starts here (cancelledBuildBilling `stoppedDuringOurStylePass`).
+          if (note.code === 'STYLE_RULES_RESUMED' && stylePassWindow.startedAt === null) stylePassWindow.startedAt = Date.now();
           try { buildDiag.record({ phase: 'build', severity: 'info', code: note.code, message: note.message, detail: note.detail, autoResolved: true }); } catch { /* a note must never fail a build */ }
         },
         // A small new app is built by ONE agent (soloBuild.ts, autopsy ca99778e) — the prompt says so beside the tools.
@@ -19539,6 +19543,8 @@ async function noteBuildOutcome(
       }
       // result is always set here (OneShot, escalation, or the loop above).
       if (!result) result = await runner.run(buildPrompt);
+      // …and the architect's loop, and with it OUR style pass, is over.
+      closeStylePassWindow(stylePassWindow, Date.now());
 
       // ── EVERY WAY A BUILD IS STOPPED MUST REACH THE TIMELINE (autopsy b89ba6f8, 2026-09-17) ──────
       //
@@ -26742,6 +26748,7 @@ async function noteBuildOutcome(
           // has no time, so it cannot show it came first — that case is billed at cost, not in full.
           appRenderedAt: appFirstRenderedAt,
           stopRequestedAt: abortRequestedAtOf(abort.signal),
+          stoppedDuringOurStylePass: stopFellInWindow(abortRequestedAtOf(abort.signal), stylePassWindow.startedAt, stylePassWindow.endedAt),
           // An unverified EDIT may have left the user's working app worse than it started — see
           // `editingExistingApp` (autopsy 95598899). Read after appRendered, so a verified edit is
           // still charged in full.

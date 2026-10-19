@@ -161,7 +161,7 @@ describe('5 · a build the user stopped is not a failed build', () => {
 });
 
 describe('6 · a stop after the app rendered in a real browser is billed as a working app (admin, Q-727 = b)', () => {
-  const facts = { abortCause: 'user-stop' as AbortCause, filesWritten: 12, decidedBilledUsd: 1.4, realCostUsd: 0.34 };
+  const facts = { abortCause: 'user-stop' as AbortCause, filesWritten: 12, decidedBilledUsd: 1.4, realCostUsd: 0.34, appRenderedAt: 1, stopRequestedAt: 2 };
 
   it('every money site reads ONE fact: the final check OR the ledger\'s in-build green pass', () => {
     expect(route).toContain('const appSeenRunningForBill = buildObs.previewRendered === true || renderProvenNow();');

@@ -111,7 +111,7 @@ import { seedKeptSentence, type AbortCause } from './buildAbortCause';
  * state from `nothing` (zero files written). It was filed as `nothing`, so the user of a seeded template heard
  * "Your workspace is exactly as it was" while the template sat in it and on screen.
  */
-export type CancelledDelivery = 'working-app' | 'files-saved' | 'nothing' | 'seed-only' | 'unverified-edit';
+export type CancelledDelivery = 'working-app' | 'files-saved' | 'nothing' | 'seed-only' | 'unverified-edit' | 'running-not-before-stop';
 
 export interface CancelledBuildFacts {
   /** From `abortCauseOf(signal)` — never guessed, never defaulted to the user. */
@@ -138,6 +138,14 @@ export interface CancelledBuildFacts {
   preseededUnchanged?: number;
   /** Did the platform OPEN the app in a real browser and see it render? */
   appRendered: boolean;
+  /**
+   * When the app was first SEEN running (epoch ms), and when the user ASKED to stop (Stop button, or the message a
+   * typed stop came from). Owner 2026-10-18 (r6–r10 autopsy): full price on a stop only when the app was running
+   * BEFORE the request. Absent ⇒ unknown ⇒ it cannot be shown to have come first ⇒ at cost.
+   * AGENTV3_STOP_FULL_NEEDS_GREEN_FIRST=off restores "rendered at all ⇒ full".
+   */
+  appRenderedAt?: number | null;
+  stopRequestedAt?: number | null;
   /**
    * Was this turn EDITING an app that already existed, rather than building a new one?
    *
@@ -216,6 +224,16 @@ function round(usd: number): number {
   return Math.round(usd * 1e6) / 1e6;
 }
 
+function greenFirstRuleOn(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_STOP_FULL_NEEDS_GREEN_FIRST ?? '').trim().toLowerCase() !== 'off';
+}
+
+/** Was the app seen running strictly BEFORE the stop was requested? Unknown on either side ⇒ false. PURE. */
+export function renderedBeforeStop(f: Pick<CancelledBuildFacts, 'appRenderedAt' | 'stopRequestedAt'>): boolean {
+  const r = f.appRenderedAt; const s = f.stopRequestedAt;
+  return typeof r === 'number' && Number.isFinite(r) && typeof s === 'number' && Number.isFinite(s) && r < s;
+}
+
 const FREE: Omit<CancelledBuildBill, 'reason'> = {
   billedUsd: 0, discountPct: 100, delivery: null, applies: false, userMessage: null,
   costFloorApplied: false,
@@ -264,6 +282,21 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
   //
   // RULE 3 is structural: every branch from here starts from `decided`, so the charge can only ever
   // be reduced. There is no path that computes a number of its own.
+  if (f.appRendered === true && !renderedBeforeStop(f) && greenFirstRuleOn()) {
+    // It renders now, but it was not running when they asked to stop: the rest was finished after the request.
+    // At cost — our margin goes, our cost never does (the same floor as below, without the half).
+    const ourCost = money(f.realCostUsd) + money(f.sandboxUsd);
+    const billedUsd = round(Math.min(decided, ourCost));
+    return {
+      billedUsd,
+      discountPct: decided > 0 ? Math.round(((decided - billedUsd) / decided) * 100) : 100,
+      delivery: 'running-not-before-stop', applies: true, costFloorApplied: billedUsd > 0,
+      reason: 'user stopped the build before the app was seen running (it rendered only after the stop request, or when is unknown) — charged at our cost, no service charge',
+      userMessage: billedUsd > 0
+        ? 'You stopped this build before the app was running. Your app is saved and you can keep using it. You have been charged only what the work actually cost to run — no service charge on top.'
+        : null,
+    };
+  }
   if (f.appRendered === true) {
     return {
       billedUsd: round(decided), discountPct: 0, delivery: 'working-app', applies: true, costFloorApplied: false,

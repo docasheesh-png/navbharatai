@@ -103,9 +103,9 @@ async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Pr
 /** G1.2 — Fetch the last completed build result for a sessionId (null if not found). */
 export async function fetchBuildSession(sessionId: string): Promise<BuildResponse | null> {
   try {
-    const res = await fetch(`/api/build-session/${encodeURIComponent(sessionId)}`);
-    if (res.status === 404) return null;
-    if (!res.ok) return null;
+    // Signed: the route checks that the caller owns this session (Q-780 rule, routes/build.ts).
+    const res = await fetch(`/api/build-session/${encodeURIComponent(sessionId)}`, { headers: await authedHeaders() });
+    if (!res.ok) return null; // 404, or refused (401/403): nothing to restore
     return await res.json() as BuildResponse;
   } catch {
     return null;

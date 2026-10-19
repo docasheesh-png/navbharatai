@@ -39,6 +39,11 @@ export const SERVER_ROUTE_PREFIXES: readonly string[] = [
 
 /** Exact server-owned paths (with and without a trailing slash) that are NOT prefixes. */
 export const SERVER_ROUTE_EXACT: readonly string[] = [
+  '/.well-known/oauth-protected-resource',
+  '/.well-known/oauth-protected-resource/api/v1/failedbr/mcp',
+  '/.well-known/oauth-protected-resource/api/failedbr/mcp',
+  '/.well-known/oauth-authorization-server',
+  '/.well-known/oauth-authorization-server/api/v1/failedbr/oauth',
   '/guide',   // U-9 auto-generated docs site (routes/KnowledgeDocs.ts)
   '/status',  // U-15 public status page (routes/health.ts)
   ROBOTS_PATH,  // robots.txt and sitemap.xml (routes/siteIndex.ts) — a crawler must get the file, not index.html
@@ -91,3 +96,4 @@ export function isMissingStaticFilePath(path: string): boolean {
   const last = p.split('/').pop() ?? '';
   return STATIC_FILE_EXT.test(last);
 }
+

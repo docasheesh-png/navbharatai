@@ -3,6 +3,8 @@ import express from 'express';
 import { request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
 const mocked = vi.hoisted(() => ({ page: vi.fn(), detail: vi.fn(), create: vi.fn(), list: vi.fn(), revoke: vi.fn(), tokenOk: vi.fn() }));
+const oauth = vi.hoisted(() => ({ register: vi.fn(), authorize: vi.fn(), pending: vi.fn(), decide: vi.fn(), token: vi.fn(), tokenOk: vi.fn(), revoke: vi.fn() }));
+vi.mock('../src/server/lib/failedReportOAuth', async original => ({ ...await original<any>(), reportOAuthService: () => oauth }));
 vi.mock('../src/server/lib/failedReportAccess', () => ({ createReportAccess: mocked.create, listReportAccess: mocked.list, revokeReportAccess: mocked.revoke, reportTokenOk: mocked.tokenOk }));
 vi.mock('../src/server/lib/failedBuildReports', async (original) => ({ ...await original<any>(), readFailedBuildPage: mocked.page, readFailedBuild: mocked.detail }));
 import { registerFailedReportRoutes } from '../src/server/routes/failedReports';
@@ -72,3 +74,43 @@ describe('private report HTTP boundary', () => {
     expect((await call(rpc('tools/call', { name: 'list_failed_builds' }))).body.error.code).toBe(-32603);
   });
 });
+
+describe('OAuth MCP integration', () => {
+  beforeEach(() => { oauth.tokenOk.mockReset().mockImplementation(async h => h === 'Bearer oauth-test'); });
+  it('discovers the pinned issuer/resource and challenges unauthenticated MCP requests', async () => {
+    const metadata = await request('/.well-known/oauth-protected-resource/api/v1/failedbr/mcp');
+    expect(metadata.status).toBe(200);
+    expect(metadata.body.resource).toBe('https://navbharatai.com/api/v1/failedbr/mcp');
+    const issuer = await request('/.well-known/oauth-authorization-server/api/v1/failedbr/oauth');
+    expect(issuer.body.code_challenge_methods_supported).toEqual(['S256']);
+    expect(issuer.body.grant_types_supported).toContain('refresh_token');
+    const unauthorized = await request('/api/v1/failedbr/mcp', { method: 'POST', body: rpc('initialize') });
+    expect(unauthorized.status).toBe(401);
+    expect(unauthorized.headers['www-authenticate']).toContain('resource_metadata="https://navbharatai.com/.well-known/oauth-protected-resource/api/v1/failedbr/mcp"');
+  });
+  it('accepts OAuth only for report reads and supports known client origins/protocol versions', async () => {
+    const headers = { Authorization: 'Bearer oauth-test', Origin: 'https://chatgpt.com' };
+    expect((await request('/api/v1/failedbr/reports', { headers })).status).toBe(200);
+    const init = await request('/api/v1/failedbr/mcp', { method: 'POST', headers, body: rpc('initialize', { protocolVersion: '2025-11-25' }) });
+    expect(init.body.result.protocolVersion).toBe('2025-11-25');
+    expect(init.headers['access-control-allow-origin']).toBe('https://chatgpt.com');
+    expect((await request('/api/v1/admin/failedbr/access', { headers })).status).toBe(401);
+    const preflight = await request('/api/v1/failedbr/mcp', { method: 'OPTIONS', headers: { Origin: 'https://claude.ai' } });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers['access-control-allow-headers']).toContain('Authorization');
+  });
+  it('keeps OAuth request details and consent behind the existing admin gate', async () => {
+    const path = '/api/v1/admin/failedbr/oauth/request/' + 'a'.repeat(64);
+    expect((await request(path)).status).toBe(401);
+    expect((await request(path, { method: 'POST', headers: { Authorization: 'Bearer oauth-test' }, body: { approve: true } })).status).toBe(401);
+    const headers = { 'x-admin-token': adminToken };
+    oauth.pending.mockResolvedValue({ clientName: 'Test AI', redirectUri: 'https://client.example/callback' });
+    expect((await request(path, { headers })).body.clientName).toBe('Test AI');
+    expect((await request(path, { method: 'POST', headers, body: {} })).status).toBe(400);
+    expect((await request(path, { method: 'POST', headers: { ...headers, Origin: 'https://attacker.example' }, body: { approve: true } })).status).toBe(403);
+    oauth.decide.mockResolvedValue('https://client.example/callback?code=test');
+    expect((await request(path, { method: 'POST', headers, body: { approve: true } })).body.redirect).toContain('callback?code=');
+    expect(oauth.decide).toHaveBeenCalledWith('a'.repeat(64), true);
+  });
+});
+

@@ -44,6 +44,8 @@ const VERDICT: Record<string, [Verdict, number]> = {
   'saveWorkspaceFiles | workspaceId, goldenFiles': ['pre-latch', 1],
   'saveWorkspaceFiles | workspaceId, savedDefaults': ['landed', 1],
   'saveWorkspaceFiles | workspaceId, savedSweep': ['landed', 1],
+  // The post-green finishing rollback (finishingRecheck.ts): only the snapshot files whose write landed.
+  'saveWorkspaceFiles | workspaceId, restoredFiles': ['landed', 1],
   'saveWorkspaceFiles | workspaceId, snapshot': ['landed', 1],
   'saveWorkspaceFiles | workspaceId, toSave': ['landed', 3],
   "saveWorkspaceFiles | workspaceId, { 'index.html': doc }": ['pre-latch', 1],

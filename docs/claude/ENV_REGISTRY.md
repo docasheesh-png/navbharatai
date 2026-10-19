@@ -4344,6 +4344,40 @@ price is not. Recorded as a queue row, not done here.
   offer's answer before ending without the hunt. `src/server/AgentV3/optionalBugHunt.ts bugHuntWaitMs`. Locked in
   `tests/aFinishedBuildIsNotHeldOpen.test.ts`.
 
+- **`AGENTV3_LANE_AI_NEGATION`** (NOT set; default **on**; `off` ⇒ old behaviour). r6–r10 autopsy 2026-10-18: the fast
+  lane's `laneAiClient` no longer adds an in-app AI client when the prompt says "no AI" / "no API" / "offline"
+  (`NO_AI_RE`). `src/server/AgentV3/SimpleBuilder.ts laneAiClient`. Locked in `tests/noAiMeansNoAiClient.test.ts`.
+- **`AGENTV3_STYLE_NOTICE_LIVE`** (NOT set; default **on**; `off` ⇒ old sentence). r6–r10 autopsy 2026-10-18: when
+  the style hand-back (`STYLE_RULES_RESUMED`) fires after the preview is already published, the chat says the preview
+  is open and will refresh, instead of "before the preview opens". `src/server/AgentV3/handBackNotice.ts`. Locked in
+  `tests/theStylePassKnowsThePreviewIsOpen.test.ts`.
+
+- **`AGENTV3_STYLE_PASS_CAP_MS`** (NOT set; default **180000**; `0`/`off` ⇒ no cap, the old behaviour; junk ⇒
+  default). r6–r10 autopsy 2026-10-18: time cap on OUR style-floor pass. Checked between model turns; on expiry the
+  already-READY build ends with the model's pre-hand-back summary and note `STYLE_PASS_CAPPED`. No billing change.
+  `src/server/AgentV3/stylePassCap.ts`. Locked in `tests/theStylePassKnowsThePreviewIsOpen.test.ts`.
+- **`AGENTV3_SKIP_UNCHANGED_PREVIEW`** (NOT set; default **on**; `off` ⇒ old behaviour). r6–r10 autopsy 2026-10-18:
+  `update_preview` on the same port with no file changed since the last successful publish returns at once instead
+  of re-running the secrets write and port probe. `src/server/AgentV3/ToolDispatcher.ts previewRefreshIsRedundant`.
+  Locked in `tests/anUnchangedPreviewIsNotRepublished.test.ts`.
+- **`AGENTV3_STOP_FULL_NEEDS_GREEN_FIRST`** (NOT set; default **on**; `off` ⇒ "rendered at all ⇒ full price" as
+  before). Owner-approved 2026-10-18 (r6–r10 autopsy): a user-stopped build is charged in full only when this pass
+  saw the app render strictly BEFORE the stop was requested (Stop button time, or the arrival time of the mid-build
+  message a typed stop came from — `abortBuild(…, requestedAt)` / `abortRequestedAtOf`). Otherwise, including an
+  unknown render time, it is charged at our real cost (provider + sandbox), never above the decided bill.
+  `src/server/AgentV3/cancelledBuildBilling.ts`. Locked in `tests/aStopIsFullPriceOnlyIfTheAppRanFirst.test.ts`.
+
+- **`AGENTV3_STYLE_PASS_STOP_AT_COST`** (NOT set; default **on**; `off` ⇒ only the green-before-stop rule applies).
+  Owner-approved 2026-10-18 (r6–r10 autopsy): a user stop requested while OUR style-floor pass (`STYLE_RULES_RESUMED`
+  → the architect's loop returning) was running is charged at our real cost, never full price.
+  `src/server/AgentV3/cancelledBuildBilling.ts stoppedDuringOurStylePass`. Locked in
+  `tests/aStopDuringOurStylePassIsNotFullPrice.test.ts`.
+- **`AGENTV3_ANSWER_TURN_NOT_BUILD`** (NOT set; default **on**; `off` ⇒ old judgement). Owner-approved 2026-10-18
+  (r6–r10 autopsy): a build turn that wrote no files and only asked a question or declined (`readTurnAnswer`
+  `.asked`/`.declined`) is treated as an answer: the release gate is recorded as info (not RED/ERROR), the platform
+  does not start the starter preview for it, and no "engine slow"/upsell line is shown. The bill stays ₹0 (the
+  empty-build rule). `src/server/AgentV3/answerOnlyTurn.ts answeredInsteadOfBuilding`. Locked in
+  `tests/aQuestionTurnIsAnAnswerNotAFailedBuild.test.ts`.
 - **`AGENTV3_FIRST_BYTE_GRACE_NEEDS_RECENT`** (NOT set; default **on**; `off` ⇒ every rung gets the first-byte grace,
   #3810 as merged) and **`AGENTV3_FIRST_BYTE_GRACE_RECENT_MS`** (NOT set; default **1800000** = 30 min). Owner-approved
   2026-10-18 (r6–r10 autopsy): the zero-byte first-byte grace (`AGENTV3_STREAM_FIRST_BYTE_GRACE_MS`, 30 s) is given

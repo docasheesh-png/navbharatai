@@ -8,6 +8,7 @@ vi.mock('../src/server/lib/failedReportOAuth', async original => ({ ...await ori
 vi.mock('../src/server/lib/failedReportAccess', () => ({ createReportAccess: mocked.create, listReportAccess: mocked.list, revokeReportAccess: mocked.revoke, reportTokenOk: mocked.tokenOk }));
 vi.mock('../src/server/lib/failedBuildReports', async (original) => ({ ...await original<any>(), readFailedBuildPage: mocked.page, readFailedBuild: mocked.detail }));
 import { registerFailedReportRoutes } from '../src/server/routes/failedReports';
+import { urlencodedBodyParser } from '../src/server/lib/requestBodyLimits';
 import { apiVersionMiddleware } from '../src/server/routes/apiVersion';
 import { mintAdminToken } from '../src/server/lib/adminAuth';
 
@@ -23,7 +24,7 @@ function request(path: string, opts: { method?: string; headers?: Record<string,
 beforeAll(async () => {
   vi.stubEnv('ADMIN_USERNAME', 'owner'); vi.stubEnv('ADMIN_PASSWORD', 'test-private-password');
   adminToken = mintAdminToken('test-private-password', 'owner', Date.now());
-  const app = express(); app.use(express.json()); app.use(apiVersionMiddleware); registerFailedReportRoutes(app);
+  const app = express(); app.use(express.json()); app.use(urlencodedBodyParser()); app.use(apiVersionMiddleware); registerFailedReportRoutes(app); // parsers mounted as in server.ts
   server = await new Promise<Server>((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
   port = (server.address() as { port: number }).port;
 });

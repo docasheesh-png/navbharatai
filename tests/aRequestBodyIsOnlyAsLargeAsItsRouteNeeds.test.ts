@@ -16,7 +16,7 @@ import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import {
   DEFAULT_JSON_LIMIT, LARGE_BODY_ROUTES, LARGE_JSON_LIMIT, RAW_BODY_ROUTES, SMALL_BODY_ROUTES,
-  compileRoutePath, smallBodyLimit, isLargeBodyRoute, jsonBodyParser, needsRawBody, routingPath,
+  compileRoutePath, smallBodyLimit, isLargeBodyRoute, jsonBodyParser, needsRawBody, routingPath, urlencodedLimitFor,
 } from '../src/server/lib/requestBodyLimits';
 
 const ROOT = process.cwd();
@@ -450,6 +450,12 @@ describe('🔒 Q-674: a route-specific limit lives in the one parser that runs',
     const offenders = [...files('src/server/routes'), 'server.ts'].filter((f) =>
       /app\.(?:get|post|put|patch|delete|all|use)\([^;]*express\.(?:json|urlencoded)\(/.test(read(f)));
     expect(offenders).toEqual([]);
+  });
+  it('form bodies are parsed only on the listed OAuth routes, by the shared parser (server.ts)', () => {
+    expect(urlencodedLimitFor('/api/failedbr/oauth/token')).toBe('16kb');
+    expect(urlencodedLimitFor('/api/v1/failedbr/oauth/revoke')).toBe('16kb');
+    expect(urlencodedLimitFor('/api/profile/budget')).toBeNull();
+    expect(read('server.ts')).toContain('app.use(urlencodedBodyParser());');
   });
   it('the small-route list resolves, and its routes are neither large nor raw', () => {
     for (const r of SMALL_BODY_ROUTES) {

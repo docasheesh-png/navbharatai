@@ -115,6 +115,7 @@ const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; wh
 };
 
 const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
+  admin_failed_report_oauth_requests: { kind: 'platform', why: 'short-lived OAuth authorization requests for the owner-only failed-report MCP connection (failedReportOAuth.ts): client id/name, redirect URI, PKCE challenge, hashed one-time code; 10-minute pending / 2-minute code expiry, expired rows pruned; no customer build data' },
   admin_failed_report_access: { kind: 'platform', why: 'bounded owner-issued report-access configuration (at most 100 hashed credentials, transaction-enforced); not customer-owned data, 30-day authentication expiry, owner revocation removes the record' },
   user_vault_pin:      { kind: 'user', why: "the user's App Lock PIN record — doc id IS the uid" },
   agentv3_mcp_library: { kind: 'user', why: "the user's saved MCP servers — doc id IS the uid" },

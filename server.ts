@@ -130,7 +130,7 @@ import { registerKnowledgeDocsRoutes } from './src/server/lib/KnowledgeDocs';
 import { registerApiKeyRoutes } from './src/server/routes/apiKeys';
 import { registerDeveloperApiRoutes } from './src/server/routes/developerApi';
 import { apiVersionMiddleware } from './src/server/routes/apiVersion';
-import { jsonBodyParser } from './src/server/lib/requestBodyLimits';
+import { jsonBodyParser, urlencodedBodyParser } from './src/server/lib/requestBodyLimits';
 import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
 import { registerObservabilityRoutes } from './src/server/routes/observability';
 import { registerReleaseNotesRoutes } from './src/server/routes/releaseNotes';
@@ -428,6 +428,8 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
         errorTracker.capture(err, { source: 'middleware', httpMethod: event.method, httpUrl: event.path, httpStatus: 413 });
       },
     }));
+    // Form bodies only on the routes listed in requestBodyLimits.ts (URLENCODED_BODY_ROUTES), never globally.
+    app.use(urlencodedBodyParser());
 
     // EXPRESS 5 restores nothing that Express 4 gave for free: `req.body` is now left UNDEFINED when
     // no parser matched, where it used to be `{}`. 419 places in this repo read it, all typed `any`,

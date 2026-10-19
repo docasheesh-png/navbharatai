@@ -203,6 +203,36 @@ export function smallBodyLimit(path: string): string | null {
   return SMALL_MATCHERS.find((m) => m.re.test(p))?.limit ?? null;
 }
 
+/**
+ * Form-encoded bodies (`application/x-www-form-urlencoded`). No global form parser exists: only the routes
+ * listed here get one, at their own small limit, mounted once in server.ts beside `jsonBodyParser` — a route
+ * never registers its own parser (Q-674). The OAuth token/revoke endpoints must accept forms (RFC 6749 §4.1.3).
+ */
+export const URLENCODED_BODY_ROUTES: readonly { path: string; limit: string; parameterLimit: number; why: string }[] = [
+  { path: '/api/failedbr/oauth/:rest', limit: '16kb', parameterLimit: 20, why: 'OAuth token/revoke/register forms for the failed-report MCP connection (failedReportOAuth.ts)' },
+];
+const URLENCODED_MATCHERS = URLENCODED_BODY_ROUTES.map((r) => ({
+  re: compileRoutePath(r.path),
+  parser: express.urlencoded({ extended: false, limit: r.limit, parameterLimit: r.parameterLimit }),
+}));
+
+/** The form parser for a listed route, or null (no form parsing anywhere else). */
+export function urlencodedLimitFor(path: string): string | null {
+  const p = routingPath(path);
+  const i = URLENCODED_MATCHERS.findIndex((m) => m.re.test(p));
+  return i >= 0 ? URLENCODED_BODY_ROUTES[i].limit : null;
+}
+
+/** Mount once in server.ts. Parses forms only on URLENCODED_BODY_ROUTES. */
+export function urlencodedBodyParser(): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const p = routingPath(req.path);
+    const m = URLENCODED_MATCHERS.find((x) => x.re.test(p));
+    if (!m) { next(); return; }
+    m.parser(req, res, next);
+  };
+}
+
 export function needsRawBody(path: string): boolean {
   const p = routingPath(path);
   return RAW_MATCHERS.some((re) => re.test(p));

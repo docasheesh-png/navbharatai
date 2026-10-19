@@ -454,7 +454,7 @@ export default function App() {
   // bookmark reopens it) and restore / on leaving. replaceState (not push) so it never pollutes history.
   useEffect(() => {
     try {
-      const onAdminPath = window.location.pathname.replace(/\/+$/, '') === '/admin';
+      const onAdminPath = ['/admin', '/failedbr'].includes(window.location.pathname.replace(/\/+$/, ''));
       if (activeView === 'admin' && !onAdminPath) window.history.replaceState(null, '', '/admin');
       else if (activeView !== 'admin' && onAdminPath) window.history.replaceState(null, '', '/');
     } catch { /* history unavailable — best effort */ }
@@ -3843,6 +3843,7 @@ export default function App() {
           {activeView === 'admin' && (
             <AdminLoginPanel
               isAdmin={isAdmin}
+              failedReports={window.location.pathname.replace(/\/+$/, '') === '/failedbr'}
               adminEmail={adminEmail}
               adminPassword={adminPassword}
               adminError={adminError}

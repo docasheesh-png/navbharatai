@@ -182,6 +182,8 @@ export const PROCESS_ONLY_CODES = new Set([
   'FREE_BUILD_TIME_CAP', 'FREE_BUILD_CHAIN_PAUSED',
   // OUR end-of-turn steer that handed the model its undefined classes (stylePolishResume.ts, autopsy 1be16985).
   'STYLE_RULES_RESUMED',
+  // OUR style pass ended by its own time cap (stylePassCap.ts) — a policy of ours, never the app.
+  'STYLE_PASS_CAPPED',
   // OUR repair pass's closing claim withheld because the pass changed nothing (repairClaim.ts, autopsy 6cd698cc).
   'REPAIR_CLAIM_WITHHELD',
   // OUR end-of-turn hand-back answered with no change (repairClaim.ts, autopsy db07e0af): a struggle of the engine.
@@ -680,6 +682,12 @@ export interface BuildBillingRecord {
   billedInr?: number;
   /** Wallet tokens actually debited (absent when billing is off / nothing was charged). */
   walletTokensDebited?: number;
+  /** ₹ that actually left the wallet (after the overdraft floor). See lib/chargeRecord.ts. */
+  walletDebitedInr?: number;
+  /** ₹ the overdraft floor made the platform absorb on this charge. */
+  absorbedInr?: number;
+  /** True when the floor capped the debit below the bill. */
+  partialDebit?: true;
   /**
    * What the PROVIDERS really cost NavBharatAI for this build (USD, tokens only, at settle time's
    * rate card) — recorded on success AND failure, because a failed build still cost us. ADMIN-ONLY:
@@ -4365,7 +4373,10 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
       const inr = typeof r.billing.billedInr === 'number' ? `₹${r.billing.billedInr.toFixed(2)} ` : '';
       const wallet = typeof r.billing.walletTokensDebited === 'number' && r.billing.walletTokensDebited > 0
         ? ` · ${r.billing.walletTokensDebited.toLocaleString()} wallet tokens debited` : '';
-      lines.push(`Charged to user: ${inr}($${r.billing.billedUsd.toFixed(4)})${r.billing.billedUsd === 0 ? ' — FREE build' : ''}${wallet}`);
+      // A capped debit says so: the bill above is NOT what the wallet paid (lib/chargeRecord.ts).
+      const capped = r.billing.partialDebit && typeof r.billing.walletDebitedInr === 'number'
+        ? ` · PARTIAL DEBIT: wallet paid ₹${r.billing.walletDebitedInr.toFixed(2)}, ₹${(r.billing.absorbedInr ?? 0).toFixed(2)} absorbed by the overdraft floor` : '';
+      lines.push(`Charged to user: ${inr}($${r.billing.billedUsd.toFixed(4)})${r.billing.billedUsd === 0 ? ' — FREE build' : ''}${wallet}${capped}`);
     } else if (typeof r.billing.walletTokensDebited === 'number' && r.billing.walletTokensDebited > 0) {
       lines.push(`Charged to user: ${r.billing.walletTokensDebited.toLocaleString()} wallet tokens debited`);
     }

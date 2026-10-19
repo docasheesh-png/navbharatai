@@ -286,6 +286,7 @@ import { runningBuilds, runningBuildCount, __setRunningBuildForTest, type Runnin
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
+import { chargeRecordFields } from '../lib/chargeRecord';
 import { startImportDurableSave, settleImportDurableSave, IMPORT_DURABLE_SETTLE_MS } from '../AgentV3/importDurableSave';
 import { announceBuildFinished, announceDeploy, serverPublishOutcome } from '../lib/userWebhookEvents';
 // The balance warning goes through ONE door now (admin 2026-09-22). It was a raw push on the block
@@ -26862,7 +26863,7 @@ async function noteBuildOutcome(
       // The display-only monthly cost (userCostStore) still records always — it is an internal
       // estimate surface, not a money movement.
       const billingActive = billingAppliesTo(userId, email);
-      let walletDebit: { tokensDebited: number; tokenBalance: number } | null = null;
+      let walletDebit: { tokensDebited: number; tokenBalance: number; debitedInr?: number; absorbedInr?: number } | null = null;
       if (userId && effectiveBilledUsd > 0) {
         userCostStore.record(userId, effectiveBilledUsd).catch(() => {});
       }
@@ -26908,7 +26909,7 @@ async function noteBuildOutcome(
             description: 'NavBharatAI Pro build',
           });
           if (debitRes.ok) {
-            walletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance };
+            walletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance, ...(typeof debitRes.debitedInr === 'number' ? { debitedInr: debitRes.debitedInr } : {}), ...(typeof debitRes.absorbedInr === 'number' ? { absorbedInr: debitRes.absorbedInr } : {}) };
           } else {
             console.error(`[AGENTV3 BILLING] Wallet debit FAILED for user ${userId} (build ${workspaceId}): ${debitRes.error} — cost was recorded but the balance was not decremented.`);
           }
@@ -27149,6 +27150,8 @@ async function noteBuildOutcome(
             realCostUsd: Math.round(decidedRealCostUsd * 1_000_000) / 1_000_000,
             sandboxCostUsd: Math.round(decidedSandboxUsd * 1_000_000) / 1_000_000,
             ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited } : {}),
+            // The HONEST charge (r6–r10): what left the wallet, and what the overdraft floor absorbed. billedInr above stays the bill.
+            ...chargeRecordFields(walletDebit),
             ...(zeroBillReason ? { zeroBillReason } : {}),
             powerMode: onlyOpus,
             powerLevel: powerLevelReqEffective,
@@ -27626,7 +27629,7 @@ async function noteBuildOutcome(
       // no way to tell a broken app from a working one carrying a wrong verdict, so it offered to
       // "fix" both — and fixing a working app is how we broke it. See failedButRunning.ts.
       // Additive and optional: an older BUNDLED Android client ignores the field entirely.
-      emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, appRendered: buildObs.previewRendered === true, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
+      emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, appRendered: buildObs.previewRendered === true, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...chargeRecordFields(walletDebit), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
       // Native push notification (admin 2026-07-26): fire-and-forget — never delays or fails the
       // response the client already has. A resumable module turn is an intermediate step, not a
       // finished build, so it's excluded (the user is mid-flow inside the app already).

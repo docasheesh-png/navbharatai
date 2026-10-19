@@ -255,7 +255,8 @@ describe('🔒 build billing is described exactly as the code bills it', () => {
   });
 
   it('code fact: a user Stop with an app running pays the work done; with files saved, half — floored at real cost, capped at the work done', () => {
-    expect(stop({ appRendered: true, decidedBilledUsd: 2 }).billedUsd).toBe(2);
+    // "An app had been seen running" = running BEFORE the Stop was asked for (#3820, rule g): times 1 < 2.
+    expect(stop({ appRendered: true, appRenderedAt: 1, stopRequestedAt: 2, decidedBilledUsd: 2 }).billedUsd).toBe(2);
     expect(stop({ decidedBilledUsd: 2 }).billedUsd).toBe(1);
     expect(stop({ decidedBilledUsd: 2, realCostUsd: 1.5 }).billedUsd).toBe(1.5);
     expect(stop({ decidedBilledUsd: 2, realCostUsd: 5 }).billedUsd).toBe(2);

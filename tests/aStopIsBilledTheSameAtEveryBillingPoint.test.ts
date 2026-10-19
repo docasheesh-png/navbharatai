@@ -17,10 +17,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { transformSync } from 'esbuild';
 import {
-  freeCancellationMessage, settleStopOrFailure, stopBillingSwitches, preseededUnchangedCount,
+  freeCancellationMessage, settleStopOrFailure, stopBillingSwitches, preseededUnchangedCount, stopFellInWindow,
   decideCancelledBuildBill, type CancelledBuildFacts,
 } from '../src/server/AgentV3/cancelledBuildBilling';
-import { abortBuild, abortCauseOf, type AbortCause } from '../src/server/AgentV3/buildAbortCause';
+import { abortBuild, abortCauseOf, abortRequestedAtOf, type AbortCause } from '../src/server/AgentV3/buildAbortCause';
 import {
   FAILED_BUILD_RULE, STOPPED_BUILD_RULE, FAILED_BUILD_RULE_PLAIN, STOPPED_BUILD_RULE_PLAIN,
 } from '../src/content/marketing';
@@ -30,7 +30,15 @@ const ROUTE = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts')
 const ROUTE_CODE = ROUTE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const DECIDED = 2;
 
-type Case = { name: string; written: number; preseeded?: number; rendered?: boolean; edit?: boolean; billed: number };
+// `seen`: WHEN the app was first seen running relative to the Stop request (#3820 rule g) — default 'before', which
+// is what "had been seen running" means in the public rule. `stylePass`: the Stop fell inside OUR style pass (#3821, h).
+type Case = { name: string; written: number; preseeded?: number; rendered?: boolean; edit?: boolean; billed: number;
+  seen?: 'before' | 'after' | 'unknown'; stylePass?: boolean };
+const STOP_AT = 1_000_000;
+const COST = 0.4; // real cost the harness passes to both points (sandbox 0)
+const renderedAt = (c: Partial<Case>): number | null =>
+  c.rendered !== true ? null : c.seen === 'after' ? STOP_AT + 1_000 : c.seen === 'unknown' ? null : STOP_AT - 1_000;
+const styleWindow = (c: Partial<Case>) => (c.stylePass === true ? { startedAt: STOP_AT - 500, endedAt: null } : { startedAt: null, endedAt: null });
 const CASES: Case[] = [
   { name: 'zero files written', written: 0, billed: 0 },
   { name: 'starter-only, not seen running', written: 12, preseeded: 12, billed: 0 },
@@ -38,9 +46,13 @@ const CASES: Case[] = [
   { name: 'existing-app edit, not seen working', written: 4, edit: true, billed: 0 },
   { name: 'saved files, no running app', written: 9, billed: DECIDED / 2 },
   { name: 'running app', written: 9, rendered: true, billed: DECIDED },
+  // Merged from main (#3820/#3821): both billing points must agree on these too.
+  { name: 'running app, but first seen running only AFTER the Stop (g)', written: 9, rendered: true, seen: 'after', billed: COST },
+  { name: 'running app, render time unknown (ledger-only proof) (g)', written: 9, rendered: true, seen: 'unknown', billed: COST },
+  { name: 'running app, Stop during OUR style pass (h)', written: 9, rendered: true, stylePass: true, billed: COST },
 ];
 
-const signal = (cause: AbortCause | null) => { const c = new AbortController(); if (cause) abortBuild(c, cause); return c; };
+const signal = (cause: AbortCause | null) => { const c = new AbortController(); if (cause) abortBuild(c, cause, STOP_AT); return c; };
 const files = (n: number) => { const m = new Map<string, string>(); for (let i = 0; i < n; i++) m.set(`f${i}`, `c${i}`); return m; };
 
 // ── The REAL finalizer block, transpiled and executed ─────────────────────────────────────────────────────
@@ -60,13 +72,15 @@ function finalizer(c: { cause: AbortCause | null; ok?: boolean } & Partial<Case>
   new Function(
     'stopBillingSwitches', 'settleStopOrFailure', 'preseededUnchangedCount', 'freeCancellationMessage', 'abortCauseOf',
     'abort', 'writtenFiles', 'billingCtx', 'wdPreviewProven', 'isEditMode', 'decided', 'ok', 'buildDiagRef', 'state',
+    'abortRequestedAtOf', 'stopFellInWindow', 'stylePassWindow',
     `let watchdogBilledUsd = state.watchdogBilledUsd; let watchdogStopNote = state.watchdogStopNote;
      ${wdBlock}
      state.watchdogBilledUsd = watchdogBilledUsd; state.watchdogStopNote = watchdogStopNote;`,
   )(
     stopBillingSwitches, settleStopOrFailure, preseededUnchangedCount, freeCancellationMessage, abortCauseOf,
-    signal(c.cause), files(c.written ?? 9), { preseededGolden: preseeded }, c.rendered === true, c.edit === true,
-    { realCostUsd: 0.4, sandboxUsd: 0 }, c.ok ?? true, { record: (e: { code: string }) => recorded.push(e.code) }, state,
+    signal(c.cause), files(c.written ?? 9), { preseededGolden: preseeded, appFirstRenderedAt: renderedAt(c) }, c.rendered === true, c.edit === true,
+    { realCostUsd: COST, sandboxUsd: 0 }, c.ok ?? true, { record: (e: { code: string }) => recorded.push(e.code) }, state,
+    abortRequestedAtOf, stopFellInWindow, styleWindow(c),
   );
   return { billed: state.watchdogBilledUsd, note: state.watchdogStopNote, recorded };
 }
@@ -80,14 +94,15 @@ function settle(c: { cause: AbortCause | null; ok: boolean } & Partial<Case>) {
   new Function(
     'settleStopOrFailure', 'stopBillingSwitches', 'preseededUnchangedCount', 'freeCancellationMessage', 'zeroBillForFailedBuild', 'abortCauseOf',
     'abort', 'writtenFiles', 'preseededGolden', 'appSeenRunningForBill', 'isEditMode', 'decidedRealCostUsd', 'decidedSandboxUsd',
-    'result', 'buildDiag', 'events', 'state',
+    'result', 'buildDiag', 'events', 'state', 'abortRequestedAtOf', 'stopFellInWindow', 'appFirstRenderedAt', 'stylePassWindow',
     `let effectiveBilledUsd = state.effectiveBilledUsd; let zeroBillReason = state.zeroBillReason; let waivedMarkupNotice = state.waivedMarkupNotice;
      ${settleBlock}
      state.effectiveBilledUsd = effectiveBilledUsd;`,
   )(
     settleStopOrFailure, stopBillingSwitches, preseededUnchangedCount, freeCancellationMessage, (ok: boolean) => ok === false, abortCauseOf,
-    signal(c.cause), files(c.written ?? 9), files(c.preseeded ?? 0), c.rendered === true, c.edit === true, 0.4, 0,
+    signal(c.cause), files(c.written ?? 9), files(c.preseeded ?? 0), c.rendered === true, c.edit === true, COST, 0,
     { ok: c.ok }, { record: () => {} }, { emit: () => {} }, state,
+    abortRequestedAtOf, stopFellInWindow, renderedAt(c), styleWindow(c),
   );
   return state.effectiveBilledUsd;
 }
@@ -106,6 +121,7 @@ describe('1 — the deadline finalizer bills a user Stop by the Stop rules (real
         expect(wd.note).toBe(freeCancellationMessage(decideCancelledBuildBill({
           abortCause: 'user-stop', filesWritten: c.written, preseededUnchanged: c.preseeded ?? 0,
           appRendered: c.rendered === true, editingExistingApp: c.edit === true, decidedBilledUsd: DECIDED,
+          appRenderedAt: renderedAt(c), stopRequestedAt: STOP_AT,
         } as CancelledBuildFacts).delivery));
       } else if (c.billed < DECIDED) {
         expect(wd.recorded).toContain('CANCELLED_BUILD_CHARGED');

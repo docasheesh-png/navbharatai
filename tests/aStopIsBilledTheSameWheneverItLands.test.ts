@@ -20,10 +20,10 @@ import { join } from 'node:path';
 import { transformSync } from 'esbuild';
 import {
   decideCancelledBuildBill, freeCancellationMessage, lateStopIsFree,
-  settleStopOrFailure, stopBillingSwitches, preseededUnchangedCount,
+  settleStopOrFailure, stopBillingSwitches, preseededUnchangedCount, stopFellInWindow,
   type CancelledBuildFacts, type CancelledDelivery,
 } from '../src/server/AgentV3/cancelledBuildBilling';
-import { abortBuild, abortCauseOf, type AbortCause } from '../src/server/AgentV3/buildAbortCause';
+import { abortBuild, abortCauseOf, abortRequestedAtOf, type AbortCause } from '../src/server/AgentV3/buildAbortCause';
 import { STOPPED_BUILD_RULE, FAILED_BUILD_RULE, AI_APP_BUILDER_PAGE } from '../src/content/marketing';
 import { aboutContent } from '../src/content/about';
 import { REFUND_POLICY } from '../src/content/legal/refundPolicy';
@@ -44,6 +44,8 @@ type Row = {
   sentence: RegExp;
 };
 const DECIDED = 2;
+// "Had been seen running" in the public rule = seen running BEFORE the Stop was asked for (#3820, rule g).
+const SEEN_BEFORE_STOP = { appRenderedAt: 1, stopRequestedAt: 2 };
 const ROWS: Row[] = [
   { name: 'zero files written', facts: { filesWritten: 0 }, delivery: 'nothing', billed: 0,
     sentence: /You pay nothing if nothing at all had been written yet/ },
@@ -51,15 +53,15 @@ const ROWS: Row[] = [
     sentence: /You pay nothing if nothing at all had been written yet/ },
   { name: 'starter-only, not seen running', facts: { filesWritten: 12, preseededUnchanged: 12 }, delivery: 'seed-only', billed: 0,
     sentence: /if only our untouched starter template was in place and no app had yet been seen running/ },
-  { name: 'starter-only, SEEN running', facts: { filesWritten: 12, preseededUnchanged: 12, appRendered: true }, delivery: 'working-app', billed: DECIDED,
+  { name: 'starter-only, SEEN running', facts: { filesWritten: 12, preseededUnchanged: 12, appRendered: true, ...SEEN_BEFORE_STOP }, delivery: 'working-app', billed: DECIDED,
     sentence: /Once files had been written and an app had been seen running in the preview, even if it was still only our starter template, you pay for the work done up to that point/ },
   { name: 'existing-app edit, not seen working', facts: { filesWritten: 4, editingExistingApp: true }, delivery: 'unverified-edit', billed: 0,
     sentence: /if you stopped a change to an existing app before it was seen working/ },
-  { name: 'existing-app edit, seen running', facts: { filesWritten: 4, editingExistingApp: true, appRendered: true }, delivery: 'working-app', billed: DECIDED,
+  { name: 'existing-app edit, seen running', facts: { filesWritten: 4, editingExistingApp: true, appRendered: true, ...SEEN_BEFORE_STOP }, delivery: 'working-app', billed: DECIDED,
     sentence: /Once files had been written and an app had been seen running in the preview/ },
   { name: 'new app, own files saved, not seen running', facts: { filesWritten: 9 }, delivery: 'files-saved', billed: DECIDED / 2,
     sentence: /If you were building a new app, files of your own were saved, and no app had yet been seen running, you pay half of the work done so far, or what that work actually cost to run if that is more, and never more than the work done/ },
-  { name: 'running app', facts: { filesWritten: 9, appRendered: true }, delivery: 'working-app', billed: DECIDED,
+  { name: 'running app', facts: { filesWritten: 9, appRendered: true, ...SEEN_BEFORE_STOP }, delivery: 'working-app', billed: DECIDED,
     sentence: /you pay for the work done up to that point, not for a full build/ },
 ];
 const facts = (r: Row): CancelledBuildFacts => ({
@@ -117,7 +119,8 @@ describe('B1 — the public Stop rule says exactly what decideCancelledBuildBill
     expect(unsend.slice(0, 4000)).toContain('stopRegisteredBuild(key, rb)');
     expect(ROUTE).toMatch(/function stopRegisteredBuild\([^)]*\): void \{\s*abortBuild\(rb\.abort, 'user-stop'\)/);
     const typed = ROUTE.slice(ROUTE.indexOf('dispatcher.setStopBuild('));
-    expect(typed.slice(0, 4000)).toContain("abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'user-stop')");
+    // #3820 added the request time (rb.lastSteerAt) as a third argument; the cause is still 'user-stop'.
+    expect(typed.slice(0, 4000)).toContain("abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'user-stop', rb.lastSteerAt)");
   });
 
   it('a failed build is defined against "you stopping it", not just the button', () => {
@@ -182,7 +185,7 @@ function settle(s: Scenario) {
   const fn = new Function(
     'settleStopOrFailure', 'stopBillingSwitches', 'preseededUnchangedCount', 'freeCancellationMessage', 'zeroBillForFailedBuild', 'abortCauseOf',
     'abort', 'writtenFiles', 'preseededGolden', 'appSeenRunningForBill', 'isEditMode', 'decidedRealCostUsd', 'decidedSandboxUsd',
-    'result', 'buildDiag', 'events', 'state',
+    'result', 'buildDiag', 'events', 'state', 'abortRequestedAtOf', 'stopFellInWindow', 'appFirstRenderedAt', 'stylePassWindow',
     `let effectiveBilledUsd = state.effectiveBilledUsd; let zeroBillReason = state.zeroBillReason; let waivedMarkupNotice = state.waivedMarkupNotice;
      ${compiled}
      state.effectiveBilledUsd = effectiveBilledUsd; state.zeroBillReason = zeroBillReason; state.waivedMarkupNotice = waivedMarkupNotice;`,
@@ -191,6 +194,8 @@ function settle(s: Scenario) {
     settleStopOrFailure, stopBillingSwitches, preseededUnchangedCount, freeCancellationMessage, (ok: boolean) => ok === false, abortCauseOf,
     ctrl, writtenFiles, preseededGolden, s.rendered === true, s.edit === true, 0.4, 0,
     { ok: s.ok }, { record: (e: { code: string }) => recorded.push(e.code) }, { emit: (e: { text: string }) => emitted.push(e.text) }, state,
+    // A rendered row was seen running before the Stop (epoch 1 < the abort's own request time, now); no style pass.
+    abortRequestedAtOf, stopFellInWindow, s.rendered === true ? 1 : null, { startedAt: null, endedAt: null },
   );
   return { billed: state.effectiveBilledUsd, reason: state.zeroBillReason, emitted, recorded };
 }
@@ -289,7 +294,8 @@ describe('B2 — one decision point, every Stop door reaches it', () => {
   });
 
   it('every Stop door raises the same cause the rule reads: button, Unsend, typed "stop", lease stop', () => {
-    const doors = ROUTE_CODE.match(/abortBuild\([^;]*'user-stop'\)/g) ?? [];
+    // #3820: the typed stop now also passes WHEN it was asked for (rb.lastSteerAt) — the cause is unchanged.
+    const doors = ROUTE_CODE.match(/abortBuild\([^;]*'user-stop'(?:, rb\.lastSteerAt)?\)/g) ?? [];
     // stopRegisteredBuild (button + Unsend), the lease renewal, and the typed stop.
     expect(doors.length).toBe(3);
     expect(ROUTE).toContain("abortBuild(buildLeaseRb.abort, 'user-stop')");

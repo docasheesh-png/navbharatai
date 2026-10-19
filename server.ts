@@ -12,7 +12,7 @@ import { denyServerOnlyArtifacts } from './src/server/lib/serverOnlyArtifacts';
 import './src/server/lib/axiosCredentialRedaction';
 import { registerPwaRoutes, type PwaStore, type PwaEntry } from './src/server/routes/pwa';
 import { BoundedCache } from './src/server/lib/boundedCache';
-import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
+import { spaFallbackShouldDefer, isMissingStaticFilePath } from './src/server/lib/spaFallback';
 import { noteWebsiteVisit } from './src/server/lib/ownAudience';
 // The rate-limit keys (forensic audit 2026-10-04): an address string, or a verified uid — never a request.
 import { identityRateKey, addressRateKey } from './src/server/lib/clientAddress';
@@ -586,6 +586,13 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
         // from the list, so the next added route cannot silently return index.html.
         if (spaFallbackShouldDefer(req.path)) {
           return next();
+        }
+        // A FILE that express.static (above) did not find gets an honest 404, never the app shell with
+        // a 200 — see isMissingStaticFilePath in lib/spaFallback.ts for the three things that broke.
+        if (isMissingStaticFilePath(req.path)) {
+          res.setHeader('Cache-Control', 'no-cache');
+          res.status(404).type('text/plain').send('Not found');
+          return;
         }
         // ONE VISIT TO NAVBHARATAI'S OWN WEBSITE. Counted HERE because this is the single line every
         // real page view passes through, and because the request already carries the IP and user-agent

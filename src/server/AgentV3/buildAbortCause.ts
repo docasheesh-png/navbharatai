@@ -59,7 +59,7 @@ export const ALL_ABORT_CAUSES: readonly AbortCause[] = Object.freeze(Object.keys
 
 const TAG = '__nbaiAbortCause';
 
-interface CauseCarrier { [TAG]: AbortCause }
+interface CauseCarrier { [TAG]: AbortCause; requestedAt?: number }
 
 function isCarrier(v: unknown): v is CauseCarrier {
   return typeof v === 'object' && v !== null && typeof (v as Record<string, unknown>)[TAG] === 'string';
@@ -71,8 +71,11 @@ function isCarrier(v: unknown): v is CauseCarrier {
  * Every abort site must go through this. A bare `controller.abort()` is exactly the state this module
  * exists to remove — it produces a signal that cannot answer the only question the user has.
  */
-export function abortBuild(controller: { abort: (reason?: unknown) => void }, cause: AbortCause): void {
-  const carrier: CauseCarrier = { [TAG]: cause };
+export function abortBuild(controller: { abort: (reason?: unknown) => void }, cause: AbortCause, requestedAt?: number): void {
+  // WHEN the stop was ASKED FOR (r6–r10 autopsy, 2026-10-18) — the moment the person pressed Stop or sent the
+  // message the stop came from, not the moment the abort landed. cancelledBuildBilling compares it with when
+  // the app was first seen running. Defaults to now: every abort site is the request itself, except a typed stop.
+  const carrier: CauseCarrier = { [TAG]: cause, requestedAt: Number.isFinite(requestedAt) ? (requestedAt as number) : Date.now() };
   try {
     controller.abort(carrier);
   } catch {
@@ -91,6 +94,13 @@ export function abortBuild(controller: { abort: (reason?: unknown) => void }, ca
 export function abortCauseOf(signal: { reason?: unknown } | undefined | null): AbortCause {
   if (!signal) return 'unknown';
   return isCarrier(signal.reason) ? signal.reason[TAG] : 'unknown';
+}
+
+/** When the recorded abort was requested (epoch ms), or null when the signal carries no recorded cause. */
+export function abortRequestedAtOf(signal: { reason?: unknown } | undefined | null): number | null {
+  if (!signal || !isCarrier(signal.reason)) return null;
+  const at = (signal.reason as CauseCarrier).requestedAt;
+  return typeof at === 'number' && Number.isFinite(at) ? at : null;
 }
 
 export interface AbortSummaryContext {
@@ -354,8 +364,16 @@ export function stoppedCallFields(cause: AbortCause, err: unknown, nominalModel:
 } {
   const ownMessage = err instanceof Error ? err.message : String(err);
   const owner = stoppedCallOwner(cause);
-  if (owner !== 'our-clock' && owner !== 'our-platform') return { model: nominalModel, error: ownMessage, extra: {} };
   const servedBy = stoppedCallServedBy(err);
+  if (owner !== 'our-clock' && owner !== 'our-platform') {
+    // 🔴 A USER STOP NAMES THE ENGINE THAT WAS RUNNING (autopsy 03368870, 2026-10-18). This branch used to
+    // record the chain's NOMINAL first rung, so a KIMI call the user stopped after 66 s was filed under
+    // glm-4.7-flashx — a model benched for that build — and read as "a benched GLM was still called".
+    // The error text is unchanged (still the user's Stop); only the model is the served one, when known.
+    // `AGENTV3_STOP_SERVED_MODEL=off` restores the old record.
+    const useServed = (process.env['AGENTV3_STOP_SERVED_MODEL'] ?? '').trim().toLowerCase() !== 'off';
+    return { model: (useServed ? servedBy?.model : undefined) ?? nominalModel, error: ownMessage, extra: useServed && servedBy ? { provider: servedBy.provider } : {} };
+  }
   return {
     model: servedBy?.model ?? nominalModel,
     error: stoppedCallError(cause, ownMessage),

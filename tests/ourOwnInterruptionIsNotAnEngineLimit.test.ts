@@ -62,7 +62,7 @@ describe('🔒 WIRING — the upsell asks its question of the complete source', 
   });
 
   it('it suppresses the upsell', () => {
-    expect(route).toContain('if (!refused && !stopped && !interrupted) {');
+    expect(route).toContain('if (!refused && !stopped && !interrupted && !answerOnlyNow()) {');
   });
 
   it('…and the suppression is recorded, in its own words', () => {

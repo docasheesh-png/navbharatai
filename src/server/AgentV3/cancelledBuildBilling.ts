@@ -111,7 +111,7 @@ import { seedKeptSentence, type AbortCause } from './buildAbortCause';
  * state from `nothing` (zero files written). It was filed as `nothing`, so the user of a seeded template heard
  * "Your workspace is exactly as it was" while the template sat in it and on screen.
  */
-export type CancelledDelivery = 'working-app' | 'files-saved' | 'nothing' | 'seed-only' | 'unverified-edit';
+export type CancelledDelivery = 'working-app' | 'files-saved' | 'nothing' | 'seed-only' | 'unverified-edit' | 'running-not-before-stop';
 
 export interface CancelledBuildFacts {
   /** From `abortCauseOf(signal)` — never guessed, never defaulted to the user. */
@@ -138,6 +138,22 @@ export interface CancelledBuildFacts {
   preseededUnchanged?: number;
   /** Did the platform OPEN the app in a real browser and see it render? */
   appRendered: boolean;
+  /**
+   * When the app was first SEEN running (epoch ms), and when the user ASKED to stop (Stop button, or the message a
+   * typed stop came from). Owner 2026-10-18 (r6–r10 autopsy): full price on a stop only when the app was running
+   * BEFORE the request. Absent ⇒ unknown ⇒ it cannot be shown to have come first ⇒ at cost.
+   * AGENTV3_STOP_FULL_NEEDS_GREEN_FIRST=off restores "rendered at all ⇒ full".
+   */
+  appRenderedAt?: number | null;
+  stopRequestedAt?: number | null;
+  /**
+   * The stop was requested while OUR style-floor pass (`STYLE_RULES_RESUMED`) was running — after the model had
+   * already declared the app finished. Owner 2026-10-18 (r6–r10 autopsy): never full price. At cost, not free:
+   * the app had already passed the gate and the work was real, but the user stopped polish they never asked for,
+   * often right after being told "Not finished yet", so our margin on it is ours to lose.
+   * AGENTV3_STYLE_PASS_STOP_AT_COST=off restores the (g) rule alone.
+   */
+  stoppedDuringOurStylePass?: boolean;
   /**
    * Was this turn EDITING an app that already existed, rather than building a new one?
    *
@@ -216,6 +232,27 @@ function round(usd: number): number {
   return Math.round(usd * 1e6) / 1e6;
 }
 
+function greenFirstRuleOn(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_STOP_FULL_NEEDS_GREEN_FIRST ?? '').trim().toLowerCase() !== 'off';
+}
+
+/** Was the app seen running strictly BEFORE the stop was requested? Unknown on either side ⇒ false. PURE. */
+export function renderedBeforeStop(f: Pick<CancelledBuildFacts, 'appRenderedAt' | 'stopRequestedAt'>): boolean {
+  const r = f.appRenderedAt; const s = f.stopRequestedAt;
+  return typeof r === 'number' && Number.isFinite(r) && typeof s === 'number' && Number.isFinite(s) && r < s;
+}
+
+/** Close an open style-pass window (no-op when it never opened or is already closed). */
+export function closeStylePassWindow(w: { startedAt: number | null; endedAt: number | null }, now: number): void {
+  if (w.startedAt !== null && w.endedAt === null) w.endedAt = now;
+}
+
+/** Was the stop requested inside [start, end)? An open end means the window was still running. PURE. */
+export function stopFellInWindow(stopAt: number | null, start: number | null, end: number | null): boolean {
+  if (stopAt === null || start === null || !Number.isFinite(stopAt) || !Number.isFinite(start)) return false;
+  return stopAt >= start && (end === null || stopAt < end);
+}
+
 const FREE: Omit<CancelledBuildBill, 'reason'> = {
   billedUsd: 0, discountPct: 100, delivery: null, applies: false, userMessage: null,
   costFloorApplied: false,
@@ -264,6 +301,25 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
   //
   // RULE 3 is structural: every branch from here starts from `decided`, so the charge can only ever
   // be reduced. There is no path that computes a number of its own.
+  const ourPassStopped = f.stoppedDuringOurStylePass === true
+    && String(process.env.AGENTV3_STYLE_PASS_STOP_AT_COST ?? '').trim().toLowerCase() !== 'off';
+  if (f.appRendered === true && ((!renderedBeforeStop(f) && greenFirstRuleOn()) || ourPassStopped)) {
+    // It renders now, but it was not running when they asked to stop: the rest was finished after the request.
+    // At cost — our margin goes, our cost never does (the same floor as below, without the half).
+    const ourCost = money(f.realCostUsd) + money(f.sandboxUsd);
+    const billedUsd = round(Math.min(decided, ourCost));
+    return {
+      billedUsd,
+      discountPct: decided > 0 ? Math.round(((decided - billedUsd) / decided) * 100) : 100,
+      delivery: 'running-not-before-stop', applies: true, costFloorApplied: billedUsd > 0,
+      reason: ourPassStopped
+        ? 'user stopped the build during OUR style-floor pass, after the model had finished — charged at our cost, never full price'
+        : 'user stopped the build before the app was seen running (it rendered only after the stop request, or when is unknown) — charged at our cost, no service charge',
+      userMessage: billedUsd > 0
+        ? 'You stopped this build before the app was running. Your app is saved and you can keep using it. You have been charged only what the work actually cost to run — no service charge on top.'
+        : null,
+    };
+  }
   if (f.appRendered === true) {
     return {
       billedUsd: round(decided), discountPct: 0, delivery: 'working-app', applies: true, costFloorApplied: false,
@@ -355,4 +411,92 @@ export function freeCancellationMessage(delivery: CancelledDelivery | null): str
     return `🛡️ You stopped this build before it changed anything, so it is FREE — no charge. ${seedKeptSentence('platform-template')}`;
   }
   return '🛡️ You stopped this build before anything was produced, so it is FREE — no charge. Your workspace is exactly as it was.';
+}
+
+/**
+ * A STOP THAT LANDED AFTER THE BUILD HAD ALREADY SUCCEEDED — is it free? PURE.
+ *
+ * 🔴 THE GAP (pre-deploy review 2026-10-18, B2). The three ₹0 Stop outcomes above (`nothing`, `seed-only`,
+ * `unverified-edit`) reached ₹0 only through the route's FAILED-build rule, `zeroBillForFailedBuild(result.ok)`.
+ * A Stop always ends the runner with `ok: false`, so that was enough — until the Stop arrives AFTER the
+ * runner has already returned `ok: true`, while the platform's own final checks are still running. Nothing
+ * resets `ok` on that path (every post-run step merely stands down on an aborted signal), so the rule above
+ * said "free", the failed-build rule did not fire, and the bill stayed the full decided amount — while the
+ * user was told the Stop was free. The late Stop is the same user action as any other (Stop button, Unsend,
+ * a typed "stop", a Stop pressed on another instance): it must get the same rules.
+ *
+ * Only the ₹0 outcomes need this; a charged Stop (`billedUsd > 0`) is already applied by the route whatever
+ * `ok` says. `applies` is true only for an explicit `user-stop`, so no other build is touched.
+ *
+ * Kill switch: `AGENTV3_BILL_LATE_STOP_RULES=off` (read by the route, passed in here) restores the old
+ * behaviour, where a late Stop on a successful build was billed in full.
+ */
+export function lateStopIsFree(bill: CancelledBuildBill | null | undefined, lateStopRulesEnabled: boolean): boolean {
+  return lateStopRulesEnabled === true && bill?.applies === true && !(bill.billedUsd > 0);
+}
+
+// ───────────────────────────────────────────────────────────────────────────────────────────────────
+// 🔒 ONE DECISION FOR EVERY BILLING POINT (pre-deploy review 2026-10-19, round 4).
+//
+// A build is settled at one of TWO places in routes/agentv3.ts: the normal settle at the end of the build,
+// and `finalizeOnDeadline`, which settles a build whose wall-clock or advisory cap fired first. Round 3
+// put the Stop rules on the first one only. The second billed every `ok` build in full, so a user Stop
+// that did not also end the build's stream (a typed "stop", or a Stop pressed on another instance; the
+// Stop button and Unsend set `rb.ended`, and the finalizer returns early for those) could be charged in
+// full by whichever settle ran first. The debit is idempotent per buildRef, so the first settle wins.
+// That is the "two locally correct rules, nothing asking what happens when both fire" shape again.
+// The fix is not a second copy of the rules. Both points now call `settleStopOrFailure`, so they cannot
+// diverge.
+// ───────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The two kill switches, read in ONE place. `off` (any case, padded) disables; anything else is on. */
+export interface StopBillingSwitches {
+  /** `AGENTV3_BILL_CANCELLED`. Off: a Stop is not billed by the cancel rule at all (the pre-2026-09-14 behaviour). */
+  billCancelled: boolean;
+  /** `AGENTV3_BILL_LATE_STOP_RULES`. Off: the rules do not reach a Stop the build had already outlived (round 3/4). */
+  lateStopRules: boolean;
+}
+export function stopBillingSwitches(env: Record<string, string | undefined>): StopBillingSwitches {
+  const on = (v: string | undefined) => (v ?? '').trim().toLowerCase() !== 'off';
+  return { billCancelled: on(env.AGENTV3_BILL_CANCELLED), lateStopRules: on(env.AGENTV3_BILL_LATE_STOP_RULES) };
+}
+
+/** How many seeded template files are still byte-identical in what the build wrote. One formula for both billing points. */
+export function preseededUnchangedCount(preseeded: Iterable<[string, string]> | null | undefined, written: { get(p: string): string | undefined }): number {
+  if (!preseeded) return 0;
+  let n = 0;
+  for (const [p, c] of preseeded) if (written.get(p) === c) n++;
+  return n;
+}
+
+export type StopOrFailureSettlement =
+  /** A user Stop the rules CHARGE: the bill becomes `billedUsd` (never more than decided). */
+  | { kind: 'cancel-charge'; billedUsd: number; cancelBill: CancelledBuildBill }
+  /** A build that did not succeed: ₹0 (the failed-build rule). `cancelBill` is set when it was a user Stop the rules made free. */
+  | { kind: 'failed-free'; cancelBill: CancelledBuildBill | null }
+  /** A user Stop the rules made free, arriving after the build had already succeeded. ₹0. */
+  | { kind: 'late-stop-free'; cancelBill: CancelledBuildBill }
+  /** Nothing here changes the bill. */
+  | { kind: 'unchanged'; cancelBill: CancelledBuildBill | null };
+
+/**
+ * The single Stop/failure decision. PURE. Called by BOTH billing points in routes/agentv3.ts.
+ *
+ * The order is the route's original if/else chain, unchanged:
+ *   1. a user Stop the rules charge → that charge, whatever `ok` says;
+ *   2. otherwise a failed build (`failed`, i.e. `zeroBillForFailedBuild(ok)`) with something to zero → ₹0;
+ *   3. otherwise a user Stop the rules made free (`lateStopIsFree`) → ₹0;
+ *   4. otherwise unchanged.
+ */
+export function settleStopOrFailure(input: {
+  failed: boolean;
+  facts: CancelledBuildFacts;
+  switches: StopBillingSwitches;
+}): StopOrFailureSettlement {
+  const cancelBill = input.switches.billCancelled ? decideCancelledBuildBill(input.facts) : null;
+  const billed = money(input.facts.decidedBilledUsd);
+  if (cancelBill?.applies && cancelBill.billedUsd > 0) return { kind: 'cancel-charge', billedUsd: cancelBill.billedUsd, cancelBill };
+  if (input.failed === true && billed > 0) return { kind: 'failed-free', cancelBill };
+  if (cancelBill && lateStopIsFree(cancelBill, input.switches.lateStopRules) && billed > 0) return { kind: 'late-stop-free', cancelBill };
+  return { kind: 'unchanged', cancelBill };
 }

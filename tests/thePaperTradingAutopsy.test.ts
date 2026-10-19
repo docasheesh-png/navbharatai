@@ -90,7 +90,9 @@ describe('2 · a backgrounded job never holds the command pipe', () => {
   });
 
   it('a quote inside the job survives', () => {
-    const r = detachBackgroundJobs(`python -c 'print("hi")' &`);
+    // Same nested-quote shape as the autopsy's `python -c 'print("hi")' &`, but with `sh` — the test
+    // must not depend on a `python` binary being installed (it is absent on some CI/dev boxes).
+    const r = detachBackgroundJobs(`sh -c 'echo "hi"' &`);
     expect(r.detached).toBe(1);
     const out = execFileSync('bash', ['-c', `${r.command}\nsleep 1; cat ${BACKGROUND_JOB_LOG}`]).toString();
     expect(out).toContain('hi');

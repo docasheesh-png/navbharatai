@@ -29,6 +29,13 @@ describe('🔒 a caller that builds its path from a base is still a caller (Q-81
     expect(isCalled('/api/foo/bar', src)).toBe(false);
   });
 
+  it('recognizes the supported versioned alias without inventing callers for unknown versions', () => {
+    expect(isCalled('/api/failedbr/reports', "fetch('/api/v1/failedbr/reports')")).toBe(true);
+    expect(isCalled('/api/failedbr/reports/:workspaceId/:historyId', "fetch(`/api/v1/failedbr/reports/${workspaceId}/${historyId}`)")).toBe(true);
+    expect(isCalled('/api/failedbr/reports', "fetch('/api/v2/failedbr/reports')")).toBe(false);
+    expect(isCalled('/api/v1/data/:workspaceId/:collection', "fetch(`/api/v1/data/${workspaceId}/${collection}`)")).toBe(true);
+  });
+
   it('a name never borrows another file\'s base, and a dynamic value is left alone', () => {
     expect(expandBaseConstants('fetch(`${API_BASE}/bar`)')).toBe('fetch(`${API_BASE}/bar`)');
     expect(expandBaseConstants("const B = `/api/${v}`; fetch(`${B}/x`)")).toContain('${B}/x');

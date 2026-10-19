@@ -13,7 +13,9 @@
  *   ITS words, so the two pages can never say different things. `tests/aboutUsTellsTheTruth.test.ts`
  *   asserts that against the real policy text — the same discipline `privacyPolicyTruth.test.ts`
  *   already applies to the Meta pixel.
- * - "Working app or free" is a real billing rule (`zeroBillForFailedBuild`), not a slogan.
+ * - "A failed build is free" is a real billing rule (`zeroBillForFailedBuild`), not a slogan. A build the
+ *   USER stops is a different rule (`decideCancelledBuildBill`, cancelledBuildBilling.ts) and is not
+ *   always free — so this page must never say "no working app, no charge" (SEO verification 2026-10-18).
  * - The founder text is the admin's OWN wording, not a story invented here.
  *
  * ⚠️ WHAT MUST NEVER BE ADDED: a team size, a user count, an investor, a certification, an award, or
@@ -118,8 +120,8 @@ export const DEFAULT_ABOUT: AboutContent = {
   promisesHeading: 'What we promise you',
   promises: [
     {
-      title: 'A working app, or it is free',
-      body: 'If a build does not produce a working app, you are not charged for it. That is a rule inside the engine, not a goodwill gesture.',
+      title: 'A failed build is free',
+      body: 'If a build fails, you are not charged for it. That is a rule inside the engine, not a goodwill gesture. If you stop a build yourself (Stop, unsending your message or typing "stop"), you pay only for work you keep: nothing if none of your own app had been written yet and no app had been seen running, and otherwise nothing, part or all of the work done so far depending on what you keep, never more. The Pricing page has the exact rule.',
     },
     {
       title: 'You pay what it really cost',

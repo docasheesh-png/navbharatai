@@ -4344,6 +4344,18 @@ price is not. Recorded as a queue row, not done here.
   offer's answer before ending without the hunt. `src/server/AgentV3/optionalBugHunt.ts bugHuntWaitMs`. Locked in
   `tests/aFinishedBuildIsNotHeldOpen.test.ts`.
 
+- **`AGENTV3_LANE_AI_NEGATION`** (NOT set; default **on**; `off` ⇒ old behaviour). r6–r10 autopsy 2026-10-18: the fast
+  lane's `laneAiClient` no longer adds an in-app AI client when the prompt says "no AI" / "no API" / "offline"
+  (`NO_AI_RE`). `src/server/AgentV3/SimpleBuilder.ts laneAiClient`. Locked in `tests/noAiMeansNoAiClient.test.ts`.
+- **`AGENTV3_STYLE_NOTICE_LIVE`** (NOT set; default **on**; `off` ⇒ old sentence). r6–r10 autopsy 2026-10-18: when
+  the style hand-back (`STYLE_RULES_RESUMED`) fires after the preview is already published, the chat says the preview
+  is open and will refresh, instead of "before the preview opens". `src/server/AgentV3/handBackNotice.ts`. Locked in
+  `tests/theStylePassKnowsThePreviewIsOpen.test.ts`.
+
+- **`AGENTV3_STYLE_PASS_CAP_MS`** (NOT set; default **180000**; `0`/`off` ⇒ no cap, the old behaviour; junk ⇒
+  default). r6–r10 autopsy 2026-10-18: time cap on OUR style-floor pass. Checked between model turns; on expiry the
+  already-READY build ends with the model's pre-hand-back summary and note `STYLE_PASS_CAPPED`. No billing change.
+  `src/server/AgentV3/stylePassCap.ts`. Locked in `tests/theStylePassKnowsThePreviewIsOpen.test.ts`.
 - **`AGENTV3_SKIP_UNCHANGED_PREVIEW`** (NOT set; default **on**; `off` ⇒ old behaviour). r6–r10 autopsy 2026-10-18:
   `update_preview` on the same port with no file changed since the last successful publish returns at once instead
   of re-running the secrets write and port probe. `src/server/AgentV3/ToolDispatcher.ts previewRefreshIsRedundant`.

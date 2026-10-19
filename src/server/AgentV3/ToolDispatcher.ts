@@ -678,6 +678,13 @@ export function previewRefreshIsRedundant(
   return !!last && last.port === port && last.changes === changesNow;
 }
 
+/** The batch-write refusal: what was NOT written first, then the full summary. PURE. */
+export function batchRefusalText(written: readonly string[], notWritten: ReadonlyArray<{ path: string; failed: string }>, summary: string): string {
+  const head = `Not written (${notWritten.length} file(s) — rewrite these): ${notWritten.map((r) => `${r.path} — ${r.failed}`).join('; ')}`;
+  const ok = written.length ? `\nWritten (do not rewrite these): ${written.join(', ')}` : '';
+  return `${head}${ok}\n\n${summary}`;
+}
+
 export class ToolDispatcher {
   /**
    * May this dispatcher publish? DENIED unless the composition root grants it — see the `deploy` case.
@@ -907,6 +914,11 @@ export class ToolDispatcher {
    * Has this agent changed the project yet — itself or through a sub-agent? The done signal asks it, so
    * an edit is never judged "complete" by the score of the app it has not touched (autopsy 1389f0d5).
    */
+  /** True once the app's live preview has been published to the user (port verified). */
+  hasPublishedPreview(): boolean {
+    return this.previewPublished;
+  }
+
   wroteAnything(): boolean {
     this.flushUnrecordedWrites();
     return this._writtenPaths.size > 0 || this._delegateWrote;
@@ -5502,7 +5514,10 @@ export class ToolDispatcher {
           ? `\nWritten (do not rewrite these): ${written.join(', ')}\nNot written: ${notWritten.map((r) => `${r.path} — ${r.failed}`).join('; ')}`
           : '';
         const summary = `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}${kitKeepNotes}${twinNotes}${batchSizeNote(dedupedByPath.size)}${notWrittenLine}`;
-        if (notWritten.length > 0) refuse(summary);
+        // 🔴 A REFUSAL LEADS WITH WHAT FAILED (r6–r10 autopsy, 2026-10-18). The rejection used to open with
+        // "Wrote 2 file(s)…" and put "Not written" last, after every steering note — where a capped tool result
+        // cut it off, so the model read a success and never rewrote the missing files.
+        if (notWritten.length > 0) refuse(batchRefusalText(written, notWritten, summary));
         return summary;
       }
 

@@ -115,6 +115,7 @@ const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; wh
 };
 
 const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
+  admin_failed_report_access: { kind: 'platform', why: 'bounded owner-issued report-access configuration (at most 100 hashed credentials, transaction-enforced); not customer-owned data, 30-day authentication expiry, owner revocation removes the record' },
   user_vault_pin:      { kind: 'user', why: "the user's App Lock PIN record — doc id IS the uid" },
   agentv3_mcp_library: { kind: 'user', why: "the user's saved MCP servers — doc id IS the uid" },
   supabase_connections: { kind: 'user', why: "the user's Supabase OAuth grant (encrypted tokens) — doc id IS the uid; erased with the account" },

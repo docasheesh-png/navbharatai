@@ -42,7 +42,7 @@ import { initializeObservability, recordError, setAppContext, crashTestTools } f
 import { productionObservabilityDeps } from './lib/observability/native';
 import { nativePlatformName, isNativeApp } from './lib/mobileNative';
 import { nativeAppBuild } from './lib/appBuildId';
-import { SW_UPDATE_MIN_INTERVAL_MS, shouldCheckForUpdate } from './swUpdateCheck';
+import { SW_UPDATE_MIN_INTERVAL_MS, shouldCheckForUpdate, controllerChangeReloader } from './swUpdateCheck';
 import { ConsentBanner } from './components/ConsentBanner';
 import { InviteAcceptGate } from './components/InviteAcceptGate';
 import { SharePortal } from './components/SharePortal';
@@ -153,13 +153,15 @@ void installAppCheck();
 // 8.6 PWA — register service worker, and AUTO-UPDATE: when a freshly deployed
 // service worker takes control, reload once so the user is never stuck on stale
 // code after a deploy (this was causing "my changes don't show up").
+//
+// P1-C: reload ONLY when one service worker replaces another (a deploy while this tab was open), never
+// when the first install claims the page — that reload made every first visit load the app twice.
+// See controllerChangeReloader in swUpdateCheck.ts.
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  let reloadedForUpdate = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (reloadedForUpdate) return;
-    reloadedForUpdate = true;
-    window.location.reload();
-  });
+  navigator.serviceWorker.addEventListener(
+    'controllerchange',
+    controllerChangeReloader(!!navigator.serviceWorker.controller, () => window.location.reload()),
+  );
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').then((reg) => {
       // Proactively check for a new SW on each load.

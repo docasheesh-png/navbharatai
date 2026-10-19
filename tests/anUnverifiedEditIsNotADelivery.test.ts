@@ -25,6 +25,7 @@ const theRealBuild: CancelledBuildFacts = {
   filesWritten: 4,
   preseededUnchanged: 0,
   appRendered: false,
+  appRenderedAt: 1, stopRequestedAt: 2, // seen running BEFORE the stop (owner 2026-10-18)
   editingExistingApp: true,
   decidedBilledUsd: 0.248124,   // the exact billedUsd from that report
 };
@@ -116,7 +117,7 @@ describe('🔒 the wiring — a rule the route never feeds is not a fix', () => 
     // away. A wiring test that any call site can satisfy tests nothing.
     const route = readFileSync(resolve(__dirname, '../src/server/routes/agentv3.ts'), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '')).join('\n');
-    const at = route.indexOf('decideCancelledBuildBill({');
+    const at = route.indexOf('const stopSettlement = settleStopOrFailure({');
     expect(at, 'the billing call is gone entirely').toBeGreaterThan(-1);
     const call = route.slice(at, route.indexOf('})', at));
     expect(call).toContain('editingExistingApp: isEditMode,');

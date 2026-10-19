@@ -80,7 +80,8 @@ export function routeForPath(pathname: string, search = ''): DeepLinkTarget | nu
   // `?view=appstore` on ANY path, not just the root. Both are kept — this module replaces two readers
   // with one rule, and a refactor that quietly re-decides an existing URL is the trade this repo's
   // rules forbid.
-  if (path === '/admin') return { view: 'admin', path, search: query };
+  // /failedbr is web-only: no new native app-link claim or mobile release is needed.
+  if (path === '/admin' || path === '/failedbr') return { view: 'admin', path, search: query };
   if (path === '/store' || path.startsWith('/store/app/')) return { view: 'appstore', path, search: query };
   // `?view=appstore` is the share link that predates `/store` and is still in circulation.
   try {

@@ -10,13 +10,15 @@
 // PURE.
 
 import { PUBLIC_LEGAL_ROUTES, DELETE_ACCOUNT_PATH, CONTACT_PATH } from './legalPaths';
+import { MARKETING_PATHS } from '../../content/marketing';
 
 export const ROBOTS_PATH = '/robots.txt';
 export const SITEMAP_PATH = '/sitemap.xml';
 
 /** The public pages a visitor or a crawler can open without signing in, canonical spellings only. */
 export function publicSitePaths(): string[] {
-  return ['/', '/store', '/status', ...Object.keys(PUBLIC_LEGAL_ROUTES), CONTACT_PATH, DELETE_ACCOUNT_PATH];
+  // Product pages come right after the homepage: they are the pages that exist to be found.
+  return ['/', ...MARKETING_PATHS, '/store', '/status', ...Object.keys(PUBLIC_LEGAL_ROUTES), CONTACT_PATH, DELETE_ACCOUNT_PATH];
 }
 
 /** The site's public origin: PUBLIC_BASE_URL when it is a real https origin, else the production one. */
@@ -26,7 +28,7 @@ export function siteOrigin(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /** Paths that are not pages: the API, live previews, the admin console. */
-const DISALLOW = ['/api/', '/preview/', '/preview-app/', '/admin'];
+const DISALLOW = ['/api/', '/preview/', '/preview-app/', '/admin', '/failedbr'];
 
 export function robotsTxt(origin: string): string {
   return ['User-agent: *', 'Allow: /', ...DISALLOW.map((d) => `Disallow: ${d}`), '', `Sitemap: ${origin}${SITEMAP_PATH}`, ''].join('\n');

@@ -30,10 +30,11 @@
       } catch (e) {}
     </script>
     <!-- viewport replaced below with viewport-fit=cover for PWA -->
-    <title>NavBharatAI v5.0 — AI App Maker</title>
+    <title>NavBharatAI — AI Chat in Hindi &amp; English, and AI App Builder</title>
     
     <!-- Branding Favicon & Apple Touch Icon -->
-    <link rel="icon" type="image/png" href="/logo.png" />
+    <!-- The 20 KB 160 px logo, not the 129 KB original: a favicon is fetched on every first visit. -->
+    <link rel="icon" type="image/png" href="/logo-160.png" />
     <link rel="apple-touch-icon" href="/logo.png" />
 
     <!-- PWA -->
@@ -62,25 +63,104 @@
     <!-- SEARCH + LINK PREVIEWS (launch checklist 2026-10-04). A search result shows `description`; WhatsApp,
          Telegram, Facebook and X show the og/twitter tags. Image URLs are ABSOLUTE because crawlers do not
          reliably resolve a relative og:image, and the text is English per the UI language rule. -->
-    <meta name="description" content="NavBharatAI is the AI app maker for India. Describe the app, website or game you want, in English or your own language, and get a working app with a live preview in minutes." />
+    <meta name="description" content="NavBharatAI is an AI platform built in India. Chat with AI in Hindi, English or Hinglish, and build working apps, websites and games with a live preview." />
     <link rel="canonical" href="https://navbharatai.com/" />
 
     <!-- Open Graph (Metadata for WhatsApp, Telegram, Discord link sharing) -->
     <meta property="og:site_name" content="NavBharatAI" />
-    <meta property="og:title" content="NavBharatAI — AI App Maker" />
-    <meta property="og:description" content="Describe your app in plain words and get a working app, website or game in minutes." />
-    <meta property="og:image" content="https://navbharatai.com/logo.png" />
-    <meta property="og:image:alt" content="NavBharatAI logo" />
+    <meta property="og:title" content="NavBharatAI — AI Chat in Hindi &amp; English, and AI App Builder" />
+    <meta property="og:description" content="Chat with AI in Hindi, English or Hinglish, and build working apps, websites and games by describing them. Live preview, one-tap publishing and App Mart." />
+    <meta property="og:image" content="https://navbharatai.com/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="NavBharatAI — AI chat in Hindi, English and Hinglish, and an AI app builder" />
+    <meta property="og:locale" content="en_IN" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://navbharatai.com/" />
 
     <!-- Twitter Card (Twitter/X preview metadata) -->
-    <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="NavBharatAI — AI App Maker" />
-    <meta name="twitter:description" content="Describe your app in plain words and get a working app, website or game in minutes." />
-    <meta name="twitter:image" content="https://navbharatai.com/logo.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="NavBharatAI — AI Chat in Hindi &amp; English, and AI App Builder" />
+    <meta name="twitter:description" content="Chat with AI in Hindi, English or Hinglish, and build working apps, websites and games by describing them. Live preview, one-tap publishing and App Mart." />
+    <meta name="twitter:image" content="https://navbharatai.com/og-image.png" />
+
+    <!-- STRUCTURED DATA (SEO audit 2026-10-18): the WebSite and the Organization behind it. This is a
+         STATIC COPY of homeJsonLd() in src/server/lib/siteSchema.ts — tests/theSiteHasOneIdentity.test.ts
+         fails if the two ever differ. Facts only: no rating, review, award or user count. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://navbharatai.com/#website",
+            "name": "NavBharatAI",
+            "alternateName": [
+              "NavBharat AI",
+              "Nav Bharat AI"
+            ],
+            "url": "https://navbharatai.com/",
+            "inLanguage": "en-IN",
+            "publisher": {
+              "@id": "https://navbharatai.com/#organization"
+            }
+          },
+          {
+            "@type": "Organization",
+            "@id": "https://navbharatai.com/#organization",
+            "name": "NavBharatAI",
+            "alternateName": [
+              "NavBharat AI",
+              "Nav Bharat AI"
+            ],
+            "url": "https://navbharatai.com/",
+            "logo": "https://navbharatai.com/logo.png",
+            "email": "info@navbharatai.com",
+            "founder": {
+              "@type": "Person",
+              "name": "Dr. Asheesh"
+            },
+            "contactPoint": [
+              {
+                "@type": "ContactPoint",
+                "contactType": "customer support",
+                "email": "info@navbharatai.com",
+                "availableLanguage": [
+                  "English",
+                  "Hindi"
+                ],
+                "areaServed": "IN"
+              }
+            ],
+            "sameAs": [
+              "https://play.google.com/store/apps/details?id=com.navbharat.ai"
+            ]
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
+    <!-- WITHOUT JAVASCRIPT (SEO audit 2026-10-18). A crawler or browser that does not run JS used to get
+         one line — "Starting up…" — for ever. This says what NavBharatAI is and links to the server-
+         rendered pages that explain it, and hides the boot spinner that would otherwise never end.
+         Facts only, from src/content/marketing.ts. It is outside #root, so the boot frame is unchanged. -->
+    <noscript>
+      <style>#nbai-boot{display:none}</style>
+      <main style="max-width:46rem;margin:0 auto;padding:2rem 1.25rem;font:17px/1.6 system-ui,sans-serif">
+        <h1>NavBharatAI — AI chat and AI app builder, built in India</h1>
+        <p>Chat with AI in Hindi, English or Hinglish. Describe an app, website or game in your own words and NavBharatAI builds it, shows it running in a live preview and publishes it on its own link. Play apps other creators made on App Mart.</p>
+        <p>NavBharatAI needs JavaScript to run. You can read about it here:</p>
+        <ul>
+          <li><a href="/ai-app-builder">AI app builder</a></li>
+          <li><a href="/indian-ai-assistant">Indian AI assistant</a></li>
+          <li><a href="/hindi-ai-assistant">Hindi AI assistant</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/about">About NavBharatAI</a></li>
+          <li><a href="/contact">Contact</a></li>
+        </ul>
+      </main>
+    </noscript>
     <!-- 🔴 THE FIRST FRAME, AND WHY IT IS HTML RATHER THAN REACT (2026-09-19, measured).
          `<div id="root"></div>` was empty, so NOTHING could paint until the whole module graph had
          arrived and run. Measured on an emulated slow-4G link with a mid-range phone CPU: first

@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { canonicalApiPath } from './apiRouteCallers';
 
 const walk = (d: string, out: string[] = []): string[] => {
   for (const n of readdirSync(d)) {
@@ -52,8 +53,10 @@ function clientPaths(): Map<string, string> {
 }
 
 function served(p: string, routes: string[]): boolean {
+  p = canonicalApiPath(p);
   const pp = p.split('/');
-  return routes.some((r) => {
+  return routes.some((registered) => {
+    const r = canonicalApiPath(registered);
     if (r === p) return true;
     const rr = r.split('/');
     if (rr.length === pp.length && rr.every((s, i) => s === pp[i] || s === 'X' || pp[i] === 'X')) return true;
@@ -75,6 +78,14 @@ const NOT_A_CALL: Record<string, string> = {
 describe('the client never calls a route the server does not have', () => {
   const routes = serverRoutes();
   const paths = clientPaths();
+
+  it('recognizes supported version aliases, including explicit versioned handlers, but never invents v2', () => {
+    expect(served('/api/v1/failedbr/reports', ['/api/failedbr/reports'])).toBe(true);
+    expect(served('/api/v1/admin/failedbr/access', ['/api/admin/failedbr/access'])).toBe(true);
+    expect(served('/api/v1/data/app/items', ['/api/v1/data/X/X'])).toBe(true);
+    expect(served('/api/v2/failedbr/reports', ['/api/failedbr/reports'])).toBe(false);
+    expect(served('/api/v1/missing', ['/api/failedbr/reports'])).toBe(false);
+  });
 
   it('found the routes and the calls (the census is looking at real code)', () => {
     expect(routes.length).toBeGreaterThan(300);

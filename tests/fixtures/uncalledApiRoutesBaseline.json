@@ -71,5 +71,7 @@
   "POST /api/techdebt/:userId/:projectId": "undecided: no caller in the app — needs a decision: give it a screen, name its external caller, or delete it",
   "POST /api/workspace/changelog": "undecided: no caller in the app — needs a decision: give it a screen, name its external caller, or delete it",
   "POST /api/workspace/traceability": "undecided: no caller in the app — needs a decision: give it a screen, name its external caller, or delete it",
-  "POST /api/workspace/version": "undecided: no caller in the app — needs a decision: give it a screen, name its external caller, or delete it"
+  "POST /api/workspace/version": "undecided: no caller in the app — needs a decision: give it a screen, name its external caller, or delete it",
+  "POST /api/failedbr/mcp": "external: authenticated remote MCP clients call the stateless read-only report tools (docs/FAILED_BUILD_REPORTS.md)",
+  "GET /api/failedbr/mcp": "external: remote MCP clients probe optional SSE support; authenticated requests receive 405 because this server uses JSON POST responses"
 }

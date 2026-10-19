@@ -39,6 +39,15 @@ export interface AppFeature {
 }
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
+  {
+    id: 'admin_failed_build_reports',
+    name: 'Private failed build reports (admin only)',
+    path: '/failedbr → Admin sign-in',
+    description: 'Admin-only retained failed build history, automatic minute refresh, full scrubbed reports, paginated REST reads and a read-only MCP endpoint. Separate hashed bearer credentials expire after 30 days and can be revoked. Public users cannot read reports or manage access.',
+    howToUse: 'The owner opens /failedbr and signs in using the existing admin login. Follow Next batch to cover all retained history. Create a separate read-only credential for each trusted compatible AI HTTP/MCP client and configure its Authorization header. This does not connect accounts or run background analysis automatically.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['failedbr', 'failed build reports', 'build fail report', 'admin reports', 'fail report dekhna', 'build report api'],
+  },
   // ─── WEBSITE CHECKUP (health check of the user's OWN published site) ──────
   {
     id: 'website_checkup',

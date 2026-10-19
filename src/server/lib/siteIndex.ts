@@ -28,7 +28,7 @@ export function siteOrigin(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /** Paths that are not pages: the API, live previews, the admin console. */
-const DISALLOW = ['/api/', '/preview/', '/preview-app/', '/admin'];
+const DISALLOW = ['/api/', '/preview/', '/preview-app/', '/admin', '/failedbr'];
 
 export function robotsTxt(origin: string): string {
   return ['User-agent: *', 'Allow: /', ...DISALLOW.map((d) => `Disallow: ${d}`), '', `Sitemap: ${origin}${SITEMAP_PATH}`, ''].join('\n');

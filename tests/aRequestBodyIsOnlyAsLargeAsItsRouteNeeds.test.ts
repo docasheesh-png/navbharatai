@@ -28,6 +28,7 @@ const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
  * is on neither list.
  */
 const REVIEWED_SMALL: Record<string, string> = {
+  '/api/failedbr/mcp': 'read-only JSON-RPC method and arguments: cursor capped at 2048 characters, ids at 400; accepts no report, file or image payload; default small body limit applies',
   '/api/admin/mfa/verify': '`code` is a 6-digit TOTP code',
   '/api/gallery/admin/:id/review': '`decision` is one of three words; `note` is cut to 500 characters by readReviewReason (storeReviewReason.ts, Q-681); `reasonContract` is a number',
   '/api/nav-store/admin/review': 'ids, `decision` (three words) and a `note` cut to 500 characters by readReviewReason (Q-681)',

@@ -453,7 +453,7 @@ import { requestScopeVerdict, requestScopeReportLine, type RequestScopeReason } 
 import { bootPythonBackendFirst, backendBootReport, isPythonServerCommand, PYTHON_BOOT_BUDGET_MS } from '../AgentV3/pythonBackendBoot';
 import { scriptRequestNoteEnabled, scriptDeliverableRequested, liveDataRequested, scriptRequestBuilderNote, scriptRequestStartLine, scriptRequestReportNote } from '../AgentV3/scriptRequest';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
-import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
+import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, redTeamBudgetMs, redTeamStepMs, redTeamRunNote, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
 import { tieredMarkupUsd, realProviderCostUsd } from '../AgentV3/providerRates';
 import { splitUnbilledCost, absorbedWorkDetail } from '../AgentV3/unbilledTurns';
@@ -24401,10 +24401,11 @@ async function noteBuildOutcome(
       ) {
         try {
           let fuzzHtml = '';
-          try { fuzzHtml = (await withTimeout(actuator.browseUrl!(workspaceId, lastPreviewUrl), 35_000, 'redteam-browse')).html; } catch { fuzzHtml = ''; }
+          try { fuzzHtml = (await withTimeout(actuator.browseUrl!(workspaceId, lastPreviewUrl), Math.min(35_000, redTeamBudgetMs()), 'redteam-browse')).html; } catch { fuzzHtml = ''; }
           const plan = generateFuzzPlan(fuzzHtml);
           const MAX_TOTAL_CASES = 12; // hard cap across all inputs so the attack is always bounded
-          const redTeamDeadline = Date.now() + 90_000; // whole red-team pass ≤ 90s regardless of case count
+          const redTeamStartedAt = Date.now();
+          const redTeamDeadline = redTeamStartedAt + redTeamBudgetMs(); // whole pass ≤ its budget (FuzzProbe.redTeamBudgetMs, default 30s)
           const findings: { input: FuzzInput; case: FuzzCase; verdict: FuzzVerdict }[] = [];
           let casesRun = 0;
           outer:
@@ -24415,9 +24416,9 @@ async function noteBuildOutcome(
               const caseStart = Date.now();
               try {
                 // Reset to a clean app state, type the hostile value, and submit (Enter).
-                await withTimeout(actuator.browserAction(workspaceId, 'navigate', { url: lastPreviewUrl }), 15_000, 'redteam-nav');
-                await withTimeout(actuator.browserAction(workspaceId, 'type', { selector: target.input.selector, text: fcase.value }), 12_000, 'redteam-type');
-                await withTimeout(actuator.browserAction(workspaceId, 'press', { selector: target.input.selector, text: 'Enter' }), 12_000, 'redteam-submit');
+                await withTimeout(actuator.browserAction(workspaceId, 'navigate', { url: lastPreviewUrl }), redTeamStepMs(redTeamDeadline, 15_000), 'redteam-nav');
+                await withTimeout(actuator.browserAction(workspaceId, 'type', { selector: target.input.selector, text: fcase.value }), redTeamStepMs(redTeamDeadline, 12_000), 'redteam-type');
+                await withTimeout(actuator.browserAction(workspaceId, 'press', { selector: target.input.selector, text: 'Enter' }), redTeamStepMs(redTeamDeadline, 12_000), 'redteam-submit');
               } catch { continue; /* the input wasn't reachable / action timed out — skip this case */ }
               let errs: string[] = [];
               try {
@@ -24427,6 +24428,7 @@ async function noteBuildOutcome(
               if (verdict.crashed) findings.push({ input: target.input, case: fcase, verdict });
             }
           }
+          try { buildDiag.record(redTeamRunNote({ casesRun, crashes: findings.length, ms: Date.now() - redTeamStartedAt, budgetMs: redTeamBudgetMs() })); } catch { /* a note never affects a build */ }
           if (findings.length > 0) {
             buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'FUZZ_ROBUSTNESS', message: fuzzSummary(findings), autoResolved: false });
             // Opt-in bounded heal — harden the source, then trust the next build/preview to re-verify.

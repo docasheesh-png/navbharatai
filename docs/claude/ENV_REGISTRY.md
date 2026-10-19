@@ -4385,3 +4385,9 @@ price is not. Recorded as a queue row, not done here.
   an answer); otherwise the old throughput grace (15 s) applies. Instance-local: a fresh instance, or silence memory
   off, gives 15 s until the rung answers once. `src/server/AgentV3/providers/openAiStream.ts firstByteGraceFor`.
   Locked in `tests/theFirstByteGraceIsEarned.test.ts`.
+
+- **`AGENTV3_REDTEAM_BUDGET_MS`** (NOT set; default **30000**, was a hard-coded 90 s checked only between cases; clamped
+  5000–300000). Build 2f46a4d8: the ~98 s silent gap between the GREEN gate and RUNTIME_VERIFIED was the red-team pass.
+  The whole pass now has this budget, every browser step is clipped to what remains, and every run records
+  `REDTEAM_RAN` (cases, seconds, crashes). `90000` restores the old budget. `src/server/AgentV3/FuzzProbe.ts`.
+  Locked in `tests/theRedTeamPassIsBoundedAndSaysSo.test.ts`.

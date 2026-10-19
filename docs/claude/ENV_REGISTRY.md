@@ -4356,3 +4356,7 @@ price is not. Recorded as a queue row, not done here.
   default). r6–r10 autopsy 2026-10-18: time cap on OUR style-floor pass. Checked between model turns; on expiry the
   already-READY build ends with the model's pre-hand-back summary and note `STYLE_PASS_CAPPED`. No billing change.
   `src/server/AgentV3/stylePassCap.ts`. Locked in `tests/theStylePassKnowsThePreviewIsOpen.test.ts`.
+- **`AGENTV3_SKIP_UNCHANGED_PREVIEW`** (NOT set; default **on**; `off` ⇒ old behaviour). r6–r10 autopsy 2026-10-18:
+  `update_preview` on the same port with no file changed since the last successful publish returns at once instead
+  of re-running the secrets write and port probe. `src/server/AgentV3/ToolDispatcher.ts previewRefreshIsRedundant`.
+  Locked in `tests/anUnchangedPreviewIsNotRepublished.test.ts`.

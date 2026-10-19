@@ -664,6 +664,20 @@ type InstallOutcome = 'installed' | 'busy' | 'failed' | 'skipped';
 /** How many writes may retry an import install that stood down under the background install's lock. */
 export const MAX_DEFERRED_IMPORT_INSTALLS = 6;
 
+/**
+ * True when an update_preview would republish exactly what is already live: same port, and no change made since
+ * that publish. PURE. AGENTV3_SKIP_UNCHANGED_PREVIEW=off ⇒ never redundant (the old behaviour).
+ */
+export function previewRefreshIsRedundant(
+  last: { port: number; changes: number } | null,
+  port: number,
+  changesNow: number,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (String(env.AGENTV3_SKIP_UNCHANGED_PREVIEW ?? '').trim().toLowerCase() === 'off') return false;
+  return !!last && last.port === port && last.changes === changesNow;
+}
+
 /** The batch-write refusal: what was NOT written first, then the full summary. PURE. */
 export function batchRefusalText(written: readonly string[], notWritten: ReadonlyArray<{ path: string; failed: string }>, summary: string): string {
   const head = `Not written (${notWritten.length} file(s) — rewrite these): ${notWritten.map((r) => `${r.path} — ${r.failed}`).join('; ')}`;
@@ -930,6 +944,8 @@ export class ToolDispatcher {
   private previewFails = 0;
   /** A live preview was published by this dispatcher (update_preview emitted a `preview` event). */
   private previewPublished = false;
+  /** The port and change count of the last update_preview that published (previewRefreshIsRedundant). */
+  private lastPublishedPreview: { port: number; changes: number } | null = null;
   /** Per-dispatcher incremental cache, so two builds never share one tsbuildinfo (TD-18). */
   private readonly tsBuildInfoId = randomUUID().slice(0, 8);
 
@@ -11339,6 +11355,13 @@ export class ToolDispatcher {
         if (!Number.isInteger(port) || port < 1 || port > 65535) {
           refuse('port must be an integer 1–65535');
         }
+        // 🔴 NOTHING CHANGED, NOTHING TO REFRESH (r6–r10 autopsy, 2026-10-18). The model re-called update_preview
+        // on the same port with no file written since the last successful publish, and each call re-ran the
+        // secrets write and the bounded port probe for a preview the user already had. The dev server hot-reloads;
+        // a call with no change has nothing to publish. AGENTV3_SKIP_UNCHANGED_PREVIEW=off restores the old path.
+        if (previewRefreshIsRedundant(this.lastPublishedPreview, port, this.changeCount())) {
+          return `The live preview on port ${port} is already published and no file has changed since — nothing to refresh. Do NOT call update_preview again until you change a file.`;
+        }
         if (!this.actuator.getPortUrl) {
           throw new Error('Live preview is not available in this sandbox.');
         }
@@ -11513,6 +11536,7 @@ export class ToolDispatcher {
         // best-effort so it can never break/block a working preview.
         await this.injectAppSignatureIntoIndexHtml();
         this.previewPublished = true;
+        this.lastPublishedPreview = { port, changes: this.changeCount() };
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
         // The url is handed to you (not withheld) because your OWN next steps need it — screenshot,
         // curl, a browser check. It must never appear in your reply to the person: they already see

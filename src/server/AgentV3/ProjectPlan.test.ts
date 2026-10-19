@@ -206,6 +206,14 @@ describe('scheduling', () => {
     expect(nextBuildableModule(p)?.id).toBe('c');
   });
 
+  it('among modules that are ready, a screen goes before a types-only module', () => {
+    const p = plan([
+      mod({ id: 'types', files: ['src/types.ts'] }),
+      mod({ id: 'screen', files: ['src/Home.tsx'] }),
+    ]);
+    expect(nextBuildableModule(p)?.id).toBe('screen');
+  });
+
   it('returns null when the plan is complete, and planComplete/planBlockedReason agree', () => {
     const p = plan([mod({ id: 'a', status: 'done' }), mod({ id: 'b', status: 'done' })]);
     expect(nextBuildableModule(p)).toBeNull();

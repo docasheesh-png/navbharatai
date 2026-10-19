@@ -383,6 +383,7 @@ import { uiWithoutBuildVerdict } from '../AgentV3/uiWithoutBuild';
 import { repeatedReadSummary, READ_LOOP_LIMIT } from '../AgentV3/repeatedReads';
 import { noteTodoOnlyTurn } from '../AgentV3/todoOnlyTurn';
 import { finishingPassMayRun, recordFinishingPassesHeld } from '../AgentV3/finishingPassesAtCap';
+import { recheckAfterFinishingWrites, postGreenRecheckEnabled } from '../AgentV3/finishingRecheck';
 import { APPEND_WITH_EMPTY_OLD_STRING } from '../AgentV3/appendByEdit';
 import { greenGuardUndidWork, withGreenGuardCorrection, type GreenGuardRestoreFacts } from '../AgentV3/greenGuardHonesty';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
@@ -22657,6 +22658,34 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* app-scaffold defaults are best-effort — never affect the build result */ }
+      // POST-GREEN FINISHING RE-CHECK (owner item 2, finishingRecheck.ts): the passes above can write after
+      // this build was already proven green. One look; only a CONCLUSIVE non-render rolls back exactly their
+      // files to the last green snapshot. Kill switch AGENTV3_POST_GREEN_RECHECK=off.
+      await recheckAfterFinishingWrites({
+        enabled: postGreenRecheckEnabled() && !!lastPreviewUrl && typeof actuator.browseUrl === 'function',
+        greenAt: inBuildGreenAt,
+        paths: [...finishingPaths],
+        aborted: () => abort.signal.aborted,
+        look: async () => {
+          const shot = await withTimeout(actuator.browseUrl!(workspaceId, internalPreviewUrl(lastPreviewUrl)), 25_000, 'post-green-recheck');
+          const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source, hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined });
+          return { rendered: isProvenGreenRender(shot, v), conclusive: v.rendered || (!v.inconclusive && !v.serverDown) };
+        },
+        loadSnapshot: () => loadWorkspaceFiles(greenWorkspaceKey(workspaceId)),
+        restore: async (plan) => {
+          await runInPass('green-guard-restore', async () => {
+            for (const [path, content] of Object.entries(plan.write)) {
+              try { await actuator.writeFile(workspaceId, path, content); writtenFiles.set(path, content); } catch { /* per-file best-effort */ }
+            }
+          });
+          const rm = buildRemoveCommand(plan.remove);
+          if (rm) await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'post-green-remove').catch(() => null);
+          for (const path of plan.remove) writtenFiles.delete(path);
+          if (Object.keys(plan.write).length > 0) await saveWorkspaceFiles(workspaceId, plan.write).catch(() => {});
+          if (plan.remove.length > 0) await removeWorkspaceFiles(workspaceId, plan.remove).catch(() => {});
+        },
+        record: (note) => { try { buildDiag.record({ phase: 'preview', ...note }); } catch { /* best-effort */ } },
+      });
 
       if (
         process.env.AGENTV3_RENDER_RESCUE !== 'off'

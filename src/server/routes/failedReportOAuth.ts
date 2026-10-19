@@ -1,4 +1,4 @@
-import express, { type Express, type RequestHandler } from 'express';
+import type { Express, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import { adminUsername, requireAdmin } from '../lib/adminAuth';
 import { getServerDb } from '../lib/serverDb';
@@ -32,8 +32,8 @@ export function registerFailedReportOAuthRoutes(app: Express): void {
   for (const path of ['/.well-known/oauth-authorization-server/api/v1/failedbr/oauth', '/.well-known/oauth-authorization-server', '/api/failedbr/oauth/.well-known/oauth-authorization-server', '/api/failedbr/oauth/.well-known/openid-configuration']) app.get(path, serverMetadata);
   const publicLimit = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false });
   const registrationLimit = rateLimit({ windowMs: 3_600_000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false });
-  // OAuth form parsing stays local to these small endpoints.
-  app.use('/api/failedbr/oauth', publicLimit, express.urlencoded({ extended: false, limit: '16kb', parameterLimit: 20 }));
+  // Form/JSON parsing and limits live in the shared requestBodyLimits boundary.
+  app.use('/api/failedbr/oauth', publicLimit);
   app.post('/api/failedbr/oauth/register', registrationLimit, wrap(async (req, res) => {
     if (!req.is('application/json')) { res.status(415).json({ error: 'invalid_request' }); return; }
     res.status(201).json(await failedReportOAuth.register(req.body ?? {}));

@@ -115,6 +115,8 @@ const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; wh
 };
 
 const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
+  admin_failed_report_oauth_clients: { kind: 'platform', why: 'bounded OAuth client configuration, transaction-capped at 100 entries; expires after 30 days and expired slots are reclaimed on registration; not customer account data' },
+  admin_failed_report_oauth_requests: { kind: 'platform', why: 'bounded pending owner-consent/code leases, transaction-capped at 100 entries; authorization expires after ten minutes, codes after two; consumed or denied leases are deleted and expired slots reclaimed' },
   admin_failed_report_access: { kind: 'platform', why: 'bounded owner-issued report-access configuration (at most 100 hashed credentials, transaction-enforced); not customer-owned data, 30-day authentication expiry, owner revocation removes the record' },
   user_vault_pin:      { kind: 'user', why: "the user's App Lock PIN record — doc id IS the uid" },
   agentv3_mcp_library: { kind: 'user', why: "the user's saved MCP servers — doc id IS the uid" },
@@ -692,3 +694,4 @@ describe('every declared collection is classified', () => {
     expect(policied.filter((c) => forever.includes(c))).toEqual([]);
   });
 });
+

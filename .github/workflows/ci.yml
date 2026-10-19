@@ -94,7 +94,7 @@ jobs:
         run: npm run typecheck:server
 
       - name: Failed-report OAuth protocol and security checks
-        run: node --experimental-strip-types scripts/failedReportOAuth.check.mjs
+        run: node --experimental-strip-types scripts/failedReportOAuth.test.mjs
 
       # ONE test run, not two (2026-08-06). This job ran `npm test` (`vitest run`) and then
       # `npm run test:coverage` (`vitest run --coverage`) — the SAME 12,400 tests twice, the second time

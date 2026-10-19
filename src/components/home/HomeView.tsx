@@ -6,10 +6,9 @@ import {
   CheckCircle2, ArrowRight, LayoutGrid, Store, Play, PlayCircle, X
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-// `openExternalUrl` only — the tutorial strip's video link. main removed the Professionals cards from
-// Home, which is what used isNativeApp / playCompliance here; keeping those imports would have left
-// dead imports behind a resolved conflict.
-import { openExternalUrl } from '../../lib/mobileNative';
+// `openExternalUrl` — the tutorial strip's video link. `isNativeApp` — the web-only links to the public
+// pages at the foot of Home (SEO audit 2026-10-18); see the comment there.
+import { openExternalUrl, isNativeApp } from '../../lib/mobileNative';
 
 /**
  * THE "HOW DO I BUILD AN APP?" VIDEO.
@@ -84,6 +83,18 @@ interface HomeViewProps {
  */
 const LINE_BIG = 'text-sm sm:text-lg';
 const LINE_SMALL = 'text-[9px] sm:text-[11px]';
+
+/** The server-rendered public pages (src/content/marketing.ts, src/server/lib/legalPaths.ts). */
+const PUBLIC_PAGE_LINKS: ReadonlyArray<readonly [string, string]> = [
+  ['/about', 'About'],
+  ['/pricing', 'Pricing'],
+  ['/ai-app-builder', 'AI App Builder'],
+  ['/indian-ai-assistant', 'Indian AI Assistant'],
+  ['/hindi-ai-assistant', 'Hindi AI Assistant'],
+  ['/contact', 'Contact'],
+  ['/privacy', 'Privacy'],
+  ['/terms', 'Terms'],
+];
 
 const PRODUCT_CARDS = [
   {
@@ -267,8 +278,12 @@ export const HomeView = ({
             initial={{ scale: 0.85, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ type: 'spring', stiffness: 120, delay: 0.1 }}
-            src="/logo.png"
-            alt="NavBharat AI"
+            // 160 px copy (20 KB) of the 518 px logo.png (129 KB): the hero shows it at 64–80 CSS px,
+            // so 160 covers a 2x screen. Lighthouse mobile measured 122 KB wasted here (SEO audit 2026-10-18).
+            src="/logo-160.png"
+            width={160}
+            height={149}
+            alt="NavBharatAI"
             className="w-16 h-16 sm:w-20 sm:h-20 object-contain drop-shadow-[0_8px_20px_rgba(249,115,22,0.25)] select-none pointer-events-none"
           />
 
@@ -471,6 +486,20 @@ export const HomeView = ({
         >
           Made with ❤️ for Bharat · Free to use · No credit card required
         </motion.p>
+
+        {/* ── Public pages (SEO audit 2026-10-18) ──
+            Plain links to the server-rendered pages that explain NavBharatAI — the homepage was the only
+            page with no path to them, so a visitor (or a crawler rendering this screen) could not reach
+            About, Pricing or the product pages from it. WEB ONLY: inside the native shell the origin is
+            the WebView's own, where these server paths do not exist, and the store listings carry
+            their own About/Privacy links. */}
+        {!isNativeApp() && (
+          <nav aria-label="About NavBharatAI" className="w-full flex flex-wrap justify-center gap-x-4 gap-y-1 text-[11px] text-faint pb-4">
+            {PUBLIC_PAGE_LINKS.map(([href, label]) => (
+              <a key={href} href={href} className="hover:text-body underline-offset-2 hover:underline">{label}</a>
+            ))}
+          </nav>
+        )}
       </div>
     </div>
   );

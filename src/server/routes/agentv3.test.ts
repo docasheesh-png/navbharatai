@@ -2555,7 +2555,9 @@ describe('zeroBillForFailedBuild — a failed build is never charged, import tur
 
   it('is wired into the billing path (not merely defined)', () => {
     const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
-    expect(SRC).toContain('zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0');
+    // Round 4: the rule feeds the ONE Stop/failure decision both billing points share.
+    expect(SRC).toContain('failed: zeroBillForFailedBuild(result.ok),');
+    expect(SRC).toContain("} else if (stopSettlement.kind === 'failed-free') {");
     expect(SRC).not.toContain('expectsArtifacts && !result.ok && effectiveBilledUsd > 0');
   });
 });

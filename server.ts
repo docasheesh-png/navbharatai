@@ -33,6 +33,9 @@ import { registerPushRoutes } from './src/server/routes/push';
 import { registerSbomRoutes } from './src/server/routes/sbom';
 import { registerLegalRoutes } from './src/server/routes/legal';
 import { registerSiteIndexRoutes } from './src/server/routes/siteIndex';
+import { registerMarketingRoutes } from './src/server/routes/marketing';
+import { spaHeadFor, readSpaShell } from './src/server/lib/spaHead';
+import { siteOrigin } from './src/server/lib/siteIndex';
 import { registerCheckoutHandoffRoute } from './src/server/routes/checkoutHandoff';
 import { registerBuildAnalyticsRoutes } from './src/server/routes/buildAnalytics';
 import { registerSupabaseIntegrationRoutes } from './src/server/routes/supabaseIntegration';
@@ -589,7 +592,17 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
           nowMs: Date.now(),
         });
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.sendFile(path.join(distPath, 'index.html'));
+        // PER-ROUTE HEAD (SEO audit 2026-10-18): every SPA path used to carry the homepage's
+        // canonical, so App Mart (/store) told search engines it WAS the homepage, and every unknown
+        // path was a 200 duplicate of it. spaHeadFor() gives /store its own canonical and title, and
+        // marks paths that are not public pages `noindex`. The shell's BODY is untouched, so the app
+        // boots exactly as before; if the file cannot be read the old sendFile path runs unchanged.
+        const shell = readSpaShell(distPath);
+        if (shell) {
+          res.type('html').send(spaHeadFor(req.path, shell, siteOrigin()));
+        } else {
+          res.sendFile(path.join(distPath, 'index.html'));
+        }
       });
     }
     
@@ -745,6 +758,9 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   // both are checked by tools that may not run JS. Both paths are declared in spaFallback.ts, so the
   // SPA catch-all defers to these handlers instead of returning index.html.
   registerLegalRoutes(app);
+  // PUBLIC product pages (/about, /pricing, /ai-app-builder, /indian-ai-assistant, /hindi-ai-assistant)
+  // — server-rendered like the legal pages, declared in spaFallback.ts via MARKETING_PATHS.
+  registerMarketingRoutes(app);
   // robots.txt + sitemap.xml, derived from the same legal-page list (declared in spaFallback.ts too).
   registerSiteIndexRoutes(app);
   // PUBLIC checkout hand-off (/pay) — the ONE origin the payment gateway has approved. The native

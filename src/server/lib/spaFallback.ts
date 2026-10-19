@@ -24,6 +24,7 @@
 import { ALL_PUBLIC_LEGAL_PATHS } from './legalPaths';
 import { CHECKOUT_HANDOFF_PATH } from './checkoutHandoff';
 import { ROBOTS_PATH, SITEMAP_PATH } from './siteIndex';
+import { MARKETING_PATHS } from '../../content/marketing';
 
 /**
  * Path prefixes owned by real server route handlers registered AFTER the SPA catch-all. A request
@@ -51,6 +52,9 @@ export const SERVER_ROUTE_EXACT: readonly string[] = [
   // path listed by the route module but forgotten here would be swallowed by the catch-all and
   // answered with index.html — a 200 that looks alive to a human and is empty to a crawler.
   ...ALL_PUBLIC_LEGAL_PATHS,
+  // PUBLIC PRODUCT PAGES (/about, /pricing and the three product pages — routes/marketing.ts).
+  // Derived, like the legal list: a page forgotten here would be answered with the app shell.
+  ...MARKETING_PATHS,
 ];
 
 /**

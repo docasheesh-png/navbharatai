@@ -20,9 +20,34 @@ import { PUBLIC_LEGAL_ROUTES, DELETE_ACCOUNT_PATH, CONTACT_PATH, LEGAL_PATH_ALIA
 import { grievanceOfficer } from '../lib/grievanceOfficer';
 import { grievanceDoc, GRIEVANCE_TITLE, GRIEVANCE_UPDATED } from '../../content/legal/grievance';
 import { contactDoc, CONTACT_TITLE, CONTACT_UPDATED } from '../../content/legal/contact';
+import { siteOrigin } from '../lib/siteIndex';
 
 // Re-exported so existing importers (and the tests that pin these paths) keep one import site.
 export { PUBLIC_LEGAL_ROUTES, DELETE_ACCOUNT_PATH, CONTACT_PATH, LEGAL_PATH_ALIASES } from '../lib/legalPaths';
+
+/**
+ * Each public page's OWN search snippet (SEO audit 2026-10-18). Every page used to share one
+ * privacy-policy sentence. Plain statements of what the page is — nothing promotional.
+ */
+export const PUBLIC_PAGE_DESCRIPTIONS: Readonly<Record<string, string>> = {
+  '/privacy': 'NavBharatAI Privacy Policy: what personal data we collect, why we collect it, who processes it, and your rights.',
+  '/terms': 'NavBharatAI Terms of Service: the rules for using NavBharatAI, wallet tokens, purchases, published apps and accounts.',
+  '/refund': 'NavBharatAI Refund & Cancellation Policy: when a payment can be refunded, how to ask, and how long it takes.',
+  '/grievance': 'NavBharatAI Grievance Redressal: how to make a formal complaint, the officer responsible and the response timelines.',
+  '/dpa': 'NavBharatAI Data Processing Agreement for business customers who process personal data through NavBharatAI.',
+  '/security': 'NavBharatAI security overview, security policy, incident response summary and vulnerability disclosure policy.',
+  [CONTACT_PATH]: 'Contact NavBharatAI by email at info@navbharatai.com for support, refunds, payments, account deletion, complaints and business enquiries.',
+  [DELETE_ACCOUNT_PATH]: 'How to delete your NavBharatAI account and data, in the app or by asking us, what is deleted, what is kept and why.',
+};
+
+/**
+ * The page's canonical address, sent as an HTTP `Link` header (which Google and Bing honour) rather
+ * than a `<link>` tag: these pages are contract-tested to load NO linked resource, and a header keeps
+ * that true. Without it the 21 alias spellings and any `?utm=` copy competed with the real page.
+ */
+function setCanonical(res: Response, path: string): void {
+  res.set('Link', `<${siteOrigin()}${path}>; rel="canonical"`);
+}
 
 export function registerLegalRoutes(app: Express): void {
   // Aliases first: a permanent redirect to the canonical path, which the handlers below serve.
@@ -39,24 +64,29 @@ export function registerLegalRoutes(app: Express): void {
    */
   app.get(CONTACT_PATH, (_req: Request, res: Response) => {
     res.set('Cache-Control', 'public, max-age=600');
+    setCanonical(res, CONTACT_PATH);
     res.type('html').send(renderLegalPageHtml({
       title: CONTACT_TITLE,
       updated: CONTACT_UPDATED,
+      description: PUBLIC_PAGE_DESCRIPTIONS[CONTACT_PATH],
       body: contactDoc(grievanceOfficer()),
     }));
   });
 
   app.get(DELETE_ACCOUNT_PATH, (_req: Request, res: Response) => {
     res.set('Cache-Control', 'public, max-age=600');
+    setCanonical(res, DELETE_ACCOUNT_PATH);
     res.type('html').send(renderLegalPageHtml({
       title: ACCOUNT_DELETION_TITLE,
       updated: ACCOUNT_DELETION_UPDATED,
+      description: PUBLIC_PAGE_DESCRIPTIONS[DELETE_ACCOUNT_PATH],
       body: ACCOUNT_DELETION,
     }));
   });
 
   for (const [path, docId] of Object.entries(PUBLIC_LEGAL_ROUTES)) {
     app.get(path, async (_req: Request, res: Response) => {
+      setCanonical(res, path);
       try {
         /**
          * The grievance page is built HERE rather than read from the registry, because it is the one
@@ -70,6 +100,7 @@ export function registerLegalRoutes(app: Express): void {
           res.type('html').send(renderLegalPageHtml({
             title: GRIEVANCE_TITLE,
             updated: GRIEVANCE_UPDATED,
+            description: PUBLIC_PAGE_DESCRIPTIONS[path],
             body: grievanceDoc(grievanceOfficer()),
           }));
           return;
@@ -89,7 +120,7 @@ export function registerLegalRoutes(app: Express): void {
         // A legal page must be current: a stale cached copy could show a reader terms that no longer
         // apply. Ten minutes is enough to absorb a crawl, short enough that an update is visible fast.
         res.set('Cache-Control', 'public, max-age=600');
-        res.type('html').send(renderLegalPageHtml({ title: doc.title, updated: doc.updated, body: doc.body }));
+        res.type('html').send(renderLegalPageHtml({ title: doc.title, updated: doc.updated, body: doc.body, description: PUBLIC_PAGE_DESCRIPTIONS[path] }));
       } catch {
         res.status(500).type('text/plain').send(
           'This document could not be loaded. Please email info@navbharatai.com and we will send it to you.',

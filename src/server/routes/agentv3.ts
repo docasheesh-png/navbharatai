@@ -426,7 +426,7 @@ import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState, lastAssistantText } from '../AgentV3/ProjectContext';
 import { refersToConversation, CONVERSATION_REPLY_MAX } from '../AgentV3/conversationReference';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
-import { decideCancelledBuildBill, freeCancellationMessage } from '../AgentV3/cancelledBuildBilling';
+import { freeCancellationMessage, settleStopOrFailure, stopBillingSwitches, preseededUnchangedCount } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
@@ -13028,7 +13028,7 @@ async function noteBuildOutcome(
     // `expectsArtifacts` rides here for the same reason the ledger does: it is computed deep inside
     // the build block, and the deadline finalizer — defined above it, called after it — needs the
     // same fact the settle path uses, or the two would price one build by different rules.
-    const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number; cacheReadInputTokens?: number; expectsArtifacts?: boolean } = {};
+    const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number; cacheReadInputTokens?: number; expectsArtifacts?: boolean; preseededGolden?: Map<string, string> } = {};
     /**
      * Phases this build has POSITIVELY ESTABLISHED delivered nothing a caller could use, so their
      * spend is ours and not the user's (see `billingPhase.ts`).
@@ -13165,6 +13165,8 @@ async function noteBuildOutcome(
       let watchdogLivePreview = { seconds: 0, usd: 0, measuredSeconds: 0 };
       // The discount this path decided, carried to the user-facing breakdown below.
       let watchdogDiscount: BuildDiscount | null = null;
+      /** The Stop rules' line for the user when they decided this bill (round 4); shown in the result summary. */
+      let watchdogStopNote: string | null = null;
       if (ok && billingCtx.providerLedger) {
         try {
           watchdogLivePreview = billableSandboxDetail(actuator, workspaceId, billingCtx.buildStartedAt);
@@ -13175,13 +13177,15 @@ async function noteBuildOutcome(
            * the settle for the reason Fix 67 exists at all: these two paths decide the same build's
            * bill, and a rule on only one of them is a rule a long build escapes.
            */
+          // One reading of "was the app seen running", shared by the markup and the Stop rules below.
+          const wdPreviewProven = buildObs.previewRendered === true || (buildDiagRef ? renderProvenInLedger(buildDiagRef.evidenceLedger()) : false);
           const wdMarkup = decideMarkupOnProof({
             decidedBilledUsd: decided.effectiveBilledUsd,
             realCostUsd: decided.realCostUsd,
             sandboxUsd: decided.sandboxUsd,
             // The same fact the settle reads (Q-727 = b): the final check's flag OR an in-build green pass
             // in the evidence ledger.
-            previewProven: buildObs.previewRendered === true || (buildDiagRef ? renderProvenInLedger(buildDiagRef.evidenceLedger()) : false),
+            previewProven: wdPreviewProven,
             // Absent ⇒ false ⇒ the rule stands down, which is the direction that cannot over-charge.
             expectsArtifacts: billingCtx.expectsArtifacts === true,
             enabled: markupNeedsPreview(),
@@ -13193,6 +13197,48 @@ async function noteBuildOutcome(
               phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW',
               message: wdMarkup.reason, autoResolved: true,
             });
+          }
+          // 🔴 A USER STOP IS BILLED BY THE STOP RULES ON THIS PATH TOO (pre-deploy review round 4). This
+          // finalizer used to bill every `ok` build in full. A typed "stop" or a Stop pressed on another
+          // instance aborts the build without ending its stream, so this cap could settle that build first
+          // and charge it in full (the debit is idempotent per buildRef: the first settle wins), even when
+          // the Stop rules say ₹0 or half. It now asks the SAME `settleStopOrFailure` the normal settle asks,
+          // with the same facts and in the same order (before the discount). A cap that fired with no user
+          // Stop has abortCause 'advisory-cap'/'watchdog', which the rules never touch, so normal timeout
+          // billing is unchanged. Kill switch: AGENTV3_BILL_LATE_STOP_RULES=off restores the old full charge here.
+          {
+            const wdSwitches = stopBillingSwitches(process.env);
+            if (wdSwitches.lateStopRules) {
+              const wdStop = settleStopOrFailure({
+                failed: !ok,
+                switches: wdSwitches,
+                facts: {
+                  abortCause: abortCauseOf(abort.signal),
+                  filesWritten: writtenFiles.size,
+                  preseededUnchanged: preseededUnchangedCount(billingCtx.preseededGolden, writtenFiles),
+                  appRendered: wdPreviewProven,
+                  editingExistingApp: isEditMode,
+                  decidedBilledUsd: watchdogBilledUsd,
+                  realCostUsd: decided.realCostUsd,
+                  sandboxUsd: decided.sandboxUsd,
+                },
+              });
+              if (wdStop.kind === 'cancel-charge') {
+                watchdogBilledUsd = wdStop.billedUsd;
+                watchdogStopNote = wdStop.cancelBill.userMessage ? `🧾 ${wdStop.cancelBill.userMessage}` : null;
+                buildDiagRef?.record({
+                  phase: 'build', severity: 'info', code: 'CANCELLED_BUILD_CHARGED', autoResolved: true,
+                  message: `${wdStop.cancelBill.reason} (discount ${wdStop.cancelBill.discountPct}%, delivery: ${wdStop.cancelBill.delivery}; settled by the deadline finalizer).`,
+                });
+              } else if (wdStop.kind === 'late-stop-free' || wdStop.kind === 'failed-free') {
+                watchdogBilledUsd = 0;
+                watchdogStopNote = freeCancellationMessage(wdStop.cancelBill?.delivery ?? null);
+                buildDiagRef?.record({
+                  phase: 'build', severity: 'info', code: 'LATE_STOP_NOT_CHARGED', autoResolved: true,
+                  message: `The user stopped this build after it had already succeeded; the deadline finalizer settled it. The Stop rules decide what the user is holding (delivery: ${wdStop.cancelBill?.delivery ?? 'unknown'}), and that is free, so it is not charged.`,
+                });
+              }
+            }
           }
           // THE BUILD DISCOUNT — on this path too, for the reason Fix 67 exists: a rule on only one of
           // the two paths that settle a build is a rule a long build escapes. Same floor, same order.
@@ -13371,6 +13417,7 @@ async function noteBuildOutcome(
         }) : '';
         const watchdogSummary = [
           buildResultRef.summary || 'Built your app — your files are saved.',
+          watchdogStopNote ?? '',
           watchdogLine,
           watchdogDiscountLine ? `🟢 ${watchdogDiscountLine}` : '',
         ].filter(Boolean).join('\n\n');
@@ -18351,6 +18398,7 @@ async function noteBuildOutcome(
       let goldenPreseededTier: 'simple' | 'pro' | null = null;
       /** Path → the exact content the platform's own template seeded. See the bill note below. */
       const preseededGolden = new Map<string, string>();
+      billingCtx.preseededGolden = preseededGolden; // round 4 — the deadline finalizer bills a Stop by the same template count
       for (const [pp, pc] of pastedSeed) preseededGolden.set(pp, pc); // the user's own pasted page — see pastedSeed
       if (process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         try {
@@ -26709,15 +26757,22 @@ async function noteBuildOutcome(
       // four safety rules, and in particular why the charge is the REAL COST already computed rather
       // than a percentage of a full build (a percentage would over-charge a user who stopped early by
       // an order of magnitude). Kill switch: AGENTV3_BILL_CANCELLED=off restores today's behaviour.
-      const cancelBill = (process.env.AGENTV3_BILL_CANCELLED ?? '').trim().toLowerCase() !== 'off'
-        ? decideCancelledBuildBill({
+      // 🔒 ONE DECISION FOR BOTH BILLING POINTS (pre-deploy review round 4). `settleStopOrFailure` runs
+      // `decideCancelledBuildBill`, the failed-build rule and `lateStopIsFree` in this chain's original order,
+      // and `finalizeOnDeadline` calls the SAME function, so a Stop is billed by the same rules whichever
+      // settle runs first. The kill switches (AGENTV3_BILL_CANCELLED, AGENTV3_BILL_LATE_STOP_RULES) are read
+      // in `stopBillingSwitches` and nowhere else.
+      const stopSettlement = settleStopOrFailure({
+        failed: zeroBillForFailedBuild(result.ok),
+        switches: stopBillingSwitches(process.env),
+        facts: {
           abortCause: abortCauseOf(abort.signal),
           filesWritten: writtenFiles.size,
           // Our own template, untouched, is not the user's app — see `preseededUnchanged`. A scaffold
           // file the builder REWROTE has different content and so is correctly counted as delivered.
           // ⚠️ `writtenFiles` itself is deliberately NOT filtered: `shouldRetryEmptyBuild` and the
           // render rescue both read its size and mean something different by it.
-          preseededUnchanged: [...preseededGolden].filter(([p, c]) => writtenFiles.get(p) === c).length,
+          preseededUnchanged: preseededUnchangedCount(preseededGolden, writtenFiles),
           appRendered: appSeenRunningForBill,
           // An unverified EDIT may have left the user's working app worse than it started — see
           // `editingExistingApp` (autopsy 95598899). Read after appRendered, so a verified edit is
@@ -26732,27 +26787,29 @@ async function noteBuildOutcome(
           // at our real cost: a cancellation may take our margin, never our cost.
           realCostUsd: decidedRealCostUsd,
           sandboxUsd: decidedSandboxUsd,
-        })
-        : null;
-      if (cancelBill?.applies && cancelBill.billedUsd > 0) {
+        },
+      });
+      const cancelBill = stopSettlement.cancelBill;
+      if (stopSettlement.kind === 'cancel-charge') {
+        const charged = stopSettlement.cancelBill;
         // Only ever REDUCES: `decideCancelledBuildBill` starts from the number already decided above
         // and can never exceed it, so cancelling can never cost more than finishing.
-        effectiveBilledUsd = cancelBill.billedUsd;
+        effectiveBilledUsd = stopSettlement.billedUsd;
         zeroBillReason = undefined;
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'CANCELLED_BUILD_CHARGED',
-          message: `${cancelBill.reason} (discount ${cancelBill.discountPct}%, delivery: ${cancelBill.delivery}).`,
+          message: `${charged.reason} (discount ${charged.discountPct}%, delivery: ${charged.delivery}).`,
           autoResolved: true,
         });
-        if (cancelBill.userMessage) {
+        if (charged.userMessage) {
           // ONE MONEY STATEMENT, NOT TWO (the lesson of autopsy 586295b7). When the floor decides the
           // charge, the bill equals the waiver's own figure, so the waived-margin notice below would
           // ALSO fire and tell the user the same thing twice in different words. The cancellation
           // message is the more specific of the two and already says there is no service charge.
           waivedMarkupNotice = null;
-          events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${cancelBill.userMessage}`, ts: Date.now() });
+          events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${charged.userMessage}`, ts: Date.now() });
         }
-      } else if (zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0) {
+      } else if (stopSettlement.kind === 'failed-free') {
         effectiveBilledUsd = 0;
         zeroBillReason = cancelBill?.applies
           ? cancelBill.reason
@@ -26764,6 +26821,20 @@ async function noteBuildOutcome(
             : '🛡️ This build did not fully succeed, so it is FREE — no charge. Send a follow-up and I will fix it.',
           ts: Date.now(),
         });
+      } else if (stopSettlement.kind === 'late-stop-free') {
+        // 🔴 THE LATE STOP (pre-deploy review 2026-10-18, B2). The user stopped AFTER the runner had already
+        // returned ok:true — during the final checks — so the failed-build branch above cannot fire, and the
+        // ₹0 the Stop rules decided (`nothing` / `seed-only` / `unverified-edit`) was lost: the build was billed
+        // in full. Same user action, same rules: see `lateStopIsFree`. Reached by every Stop door (button,
+        // Unsend, typed "stop", a lease stop), because they all end in `abortBuild(…, 'user-stop')` and this is
+        // the one decision (`settleStopOrFailure`, shared with finalizeOnDeadline). Kill switch: AGENTV3_BILL_LATE_STOP_RULES=off.
+        effectiveBilledUsd = 0;
+        zeroBillReason = `${stopSettlement.cancelBill.reason} (stop arrived after the build had succeeded, during its final checks)`;
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'LATE_STOP_NOT_CHARGED', autoResolved: true,
+          message: `The user stopped this build after it had already succeeded, during its final checks. The Stop rules decide what the user is holding (delivery: ${stopSettlement.cancelBill.delivery}), and that is free — so it is not charged.`,
+        });
+        events.emit({ type: 'narration', agent: 'architect', text: freeCancellationMessage(stopSettlement.cancelBill.delivery), ts: Date.now() });
       }
       if (userId && result.ok && effectiveBilledUsd > 0 && freeOnboardingLimit() > 0) {
         const isFree = await onboardingCreditStore

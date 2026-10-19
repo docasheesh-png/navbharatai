@@ -94,7 +94,7 @@ export async function settleVerbatimTemplate(input: {
     if (errors.length > 0) {
       const message = `The tested template did not parse (${errors.length} file(s): ${errors.slice(0, 4).map((e) => e.path).join(', ')}) — the engine will build it instead of shipping a file that cannot run.`;
       input.narrate(message);
-      input.record({ severity: 'warning', code: 'GOLDEN_SCAFFOLD', message });
+      input.record({ severity: 'info', code: 'GOLDEN_SCAFFOLD', message });
       return { deliver: false, summary: '' };
     }
     await input.startPreview();
@@ -104,7 +104,7 @@ export async function settleVerbatimTemplate(input: {
     return { deliver: true, summary };
   } catch (err) {
     const message = `The template could not be checked (${String((err as Error)?.message ?? err).slice(0, 160)}) — the engine will build it.`;
-    try { input.record({ severity: 'warning', code: 'GOLDEN_SCAFFOLD', message }); } catch { /* the caller owns the recorder */ }
+    try { input.record({ severity: 'info', code: 'GOLDEN_SCAFFOLD', message }); } catch { /* the caller owns the recorder */ }
     return { deliver: false, summary: '' };
   }
 }

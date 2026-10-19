@@ -4385,3 +4385,9 @@ price is not. Recorded as a queue row, not done here.
   an answer); otherwise the old throughput grace (15 s) applies. Instance-local: a fresh instance, or silence memory
   off, gives 15 s until the rung answers once. `src/server/AgentV3/providers/openAiStream.ts firstByteGraceFor`.
   Locked in `tests/theFirstByteGraceIsEarned.test.ts`.
+
+- `AGENTV3_TS_JSX_RENAME` (default on; `off` disables). JSX written into a `.ts` file is moved to `.tsx`:
+  the per-file builder's pre-write reconcile renames it and rewrites explicit `./X.ts` references; the agent's
+  `write_file` relocates only a NEW file whose importers use extension-less specifiers (otherwise unchanged).
+  Detection is high-precision (closing tag, fragment, or self-closing component) so generics never match.
+  `src/server/AgentV3/LanguageCoherence.ts tsFileHasJsx / tsxRelocationFor`. Locked in `tests/jsxInATsFileBecomesTsx.test.ts`.

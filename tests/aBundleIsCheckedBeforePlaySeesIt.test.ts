@@ -83,7 +83,9 @@ async function aab(bytes: Uint8Array): Promise<string> {
 }
 
 describe('the script the release workflow runs, on a real zip', () => {
-  const run = (path: string) => spawnSync('npx', ['tsx', 'scripts/checkBundlePermissions.ts', path], { encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '' } });
+  // Exercise the real TypeScript script without tsx CLI's unrelated Unix IPC server. Restricted
+  // verification hosts can run Node's loader but cannot bind /tmp/tsx-*/<pid>.pipe.
+  const run = (path: string) => spawnSync(process.execPath, ['--import', 'tsx', 'scripts/checkBundlePermissions.ts', path], { encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '' } });
 
   it('🔒 exits 1 on a restricted permission, 0 on a clean bundle', async () => {
     const bad = run(await aab(manifest('INTERNET', 'READ_MEDIA_IMAGES')));

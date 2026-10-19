@@ -980,10 +980,12 @@ export class ToolDispatcher {
    * Unset ⇒ the tool reports honestly that it cannot stop, rather than claiming it did.
    */
   private stopBuild?: (reason: string) => void;
+  private stopRequestSource: () => string = () => '';
 
   /** Wire the stop. Called once per build by the composition root. */
-  setStopBuild(fn: (reason: string) => void): void {
+  setStopBuild(fn: (reason: string) => void, readUserMessage: () => string = () => ''): void {
     this.stopBuild = fn;
+    this.stopRequestSource = readUserMessage;
   }
 
   /**
@@ -6929,12 +6931,19 @@ export class ToolDispatcher {
       }
 
       case 'stop_build': {
-        const reason = (optStr(input, 'reason') || '').slice(0, 300);
+        const reason = (optStr(input, 'reason') || '').trim();
         if (!this.stopBuild) {
           // HONEST, NOT SILENT. Returning "stopped." with nothing wired would make the model tell the
           // user their build had ended while it carried on — the exact fake-success the second
           // absolute rule forbids.
           refuse('Could not stop this build — stopping is not available here. Tell the user plainly, and keep going or wrap up.');
+        }
+        // The model classifies intent; it cannot invent WHO requested cancellation. In build
+        // 1b38d662 it supplied its own server-restart plan and the record called that "user said".
+        // Check against the composition root's trusted message, never tool-supplied provenance.
+        const request = this.stopRequestSource().trim();
+        if (!request || !reason || reason !== request) {
+          refuse('Could not stop this build: reason must exactly quote the latest user message asking to end the whole build. A dev server restart, browser retry or tool repair is not a user cancellation. Keep working; use bash to restart the dev server.');
         }
         this.stopBuild(reason);
         return 'Stopping this build now. The files written so far are saved; the user can resume with one message.';

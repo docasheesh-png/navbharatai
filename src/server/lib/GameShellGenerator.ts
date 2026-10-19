@@ -1171,6 +1171,7 @@ export function generateGameShell(include?: string[]): GameShellResult {
       '    setup: (ctx) => {\n' +
       '      const road = createRoad({ length: 400 });\n' +
       '      car = createCar({ color: 0xb42b2b });\n' +
+      '      car.rotation.y = Math.PI;       // local +Z nose faces world -Z, into the screen\n' +
       '      car.position.y = ROAD_SURFACE_Y;   // wheels ON the asphalt\n' +
       '      ctx.scene.add(road, car);\n' +
       '      drive = createVehicleState(car);   // starts moving, pointing where the model points (+Z)\n' +

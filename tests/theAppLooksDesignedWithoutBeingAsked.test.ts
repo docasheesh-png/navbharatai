@@ -158,7 +158,10 @@ describe('3 · the recipes people actually build: games, chat, tabs, toast', () 
   });
 
   it('motion stays inside the kit\'s own rules: transform/opacity, and reduced motion quiets it', () => {
-    expect(DESIGN_KIT_CSS).toMatch(/@keyframes nb-pulse \{[^}]*transform/);
+    expect(DESIGN_KIT_CSS).toMatch(/@keyframes nb-pulse \{[^}]*opacity/);
+    // A perpetually scaled Start Game never becomes stable enough for a normal browser click.
+    const pulse = DESIGN_KIT_CSS.match(/@keyframes nb-pulse[^\n]+/)?.[0] ?? '';
+    expect(pulse).not.toMatch(/transform|scale\(|translate|width|height/);
     expect(DESIGN_KIT_CSS).toMatch(/\.nb-game-bar-fill \{[^}]*transform: scaleX\(var\(--value, 1\)\)/);
     expect(DESIGN_KIT_CSS).toMatch(/prefers-reduced-motion: reduce[\s\S]*\.nb-game-btn:hover/);
   });

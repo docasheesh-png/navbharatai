@@ -3,7 +3,20 @@ import {
   extractExportedDeclaration, kitTypeContract, KIT_CONTRACT_NAMES, KIT_CONTRACT_HEADING,
 } from '../src/server/lib/kitTypeContract';
 import { generateGameShell } from '../src/server/lib/GameShellGenerator';
+import { generateGame3D } from '../src/server/lib/Game3DGenerator';
 import { compactRecipeResult, HANDOFF_RECIPE_CHARS } from '../src/server/AgentV3/gameKitSeed';
+
+it('the racing report receives vehicle and road API shapes before its example or handoff cut', () => {
+  const recipe = generateGame3D();
+  const contract = compactRecipeResult(recipe.instructions);
+  for (const name of ['RoadOptions', 'MotorcycleOptions', 'Motorcycle', 'VehicleState', 'VehicleTuning']) {
+    const declaration = extractExportedDeclaration(recipe.files['src/game/three/objects.ts'], name);
+    expect(declaration).toBeTruthy();
+    expect(contract.replace(/^ {2}/gm, '')).toContain(declaration);
+  }
+  expect(contract).toContain('root: THREE.Group;');
+  expect(contract).not.toContain('livery?:');
+});
 
 /**
  * 🧬 THE KIT'S OWN TYPES ARE HANDED OVER, NOT GUESSED — Q-909, autopsy `50378049` (BlockWorld, a voxel

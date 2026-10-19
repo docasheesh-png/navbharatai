@@ -97221,3 +97221,20 @@ them went with them.
 server file hands the upstream message over as the error a user reads — the sibling that does not exist
 yet — while still allowing it as `detail`, which is the deliberate, useful use. Reversion proof: the raw
 shape restored at one site → 2 fail; the GitHub-outage remap removed → 1 fail; restored → 8 pass.
+
+
+## 2026-10-19 — game direction and autopsy 2e06d8bd / 1b38d662
+
+Branch `fix/game-direction-autopsy`, upstream source snapshot 789f318bb5c06456133c52a04fa58685abbf8acd. No other session's uncommitted work was copied. Six engine changes cover Q-1200…Q-1205: rendered-camera-relative yaw, chase front-hemisphere guard, world -Z recipe examples, geometry-stable Start Game pulse, trusted cancellation provenance, and extracted vehicle/road contracts. Detailed evidence, 23 finding rows and explicit blockers are in `docs/game-engine/autopsy-2026-10-19.md` and `BUILD_REPORT_QUEUE.md`. Original generated app source and production account/latency evidence are unavailable; existing games and historical debit are NOT claimed repaired. Open PR #3824 owns billing settlement work and is preserved.
+
+Reversion probes for yaw, chase, invented stop and pulse failed as required. Targeted initial run: 200 passed, 1 skipped. Final CI-equivalent gate and PR results are recorded in the PR; no deployment is claimed by this source entry.
+
+Follow-up in the same branch: Q-1223 fixes the kit-history command's absolute-importer resolution, found while recording the new camera hash. Isolated real-command test and history census: 21 passed. Initial broad coverage did not establish a gate: it ran Node 24/CEST and was then rejected by automatic approval review over possible external payment-service egress. Final verification is Node 22/UTC with a credential-free, proxy-free environment and outbound networking denied; no denied operation is treated as passing.
+
+Q-1224: the bundle-permission script test now uses Node's tsx loader instead of the CLI's unrelated Unix IPC. Real bad/clean zip assertions and starter-version census pass (25 tests). Seven current platform starter CSS hashes added without deleting historical versions. Verification-only fixes: queue field labels, API contract indentation assertion, theme-only snapshot scope, and a real local dependency directory. Final autopsy ledger has 25 findings: 8 implemented fixes, 17 explicit blockers.
+
+Q-1225 fixes the false no-call manifest claim by describing the completed-response ledger accurately, rather than denying a cancelled attempted call. Record/Calendar tests: 44 passed. No ladder, tier or billing policy changed. Q-1218 keeps the distinct attribution-trace blocker. Final ledger now has 26 findings, 9 implemented fixes and 17 explicit blockers.
+
+Final Q-1225 sibling sweep also removes the false no-attempt statement from the stopped-build upsell note, preserving suppression behavior. Related regression suites: 55 passed. Reversion checks caught the record-label, history resolver, missing API handoff and missing forward rotation; earlier probes caught yaw, chase, invented stop and button geometry. Safe offline environment checks: 192 passed across the previously affected dispatcher, migration and iOS-template suites; no unhandled errors. Non-root-equivalent tar extraction and asynchronous denied socket errors are verification-only settings, not product policy changes.
+
+The resolving PR retires Q-1200…Q-1205 and Q-1223…Q-1225 atomically when it merges: those nine IDs are in the closed register, with the root-cause ledger retained in the game autopsy. The 17 evidence/account/access blockers remain in the open queue. This proposed resolution is conditional on the immutable final gate and merge; no deployment or old-game repair is claimed.

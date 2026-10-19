@@ -121,7 +121,7 @@ describe('4 · a build no model touched does not name a model', () => {
     // Q-970 moved this expression into `buildRecordModel`, the one name every build-level record carries.
     // The rule is the same and is asserted on the function: with no call made, not even the PLANNED rung
     // is named — and the manifest reads that value, with the ledger as its "any call made" input.
-    expect(buildRecordModel({ planned: 'glm-4.7-flashx', anyCallMade: false })).toBe('none (no model call was made)');
+    expect(buildRecordModel({ planned: 'glm-4.7-flashx', anyCallMade: false })).toBe('none (no completed model response recorded)');
     const route = read('src/server/routes/agentv3.ts');
     expect(route).toContain('anyCallMade: providerLedger.entries().length > 0,');
     expect(route).toContain('model: buildModelForRecord,');

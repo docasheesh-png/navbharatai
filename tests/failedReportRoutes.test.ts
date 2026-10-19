@@ -13,10 +13,11 @@ import { mintAdminToken } from '../src/server/lib/adminAuth';
 
 let server: Server; let port: number; let adminToken: string;
 function request(path: string, opts: { method?: string; headers?: Record<string, string>; body?: unknown } = {}): Promise<{ status: number; headers: any; body: any }> {
+  const payload = typeof opts.body === 'string' ? opts.body : opts.body === undefined ? undefined : JSON.stringify(opts.body);
   return new Promise((resolve, reject) => {
-    const r = httpRequest({ hostname: '127.0.0.1', port, path, method: opts.method ?? 'GET', headers: { 'Content-Type': 'application/json', ...(opts.body ? { 'Content-Length': String(Buffer.byteLength(JSON.stringify(opts.body))) } : {}), ...opts.headers } }, (s) => {
+    const r = httpRequest({ hostname: '127.0.0.1', port, path, method: opts.method ?? 'GET', headers: { 'Content-Type': 'application/json', ...(payload !== undefined ? { 'Content-Length': String(Buffer.byteLength(payload)) } : {}), ...opts.headers } }, (s) => {
       let body = ''; s.on('data', (b) => { body += b; }); s.on('end', () => resolve({ status: s.statusCode!, headers: s.headers, body: body ? JSON.parse(body) : null }));
-    }); r.on('error', reject); if (opts.body) r.write(JSON.stringify(opts.body)); r.end();
+    }); r.on('error', reject); if (payload !== undefined) r.write(payload); r.end();
   });
 }
 beforeAll(async () => {
@@ -77,6 +78,20 @@ describe('private report HTTP boundary', () => {
 
 describe('OAuth MCP integration', () => {
   beforeEach(() => { oauth.tokenOk.mockReset().mockImplementation(async h => h === 'Bearer oauth-test'); });
+  it('exposes dynamic registration and parses standard OAuth form token/revoke requests', async () => {
+    oauth.register.mockResolvedValue({ client_id: 'registered', token_endpoint_auth_method: 'none' });
+    const registration = await request('/api/v1/failedbr/oauth/register', { method: 'POST', body: { redirect_uris: ['https://client.example/callback'], token_endpoint_auth_method: 'none' } });
+    expect(registration.status).toBe(201);
+    expect(registration.body.client_id).toBe('registered');
+    oauth.token.mockResolvedValue({ access_token: 'test-access', token_type: 'Bearer', expires_in: 3600 });
+    const formHeaders = { 'Content-Type': 'application/x-www-form-urlencoded' };
+    const token = await request('/api/v1/failedbr/oauth/token', { method: 'POST', headers: formHeaders, body: 'grant_type=authorization_code&client_id=registered&code=test-code&code_verifier=test-verifier' });
+    expect(token.status).toBe(200);
+    expect(token.headers['cache-control']).toBe('no-store');
+    expect(oauth.token).toHaveBeenCalledWith({ grant_type: 'authorization_code', client_id: 'registered', code: 'test-code', code_verifier: 'test-verifier' }, undefined);
+    expect((await request('/api/v1/failedbr/oauth/revoke', { method: 'POST', headers: formHeaders, body: 'client_id=registered&token=test-access' })).status).toBe(200);
+    expect(oauth.revoke).toHaveBeenCalledWith({ client_id: 'registered', token: 'test-access' }, undefined);
+  });
   it('discovers the pinned issuer/resource and challenges unauthenticated MCP requests', async () => {
     const metadata = await request('/.well-known/oauth-protected-resource/api/v1/failedbr/mcp');
     expect(metadata.status).toBe(200);

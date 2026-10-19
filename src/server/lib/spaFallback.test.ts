@@ -3,6 +3,11 @@ import { readFileSync } from 'node:fs';
 import { spaFallbackShouldDefer, SERVER_ROUTE_PREFIXES, SERVER_ROUTE_EXACT } from './spaFallback';
 
 describe('spaFallbackShouldDefer — deployed user apps must not be swallowed by the SPA catch-all', () => {
+  it('keeps OAuth discovery as server JSON and registers reports before Vite/SPA handling', () => {
+    for (const path of ['/.well-known/oauth-protected-resource/api/v1/failedbr/mcp', '/.well-known/oauth-authorization-server/api/v1/failedbr/oauth']) expect(spaFallbackShouldDefer(path)).toBe(true);
+    const server = readFileSync('server.ts', 'utf8');
+    expect(server.indexOf('registerFailedReportRoutes(app);')).toBeLessThan(server.indexOf('await initializeServer();'));
+  });
   it('THE REAL FAILURE: a deployed PWA link reaches its own handler, not NavBharatAI', () => {
     // Reported verbatim: user deploys via Settings → Hosting & Deploy → Deploy to NavBharatAI, gets
     // this link, opens it — and sees NavBharatAI instead of their own app.
@@ -79,3 +84,4 @@ describe('the exclusion list cannot silently drift again (the bug class, not jus
     for (const p of SERVER_ROUTE_EXACT) expect(p.endsWith('/'), p).toBe(false);
   });
 });
+

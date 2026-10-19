@@ -4,7 +4,7 @@ import { clarityJudgeAsk } from '../AgentV3/clarityJudgeAsk';
 import { platformVoiceEnabled, voiceOf, voiceRequestedIn, eventInUserVoice } from '../AgentV3/platformVoice';
 import { silenceMemoryEnabled, sharedProviderSilenceMemory } from '../AgentV3/providerSilenceMemory';
 import { soloKeeps, soloArchitectNote, soloInputOf, buildsSolo } from '../AgentV3/soloBuild';
-import { templateInstantPreviewEnabled, shouldUseSlimPrompt, isTemplateVerifyJob, capTemplateVerifyEstimate } from '../AgentV3/templateVerify';
+import { templateInstantPreviewEnabled, shouldUseSlimPrompt, isTemplateVerifyJob, capTemplateVerifyEstimate, verbatimTemplateSkipsModel, settleVerbatimTemplate, startTemplatePreview, templateRunResult, templateCountsAsGated } from '../AgentV3/templateVerify';
 import { teacherPromoFor } from '../lib/freeChatReplies';
 import { BoundedCache } from '../lib/boundedCache';
 import { FILE_SIZE_RULE, READ_GUIDE_TOOL, fileSizeRuleEnabled, moduleText, modularizePrompt, modularPromptEnabled } from '../AgentV3/reliability/modularPrompt';
@@ -52,7 +52,7 @@ import { parseKeyPool } from '../lib/keyPool';
 import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
-import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
+import { fileBudgetForPrompt, foldPlanToBudget, fileBudgetReport } from '../AgentV3/fileBudget';
 import { firstEtaLine, formatEtaRange, fleetEtaLine, etaTickLine, etaPhaseLine } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity } from '../AgentV3/complexityRouting';
@@ -383,6 +383,7 @@ import { uiWithoutBuildVerdict } from '../AgentV3/uiWithoutBuild';
 import { repeatedReadSummary, READ_LOOP_LIMIT } from '../AgentV3/repeatedReads';
 import { noteTodoOnlyTurn } from '../AgentV3/todoOnlyTurn';
 import { finishingPassMayRun, recordFinishingPassesHeld } from '../AgentV3/finishingPassesAtCap';
+import { recheckAfterFinishingWrites, postGreenRecheckEnabled } from '../AgentV3/finishingRecheck';
 import { APPEND_WITH_EMPTY_OLD_STRING } from '../AgentV3/appendByEdit';
 import { greenGuardUndidWork, withGreenGuardCorrection, type GreenGuardRestoreFacts } from '../AgentV3/greenGuardHonesty';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
@@ -1091,69 +1092,9 @@ export function deriveWorkspaceId(userId: string | null, sessionId: unknown): st
  * complete-app request — must flip to an EDIT. The destructive rebuild path must never be reachable
  * through an infra hiccup. Pure.
  */
-/**
- * Fix 41 (report 2026-07-08) — the instruction injected into the architect prompt when a GitHub-URL
- * import FAILED this turn. Without it the model, seeing an empty workspace and a "survey this repo"
- * ask, replied "I don't see a repository URL in your message — please share it" 15 seconds after the
- * platform itself said "I couldn't clone <url>". This makes the model ACKNOWLEDGE the exact URL and
- * the real reason (private/no-access/bad-url) and tell the user how to grant access — never re-ask
- * for the URL they already gave. Returns '' when no import failed. Pure.
- */
-export function failedImportPromptNote(failed: { url: string; reason: string } | null | undefined): string {
-  if (!failed || !failed.url) return '';
-  return [
-    'IMPORTANT — A GITHUB IMPORT WAS ALREADY ATTEMPTED AND FAILED THIS TURN.',
-    `The user DID provide a repository URL: ${failed.url}`,
-    `The import failed because ${failed.reason}.`,
-    'Do NOT ask the user for the repository URL — they already gave it. Acknowledge that this exact',
-    'URL could not be accessed, and if it is private tell them to connect the GitHub account that owns',
-    'it via ⚙ → GitHub (or double-check the URL). Keep the reply short and do not contradict the',
-    'message the platform already showed them. Do NOT clone the repository yourself into a temp',
-    'directory and report success — those files would NOT persist into the workspace.',
-  ].join('\n');
-}
-
-/**
- * INSTANT-CONNECT survey note (admin 2026-07-24). When the GitHub API tree + key files were fetched
- * up-front, give the architect the repo's real structure and key-file contents so it can survey the app
- * IMMEDIATELY — no waiting on the full download/land. Bounded so a huge repo never floods the prompt.
- * Returns '' when there is no instant-connect data. Pure.
- */
-export function importSurveyPromptNote(
-  survey: { url: string; fileCount: number; structure: string; keyFiles: Record<string, string>; truncated: boolean } | null | undefined,
-): string {
-  if (!survey || !survey.url) return '';
-  const lines = [
-    'IMPORTED PROJECT — you are connected to the user\'s GitHub repository and its files are being loaded into the workspace.',
-    `Repository: ${survey.url}`,
-    `It contains ${survey.fileCount} file(s)${survey.truncated ? ' (large repo — the listing below is partial)' : ''}. Top-level structure: ${survey.structure}.`,
-  ];
-  const keys = Object.keys(survey.keyFiles);
-  if (keys.length > 0) {
-    lines.push('', 'Key files (read directly from the repo, for your survey):');
-    for (const k of keys) {
-      lines.push(`\n----- ${k} -----\n${survey.keyFiles[k]}`);
-    }
-  }
-  lines.push('', 'Use this to give an accurate survey of what the app is and how it is structured. Do not claim you cannot see the repository — you are connected to it.');
-  return lines.join('\n');
-}
-
-/** The leading marker of the honesty-backstop prefix — used to avoid prepending it twice. */
-export const IMPORT_HONESTY_PREFIX_MARK = '⚠️ The GitHub import did not complete';
-
-/**
- * HONESTY BACKSTOP (mitrify autopsy 2026-07-23, rule 5). When a GitHub import FAILED this turn, the
- * user-facing summary must NOT read as an import success — even if the model's prose claims it cloned the
- * repo "successfully". (Real case: the model surveyed a `/tmp` clone that never landed, so the workspace was
- * empty while the summary said "ready for further work".) This prepends the platform's honest verdict so the
- * truth is the FIRST thing the user reads; the model's prose still follows but can no longer stand alone as a
- * false success. Returns '' when no import failed. Pure.
- */
-export function importHonestySummaryPrefix(failed: { url: string; reason: string } | null | undefined): string {
-  if (!failed || !failed.url) return '';
-  return `${IMPORT_HONESTY_PREFIX_MARK} — ${failed.url} could not be imported (${failed.reason}). Your workspace does not contain that repository, so anything below is not a saved import.\n\n———\n`;
-}
+// Import-turn prompt notes moved to AgentV3/importPromptNotes.ts (item 5); re-exported for existing importers.
+export { failedImportPromptNote, importSurveyPromptNote, IMPORT_HONESTY_PREFIX_MARK, importHonestySummaryPrefix } from '../AgentV3/importPromptNotes';
+import { failedImportPromptNote, importSurveyPromptNote, IMPORT_HONESTY_PREFIX_MARK, importHonestySummaryPrefix } from '../AgentV3/importPromptNotes';
 
 export function rebuildGuardFlipsToEdit(opts: {
   intent: string;
@@ -1460,9 +1401,12 @@ export function reviewerShouldRun(opts: {
   fastLaneGated: boolean;
   reviewFastlaneForced: boolean;
   startTierSonnet: boolean;
+  /** A verbatim chip already delivered its tested template (Q-963). No model review of a file we wrote. */
+  templateDelivered?: boolean;
 }): boolean {
   return opts.wroteFiles
     && !opts.isImportTurn
+    && !opts.templateDelivered
     && (!opts.fastLaneGated || opts.reviewFastlaneForced || opts.startTierSonnet);
 }
 
@@ -16793,12 +16737,14 @@ async function noteBuildOutcome(
           // exists for exactly this call — it defaults to the first argument, so omitting it sized the app
           // the MODEL is told to build from notes+request while the overrun recorded five lines below read
           // the bare prompt. Two answers to one question; the model's was the wrong one.
-          const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework, scaffold), manifestUserPrompt(withRequestNotes(prompt, requestNotesText), scaffold, prompt)));
-          // FILE BUDGET honesty (admin 2026-08-02): the plan is NEVER trimmed — shipping an incomplete app
-          // would be far worse than shipping a large one — but an overrun is recorded so "this app planned
-          // more files than it should need" is measurable instead of invisible.
+          const parsedForBudget = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework, scaffold), manifestUserPrompt(withRequestNotes(prompt, requestNotesText), scaffold, prompt)));
+          const foldedManifest = foldPlanToBudget(parsedForBudget, fileBudgetForPrompt(prompt));
+          const manifest = foldedManifest.files;
+          // FILE BUDGET honesty (admin 2026-08-02): an overrun is recorded against the RAW plan, and the
+          // files past the ceiling are folded into a kept file (`foldPlanToBudget`) instead of each
+          // becoming its own model call. Nothing is deleted.
           try {
-            const overNote = overBudgetNote(manifest.length, fileBudgetForPrompt(prompt));
+            const overNote = fileBudgetReport(parsedForBudget.length, fileBudgetForPrompt(prompt), foldedManifest);
             if (overNote) buildDiag.record({ phase: 'plan', severity: 'warning', code: 'FILE_BUDGET_EXCEEDED', message: overNote, autoResolved: true });
           } catch { /* budget telemetry is best-effort */ }
           // THE ETA'S FIRST REAL FACT. Up to this point the estimate came from counting words in the
@@ -19193,6 +19139,18 @@ async function noteBuildOutcome(
           try { await saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* durable save is best-effort */ }
         }
       }
+
+      // Q-963 — a verbatim chip whose tested template parsed is the app. No architect loop, no review.
+      // The decision lives in templateVerify.ts so this handler grows no branch (Q-979).
+      const verbatimTemplate = await settleVerbatimTemplate({
+        skip: verbatimTemplateSkipsModel({ preseeded: goldenPreseeded, tier: goldenPreseededTier, prompt }),
+        files: Object.fromEntries(preseededGolden),
+        startPreview: () => startTemplatePreview(templateInstantPreviewEnabled(), () => dispatcher.dispatch({ id: 'template-verify-preview', name: 'update_preview', input: { port: 5173 } }, 'architect', { signal: abort.signal }).then(() => undefined)),
+        narrate: (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }),
+        record: (row) => { try { buildDiag.record({ phase: 'build', severity: row.severity, code: row.code, message: row.message, autoResolved: true }); } catch { /* best-effort */ } },
+      });
+      result = templateRunResult(result, verbatimTemplate);
+      fastLaneGated = templateCountsAsGated(fastLaneGated, verbatimTemplate.deliver);
 
       // FREE-TIER: never escalate a free build — escalation climbs to Sonnet/Claude, and a not-yet-
       // paying user's build must never spend that budget. A failed free build converts to paid (upsell).
@@ -22418,6 +22376,35 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* app-scaffold defaults are best-effort — never affect the build result */ }
+      // POST-GREEN FINISHING RE-CHECK (owner item 2, finishingRecheck.ts): the passes above can write after
+      // this build was already proven green. One look; only a CONCLUSIVE non-render rolls back exactly their
+      // files to the last green snapshot. Kill switch AGENTV3_POST_GREEN_RECHECK=off.
+      await recheckAfterFinishingWrites({
+        enabled: postGreenRecheckEnabled() && !!lastPreviewUrl && typeof actuator.browseUrl === 'function',
+        greenAt: inBuildGreenAt,
+        paths: [...finishingPaths],
+        aborted: () => abort.signal.aborted,
+        look: async () => {
+          const shot = await withTimeout(actuator.browseUrl!(workspaceId, internalPreviewUrl(lastPreviewUrl)), 25_000, 'post-green-recheck');
+          const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source, hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined });
+          return { rendered: isProvenGreenRender(shot, v), conclusive: v.rendered || (!v.inconclusive && !v.serverDown) };
+        },
+        loadSnapshot: () => loadWorkspaceFiles(greenWorkspaceKey(workspaceId)),
+        restore: async (plan) => {
+          const restoredFiles: Record<string, string> = {}; // only what actually landed is persisted
+          await runInPass('green-guard-restore', async () => {
+            for (const [path, content] of Object.entries(plan.write)) {
+              try { await actuator.writeFile(workspaceId, path, content); writtenFiles.set(path, content); noteFinishingWrite(path); restoredFiles[path] = content; } catch { /* per-file best-effort */ }
+            }
+          });
+          const rm = buildRemoveCommand(plan.remove);
+          if (rm) await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'post-green-remove').catch(() => null);
+          for (const path of plan.remove) writtenFiles.delete(path);
+          if (Object.keys(restoredFiles).length > 0) await saveWorkspaceFiles(workspaceId, restoredFiles).catch(() => {});
+          if (plan.remove.length > 0) await removeWorkspaceFiles(workspaceId, plan.remove).catch(() => {});
+        },
+        record: (note) => { try { buildDiag.record({ phase: 'preview', ...note }); } catch { /* best-effort */ } },
+      });
 
       if (
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
@@ -24820,6 +24807,7 @@ async function noteBuildOutcome(
         fastLaneGated,
         reviewFastlaneForced: envFlag('AGENTV3_REVIEW_FASTLANE'),
         startTierSonnet: analysis?.startTier === 'sonnet',
+        templateDelivered: verbatimTemplate.deliver,
       });
       // A Project Mode module that a later module assembles is not reviewed as an app: the reviewer would
       // read a half-built project and report the starter page as the product. The shell turn reviews the

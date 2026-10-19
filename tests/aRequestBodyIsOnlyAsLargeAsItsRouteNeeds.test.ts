@@ -28,6 +28,9 @@ const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
  * is on neither list.
  */
 const REVIEWED_SMALL: Record<string, string> = {
+  '/api/failedbr/oauth/register': 'OAuth metadata only: at most five 512-character redirect URLs, 60-character name; 16 KB JSON limit',
+  '/api/failedbr/oauth/token': 'OAuth code/verifier or refresh token and client authentication; 16 KB JSON/form limits',
+  '/api/failedbr/oauth/revoke': 'one token plus client authentication; 16 KB JSON/form limits',
   '/api/failedbr/mcp': 'read-only JSON-RPC method and arguments: cursor capped at 2048 characters, ids at 400; accepts no report, file or image payload; default small body limit applies',
   '/api/admin/mfa/verify': '`code` is a 6-digit TOTP code',
   '/api/gallery/admin/:id/review': '`decision` is one of three words; `note` is cut to 500 characters by readReviewReason (storeReviewReason.ts, Q-681); `reasonContract` is a number',
@@ -458,3 +461,4 @@ describe('🔒 Q-674: a route-specific limit lives in the one parser that runs',
     expect(smallBodyLimit('/api/profile/budget')).toBeNull();
   });
 });
+

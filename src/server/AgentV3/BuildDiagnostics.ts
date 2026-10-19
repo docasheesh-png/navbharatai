@@ -103,6 +103,7 @@ export const PROCESS_ONLY_CODES = new Set([
   'GREEN_GUARD_UNVERIFIED',   // "could not be opened to check this turn" — the class of PREVIEW_UNVERIFIED
   // A restore point OUR save did not keep (GT-6). The app rendered; the miss is the store, not the app.
   'IN_BUILD_GREEN_SKIPPED_PARTIAL_SCAN', 'IN_BUILD_GREEN_NOT_SAVED', 'GREEN_SNAPSHOT_NOT_SAVED',
+  'POST_GREEN_RECHECK_OK', 'POST_GREEN_RECHECK_INCONCLUSIVE', 'POST_GREEN_ROLLBACK', 'POST_GREEN_ROLLBACK_SKIPPED',
   'HEAL_NOT_DURABLE',         // our repair wrote twice to one file; the user never sees repair passes
   'IMPORT_NOT_DURABLE',       // our store did not confirm saving an import (autopsy d0b2fcd6, Q-735) — their app is unchanged
   'IMPORT_DURABLE_PENDING',   // our background save of an import was still running when the turn ended (build d62bf22d) — their app is unchanged

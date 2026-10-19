@@ -622,6 +622,8 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
     
    }
   
+  // MCP discovery must return JSON before Vite/the SPA fallback can answer with index.html.
+  registerFailedReportRoutes(app);
   await initializeServer();
 
   // Auth routes (OTP gateway) — extracted to src/server/routes/auth.ts (Phase 1).
@@ -745,7 +747,6 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   registerSyncRoutes(app);
   registerPaymentRoutes(app, paymentLimiter);
   registerAdminRoutes(app, adminLimiter);
-  registerFailedReportRoutes(app);
   // MONITOR — point the shared metrics registry at the time-series store, ONCE. Every existing
   // getMetrics().recordBuild/recordModelCall call site then feeds the admin Monitor's charts with no
   // change at those call sites (see metricsTimeline.ts for why it is a sink and not a direct import).
@@ -1272,3 +1273,4 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
     process.exit(1);
   }
 })();
+

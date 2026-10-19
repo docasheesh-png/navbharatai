@@ -243,5 +243,13 @@ describe('the summary and the A/B comparison', () => {
     expect(s.llmCalls.mean).toBeNull();
     expect(s.cachedShare).toBeNull();
   });
+  it('an incomplete ledger cannot look like a cheaper candidate in the A/B comparison', () => {
+    const partial = file('partial', [run('a', metrics({ evidence: evOf({ diagnostics: {
+      providerTokens: { A: { inputTokens: 10, outputTokens: 2 }, B: { outputTokens: 3 } },
+    } }) }))]);
+    const input = compareEvidence(base, partial).rows.find((r) => r.metric === 'input tokens / build')!;
+    expect(input.candidate).toBeNull();
+    expect(input.nCandidate).toBe(0);
+    expect(input.deltaPct).toBeNull();
+  });
 });
-

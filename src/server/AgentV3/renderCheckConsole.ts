@@ -148,3 +148,54 @@ export function splitAuthRefusals(lines: readonly string[]): { kept: string[]; a
   for (const l of Array.isArray(lines) ? lines : []) (isAuthRefusalEcho(l) ? authRefusals : kept).push(l);
   return { kept, authRefusals };
 }
+
+/**
+ * 🔴 A MISSING STATIC ASSET IS NOT A RENDER FAILURE (build 19e5f6fb "Sonu online clases", 2026-10-18).
+ *
+ * The app rendered in a real browser at 551 s (PROD_BUILD_OK, typecheck clean, screenshot fine). Then
+ * the production-defaults pass wrote index.html tags (manifest / icon / sw.js registration) and its
+ * public/ files, and the next render check saw ONE console line:
+ *
+ *     Failed to load resource: the server responded with a status of 404 (Not Found)
+ *
+ * Every render check requires `consoleErrs.length === 0` (routes/agentv3.ts verify loop, render rescue,
+ * last-chance proof), so that one line made a visibly rendered app PREVIEW_NOT_RENDERED →
+ * OUTCOME_PREVIEW_FAILED → gate RED → ₹0. A repair could not fix it: the app code was never wrong.
+ *
+ * A 404 *response echo* is Chromium's report that some sub-resource (favicon, manifest, icon, font,
+ * image, service worker) was not there. It cannot by itself stop a page from painting — a missing JS
+ * module or a crash shows up as its own error, and if the page really did not paint the DOM verdict says
+ * "not rendered" on its own. So the echo is dropped from the RENDER verdict only when it is:
+ *   • URL-less (Chromium's usual form — it cannot be tied to app code), or
+ *   • names a static asset (icon / manifest / sw.js / font / image / robots / css map).
+ * A 404 naming a .js/.ts/.tsx module, every 5xx, uncaught errors and thrown fetches still count.
+ *
+ * `AGENTV3_ASSET_404_IGNORE=off` restores the old behaviour without a deploy.
+ */
+export const RESOURCE_404_ECHO_RE = /Failed to load resource: the server responded with a status of 404\b/i;
+export const STATIC_ASSET_URL_RE =
+  /(?:favicon[^\s]*|\/sw\.js|service-?worker\.js|manifest(?:\.webmanifest|\.json)|\.(?:ico|png|jpe?g|gif|webp|avif|svg|woff2?|ttf|otf|eot|webmanifest|map|txt|mp3|mp4|webm))(?:[?#][^\s]*)?(?:\s|$|\)|,)/i;
+const MODULE_URL_RE = /https?:\/\/\S+\.(?:m?[jt]sx?|vue|svelte)(?:[?#]\S*)?/i;
+
+function asset404IgnoreEnabled(): boolean {
+  return (process.env['AGENTV3_ASSET_404_IGNORE'] ?? '').trim().toLowerCase() !== 'off';
+}
+
+/** True when a console line is only a 404 for a static asset (or a URL-less 404 echo). PURE. */
+export function isStaticAssetMiss(text: unknown): boolean {
+  const t = String(text ?? '');
+  const is404Echo = RESOURCE_404_ECHO_RE.test(t) || /\b404\b.*\(Not Found\)/i.test(t) && /Failed to load resource/i.test(t);
+  if (!is404Echo) return false;
+  if (STATIC_ASSET_URL_RE.test(t + ' ')) return true; // icon / manifest / sw.js / font / image
+  if (MODULE_URL_RE.test(t)) return false;               // a missing code module is real evidence
+  return !/https?:\/\/|\s\/[\w.-]/.test(t);          // URL-less echo: cannot be tied to app code
+}
+
+/** Split render-check console lines into judging lines and static-asset 404 echoes. PURE. */
+export function splitAssetMisses(lines: readonly string[]): { kept: string[]; assetMisses: string[] } {
+  const kept: string[] = [];
+  const assetMisses: string[] = [];
+  const on = asset404IgnoreEnabled();
+  for (const l of Array.isArray(lines) ? lines : []) (on && isStaticAssetMiss(l) ? assetMisses : kept).push(l);
+  return { kept, assetMisses };
+}

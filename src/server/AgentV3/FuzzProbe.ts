@@ -249,3 +249,37 @@ export function fuzzRepairPrompt(findings: { input: FuzzInput; case: FuzzCase; v
 export function redTeamEnabled(): boolean {
   return envFlag('AGENTV3_REDTEAM');
 }
+
+/**
+ * 🔴 THE SILENT 90 SECONDS AFTER GREEN (build 2f46a4d8, 2026-10-18). The release gate went GREEN at 231.8 s and
+ * RUNTIME_VERIFIED landed at 329.9 s with NOTHING recorded between: the red-team pass ran there, with a 90 s
+ * deadline checked only BETWEEN cases (each case could still spend up to 39 s in its own browser timeouts), and a
+ * clean run wrote no line at all. The user sat on "running the final checks" for a pass that found nothing.
+ *
+ * Now the whole pass has an env budget (default 30 s), every browser step is clipped to what is left of it, and
+ * the pass always records how long it took and how many cases ran. AGENTV3_REDTEAM_BUDGET_MS=90000 restores the
+ * old budget. PURE.
+ */
+export const REDTEAM_BUDGET_MS_DEFAULT = 30_000;
+
+export function redTeamBudgetMs(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(String(env.AGENTV3_REDTEAM_BUDGET_MS ?? '').trim());
+  return Number.isFinite(n) && n >= 5_000 ? Math.min(n, 300_000) : REDTEAM_BUDGET_MS_DEFAULT;
+}
+
+/** One browser step's timeout: its own cap, never past the pass's deadline (at least 1 s so it can fail cleanly). */
+export function redTeamStepMs(deadline: number, capMs: number, now: number = Date.now()): number {
+  return Math.max(1_000, Math.min(capMs, deadline - now));
+}
+
+/** What the pass did, always recorded — a clean run is a result, not silence. */
+export function redTeamRunNote(r: { casesRun: number; crashes: number; ms: number; budgetMs: number }): {
+  phase: 'readiness'; severity: 'info'; code: 'REDTEAM_RAN'; message: string; autoResolved: true;
+} {
+  const s = Math.round(r.ms / 1000);
+  return {
+    phase: 'readiness', severity: 'info', code: 'REDTEAM_RAN', autoResolved: true,
+    message: `Red-team pass: ${r.casesRun} hostile input case(s) in ${s}s (budget ${Math.round(r.budgetMs / 1000)}s), `
+      + `${r.crashes === 0 ? 'no crash' : `${r.crashes} crash(es)`}.`,
+  };
+}

@@ -53,7 +53,7 @@
 // absence is exactly what an aggregator's reviewer looks for.
 
 export const REFUND_POLICY_TITLE = 'Refund & Cancellation Policy';
-export const REFUND_POLICY_UPDATED = '21 September 2026';
+export const REFUND_POLICY_UPDATED = '18 October 2026';
 
 export const REFUND_POLICY = `# Refund & Cancellation Policy
 
@@ -96,7 +96,8 @@ This applies equally to:
 
 A refund window is the wrong instrument for the thing customers actually worry about, so NavBharatAI answers that worry inside the product rather than after the fact. These are enforced by the Platform, not merely promised here:
 
-- **A build that was meant to produce an app and did not succeed is not charged.** You are not billed for a failure.
+- **A build that was meant to produce an app and did not succeed is not charged.** You are not billed for a failure. A build fails when it ends without succeeding for any reason other than you stopping it.
+- **A build you stop yourself is not a failure, and you pay only for work you keep.** Unsending your message or typing "stop" counts the same as pressing Stop. You pay nothing if nothing at all had been written yet; if only our untouched starter template was in place and no app had yet been seen running; or if you stopped a change to an existing app before it was seen working. Once files had been written and an app had been seen running in the preview, even if it was still only our starter template, you pay for the work done up to that point, not for a full build. If you were building a new app, files of your own were saved, and no app had yet been seen running, you pay half of the work done so far, or what that work actually cost to run if that is more, and never more than the work done. This holds even if your Stop arrives after the build has finished and only its final checks are still running. Closing the app or losing your signal does not stop a build: it carries on and is billed normally.
 - **Where usage cannot be measured, nothing is charged.** We absorb it rather than estimate a number and bill you for a guess.
 - **If a defect on our side consumed your credit without delivering what was promised, we re-credit those tokens to your wallet.** There is no time limit on this, because the fault is ours.
 

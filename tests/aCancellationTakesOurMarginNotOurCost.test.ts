@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { decideCancelledBuildBill } from '../src/server/AgentV3/cancelledBuildBilling';
 import { decideMarkupOnProof } from '../src/server/AgentV3/previewEarnsMarkup';
+import { APP_KNOWLEDGE_BASE } from '../src/server/AppContext/AppKnowledgeBase';
 import type { AbortCause } from '../src/server/AgentV3/buildAbortCause';
 
 const route = readFileSync(resolve(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
@@ -28,7 +29,8 @@ const module_ = readFileSync(resolve(__dirname, '../src/server/AgentV3/cancelled
 const facts = (o: Partial<Parameters<typeof decideCancelledBuildBill>[0]> = {}) => ({
   abortCause: 'user-stop' as AbortCause,
   filesWritten: 12,
-  appRendered: false,      // the state in which BOTH rules fire — the whole subject of this suite
+  appRendered: false,
+  appRenderedAt: 1, stopRequestedAt: 2, // seen running BEFORE the stop (owner 2026-10-18) — so appRendered: true means a full-price stop      // the state in which BOTH rules fire — the whole subject of this suite
   decidedBilledUsd: 1.00,
   ...o,
 });
@@ -200,10 +202,15 @@ describe('the new message', () => {
  */
 describe('the wiring', () => {
   it('the route really passes the two real-cost numbers to the cancellation decision', () => {
-    const call = route.slice(route.indexOf('? decideCancelledBuildBill({'));
-    const body = call.slice(0, call.indexOf('        : null;'));
+    const call = route.slice(route.indexOf('const stopSettlement = settleStopOrFailure({'));
+    const body = call.slice(0, call.indexOf('const cancelBill = stopSettlement.cancelBill;'));
+    expect(body.length).toBeGreaterThan(0);
     expect(body).toMatch(/realCostUsd:\s*decidedRealCostUsd/);
     expect(body).toMatch(/sandboxUsd:\s*decidedSandboxUsd/);
+    // …and the deadline finalizer (round 4) feeds the same decision its own measured pair.
+    const wd = route.slice(route.indexOf('const wdStop = settleStopOrFailure({'));
+    expect(wd.slice(0, 1200)).toMatch(/realCostUsd:\s*decided\.realCostUsd/);
+    expect(wd.slice(0, 1200)).toMatch(/sandboxUsd:\s*decided\.sandboxUsd/);
   });
 
   it('they are the SAME two numbers the margin waiver is given — one cost, not two estimates', () => {
@@ -215,12 +222,12 @@ describe('the wiring', () => {
   it('🔒 ONE money statement — the cancellation message clears the waived-margin notice', () => {
     // Without this the floored charge equals the waiver's own figure, so the notice at the end of
     // the settle ALSO fires and the user is told the same thing twice in different words.
-    const emit = route.indexOf('if (cancelBill.userMessage) {');
+    const emit = route.indexOf('if (charged.userMessage) {');
     expect(emit).toBeGreaterThan(-1);
     const block = route.slice(emit, emit + 900);
     expect(block).toMatch(/waivedMarkupNotice = null;/);
     expect(block.indexOf('waivedMarkupNotice = null;'))
-      .toBeLessThan(block.indexOf('text: `🧾 ${cancelBill.userMessage}`'));
+      .toBeLessThan(block.indexOf('text: `🧾 ${charged.userMessage}`'));
   });
 
   it('the floor sits AFTER every ₹0 return, so it can never charge for an undelivered build', () => {
@@ -240,13 +247,15 @@ describe('the wiring', () => {
     // cancelled build charged?"*. It stated case (2) as a flat HALF — true until this change and
     // false after it, and nothing in tsc or the suite can see a stale sentence. CLAUDE.md's sync
     // rule is that it moves in the SAME commit; this is that rule with teeth.
-    const kb = readFileSync(resolve(__dirname, '../src/server/AppContext/AppKnowledgeBase.ts'), 'utf8');
+    // Round 4: the KB now QUOTES the public rule (STOPPED_BUILD_RULE_PLAIN), so read the value the AI
+    // actually receives, not the source text (which holds only the `${…}` reference).
+    const kb = JSON.stringify(APP_KNOWLEDGE_BASE);
     const rule = kb.slice(kb.indexOf('IF YOU STOP A BUILD YOURSELF'));
-    const caseTwo = rule.slice(0, rule.indexOf('(3) you stop before anything'));
+    const caseTwo = rule.slice(0, rule.indexOf('WHAT STAYS FREE'));
     expect(caseTwo).not.toMatch(/you pay HALF/);
-    expect(caseTwo).toMatch(/no service charge/i);
-    // The two protective halves of the sentence must both survive a later tidy-up.
-    expect(caseTwo).toMatch(/less than a finished build/);
-    expect(caseTwo).toMatch(/never less than what that work genuinely cost/);
+    // The two protective halves of the files-saved case must both survive a later tidy-up: the floor at
+    // real cost, and the cap at the work done.
+    expect(caseTwo).toMatch(/or what that work actually cost to run if that is more/);
+    expect(caseTwo).toMatch(/never more than the work done/);
   });
 });

@@ -31,3 +31,49 @@ describe('swUpdateCheck — throttled service-worker update re-check (B8)', () =
     expect(shouldCheckForUpdate(last, now + 999)).toBe(false);
   });
 });
+
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { controllerChangeReloader } from './swUpdateCheck';
+
+describe('controllerChangeReloader — reload only for a real SW update, never for the first install (P1-C)', () => {
+  it('🔴 a FIRST install claiming an uncontrolled page does NOT reload (the double page load)', () => {
+    let reloads = 0;
+    const onChange = controllerChangeReloader(false, () => { reloads += 1; });
+    expect(onChange()).toBe('adopted');
+    expect(reloads).toBe(0);
+  });
+
+  it('a deploy while the tab is open (one SW replacing another) reloads — exactly once', () => {
+    let reloads = 0;
+    const onChange = controllerChangeReloader(true, () => { reloads += 1; });
+    expect(onChange()).toBe('reloaded');
+    expect(onChange()).toBe('ignored');
+    expect(reloads).toBe(1);
+  });
+
+  it('first install, then a deploy later in the SAME tab: adopt first, reload on the real update', () => {
+    let reloads = 0;
+    const onChange = controllerChangeReloader(false, () => { reloads += 1; });
+    expect(onChange()).toBe('adopted');
+    expect(onChange()).toBe('reloaded');
+    expect(onChange()).toBe('ignored');
+    expect(reloads).toBe(1);
+  });
+
+  it('main.tsx wires it with the controller state read at startup, and has no unconditional reload', () => {
+    const main = readFileSync(resolve(process.cwd(), 'src/main.tsx'), 'utf8').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    expect(main).toMatch(/addEventListener\(\s*'controllerchange',\s*controllerChangeReloader\(!!navigator\.serviceWorker\.controller,/);
+    expect(main).not.toMatch(/reloadedForUpdate/);
+    // The update machinery the reload pairs with is untouched: register, update on load, periodic + refocus re-check.
+    expect(main).toContain("navigator.serviceWorker.register('/sw.js')");
+    expect(main).toContain('reg.update()');
+    expect(main).toContain('setInterval(checkForUpdate, SW_UPDATE_MIN_INTERVAL_MS)');
+  });
+
+  it('sw.js still activates immediately (skipWaiting + clients.claim), so a deploy is still picked up', () => {
+    const sw = readFileSync(resolve(process.cwd(), 'public/sw.js'), 'utf8');
+    expect(sw).toContain('self.skipWaiting()');
+    expect(sw).toContain('self.clients.claim()');
+  });
+});

@@ -286,6 +286,7 @@ import { runningBuilds, runningBuildCount, __setRunningBuildForTest, type Runnin
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
+import { chargeRecordFields } from '../lib/chargeRecord';
 import { startImportDurableSave, settleImportDurableSave, IMPORT_DURABLE_SETTLE_MS } from '../AgentV3/importDurableSave';
 import { announceBuildFinished, announceDeploy, serverPublishOutcome } from '../lib/userWebhookEvents';
 // The balance warning goes through ONE door now (admin 2026-09-22). It was a raw push on the block
@@ -426,7 +427,7 @@ import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState, lastAssistantText } from '../AgentV3/ProjectContext';
 import { refersToConversation, CONVERSATION_REPLY_MAX } from '../AgentV3/conversationReference';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
-import { decideCancelledBuildBill, freeCancellationMessage } from '../AgentV3/cancelledBuildBilling';
+import { decideCancelledBuildBill, stopFellInWindow, closeStylePassWindow, freeCancellationMessage } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
@@ -667,7 +668,7 @@ import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
 import { restateDesignAfterRepair } from '../AgentV3/designAfterRepair';
 import { withRequestNotes, requestNotesFor } from '../AgentV3/requestNotes';
-import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort } from '../AgentV3/buildAbortCause';
+import { abortBuild, abortCauseOf, abortRequestedAtOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { isAnswerOnlyTurn, answeredInsteadOfBuilding, previewFailedSeverity, previewFailedNarration, decideAnswerOnlyGate } from '../AgentV3/answerOnlyTurn';
@@ -6928,6 +6929,7 @@ async function noteBuildOutcome(
         return;
       }
       (rb.steerQueue ??= []).push(message);
+      rb.lastSteerAt = Date.now();
       // "Hindi me bolo" mid-build (autopsy eb58abaf): every platform line from here on follows it.
       if (platformVoiceEnabled()) { const asked = voiceRequestedIn(message); if (asked) rb.voice = asked; }
       // Instant, honest feedback to EVERY attached device: the message is queued (the runner emits
@@ -13052,6 +13054,8 @@ async function noteBuildOutcome(
     const buildObs: { previewRendered: boolean; telemetryRecorded: boolean } = { previewRendered: false, telemetryRecorded: false };
     /** What the model's last answer was (readTurnAnswer), carried to `answerOnlyNow` (answeredInsteadOfBuilding). */
     const answeredHolder: { asked: boolean; declined: boolean } = { asked: false, declined: false };
+    /** OUR style-floor pass window (STYLE_RULES_RESUMED → the architect's loop returning), for the stop bill. */
+    const stylePassWindow: { startedAt: number | null; endedAt: number | null } = { startedAt: null, endedAt: null };
     // ONE build must count ONCE. `finalizeOnDeadline` is guarded by `rb.ended`, but the advisory cap
     // fires 120s after a SUCCESSFUL result, so a long post-build tail can race the normal settle and
     // both exits can reach a recorder. Billing survives that on its idempotent buildRef; a counter has
@@ -16376,7 +16380,8 @@ async function noteBuildOutcome(
               : undefined,
           });
         } catch { /* the record must never be what prevents the stop */ }
-        abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'user-stop');
+        // The STOP WAS REQUESTED when the person's message arrived, not when the model acted on it.
+        abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'user-stop', rb.lastSteerAt);
       });
       // C2 — load the project's own "never touch this" list and ARM THE GUARD before any tool runs.
       // Reading the file into the prompt alone would be a wish, not a rule: a model told nicely still
@@ -17288,6 +17293,8 @@ async function noteBuildOutcome(
         // are built. The done signal must not tell a module turn it may stop (autopsy 50378049).
         projectModule: () => projectModuleRef?.name ?? null,
         onNote: (note: { code: string; message: string; detail?: string }) => {
+          // OUR style pass starts here (cancelledBuildBilling `stoppedDuringOurStylePass`).
+          if (note.code === 'STYLE_RULES_RESUMED' && stylePassWindow.startedAt === null) stylePassWindow.startedAt = Date.now();
           try { buildDiag.record({ phase: 'build', severity: 'info', code: note.code, message: note.message, detail: note.detail, autoResolved: true }); } catch { /* a note must never fail a build */ }
         },
         // A small new app is built by ONE agent (soloBuild.ts, autopsy ca99778e) — the prompt says so beside the tools.
@@ -19541,6 +19548,8 @@ async function noteBuildOutcome(
       }
       // result is always set here (OneShot, escalation, or the loop above).
       if (!result) result = await runner.run(buildPrompt);
+      // …and the architect's loop, and with it OUR style pass, is over.
+      closeStylePassWindow(stylePassWindow, Date.now());
 
       // ── EVERY WAY A BUILD IS STOPPED MUST REACH THE TIMELINE (autopsy b89ba6f8, 2026-09-17) ──────
       //
@@ -21860,6 +21869,8 @@ async function noteBuildOutcome(
       // but was never confirmed to render, so nothing here was proven to RUN" — 1.4 seconds after the
       // same build had watched it render. Nothing failed, nothing logged; the report simply lied.
       let previewVerifiedRendered = false;
+      /** When THIS pass first saw the app render (epoch ms) — compared with the stop request (cancelledBuildBilling). */
+      let appFirstRenderedAt: number | null = null;
       // When a real-browser render check last came back CLEAN (its start time). Every console line logged
       // before it has been answered by it, so the runtime auto-fix loop does not hand those to a repair
       // (autopsy 12511a9c — `runtimeAutofixSince`).
@@ -21903,6 +21914,7 @@ async function noteBuildOutcome(
        */
       const markAppRendered = (source: 'browser' | 'curl' | undefined, where: string): void => {
         previewVerifiedRendered = true; // the eyes SAW it render — the runtime verdict must not deny it
+        if (appFirstRenderedAt === null) appFirstRenderedAt = Date.now();
         buildObs.previewRendered = true; // the same observation, readable by the deadline finalizer
         // …and the third copy, on the stricter rule it has always had: a curl fallback's empty-shell
         // "render" is not proof, so only a real browser may hold a late flip (the Green Freeze rule).
@@ -26739,6 +26751,11 @@ async function noteBuildOutcome(
           // render rescue both read its size and mean something different by it.
           preseededUnchanged: [...preseededGolden].filter(([p, c]) => writtenFiles.get(p) === c).length,
           appRendered: appSeenRunningForBill,
+          // WAS IT RUNNING BEFORE THEY ASKED TO STOP? (r6–r10 autopsy, owner 2026-10-18.) A ledger-only proof
+          // has no time, so it cannot show it came first — that case is billed at cost, not in full.
+          appRenderedAt: appFirstRenderedAt,
+          stopRequestedAt: abortRequestedAtOf(abort.signal),
+          stoppedDuringOurStylePass: stopFellInWindow(abortRequestedAtOf(abort.signal), stylePassWindow.startedAt, stylePassWindow.endedAt),
           // An unverified EDIT may have left the user's working app worse than it started — see
           // `editingExistingApp` (autopsy 95598899). Read after appRendered, so a verified edit is
           // still charged in full.
@@ -26860,7 +26877,7 @@ async function noteBuildOutcome(
       // The display-only monthly cost (userCostStore) still records always — it is an internal
       // estimate surface, not a money movement.
       const billingActive = billingAppliesTo(userId, email);
-      let walletDebit: { tokensDebited: number; tokenBalance: number } | null = null;
+      let walletDebit: { tokensDebited: number; tokenBalance: number; debitedInr?: number; absorbedInr?: number } | null = null;
       if (userId && effectiveBilledUsd > 0) {
         userCostStore.record(userId, effectiveBilledUsd).catch(() => {});
       }
@@ -26906,7 +26923,7 @@ async function noteBuildOutcome(
             description: 'NavBharatAI Pro build',
           });
           if (debitRes.ok) {
-            walletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance };
+            walletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance, ...(typeof debitRes.debitedInr === 'number' ? { debitedInr: debitRes.debitedInr } : {}), ...(typeof debitRes.absorbedInr === 'number' ? { absorbedInr: debitRes.absorbedInr } : {}) };
           } else {
             console.error(`[AGENTV3 BILLING] Wallet debit FAILED for user ${userId} (build ${workspaceId}): ${debitRes.error} — cost was recorded but the balance was not decremented.`);
           }
@@ -27147,6 +27164,8 @@ async function noteBuildOutcome(
             realCostUsd: Math.round(decidedRealCostUsd * 1_000_000) / 1_000_000,
             sandboxCostUsd: Math.round(decidedSandboxUsd * 1_000_000) / 1_000_000,
             ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited } : {}),
+            // The HONEST charge (r6–r10): what left the wallet, and what the overdraft floor absorbed. billedInr above stays the bill.
+            ...chargeRecordFields(walletDebit),
             ...(zeroBillReason ? { zeroBillReason } : {}),
             powerMode: onlyOpus,
             powerLevel: powerLevelReqEffective,
@@ -27624,7 +27643,7 @@ async function noteBuildOutcome(
       // no way to tell a broken app from a working one carrying a wrong verdict, so it offered to
       // "fix" both — and fixing a working app is how we broke it. See failedButRunning.ts.
       // Additive and optional: an older BUNDLED Android client ignores the field entirely.
-      emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, appRendered: buildObs.previewRendered === true, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
+      emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, appRendered: buildObs.previewRendered === true, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...chargeRecordFields(walletDebit), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
       // Native push notification (admin 2026-07-26): fire-and-forget — never delays or fails the
       // response the client already has. A resumable module turn is an intermediate step, not a
       // finished build, so it's excluded (the user is mid-flow inside the app already).

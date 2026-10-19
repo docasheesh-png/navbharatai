@@ -69,6 +69,7 @@ export function registerLegalRoutes(app: Express): void {
       title: CONTACT_TITLE,
       updated: CONTACT_UPDATED,
       description: PUBLIC_PAGE_DESCRIPTIONS[CONTACT_PATH],
+      url: `${siteOrigin()}${CONTACT_PATH}`,
       body: contactDoc(grievanceOfficer()),
     }));
   });
@@ -80,6 +81,7 @@ export function registerLegalRoutes(app: Express): void {
       title: ACCOUNT_DELETION_TITLE,
       updated: ACCOUNT_DELETION_UPDATED,
       description: PUBLIC_PAGE_DESCRIPTIONS[DELETE_ACCOUNT_PATH],
+      url: `${siteOrigin()}${DELETE_ACCOUNT_PATH}`,
       body: ACCOUNT_DELETION,
     }));
   });
@@ -101,6 +103,7 @@ export function registerLegalRoutes(app: Express): void {
             title: GRIEVANCE_TITLE,
             updated: GRIEVANCE_UPDATED,
             description: PUBLIC_PAGE_DESCRIPTIONS[path],
+            url: `${siteOrigin()}${path}`,
             body: grievanceDoc(grievanceOfficer()),
           }));
           return;
@@ -120,7 +123,7 @@ export function registerLegalRoutes(app: Express): void {
         // A legal page must be current: a stale cached copy could show a reader terms that no longer
         // apply. Ten minutes is enough to absorb a crawl, short enough that an update is visible fast.
         res.set('Cache-Control', 'public, max-age=600');
-        res.type('html').send(renderLegalPageHtml({ title: doc.title, updated: doc.updated, body: doc.body, description: PUBLIC_PAGE_DESCRIPTIONS[path] }));
+        res.type('html').send(renderLegalPageHtml({ title: doc.title, updated: doc.updated, body: doc.body, description: PUBLIC_PAGE_DESCRIPTIONS[path], url: `${siteOrigin()}${path}` }));
       } catch {
         res.status(500).type('text/plain').send(
           'This document could not be loaded. Please email info@navbharatai.com and we will send it to you.',

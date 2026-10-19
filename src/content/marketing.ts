@@ -182,7 +182,7 @@ export const INDIAN_AI_ASSISTANT_PAGE: MarketingPage = {
   path: INDIAN_AI_ASSISTANT_PATH,
   title: 'Indian AI Assistant for Everyday Work — NavBharatAI',
   description:
-    'NavBharatAI is an AI assistant built in India for Indian users: chat in Hindi, English or Hinglish, pay in rupees by UPI, and get help with study, work and business.',
+    'An AI assistant built in India for Indian users: chat in Hindi, English or Hinglish, pay in rupees by UPI, and get help with study, work and business.',
   h1: 'An AI assistant built in India, for the way India works',
   intro: [
     'NavBharatAI is an AI platform made in India, by an Indian founder, for Indian users. It brings together an AI chat assistant, specialist assistants for everyday Indian needs, and an [AI app builder](/ai-app-builder) — in one app, on the web and on Android.',
@@ -237,7 +237,7 @@ export const HINDI_AI_ASSISTANT_PAGE: MarketingPage = {
   path: HINDI_AI_ASSISTANT_PATH,
   title: 'Hindi AI Assistant — Chat in Hindi & Hinglish | NavBharatAI',
   description:
-    'Ask NavBharatAI anything in Hindi, in Hinglish (Hindi in English letters) or in English. Learn, write, translate and even build apps in the language you think in.',
+    'Ask NavBharatAI anything in Hindi, Hinglish (Hindi in English letters) or English. Learn, write, translate and even build apps in the language you think in.',
   h1: 'A Hindi AI assistant that also understands Hinglish',
   intro: [
     'Most people in India do not type pure Hindi or pure English. They type both, often in the same sentence, and often in English letters. NavBharatAI is built for exactly that: write the way you speak, and it understands.',

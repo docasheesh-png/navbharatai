@@ -97307,3 +97307,15 @@ node_modules symlink was replaced with a real copied install, without changing
 package versions or weakening its directory guard. Final-source full checks and
 exact-head remote coverage/real-database drills are still required before push
 and merge. Phase2 remains IN PROGRESS; phases3–6 have not started.
+
+
+### 2026-10-20 — Phase 2 final-source census correction
+
+The post-ZIP full-suite preflight found one stale exact-assignment assertion in
+the server Firestore SDK census: verified admission now conditionally supplies
+null when coordination is disabled. The test now requires the real admin import,
+admin handle initializer and passing that store to claimWorkspaceBuild, while
+retaining both whole-server client-SDK and shared-client-handle prohibitions.
+Nine relevant files pass116/116 underNode22/UTC; no production code changed.
+The known-failing preflight was stopped and all final-source local checks must
+run again before push. No full-suite or remoteCI pass is claimed by this entry.

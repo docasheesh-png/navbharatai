@@ -28,6 +28,7 @@ import { audit } from './audit';
 import { loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { projectRefFromUrl } from './supabaseData';
 import { getProjectState, projectStateMessage, stateNeedsOwner } from './supabaseProjectState';
+import { ownedByVerifiedUid } from './workspaceIdentity';
 
 /** Where a database is created when the caller expresses no preference. */
 export const DEFAULT_REGION = 'ap-south-1';
@@ -240,6 +241,17 @@ export interface ProvisionInput {
  * A caller with no grant gets a 400 telling the user to connect first; it must never pretend it asked.
  */
 export async function provisionDatabaseForUser(uid: string, input: ProvisionInput = {}): Promise<ProvisionSuccess | ProvisionFailure> {
+  // Both HTTP and in-build callers reach this sequence. An app id is only a request to act on an
+  // app, never proof of ownership: without this boundary a caller could apply another user's saved
+  // migration SQL to a database in their own provider account and read the schema there.
+  // Refuse before reading the vault, creating a project, or loading any workspace source. Settings
+  // may still provision without an app; an app-scoped operation always needs a real verified owner.
+  const workspace = String(input.workspaceId ?? '').trim();
+  if (workspace && !ownedByVerifiedUid(uid, workspace)) {
+    return { ok: false, status: 403, error: 'This app is not on your account. No database was created or changed.' };
+  }
+  input = { ...input, workspaceId: workspace || undefined };
+
   // ── DO THEY ALREADY HAVE ONE? ───────────────────────────────────────────────────────────────────
   //
   // Asked BEFORE the OAuth grant is checked, and that order is deliberate: reusing a database the user
@@ -250,7 +262,6 @@ export async function provisionDatabaseForUser(uid: string, input: ProvisionInpu
   // 🔒 This is also where the leak is closed. A database used to be written SHARED, so every later app
   // received it without asking. Now it reaches an app only when the user presses the button on THAT
   // app — and pressing it hands them the one they have rather than spending a project slot.
-  const workspace = String(input.workspaceId ?? '').trim();
   if (workspace && !input.forceNew) {
     const rows = await loadUserVaultRows(uid).catch(() => []);
     if (!appHasOwnDatabase(rows, workspace)) {

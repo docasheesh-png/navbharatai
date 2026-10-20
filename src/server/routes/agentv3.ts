@@ -1043,32 +1043,10 @@ export function verifiedWorkspaceReadOk(verifiedUid: string | null, workspaceId:
 }
 
 /**
- * ⚠️ NON-STRICT: falls back to the CLAIMED body/query userId when there is no token. Kept ONLY for the
- * automatic build-loop surfaces (preview error/health reports, the build queue) where a token blip must
- * not hard-break a running build. Anything that READS a user's source, deploys it, restores it, or
- * pushes it uses `assertVerifiedWorkspaceOwner` (forensic audit 2026-10-04, P1: a token-less request
- * naming `agentv3-<victimUid>-<sid>` with `userId: <victimUid>` read the victim's whole source tree and
- * could deploy it with the victim's own keys). `tests/aClaimedUidReadsNoOnesSource.test.ts` holds the line.
- */
-async function assertWorkspaceOwner(req: Request, workspaceId: string): Promise<boolean> {
-  const verifiedUid = await verifyFirebaseToken(req);
-  // Claimed id may come from the JSON body (POST) or the query string (GET).
-  const claimedUid =
-    (typeof req.body?.userId === 'string' ? req.body.userId : null) ??
-    (typeof req.query?.userId === 'string' ? req.query.userId : null);
-  return workspaceOwnershipOk(verifiedUid, claimedUid, workspaceId);
-}
-
-/**
- * SECURITY (T0-9 convergence, 2026-07-19) — STRICT owner gate for the DESTRUCTIVE writes (exec,
- * delete-files, import-files, visual-edit). Unlike `assertWorkspaceOwner` (which keeps a claimed-uid
- * fallback so a token-blip BUILD never hard-breaks), these highest-stakes operations demand the VERIFIED
- * uid own a real workspace: a token-less caller who merely LEARNED `agentv3-victim-{sid}` can no longer
- * run an arbitrary command or delete files on it by claiming the victim's uid. Anon workspaces stay
- * reachable by their unguessable sid (capability model unchanged), and a legit owner with a transient
- * token blip self-heals (403 → the client refreshes its token and retries — and these are explicit,
- * user-initiated actions, not the automatic build loop). Reuses the tested `verifiedWorkspaceReadOk`
- * (verified-owner-or-anon-capability), so the strict rule is identical to the private-report read gate.
+ * Every workspace route requires the VERIFIED owner of a real workspace. A token failure must
+ * refuse before reading files, probing/restarting a sandbox, or mutating diagnostics/queues.
+ * The client refreshes its token and retries once; a claimed body/query uid is never authority.
+ * Anon workspaces retain the existing unguessable-session capability policy.
  */
 async function assertVerifiedWorkspaceOwner(req: Request, workspaceId: string): Promise<boolean> {
   return verifiedWorkspaceReadOk(await verifyFirebaseToken(req), workspaceId);
@@ -4775,7 +4753,7 @@ async function noteBuildOutcome(
     // check: anyone who learned a workspaceId (e.g. via the now-closed enumeration leak) could
     // download another user's full report — generated source, prompts, errors. Two guards:
     //  • workspace-scoped read (history / session / buildId / latest-by-workspace): require ownership
-    //    of the workspaceId. assertWorkspaceOwner grants the anon-capability case too (an
+    //    of the workspaceId. assertVerifiedWorkspaceOwner grants the anon-capability case too (an
     //    agentv3-anon-* workspace is reachable by its unguessable id), so Fix-26 report downloads work.
     //  • per-user fallback (no workspaceId → loadLatestForUser / in-memory): resolve the owner from the
     //    VERIFIED token below, NEVER the query userId — else `?userId=victim` fetched victim's report.
@@ -5490,9 +5468,9 @@ async function noteBuildOutcome(
     const message = typeof req.body?.message === 'string' ? req.body.message.slice(0, 4000) : '';
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId || !message) { res.status(400).json({ error: 'workspaceId and message are required.' }); return; }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     // SECURITY (T0-9): the per-USER "latest report" slot is keyed off the VERIFIED uid, NEVER the claimed
-    // body.userId. Since assertWorkspaceOwner passes for ANY caller on an agentv3-anon-* workspace, keying
+    // body.userId. Since assertVerifiedWorkspaceOwner passes for ANY caller on an agentv3-anon-* workspace, keying
     // that slot by the claim let an attacker (owning their own anon workspace) set body.userId=<victim> and
     // OVERWRITE the victim's downloadable "latest build report" with attacker-supplied content. The
     // workspace-keyed durable copies below stay workspace-scoped (already ownership-checked); only this
@@ -5647,7 +5625,7 @@ async function noteBuildOutcome(
     const framework = typeof req.body?.framework === 'string' ? req.body.framework : 'vite-react';
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     // OPTION A — a PERSON pressing Diagnose / Restart / Wake up is evidence their app is not working.
     // Nobody does that to an app that works. `userInitiated` is what separates it from the watchdog's
     // own automatic heal of a sleeping sandbox, which is routine and must never be read as a failure —
@@ -6245,7 +6223,7 @@ async function noteBuildOutcome(
     const framework = typeof req.body?.framework === 'string' ? req.body.framework : 'vite-react';
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     try {
       // hasFiles is DURABLE (Firestore) — true even years later on a long-dead sandbox.
       const fileCount = await raceTimeout(countWorkspaceFiles(workspaceId), 4_000, 'previewHealthFiles').catch(() => 0);
@@ -6654,7 +6632,7 @@ async function noteBuildOutcome(
   /** Enqueue a command for THIS app. `source`: 'user' (typed) | 'planner' | 'advisor' (a non-writing
    *  chat handing work to the executor). Returns the updated queue + summary.
    *  🔒 Every queue route takes the VERIFIED owner (audit 2026-10-11): a queued prompt becomes a build that
-   *  spends its owner's wallet, so the claimed-uid fallback `assertWorkspaceOwner` keeps for token blips let
+   *  spends its owner's wallet, so the former claimed-uid owner fallback let
    *  anyone who learned a workspace id and its owner's uid queue work on that owner's money. */
   app.post('/api/agentv3/queue/enqueue', async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';

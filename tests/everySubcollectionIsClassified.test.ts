@@ -85,7 +85,7 @@ const CLASSIFICATION: Record<string, Kind & { clock?: true; erasedBy?: string; f
   'src/server/project/BuildHistoryStore.ts › versions': {
     kind: 'bounded',
     why: 'MAX_SAVED_VERSIONS per session; the oldest is deleted on every save',
-    erasedBy: 'src/server/lib/derivedIdErase.ts',
+    erasedBy: 'src/server/lib/workspaceDataErase.ts',
   },
   'src/server/lib/navStoreWebData.ts › dataSub': { kind: 'bounded', why: 'NavData rows: MAX_ROWS_PER_APP per app, the quota that IS the admin authorization' },
 

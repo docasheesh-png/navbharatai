@@ -12,8 +12,9 @@
 // found, read, correctly judged unreachable, and recorded in `BUILD_REPORT_QUEUE.md` as an open row
 // rather than registered on a guess:
 //
-//   · Q-764  `build_history/{sessionId}` + its `versions` subcollection — every build's version
-//            metadata for every app. A BARE sessionId, which the `agentv3-{uid}-` range cannot match.
+//   · Q-764  `build_history_v2/{workspaceId}` + its `versions` subcollection — canonical histories can
+//            also be resolved from the owner's build rows before other erasers remove those rows.
+//            Legacy BARE sessionId rows have no proven owner and are retained pending attribution.
 //   · Q-761  `bot_sessions/{botId}_{chatId}` (`BotStore.ts:283/296`) — per-chat conversation state for
 //            a bot whose owner is gone. Reachable from the BOT, never from the uid.
 //
@@ -51,7 +52,7 @@
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
-import { workspacePrefixFor } from './workspaceIdentity';
+import { workspacePrefixFor, WORKSPACE_PREFIX, ANON_WORKSPACE_PREFIX } from './workspaceIdentity';
 // Q-784: the same ownership predicate the workspace eraser applies to every document its range matched.
 import { eraseableWorkspaceId } from './workspaceDataErase';
 
@@ -80,32 +81,6 @@ export function planBotSessionErase(botId: string | null | undefined): PrefixRan
 }
 
 /**
- * Every `build_history` document id belonging to this user, from the two EXACT sources — never a guess.
- *
- *  · `sessionIds` — the `sessionId` field of `user_build_history where userId == uid`
- *    (`UserBuildHistoryStore.ts:27/79`). Already a uid-indexed collection, so these are exact.
- *  · `workspaceIds` — the ids the `agentv3-{uid}-…` range returns, with that prefix stripped back off.
- *    `buildHistoryAccess.ts` states the relationship and `restorePointKey` is the function that
- *    performs it: "the workspace is `agentv3-{uid}-{sessionId}`, and `restorePointKey` strips the
- *    prefix back off, so the history document id is the bare `pro-<ts>`".
- *
- * BOTH are used, unioned, because neither is provably complete on its own: a build can write version
- * history without a `user_build_history` row, and a workspace can be gone while its history is not.
- * Taking the union can only find MORE of the user's own documents; it cannot reach anyone else's,
- * because every input is already restricted to this user.
- *
- * A workspace id that does not carry this user's prefix is dropped rather than used bare — bare would
- * mean deleting `build_history/{someOtherWorkspaceId}`.
- *
- * 🔴 AND A HYPHENATED UID RESOLVES NOTHING AT ALL, for the reason `planWorkspaceErase` already refuses
- * one: `agentv3-{uid}-` is ambiguous when the uid may contain `-`, so `agentv3-abc-d-pro-1` is both
- * `abc-d`'s workspace `pro-1` and `abc`'s workspace `d-pro-1`. Splitting it would hand this function a
- * key belonging to a DIFFERENT person. The check is repeated here rather than left to the caller
- * because this is the function that performs the split, and a pure guard is the one that can be tested.
- *
- * PURE.
- */
-/**
  * The range of `workspaceId` FIELD values belonging to `uid`, or null when it cannot be formed safely.
  *
  * 🔴 THE FOURTH REACHABILITY SHAPE (Q-784). `build_events` is appended with `.add()`, so its document
@@ -132,6 +107,7 @@ export function planWorkspaceFieldErase(uid: string | null | undefined): PrefixR
   return { startAt: prefix, endAt: `${prefix}${RANGE_END_CHAR}` };
 }
 
+/** Resolve exact canonical history ids from owned build rows and workspace ids. PURE. */
 export function buildHistoryKeysFor(
   uid: string,
   sessionIds: readonly string[],
@@ -139,16 +115,25 @@ export function buildHistoryKeysFor(
 ): string[] {
   if (String(uid ?? '').includes('-')) return [];
   const prefix = workspacePrefixFor(uid);
+  if (!prefix || uid === 'anon') return [];
   const keys = new Set<string>();
+  // A session suffix is not an ownership proof for a global legacy row: two users may choose the
+  // same suffix. Resolve only canonical owner+session keys in build_history_v2; never erase the old
+  // build_history namespace on a guess. All of it remains retained pending independently proven
+  // ownership, including legacy ids that happen to look like another person's full workspace id.
+  const addWorkspace = (ws: string): void => {
+    if (!ws.startsWith(ANON_WORKSPACE_PREFIX) && eraseableWorkspaceId(uid, ws)
+      && /^[A-Za-z0-9_-]{1,128}$/.test(ws.slice(prefix.length))) keys.add(ws);
+  };
   for (const s of sessionIds) {
     const id = String(s ?? '').trim();
-    if (id) keys.add(id);
+    if (!id) continue;
+    if (id.startsWith(WORKSPACE_PREFIX)) addWorkspace(id);
+    else if (/^[A-Za-z0-9_-]{1,128}$/.test(id)) addWorkspace(`${prefix}${id}`);
   }
   for (const w of workspaceIds) {
     const ws = String(w ?? '').trim();
-    if (!ws || !prefix || !ws.startsWith(prefix)) continue;
-    const key = ws.slice(prefix.length);
-    if (key) keys.add(key);
+    if (ws) addWorkspace(ws);
   }
   return [...keys].sort();
 }
@@ -169,7 +154,15 @@ export interface DerivedEraseReport {
   keys: { bots: number; historySessions: number };
   /** Present when the composite-id sweep was declined — see planUidPrefixErase. */
   refusal?: DerivedEraseRefusal;
+  /** Known attribution limitation, not a claim that any particular user has retained snapshots. */
+  limitations?: readonly (typeof LEGACY_HISTORY_ERASURE_LIMITATION)[];
 }
+
+export const LEGACY_HISTORY_ERASURE_LIMITATION = {
+  code: 'legacy-history-ownership-unverified',
+  collection: 'build_history',
+  message: 'Old build snapshots whose owner cannot be verified are retained pending ownership review.',
+} as const;
 
 const PAGE = 200;
 const SUBDOC_PAGE = 300;
@@ -317,7 +310,10 @@ async function ownedWorkspaceIds(store: admin.firestore.Firestore, uid: string):
  * a flaky index cannot leave the remainder of someone's data behind.
  */
 export async function deleteUserDerivedIdData(uid: string): Promise<DerivedEraseReport> {
-  const empty: DerivedEraseReport = { uid, collections: [], totalDeleted: 0, keys: { bots: 0, historySessions: 0 } };
+  const empty: DerivedEraseReport = {
+    uid, collections: [], totalDeleted: 0, keys: { bots: 0, historySessions: 0 },
+    limitations: [LEGACY_HISTORY_ERASURE_LIMITATION],
+  };
   if (!uid || typeof uid !== 'string') return { ...empty, refusal: 'unusable-uid' };
   const store = db();
   if (!store) return empty;
@@ -341,7 +337,9 @@ export async function deleteUserDerivedIdData(uid: string): Promise<DerivedErase
   }
   collections.push({ collection: 'bot_sessions', documents: sessionDocs, children: 0, error: botError });
 
-  // ── `build_history/{sessionId}` + `versions`, resolved from both exact sources ───────────────────
+  // ── Canonical `build_history_v2/{workspaceId}` + `versions`, resolved from owned sources ─────────
+  // Unattributed legacy build_history rows are not selected, read or deleted. A colliding suffix in
+  // the user's own build history never authorizes erasing a different person's legacy versions.
   let historyKeys: string[] = [];
   let historyDocs = 0;
   let historyChildren = 0;
@@ -353,7 +351,7 @@ export async function deleteUserDerivedIdData(uid: string): Promise<DerivedErase
     ]);
     historyKeys = buildHistoryKeysFor(uid, sessionIds, workspaceIds);
     for (const key of historyKeys) {
-      const ref = store.collection('build_history').doc(key);
+      const ref = store.collection('build_history_v2').doc(key);
       // The `versions` subcollection holds the actual version metadata, so it goes FIRST — and it is
       // swept whether or not the parent document exists, because Firestore keeps a subcollection under
       // a missing parent perfectly happily and that is precisely how Q-134 lost data.
@@ -364,7 +362,7 @@ export async function deleteUserDerivedIdData(uid: string): Promise<DerivedErase
   } catch (e) {
     historyError = e instanceof Error ? e.message : String(e);
   }
-  collections.push({ collection: 'build_history', documents: historyDocs, children: historyChildren, error: historyError });
+  collections.push({ collection: 'build_history_v2', documents: historyDocs, children: historyChildren, error: historyError });
 
   // ── `build_events`, found by a RANGE over its `workspaceId` FIELD (Q-784) ────────────────────────
   //
@@ -394,5 +392,6 @@ export async function deleteUserDerivedIdData(uid: string): Promise<DerivedErase
     collections,
     totalDeleted: collections.reduce((s, c) => s + c.documents + c.children, 0),
     keys: { bots: botIds.length, historySessions: historyKeys.length },
+    limitations: [LEGACY_HISTORY_ERASURE_LIMITATION],
   };
 }

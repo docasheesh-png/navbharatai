@@ -32,7 +32,6 @@
 
 import { buildHistoryStore } from '../project/BuildHistoryStore';
 import { BoundedCache } from '../lib/boundedCache';
-import { workspacePrefixFor } from '../lib/workspaceIdentity';
 
 /**
  * The most RAW source (UTF-8 bytes) handed to the store for one restore point.
@@ -46,21 +45,12 @@ import { workspacePrefixFor } from '../lib/workspaceIdentity';
 export const MAX_RESTORE_POINT_BYTES = 6_000_000;
 
 /**
- * The key the Time Machine reads.
- *
- * ⚠️ `/api/versioning/apps` lists a user's apps as `workspaceId` MINUS `agentv3-{uid}-`, and
- * `/api/build-history/:sessionId` is then called with that bare session id. So a restore point written
- * under the full workspace id would be invisible to the very screen it exists for — the failure would
- * look identical to writing nothing at all. One rule, derived the same way the route derives it.
- *
- * A workspace that does not carry this user's prefix (an imported or legacy id) keeps its own id,
- * which is what the listing route does too.
+ * Canonical storage key: keep the complete workspace id, including its owner.
+ * The HTTP history routes resolve older bare-session URLs to this same key after authorization.
+ * Removing the owner put different accounts using the same session id in one shared history.
  */
-export function restorePointKey(workspaceId: string, uid: string | null | undefined): string {
-  const ws = String(workspaceId ?? '').trim();
-  if (!ws) return '';
-  const prefix = workspacePrefixFor(uid);
-  return prefix && ws.startsWith(prefix) ? ws.slice(prefix.length) : ws;
+export function restorePointKey(workspaceId: string, _uid: string | null | undefined): string {
+  return String(workspaceId ?? '').trim();
 }
 
 export interface RestorePointDecision {

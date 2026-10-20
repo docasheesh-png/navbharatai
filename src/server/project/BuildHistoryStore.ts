@@ -7,8 +7,12 @@
  * version 3" semantics without a real git server.
  *
  * Collection layout:
- *   build_history/{sessionId}              — workspace metadata doc
- *   build_history/{sessionId}/versions/{versionId}  — one doc per build
+ *   build_history_v2/{workspaceId}              — discoverable workspace metadata doc
+ *   build_history_v2/{workspaceId}/versions/{versionId}  — one doc per build
+ * The full owner-scoped workspace id is required. Legacy bare-session records are retained but
+ * cannot safely be attributed from a matching session suffix, so this store never falls back to them.
+ * A separate collection is essential: old arbitrary session ids can themselves resemble workspace
+ * ids. Merely changing a document key in the old collection could expose or mix their unowned rows.
  *
  * Versions are capped at MAX_VERSIONS_PER_WORKSPACE per workspace (oldest
  * dropped). Each version doc is capped at MAX_VERSION_BYTES (Firestore 1MB
@@ -19,6 +23,7 @@ import { getServerDb } from '../lib/serverDb';
 import { MAX_SAVED_VERSIONS } from '../../lib/versionRetention';
 import { fitFilesPacked, unpackJson, utf8Bytes, compactStorageEnabled, MAX_PACKED_BYTES, type PackedEncoding } from '../lib/compactStore';
 import { MAX_OMITTED_PATHS_REMEMBERED } from './versionRestore';
+import { isWorkspaceId } from '../lib/workspaceIdentity';
 
 export interface VersionEntry {
   id: string;
@@ -128,7 +133,7 @@ class BuildHistoryStore {
   }
 
   private versionsCol(db: admin.firestore.Firestore, sessionId: string) {
-    return db.collection('build_history').doc(sessionId).collection('versions');
+    return db.collection('build_history_v2').doc(sessionId).collection('versions');
   }
 
   async save(
@@ -142,6 +147,7 @@ class BuildHistoryStore {
       ok: boolean;
     },
   ): Promise<boolean> {
+    if (!isWorkspaceId(sessionId)) return false;
     // 🔴 RETURNS WHETHER THE VERSION REALLY LANDED (2026-09-20). It used to return `void` and swallow
     // everything — including `if (!db) return`, the case where Firestore is not configured at all. So
     // every caller's only honest statement was "we asked", and a build report that said "a version was
@@ -178,6 +184,9 @@ class BuildHistoryStore {
       if (plan.omitted.length > 0) {
         console.warn(`[BuildHistory] version for ${sessionId} left out ${plan.omitted.length} file(s) that did not fit even compressed`);
       }
+      // A parent makes the canonical key discoverable for account erasure even after the app's
+      // workspace-file document is gone. Firestore does not list parents that only have children.
+      await db.collection('build_history_v2').doc(sessionId).set({ workspaceId: sessionId, storageVersion: 2 }, { merge: true });
       await col.doc(id).set(doc);
       // ⚠️ THE TRIM HAS ITS OWN try ON PURPOSE. Past this line the version EXISTS and is restorable;
       // retention is housekeeping. Folding the two together would report a saved version as unsaved
@@ -201,6 +210,7 @@ class BuildHistoryStore {
 
   /** List version metadata for a workspace, newest first. No file payloads. */
   async list(sessionId: string): Promise<VersionMeta[]> {
+    if (!isWorkspaceId(sessionId)) return [];
     const db = this.getDb();
     if (!db) return [];
     try {
@@ -223,6 +233,7 @@ class BuildHistoryStore {
 
   /** Get a single version with full file payload. */
   async get(sessionId: string, versionId: string): Promise<VersionEntry | null> {
+    if (!isWorkspaceId(sessionId)) return null;
     const db = this.getDb();
     if (!db) return null;
     try {

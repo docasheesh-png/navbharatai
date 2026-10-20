@@ -212,6 +212,8 @@ describe('the built-app eraser and the page do not drift apart', () => {
       project_plans_v3: /projects and built apps/i,
       app_engineering_memory_v1: /projects and built apps/i,
       app_ai_settings: /projects and built apps/i,
+      build_history_v2: /build history and diagnostics/i,
+      build_sessions_v2: /build history and diagnostics/i,
       // Q-134 (2026-10-05): two stores the erase now reaches, each named on the page.
       workspace_user_actions_v1: /the list of things the builder asked you to do/i,
       code_reviews: /the review comments left on them/i,

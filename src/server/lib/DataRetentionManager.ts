@@ -528,6 +528,7 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
   { collection: 'metrics_snapshots', ttlDays: 400, timestampField: 'updatedAt', timestampKind: 'epochMs' },
   // `savedAt: Date.now()` — ProBuildSession. A finished build's transient session result.
   { collection: 'build_sessions', ttlDays: 90, timestampField: 'savedAt', timestampKind: 'epochMs' },
+  { collection: 'build_sessions_v2', ttlDays: 90, timestampField: 'savedAt', timestampKind: 'epochMs' },
   // `updatedAt: new Date().toISOString()` — ErrorPatternStore. Per-session hints, regenerated freely.
   { collection: 'session_error_hints', ttlDays: 30, timestampField: 'updatedAt', timestampKind: 'iso' },
   // The "why do builds fail?" ledger — ONE document per calendar day, so a long window is cheap and
@@ -772,6 +773,7 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
   { collection: 'app_engineering_memory_v1', reason: "the app's requirement ledger, open issues and change log — bounded per app, erased with the workspace" },
   { collection: 'app_builds', reason: "the user's own build record" },
   { collection: 'user_build_history', reason: "the user's own history; removed with their account, not with age" },
+  { collection: 'build_history_v2', reason: "the user's owner-scoped restore points; bounded per app and removed with their account, not with age" },
   { collection: 'user_costs', reason: 'money. A billing record deleted on a timer cannot be reconciled or disputed' },
   /**
    * Money. Privacy §9's FIRST stated exception to erasure, and Indian tax and accounting law requires

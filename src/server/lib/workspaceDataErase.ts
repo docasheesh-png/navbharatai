@@ -65,18 +65,24 @@ export const WORKSPACE_SCOPED_COLLECTIONS: readonly WorkspaceScopedCollection[] 
   { collection: 'project_plans_v3' },
   { collection: 'app_engineering_memory_v1' },
   { collection: 'app_ai_settings' },
+  // Canonical version histories use the full workspace id and have a persisted parent marker, so
+  // their versions remain reachable for erasure even after the source workspace has been removed.
+  // Legacy bare-session histories have no proven owner and stay retained pending attribution.
+  { collection: 'build_history_v2', sub: 'versions' },
+  // The namespaced legacy-result API also uses canonical owner+session ids. Its old build_sessions
+  // collection remains under the existing age-based retention policy, never deleted by owner guess.
+  { collection: 'build_sessions_v2' },
   /**
    * ── 🔴 THE APP DATA THE WORKSPACE ERASER NEVER LISTED (Q-701, 2026-10-08) ─────────────────────────
    * Each doc id below was read at its own store. The eraser works by an id RANGE over
    * `agentv3-{uid}-…`, so a store keyed by the WORKSPACE id is reached; two that are keyed by
    * something else are deliberately NOT here and were recorded in `BUILD_REPORT_QUEUE.md` instead of
-   * being registered on a guess (`app_ai_apps`, whose doc id is the APP id, and `build_history`,
-   * whose doc id is a bare sessionId that the `agentv3-{uid}-` range cannot match).
+   * being registered on a guess (`app_ai_apps`, whose doc id is the APP id, and the legacy bare
+   * `build_history` ids that the `agentv3-{uid}-` range cannot match).
    *
-   * 🟢 BOTH ARE NOW COVERED, AND NEITHER BY THIS REGISTRY — which is the point (2026-10-09). Reading
-   * each one answered the question the guess could not: `app_ai_apps` carries a `userId` field, so it
-   * belongs in `DataRetentionManager`'s user registry (Q-765), and `build_history`'s id is DERIVED
-   * from a workspace id, which needed a third reachability shape — `derivedIdErase.ts` (Q-764).
+   * `app_ai_apps` carries a `userId` field and belongs in `DataRetentionManager` (Q-765). Canonical
+   * `build_history_v2` uses full workspace ids and is registered above; `derivedIdErase` also derives
+   * canonical ids from owned build rows. Neither mechanism touches the old build_history namespace.
    */
   /** The app's attachment memory (`attachmentMemory.ts:115/130`). */
   { collection: 'agentv3_attachment_memory' },

@@ -71,6 +71,7 @@ describe('the registry of collections that hold a built app', () => {
     expect(byName['workspace_assets_v3']).toBe('assets');
     expect(byName['workspace_checkpoints_v3']).toBe('items');
     expect(byName['workspace_embeddings_v3']).toBe('files');
+    expect(byName['build_history_v2']).toBe('versions');
   });
 
   it('every entry names a real collection, and a repeated name is a second subcollection', () => {

@@ -105,13 +105,6 @@ const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; wh
       + 'field, swept by a RANGE over that FIELD (`planWorkspaceFieldErase`) with each matched document '
       + "verified by the workspace eraser's own ownership predicate (Q-784)",
   },
-  build_history: {
-    file: DERIVED_ERASER,
-    calledAs: DERIVED_CALL,
-    why: 'the id is a BARE sessionId, which is the workspace id minus the `agentv3-{uid}-` prefix '
-      + '(`buildHistoryAccess.ts`), so it is resolved from `user_build_history` and from that id range, '
-      + 'and its `versions` subcollection is swept first (Q-764)',
-  },
 };
 
 const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
@@ -281,6 +274,7 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   // ── Purged on a clock ────────────────────────────────────────────────────────────────────────
   build_jobs:        { kind: 'retained', why: 'one doc per queued build job; purged on its own window' },
   build_sessions:    { kind: 'retained', why: 'one doc per build session; purged on its own window' },
+  build_sessions_v2: { kind: 'workspace', why: 'canonical owner+session keys in a fresh namespace; erased by verified workspace range' },
   build_failures:    { kind: 'retained', why: 'one doc per failed build, for the failure view; purged on its own window' },
   server_logs:       { kind: 'retained', why: 'server log lines; purged on their own window' },
   metrics_snapshots: { kind: 'retained', why: 'one doc per daily metrics snapshot; purged on its own window' },
@@ -315,7 +309,8 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
    * the registry, which is exact-match only and would have deleted the index and kept the data.
    */
   user_workspaces: { kind: 'user', why: "the person's cross-device workspace: a manifest plus `{uid}__c{i}` chunks, erased by `syncWorkspaceErase.ts`" },
-  build_history: { kind: 'user', why: "every build's version metadata for every app — keyed by a BARE sessionId, which `derivedIdErase.ts` resolves from `user_build_history` and the workspace id range, `versions` subcollection first (Q-764)" },
+  build_history: { kind: 'blocked', why: 'Q-764 legacy ownership attribution remains OPEN: old globally keyed rows have no trusted owner; retain them until independently proven, never erase by a matching session suffix or workspace-shaped id' },
+  build_history_v2: { kind: 'workspace', why: 'owner+session keys in a fresh namespace, discoverable parent markers and versions erased before parents; old ambiguous namespace is never touched' },
   /** ✅ Q-765, 2026-10-09: registered by its `userId` field, which it has always carried. */
   app_ai_apps:   { kind: 'user', why: "which app may call NavBharatAI's AI and as whom — doc id is the APP id, so the workspace range cannot reach it; reached by its `userId` field" },
   analytics_daily:  { kind: 'retained', why: 'one doc per UTC day of product-analytics counts and the activation funnel — no person in it; purged at 400 days, and `getFunnel` never asks for more than 365 (Q-767)' },

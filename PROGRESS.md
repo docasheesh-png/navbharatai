@@ -97912,3 +97912,6 @@ Cloud Build configuration and adds its shell-escaping regression. That incoming
 configuration must be preserved on integration; earlier default-OFF notes above
 are historical checkpoints. A bounded changed-caller census and all final-source
 gates remain required before this queue checkpoint can be pushed or merged.
+## 2026-10-20 — Admin authorized PR #3853 merge and Weak policy activation
+
+Rechecked the exact PR head and green GitHub CI, then merged #3853 with an expected-head lease (merge commit 68528197949135513d2df97e3b4dee667036059a). Admin explicitly said to merge and turn on the policy. Activation is a separate additive Cloud Build configuration change: `_WEAK_SCOPE_POLICY=on`, `_WEAK_BUILD_COST_CEILING_USD=1`; trigger-level rollback remains available with `off`. Provider keys, explicit ladder overrides, and Normal/Strong routing are not changed. Deployment and runtime confirmation are pending; do not infer live activation merely from the merge.

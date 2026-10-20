@@ -17,10 +17,17 @@ import { describe, it, expect, vi } from 'vitest';
 import { defaultToolCatalog } from '../src/server/AgentV3/ToolCatalog';
 import { ToolDispatcher } from '../src/server/AgentV3/ToolDispatcher';
 import { abortBuild, abortCauseOf, abortSummary, isUserInitiated } from '../src/server/AgentV3/buildAbortCause';
+import { readFileSync } from 'node:fs';
 
 function tools(): Array<{ name: string; description: string; input_schema?: unknown }> {
   return defaultToolCatalog() as never;
 }
+
+it('the production stop reads trusted steering text after the queue is consumed', () => {
+  const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+  expect(route).toContain('rb.lastSteerMessage = message;');
+  expect(route).toContain("}, () => rb.lastSteerMessage ?? (isPlatformFixRequest(prompt) ? '' : prompt));");
+});
 
 describe('the tool exists and its description IS the precision rule', () => {
   const tool = () => tools().find((t) => t.name === 'stop_build');
@@ -68,7 +75,7 @@ describe('the decision reaches the build', () => {
   it('calls the wired stop, and passes the user\'s words through', async () => {
     const d = dispatcher();
     const stop = vi.fn();
-    d.setStopBuild(stop);
+    d.setStopBuild(stop, () => 'मेरा आदेश है कि अभी छोड़ दो');
     const out = text(await d.dispatch(call({ reason: 'मेरा आदेश है कि अभी छोड़ दो' })));
     expect(stop).toHaveBeenCalledTimes(1);
     expect(stop.mock.calls[0][0]).toContain('छोड़ दो');
@@ -83,11 +90,28 @@ describe('the decision reaches the build', () => {
     expect(out).not.toMatch(/Stopping this build now/);
   });
 
-  it('a missing reason still stops — the record is secondary to the user\'s wish', async () => {
+  it('missing or invented user words cannot cancel a build', async () => {
     const d = dispatcher();
     const stop = vi.fn();
-    d.setStopBuild(stop);
+    d.setStopBuild(stop, () => 'Mujhe ek car game banana hai');
     await d.dispatch(call({}));
+    const out = text(await d.dispatch(call({ reason: 'Restarting dev server to get clean state' })));
+    expect(stop).not.toHaveBeenCalled();
+    expect(out).toContain('Could not stop');
+  });
+
+  it('a consumed steering message stays authoritative and an unwired source fails closed', async () => {
+    const d = dispatcher();
+    const stop = vi.fn();
+    let latest = 'band karo';
+    d.setStopBuild(stop, () => latest);
+    latest = 'मुझे नहीं चाहिए';
+    await d.dispatch(call({ reason: 'band karo' }));
+    expect(stop).not.toHaveBeenCalled();
+    await d.dispatch(call({ reason: latest }));
+    expect(stop).toHaveBeenCalledExactlyOnceWith(latest);
+    d.setStopBuild(stop);
+    await d.dispatch(call({ reason: latest }));
     expect(stop).toHaveBeenCalledTimes(1);
   });
 });

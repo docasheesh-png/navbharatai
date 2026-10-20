@@ -6635,6 +6635,7 @@ async function noteBuildOutcome(
       }
       (rb.steerQueue ??= []).push(message);
       rb.lastSteerAt = Date.now();
+      rb.lastSteerMessage = message;
       // "Hindi me bolo" mid-build (autopsy eb58abaf): every platform line from here on follows it.
       if (platformVoiceEnabled()) { const asked = voiceRequestedIn(message); if (asked) rb.voice = asked; }
       // Instant, honest feedback to EVERY attached device: the message is queued (the runner emits
@@ -16139,7 +16140,7 @@ async function noteBuildOutcome(
         } catch { /* the record must never be what prevents the stop */ }
         // The STOP WAS REQUESTED when the person's message arrived, not when the model acted on it.
         abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'user-stop', rb.lastSteerAt);
-      });
+      }, () => rb.lastSteerMessage ?? (isPlatformFixRequest(prompt) ? '' : prompt));
       // C2 — load the project's own "never touch this" list and ARM THE GUARD before any tool runs.
       // Reading the file into the prompt alone would be a wish, not a rule: a model told nicely still
       // edits a protected folder during a big refactor, and the user finds out when their live payment
@@ -26433,16 +26434,15 @@ async function noteBuildOutcome(
           // would leave two answers to one question, which is the exact shape of the bug all three of
           // (a)-(c) came from. If the render evidence ever needs to suppress an upsell on a build that
           // genuinely DID fail, that is a new decision with its own evidence — not this one restated.
-          // (f) THE BUILD WAS STOPPED, SO NOTHING WAS EVER ATTEMPTED (autopsy fdd59ef8, 2026-09-17).
+          // (f) A STOP IS NOT A CAPABILITY-LIMIT VERDICT (autopsy fdd59ef8; corrected by 2e06d8bd).
           // That build's prompt was OUR OWN 401 sign-in notice, wrapped by the "Fix with AI" button;
           // the model read it, answered "I need to sign in first" and called `stop_build`. This block
           // then told the person *"Your app needs our strongest engine… Add credits and I will
           // complete it on the best engine."* **Their problem was signing in.** A fuller wallet buys
-          // nothing at all here — no engine was ever asked to build anything.
+          // no capability-limit evidence here — a Stop says nothing about how much engine work ran.
           //
-          // TESTED FIRST, ahead of even a refusal, and that ordering is the claim: a stopped build did
-          // not reach the point of having a capability to judge, so every reading below it — refused,
-          // degraded, misconfigured, starved — is reasoning about evidence that was never gathered.
+          // TESTED FIRST, ahead of even a refusal. A Stop can follow real model work, including a
+          // delivered preview; cancellation itself is never evidence that the person needs more credits.
           // The signal is `toolWasUsed`, which reads the timeline the report itself prints, so it
           // cannot drift from what an admin sees (the alternative, a new flag threaded 6,000 lines
           // down the handler, would be a second answer to a question the timeline already answers).
@@ -26508,7 +26508,7 @@ async function noteBuildOutcome(
               // unresolved warning it was one of the two "problems" on a report of a build the user simply
               // stopped (autopsy 6db0ff31). The other reasons stay warnings: each names a real fault of ours.
               message: stopped
-                ? 'Did not ask this user to add credits: the build was STOPPED, so no engine was ever asked to build anything. There is no capability limit to sell against — a fuller wallet would have changed nothing.'
+                ? 'Did not ask this user to add credits: the build was STOPPED. A stopped build does not establish a capability limit; it is not evidence that adding credits would help.'
                 : interrupted
                 ? `Did not ask this user to add credits: our own platform interrupted this build (${abortCauseOf(abort.signal)}) before any engine could be judged. A deploy, a lock takeover or a cleanup is not a capability limit, and a fuller wallet would have changed nothing.`
                 : refused

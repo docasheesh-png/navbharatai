@@ -97991,3 +97991,28 @@ Before this correction, the bounded changed-caller/PII cohort passed 24 files /
 results and prior quick checks do not replace renewed final-source checks.
 Both final-source local gates and exact-head CI remain required. Phase2 and
 final queued/manual/SDK source fencing, allocation and legacy ownership remain OPEN.
+
+
+### 2026-10-20 12:22 UTC — Phase2 green-freeze census follows nested save calls
+
+The complete queue run at `5022f54` finished exit1: one failed file, two failed
+assertions, 2,819 files and 40,263 tests passed, 67 skipped (538.50s). It is NOT a
+passing gate. Its green-freeze census extracted call arguments with a line regex;
+the new outer track/issue parentheses became part of two existing payload keys.
+The actual writers and their audited multiplicities remain three toSave calls
+and six captured-writtenFiles calls. No production correction was needed.
+
+The test now reads actual TypeScript CallExpression arguments, preserving nested
+payload parentheses while ignoring comment/string lookalikes. Every existing
+VERDICT reason and count is unchanged. Raw and tracked forms produce the same
+keys; injecting an extra classified call into the actual route produces count4,
+and injecting a genuinely new payload remains unclassified. Restoring only the
+old extractor reproduces both original failures; the safe AST test was restored.
+The final bounded sweep searches bare writer identifiers so quoted/regex census
+references are included. All 46 caller/sibling files pass, with 764 tests.
+
+This correction changes only the census test and this evidence. Runtime, package,
+threshold, freeze classifications and skips are unchanged. Final-source quick
+gates, the complete suite and both required exact-head CI jobs must still pass
+before merge. Phase2 and the previously documented source/ownership/allocation
+boundaries remain OPEN.

@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import ts from 'typescript';
 
 type Verdict =
   | 'landed'       // saves only what landed: `writtenFiles` (set after a write succeeds) or a sandbox scan
@@ -59,13 +60,21 @@ const VERDICT: Record<string, [Verdict, number]> = {
 
 const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
 
-function durableWrites(): Map<string, number> {
+function durableWrites(text = route): Map<string, number> {
   const out = new Map<string, number>();
-  for (const m of route.matchAll(/\b(saveWorkspaceFiles|mergeWorkspaceFiles)\(([^\n]*)/g)) {
-    const arg = m[2].split(/\)\.catch|\);|\)\s*$/)[0].trim();
-    const key = `${m[1]} | ${arg}`;
-    out.set(key, (out.get(key) ?? 0) + 1);
-  }
+  const source = ts.createSourceFile('agentv3.ts', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const name = ts.isIdentifier(node.expression) ? node.expression.text
+        : ts.isPropertyAccessExpression(node.expression) ? node.expression.name.text : undefined;
+      if (name === 'saveWorkspaceFiles' || name === 'mergeWorkspaceFiles') {
+        const key = `${name} | ${node.arguments.map((arg) => arg.getText(source).trim()).join(', ')}`;
+        out.set(key, (out.get(key) ?? 0) + 1);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
   return out;
 }
 
@@ -88,5 +97,35 @@ describe('Q-132: every direct durable write in the build route has a green-freez
 
   it('the dep prune — the one writer that goes through npm, not writeFile — stands down once green', () => {
     expect(route).toMatch(/pruneUnusedDepsEnabled\(\)[^\n]*!isGreenLatched\(workspaceId\)/);
+  });
+
+  it('classifies raw and nested tracked calls by their own arguments, preserving nested payload parentheses', () => {
+    const calls = durableWrites(`
+      saveWorkspaceFiles(workspaceId, toSave);
+      sourcePublication.track(saveWorkspaceFiles(workspaceId, toSave)).catch(() => {});
+      sourcePublication.issue(() => saveWorkspaceFiles(workspaceId, toSave)).catch(() => {});
+      saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles));
+      sourcePublication.track(saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles))).catch(() => {});
+      sourcePublication.issue(() => saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles))).catch(() => {});
+      // saveWorkspaceFiles(workspaceId, commentOnly);
+      const explanation = 'saveWorkspaceFiles(workspaceId, stringOnly)';
+    `);
+    expect([...calls]).toEqual([
+      ['saveWorkspaceFiles | workspaceId, toSave', 3],
+      ['saveWorkspaceFiles | workspaceId, Object.fromEntries(writtenFiles)', 3],
+    ]);
+  });
+
+  it('a duplicated classified write in the actual route still fails the original multiplicity audit', () => {
+    const calls = durableWrites(`${route}\nsourcePublication.track(saveWorkspaceFiles(workspaceId, toSave));`);
+    const changed = [...calls.entries()].filter(([key, count]) => VERDICT[key] && VERDICT[key][1] !== count)
+      .map(([key, count]) => `${key} ×${count}`);
+    expect(changed).toEqual(['saveWorkspaceFiles | workspaceId, toSave ×4']);
+  });
+
+  it('a genuinely new save in the actual route still requires its own green-freeze verdict', () => {
+    const calls = durableWrites(`${route}\nsourcePublication.issue(() => saveWorkspaceFiles(workspaceId, newUnreviewedPayload));`);
+    expect([...calls.keys()].filter((key) => !(key in VERDICT)))
+      .toEqual(['saveWorkspaceFiles | workspaceId, newUnreviewedPayload']);
   });
 });

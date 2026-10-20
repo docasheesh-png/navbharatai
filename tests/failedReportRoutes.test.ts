@@ -3,14 +3,20 @@ import express from 'express';
 import { request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
 const mocked = vi.hoisted(() => ({ page: vi.fn(), detail: vi.fn(), create: vi.fn(), list: vi.fn(), revoke: vi.fn(), tokenOk: vi.fn() }));
-const oauth = vi.hoisted(() => ({ register: vi.fn(), authorize: vi.fn(), pending: vi.fn(), decide: vi.fn(), token: vi.fn(), tokenOk: vi.fn(), revoke: vi.fn() }));
+const oauth = vi.hoisted(() => ({ register: vi.fn(), authorize: vi.fn(), pending: vi.fn(), decide: vi.fn(), token: vi.fn(), tokenOk: vi.fn(), tokenPrincipal: vi.fn(), revoke: vi.fn() }));
+const autopsy = vi.hoisted(() => ({ read: vi.fn(), update: vi.fn() }));
 vi.mock('../src/server/lib/failedReportOAuth', async original => ({ ...await original<any>(), reportOAuthService: () => oauth }));
 vi.mock('../src/server/lib/failedReportAccess', () => ({ createReportAccess: mocked.create, listReportAccess: mocked.list, revokeReportAccess: mocked.revoke, reportTokenOk: mocked.tokenOk }));
 vi.mock('../src/server/lib/failedBuildReports', async (original) => ({ ...await original<any>(), readFailedBuildPage: mocked.page, readFailedBuild: mocked.detail }));
+vi.mock('../src/server/lib/failedReportAutopsy', async original => ({ ...await original<any>(),
+  readFailedReportAutopsy: autopsy.read, updateFailedReportAutopsy: autopsy.update,
+  withFailedReportAutopsies: async (page: unknown) => page,
+}));
 import { registerFailedReportRoutes } from '../src/server/routes/failedReports';
 import { apiVersionMiddleware } from '../src/server/routes/apiVersion';
 import { formBodyParser, jsonBodyParser } from '../src/server/lib/requestBodyLimits';
 import { mintAdminToken } from '../src/server/lib/adminAuth';
+import { failedReportDigest } from '../src/server/lib/failedBuildReports';
 
 let server: Server; let port: number; let adminToken: string;
 function request(path: string, opts: { method?: string; headers?: Record<string, string>; body?: unknown } = {}): Promise<{ status: number; headers: any; body: any }> {
@@ -30,7 +36,11 @@ beforeAll(async () => {
   port = (server.address() as { port: number }).port;
 });
 afterAll(async () => { await new Promise<void>((r) => server.close(() => r())); });
-beforeEach(() => { mocked.page.mockReset().mockResolvedValue({ reports: [], nextCursor: null, scanned: 1 }); mocked.detail.mockReset().mockResolvedValue({ ok: false }); mocked.tokenOk.mockReset().mockImplementation(async (s) => s === 'Bearer read-only'); mocked.create.mockReset().mockResolvedValue({ id: 'a'.repeat(64), token: 'only-once' }); mocked.list.mockResolvedValue([]); mocked.revoke.mockResolvedValue(undefined); });
+beforeEach(() => { mocked.page.mockReset().mockResolvedValue({ reports: [], nextCursor: null, scanned: 1 }); mocked.detail.mockReset().mockResolvedValue({ ok: false }); mocked.tokenOk.mockReset().mockImplementation(async (s) => s === 'Bearer read-only'); mocked.create.mockReset().mockResolvedValue({ id: 'a'.repeat(64), token: 'only-once' }); mocked.list.mockResolvedValue([]); mocked.revoke.mockResolvedValue(undefined);
+  oauth.tokenOk.mockReset().mockResolvedValue(false); oauth.tokenPrincipal.mockReset().mockResolvedValue(null);
+  autopsy.read.mockReset().mockResolvedValue({ reportDigest: 'a'.repeat(64), revision: 0, state: 'not_started', record: null });
+  autopsy.update.mockReset().mockResolvedValue({ reportDigest: 'a'.repeat(64), revision: 1, state: 'in_progress', record: {} });
+});
 const bearer = { Authorization: 'Bearer read-only' };
 const rpc = (method: string, params?: unknown) => ({ jsonrpc: '2.0', id: 1, method, params });
 describe('private report HTTP boundary', () => {
@@ -64,7 +74,7 @@ describe('private report HTTP boundary', () => {
   it('serves authenticated MCP initialization, read tools, notifications and honest errors', async () => {
     const call = (body: unknown, headers = bearer) => request('/api/v1/failedbr/mcp', { method: 'POST', headers, body });
     expect((await call(rpc('initialize'))).body.result.capabilities).toEqual({ tools: {} });
-    expect((await call(rpc('tools/list'))).body.result.tools).toHaveLength(2);
+    expect((await call(rpc('tools/list'))).body.result.tools).toHaveLength(3);
     expect((await call(rpc('tools/call', { name: 'list_failed_builds', arguments: { cursor: 'next' } }))).body.result.content[0].text).toContain('nextCursor');
     expect(mocked.page).toHaveBeenCalledWith('next', undefined);
     expect((await call(rpc('tools/call', { name: 'get_failed_build', arguments: { workspaceId: 'app', historyId: '100' } }))).body.result.content[0].text).toContain('false');
@@ -75,6 +85,62 @@ describe('private report HTTP boundary', () => {
     expect((await request('/api/v1/failedbr/mcp', { headers: bearer })).status).toBe(405);
     mocked.page.mockRejectedValueOnce(new Error('offline'));
     expect((await call(rpc('tools/call', { name: 'list_failed_builds' }))).body.error.code).toBe(-32603);
+  });
+});
+
+describe('separate autopsy write boundary', () => {
+  const path = '/api/v1/failedbr/reports/app/100/autopsy';
+  it('read-only credentials can inspect metadata but cannot write over REST or direct MCP calls', async () => {
+    expect((await request(path, { headers: bearer })).body.state).toBe('not_started');
+    expect((await request(path, { method: 'POST', headers: bearer, body: {} })).status).toBe(403);
+    const denied = await request('/api/v1/failedbr/mcp', { method: 'POST', headers: bearer,
+      body: rpc('tools/call', { name: 'set_failed_build_autopsy', arguments: { workspaceId: 'app', historyId: '100', update: {} } }) });
+    expect(denied.body.error).toMatchObject({ code: -32003 });
+    expect(denied.status).toBe(403);
+    expect(denied.headers['www-authenticate']).toContain('error="insufficient_scope"');
+    expect(denied.headers['www-authenticate']).toContain('scope="failed-reports:read failed-reports:autopsy"');
+    expect(denied.body.error.message).toContain('failed-reports:autopsy');
+    expect(autopsy.update).not.toHaveBeenCalled();
+    expect(oauth.tokenPrincipal).toHaveBeenCalledWith('Bearer read-only', 'failed-reports:autopsy');
+  });
+  it('returns the evidence digest from the full report snapshot, not a later metadata read', async () => {
+    const evidence = { ok: false, startedAt: 100, endedAt: 101, summary: 'The evidence actually returned.' };
+    mocked.detail.mockResolvedValue(evidence);
+    const detail = await request('/api/v1/failedbr/reports/app/100', { headers: bearer });
+    expect(detail.body).toEqual({ report: evidence, reportDigest: failedReportDigest(evidence) });
+    const tool = await request('/api/v1/failedbr/mcp', { method: 'POST', headers: bearer,
+      body: rpc('tools/call', { name: 'get_failed_build', arguments: { workspaceId: 'app', historyId: '100' } }) });
+    expect(JSON.parse(tool.body.result.content[0].text)).toEqual({ ...evidence, reportDigest: failedReportDigest(evidence) });
+    expect(autopsy.read).not.toHaveBeenCalled();
+  });
+  it('explicit write consent exposes only the metadata tool and binds actor to the verified grant', async () => {
+    oauth.tokenOk.mockResolvedValue(true);
+    oauth.tokenPrincipal.mockResolvedValue({ grantId: 'b'.repeat(64), owner: 'owner', clientId: 'client', scope: 'failed-reports:read failed-reports:autopsy' });
+    const headers = { Authorization: 'Bearer explicit-write' };
+    const tools = (await request('/api/v1/failedbr/mcp', { method: 'POST', headers, body: rpc('tools/list') })).body.result.tools;
+    expect(tools.map((t: any) => t.name)).toEqual(['list_failed_builds', 'get_failed_build', 'get_failed_build_autopsy', 'set_failed_build_autopsy']);
+    expect(tools.at(-1).annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
+    expect((await request(path, { method: 'POST', headers, body: { status: 'in_progress' } })).status).toBe(200);
+    expect(autopsy.update).toHaveBeenCalledWith('app', '100', { status: 'in_progress' }, `oauth:${'b'.repeat(64)}`);
+    expect((await request('/api/v1/admin/failedbr/access', { headers })).status).toBe(401);
+    const invalid = await request('/api/v1/failedbr/mcp', { method: 'POST', headers, body: rpc('tools/call', {
+      name: 'set_failed_build_autopsy', arguments: { workspaceId: 'app', historyId: '100', update: {}, report: { ok: true } },
+    }) });
+    expect(invalid.body.error.code).toBe(-32602);
+    expect(autopsy.update).toHaveBeenCalledTimes(1);
+  });
+  it('admin writes are supported without granting a machine new access; failures remain honest', async () => {
+    const headers = { 'x-admin-token': adminToken };
+    expect((await request(path, { method: 'POST', headers, body: { status: 'in_progress' } })).status).toBe(200);
+    expect(autopsy.update).toHaveBeenCalledWith('app', '100', { status: 'in_progress' }, 'admin:owner');
+    expect(oauth.tokenPrincipal).not.toHaveBeenCalled();
+    autopsy.update.mockRejectedValueOnce(new Error('database offline'));
+    expect((await request(path, { method: 'POST', headers, body: {} })).status).toBe(503);
+    autopsy.read.mockResolvedValueOnce(null);
+    expect((await request(path, { headers })).status).toBe(404);
+    oauth.tokenPrincipal.mockRejectedValueOnce(new Error('revocation store unavailable'));
+    expect((await request(path, { method: 'POST', headers: bearer, body: {} })).status).toBe(503);
+    expect(mocked.create).not.toHaveBeenCalled();
   });
 });
 

@@ -905,7 +905,7 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
           // sweep's guard walks, because `server.ts` sits at the repo ROOT and not under `src/`.
           if (envFlag('DATA_RETENTION_PURGE_ENABLED')) {
             const runPurge = () => import('./src/server/lib/DataRetentionManager')
-              .then(async ({ getRetentionDb, purgeExpired, getSubcollectionRetentionSource, purgeExpiredSubcollections, cappedCollections }) => {
+              .then(async ({ getRetentionDb, purgeExpired, getSubcollectionRetentionSource, purgeExpiredSubcollections, cappedCollections, purgeFailureSummary }) => {
                 const db = getRetentionDb();
                 const top = db ? await purgeExpired(db, Date.now()) : null;
                 // Q-134: subcollections under every parent (past build reports), purged parent by parent.
@@ -924,9 +924,10 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
                  */
                 const capped = [...cappedCollections(top ?? { collections: [], totalDeleted: 0 }),
                                 ...cappedCollections(nested ?? { collections: [], totalDeleted: 0 })];
-                return { n: (top?.totalDeleted ?? 0) + (nested?.totalDeleted ?? 0), capped };
+                const failed = purgeFailureSummary(top ?? { collections: [], totalDeleted: 0 }, nested ?? { collections: [], totalDeleted: 0 });
+                return { n: (top?.totalDeleted ?? 0) + (nested?.totalDeleted ?? 0), capped, failed };
               })
-              .then(({ n, capped }) => {
+              .then(({ n, capped, failed }) => {
                 if (n) console.log(`[P-DATA.4] retention purge removed ${n} expired record(s)`);
                 if (capped.length) {
                   console.warn(
@@ -934,8 +935,13 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
                     + 'remove. Normal while a backlog drains; every night means maxPerRun is below the write rate.',
                   );
                 }
+                if (failed.count) {
+                  console.warn(`[P-DATA.4] retention purge failed for ${failed.count} collection(s): ${failed.collections.join(', ')}`
+                    + (failed.omitted ? `; ${failed.omitted} additional collection(s)` : '')
+                    + '. Incomplete cleanup remains pending; error details are not logged.');
+                }
               })
-              .catch(() => { /* best-effort — purge must never affect the server */ });
+              .catch(() => { console.warn('[P-DATA.4] retention purge could not complete; error details are not logged.'); });
             // `exclusive`: this DELETES, and every instance runs its own tick loop. The deletes are
             // idempotent, so N instances would not destroy anything they should not — they would
             // simply do the whole purge N times, paying N times the Firestore reads and writes on a

@@ -72,6 +72,7 @@ jobs:
           }
           NODE
           node scripts/phase2-firestore-drills.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/firestore-drills.log"
+          node --import ./node_modules/tsx/dist/loader.mjs scripts/failedReportAutopsy.check.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/autopsy-drills.log"
       - name: Upload build safety evidence
         if: always()
         uses: actions/upload-artifact@v7

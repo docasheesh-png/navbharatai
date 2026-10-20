@@ -1,5 +1,6 @@
 /** Read existing retained history; never add work to the build/write path. */
 import { FieldPath } from 'firebase-admin/firestore';
+import { createHash } from 'node:crypto';
 import { getServerDb } from './serverDb';
 import { redactSecrets } from '../AgentV3/SecretRedactor';
 import type { FailedBuildPage, FailedBuildRow } from '../../lib/failedBuildReports';
@@ -34,7 +35,9 @@ export function settledFailure(raw: unknown): raw is Record<string, unknown> & {
 export function redactFailedReport(value: unknown): unknown {
   const walk = (v: unknown, depth: number): unknown => {
     if (depth > 80) return '[Omitted: nesting limit]';
-    if (typeof v === 'string') return redactSecrets(v).replace(/\bnbfr_[A-Za-z0-9_-]{43}\b/g, '[REDACTED:report-access]');
+    if (typeof v === 'string') return redactSecrets(v)
+      .replace(/\bnbfr_[A-Za-z0-9_-]{43}\b/g, '[REDACTED:report-access]')
+      .replace(/\b(?:nbfo_|nbfrt_|nbfcode_)[a-f0-9]{64}\.[A-Za-z0-9_-]{43}\b/g, '[REDACTED:report-oauth]');
     if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1));
     if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k,
       /(?:^|[_-])(?:password|passwd|pwd|secret|token|access[_-]?key|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|private[_-]?key|client[_-]?secret)$/i.test(k)
@@ -43,8 +46,14 @@ export function redactFailedReport(value: unknown): unknown {
   };
   return walk(value, 0);
 }
+/** Canonical scrubbed evidence digest: object key order cannot create a false revision. */
+export function failedReportDigest(value: unknown): string {
+  const canonical = (v: unknown): unknown => Array.isArray(v) ? v.map(canonical) :
+    v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, x]) => [k, canonical(x)])) : v;
+  return createHash('sha256').update(JSON.stringify(canonical(redactFailedReport(value)))).digest('hex');
+}
 function row(workspaceId: string, historyId: string, r: Record<string, unknown> & { startedAt: number; endedAt: number }): FailedBuildRow {
-  return redactFailedReport({ workspaceId, historyId, buildId: typeof r.buildId === 'string' ? r.buildId : null,
+  return redactFailedReport({ workspaceId, historyId, reportDigest: failedReportDigest(r), buildId: typeof r.buildId === 'string' ? r.buildId : null,
     startedAt: r.startedAt, endedAt: r.endedAt,
     appLabel: typeof r.prompt === 'string' ? r.prompt.split('\n')[0].slice(0, 180) : 'Untitled build',
     rootCause: typeof r.rootCause === 'string' ? r.rootCause.slice(0, 1000) : null }) as FailedBuildRow;

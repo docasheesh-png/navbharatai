@@ -97569,3 +97569,101 @@ promises and retain the no-fake-progress/near-success protections. The whole-sou
 dead-code guard is unchanged; no exemption was added. That failed preflight was
 stopped and is not passing evidence. Focused and complete final-source checks
 must pass again before the updated PR head is pushed.
+
+### 2026-10-20 — Phase2 asset owner collision caught before updated PR push
+
+The combined deadline/recovery head `f29da58` passed the full Node22/UTC suite:
+2,807 files /40,051 tests passed /67 skipped /0 failed, plus both typechecks,
+production build/boot and imports/native/OAuth/bundle/server-dependency checks.
+That proof predates the following ownership correction and is not the final gate
+for its new source. PR #3852 remains unmerged and its original remote head has
+not yet received these local changes.
+
+Independent review reproduced a dangerous inverse prefix collision in the
+proposed asset eraser: deleting for uid `abc` also selected legacy objects for
+`abc-d`. Refusing only hyphenated deleting UIDs did not protect the shorter
+neighbor. New spills now receive only the server-verified owner separately and
+use an encoded, slash-delimited `workspace-assets-v2` owner component. Erasure
+selects only that exact namespace. Legacy opaque pointers remain readable;
+legacy objects are never deleted by guessing a workspace/session owner. Overall
+`removed` remains false with a legacy ownership limitation, while a separate
+`verifiedOwnerObjectsRemoved` confirms only completed verified-owner objects.
+The registered profile fallback preserves that honest outcome on unexpected
+errors without exposing internal storage details.
+
+The focused asset cohort passed 104 tests and both typechecks. Mutating the
+delete selector back to the unsafe prefix deletes the foreign neighbor and
+fails the stateful regression; replacing deletion with a no-op fails on retained
+verified-owner bytes. These were restored before commit `fa9c876`. Root profile
+limitation checks also pass. Complete final-source local and exact-head remote
+checks remain required after all ownership corrections are frozen.
+
+The sibling audit also confirmed that legacy full workspace IDs themselves
+collide (`abc` + `d-session1` equals `abc-d` + `session1`). Verified tokens and
+fresh history/session collections using that same full key do not disambiguate
+ownership. Existing workspace documents have no trustworthy historical owner
+stamp. A bounded refusal of legacy prefix-only erasure is in progress; a safe
+prospective owner boundary and verified legacy migration are still OPEN for
+private reads/writes. The roadmap now explicitly qualifies Phase1 security
+readiness. No unconditional security/100-percent claim is justified.
+
+### 2026-10-20 — Phase2 unverified deletion siblings and honest user outcomes
+
+The inverse UID collision also reaches legacy Firestore workspace ranges,
+derived histories/build events and hosted snapshots. Their shared planner now
+refuses prefix-only attribution for every valid UID, not only a hyphenated
+requester, and reports `ownership-unverified` before destructive selection.
+A deliberate planner-only reversion of the registered profile test deletes the
+foreign `workspace_files_v3/agentv3-abc-d-session1` document and fails on its
+missing actual bytes. The safe source was restored.
+
+The sibling audit found distinct composite-key cases: sync's `abc__c0` can be
+another account's manifest or `abc`'s chunk, and legacy conversation turns can
+belong to a colliding workspace while the parent retains a different userId.
+A parent owner field does not prove the ownership of mixed historical payloads.
+The sync eraser now refuses attribution without reads/deletes; its actual-body
+reversion loses foreign manifest/chunk data in both directions and fails.
+Known mixed-owner platform stores retain their registry/child inventory while
+returning explicit zero-deletion refusal, rather than being hidden from the
+census. ADR/debt and app-identity composite stores are being checked under this
+same policy; final scope and gates are recorded after their source freezes.
+
+The in-app confirmation screen and public deletion instructions now disclose
+retained ownership-unverified workspace/conversation/sync/snapshot/asset data.
+An account-removal acknowledgment never proves all data was wiped. A missing or
+failed response never proves nothing changed; sign-out follows confirmed account
+removal. The 25 focused product/profile checks passed before the final combined
+freeze. Full local and exact-head remote checks are still required. Private
+read/write ownership, verified legacy migration and late-write fencing remain
+OPEN; these destructive-action mitigations do not complete either Phase2 or
+unconditional security readiness.
+
+### 2026-10-20 — Phase2 destructive ownership scope frozen for final gate
+
+The completed bounded sibling audit now covers five proven mixed-owner platform
+stores through one pre-query refusal policy: agentv3_conversations,
+sonic_voice_memory, adrDecisions, techDebt and app_ai_apps. Their inventory and
+children remain declared. Actual production writers reproduce shared physical
+keys and mixed turns/arrays/previous nonces; selective policy reversions delete
+foreign persisted bytes and fail the regressions. Whole-eraser no-op controls
+also fail because independently attributable platform records must still erase.
+The real registered profile regression invokes retention, derived, workspace,
+snapshot and sync erasers together; ambiguous data survives while exact-owner
+platform/bot paths remain exercised.
+
+Final combined focused ownership/product cohort: 17 files /172 tests passed,
+zero failed/skipped, Node22/UTC. Asset namespace, sync, platform retention and
+legacy planner changes are committed locally as fa9c876, 96c5a1f, 958dd8e and
+dbe7fe7. No updated head is pushed yet. The bounded additional registry review
+found no further reachable mixed-owner collision in its selected current caller
+domains; that is not proof of historical attribution or deployed Firestore rules.
+The independent prospective ownership design is retained in the execution
+artifact at /tmp/navbharatai-phase2-staging/verified-workspace-owner-design.md.
+
+The queue normal-module handoff is a separate isolated checkpoint, local
+37e667e, with 261 focused tests, 21/21 real Firestore multiprocess drills and
+both typechecks passed. It still needs the final combined-source gate and CI.
+Phase2 remains IN PROGRESS. Legacy private access/migration, physical SDK/source
+fencing, full state/origin preservation and production-provider evidence remain
+OPEN. Phases3–6 have not started. Merge authorization remains conditional on
+green exact-head CI; no 100/100 or phase completion is inferred from these fixes.

@@ -13,7 +13,7 @@
 // is erased is worse than no page, because people rely on it and stop asking.
 
 export const ACCOUNT_DELETION_TITLE = 'Delete your NavBharatAI account';
-export const ACCOUNT_DELETION_UPDATED = '5 October 2026';
+export const ACCOUNT_DELETION_UPDATED = '20 October 2026';
 
 export const ACCOUNT_DELETION = `# Delete your NavBharatAI account
 
@@ -25,7 +25,9 @@ This page explains how to ask us to delete your **NavBharatAI** account (Android
 
 ## The fastest way: delete it yourself, in the app
 
-Open **Settings**, scroll to the bottom to the red **Danger zone**, and choose **Delete account**. You will be asked to type the word *delete* to confirm — a single accidental tap can never delete an account. Deletion runs immediately and you are signed out.
+Open **Settings**, scroll to the bottom to the red **Danger zone**, and choose **Delete account**. You will be asked to type the word *delete* to confirm — a single accidental tap can never delete an account. Deletion starts immediately; you are signed out when account removal is confirmed.
+
+**Account removal and complete data erasure are separate outcomes.** Automatic deletion retains older records whose ownership cannot be independently verified, including workspaces, chat and voice conversations, cross-device workspace copies, saved versions, hosted snapshots, engineering notes, app identity records and uploaded assets. These records need ownership review; they are not deleted by guessing from an account or workspace name. The app reports this limitation. Email **info@navbharatai.com** to request review of retained data, even after your sign-in is removed.
 
 ---
 
@@ -52,12 +54,12 @@ Sending it from your own registered address is how we confirm the request is rea
 
 ## What is deleted
 
-When your deletion request is completed, we remove:
+When ownership is independently verified and your deletion request is completed, we remove the attributable data below. The automatic-deletion limits above apply to older workspace records and copies; this list is not a claim that those records are immediately erased:
 
 - your **account record and profile** (name, email address, phone number, profile picture);
 - your **chat history** across every NavBharatAI assistant;
 - your **projects and built apps**, including their files and any archives you uploaded, the review comments left on them, and the list of things the builder asked you to do for them;
-- your **build history and diagnostics** tied to your account, including the reports of past builds, **every saved version of every app you could have restored**, and the record of which instructions each build ran with;
+- your **build history and diagnostics** tied to your account, including the reports of past builds, saved versions whose ownership can be independently verified, and the record of which instructions each build ran with;
 - your **notifications and devices** — the mentions sent to you inside NavBharatAI, and the push-notification address of each phone you signed in on;
 - your **wallet, token balance and usage records**;
 - any **API keys and credentials** you stored in the secrets vault;
@@ -143,7 +145,7 @@ When your deletion request is completed, we remove:
 
 ## How long it takes
 
-Personal data is deleted or irreversibly anonymised **within 30 days** of a confirmed request. The payment and tax records described above are the only exception.
+Our published deletion timeline is **within 30 days** of a confirmed request. Automatic account removal does not establish that retained ownership-unverified data has been erased or that its review is complete. We cannot confirm completion for those records until ownership review finishes; contact us using the address above. Payment and tax records follow their separate legal retention period.
 
 Backups are cycled on their own schedule, so a copy of already-deleted data may persist in an encrypted backup for a short additional period before it is overwritten. It is not restored to the live service and is not used for anything.
 

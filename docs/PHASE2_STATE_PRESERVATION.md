@@ -87,29 +87,85 @@ settlement for all concurrent exits.
 
 ## Completed private asset objects
 
-Large workspace assets spill to private object storage at
-`workspace-assets/<workspaceId>/<assetId>`. Account erasure previously deleted
-their Firestore pointers while retaining the bytes. The writer, reader and eraser
-now share the same bucket selection and object-key definition.
+Large workspace assets spill outside Firestore. The legacy key
+`workspace-assets/<workspaceId>/<assetId>` has no independently verified owner.
+Its apparent UID prefix is ambiguous: deleting for `abc` can match a workspace
+belonging to `abc-d`. Refusing deletion only when the deleting UID has a hyphen
+does not solve this collision. The original proposed prefix erasure was caught
+before the updated PR was pushed and is replaced, not treated as safe evidence.
 
-The authenticated, confirmed profile deletion path deletes the verified owner's
-safe private prefix even if metadata was already erased. It uses the existing
-workspace erasure planner, refuses ambiguous hyphenated UIDs, and now also
-refuses the reserved anonymous namespace. Foreign owners, published/shared
-objects and APK objects are outside this prefix.
+New authenticated spills receive the server-verified UID separately from the
+workspace ID and use `workspace-assets-v2/<encoded-owner>/<encoded-workspace>/<assetId>`.
+The owner component is encoded and slash-delimited, so neither a neighboring UID
+nor a shared legacy workspace ID can select another owner's object. The writer,
+reader and eraser retain shared bucket selection. Opaque legacy storage pointers
+remain readable; unauthenticated legacy writes do not acquire verified ownership.
 
-The additive `workspaceAssetObjects` response reports attempted, removed and
-failures separately from Firestore document counts. Unconfigured storage or a
-partial/unconfirmed deletion never claims that the objects were removed.
-Tests exercise the real spill writer and registered account deletion against
-stateful database/bucket doubles, including metadata loss, partial failure,
-retry and authorization boundaries. A deliberate no-op deletion reversion fails
-on retained owner bytes.
+The authenticated, confirmed profile deletion path removes only completed objects
+under that exact verified-owner namespace, including after Firestore pointer
+loss. It never infers legacy ownership from session strings, history records or
+workspace prefixes. Legacy objects remain retained for separately verified review.
+Anonymous or unusable owner identities are refused. Published/shared and APK
+objects are outside this namespace.
 
-The deletion confirms only the configured bucket's completed objects. It does
-not fence an upload already in flight, reconcile historical bucket changes or
-erase ZIP chunks keyed by upload ID. Account-lifecycle tombstones and durable
-late-write reconciliation remain open.
+The additive `workspaceAssetObjects` response separates
+`verifiedOwnerObjectsRemoved` from overall `removed`. Overall removal remains
+unconfirmed (`removed: false`) because legacy ownership is unresolved; the
+response includes that limitation. Unconfigured storage, failed deletion and
+unexpected errors never claim verified-object removal. Tests exercise the actual
+spill writer and registered account deletion with stateful database/bucket
+doubles, metadata loss, partial failure, retry and authorization. Owners `abc` and
+`abc-d` share the same legacy workspace ID in the regression: erasing one must
+preserve the other's new bytes and every legacy object.
+
+This confirms only the configured bucket's completed verified-owner objects. It
+does not fence an upload already in flight, reconcile historical buckets or erase
+ZIP chunks keyed by upload ID. Account-lifecycle tombstones, verified legacy
+migration and durable late-write reconciliation remain open.
+
+## Legacy workspace erasure refuses unverified attribution
+
+The same UID collision affects the older Firestore workspace eraser, hosted
+snapshot selection, build-event field ranges and histories derived from session
+rows. Conversation parents can also retain one userId while turns from another
+colliding workspace are appended. Cross-device sync has its own collision:
+`user_workspaces/abc__c0` can be a chunk for `abc` or the manifest for `abc__c0`.
+Constructing an exact composite key does not resolve these collisions.
+The same class exists in voice conversation memory, ADR/debt records and app AI
+identity records: production writers can merge old turns, arrays or still-valid
+previous nonces while retaining or replacing a parent userId. Those five known
+mixed-owner platform stores keep their registry entries but explicitly refuse
+account-erasure attribution before any query. Actual writer regressions reproduce
+the mixed payloads; the registry handler does not equate a last-written owner
+field with proof of every retained byte.
+Re-checking the same prefix does not independently verify ownership. Even
+a default-shaped Firebase UID can be the shorter neighbor of a valid custom UID;
+checking current Auth accounts would miss deleted historical owners.
+
+The shared legacy workspace erasure planner now refuses every prefix-only
+attribution with `ownership-unverified`, before querying or deleting workspace
+documents or snapshots. Derived history and build-event paths share that refusal.
+Legacy conversation cascading and synced workspace erasure likewise refuse
+unverified attribution before destructive selection. Their reports retain zero
+deletion counts and a reason, rather than claiming an empty completed erasure.
+Exact owner-field platform and bot erasure remains separate; newly verified-owner
+asset objects use their independent safe namespace. Account removal is still
+reported separately from data erasure. The profile response always explains that
+unverified workspace records, histories and hosted snapshots are retained, even
+when an eraser fails before returning its report. This intentionally leaves a
+compliance gap rather than deleting a stranger's work.
+
+The registered profile regression holds neighboring owners' workspace,
+history, event, conversation, sync and snapshot data while exercising the actual
+eraser decisions. It checks that ambiguous storage is retained and independently
+owned platform/bot data can still be removed. The deletion screen and public
+instructions disclose retained data before confirmation; missing responses never
+prove that nothing changed or that all data was erased.
+This is a bounded destructive-action mitigation. Private
+workspace read/write authorization still relies on the ambiguous legacy identity
+scheme and remains an OPEN security issue. A prospective independently verified
+owner boundary and verified legacy migration are required; changing the runtime
+or browser origin without preserving state is not a safe shortcut.
 
 ## Release evidence
 

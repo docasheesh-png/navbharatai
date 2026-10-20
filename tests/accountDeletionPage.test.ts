@@ -66,6 +66,16 @@ describe('the page satisfies what Play actually asks for', () => {
   it('states the token-balance consequence instead of letting someone find out afterwards', () => {
     expect(ACCOUNT_DELETION).toMatch(/not refundable on deletion/i);
   });
+
+  it('discloses automatic legacy retention before confirmation and does not promise every saved version is erased', () => {
+    const limitation = ACCOUNT_DELETION.indexOf('Automatic deletion retains older records');
+    expect(limitation).toBeGreaterThan(0);
+    expect(limitation).toBeLessThan(ACCOUNT_DELETION.indexOf('## What is deleted'));
+    expect(ACCOUNT_DELETION).toMatch(/chat and voice conversations, cross-device workspace copies, saved versions, hosted snapshots, engineering notes, app identity records and uploaded assets/);
+    expect(ACCOUNT_DELETION).toMatch(/not deleted by guessing/);
+    expect(ACCOUNT_DELETION).toMatch(/cannot confirm completion.*until ownership review finishes/);
+    expect(ACCOUNT_DELETION).not.toMatch(/every saved version of every app you could have restored/);
+  });
 });
 
 describe('the URL is actually served', () => {

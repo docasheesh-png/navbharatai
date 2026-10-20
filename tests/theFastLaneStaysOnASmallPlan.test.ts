@@ -114,7 +114,7 @@ describe('3 · in the route: the call is let through, the lane keeps going, the 
     expect(at).toBeGreaterThan(-1);
     const generation = route.slice(at, route.indexOf('const fastWriteRaw =', at));
     expect(generation).toContain('continueFastLaneGeneration(first, {');
-    expect(generation).toMatch(/generate:\s*\(prompt\)\s*=>\s*fastGenerateOnce\(system,\s*prompt,\s*genOpts\?\.deadlineAt,\s*genOpts\?\.mayReason === true\)/);
+    expect(generation).toMatch(/generate:\s*\(prompt\)\s*=>\s*fastGenerateOnce\(system,\s*prompt,\s*genOpts\?\.deadlineAt,\s*genOpts\?\.mayReason === true,\s*genOpts\?\.repair === true\)/);
     expect(read('src/server/AgentV3/FastLaneContinuation.ts')).toContain('deps.generate(continuationPrompt(text))');
     expect(route).toContain('recordReasoningStays(buildDiag, laneReasoningStays, sb);');
     expect(PROCESS_ONLY_CODES.has('FAST_LANE_STAYED_ON_REASONING_RUNG')).toBe(true);

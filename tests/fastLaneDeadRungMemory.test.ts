@@ -183,7 +183,9 @@ describe('the wiring — one map per BUILD, inside the request handler', () => {
     expect(route).toContain('const fastLaneDeadRungs = new Map<string, string>();');
     const at = route.indexOf('const makeFastTextRunner =');
     expect(at).toBeGreaterThan(0);
-    expect(route.slice(at, at + 900)).toContain('deadRungs: fastLaneDeadRungs');
+    const end = route.indexOf('const makePlanTextRunner =', at);
+    expect(end).toBeGreaterThan(at);
+    expect(route.slice(at, end)).toContain('deadRungs: fastLaneDeadRungs');
   });
 
   it('🔒 it is declared INSIDE the build request handler, so it cannot outlive one build', () => {

@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({
   paths: new Map<string, Record<string, unknown>>(),
   deleted: [] as string[],
+  collections: [] as string[],
 }));
 
 function collection(path: string) {
+  state.collections.push(path);
   let start = '';
   let end = '\uffff';
   let pageSize = Infinity;
@@ -52,32 +54,34 @@ beforeEach(() => {
   vi.stubEnv('VITEST', '');
   state.paths.clear();
   state.deleted.length = 0;
+  state.collections.length = 0;
 });
 afterEach(() => vi.unstubAllEnvs());
 
-describe('account erase follows canonical history ownership', () => {
-  it('erases owned versions after the source app is gone, retaining another owner and unowned legacy rows', async () => {
+describe('account erase requires independent history ownership', () => {
+  it('retains full-key and bare histories when neither a parent marker nor key shape proves ownership', async () => {
     const own = 'build_history_v2/agentv3-alice-shared123';
     const other = 'build_history_v2/agentv3-bob-shared123';
     const legacy = 'build_history/shared123';
     const legacyWorkspaceShapedId = 'build_history/agentv3-alice-shared123';
-    for (const path of [own, other, legacy, legacyWorkspaceShapedId, 'build_history_v2/agentv3-anon-shared123']) {
+    const collidedWorkspaceId = 'agentv3-alice-x-shared123';
+    // alice/session=x-shared123 and alice-x/session=shared123 name the same physical history.
+    expect(collidedWorkspaceId).toBe(`agentv3-${'alice'}-${'x-shared123'}`);
+    expect(collidedWorkspaceId).toBe(`agentv3-${'alice-x'}-${'shared123'}`);
+    const collided = `build_history_v2/${collidedWorkspaceId}`;
+    for (const path of [own, other, collided, legacy, legacyWorkspaceShapedId, 'build_history_v2/agentv3-anon-shared123']) {
       state.paths.set(path, { workspaceId: path.slice(path.indexOf('/') + 1) });
       state.paths.set(`${path}/versions/v1`, { files: { 'app.ts': path } });
     }
     state.paths.set(`${own}/versions/v2`, { files: { 'app.ts': 'second own version' } });
-    // No workspace_files_v3 parent remains: the history's own parent marker makes it reachable.
+    const before = [...state.paths.entries()];
+    // A full-key parent makes versions reachable, but cannot independently attribute their bytes.
+    // This remains true after the source workspace disappears.
     const result = await deleteUserWorkspaceData('alice');
-    expect(result.collections.find((row) => row.collection === 'build_history_v2'))
-      .toMatchObject({ workspaces: 1, documents: 2 });
-    expect(state.paths.has(own)).toBe(false);
-    expect(state.paths.has(`${own}/versions/v1`)).toBe(false);
-    expect(state.paths.has(`${own}/versions/v2`)).toBe(false);
-    for (const kept of [other, legacy, legacyWorkspaceShapedId, 'build_history_v2/agentv3-anon-shared123']) {
-      expect(state.paths.has(kept)).toBe(true);
-      expect(state.paths.has(`${kept}/versions/v1`)).toBe(true);
-    }
-    expect(state.deleted.at(-1)).toBe(own);
-    expect(state.deleted.slice(0, -1)).toEqual([`${own}/versions/v1`, `${own}/versions/v2`]);
+    expect([...state.paths.entries()]).toEqual(before);
+    expect(state.paths.get(`${collided}/versions/v1`)).toEqual({ files: { 'app.ts': collided } });
+    expect(state.deleted).toEqual([]);
+    expect(state.collections).toEqual([]);
+    expect(result).toEqual({ uid: 'alice', collections: [], totalDeleted: 0, refusal: 'ownership-unverified' });
   });
 });

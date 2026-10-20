@@ -20,6 +20,7 @@
 // to today's behaviour; a false positive at worst wastes part of one repair pass. PURE + unit-testable.
 
 import * as ts from 'typescript';
+import { createExportCapabilities, EXPORT_CODE_FILE, type ModuleCapabilities } from './exportCapabilities';
 
 export interface ModuleContract {
   /** Named exports of the module (function/class/const/let/var/interface/type/enum names + export lists + 'default'). */
@@ -32,7 +33,7 @@ export interface ModuleContract {
 
 export type ContractMap = Map<string, ModuleContract>;
 
-const SOURCE_EXT = ['.tsx', '.ts', '.jsx', '.js', '.mjs'];
+const SOURCE_EXT = ['.tsx', '.ts', '.mts', '.cts', '.jsx', '.js', '.mjs', '.cjs'];
 
 /** A path's module key = path without a source extension (so importers' `./foo` lines up). */
 function moduleKey(path: string): string {
@@ -42,43 +43,14 @@ function moduleKey(path: string): string {
 
 /** Extract a module's exported symbols + enum members from its source. PURE. */
 export function extractModuleContract(content: string): ModuleContract {
-  const exports = new Set<string>();
+  return moduleContract(content, createExportCapabilities({ 'module.ts': content || '' }).exportsOf('module.ts'));
+}
+
+function moduleContract(content: string, surface: ModuleCapabilities): ModuleContract {
+  const exports = new Set(surface.exports.keys());
   const enums = new Map<string, Set<string>>();
   const src = content || '';
-
-  const declRe = /export\s+(?:default\s+)?(?:async\s+)?(?:function|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)/g;
-  for (let m = declRe.exec(src); m; m = declRe.exec(src)) exports.add(m[1]);
-
-  // DESTRUCTURED exports — `export const { a, b: c } = …` and `export const [ x ] = …`. The `declRe`
-  // above requires an identifier after `const`, so it misses these entirely — and then a valid
-  // consumer `import { a } from …` was reported as drift. This is a COMMON generated-React pattern
-  // (Zustand `export const { useStore } = create(...)`, Context `export const { Provider, useX } =
-  // createContext(...)`). Each bound local name is what consumers import.
-  const destructRe = /export\s+(?:const|let|var)\s*(\{[^}]*\}|\[[^\]]*\])\s*=/g;
-  for (let m = destructRe.exec(src); m; m = destructRe.exec(src)) {
-    for (const raw of m[1].slice(1, -1).split(',')) {
-      let seg = raw.trim();
-      if (!seg) continue;
-      seg = seg.replace(/=.*$/, '').trim();               // drop a default value
-      const local = seg.includes(':') ? seg.slice(seg.indexOf(':') + 1) : seg; // `key: local` → local
-      const id = local.replace(/^\.\.\./, '').trim();     // rest element `...rest`
-      if (/^[A-Za-z_$][\w$]*$/.test(id)) exports.add(id);
-    }
-  }
-
-  // `export { a, b as c }` — the OUTER name (after `as`) is what consumers import.
-  const listRe = /export\s*\{([^}]*)\}/g;
-  for (let m = listRe.exec(src); m; m = listRe.exec(src)) {
-    for (const part of m[1].split(',')) {
-      const seg = part.trim();
-      if (!seg) continue;
-      const name = (seg.split(/\s+as\s+/).pop() || '').trim();
-      if (/^[A-Za-z_$][\w$]*$/.test(name)) exports.add(name);
-    }
-  }
-
-  if (/export\s+default\b/.test(src)) exports.add('default');
-  const hasWildcard = /export\s*\*/.test(src);
+  const hasWildcard = /export\s*(?:type\s+)?\*/.test(src);
 
   // enums: capture name + member identifiers (first identifier of each comma-separated entry).
   const enumRe = /(?:export\s+)?(?:const\s+)?enum\s+([A-Za-z_$][\w$]*)\s*\{([^}]*)\}/g;
@@ -140,31 +112,16 @@ function objectLiteralKeys(body: string): Set<string> | null {
 
 /** Build the contract for every generated module. PURE. */
 export function extractContract(files: Record<string, string>): ContractMap {
+  return contractWithCapabilities(files, createExportCapabilities(files));
+}
+
+function contractWithCapabilities(files: Record<string, string>, capabilities: ReturnType<typeof createExportCapabilities>): ContractMap {
   const map: ContractMap = new Map();
   for (const [path, content] of Object.entries(files || {})) {
-    if (!SOURCE_EXT.some((e) => path.endsWith(e))) continue; // only TS/JS modules carry exports
-    map.set(moduleKey(path), extractModuleContract(content));
+    if (!EXPORT_CODE_FILE.test(path)) continue; // only TS/JS modules carry exports
+    map.set(moduleKey(path), moduleContract(content, capabilities.exportsOf(path)));
   }
   return map;
-}
-
-/** Resolve a relative specifier against the importer path to a module key, or null if not in-app/relative. */
-function resolveRelative(fromPath: string, spec: string): string | null {
-  if (!spec.startsWith('.')) return null;       // external (e.g. 'react') — not our concern
-  if (/\.css$/.test(spec)) return null;          // stylesheet, no TS exports
-  const dir = fromPath.includes('/') ? fromPath.slice(0, fromPath.lastIndexOf('/')) : '';
-  const parts = dir ? dir.split('/') : [];
-  for (const seg of spec.replace(/\.[a-z0-9]+$/i, '').split('/')) {
-    if (seg === '' || seg === '.') continue;
-    if (seg === '..') parts.pop();
-    else parts.push(seg);
-  }
-  return parts.join('/');
-}
-
-/** A module key matched against the contract, trying `key` then `key/index`. */
-function lookup(map: ContractMap, key: string): ModuleContract | null {
-  return map.get(key) ?? map.get(`${key}/index`) ?? null;
 }
 
 /**
@@ -172,7 +129,8 @@ function lookup(map: ContractMap, key: string): ModuleContract | null {
  * report (capped), or null when there is no detectable drift. PURE & deterministic — advisory input to repair.
  */
 export function contractDriftReport(files: Record<string, string>): string | null {
-  const map = extractContract(files);
+  const capabilities = createExportCapabilities(files);
+  const map = contractWithCapabilities(files, capabilities);
   // Aggregate enums by name — but if the SAME name is declared in multiple files with DIFFERENT
   // members (generic names like Status/Type/Role/Size recur per-feature in larger apps), we cannot
   // tell by name alone which enum a given file's `Status.X` refers to. The old "first-wins" map
@@ -194,26 +152,22 @@ export function contractDriftReport(files: Record<string, string>): string | nul
   const push = (line: string) => { if (!seen.has(line)) { seen.add(line); lines.push(line); } };
 
   for (const [path, content] of Object.entries(files || {})) {
-    if (!SOURCE_EXT.some((e) => path.endsWith(e))) continue;
+    if (!EXPORT_CODE_FILE.test(path)) continue;
     const src = content || '';
 
-    // (1) named imports that the resolved in-app target does NOT export.
-    const impRe = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g;
-    for (let m = impRe.exec(src); m; m = impRe.exec(src)) {
-      const key = resolveRelative(path, m[2]);
-      if (!key) continue;
-      const target = lookup(map, key);
-      if (!target || target.hasWildcard) continue;   // unknown/wildcard target → conservative skip
-      for (const part of m[1].split(',')) {
-        const seg = part.trim();
-        if (!seg) continue;
-        const name = (seg.split(/\s+as\s+/)[0] || '').trim(); // the name that must be EXPORTED by target
-        if (!/^[A-Za-z_$][\w$]*$/.test(name)) continue;
-        if (!target.exports.has(name)) {
-          const avail = [...target.exports].filter((e) => e !== 'default').slice(0, 12).join(', ') || '(none)';
-          push(`${path}: imports { ${name} } from '${m[2]}' but it exports: ${avail}`);
-        }
-      }
+    // (1) Named imports need the producer's ACTUAL capability, not just its declared name.
+    // Ordinary imports used only in annotations remain legal (TypeScript can erase them).
+    for (const binding of capabilities.importsOf(path)) {
+      if (binding.imported === 'default') continue;
+      const targetPath = capabilities.resolve(path, binding.from);
+      if (!targetPath) continue;
+      const target = capabilities.exportsOf(targetPath);
+      const cap = target.exports.get(binding.imported);
+      if (target.uncertain) continue;
+      if (cap && (!binding.readsValue || cap.runtime !== 'erased')) continue;
+      const available = [...target.exports].filter(([name, c]) => name !== 'default' &&
+        (!binding.readsValue || c.runtime !== 'erased')).slice(0, 12).map(([name]) => name).join(', ') || '(none)';
+      push(`${path}: imports { ${binding.imported} } from '${binding.from}' but it exports: ${available}${cap ? ' (requested runtime value is type-only or ambient)' : ''}`);
     }
 
     // (2) Enum.Member references whose member the enum does not declare.

@@ -136,15 +136,15 @@ describe('serializeQueue / parseStoredQueue (durable, strict)', () => {
     expect(parseStoredQueue('ws1', raw).items.map((i) => i.id)).toEqual(['ok']);
   });
 
-  it("heals a stale 'running' item (a dead instance) to 'failed' so the serial slot is never stuck", () => {
+  it("preserves another process's running item until explicit recovery proves it is interrupted", () => {
     const raw = { items: [
       { id: 'x', prompt: 'p', source: 'user', status: 'running', createdTs: 1 },
       { id: 'y', prompt: 'p', source: 'user', status: 'pending', createdTs: 2 },
     ] };
     const q = parseStoredQueue('ws1', raw);
-    expect(q.items.find((i) => i.id === 'x')?.status).toBe('failed');
-    expect(runningItem(q)).toBeUndefined();       // slot free
-    expect(claimNext(q).claimed?.id).toBe('y');   // next can run
+    expect(q.items.find((i) => i.id === 'x')?.status).toBe('running');
+    expect(runningItem(q)?.id).toBe('x');
+    expect(claimNext(q).claimed).toBeNull();
   });
 });
 

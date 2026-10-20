@@ -55,7 +55,13 @@ describe('the server has one Firestore SDK — the admin one', () => {
 
   it('the zip import lease and the SBOM store use the admin handle', () => {
     const zip = readFileSync(join(root, 'src/server/routes/zipUpload.ts'), 'utf8');
-    expect(zip).toMatch(/const store = getServerDb\(\) as unknown as BuildLeaseStore \| null;/);
+    expect(zip).toMatch(/import\s*\{\s*getServerDb\s*\}\s*from\s*['"]\.\.\/lib\/serverDb['"]/);
+    const leaseStoreInitializer = zip.match(/const\s+store\s*=\s*([^;]+);/)?.[1];
+    expect(leaseStoreInitializer, 'ZIP lease must obtain its enabled store from the admin initializer').toBeDefined();
+    // A disabled lease deliberately selects null and refuses admission; it never substitutes a client handle.
+    expect(leaseStoreInitializer).toMatch(/getServerDb\(\)/);
+    expect(leaseStoreInitializer).toMatch(/as unknown as BuildLeaseStore \| null/);
+    expect(zip).toMatch(/await claimWorkspaceBuild\(store,\s*\{/);
     const sbom = readFileSync(join(root, 'src/server/routes/sbom.ts'), 'utf8');
     expect(sbom).toMatch(/getServerDb\(\)/);
     expect(sbom).toMatch(/collection\('sboms'\)\.doc\(ownedWorkspaceId\)\.collection\('builds'\)/);

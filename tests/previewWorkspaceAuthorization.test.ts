@@ -10,6 +10,9 @@ const deps = vi.hoisted(() => ({
   loadDiagnostics: vi.fn(async () => null),
   writeDiagnostics: vi.fn(async () => {}),
   mutateQueue: vi.fn(async () => ({ items: [] })),
+  mutateQueueWithResult: vi.fn(async () => ({ queue: { items: [] }, result: { added: true } })),
+  claimQueuedCommand: vi.fn(async () => ({ queue: { items: [] }, result: null })),
+  recoverQueuedCommand: vi.fn(async () => ({ queue: { items: [] }, result: false })),
   countFiles: vi.fn(async () => 0),
   loadQueue: vi.fn(async () => ({ items: [] })),
   actuator: vi.fn(() => ({})),
@@ -34,6 +37,9 @@ vi.mock('../src/server/AgentV3/BuildQueueStore', async (original) => ({
   ...await original<typeof import('../src/server/AgentV3/BuildQueueStore')>(),
   loadQueue: deps.loadQueue,
   mutateQueue: deps.mutateQueue,
+  mutateQueueWithResult: deps.mutateQueueWithResult,
+  claimQueuedCommand: deps.claimQueuedCommand,
+  recoverQueuedCommand: deps.recoverQueuedCommand,
 }));
 vi.mock('../src/server/routes/actuatorFactory', () => ({ buildActuator: deps.actuator }));
 
@@ -54,7 +60,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 const workspaceId = 'agentv3-victimUid123-11111111-1111-4111-8111-111111111111';
 const previewRoutes = ['POST /api/agentv3/preview-error', 'POST /api/agentv3/preview-diagnose', 'POST /api/agentv3/preview-health'];
-const queueRoutes = ['POST /api/agentv3/queue/enqueue', 'GET /api/agentv3/queue', 'POST /api/agentv3/queue/cancel', 'POST /api/agentv3/queue/next', 'POST /api/agentv3/queue/complete'];
+const queueRoutes = ['POST /api/agentv3/queue/enqueue', 'GET /api/agentv3/queue', 'POST /api/agentv3/queue/cancel', 'POST /api/agentv3/queue/next', 'POST /api/agentv3/queue/complete', 'POST /api/agentv3/queue/recover'];
 
 async function request(route: string, token?: string, ws = workspaceId) {
   const input = { workspaceId: ws, userId: 'victimUid123', email: 'owner@example.test', message: 'runtime error', framework: 'vite-react', prompt: 'change app', id: 'queued-item' };
@@ -72,12 +78,27 @@ describe('workspace preview and queue authorization uses the verified token', ()
         expect(deps.loadDiagnostics).not.toHaveBeenCalled();
         expect(deps.writeDiagnostics).not.toHaveBeenCalled();
         expect(deps.mutateQueue).not.toHaveBeenCalled();
+        expect(deps.mutateQueueWithResult).not.toHaveBeenCalled();
+        expect(deps.claimQueuedCommand).not.toHaveBeenCalled();
+        expect(deps.recoverQueuedCommand).not.toHaveBeenCalled();
         expect(deps.countFiles).not.toHaveBeenCalled();
         expect(deps.loadQueue).not.toHaveBeenCalled();
         expect(deps.actuator).not.toHaveBeenCalled();
         if (token) expect(deps.verify).toHaveBeenCalledWith(token);
       });
     }
+  }
+  for (const route of queueRoutes) {
+    it(`${route} accepts the verified owner after an expired-token refusal`, async () => {
+      expect((await request(route, 'expired-token')).statusCode).toBe(403);
+      expect((await request(route, 'owner-token')).statusCode).toBe(200);
+      expect(deps.verify).toHaveBeenCalledWith('owner-token');
+      if (route.endsWith('/enqueue')) expect(deps.mutateQueueWithResult).toHaveBeenCalledWith(workspaceId, expect.any(Function));
+      else if (route.endsWith('/next')) expect(deps.claimQueuedCommand).toHaveBeenCalledWith(workspaceId, false);
+      else if (route.endsWith('/cancel')) expect(deps.mutateQueue).toHaveBeenCalledWith(workspaceId, expect.any(Function));
+      else if (route.endsWith('/recover')) expect(deps.recoverQueuedCommand).toHaveBeenCalledWith(workspaceId, 'queued-item');
+      else expect(deps.loadQueue).toHaveBeenCalledWith(workspaceId);
+    });
   }
   for (const route of previewRoutes) {
     it(`${route} accepts the verified owner after an expired-token refusal`, async () => {

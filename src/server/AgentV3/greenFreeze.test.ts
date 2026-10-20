@@ -268,16 +268,22 @@ describe('the latch cannot leak into the next build', () => {
   it('the latch is cleared at the VERY START of a build, before any write', () => {
     // The robust fix: build B clears any stale latch a bypassed teardown of build A may have left,
     // BEFORE build B writes a line — so no teardown path can freeze the next build's generation.
-    // Anchored on the DERIVATION rather than on whatever comment happens to follow the clear. The old
-    // anchor pinned the next line's text, so an unrelated insertion below it broke the test without
-    // anything about the guarantee changing. This states the guarantee directly: the workspace id is
-    // derived, and clearing the latch is the very next thing that happens to it.
-    const derive = routes.indexOf('const workspaceId = deriveWorkspaceId(userId, req.body?.sessionId);');
-    const clearAtStart = routes.indexOf('clearGreenLatch(workspaceId); } catch { /* best-effort */ }', derive);
-    const latch = routes.indexOf('latchGreen(workspaceId,');
+    // The accepted build reuses its preflight workspace identity. Follow that identity through both
+    // aliases, then require the clear before the first sandbox operation and before either green latch.
+    // An exact spelling of the old inline derivation missed this unchanged guarantee after extraction.
+    const derive = routes.indexOf('const leaseWorkspaceId = deriveWorkspaceId(');
+    const intent = routes.indexOf('const intentWorkspaceId = leaseWorkspaceId;', derive);
+    const build = routes.indexOf('const workspaceId = intentWorkspaceId;', intent);
+    const clearAtStart = routes.indexOf('clearGreenLatch(workspaceId); } catch { /* best-effort */ }', build);
+    const firstSandboxOperation = routes.slice(build).search(/actuator\.(?:ensureWorkspace|writeFile|writeBinaryFile)\(/);
+    const latch = routes.indexOf('latchGreen(workspaceId,', build);
     expect(derive).toBeGreaterThan(-1);
-    expect(clearAtStart).toBeGreaterThan(-1);
-    expect(clearAtStart).toBeLessThan(latch); // cleared before it could ever be set this build
+    expect(intent).toBeGreaterThan(derive);
+    expect(build).toBeGreaterThan(intent);
+    expect(clearAtStart).toBeGreaterThan(build);
+    expect(firstSandboxOperation).toBeGreaterThan(-1);
+    expect(clearAtStart).toBeLessThan(build + firstSandboxOperation);
+    expect(clearAtStart).toBeLessThan(latch);
   });
 
   it('re-latching is a no-op — a mutated tree can never overwrite the real green snapshot', () => {

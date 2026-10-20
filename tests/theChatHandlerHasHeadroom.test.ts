@@ -69,7 +69,8 @@ function branchTokens(body: string): number {
  * Q-979's own prescription happening by itself. Lowered to the measurement, not to a guess — and the
  * down-only test is what forced it to be noticed at all rather than drifting.
  */
-const BRANCH_BUDGET = 546;
+// Coordination/preflight/heartbeat extracted in Phase2: measured543, preserving the down-only ratchet.
+const BRANCH_BUDGET = 543;
 
 const WHAT_TO_DO = [
   'The chat handler is at or over its branch budget.',

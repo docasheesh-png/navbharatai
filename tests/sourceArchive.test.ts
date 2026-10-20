@@ -103,7 +103,7 @@ describe('packWorkspaceArchive', () => {
       const listed = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' })
         .split('\n').map((s) => s.trim()).filter(Boolean).sort();
       expect(listed).toEqual(r.packed.slice().sort());
-      execFileSync('tar', ['-xzf', archive, '-C', dir]);
+      execFileSync('tar', ['--no-same-owner', '-xzf', archive, '-C', dir]);
       expect(readFileSync(join(dir, 'src/App.tsx'), 'utf8')).toBe(files['src/App.tsx']);
       expect(readFileSync(join(dir, 'package.json'), 'utf8')).toBe(files['package.json']);
     } finally {

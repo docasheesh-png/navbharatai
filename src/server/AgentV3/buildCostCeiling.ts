@@ -50,7 +50,13 @@ export const MAX_BUILD_COST_CEILING_USD = 50;
  * to the default: a value that is PRESENT and unparseable can never have been intended as "off",
  * which is the same reasoning `parseRolloutPercent` already applies to a malformed percentage.
  */
-export function buildCostCeilingUsd(env: NodeJS.ProcessEnv = process.env): number {
+export function buildCostCeilingUsd(env: NodeJS.ProcessEnv = process.env, weakScopePolicy = false): number {
+  if (weakScopePolicy) {
+    const value = Number(env.AGENTV3_WEAK_BUILD_COST_CEILING_USD);
+    const weak = Number.isFinite(value) && value > 0 ? Math.min(value, MAX_BUILD_COST_CEILING_USD) : 1;
+    const global = buildCostCeilingUsd(env);
+    return global > 0 ? Math.min(weak, global) : weak;
+  }
   const raw = String(env.AGENTV3_BUILD_COST_CEILING_USD ?? '').trim().replace(/[$,\s]/g, '');
   if (raw === '0') return 0; // explicit opt-out
   const n = Number(raw);

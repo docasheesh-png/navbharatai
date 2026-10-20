@@ -97814,3 +97814,22 @@ publish once green; merge only after the admin explicitly names this PR. Keep al
 source/CI rows IN PROGRESS until merge.
 Remaining item-level prevention and Q-1894–Q-1897 stay open. Third-report expansion is paused;
 resume one-by-one Q-1300 work after this batch, without rewriting prior checkpoint history.
+
+### 2026-10-20 — fresh-main rebase after connector interruption; new final gate pending
+
+The connector upload/catalog interruption ran from approximately 05:37 to 11:06 UTC. During it,
+main advanced from `885ba410` to `68528197949135513d2df97e3b4dee667036059a` through other sessions'
+PRs #3848–#3853. All five local checkpoints rebased cleanly; the pre-documentation HEAD is
+`459601558`. Existing fresh-main content and all previous progress remain unchanged as a prefix.
+
+The prior exact tree `3efec7ea` completed its local full gate: **2,798 files / 39,996 tests passed,
+67 skipped**, with **all 14 non-suite checks passed**. This proves that earlier tree only. The
+complete gate on the newly rebased fresh-main tree is **PENDING**; no follow-up PR was created.
+Resume with that complete gate, then publish once green; merge only after the admin explicitly
+names that PR. Do not treat the connector interruption or rebase as a new source repair.
+
+Persisted scope is unchanged: **2 ledgers / 119 items / 549 reports awaiting itemization**;
+the audit queue remains **400 pending rows = 341 OPEN / 16 IN PROGRESS / 43 four-field BLOCKED**.
+The third report's 51-item ledger is ready in scratch for the next batch and is not published or
+counted here. Original counts remain **4 terminal source classes / 0 historical app reruns /
+0 whole-report resolutions**. No queue, CSV, source or third-ledger publication change is included.

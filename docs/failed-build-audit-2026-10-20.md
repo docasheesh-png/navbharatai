@@ -14,6 +14,13 @@ primary assessment, current source/tests, queue reference and next action. It co
 raw model responses, credentials or copied log excerpts. Detailed retained evidence stays outside
 the repository. A report row is not an item row, and no historical application was rerun.
 
+Current resume: all five local checkpoints rebased cleanly onto main
+`68528197949135513d2df97e3b4dee667036059a` (pre-documentation HEAD `459601558`). The earlier
+exact tree `3efec7ea` passed 2,798 test files / 39,996 tests, with 67 skipped, and all 14 other
+checks. That result applies to that earlier tree; the complete fresh-main gate is pending.
+No follow-up PR has been created. Publish only after the new gate passes; merge requires the
+admin to explicitly name that PR. The queue, persisted counts and unresolved work below are unchanged.
+
 ## Count correction
 
 The earlier `fixed-this-turn = 26` field was a mixed code-coverage label. It did **not** mean

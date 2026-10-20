@@ -61,10 +61,10 @@ describe('bucketSetupSql — the bucket', () => {
     }
   });
 
-  it('drops MIME entries that are not MIME types rather than passing them through', () => {
-    const sql = sqlOf({ ...defaultBucketSpec(), mimeTypes: ['image/png', "junk'; drop table x; --"] });
-    expect(sql).toContain("'image/png'");
-    expect(sql).not.toContain('drop table');
+  it('rejects invalid MIME restrictions instead of silently weakening the allow-list', () => {
+    for (const mimeTypes of [['image/png', "junk'; drop table x; --"], ['not-a-type']]) {
+      expect(bucketSetupSql({ ...defaultBucketSpec(), mimeTypes }).ok).toBe(false);
+    }
   });
 
   it('writes null (any type) when no MIME filter is given', () => {

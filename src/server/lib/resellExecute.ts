@@ -25,8 +25,8 @@ export interface ServerResellDeps {
   nowMs?: number;
 }
 
-function refused(status: number, error: string): { status: number; body: Record<string, unknown> } {
-  return { status, body: { ok: false, charged: false, error } };
+function refused(status: number, error: string, payment: Record<string, unknown> = {}): { status: number; body: Record<string, unknown> } {
+  return { status, body: { ok: false, charged: false, error, ...payment } };
 }
 
 /**
@@ -56,7 +56,11 @@ export async function executeServerResell(
       : 'The server did not become ready and could not be confirmed down. Nothing was charged.');
   }
   const clientRef = stableResellRef('server', input.workspaceId, deps.nowMs ?? Date.now());
-  const charged = await deps.charge(clientRef, proof);
+  let charged: ChargeResult;
+  try { charged = await deps.charge(clientRef, proof); }
+  catch {
+    return refused(503, 'Payment confirmation is unavailable. The live server has been kept for reconciliation; do not purchase it again.', { charged: null, paymentStatus: 'unknown', delivered: true, reconciliationRequired: true });
+  }
   if (charged.ok && charged.active !== false) {
     return {
       status: 200,
@@ -109,30 +113,36 @@ export async function executeDatabaseResell(
   }
   const proof = databaseAddonProof(input.workspaceId, created.projectRef);
   if (!proof) {
-    await deps.destroy(created.projectRef);
-    return refused(502, 'The database id was not one we can bill against, so it was removed. Nothing was charged.');
+    const gone = await deps.destroy(created.projectRef).catch(() => ({ ok: false }));
+    return refused(502, gone.ok ? 'The database id was not one we can bill against, so it was removed. Nothing was charged.' : 'The database id could not be billed and cleanup could not be confirmed. Nothing was charged.', { cleanupPending: !gone.ok });
   }
   const clientRef = stableResellRef('database', input.workspaceId, deps.nowMs ?? Date.now());
-  const charged = await deps.charge(clientRef, proof);
+  let charged: ChargeResult;
+  try { charged = await deps.charge(clientRef, proof); }
+  catch {
+    // A lost response is not evidence that the debit failed. Preserve the provisioned resource
+    // until the ledger can be reconciled, rather than deleting something the user may have paid for.
+    return refused(503, 'Payment confirmation is unavailable. The database has been kept for reconciliation; do not start another purchase.', { charged: null, paymentStatus: 'unknown', delivered: false, cleanupPending: true });
+  }
   if (!charged.ok || charged.active === false) {
-    const gone = await deps.destroy(created.projectRef);
+    const gone = await deps.destroy(created.projectRef).catch(() => ({ ok: false }));
     return refused(402, gone.ok
       ? `${charged.error || 'The charge did not complete.'} The database was deleted. Nothing was charged.`
       : `${charged.error || 'The charge did not complete.'} The database may still exist and you were NOT charged.`);
   }
-  const saved = await deps.save(created.env);
+  const saved = await deps.save(created.env).catch(() => false);
   if (!saved) {
-    const gone = await deps.destroy(created.projectRef);
+    const gone = await deps.destroy(created.projectRef).catch(() => ({ ok: false }));
     if (!gone.ok) {
-      return refused(500, 'The database is ready but its keys could not be saved, and it could not be confirmed deleted. You were charged because it is still up — remove it from Publish once it can be deleted, and unused days come back.');
+      return refused(500, 'The database is ready but its keys could not be saved, and it could not be confirmed deleted. You were charged because it is still up — remove it from Publish once it can be deleted, and unused days come back.', { charged: charged.charged === true, refunded: false, delivered: false, cleanupPending: true });
     }
-    const refunded = await deps.refund(clientRef);
+    const refunded = await deps.refund(clientRef).catch(() => ({ ok: false }));
     return refused(500, refunded.ok
       ? 'The database was ready but its keys could not be saved, so it was deleted and the charge was returned.'
-      : 'The database was deleted because its keys could not be saved. The charge could not be returned automatically — it is not still running. Try Remove again.');
+      : 'The database was deleted because its keys could not be saved. The charge could not be returned automatically — it is not still running. Try Remove again.', { charged: charged.charged === true, refunded: refunded.ok, delivered: false, cleanupPending: false });
   }
   const sharedNote = deps.quoteInput.product === 'shared'
-    ? ' Publish the app again so it can call the API. The key is saved in this app\'s secrets, not in the source.'
+    ? ' Connect verified sign-in with configureNbaiAuth, then publish the app again. Users can access their own records; older unowned records stay available only to the app owner. The app key alone grants no access.'
     : '';
   return {
     status: 200,

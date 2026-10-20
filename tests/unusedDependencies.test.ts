@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'fs';
-import { join, resolve, extname } from 'path';
+import { readFileSync, statSync } from 'fs';
+import { sourceCensusFiles } from './helpers/sourceCensus';
+import { join, resolve, extname, relative } from 'path';
 
 /**
  * 🔒 EVERY RUNTIME DEPENDENCY MUST ACTUALLY BE IMPORTED.
@@ -20,11 +21,8 @@ const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 const CODE = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
 
 function walk(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(join(ROOT, dir))) {
-    if (entry === 'node_modules' || entry === '.git') continue;
-    const rel = `${dir}/${entry}`;
-    if (statSync(join(ROOT, rel)).isDirectory()) walk(rel, out);
-    else if (CODE.includes(extname(rel))) out.push(rel);
+  for (const path of sourceCensusFiles(join(ROOT, dir), p => CODE.includes(extname(p)), ['node_modules', '.git'])) {
+    out.push(relative(ROOT, path).replace(/\\/g, '/'));
   }
   return out;
 }

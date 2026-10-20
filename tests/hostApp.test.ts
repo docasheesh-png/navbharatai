@@ -47,6 +47,13 @@ function happyCloud(over: { build?: string; deployStatus?: number; iamStatus?: n
 }
 
 describe('🔒 the two flags — inert by default, admin-only after that', () => {
+  it('a public switch alone cannot bypass real isolation and egress verification', () => {
+    const ready = { ...ON, NAVBHARAT_CLOUD_PUBLIC: 'on', NAVBHARAT_APPS_CREDENTIALLESS_BUILD: 'on', NAVBHARAT_APPS_BUILD_ISOLATION_VERIFIED: 'on', NAVBHARAT_APPS_EGRESS_VERIFIED: 'on' };
+    expect(hostingAvailability({ isAdmin: false, hasPlan: true, env: ready }).available).toBe(true);
+    for (const key of ['NAVBHARAT_APPS_CREDENTIALLESS_BUILD', 'NAVBHARAT_APPS_BUILD_ISOLATION_VERIFIED', 'NAVBHARAT_APPS_EGRESS_VERIFIED']) {
+      expect(hostingAvailability({ isAdmin: false, hasPlan: true, env: { ...ready, [key]: 'off' } }).available).toBe(false);
+    }
+  });
   it('the master switch is OFF unless explicitly set', () => {
     expect(navBharatCloudEnabled({} as NodeJS.ProcessEnv)).toBe(false);
     expect(navBharatCloudEnabled({ NAVBHARAT_CLOUD: 'off' } as NodeJS.ProcessEnv)).toBe(false);
@@ -61,7 +68,7 @@ describe('🔒 the two flags — inert by default, admin-only after that', () =>
   it('a non-admin is refused while the feature is still being tested', () => {
     expect(hostingAvailability({ isAdmin: false, env: ON }).available).toBe(false);
     expect(hostingAvailability({ isAdmin: true, env: ON }).available).toBe(true);
-    const open = { ...ON, NAVBHARAT_CLOUD_PUBLIC: 'on' } as NodeJS.ProcessEnv;
+    const open = { ...ON, NAVBHARAT_CLOUD_PUBLIC: 'on', NAVBHARAT_APPS_CREDENTIALLESS_BUILD: 'on', NAVBHARAT_APPS_BUILD_ISOLATION_VERIFIED: 'on', NAVBHARAT_APPS_EGRESS_VERIFIED: 'on' } as NodeJS.ProcessEnv;
     // Public now means "open to plan holders", not "open to everyone" — see the plan gate below.
     expect(hostingAvailability({ isAdmin: false, hasPlan: true, env: open }).available).toBe(true);
   });
@@ -71,7 +78,7 @@ describe('🔒 the two flags — inert by default, admin-only after that', () =>
     // machines NavBharatAI pays for and has no free tier to fall back to. The agreement a buyer ticks
     // now says exactly that, so the gate has to say it too. `undefined` means the lookup did not
     // answer, and an unknown must never open a paid path.
-    const open = { ...ON, NAVBHARAT_CLOUD_PUBLIC: 'on' } as NodeJS.ProcessEnv;
+    const open = { ...ON, NAVBHARAT_CLOUD_PUBLIC: 'on', NAVBHARAT_APPS_CREDENTIALLESS_BUILD: 'on', NAVBHARAT_APPS_BUILD_ISOLATION_VERIFIED: 'on', NAVBHARAT_APPS_EGRESS_VERIFIED: 'on' } as NodeJS.ProcessEnv;
     for (const hasPlan of [false, undefined]) {
       const a = hostingAvailability({ isAdmin: false, hasPlan, env: open });
       expect(a.available, String(hasPlan)).toBe(false);

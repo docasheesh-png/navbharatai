@@ -16,6 +16,47 @@ function pending() {
   return { promise, release };
 }
 
+const RESTORE_NAME = /restore|revert|rollback/i;
+
+function mayNameRestore(text: string): boolean {
+  if (RESTORE_NAME.test(text)) return true;
+  if (!text.includes('\\')) return false;
+  // Encoded characters (including malformed possible encodings) always need the AST. Remaining
+  // escapes can only retain their next character, insert a control character or continue a line:
+  // removing the slash/continuation overincludes those names instead of hiding an identity escape.
+  if (/\\(?:[ux]|[0-7])/i.test(text)) return true;
+  return RESTORE_NAME.test(text.replace(/\\(?:\r\n|[\r\n\u2028\u2029])/g, '').replace(/\\/g, ''));
+}
+
+function restoreMutations(path: string, text: string, parsed?: ts.SourceFile): Array<{ key: string; body: string }> {
+  if (!mayNameRestore(text)) return [];
+  const file = parsed ?? ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
+  const found: Array<{ key: string; body: string }> = [];
+  function visit(node: ts.Node) {
+    if (ts.isFunctionLike(node) && 'body' in node && node.body) {
+      const parent = node.parent;
+      const named = node.name ?? ((ts.isVariableDeclaration(parent) || ts.isPropertyAssignment(parent)) ? parent.name : undefined);
+      const literalName = named && ts.isComputedPropertyName(named) ? named.expression : named;
+      // Identifier/string .text decodes escaped spellings such as res\u0074ore. Other names retain
+      // the previous raw-text check, so this optimisation cannot narrow the existing census.
+      const name = literalName && (ts.isIdentifier(literalName) || ts.isStringLiteralLike(literalName))
+        ? literalName.text : named?.getText(file);
+      if (name && RESTORE_NAME.test(name)) {
+        let mutates = false;
+        function calls(child: ts.Node) {
+          if (ts.isCallExpression(child) && /(?:\.(?:writeFiles?|writeBinaryFile|removeFile|runCommand|write|remove|execInContainer|run|restore|git)|(?:^|\.)apply(?:Green)?SnapshotRestore|writeWorkspaceFiles|mergeWorkspaceFiles|saveWorkspaceFiles|removeWorkspaceFiles|execPromise)$/.test(child.expression.getText(file))) mutates = true;
+          ts.forEachChild(child, calls);
+        }
+        calls(node.body);
+        if (mutates) found.push({ key: `${path}#${name}`, body: node.getText(file) });
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(file);
+  return found;
+}
+
 describe('an automatic restore reports only what it applied', () => {
   it('a real failed rm keeps that file in captured and durable state while other operations land', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'snapshot-restore-'));
@@ -141,6 +182,18 @@ describe('an automatic restore reports only what it applied', () => {
 describe('automatic restore caller census', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
   const source = ts.createSourceFile('agentv3.ts', route, ts.ScriptTarget.Latest, true);
+
+  it.each([
+    ['Unicode identifier', String.raw`async function res\u0074oreEscaped() { await io.writeFile('a', 'green'); }`, 'restoreEscaped'],
+    ['hex string property', String.raw`const helpers = { 're\x76ertEscaped': async () => { await io.runCommand('undo'); } };`, 'revertEscaped'],
+    ['computed Unicode property', String.raw`const helpers = { ['roll\u0062ackEscaped']: async () => { await io.removeFile('extra'); } };`, 'rollbackEscaped'],
+    ['identity escape', String.raw`const helpers = { 'rest\oreIdentity': async () => { await io.writeFile('a', 'green'); } };`, 'restoreIdentity'],
+    ['legacy octal escape', String.raw`const helpers = { 'res\164oreOctal': async () => { await io.writeFile('a', 'green'); } };`, 'restoreOctal'],
+    ['continued string', String.raw`const helpers = { 're\
+vertContinued': async () => { await io.writeFile('a', 'green'); } };`, 'revertContinued'],
+  ])('the census still finds a mutation with a %s name', (_label, escaped, name) => {
+    expect(restoreMutations('escaped.ts', escaped).map((entry) => entry.key)).toEqual([`escaped.ts#${name}`]);
+  });
   it('every route restore planner uses applied outcomes or the explicitly checked version restore', () => {
     let plans = 0;
     function visit(node: ts.Node) {
@@ -213,42 +266,16 @@ describe('automatic restore caller census', () => {
         const path = `${dir}/${entry.name}`;
         if (entry.isDirectory()) { scan(path); continue; }
         if (!/\.[cm]?tsx?$/.test(path) || /\.(?:test|spec)\.[^.]+$/.test(path)) continue;
-        const text = readFileSync(path, 'utf8');
-        // Every candidate name must contain one of these words. Avoid building an AST for files
-        // that cannot contain a candidate; the census still walks the whole source tree.
-        if (!/restore|revert|rollback/i.test(text)) continue;
-        const file = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
-        function visit(node: ts.Node) {
-          if (ts.isFunctionLike(node) && 'body' in node && node.body) {
-            const parent = node.parent;
-            const named = node.name ?? ((ts.isVariableDeclaration(parent) || ts.isPropertyAssignment(parent)) ? parent.name : undefined);
-            const name = named?.getText(file);
-            if (name && /restore|revert|rollback/i.test(name)) {
-              let mutates = false;
-              function calls(child: ts.Node) {
-                // This is an existence check; one mutation proves the body needs classification.
-                if (mutates) return;
-                if (ts.isCallExpression(child) && /(?:\.(?:writeFiles?|writeBinaryFile|removeFile|runCommand|write|remove|execInContainer|run|restore|git)|(?:^|\.)apply(?:Green)?SnapshotRestore|writeWorkspaceFiles|mergeWorkspaceFiles|saveWorkspaceFiles|removeWorkspaceFiles|execPromise)$/.test(child.expression.getText(file))) mutates = true;
-                ts.forEachChild(child, calls);
-              }
-              calls(node.body);
-              if (mutates) {
-                const key = `${path}#${name}`;
-                found.add(key);
-                expect(policies[key], `Unclassified restore mutation: ${key}`).toBeDefined();
-                // The default live gate can be a function parameter, so inspect the whole function.
-                for (const required of policies[key] ?? []) expect(node.getText(file), key).toContain(required);
-              }
-            }
-          }
-          ts.forEachChild(node, visit);
+        const text = path === 'src/server/routes/agentv3.ts' ? route : readFileSync(path, 'utf8');
+        for (const { key, body } of restoreMutations(path, text, path === 'src/server/routes/agentv3.ts' ? source : undefined)) {
+          found.add(key);
+          expect(policies[key], `Unclassified restore mutation: ${key}`).toBeDefined();
+          // The default live gate can be a function parameter, so inspect the whole function.
+          for (const required of policies[key] ?? []) expect(body, key).toContain(required);
         }
-        visit(file);
       }
     }
     scan('src');
     expect([...found].sort()).toEqual(Object.keys(policies).sort());
-  // This intentionally parses production source across the repository, rather than one fixture.
-  // Give instrumented CI enough time for that corpus; no runtime recovery deadline changes.
-  }, 60_000);
+  });
 });

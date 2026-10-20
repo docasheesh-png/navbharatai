@@ -48,6 +48,8 @@ const REVIEWED_SMALL: Record<string, string> = {
   '/api/admin/users/:userId/merge': '`fromUserId` only',
   '/api/admin/announcement': 'an announcement message',
   '/api/admin/promo': 'promo-code fields (parseAdminPromoInput)',
+  '/api/admin/ads': 'house-ad text fields plus ONE picture that the admin page crops to 1200×300 and compresses to at most HOUSE_AD_IMAGE_MAX_BYTES (300 KB decoded, ~400 KB as base64) before sending; checkAdImage refuses anything larger, so the body stays under the 1 MB default',
+  '/api/admin/ads/:id': 'the same house-ad body as POST /api/admin/ads: text fields and at most one 300 KB picture',
   '/api/admin/site/about': 'the About page text fields',
   '/api/agentv3/conversations/:id/name': '`promptHash` is a hash; `name` is a title',
   '/api/agentv3/report-to-admin': 'ids, `promptHash` and a note (AgentV3Panel.tsx sends nothing else)',

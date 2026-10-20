@@ -1,3 +1,4 @@
+import projectPackage from '../../../package.json';
 // P-AI.7 — Test Generation Intelligence (automatic post-build scaffolding).
 //
 // The `generate_tests` TOOL already lets the AI scaffold tests on demand, but nothing produced
@@ -254,7 +255,8 @@ export function planAutoTests(
  * the same Vite major the app template ships (vitest 5 supports vite ^6 || ^7 || ^8); a test asserts the
  * two stay equal, so the pin cannot drift from a version we actually run.
  */
-export const VITEST_RANGE = '^5.0.3';
+// The generated runner uses the range verified by this repository's own CI.
+export const VITEST_RANGE = projectPackage.devDependencies.vitest;
 
 /**
  * THE MODEL ASKED FOR TESTS, SO THE TESTS MUST BE ABLE TO RUN (autopsy a7aa447c, 2026-09-29).

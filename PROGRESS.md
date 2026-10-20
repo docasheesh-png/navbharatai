@@ -97854,3 +97854,23 @@ old trees. The merged-state final gate is pending at this checkpoint; do not cla
 hosted green or merge this PR without the admin explicitly naming it. Counts remain
 4 demonstrated historical terminal classes / 0 app reruns / 0 whole-report closures;
 two repository item ledgers / 119 items / 549 remaining repository ledgers.
+
+
+### 2026-10-20 - PR3856 hosted census timeout and final-state verification restart
+
+Old published head5db7cc763 hosted run39414984247 completed with40,154 tests passed,
+one restore-census test timing out at20seconds and73 skipped. The authority scan
+AST-parsed all2,453 non-test source files before checking relevant helper names.
+Q-2163 is IN PROGRESS under this PR for conservative prefiltering with escaped-name
+coverage, full AST traversal, unchanged exact policy checks and behavioral proof.
+The timeout is not raised and no census boundary or test is skipped. Frozen proof
+preserves all2,453 input files and the exact18 policies; AST parsing falls2,453→684.
+All18 focused tests pass; one-CPU V8 census9.015s is below the unchanged20s cap.
+Missing-live-gate, new-unclassified-restore and naive raw-prefilter negatives fail
+correctly. The merged-state full and hosted gates remain pending at this checkpoint. The superseded
+local25a run was stopped intentionally; it is not recorded as a green result.
+
+Audit append now401 rows =341 OPEN /17 IN PROGRESS /43 four-field BLOCKED. This adds
+one CI integration row to the earlier400; historical terminal class/app replay/whole
+report closure counts stay4/0/0. The separate next-batch worktree owns three newly
+prepared item ledgers and the typed-launch investigation; it is outside PR3856.

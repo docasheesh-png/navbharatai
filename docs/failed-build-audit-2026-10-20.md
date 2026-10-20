@@ -127,15 +127,15 @@ as a contamination flag in the private evidence artifact.
 
 ## Queue and exact resume point
 
-This change adds **400 pending rows** without deleting or closing existing rows: **341 OPEN**,
-**16 IN PROGRESS**, and **43 genuine four-field BLOCKED**. Per-report IDs use
+This change adds **401 pending rows** without deleting or closing existing rows: **341 OPEN**,
+**17 IN PROGRESS**, and **43 genuine four-field BLOCKED**. Per-report IDs use
 `Q-(1301 + zero-based report-index)` within the reserved range; holes are intentional. The first
 61 individual items map I001–I061 to Q-1900–Q-1960; the second 58 map I001–I058 to Q-1963–Q-2020.
 Q-1961/Q-1962 record the two Q-1899 siblings, Q-2021 the shared unsafe-orphan class, and
 Q-2022–Q-2024 the failed-gate callback wait and two discovered native-identity source siblings.
 The IN-PROGRESS rows are Q-1890–Q-1893, Q-1898–Q-1899, Q-1928, Q-1961–Q-1962,
-Q-1982–Q-1984 and Q-2021–Q-2024, owned by `codex/failed-build-claude-audit-20261020` pending
-its complete gate and merge. No PR has been published for the red full-gate checkpoint.
+Q-1982–Q-1984, Q-2021–Q-2024 and Q-2163, owned by `codex/failed-build-claude-audit-20261020` pending
+its complete gate and merge. The earlier red checkpoint was not published; PR #3856 now tracks this implementation and its subsequent merged-state gate.
 
 Q-1383/Q-1635/Q-1670/Q-1804 credit the four terminal source-class corrections merged in #3846,
 but remain OPEN / owner — for remaining report-item review and unverified historical delivery.
@@ -292,3 +292,14 @@ with deployment configuration and one configuration test; no application source 
 dependencies changed. The local merge preserves both histories and awaits its final
 merged-state gate at this freeze. Earlier checkpoint gates apply to their own trees;
 the PR description and hosted run carry the latest verification result.
+
+
+Hosted CI on original PR head `5db7cc763` exposed one authority-census timeout:
+40,154 tests passed, one census timed out at 20 seconds, and 73 were skipped.
+Q-2163 owns the class-preserving scan optimization and its final verification.
+All2,453 input files retain the exact18-function policy census while AST parses
+fall2,453→684. All18 focused tests pass, including six encoded-name boundaries;
+one-CPU V8 census9.015s stays inside the unchanged20s cap. Three negative controls
+still fail correctly. Full merged-state and hosted gates remain pending.
+It adds one IN-PROGRESS integration row, not a historical terminal fix. Current
+application source remains unchanged while this test harness is repaired.

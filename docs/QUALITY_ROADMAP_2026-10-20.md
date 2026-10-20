@@ -16,7 +16,7 @@ permanent 100/100 rating or leadership over other products.
 | Phase | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
 | 1 | Security and authorization | MERGED / CI VERIFIED | [PR #3847](https://github.com/docasheesh-png/navbharatai/pull/3847), [successful exact-head CI](https://github.com/docasheesh-png/navbharatai/actions/runs/39370215420), merged as `885ba41023c2f7327be956aadc71f79ee2840821`. Legacy recovery and dependency exceptions remain documented. |
-| 2 | Concurrent-build safety and recovery | IN PROGRESS | Scoped queue/retry/import-lease checkpoint prepared for final verification. Runtime isolation proposal is BLOCKED: existing browser-origin data, local databases/uploads and generated secrets need preservation. Real local fault checks pass but do not establish compatibility; see PHASE2_QUEUE_RETRY.md. |
+| 2 | Concurrent-build safety and recovery | IN PROGRESS | Queue/retry/import-lease [PR #3848](https://github.com/docasheesh-png/navbharatai/pull/3848) merged after [both CI jobs passed](https://github.com/docasheesh-png/navbharatai/actions/runs/39378125233), merge `06f8065629debbd846c1f836241c5be9a5a8337e`. Next checkpoint addresses uncertain reconnects and completed private asset erasure; see PHASE2_STATE_PRESERVATION.md. Full runtime/state preservation and late-write reconciliation remain open. |
 | 3 | Reproducible quality baseline | NOT STARTED | Start after Phase 2; use existing benchmark harness and real outcome evidence. |
 | 4 | Generated-app correctness | NOT STARTED | Start after Phase 3; prioritize measured failure cohorts. |
 | 5 | Maintainability and strict typing | NOT STARTED | Start after Phase 4; preserve behavior while extracting bounded modules. |

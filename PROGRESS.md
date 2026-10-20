@@ -97422,3 +97422,41 @@ retaining both whole-server client-SDK and shared-client-handle prohibitions.
 Nine relevant files pass116/116 underNode22/UTC; no production code changed.
 The known-failing preflight was stopped and all final-source local checks must
 run again before push. No full-suite or remoteCI pass is claimed by this entry.
+
+### 2026-10-20 — Phase 2 recovery identity and completed asset erasure checkpoint
+
+PR #3848 subsequently passed both exact-head CI jobs at
+`7241043914134488c4f54b005988fc76cc62ef9d` and merged as
+`06f8065629debbd846c1f836241c5be9a5a8337e`. Remote coverage suite:
+39,947 passed /73 skipped /0 failed; downloaded real database evidence:
+14 distinct drills passed /0 failed. This supersedes only the earlier pending
+release status, not the open runtime/state-preservation boundaries.
+
+The next scoped checkpoint stops unknown identity reads and nonterminal
+reconnect errors from creating replacement sandboxes. Strict tri-state lookup,
+nominal retryable recovery error and public/nested retry propagation retain
+explicit-ID behavior and typed static-connect not-found source restoration.
+Actual SDK classification is exercised over loopback HTTP, and actual actuator
+lifecycle tests include timeout/late resolution and subsequent retry. Initial
+builder setup refuses before execution; registered preview JSON/stream routes
+report retry honestly without a false missing-package diagnosis. Only definite
+pre-builder refusal settles failed with a zero-step result; later failures retain
+unknown outcome. Extracted crash publishing preserves client redaction and raw
+admin diagnostics; the handler's down-only branch budget remains543.
+
+Account deletion now erases completed private asset spill bytes by a verified
+safe owner prefix, independent of lost Firestore metadata. Writer, reader and
+eraser share the bucket/object path definition. The planner also refuses the
+unowned anonymous namespace. The additive response reports unconfigured/partial
+storage removal separately and honestly. Actual spill→registeredDELETE tests
+preserve foreign/shared/APK objects and cover retry and authorization. Reverting
+the erasure to a success-shaped no-op reproduces retained owner bytes.
+
+Focused component checks pass; complete final-source local gates and exact-head
+CI are still required before this checkpoint can ship. Fresh-create ambiguity,
+first-allocation races, physical command/source fencing, best-effort restore
+sinks, complete local/browser state preservation, late uploads, historical
+buckets and ZIP chunk reconciliation remain OPEN. A separate review found queue
+bindings settle too early on resumable results; the next Phase2 slice will
+address that lifecycle. Phases3–6 remain unstarted. Detail and evidence limits:
+`docs/PHASE2_STATE_PRESERVATION.md`.

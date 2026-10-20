@@ -2,6 +2,8 @@ import type { Request, Response, RequestHandler } from 'express';
 import { renewWorkspaceBuild, LEASE_HEARTBEAT_MS, type BuildLeaseStore } from './workspaceBuildLease';
 import type { RunningBuild } from './runningBuildRegistry';
 import { abortBuild } from './buildAbortCause';
+import { SandboxRecoveryUnavailableError, isSandboxRecoveryUnavailable } from './SandboxRecoveryError';
+import { redactProvidersText } from '../lib/providerRedaction';
 // Per-accepted-request coordination. This owns queue/receipt identity, not runtime/source fencing.
 import { loadQueue, bindQueuedBuild, settleQueuedBuild, QueueClaimConflictError, type QueueBuildBinding } from './BuildQueueStore';
 import { reserveBuildRequest, completeBuildRequest, validBuildRequestId, type BuildRequestReceipt, type BuildRequestOutcome, type BuildRequestStore } from '../lib/buildRequestReceipt';
@@ -13,6 +15,36 @@ export function buildRequestInputRejection(input: { requestId?: unknown; session
   if (!input.ownerId || input.ownerId === 'anon') return { status: 401, payload: { error: 'Please sign in again before retrying this request.', code: 'reauth' } };
   if (!validBuildRequestId(input.requestId)) return { status: 400, payload: { error: 'A valid UUID requestId is required.', code: 'BUILD_REQUEST_INVALID' } };
   return null;
+}
+
+/** A known setup refusal ends this attempt before the builder can run or retry on an empty VM. */
+class BuildSetupRecoveryUnavailableError extends SandboxRecoveryUnavailableError {}
+
+export function rethrowBuildSetupRecoveryUnavailable(error: unknown): void {
+  if (isSandboxRecoveryUnavailable(error)) throw new BuildSetupRecoveryUnavailableError();
+}
+
+export function buildExceptionDetails(error: unknown): { message: string; phase: 'sandbox' | 'build'; code: string; summary: string } {
+  const message = error instanceof Error ? error.message : String(error);
+  const recovery = isSandboxRecoveryUnavailable(error);
+  return {
+    message,
+    phase: recovery ? 'sandbox' : 'build',
+    code: recovery ? error.code : 'BUILD_EXCEPTION',
+    summary: (recovery ? message : `Build stopped — an unexpected error occurred: ${message}`).slice(0, 500),
+  };
+}
+
+/** Preserve ordinary crash reporting; a definite pre-builder refusal also settles request identity. */
+export function publishBuildException(error: unknown, diagnostics: unknown, emit: (event: unknown) => void): void {
+  const { message } = buildExceptionDetails(error);
+  emit({ type: 'error', message: redactProvidersText(message), ts: Date.now(),
+    ...(isSandboxRecoveryUnavailable(error) ? { code: error.code, retryable: true } : {}),
+    ...(diagnostics ? { diagnostics } : {}),
+  });
+  if (error instanceof BuildSetupRecoveryUnavailableError) {
+    emit({ type: 'result', ok: false, summary: message, steps: 0, billedUsd: 0, billedInr: 0 });
+  }
 }
 
 export function createBuildRequestCoordination(opts: {

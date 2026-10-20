@@ -238,10 +238,12 @@ describe('🔒 a PERSISTED diagnostics report can never carry a stale success na
   });
 
   it('the crash-path finalizer also passes an honest summary — the sibling call site (rule 3: hunt the siblings)', () => {
-    const i = route.indexOf("buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_EXCEPTION'");
+    const i = route.indexOf('const crash = buildExceptionDetails(err);');
     expect(i).toBeGreaterThan(-1);
-    const body = route.slice(i, i + 900);
+    const body = route.slice(i, route.indexOf('const crashReport = buildDiagRef?.report();', i));
     expect(body).not.toContain('buildDiagRef?.finish(false);');
-    expect(body).toMatch(/buildDiagRef\?\.finish\(false, `Build stopped[\s\S]*errMsg[\s\S]*\)/);
+    expect(body).toContain('buildDiagRef?.finish(false, crash.summary);');
+    // sandboxRecoveryFailure.test.ts executes the shared computation for ordinary crashes and
+    // setup refusals; neither can reuse a premature success narration from the report.
   });
 });

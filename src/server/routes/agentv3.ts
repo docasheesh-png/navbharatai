@@ -236,7 +236,8 @@ import { pastedAppFacts } from '../lib/pastedSource';
 import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote, strictReverify } from '../AgentV3/verifyAfterFix';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
-import { createBuildRequestCoordination, createBuildPreflightStream, buildRequestInputRejection, withBuildRequestCleanup, startBuildLeaseHeartbeat } from '../AgentV3/BuildRequestCoordination';
+import { createBuildRequestCoordination, createBuildPreflightStream, buildRequestInputRejection, withBuildRequestCleanup, startBuildLeaseHeartbeat, rethrowBuildSetupRecoveryUnavailable, buildExceptionDetails, publishBuildException } from '../AgentV3/BuildRequestCoordination';
+import { isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable } from '../AgentV3/SandboxRecoveryError';
 import { loadQueue, mutateQueue, mutateQueueWithResult, claimQueuedCommand, recoverQueuedCommand, QueueStoreUnavailableError, QueueClaimConflictError } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext, plannerDomainBrief } from '../AgentV3/RoleChats';
 import { summarizeFileTree, NAVBHARATAI_UI_MAP } from '../AgentV3/systemPrompt';
@@ -5745,7 +5746,10 @@ async function noteBuildOutcome(
         }
         // Re-materialize durable binary assets (logo/icons/fonts) into the re-seeded sandbox.
         await restoreWorkspaceAssets(actuator, workspaceId).catch(() => 0);
-      } catch { /* hydration is best-effort — the structure check below still runs */ }
+      } catch (error) {
+        rethrowSandboxRecoveryUnavailable(error);
+        // Other hydration failures retain the existing best-effort structure check.
+      }
       // STRUCTURE VALIDATION FIRST — before spending 90 s trying to boot a server that CAN'T run.
       // Read package.json and confirm the project is actually runnable (valid JSON + a dev/start/serve
       // script). A missing/broken package.json is reported as a clear structural issue instead of the
@@ -5994,6 +5998,11 @@ async function noteBuildOutcome(
       });
     } catch (err) {
       if (heartbeat) clearInterval(heartbeat);
+      if (isSandboxRecoveryUnavailable(err)) {
+        if (!streaming) res.setHeader('Retry-After', '2');
+        finish({ ok: false, portListening: false, reason: err.message, detail: '', code: err.code, retryable: true }, 503);
+        return;
+      }
       finish({ ok: false, portListening: false, reason: err instanceof Error ? err.message : 'Could not reach the sandbox to diagnose the preview.', detail: '' }, 500);
     } finally {
       // Release the hold however this ended — a revive that threw must not keep a sandbox billing.
@@ -15556,6 +15565,7 @@ async function noteBuildOutcome(
         registerSession(workspaceId, git, userId ?? undefined, actuator);
         events.emit({ type: 'workspace', workspaceId, ts: Date.now() });
       } catch (setupErr) {
+        rethrowBuildSetupRecoveryUnavailable(setupErr);
         const m = setupErr instanceof Error ? setupErr.message : String(setupErr);
         git = undefined;
         sandboxUnavailable = true;
@@ -27481,19 +27491,20 @@ async function noteBuildOutcome(
       // in-memory cache (lastDiagnostics) — it does NOT write to Firestore on every tick — so a crash
       // must explicitly durable-save here, or this report is lost the moment the instance recycles
       // (exactly the "empty build report" DiagnosticsStore.ts exists to prevent, but this path missed it).
-      const errMsg = err instanceof Error ? err.message : String(err);
+      const crash = buildExceptionDetails(err);
+      const errMsg = crash.message;
       // Hoisted out of the try below so the client `error` emit can carry the crash report (see the
       // emit at the end of this catch) — a bare error message never told the user WHAT went wrong.
       let crashReportForClient: unknown = undefined;
       try {
-        buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_EXCEPTION', message: errMsg, autoResolved: false });
+        buildDiagRef?.record({ phase: crash.phase, severity: 'error', code: crash.code, message: errMsg, autoResolved: false });
         // SAME STALE-SUMMARY SIBLING AS THE WATCHDOG PATH (see the comment beside `pauseMsgForReport`
         // above): `ingestEvent`'s `case 'done'` sets `this.summary` unconditionally on every mid-build
         // `done` event, and `finish()` only overwrites it when a summary is actually passed. Calling
         // `finish(false)` with none left a build that crashed AFTER a premature "done" narration
         // reporting that stale, celebratory text as its persisted `summary` — the crash report's OWN
         // `ok: false` and this BUILD_EXCEPTION entry said the opposite of what `summary` claimed.
-        buildDiagRef?.finish(false, `Build stopped — an unexpected error occurred: ${errMsg}`.slice(0, 500));
+        buildDiagRef?.finish(false, crash.summary);
         const crashReport = buildDiagRef?.report();
         if (crashReport) {
           // 🔒 THE CLIENT GETS THE ANONYMIZED REPORT — NEVER THE RAW ONE (white-label law, 2026-08-16).
@@ -27557,7 +27568,7 @@ async function noteBuildOutcome(
       // the provider's own words ("429 from …", "anthropic: rate_limit_error"), and a user reading a
       // vendor's name in our error learns which AI we run — the one thing the white-label law exists to
       // prevent. The admin-side record keeps the raw text (buildDiagRef recorded errMsg verbatim).
-      emit({ type: 'error', message: redactProvidersText(errMsg), ts: Date.now(), ...(crashReportForClient ? { diagnostics: crashReportForClient } : {}) });
+      publishBuildException(err, crashReportForClient, emit);
       announceBuildFinished(userId, false);
     } finally {
       // GREEN FREEZE — clear this workspace's green latch no matter how the build ended, so a stale

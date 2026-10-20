@@ -63,10 +63,12 @@ describe('2 · the recorder', () => {
 
 describe('3 · reports already stored are corrected on read', () => {
   const issues = [warn('READINESS_WARNING'), warn('READINESS_WARNING'), warn('READINESS_WARNING'), warn('TOOL_ERROR'), warn('TOOL_ERROR')];
-  it('an older report (no healRule) loses the left-open rows its count included', () => {
+  it('an older report retains adjusted compatibility evidence, not a proven repair total', () => {
     const legacy = { counts: { autoResolved: 5 }, issues };
     expect(healCountOf(legacy)).toBe(2);
-    expect(summarizeHealCodes(legacy)).toEqual({ codes: { TOOL_ERROR: 2 }, total: 2, unattributed: 0, open: { READINESS_WARNING: 3 } });
+    expect(summarizeHealCodes(legacy)).toEqual({ codes: { TOOL_ERROR: 2 }, total: null, unattributed: null, open: { READINESS_WARNING: 3 },
+      interpretation: { rawAutoResolved: 5, rawHealRule: null, rawAutoResolvedState: 'numeric', rawHealRuleState: 'missing', total: null, compatibilityCount: 2, provenance: 'legacy-unverified',
+        observed: 2, timeline: { status: 'unknown', reason: 'missing-total' } } });
   });
   it('a new report is never corrected twice', () => {
     const current = { counts: { autoResolved: 2, leftOpen: 3, healRule: HEAL_RULE }, issues };
@@ -76,10 +78,10 @@ describe('3 · reports already stored are corrected on read', () => {
   it('no count ⇒ null, never zero', () => {
     expect(healCountOf({ issues })).toBeNull();
   });
-  it('the scorecard reads the corrected count, not the stored one', () => {
+  it('the scorecard excludes an unverified legacy total, not falling back to the raw count', () => {
     const legacy = { counts: { autoResolved: 5 }, issues };
     const input = toMetricInput({ workspaceId: 'w', startedAt: 1, endedAt: 2, ok: true, counts: legacy.counts, healCodes: summarizeHealCodes(legacy) });
-    expect(input.healCount).toBe(2);
+    expect(input.healCount).toBeNull();
   });
 });
 
@@ -103,7 +105,7 @@ describe('5 · first-pass quality does not get better by renaming', () => {
     expect(classifyFirstPass({ ok: true, counts: { autoResolved: 0, unresolved: 0, leftOpen: 0 } })).toBe('clean');
   });
   it('the admin-report projection carries it too', () => {
-    const s = firstPassStatsFromMeta([{ ok: true, healCount: 0, unresolvedCount: 0, leftOpenCount: 1 }]);
+    const s = firstPassStatsFromMeta([{ ok: true, healRule: 3, healCount: 0, unresolvedCount: 0, leftOpenCount: 1 }]);
     expect(s.clean).toBe(0);
     expect(s.healed).toBe(1);
   });

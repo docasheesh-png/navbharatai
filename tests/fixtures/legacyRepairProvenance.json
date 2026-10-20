@@ -1,0 +1,1342 @@
+[
+  {
+    "id": "P01",
+    "case": "coherent complete unversioned closed-event aggregate with positive info inflation",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": 6,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P02",
+    "case": "same class with visible genuine repair",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 8,
+        "autoResolved": 7,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        },
+        {
+          "code": "HTML_ENTRY_REPAIRED",
+          "severity": "warning",
+          "autoResolved": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "P03",
+    "case": "explicit issue loss despite matching local count",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": 6,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ],
+      "truncation": {
+        "channels": {
+          "issues": {
+            "kept": 7,
+            "total": 9
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "P04",
+    "case": "in-memory truncation marker",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": 6,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TIMELINE_TRUNCATED",
+          "severity": "info",
+          "autoResolved": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "P05",
+    "case": "visible issue length below total",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 9,
+        "autoResolved": 6,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P06",
+    "case": "missing total",
+    "report": {
+      "ok": true,
+      "counts": {
+        "autoResolved": 6
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P07",
+    "case": "total smaller than visible length",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 5,
+        "autoResolved": 6,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P08",
+    "case": "fractional total",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 6.5,
+        "autoResolved": 6,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P09",
+    "case": "negative total",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": -1,
+        "autoResolved": 6,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P10",
+    "case": "malformed null issue",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": 6,
+        "unresolved": 1
+      },
+      "issues": [
+        null,
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P11",
+    "case": "raw count does not equal all closed rows",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": 2,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P12",
+    "case": "all-closed equality without positive info inflation",
+    "report": {
+      "counts": {
+        "total": 1,
+        "autoResolved": 1
+      },
+      "issues": [
+        {
+          "code": "HTML_ENTRY_REPAIRED",
+          "severity": "warning",
+          "autoResolved": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "P13",
+    "case": "missing raw count",
+    "report": {
+      "issues": []
+    }
+  },
+  {
+    "id": "P14",
+    "case": "current versioned zero",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 1,
+        "autoResolved": 0,
+        "unresolved": 0,
+        "healRule": 3
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "P15",
+    "case": "current versioned positive",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 2,
+        "autoResolved": 2,
+        "unresolved": 0,
+        "healRule": 3
+      },
+      "issues": [
+        {
+          "code": "HTML_ENTRY_REPAIRED",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "DANGLING_STYLESHEET_IMPORT_REMOVED",
+          "severity": "warning",
+          "autoResolved": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "P16",
+    "case": "current versioned cropped",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 5,
+        "autoResolved": 3,
+        "healRule": 3
+      },
+      "issues": [
+        {
+          "code": "HTML_ENTRY_REPAIRED",
+          "severity": "warning",
+          "autoResolved": true
+        }
+      ],
+      "truncation": {
+        "channels": {
+          "issues": {
+            "kept": 1,
+            "total": 5
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "P17",
+    "case": "rule-2 complete reclassification",
+    "report": {
+      "counts": {
+        "autoResolved": 2,
+        "healRule": 2
+      },
+      "issues": [
+        {
+          "code": "HTML_ENTRY_REPAIRED",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "P18",
+    "case": "rule-2 cropped",
+    "report": {
+      "counts": {
+        "autoResolved": 3,
+        "healRule": 2
+      },
+      "issues": []
+    }
+  },
+  {
+    "id": "P19",
+    "case": "future numeric version",
+    "report": {
+      "counts": {
+        "autoResolved": 2,
+        "healRule": 4
+      },
+      "issues": []
+    }
+  },
+  {
+    "id": "P20",
+    "case": "explicit normalized unknown with raw count still present",
+    "report": {
+      "counts": {
+        "autoResolved": 6
+      },
+      "healCodes": {
+        "codes": {},
+        "total": null,
+        "unattributed": null,
+        "open": {
+          "READINESS_WARNING": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "P21",
+    "case": "meta-only untagged numeric scalar",
+    "report": {
+      "ok": true,
+      "healCount": 2,
+      "unresolvedCount": 0
+    }
+  },
+  {
+    "id": "P22",
+    "case": "missing or malformed healRule",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": 6,
+        "unresolved": 1,
+        "healRule": "3"
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P23",
+    "case": "fractional raw closed count",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": 6.5,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P24",
+    "case": "conflicting truncation kept versus actual length",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": 6,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ],
+      "truncation": {
+        "channels": {
+          "issues": {
+            "kept": 3,
+            "total": 3
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "P25",
+    "case": "trusted cropped zero with info event",
+    "report": {
+      "counts": {
+        "total": 3,
+        "autoResolved": 0,
+        "healRule": 3
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        }
+      ],
+      "truncation": {
+        "channels": {
+          "issues": {
+            "kept": 1,
+            "total": 3
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "P26",
+    "case": "no issues array with trusted count",
+    "report": {
+      "counts": {
+        "autoResolved": 2,
+        "healRule": 3
+      }
+    }
+  },
+  {
+    "id": "P27",
+    "case": "visible genuine repair without aggregate",
+    "report": {
+      "counts": {
+        "healRule": 3
+      },
+      "issues": [
+        {
+          "code": "HTML_ENTRY_REPAIRED",
+          "severity": "warning",
+          "autoResolved": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "P28",
+    "case": "synthetic repeated narration rows",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": 6,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true,
+          "repeatCount": 3
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted.",
+          "repeatCount": 3
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true,
+          "repeatCount": 3
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true,
+          "repeatCount": 3
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true,
+          "repeatCount": 3
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true,
+          "repeatCount": 3
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false,
+          "repeatCount": 3
+        }
+      ]
+    }
+  },
+  {
+    "id": "P29",
+    "case": "null normalized count sent directly to first-pass classifier",
+    "report": {
+      "ok": true,
+      "counts": {
+        "autoResolved": null,
+        "unresolved": 0
+      }
+    }
+  },
+  {
+    "id": "P30",
+    "case": "negative raw count",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": -1,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P31",
+    "case": "string raw count",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": "6",
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P32",
+    "case": "missing severity",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": 6,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P33",
+    "case": "nonboolean closed flag",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": 6,
+        "unresolved": 1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": "true"
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P34",
+    "case": "fractional healRule",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": 6,
+        "unresolved": 1,
+        "healRule": 3.5
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P35",
+    "case": "negative healRule",
+    "report": {
+      "ok": true,
+      "counts": {
+        "total": 7,
+        "autoResolved": 6,
+        "unresolved": 1,
+        "healRule": -1
+      },
+      "issues": [
+        {
+          "code": "HEARTBEAT",
+          "severity": "info",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_STEP",
+          "severity": "info",
+          "autoResolved": true,
+          "message": "A helper import was adjusted."
+        },
+        {
+          "code": "PROVIDER_FALLBACK",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "AGENT_NOTE",
+          "severity": "error",
+          "autoResolved": true
+        },
+        {
+          "code": "READINESS_WARNING",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "SIMPLE_BUILD_VERIFY_ERROR",
+          "severity": "warning",
+          "autoResolved": true
+        },
+        {
+          "code": "TOOL_ERROR",
+          "severity": "error",
+          "autoResolved": false
+        }
+      ]
+    }
+  },
+  {
+    "id": "P36",
+    "case": "nonfinite autoResolved: NaN",
+    "inputEncoding": {
+      "field": "autoResolved",
+      "nonJsonNumber": "NaN"
+    }
+  },
+  {
+    "id": "P37",
+    "case": "nonfinite autoResolved: Infinity",
+    "inputEncoding": {
+      "field": "autoResolved",
+      "nonJsonNumber": "Infinity"
+    }
+  },
+  {
+    "id": "P38",
+    "case": "nonfinite total: NaN",
+    "inputEncoding": {
+      "field": "total",
+      "nonJsonNumber": "NaN"
+    }
+  },
+  {
+    "id": "P39",
+    "case": "nonfinite total: Infinity",
+    "inputEncoding": {
+      "field": "total",
+      "nonJsonNumber": "Infinity"
+    }
+  }
+]

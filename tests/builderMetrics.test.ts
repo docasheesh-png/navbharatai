@@ -288,6 +288,6 @@ describe('first-pass quality — the 50/50 law as a number', () => {
   });
 
   it('says UNKNOWN rather than inventing a rate when nothing has recorded it', () => {
-    expect(scorecardHeadline(builderScorecard([b(undefined)]))).toMatch(/no build has recorded a heal count yet — unknown/);
+    expect(scorecardHeadline(builderScorecard([b(undefined)]))).toMatch(/no usable repair total — unknown/);
   });
 });

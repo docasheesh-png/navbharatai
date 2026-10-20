@@ -84,7 +84,7 @@ import { tallyHandover, projectHandover, handoverHeadline, handoverSample } from
 import { tallyPauseCauses } from '../AgentV3/sandboxLifetime';
 import { tallyMinutes, tallyStarts } from '../AgentV3/sandboxSessions';
 import { capSessionReports } from '../AgentV3/BuildDiagnostics';
-import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
+import { firstPassStatsFromMeta, firstPassMetaFromDiagnostics, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
 import { licenceExposures, licenceExposureHeadline, activeExposureCount } from '../../lib/licenceExposure';
 import { builderScorecard, scorecardHeadline } from '../../lib/builderMetrics';
 import { collectScorecardBuilds, populationNote } from '../lib/scorecardPopulation';
@@ -1014,13 +1014,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
        * That would have been a worse lie than the one being fixed here, and it would have looked just
        * as confident. Mapped explicitly, at the one place the two vocabularies meet.
        */
-      const stats = firstPassStatsFromMeta(allBuilds.map((b) => ({
-        ok: b.ok,
-        healCount: b.counts?.autoResolved,
-        unresolvedCount: b.counts?.unresolved,
-        leftOpenCount: b.counts?.leftOpen,
-        userStopped: b.userStopped === true,
-      })));
+      const stats = firstPassStatsFromMeta(allBuilds.map(firstPassMetaFromDiagnostics));
       const reported = firstPassStatsFromMeta(reports);
       res.json({
         ...stats,

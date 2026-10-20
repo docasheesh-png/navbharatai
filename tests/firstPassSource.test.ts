@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { firstPassStatsFromMeta } from '../src/lib/firstPassQuality';
+import { firstPassStatsFromMeta, firstPassMetaFromDiagnostics } from '../src/lib/firstPassQuality';
 
 /**
  * ADMIN SCREENSHOT 2026-08-12 — the First-pass quality card reading "4.3% right first time, 24 of 47
@@ -52,13 +52,13 @@ describe('the headline now counts every build, not every complaint', () => {
   });
 
   it('the card says out loud which population it counted', () => {
-    expect(panel).toContain('Across EVERY build by every user — not only the ones someone reported.');
+    expect(panel).toContain('Source: every user’s build records, not only reported complaints.');
   });
 
   it('…and shows the complaints rate with an honest reading of the gap', () => {
     expect(panel).toMatch(/users actually pressed/);
     expect(panel).toMatch(/people report what broke/);
-    expect(panel).toMatch(/users are reporting a fair sample/);
+    expect(panel).toMatch(/that alone does not show whether reports are a representative sample/);
   });
 });
 
@@ -72,9 +72,9 @@ describe('the shape mismatch that would have produced a WORSE number', () => {
    * is explicit at the one place the two vocabularies meet.
    */
   const raw = [
-    { ok: true, counts: { autoResolved: 0, unresolved: 0 } },   // genuinely clean
-    { ok: true, counts: { autoResolved: 3, unresolved: 0 } },   // healed
-    { ok: false, counts: { autoResolved: 1, unresolved: 2 } },  // failed
+    { ok: true, counts: { healRule: 3, autoResolved: 0, unresolved: 0 } },   // genuinely clean
+    { ok: true, counts: { healRule: 3, autoResolved: 3, unresolved: 0 } },   // healed
+    { ok: false, counts: { healRule: 3, autoResolved: 1, unresolved: 2 } },  // failed
   ];
 
   it('unmapped, it reports almost nothing as measurable — and would have read ~100% failed', () => {
@@ -86,9 +86,7 @@ describe('the shape mismatch that would have produced a WORSE number', () => {
   });
 
   it('mapped, it reports the truth', () => {
-    const right = firstPassStatsFromMeta(raw.map((b) => ({
-      ok: b.ok, healCount: b.counts?.autoResolved, unresolvedCount: b.counts?.unresolved,
-    })));
+    const right = firstPassStatsFromMeta(raw.map(firstPassMetaFromDiagnostics));
     expect(right.clean).toBe(1);
     expect(right.healed).toBe(1);
     expect(right.failed).toBe(1);
@@ -97,14 +95,15 @@ describe('the shape mismatch that would have produced a WORSE number', () => {
   });
 
   it('the route performs that mapping explicitly', () => {
-    expect(route).toContain('healCount: b.counts?.autoResolved');
-    expect(route).toContain('unresolvedCount: b.counts?.unresolved');
+    expect(route).toContain('allBuilds.map(firstPassMetaFromDiagnostics)');
+    expect(firstPassMetaFromDiagnostics(raw[0])).toMatchObject({ healCount: 0, unresolvedCount: 0,
+      repairCount: { total: 0, provenance: 'current-rule' } });
   });
 
   it('a genuinely legacy row is still excluded, not counted as clean', () => {
     // The original protection must survive: a row with no counts at all is unknowable, and counting
     // it as clean would inflate the exact number we judge ourselves by.
-    const s = firstPassStatsFromMeta([{ ok: true }, { ok: true, healCount: 0, unresolvedCount: 0 }]);
+    const s = firstPassStatsFromMeta([{ ok: true }, { ok: true, healRule: 3, healCount: 0, unresolvedCount: 0 }]);
     expect(s.skippedLegacy).toBe(1);
     expect(s.clean).toBe(1);
     expect(s.total).toBe(1);

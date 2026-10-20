@@ -118,16 +118,16 @@ describe('toMetricInput — what a row means, and what it must never invent', ()
   it('reads the verdict, the duration, the charge and both counts', () => {
     expect(toMetricInput({
       workspaceId: 'w1', startedAt: 1_000, endedAt: 61_000, ok: true, billedInr: 28.95,
-      counts: { autoResolved: 6, workarounds: 2 },
+      counts: { healRule: 3, autoResolved: 6, workarounds: 2 },
     })).toEqual({
       workspaceId: 'w1', reportedAt: 1_000, ok: true, buildMs: 60_000,
       billedInr: 28.95, healCount: 6, workaroundCount: 2,
     });
   });
 
-  it('🔒 an ABSENT heal count is undefined, never 0 — 0 would score a legacy row as a clean pass', () => {
+  it('🔒 an ABSENT heal count is null, never 0 — 0 would score a legacy row as a clean pass', () => {
     const r = toMetricInput({ workspaceId: 'w', startedAt: 1, endedAt: 2, ok: true, counts: {} });
-    expect(r.healCount).toBeUndefined();
+    expect(r.healCount).toBeNull();
     expect(r.workaroundCount).toBeUndefined();
     expect(healOf([r]).builds).toBe(0);      // excluded from the rate, not counted as clean
   });

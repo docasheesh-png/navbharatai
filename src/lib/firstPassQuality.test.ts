@@ -33,8 +33,8 @@ describe('classifyFirstPass — a self-heal is a RED FLAG, not a success (50/50 
     expect(classifyFirstPass(undefined)).toBe('failed');
   });
 
-  it('a missing counts block is treated as clean only when the build genuinely delivered', () => {
-    expect(classifyFirstPass({ ok: true })).toBe('clean');
+  it('a missing counts block is unknown, while a known failed build remains failed', () => {
+    expect(classifyFirstPass({ ok: true })).toBe('unknown');
     expect(classifyFirstPass({ ok: false })).toBe('failed');
   });
 });
@@ -57,7 +57,7 @@ describe('firstPassStats — the headline is the CLEAN rate, with the flattering
     const s = firstPassStats([]);
     expect(s.cleanRate).toBeNull();
     expect(s.deliveredRate).toBeNull();
-    expect(firstPassHeadline(s)).toContain('No builds recorded yet');
+    expect(firstPassHeadline(s)).toContain('No measured first-pass results');
   });
 
   it('ignores nulls in the input instead of counting them as failures', () => {
@@ -72,7 +72,7 @@ describe('firstPassStats — topHealCodes is the ACTIONABLE half (what to preven
         { code: 'INTEGRITY_HEALED', autoResolved: true },
         { code: 'PREVIEW_COMPILE_HEALED', autoResolved: true },
       ] }),
-      build({ counts: { autoResolved: 1 }, issues: [{ code: 'INTEGRITY_HEALED', autoResolved: true }] }),
+      build({ counts: { autoResolved: 1, unresolved: 0 }, issues: [{ code: 'INTEGRITY_HEALED', autoResolved: true }] }),
     ]);
     expect(s.topHealCodes[0]).toEqual({ code: 'INTEGRITY_HEALED', count: 2 });
     expect(s.topHealCodes[1]).toEqual({ code: 'PREVIEW_COMPILE_HEALED', count: 1 });
@@ -107,10 +107,10 @@ describe('firstPassStats — topHealCodes is the ACTIONABLE half (what to preven
 
 describe('firstPassHeadline — honest wording, never rounds a miss up to the target', () => {
   it('says "below" when under target and names all three buckets', () => {
-    const line = firstPassHeadline(firstPassStats([build(), build({ counts: { autoResolved: 1 } })]));
+    const line = firstPassHeadline(firstPassStats([build(), build({ counts: { autoResolved: 1, unresolved: 0 } })]));
     expect(line).toContain('50.0%');
     expect(line).toContain('below');
-    expect(line).toMatch(/1 clean, 1 needed repair, 0 failed/);
+    expect(line).toMatch(/1 clean, 1 repaired, 0 warning-only, 0 failed/);
   });
 
   it('says "at or above" exactly at the target boundary, not just past it', () => {
@@ -127,22 +127,22 @@ describe('firstPassHeadline — honest wording, never rounds a miss up to the ta
 describe('firstPassStatsFromMeta — a legacy row is skipped, never counted as clean', () => {
   it('skips delivered rows that predate the counts field and reports how many', () => {
     const s = firstPassStatsFromMeta([
-      { ok: true, healCount: 0, unresolvedCount: 0 },   // clean
+      { ok: true, healRule: 3, healCount: 0, unresolvedCount: 0 },   // clean
       { ok: true },                                     // legacy — unknowable, must NOT count as clean
-      { ok: true, healCount: 3, unresolvedCount: 0 },   // healed
+      { ok: true, healRule: 3, healCount: 3, unresolvedCount: 0 },   // healed
     ]);
     expect(s).toMatchObject({ total: 2, clean: 1, healed: 1, failed: 0, skippedLegacy: 1 });
     expect(s.cleanRate).toBeCloseTo(0.5); // 1 of 2 USABLE rows — the legacy row is not in the denominator
   });
 
   it('still counts a legacy FAILURE — "it did not deliver" needs no counts', () => {
-    const s = firstPassStatsFromMeta([{ ok: false }, { ok: false, healCount: 2, unresolvedCount: 1 }]);
+    const s = firstPassStatsFromMeta([{ ok: false }, { ok: false, healRule: 3, healCount: 2, unresolvedCount: 1 }]);
     expect(s).toMatchObject({ total: 2, failed: 2, skippedLegacy: 0 });
     expect(s.cleanRate).toBe(0);
   });
 
   it('a half-written row (one count present, one missing) is treated as legacy, not as zero', () => {
-    const s = firstPassStatsFromMeta([{ ok: true, healCount: 0 }]);
+    const s = firstPassStatsFromMeta([{ ok: true, healRule: 3, healCount: 0 }]);
     expect(s).toMatchObject({ total: 0, skippedLegacy: 1 });
     expect(s.cleanRate).toBeNull();
   });
@@ -151,13 +151,13 @@ describe('firstPassStatsFromMeta — a legacy row is skipped, never counted as c
     const s = firstPassStatsFromMeta([{ ok: true }, { ok: true }]);
     expect(s.cleanRate).toBeNull();
     expect(s.skippedLegacy).toBe(2);
-    expect(firstPassHeadline(s)).toContain('No builds recorded yet');
+    expect(firstPassHeadline(s)).toContain('No measured first-pass results');
   });
 
   it('a warning left open is not called a repair, and a user stop is not a failure', () => {
     const s = firstPassStatsFromMeta([
-      { ok: true, healCount: 0, unresolvedCount: 1 },
-      { ok: true, healCount: 2, unresolvedCount: 0 },
+      { ok: true, healRule: 3, healCount: 0, unresolvedCount: 1 },
+      { ok: true, healRule: 3, healCount: 2, unresolvedCount: 0 },
       { ok: false, userStopped: true },
       { ok: false },
     ]);

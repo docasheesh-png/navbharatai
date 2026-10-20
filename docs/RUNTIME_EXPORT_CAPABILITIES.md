@@ -73,3 +73,35 @@ files through esbuild's filesystem resolver. Its TypeScript probe uses the real
 module resolver, not a custom `resolveModuleNames` hook: a hook returning only a
 filename drops `resolvedUsingTsExtension` and can hide TS5097. Negative controls
 prove the probe rejects raw `.mts`/`.cts` imports before checking repaired output.
+
+## 2026-10-20 — PR #3872: isolate cooldown, starvation and build-bench regression fixtures
+
+Hosted CI run `39490035922`, job `118860455747`, exposed four assertion failures after the missing
+cooldown default was restored to 60 seconds. The bounded reproduction matched all four failures
+(38 other tests passed). The root was test coupling, not a changed starvation/timeout classifier:
+the old fixtures implicitly relied on the missing-config bug disabling the shared cooldown, and
+StudyRacer also leaked the first test's singleton cooldown into the second. Explicit `0` made the
+unchanged baseline pass 42/42; running StudyRacer's second case alone changed its actual GLM calls
+from zero to one, proving the additional inter-test contamination.
+
+| Problem | Root / class | Fix and regression proof |
+| --- | --- | --- |
+| Non-first pool key never reached the starvation control | A first timeout correctly cooled the service before the synthetic second-key starvation | Inject a private disabled cooldown only into that starvation-key unit test; its original `[1,1,0,0,0,0]` and family-key assertions remain. Reverting family retirement to per-key makes it fail. |
+| Timeout retry fixture expected an immediate second attempt | Transient cooldown and permanent dead-rung retirement were conflated by the fixture | Keep a first-strike 60-second cooldown enabled, prove suppression at 59,999 ms and retry at 60,000 ms, with the dead-rung map empty throughout. Treating timeout as permanent starvation makes it fail. |
+| StudyRacer without-shared-bench control stopped at one call | Process cooldown masked the separate build-lifetime bench | Inject a private disabled cooldown; retain the original three-call negative control. |
+| StudyRacer shared-bench case saw zero calls | Same masking plus singleton state leaked by the prior case | Inject a fresh private disabled cooldown; retain the original two-call and one-announcement assertions. Removing the shared build registry makes this case fail. |
+
+The production singleton tests now cover both request timeout and per-key 429, missing/blank/explicit-off
+configuration, first-strike suppression, exact expiry and successful recovery. Default-on pool controls
+prove timeout/overload suppress both same-model and different-model sibling keys, preserve a different
+provider family, and recover after expiry; ordinary per-key quota 429 still rotates to a healthy sibling.
+Existing starvation tests retain healthy-model/family boundaries. Singleton users reset before and after
+each case, including failed assertions. No production source, provider policy or live environment changed.
+Removing the missing-value guard again makes 12 of the 26 production-default tests fail.
+
+Validation: frontend and server typechecks and the unused-import/local gate passed. The six-file
+bounded suite passed **147/147**, including all 65 runner tests and all 14
+measured-timeout-cost-floor tests. All four deliberate source mutations failed their targeted controls
+and were restored. Validation used an empty credential environment and the offline guard under the shared
+validation lock. Full local suite deliberately not run; the complete hosted gate remains required before
+any merge, and this entry does not mark the PR or report merged or complete.

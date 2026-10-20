@@ -1,8 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   makeMultiProviderTurnRunner,
+  createRateLimitCooldowns,
   sharedRateLimitCooldowns,
+  type MultiProviderOptions,
   type NamedRunner,
 } from '../src/server/AgentV3/providers/MultiProviderTurnRunner';
 import { STARVED_BUDGET_MESSAGE } from '../src/server/AgentV3/floorBudget';
@@ -26,6 +28,7 @@ import type { RunTurnParams, TurnResult, TurnRunner } from '../src/server/AgentV
 // The 429 cooldown registry is a process-wide singleton by design; reset it so a simulated failure in
 // one case can never bench a provider for the next (same guard the existing runner suite uses).
 beforeEach(() => sharedRateLimitCooldowns.reset());
+afterEach(() => sharedRateLimitCooldowns.reset());
 
 const PARAMS: RunTurnParams = { model: 'm', messages: [{ role: 'user', content: 'hi' }] };
 
@@ -49,8 +52,8 @@ const timingOutRunner = (): TurnRunner => ({
 });
 
 /** One build's fast lane: a NEW runner per file, all sharing that build's one dead-rung map. */
-const perFileRunner = (chain: NamedRunner[], deadRungs: Map<string, string>): TurnRunner =>
-  makeMultiProviderTurnRunner(chain, { deadRungs });
+const perFileRunner = (chain: NamedRunner[], deadRungs: Map<string, string>, options: Pick<MultiProviderOptions, 'cooldowns' | 'now'> = {}): TurnRunner =>
+  makeMultiProviderTurnRunner(chain, { ...options, deadRungs });
 
 const glmKimi = (glm: TurnRunner, kimi: TurnRunner): NamedRunner[] => [
   { name: 'GLM', runner: glm, modelId: 'glm-5.3-flash' },
@@ -167,12 +170,22 @@ describe('Test 5 — starved ≠ timeout, and sharing the map does not blur them
     expect([...build.values()][0]).toContain(STARVED_BUDGET_MESSAGE);
   });
 
-  it('a timed-out rung is therefore still RE-TRIED on the next file of the same build', async () => {
+  it('a timed-out rung is still RE-TRIED on a later file after its transient cooldown expires', async () => {
     const build = new Map<string, string>();
     const glm = timingOutRunner();
-    await perFileRunner(glmKimi(glm, okRunner('a')), build).runTurn(PARAMS);
-    await perFileRunner(glmKimi(glm, okRunner('b')), build).runTurn(PARAMS);
+    let clock = 1_000_000;
+    const cooldowns = createRateLimitCooldowns(60_000, 1);
+    const options = { cooldowns, now: () => clock };
+    await perFileRunner(glmKimi(glm, okRunner('a')), build, options).runTurn(PARAMS);
+    expect(cooldowns.until('GLM')).toBe(clock + 60_000);
+    clock += 59_999;
+    await perFileRunner(glmKimi(glm, okRunner('cooling')), build, options).runTurn(PARAMS);
+    expect(glm.runTurn).toHaveBeenCalledTimes(1);
+    expect(build.size).toBe(0); // transient suppression is not permanent retirement
+    clock++;
+    await perFileRunner(glmKimi(glm, okRunner('b')), build, options).runTurn(PARAMS);
     expect(glm.runTurn).toHaveBeenCalledTimes(2);
+    expect(build.size).toBe(0);
   });
 });
 

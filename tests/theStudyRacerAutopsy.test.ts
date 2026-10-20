@@ -30,7 +30,7 @@ import { scanSecurity, callSpanAt } from '../src/server/AgentV3/SecurityAnalysis
 import { enclosingTag } from '../src/server/AgentV3/jsxTags';
 import { identitySource, workspaceContentHash, snapshotConfirmation } from '../src/server/AgentV3/snapshotIdentity';
 import { PREVIEW_BRIDGE_MARKER } from '../src/server/AgentV3/previewBridge';
-import { makeMultiProviderTurnRunner, createBuildBenchRegistry, type NamedRunner } from '../src/server/AgentV3/providers/MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, createBuildBenchRegistry, createRateLimitCooldowns, type NamedRunner } from '../src/server/AgentV3/providers/MultiProviderTurnRunner';
 import type { TurnResult } from '../src/server/AgentV3/providers/ClaudeClient';
 
 const src = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
@@ -96,9 +96,12 @@ describe('3 · a rung benched in one runner is benched in every runner of the bu
 
   it('🔴 WITHOUT a shared registry the second runner calls the benched family again (the bug)', async () => {
     const calls: string[] = [];
-    const a = makeMultiProviderTurnRunner(chain(calls));
+    // Isolate build-lifetime memory from the independent process-wide transient cooldown. Otherwise
+    // the first timeout suppresses the second strike, and leaks a cooldown into the next test too.
+    const cooldowns = createRateLimitCooldowns(0);
+    const a = makeMultiProviderTurnRunner(chain(calls), { cooldowns });
     await a.runTurn(params); await a.runTurn(params); // two timeouts → GLM benched in runner A
-    const b = makeMultiProviderTurnRunner(chain(calls));
+    const b = makeMultiProviderTurnRunner(chain(calls), { cooldowns });
     await b.runTurn(params);
     expect(calls.filter((c) => c === 'GLM').length).toBe(3); // runner B never heard of the bench
   });
@@ -107,9 +110,10 @@ describe('3 · a rung benched in one runner is benched in every runner of the bu
     const calls: string[] = [];
     const bench = createBuildBenchRegistry();
     const benched: string[] = [];
-    const a = makeMultiProviderTurnRunner(chain(calls), { bench, onProviderBenched: (f) => benched.push(f) });
+    const cooldowns = createRateLimitCooldowns(0); // same isolation as the no-registry control above
+    const a = makeMultiProviderTurnRunner(chain(calls), { bench, cooldowns, onProviderBenched: (f) => benched.push(f) });
     await a.runTurn(params); await a.runTurn(params);
-    const b = makeMultiProviderTurnRunner(chain(calls), { bench, onProviderBenched: (f) => benched.push(f) });
+    const b = makeMultiProviderTurnRunner(chain(calls), { bench, cooldowns, onProviderBenched: (f) => benched.push(f) });
     const r = await b.runTurn(params);
     expect(r.text).toBe('from KIMI');
     expect(calls.filter((c) => c === 'GLM').length).toBe(2);

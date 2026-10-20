@@ -137,6 +137,7 @@ export const OUTCOME_REASONS: Readonly<Record<string, FailureReason>> = {
    * abort are different bugs with different fixes, and one label for both hides the second.
    */
   OUTCOME_ABORTED_UNKNOWN: { key: 'aborted-unknown', label: 'Aborted by something that never said why (not the wall clock, not the user)' },
+  OUTCOME_UNEXPLAINED: { key: 'unexplained', label: 'The run ended not-ok and never recorded an outcome code' },
 };
 
 /**

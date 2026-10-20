@@ -77,6 +77,7 @@ export const OUTCOME_TO_CATEGORY: Readonly<Record<string, { category: FailureCat
   // Split out of OUTCOME_STOPPED on 2026-09-20 — an abort raised somewhere that never went through
   // `abortBuild`, so its signal carried no cause. An engine condition; nothing in the app caused it.
   OUTCOME_ABORTED_UNKNOWN: { category: 'incomplete', hint: 'Something aborted the build without recording why — it did not come through the abort funnel. An engine condition, not the app or the prompt; retry.' },
+  OUTCOME_UNEXPLAINED: { category: 'incomplete', hint: 'The run ended not-ok and wrote no outcome code. An engine hole, not a fact about the app; retry.' },
 };
 
 /**

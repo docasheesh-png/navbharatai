@@ -2,7 +2,7 @@
 //
 // ── WHY THIS EXISTS ──────────────────────────────────────────────────────────────────────────────
 // Q-890 made the un-reconcilable credit LOUD: `payments.ts` logs `UNRECONCILED CREDIT for order …`
-// and credits our own recorded figure. That asymmetry is deliberate and must not be "completed" into
+// and records the unreadable original. Q-1226 now credits the verified gateway amount instead. That asymmetry is deliberate and must not be "completed" into
 // a symmetric rule — the provider's amount unreadable REFUSES, our own record unreadable CREDITS,
 // because refusing there would strand a customer who really paid (the reasoning is held in
 // `tests/theAmountCheckCannotBeSkipped.test.ts` so it cannot be lost).
@@ -118,4 +118,42 @@ export function unreconciledPatchIsStorable(patch: Record<string, unknown>): boo
     if (typeof v === 'number' && !Number.isFinite(v)) return false;
   }
   return true;
+}
+
+/** Read a money field without coercing null, blanks, booleans or arrays into a payment. */
+function readableAmount(value: unknown): number {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return NaN;
+  if (typeof value === 'string' && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value.trim())) return NaN;
+  return Number(value);
+}
+
+/** A deliberate amount refusal, not a provider/storage outage (webhook retry contract, Q-888). */
+export class PaymentAmountMismatchError extends Error {
+  constructor() {
+    super('Payment amount mismatch detected — please contact support.');
+    this.name = 'PaymentAmountMismatchError';
+  }
+}
+
+/**
+ * Cashfree's confirmed amount is the settlement basis, never the independently stored balanceAdded.
+ * A readable local amount must still match; an unreadable one is retained in the reconciliation audit.
+ * Called again on the transaction's fresh order so a concurrent edit cannot bypass the amount check.
+ */
+export function reconcileGatewayPaidAmount(providerAmount: unknown, recordedAmount: unknown): {
+  amountPaid: number;
+  unreadableRecorded: boolean;
+} {
+  const paidAmount = readableAmount(providerAmount);
+  if (!Number.isFinite(paidAmount) || paidAmount <= 0 || !Number.isSafeInteger(Math.round(paidAmount * 100))) {
+    throw new Error('This payment could not be verified — please contact support.');
+  }
+  const expectedAmount = readableAmount(recordedAmount);
+  // Preserve the one-paisa boundary despite floating-point subtraction (100.01 - 100 > 0.01).
+  // Cap floating-point slack far below one paisa even for a corrupt, extremely large record.
+  const tolerance = 0.01 + Math.min(1e-9, Number.EPSILON * Math.max(Math.abs(paidAmount), Math.abs(expectedAmount)) * 2);
+  if (Number.isFinite(expectedAmount) && Math.abs(paidAmount - expectedAmount) > tolerance) {
+    throw new PaymentAmountMismatchError();
+  }
+  return { amountPaid: paidAmount, unreadableRecorded: !Number.isFinite(expectedAmount) };
 }

@@ -160,6 +160,18 @@ describe('an event the gateway has settled is acknowledged, so it stops coming b
     expect(store.get('payment_transactions/ord_mismatch')!.paymentStatus).toBe('PENDING');
   });
 
+  it('Q-1226: an unreadable stored amount is credited consistently and acknowledged once', async () => {
+    pendingOrder('ord_legacy', { amountPaid: 'legacy', balanceAdded: 999 });
+    const first = await deliverPayment('ord_legacy');
+    expect(first.statusCode).toBe(200);
+    expect(first.body.status).toBe('OK');
+    expect(store.get('user_token_wallets/buyer')).toMatchObject({ tokenBalance: 10000, remaining_balance: 100 });
+    expect(store.get('payment_transactions/ord_legacy')).toMatchObject({ amountPaid: 102, balanceAdded: 100, paymentStatus: 'SUCCESS', unreconciledCredit: true });
+    const again = await deliverPayment('ord_legacy');
+    expect(again.statusCode).toBe(200);
+    expect(store.get('user_token_wallets/buyer')!.walletLedger).toHaveLength(1);
+  });
+
   it('a genuine payment is still fulfilled and answered 200 — the fix changes no happy path', async () => {
     pendingOrder('ord_ok');
     const res = await deliverPayment('ord_ok');

@@ -3164,6 +3164,15 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Money") stil
     keywords: ['bot ledger', 'bots', 'admin bots', 'who built bots', 'whatsapp bots', 'telegram bots', 'bot owners', 'unsigned bots', 'app secret', 'kis user ne bot banaya', 'bot ka hisab', 'bots list', 'bot kisne banaya'],
   },
   {
+    id: 'admin-house-ads',
+    name: 'Ads (the admin\'s own product ads)',
+    path: 'Admin Dashboard → Money → Ads (admin only)',
+    description: `Admin-only page where the admin runs ads for their OWN products inside NavBharatAI (admin 2026-10-20). The admin adds an ad with a name, a short description, a picture and an optional https link; the picture is cropped to a wide 1200 by 300 strip in the browser, and the preview shows exactly what users will see. The admin ticks where each ad appears: App Mart (a "Sponsored" tile between the app tiles), the Home screen (a small banner at the bottom), the success screen after publishing an app or posting it to App Mart (a small banner below the message), and the phone app's App Mart screen (a bottom banner). The server-rendered public product pages do not carry ads, because those static pages cannot tell whether the reader has paid. Each ad can have an optional start and end date and can be turned on or off, edited or deleted. Every ad carries a visible "Sponsored" label and is never a popup or a full-screen ad. Anyone who has paid (real money spent on tokens, or an active hosting plan) never sees an ad; free signed-in users and signed-out visitors do. There is no outside ad network and no tracking. A change can take up to a minute to reach every user.`,
+    howToUse: 'Admin login required. Open the Admin Dashboard → Money → Ads. Choose "New ad", type the name and description, add an optional https link, choose a picture, tick where it should appear, optionally set the dates, and choose "Create ad". Use "Turn off" to stop an ad without deleting it, the pencil to edit it, and the bin to delete it.',
+    relatedFeatures: [],
+    keywords: ['ads', 'ad', 'advertisement', 'advertising', 'sponsored', 'house ads', 'admin ads', 'ad banner', 'sponsored tile', 'apna ad', 'ads kaise lagayein', 'ad kaha dikhega', 'ads admin panel', 'promotion', 'product ad', 'banner ad'],
+  },
+  {
     id: 'admin-ai-insights',
     name: 'AI Insights & NL Telemetry Query',
     path: 'Admin Dashboard → Home → Insights card (admin only)',

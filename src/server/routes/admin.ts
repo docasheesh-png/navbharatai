@@ -21,6 +21,8 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, runTransaction, getServerDb as getDb } from '../lib/serverDb';
 import { createAdminPromo, ADMIN_PROMO_COLLECTION } from '../lib/adminPromoStore';
 import { adminPromoStatus, normalizeAdminPromoCode, parseAdminPromoInput } from '../lib/adminPromoCodes';
+import { listHouseAds, createHouseAd, updateHouseAd, deleteHouseAd } from '../lib/houseAdStore';
+import { houseAdStatus } from '../../lib/houseAds';
 import {
   listDailyBuildOutcomes, summariseBuildOutcomes, cureFamily, cureSplit,
 } from '../lib/mobileBuildOutcomeStore';
@@ -3682,6 +3684,52 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       if (!snap.exists()) return res.status(404).json({ error: `${code} does not exist.` });
       await deleteDoc(ref);
       audit('ADMIN_PROMO_DELETED', { admin: adminUsername(), code, ip: req.ip });
+      res.json({ ok: true });
+    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
+  });
+
+  // ── House ads (admin 2026-10-20: "admin panel me ads ka option — admin apne kisi saman ka ads chala sake") ──
+  // The admin's OWN products only; there is no third-party network in this path and nothing is tracked. The
+  // public half (what a screen asks for, and the picture) is routes/houseAds.ts. `status` is computed by the
+  // SAME rule the public list applies, so this table can never say "Live" about an ad nobody is shown.
+  app.get('/api/admin/ads', verifyAdminToken, async (_req: Request, res: Response) => {
+    const db = getDb() as any;
+    if (!db) return res.status(503).json({ error: 'Database unavailable.' });
+    try {
+      const now = Date.now();
+      res.json({ ads: (await listHouseAds(db)).map((a) => ({ ...a, status: houseAdStatus(a, now) })) });
+    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
+  });
+
+  app.post('/api/admin/ads', verifyAdminToken, async (req: Request, res: Response) => {
+    const db = getDb() as any;
+    if (!db) return res.status(503).json({ error: 'Database unavailable.' });
+    try {
+      const r = await createHouseAd(db, req.body, Date.now());
+      if (!r.ok) return res.status(r.status).json({ error: r.error });
+      audit('ADMIN_HOUSE_AD_CREATED', { admin: adminUsername(), adId: r.value.id, ip: req.ip });
+      res.json({ ok: true, id: r.value.id });
+    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
+  });
+
+  app.put('/api/admin/ads/:id', verifyAdminToken, async (req: Request, res: Response) => {
+    const db = getDb() as any;
+    if (!db) return res.status(503).json({ error: 'Database unavailable.' });
+    try {
+      const r = await updateHouseAd(db, String(req.params.id || ''), req.body, Date.now());
+      if (!r.ok) return res.status(r.status).json({ error: r.error });
+      audit('ADMIN_HOUSE_AD_UPDATED', { admin: adminUsername(), adId: r.value.id, ip: req.ip });
+      res.json({ ok: true, id: r.value.id });
+    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
+  });
+
+  app.delete('/api/admin/ads/:id', verifyAdminToken, async (req: Request, res: Response) => {
+    const db = getDb() as any;
+    if (!db) return res.status(503).json({ error: 'Database unavailable.' });
+    try {
+      const r = await deleteHouseAd(db, String(req.params.id || ''));
+      if (!r.ok) return res.status(r.status).json({ error: r.error });
+      audit('ADMIN_HOUSE_AD_DELETED', { admin: adminUsername(), adId: r.value.id, ip: req.ip });
       res.json({ ok: true });
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });

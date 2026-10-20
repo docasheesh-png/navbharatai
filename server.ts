@@ -76,6 +76,7 @@ import { registerMinifyRoutes } from './src/server/routes/minify';
 import { registerWorkspaceFileRoutes } from './src/server/routes/workspaceFiles';
 import { registerMobileSetupRoutes } from './src/server/routes/mobileSetup';
 import { registerNavStoreRoutes } from './src/server/routes/navStore';
+import { registerHouseAdRoutes } from './src/server/routes/houseAds';
 import { registerAppMartSocialRoutes } from './src/server/routes/appMartSocial';
 import { registerPlatformRatingRoutes } from './src/server/routes/platformRating';
 import { registerAppAiRoutes } from './src/server/routes/appAi';
@@ -701,6 +702,9 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   // Nav App Store — user-published Android apps. Every upload is inspected and malware-scanned, and
   // NOTHING becomes public without an explicit admin approval. See routes/navStore.ts.
   registerNavStoreRoutes(app);
+  // The admin's own product ads — what a screen asks for and the picture it draws. Paid accounts get
+  // nothing; every doubt answers `{ ad: null }`. The admin half lives in routes/admin.ts. See routes/houseAds.ts.
+  registerHouseAdRoutes(app);
   // App Mart social — likes, dislikes, comments, creator profiles and their notifications. Reads are
   // open; every write needs a verified sign-in. See routes/appMartSocial.ts.
   registerAppMartSocialRoutes(app);

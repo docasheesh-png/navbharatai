@@ -25,6 +25,7 @@ import { createPortal } from 'react-dom';
 import { ExternalLink, Copy, Check, X, Share2 } from 'lucide-react';
 import { FIREWORK_MS, prettyUrl, whatsappShareUrl, type CelebrationKind } from '../../lib/firstPublish';
 import { useDialogOpen } from '../../hooks/useDialogOpen';
+import { SponsoredBanner } from '../ads/SponsoredAd';
 
 /**
  * Above every other layer this app stacks.
@@ -191,6 +192,11 @@ export function PublishCelebration({ kind, url, appName, firstPublish = false, o
             <Share2 className="h-3.5 w-3.5" /> Share
           </a>
         </div>
+
+        {/* A small banner BELOW the link and the buttons — inside the card, in the flow, never an overlay. It is
+            drawn only for someone who has not paid, and not at all when there is no ad. The celebration is
+            about the user's app: the banner never sits between them and their link. */}
+        <SponsoredBanner placement="publish_success" className="mt-4" />
       </div>
 
       {/* Scoped to this component. `nb-reduce-motion` is the class the app's own motion setting puts on

@@ -14,6 +14,8 @@ import { readSortPref, writeSortPref, sessionSeed, markOpened, logAppMartEvent }
 import { authedFetch } from '../../lib/authedFetch';
 import { LONG_REQUEST_TIMEOUT_MS, isFetchTimeout } from '../../lib/longRequest';
 import { resolveApiHref } from '../../lib/apiBase';
+import { SponsoredBanner, SponsoredTile } from '../ads/SponsoredAd';
+import { useHouseAd } from '../ads/useHouseAd';
 import { isNativeApp, nativePlatformName } from '../../lib/mobileNative';
 import { androidInstallsHidden, visibleAndroidApps } from '../../lib/appStoreCompliance';
 import { adultBadge } from '../../lib/adultContent';
@@ -199,6 +201,8 @@ function askReviewReason(question: string): string | null {
 export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initialTab, initialPublishWorkspaceId, socialTarget }) => {
   const [tab, setTab] = useState<Tab>(initialTab ?? 'browse');
   const [status, setStatus] = useState<StoreStatus | null>(null);
+  // The admin's own product ad for the App Mart tile (src/lib/houseAds.ts). Null for a paid account and on every doubt.
+  const martTileAd = useHouseAd('mart_tile');
   // Why the status could not be read, when it could not — shown on the Publish tab instead of crashing it.
   const [statusProblem, setStatusProblem] = useState<string | null>(null);
 
@@ -1018,8 +1022,12 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                 moved to the detail sheet on purpose — keeping it here doubled the tile height and
                 halved how many apps a first-time visitor sees before deciding this place is empty. */
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-              {pagedWebApps.visible.map((a) => (
-                <div key={a.id} className="flex flex-col rounded-xl bg-card border border-line hover:border-line transition-colors">
+              {pagedWebApps.visible.map((a, i) => (
+                <React.Fragment key={a.id}>
+                {/* SPONSORED TILE — one cell BETWEEN the app tiles (after the fourth), only in the general store and only
+                    once there are enough apps around it to be "between" anything. Draws nothing without an ad. */}
+                {i === 4 && browseView === 'general' && martTileAd && <SponsoredTile ad={martTileAd} />}
+                <div className="flex flex-col rounded-xl bg-card border border-line hover:border-line transition-colors">
                   <button
                     onClick={() => void openWebDetail(a)}
                     className="flex flex-col items-start gap-2 p-3 pb-2 flex-1 min-w-0 text-left"
@@ -1073,6 +1081,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                     <Play size={12} /> Open
                   </button>
                 </div>
+                </React.Fragment>
               ))}
               {/* ⚠️ col-span-full or the button becomes a TILE — a grid child is a cell by default,
                   so without this it would sit squeezed into the next slot beside a real app. */}
@@ -1306,6 +1315,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                     )}
                   </div>
                 )}
+                {/* A small banner BELOW the success message — in the flow, never over it. Only after a real success. */}
+                {pubResult?.ok && <SponsoredBanner placement="publish_success" className="mt-3" />}
               </div>
 
               <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs leading-relaxed text-muted">
@@ -1769,6 +1780,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
             </div>
           )
         )}
+        {/* The phone app's bottom banner for App Mart (admin 2026-10-20). The web store gets the tile instead. */}
+        {tab === 'browse' && isNativeApp() && <SponsoredBanner placement="mart_banner" className="mt-6" />}
       </div>
 
       {/* 🔴 `p-0` USED TO CANCEL THE SHEET CONTRACT ON BOTH OF THESE (measured 2026-09-22).

@@ -4410,3 +4410,7 @@ Explicit `on` enables one bounded preflight, a two-model default ladder, complex
 ### `AGENTV3_WEAK_BUILD_COST_CEILING_USD`
 
 Candidate-policy Weak measured provider-cost ceiling, default $1; positive finite values capped at $50. A smaller enabled global `AGENTV3_BUILD_COST_CEILING_USD` wins. Applied between measured turns, not a guaranteed hard provider-invoice bound. This does not change user markup or wallet pricing.
+
+### Weak policy production activation (admin-authorized 2026-10-20)
+
+Cloud Build now passes `AGENTV3_WEAK_SCOPE_POLICY=${_WEAK_SCOPE_POLICY}` and `AGENTV3_WEAK_BUILD_COST_CEILING_USD=${_WEAK_BUILD_COST_CEILING_USD}` using additive `--update-env-vars`. Trigger substitution defaults are `on` and `1`; set `_WEAK_SCOPE_POLICY=off` and redeploy for persistent rollback. Direct Cloud Run edits are replaced by the trigger values on the next deployment. No provider key or explicit ladder override is changed.

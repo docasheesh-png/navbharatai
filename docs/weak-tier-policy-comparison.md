@@ -1,6 +1,6 @@
 # Weak tier: candidate policy versus current routing
 
-Status: implemented behind `AGENTV3_WEAK_SCOPE_POLICY=on`; off/unset keeps current routing. Not deployed or benchmarked against paid provider calls. User request on 2026-10-20 authorizes this candidate for review. Normal and Strong policies are unchanged.
+Status: PR #3853 is merged after green CI. The admin explicitly authorized activation on 2026-10-20. Cloud Build now configures `AGENTV3_WEAK_SCOPE_POLICY=on` and a $1 measured ceiling through trigger substitutions; deployment still needs to be observed before reporting the policy live. Off/unset at runtime keeps legacy routing. No paired app-generation benchmark is claimed. Normal and Strong policies are unchanged.
 
 | Concern | Current code | Candidate |
 |---|---|---|
@@ -43,4 +43,4 @@ The classifier's measured accepted-call usage is included in the provider ledger
 
 ## Rollout and rollback
 
-Enable the flag on a controlled environment, run the same small prompt set on both policies, inspect real proof/cost records, then decide broad activation. Unset the flag to restore existing routing. Explicit `AGENTV3_LADDER_WEAK` overrides remain authoritative; remove old overrides if testing the two-model default.
+Production deployment passes the flag through Cloud Build substitution `_WEAK_SCOPE_POLICY` (default `on`) and the measured ceiling through `_WEAK_BUILD_COST_CEILING_USD` (default `1`). The admin authorized this activation after reviewing the candidate and green tests. Set `_WEAK_SCOPE_POLICY=off` in the Cloud Build trigger and deploy to roll back persistently. A direct Cloud Run env override to `off` is immediate but the next pipeline deploy reapplies its trigger setting. Run paired prompts to measure first-attempt proof and real spend; test success is not a quality benchmark. Explicit `AGENTV3_LADDER_WEAK` overrides remain authoritative; remove a legacy override if testing the two-model default. This change does not delete or widen any provider-key or override setting.

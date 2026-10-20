@@ -35,6 +35,7 @@ import {
 import { readGiftDaily, giftDay, redeemGiftCode } from '../lib/giftCodeStore';
 import { appLockBlocks } from '../lib/appLockEnforce';
 import { classifyCashfreeWebhook, cashfreeWebhookOrderId } from '../lib/paymentReversal';
+import { emailForLog, nameForLog, phoneForLog, webhookShapeForLog } from '../lib/piiForLog';
 import { settleCashfreeReversal } from '../lib/paymentReversalStore';
 
 /**
@@ -328,7 +329,10 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       const protocol = (host.includes('localhost') || host.includes('127.0.0.1')) ? 'http' : 'https';
       const secureReturnUrl = `${protocol}://${host}/api/payment/verify-redirect?order_id={order_id}`;
 
-      console.log(`[CASHFREE] Payload inputs - Name: ${customerNameClean}, Email: ${customerEmailClean}, Phone: ${customerPhoneClean}, ID: ${customerIdClean}, Amount: ${finalAmount}, ReturnURL: ${secureReturnUrl}`);
+      // Q-886: an order that fails is diagnosed from this line, so it keeps the ORDER's identifiers and
+      // the amount. It used to keep the PAYER's identity too — name, email and phone in full, on every
+      // order, on the normal path. The user id is the handle for "who"; the rest is masked.
+      console.log(`[CASHFREE] Payload inputs - order ${orderId}, user ${customerIdClean}, name ${nameForLog(customerNameClean)}, email ${emailForLog(customerEmailClean)}, phone ${phoneForLog(customerPhoneClean)}, Amount: ${finalAmount}, ReturnURL: ${secureReturnUrl}`);
 
       const cfResponse = await axios.post(cfUrl, {
         order_id: orderId,
@@ -527,7 +531,10 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       // `cashfreeWebhookOrderId`. A refund event used to fail right here with "Order ID missing".
       const orderId = cashfreeWebhookOrderId(req.body);
       if (!orderId) {
-        console.warn('[CASHFREE WEBHOOK] Missing order_id in webhook body:', req.body);
+        // Q-886: this printed the WHOLE body — the payer's name, email and phone included — and it fired
+        // exactly when something was already wrong, so the worst payloads were the likeliest to be
+        // printed. The diagnosis needs the SHAPE (which keys arrived, which event), never the values.
+        console.warn(`[CASHFREE WEBHOOK] Missing order_id in webhook body: ${webhookShapeForLog(req.body)}`);
         return res.status(400).json({ error: 'Order ID missing in webhook payload' });
       }
 

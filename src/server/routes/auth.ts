@@ -226,7 +226,10 @@ export function registerAuthRoutes(app: Express): void {
       phoneOtpRecords.set(cleanPhone, updateOtpRecord(phoneOtpRecords.get(cleanPhone)));
       ipOtpRecords.set(ip, updateOtpRecord(ipOtpRecords.get(ip)));
 
-      console.log(`[OTP PROTECTION SUCCESS] Request verified for phone ${cleanPhone} from source IP ${ip}`);
+      // Q-886's SIBLING, found by hunting the class rather than the line: this file already masked a
+      // phone through `phoneForLog` eleven lines up, and then printed the next one in full. A rule that
+      // must be remembered at every log statement is a rule that will eventually be forgotten.
+      console.log(`[OTP PROTECTION SUCCESS] Request verified for phone ${phoneForLog(cleanPhone)} from source IP ${ip}`);
       return res.json({ success: true, message: "Verification cooldown validated. Safe to initialize OTP dispatch." });
 
     } catch (err: any) {

@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
+import { weakScopePolicyEnabled } from '../src/server/AgentV3/weakBuildAdmission';
+import { tierLadder, planLadder } from '../src/server/AgentV3/tierLadder';
+import { buildCostCeilingUsd } from '../src/server/AgentV3/buildCostCeiling';
 
 /**
  * Cloud Build performs ITS OWN substitution on every `$NAME` / `${NAME}` inside a step's `args` before the
@@ -14,6 +17,25 @@ const BUILT_INS = new Set(['PROJECT_ID', 'PROJECT_NUMBER', 'BUILD_ID', 'COMMIT_S
 describe('cloudbuild.yaml — every $ in a step is a Cloud Build variable, a $_user variable, or an escaped $$', () => {
   const doc = parse(readFileSync('cloudbuild.yaml', 'utf8')) as { steps: Array<{ args?: string[]; entrypoint?: string; name: string }>; substitutions?: Record<string, string> };
   const declared = new Set(Object.keys(doc.substitutions ?? {}));
+
+  it('deploys the authorized Weak policy and supports substitution rollback without replacing other environment variables', () => {
+    const deploy = doc.steps.find((step) => step.args?.includes('deploy'))!;
+    expect(deploy.args).not.toContain('--set-env-vars');
+    const update = deploy.args![deploy.args!.indexOf('--update-env-vars') + 1];
+    const render = (overrides: Record<string, string> = {}) => Object.fromEntries(
+      update.replace(/\$\{(_\w+)\}/g, (_, name) => ({ ...doc.substitutions, ...overrides })[name])
+        .split(',').map((entry) => entry.split('=')),
+    );
+    const active = render();
+    expect(weakScopePolicyEnabled(active)).toBe(true);
+    expect(tierLadder('weak', active).rungs.map((rung) => rung.model)).toEqual(['glm-4.7-flashx', 'kimi-k2.7-code']);
+    expect(planLadder('weak', active, true)[0].provider).toBe('KIMI');
+    expect(buildCostCeilingUsd(active, true)).toBe(1);
+    const rollback = render({ _WEAK_SCOPE_POLICY: 'off' });
+    expect(weakScopePolicyEnabled(rollback)).toBe(false);
+    expect(tierLadder('weak', rollback).rungs.length).toBeGreaterThan(2);
+    for (const tier of ['normal', 'strong']) expect(tierLadder(tier, active)).toEqual(tierLadder(tier, rollback));
+  });
 
   it('no step references a bare bash variable Cloud Build would reject at submit time', () => {
     const bad: string[] = [];

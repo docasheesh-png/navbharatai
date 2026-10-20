@@ -307,7 +307,7 @@ export const PROCESS_ONLY_CODES = new Set([
   // nothing about the app's code, and counting one as a "build-breaking blocker" on the user's health
   // card is the provider-error-as-app-blocker class (autopsy 4efab9d7) through a new door.
   'OUTCOME_USER_STOPPED', 'OUTCOME_COST_CEILING', 'OUTCOME_FUTILE', 'OUTCOME_DEPLOY_DRAIN',
-  'OUTCOME_SUPERSEDED', 'OUTCOME_REAPED',
+  'OUTCOME_SUPERSEDED', 'OUTCOME_REAPED', 'OUTCOME_AUTHORITY_UNAVAILABLE',
   // …and the two the deadline finalizer already wrote, for the same reason (the siblings, rule 3): the
   // wall-clock cap and an abort with no recorded cause end the RUN; neither is evidence about the app.
   // The release gate is RED on `buildOk:false` regardless, so this changes no verdict — only the

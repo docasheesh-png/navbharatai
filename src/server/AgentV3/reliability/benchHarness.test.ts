@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { buildSucceeded, compareBench, selectBenchPrompts, validateBenchFixture, wilson, type BenchResultFile, type BenchRun } from './benchHarness';
+import { buildSucceeded, compareBench, selectBenchPrompts, summarizeEvidence, validateBenchFixture, wilson, type BenchResultFile, type BenchRun } from './benchHarness';
 import type { BuildMetrics } from '../BakeoffMetrics';
 
 const fixture = validateBenchFixture(JSON.parse(readFileSync(join(__dirname, '../../../../scripts/fixtures/reliability-bench-prompts.json'), 'utf8')));
@@ -26,6 +26,19 @@ describe('reliability bench fixture', () => {
 const M = (over: Partial<BuildMetrics> = {}): BuildMetrics => ({ filesCreated: 5, ok: true, readinessScore: 80, billedUsd: 0, toolCalls: 10, toolErrors: 0, providerFallbacks: 0, geminiTrap: false, errored: false, ...over });
 
 describe('success + comparison', () => {
+  it('reports nearest-rank latency tails and leaves unknown cost unmeasured', () => {
+    const runs: BenchRun[] = Array.from({ length: 20 }, (_, i) => ({
+      id: String(i), lang: 'english', complexity: 'simple', attempt: 1,
+      seconds: i + 1, success: false, metrics: M({ billedUsd: null }),
+    }));
+    const s = summarizeEvidence(runs.reverse());
+    expect(s.wallSeconds).toMatchObject({ n: 20, p50: 10, p95: 19 });
+    expect(s.realCostUsd).toMatchObject({ n: 0, mean: null, p50: null, p95: null });
+    expect(s.billedUsd.n).toBe(0);
+    expect(summarizeEvidence([]).wallSeconds).toMatchObject({ n: 0, p50: null, p95: null });
+    expect(summarizeEvidence([{ ...runs[0], seconds: null, failure: 'request-in-progress' }]).wallSeconds)
+      .toMatchObject({ n: 0, mean: null, p50: null, p95: null });
+  });
   it('success is strict', () => {
     expect(buildSucceeded(M())).toBe(true);
     expect(buildSucceeded(M({ filesCreated: 0 }))).toBe(false);
@@ -49,5 +62,7 @@ describe('success + comparison', () => {
     expect(cmp.fixed).toEqual(['a']);
     expect(cmp.broke).toEqual(['b']);
     expect(cmp.verdict).toMatch(/Not distinguishable/);
+    expect(compareBench(base, { ...cand, runs: cand.runs.slice(1) }).verdict).toMatch(/Not comparable.*different prompts/);
+    expect(compareBench(base, { ...cand, runs: cand.runs.map((r) => ({ ...r, failure: 'HTTP 401' })) }).verdict).toMatch(/Not comparable.*unreconciled/);
   });
 });

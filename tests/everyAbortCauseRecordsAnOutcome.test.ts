@@ -23,7 +23,7 @@ import { deriveRootCause, stoppedByUser, isAppFinding } from '../src/server/Agen
  */
 
 const ALL_CAUSES: readonly AbortCause[] = [
-  'user-stop', 'watchdog', 'advisory-cap', 'deploy-drain', 'lock-reclaimed', 'reaper', 'cost-cap', 'futile', 'unknown',
+  'user-stop', 'watchdog', 'advisory-cap', 'deploy-drain', 'lock-reclaimed', 'authority-unavailable', 'reaper', 'cost-cap', 'futile', 'unknown',
   // Autopsy 9c612cdb (Q-998): a pass's OWN budget — the review, the post-fix recheck, a repair. They abort that
   // pass's signal, never the build's, so `abortOutcomeFor` yields nothing for them (the pass records its own line);
   // they are listed here because this census exists so that no cause can hide.

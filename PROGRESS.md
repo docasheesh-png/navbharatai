@@ -97423,43 +97423,6 @@ Nine relevant files pass116/116 underNode22/UTC; no production code changed.
 The known-failing preflight was stopped and all final-source local checks must
 run again before push. No full-suite or remoteCI pass is claimed by this entry.
 
-### 2026-10-20 — Phase 2 recovery identity and completed asset erasure checkpoint
-
-PR #3848 subsequently passed both exact-head CI jobs at
-`7241043914134488c4f54b005988fc76cc62ef9d` and merged as
-`06f8065629debbd846c1f836241c5be9a5a8337e`. Remote coverage suite:
-39,947 passed /73 skipped /0 failed; downloaded real database evidence:
-14 distinct drills passed /0 failed. This supersedes only the earlier pending
-release status, not the open runtime/state-preservation boundaries.
-
-The next scoped checkpoint stops unknown identity reads and nonterminal
-reconnect errors from creating replacement sandboxes. Strict tri-state lookup,
-nominal retryable recovery error and public/nested retry propagation retain
-explicit-ID behavior and typed static-connect not-found source restoration.
-Actual SDK classification is exercised over loopback HTTP, and actual actuator
-lifecycle tests include timeout/late resolution and subsequent retry. Initial
-builder setup refuses before execution; registered preview JSON/stream routes
-report retry honestly without a false missing-package diagnosis. Only definite
-pre-builder refusal settles failed with a zero-step result; later failures retain
-unknown outcome. Extracted crash publishing preserves client redaction and raw
-admin diagnostics; the handler's down-only branch budget remains543.
-
-Account deletion now erases completed private asset spill bytes by a verified
-safe owner prefix, independent of lost Firestore metadata. Writer, reader and
-eraser share the bucket/object path definition. The planner also refuses the
-unowned anonymous namespace. The additive response reports unconfigured/partial
-storage removal separately and honestly. Actual spill→registeredDELETE tests
-preserve foreign/shared/APK objects and cover retry and authorization. Reverting
-the erasure to a success-shaped no-op reproduces retained owner bytes.
-
-Focused component checks pass; complete final-source local gates and exact-head
-CI are still required before this checkpoint can ship. Fresh-create ambiguity,
-first-allocation races, physical command/source fencing, best-effort restore
-sinks, complete local/browser state preservation, late uploads, historical
-buckets and ZIP chunk reconciliation remain OPEN. A separate review found queue
-bindings settle too early on resumable results; the next Phase2 slice will
-address that lifecycle. Phases3–6 remain unstarted. Detail and evidence limits:
-`docs/PHASE2_STATE_PRESERVATION.md`.
 ## 2026-10-20 — Q-1126 batch 2: the four-field ratchet 40 → 24, and the batch caught its own bad measurement
 
 **Fifteen rows cleared, and HOW they cleared is the finding.** Batch 1 had already corrected this row's
@@ -97512,6 +97475,107 @@ its own documentation): here it is a census re-written instead of re-used.
 group; Q-891 and Q-894 genuinely need the admin (revenue columns, coupon policy) and stay blocked. Then
 Q-886 and Q-888 as their own rows of work, one at a time.
 
+## 2026-10-20 — Q-886: a customer's own details never go into a log line whole (and Q-1227, found hunting it)
+
+**The defect was on the NORMAL path, not an error branch.** Three live sites printed a real person's
+details into the container log: `routes/payment.ts` logged `Name: … Email: … Phone: …` on EVERY Cashfree
+order; the same file logged the WHOLE webhook body whenever an event carried no order id — firing exactly
+when something was already wrong, so the worst payloads were the likeliest to print; and `routes/auth.ts`
+logged a full phone number on every successful OTP gate check. Nothing was wrong with wanting those lines:
+an order that fails is diagnosed from them. What was wrong is that the diagnosis needs an IDENTIFIER and
+the code printed an IDENTITY.
+
+**The sibling the hunt found is why this is a module and not three careful edits.** `phoneForLog` already
+existed and was already used — at `auth.ts:167`, eleven lines above `:229`, which printed the next phone
+in full. A rule that must be remembered at every log statement is a rule that will eventually be
+forgotten, and the forgetting is SILENT: a log line that says too much looks exactly like one that says
+enough. So `src/server/lib/piiForLog.ts` is one home (`emailForLog`, `nameForLog`, `webhookShapeForLog`,
+plus `phoneForLog` re-exported), every helper total — junk gives a safe string, never a throw, because a
+logging helper that can throw turns a diagnostic line into an outage.
+
+**The census is shape-based, and two drafts of it were wrong in instructive ways.** Banning the words
+"email"/"phone" near `console.log` flags `[CIRCUIT] ${p.name}` and misses `${cleanPhone}` — wrong in both
+directions, so the census matches the INTERPOLATION of a value whose identifier is a person's own detail.
+Then the first such draft forbade `customer[A-Z]…` wholesale and flagged `${customerIdClean}` **on the
+very line it was meant to bless**, which would have pushed the fix toward a log nobody can trace. An
+account id is OUR handle for "who"; name, email, phone and mobile are the person's. Both reasonings now
+sit beside the pattern rather than only in a commit message. The second draft flagged the fix's own
+`webhookShapeForLog(req.body)`, so the wrapped form is excluded explicitly.
+
+Locked by `tests/aCustomerIsNotIdentifiedInALog.test.ts` (11 tests). **Three reversions bite, one per
+original site:** the payment line back to Name/Email/Phone in full → 2 fail; the whole-body log back →
+2 fail; `auth.ts` back to a raw phone → 2 fail.
+
+### Q-1227 — two drifted `maskPhone` copies, recorded rather than bundled
+
+`src/lib/phoneNumber.ts` keeps the last FOUR digits; `src/server/lib/vaultPin.ts` the last TWO. Same name,
+different behaviour — the fourth rule's duplicated-code class in its worst shape, because a reader who
+checks one and trusts the other is wrong with no way to notice. No call site imports both, which is
+exactly why the drift stayed invisible.
+
+**It is NOT folded into Q-886 on purpose.** The `vaultPin` copy renders a string the USER reads — the
+fresh-sign-in destination hint — so unifying them is not a refactor; it changes what a person sees while
+verifying their identity, and if the last-two copy were the one kept, every OTP destination hint in the
+app would get less informative. Quietly changing a user-facing string while fixing log lines is the trade
+the first absolute rule forbids. 🟡 BLOCKED on the admin's choice of which masking the user should see,
+with last-4 recommended (it is what the rest of the product shows, and what `phoneForLog` already uses).
+
+**Q-888 is next** — the other row batch 2 moved from BLOCKED to OPEN: `routes/payment.ts:589` answers 400
+to a payment webhook we have definitively settled, so Cashfree re-sends it indefinitely.
+## 2026-10-20 — Candidate Weak scope/routing policy (Codex)
+
+Admin requested a lower-cost working-app policy, comparison with current routing, a small complexity call, and a Weak refusal/Strong-selector direction for oversized games. Implemented opt-in `AGENTV3_WEAK_SCOPE_POLICY=on` so current policy can be compared and restored. One strict three-label FlashX preflight before sandbox setup; unavailable/malformed classification does not start coding; exact tested templates skip it. Candidate default coding chain is FlashX/Kimi only; complex planning starts on Kimi. Added a shared text-repair allowance and disabled candidate Weak empty-build regeneration. Candidate measured ceiling defaults to $1 (configurable); accepted classifier usage joins the real ledger. Existing delivery proof remains authoritative. Added regression coverage and comparison in `docs/weak-tier-policy-comparison.md`.
+
+Open limits: not a universal one-pass repair budget across every agentic finishing gate; between-turn ledger checks can overshoot on a live call and do not account for unknown provider usage; imported repository scope requires file inspection, not this prompt-only gate. No paid-provider benchmark or live deployment claimed. No model success/savings percentages claimed. Verification results to be appended after the final gate.
+
+Verification checkpoint: 151 targeted tests passed; frontend/server typechecks passed; production build, bundle budget, boot smoke, unused-import, native-shell, and production-dependency checks passed. Framework eligibility moved unchanged to its module to keep the chat control-flow ratchet below the existing limit (543 → 542). Full-suite verification is NOT complete: automatic approval review rejected further interaction with the full run because a test was attempting a live Anthropic API request (credential/external-spend risk). No full-suite pass, CI-green PR, merge, deployment, or paid benchmark claimed. Candidate stays disabled by default pending complete verification.
+
+## 2026-10-20 — Weak candidate verification completed after admin test authorization
+
+Admin explicitly authorized the live-API-capable suite. Stable final run: **2,803 test files passed; 39,994 tests passed; 67 intentionally skipped; zero failures**. Both typechecks, production build, bundle budget, boot smoke, unused-import, OAuth protocol checks, native-shell and production dependency gates passed. Updated wiring assertions to follow the new runner parameters while retaining their stop/deadline/dead-rung guarantees. Test archive extraction now uses `--no-same-owner` in both sibling extractors, avoiding unrelated host ownership failures without changing archive contents. Invalid ladder overrides now fall back to the candidate's two-model policy rather than accidentally restoring the legacy chain. Classifier request is additionally locked by SDK mocks: one call, 8 output tokens, 5-second timeout, thinking disabled, no SDK retries, and measured usage forwarded. Candidate remains opt-in; no merge, deployment, paired app-generation benchmark, or first-attempt guarantee is claimed.
+
+## 2026-10-20 — Admin authorized PR #3853 merge and Weak policy activation
+
+Rechecked the exact PR head and green GitHub CI, then merged #3853 with an expected-head lease (merge commit 68528197949135513d2df97e3b4dee667036059a). Admin explicitly said to merge and turn on the policy. Activation is a separate additive Cloud Build configuration change: `_WEAK_SCOPE_POLICY=on`, `_WEAK_BUILD_COST_CEILING_USD=1`; trigger-level rollback remains available with `off`. Provider keys, explicit ladder overrides, and Normal/Strong routing are not changed. Deployment and runtime confirmation are pending; do not infer live activation merely from the merge.
+
+
+### 2026-10-20 — Phase 2 recovery identity and completed asset erasure checkpoint
+
+PR #3848 subsequently passed both exact-head CI jobs at
+`7241043914134488c4f54b005988fc76cc62ef9d` and merged as
+`06f8065629debbd846c1f836241c5be9a5a8337e`. Remote coverage suite:
+39,947 passed /73 skipped /0 failed; downloaded real database evidence:
+14 distinct drills passed /0 failed. This supersedes only the earlier pending
+release status, not the open runtime/state-preservation boundaries.
+
+The next scoped checkpoint stops unknown identity reads and nonterminal
+reconnect errors from creating replacement sandboxes. Strict tri-state lookup,
+nominal retryable recovery error and public/nested retry propagation retain
+explicit-ID behavior and typed static-connect not-found source restoration.
+Actual SDK classification is exercised over loopback HTTP, and actual actuator
+lifecycle tests include timeout/late resolution and subsequent retry. Initial
+builder setup refuses before execution; registered preview JSON/stream routes
+report retry honestly without a false missing-package diagnosis. Only definite
+pre-builder refusal settles failed with a zero-step result; later failures retain
+unknown outcome. Extracted crash publishing preserves client redaction and raw
+admin diagnostics; the handler's down-only branch budget remains543.
+
+Account deletion now erases completed private asset spill bytes by a verified
+safe owner prefix, independent of lost Firestore metadata. Writer, reader and
+eraser share the bucket/object path definition. The planner also refuses the
+unowned anonymous namespace. The additive response reports unconfigured/partial
+storage removal separately and honestly. Actual spill→registeredDELETE tests
+preserve foreign/shared/APK objects and cover retry and authorization. Reverting
+the erasure to a success-shaped no-op reproduces retained owner bytes.
+
+Focused component checks pass; complete final-source local gates and exact-head
+CI are still required before this checkpoint can ship. Fresh-create ambiguity,
+first-allocation races, physical command/source fencing, best-effort restore
+sinks, complete local/browser state preservation, late uploads, historical
+buckets and ZIP chunk reconciliation remain OPEN. A separate review found queue
+bindings settle too early on resumable results; the next Phase2 slice will
+address that lifecycle. Phases3–6 remain unstarted. Detail and evidence limits:
+`docs/PHASE2_STATE_PRESERVATION.md`.
 ### 2026-10-20 — Phase2 deadline body-exit hold added to PR #3852
 
 The recovery/asset checkpoint's original head `e379b88` passed the full local
@@ -98308,6 +98372,148 @@ are historical checkpoints. A bounded changed-caller census and all final-source
 gates remain required before this queue checkpoint can be pushed or merged.
 ## 2026-10-20 — Admin authorized PR #3853 merge and Weak policy activation
 
+### 2026-10-20 - published audit PR3856: integrate the next main policy activation
+
+PR3856 published commit `5db7cc763` / tree `2f38c4d2` after the final local gate:
+2,811 files / 40,161 tests passed / 67 skipped, all 14 additional CI checks, and
+14 real Firestore/multiprocess drills passed. Remote commit/tree matched exactly.
+Its hosted database job passed; hosted coverage was still running when main advanced.
+
+Main `3974c34d` adds the authorized deployment-policy activation from PR3855: five
+configuration/documentation/test files, no application source or dependency changes.
+Integrate that commit while preserving its exact files, main's queue/progress history
+and all prior local audit entries. The earlier green results remain scoped to their
+old trees. The merged-state final gate is pending at this checkpoint; do not claim
+hosted green or merge this PR without the admin explicitly naming it. Counts remain
+4 demonstrated historical terminal classes / 0 app reruns / 0 whole-report closures;
+two repository item ledgers / 119 items / 549 remaining repository ledgers.
+
+
+### 2026-10-20 - PR3856 hosted census timeout and final-state verification restart
+
+Old published head5db7cc763 hosted run39414984247 completed with40,154 tests passed,
+one restore-census test timing out at20seconds and73 skipped. The authority scan
+AST-parsed all2,453 non-test source files before checking relevant helper names.
+Q-2163 is IN PROGRESS under this PR for conservative prefiltering with escaped-name
+coverage, full AST traversal, unchanged exact policy checks and behavioral proof.
+The timeout is not raised and no census boundary or test is skipped. Frozen proof
+preserves all2,453 input files and the exact18 policies; AST parsing falls2,453→684.
+All18 focused tests pass; one-CPU V8 census9.015s is below the unchanged20s cap.
+Missing-live-gate, new-unclassified-restore and naive raw-prefilter negatives fail
+correctly. The merged-state full and hosted gates remain pending at this checkpoint. The superseded
+local25a run was stopped intentionally; it is not recorded as a green result.
+
+Audit append now401 rows =341 OPEN /17 IN PROGRESS /43 four-field BLOCKED. This adds
+one CI integration row to the earlier400; historical terminal class/app replay/whole
+report closure counts stay4/0/0. The separate next-batch worktree owns three newly
+prepared item ledgers and the typed-launch investigation; it is outside PR3856.
+
+
+### 2026-10-20 - preserve concurrent PR3856 integration and restart exact-tree verification
+
+Remote PR3856 advanced independently to5456d186c, adding main17a4c45ae
+(customer-log privacy PR3854) and the phase-two deadline/recovery/verified-owner
+erasure branch from PR3852. This local merge preserves those authored changes,
+all queue rows and both progress histories; they are not credited as new failed-
+report repairs by this audit. The sole restore-census conflict keeps the proven
+escape-aware scanner and its unchanged20-second timeout instead of the concurrent
+raw-only filter/60-second allowance. Corpus equivalence is checked again on the
+combined source; all final gates are pending for this tree.
+
+The fca616bb6 checkpoint passed all14 additional checks and14 real database
+drills, but its full coverage suite never ran: the superseded runner left a lock
+owned by a zombie PID. The next run uses its own coverage report directory; no
+active process lock is removed. This is a verification restart, not a green
+coverage claim. Audit append remains401 rows /119 individually enumerated items
+in2 reports,4 demonstrated terminal classes,0 historical app reruns and0 whole-
+report closures. No merge is authorized or performed.
+### 2026-10-20 — LOCAL next batch: three retained ledgers, not yet published or final-gated
+
+The isolated branch `codex/failed-build-next-ledgers-20261020` starts at
+`25a0c781528520619f8eac948fa620638d2211d8`, incorporating fresh main
+`3974c34d95db3f2c4384d1477317ba9cf275eacd`. Existing main/previous progress is preserved
+as an exact byte prefix; the closed register and all 400 earlier audit row states/owners stay intact.
+Only Q-1300 and primary notes Q-1304/Q-1307/Q-1309 are updated for the new retained itemization.
+
+Three fully cross-channel-reviewed retained ledgers are now recorded locally, each item with its
+own queue row: 6af23429 has 51 (Q-2025–Q-2075), b6283d2d has 42 (Q-2076–Q-2117), and
+12514b7f has 44 (Q-2118–Q-2161). Their 137 items are 129 OPEN / 8 genuine four-field BLOCKED;
+their five buckets are 15 observed recoveries / 11 workarounds / 51 skips / 17 still-broken /
+43 struggles. Missing command payloads, clipped previews and overlapping/mirrored observations
+are retained as explicit limits, not silently reconstructed. The fourth report's post-endedAt
+billing telemetry is excluded from terminal causality; the fifth report's local repair cancellation
+is distinct from its actual global cap and is not reported as a provider outage.
+
+Q-2162 is the active plain-TypeScript-server managed-launch class, IN PROGRESS on this next branch.
+The third report proves a 300.003-second foreground deadline; an inert helper counterexample
+proves current classifier discrepancy, while the exact deployed historical path/listener ownership
+is not replayed. Its individual historical item I015/Q-2039 remains OPEN pending scoped source
+proof. This contributor is not a fifth demonstrated historical terminal-root class.
+
+LOCAL next-batch scope: 5 ledgers / 256 individually queued retained items / 546 other reports
+awaiting repository item ledgers. Five-report-only buckets: 78 recoveries / 17 workarounds /
+76 skips / 21 still-broken / 64 struggles. Audit queue: 538 pending rows = 470 OPEN /
+17 IN PROGRESS / 51 four-field BLOCKED. The CSV changes only the three newly itemized rows;
+all original all-item-resolved, historical-rerun and whole-report-closure flags remain false.
+Six reports have structured generatedFiles payloads; other partial source can survive in tool previews.
+
+PR #3856 remains separate: 2 ledgers / 119 items / 549 remaining. Its old hosted suite failed
+one source-census 20-second timeout (40,154 passed / 1 failed / 73 skipped). The 25a integrated
+run was superseded and stopped while root repairs test performance under separately reserved
+Q-2163, without weakening assertions or raising timeouts. That primary row/correction and its
+later integration are outside this 538-row LOCAL draft. A new final primary gate is required;
+this next batch does not edit that PR or claim hosted green/merge.
+Original audited counts remain 4 demonstrated terminal platform classes / 0 historical app reruns /
+0 sixth-rule whole-report resolutions. Resume Q-2162 and recorded item-level prevention in this
+next branch; no sixth report is started. Publish this next batch only after its final gate passes;
+merge only after the admin explicitly names that PR. No source, test, commit, push or PR operation
+is part of this documentation checkpoint.
+
+
+### 2026-10-20 — next-batch rebase, approved platform-only closures and seven retained ledgers
+
+Fixed integration HEAD1 bf 8b 22a 03d 551 fb 27f 0 bb 622006 dff 18672c 2 ad/treeb 5e 3c 753 combines merged
+main 72c 3252d 0 faf 33 fd 51987 fbc 2b 9d 991f 7742953c and the later local census delta. Prior main and
+all earlier progress bytes remain intact. The old five-ledger/538-row draft above is superseded
+by this checkpoint, not rewritten. PR3856 was externally merged at 12:26:44 UTC. Its exact head
+5456d186caab683f5bec17f3aa5e0fb1506b6476 and main 72 share tree 813484 db 9c 1349164824 bf 025227175f 52b 3b 4f 0;
+required CI39418902451 had both build-and-test and queue-retry jobsSUCCESS on that exact tree.
+The older 5 dbfailed census run is a different head; the separate d 68 local gate passed 2,822 files / 40,289 tests / 67 skipped, all 14 additional
+checks and 14 database drills. This proves d 68 only; the new combined tree needs its own gate. No new PR has been created; root will integrate the later payments
+main change before final verification. Source/tests stayed frozen during this documentation work.
+
+Root approved closing twelve shared platform/source/CI rows only: Q1890–1893,Q1898–1899,
+Q1961–1962,Q2021–2024. Each has behavior reversion/sibling proof and exact merged source/CI
+evidence in docs/failed-build-audit-2026-10-20.md; IDs append to the closed register. This is
+not twelve historical applications or whole reports repaired. Four historical item rowsQ1928/
+Q1982–1984 becomeOPENowner — for remaining exact saved/served behavior evidence. Their source
+prevention credit remains, but no app replay or historical delivery equivalence is invented.
+
+Seven retained ledgers now enumerate 281 individually queued items:618b 61,cfd 58,6 af 51,b 62842,
+12514b44,78e 23,4 cf 2. The seven have 248 OPEN/0 IN PROGRESS/33 genuinefour-field BLOCKED, with 544 other
+reports awaiting repository item ledgers. Seven-report-only buckets:78 observedrecoveries/
+20 workarounds/84 skips/29 still-broken/70 struggles. PR3856's merged scope was 2 ledgers 119 items;
+this new branch adds 5 ledgers 162 items and 4 class/CIrows=166 new audit rows, then removes 12 merged
+platform rows: net+154 from mergedmain 400 →554 pending =497 OPEN/3 IN PROGRESS/54 four-field BLOCKED.
+The only active audit rowsQ2162,Q2163,Q2200 belong to codex/failed-build-next-ledgers-20261020.
+No future PR is claimed to add 554 new rows. Original all-item-closed/rerun/whole-report CSVflags
+remainfalse; userStop 4 cf remains authoritative and is not restarted or counted as an engine failure.
+
+Q-2162 directtyped-server lifecycle/shared literal revival:17 files 624 PASS/0 skip; isolatedbaseline
+37 behaviorFAIL/51 PASS, revivalconsumer 5 FAIL/83 PASS, final 88 PASS. HistoricalQ2039 remainsOPEN:
+the 300.003s/EADDRINUSE process sequence is not replayed. Q-2200 canonical 8 abort ETAclass:
+15 baselinebehaviorFAIL/3 healthycontrolsPASS→18 PASS;5 files 99 PASS/bothTSgreen. HistoricalQ2177
+remainsOPEN; no saved historical score or game is claimed repaired. Q-2163 stronger escape-aware
+census 18 PASS/oneCPU-V8 time 9.015s keeps unchanged 20 scap,2453 inputs and 18 policyentries; its
+final new-tree/hosted verification remains pending. Q-2201 isOPENowner — for advisory-cap delivery
+inference: current-source route transitions need behavioral reproduction; it is not the historic
+78 terminal cause or a fixed class. Futility timing/live narration/provider funding remain separate.
+
+Original audited counts remain 4 demonstrated terminal platform classes/0 historical app reruns/
+0 whole-report resolutions. This next branch is local/unpublished/not final-gated. Resume the new
+full gate after root's final-main integration and preserve every remaining item/class row.
+Publish once green; merge only after admin explicitly names the new PR. No commit/push/merge
+was performed by the documentation coordinator.
 Rechecked the exact PR head and green GitHub CI, then merged #3853 with an expected-head lease (merge commit 68528197949135513d2df97e3b4dee667036059a). Admin explicitly said to merge and turn on the policy. Activation is a separate additive Cloud Build configuration change: `_WEAK_SCOPE_POLICY=on`, `_WEAK_BUILD_COST_CEILING_USD=1`; trigger-level rollback remains available with `off`. Provider keys, explicit ladder overrides, and Normal/Strong routing are not changed. Deployment and runtime confirmation are pending; do not infer live activation merely from the merge.
 
 
@@ -98514,6 +98720,21 @@ The corrected combined source-writer/incoming-main cohort then passed **66 files
 72.83s). Final source is now frozen for the new complete suite and all quick
 checks; exact-head CI remains separate. No broader safety claim follows from
 these focused results.
+### 2026-10-20 - final next-batch main integration and verification freeze
+
+Committed the seven-ledger/source checkpoint as3d10a06a3, then integrated main
+6cdc155fa (PR3857 payment-webhook classification) without conflicts. All six
+Q2162/Q2200 source/test hashes remain exactly equal to their reviewed freezes;
+the integrated focused selection passes142 tests. The overview now records the
+current base and exact report/commit identifiers. The d68f6dfb4 complete gate
+passed2,822 files /40,289 tests /67 skipped,14 additional checks and14 database
+drills on unchanged treeb5e3c7530. It proves that checkpoint, not this new tree.
+
+Final next-tree full coverage/type/build/boot/security and real database gates
+are pending. Published ledger scope remains7/281/544, with554 pending audit rows
+(497 OPEN/3 IN PROGRESS/54 four-field BLOCKED) and12 already-merged platform/CI
+rows recorded closed. Future scratch autopsies are outside this publication.
+No new PR or hosted success is claimed yet, and this session has not merged a PR.
 ## 2026-10-20 — Q-1126 batch 3: the four-field gap reaches ZERO, and the ratchet becomes an invariant
 
 **154 blocked rows, 0 deficient**, measured with the census's own parser. The guard's baseline is now `0`,
@@ -98579,6 +98800,10 @@ The same run reported a SIGKILL of the real PGlite shim test worker. Its fixture
 
 Integrated latest main (6cdc155fa, including #3852, #3856 and #3857) before the final gates; only PROGRESS.md overlapped, and both append histories were retained. The candidate branch is now `codex/hosting-data-storage-hardening-integrated`.
 
+
+### 2026-10-20 — seven-ledger batch integrates latest hosting/data boundary main
+
+The prior exact 0d8ef9f5b source tree passed 2,826 files /40,408 tests /67 skipped, all14 additional checks and14 real database drills. Its first attempt had only a worktree dependency symlink invariant failure; npm ci installed a real directory, then the full second attempt passed with the source unchanged. Those logs are archived against that exact tree. Concurrent PR #3858 then merged to main5474b0d0e; this branch integrates all26 upstream files, preserving every main and own PROGRESS line and all seven-ledger queue/source freezes. Its hosting/data migration is upstream work, not claimed as a new failed-report fix here. A new full final-source gate and exact-head database receipt are required before this new branch is pushed. Counts remain7ledgers/281items/544otherreports and554pending audit rows;12 earlier merged platform rows are closed, with0 historical app reruns/whole-report closures. No merge performed by this session.
 ### Integration with the concurrent data-boundary remediation
 
 Integrated main `5474b0d0e` (#3858), preserving its supported-token user ownership, legacy-owner
@@ -98685,7 +98910,7 @@ absent"*.
 The test was right that something had to change. It was wrong about which thing, and the difference matters:
 loosening a guard to let my own edit through would have been the easy version of this.
 
-### Q-2025 — 109 test files still hand-roll the source walk
+### Q-2202 — 109 test files still hand-roll the source walk (renumbered to preserve the retained-item Q-2025)
 
 Raised, not swept. `tests/helpers/sourceCensus.ts` arrived hours ago in **#3858, from another session**,
 which migrated three files; 130 test files reference `readdirSync` and **109** self-recurse with

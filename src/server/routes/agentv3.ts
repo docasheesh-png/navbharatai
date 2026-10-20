@@ -382,13 +382,13 @@ import { dormancyReason, reportableFileCount } from '../AgentV3/workspaceDormanc
 import { uiWithoutBuildVerdict } from '../AgentV3/uiWithoutBuild';
 import { repeatedReadSummary, READ_LOOP_LIMIT } from '../AgentV3/repeatedReads';
 import { noteTodoOnlyTurn } from '../AgentV3/todoOnlyTurn';
-import { finishingPassMayRun, recordFinishingPassesHeld } from '../AgentV3/finishingPassesAtCap';
+import { createFinishingPassGuard, recordFinishingPassesHeld } from '../AgentV3/finishingPassesAtCap';
 import { recheckAfterFinishingWrites, postGreenRecheckEnabled } from '../AgentV3/finishingRecheck';
 import { APPEND_WITH_EMPTY_OLD_STRING } from '../AgentV3/appendByEdit';
 import { greenGuardUndidWork, withGreenGuardCorrection, type GreenGuardRestoreFacts } from '../AgentV3/greenGuardHonesty';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
 import { planE2eScaffold } from '../AgentV3/e2eScaffold';
-import { withE2eExcluded, e2eExcludeNote } from '../AgentV3/e2eTypecheck';
+import { withE2eExcluded, e2eExcludeNote, excludeE2eBeforeScaffolding } from '../AgentV3/e2eTypecheck';
 import { findAmbientShimCollisions, stripCollidingAmbientShims, ambientShimNote } from '../AgentV3/ambientModuleShim';
 import { shapeConflict } from '../AgentV3/appIdentity';
 import {
@@ -399,7 +399,7 @@ import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { auditConnectedProject } from '../AgentV3/ConnectAudit';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, oneShotSkipReason, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
-import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
+import { continueFastLaneGeneration, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
 import { recordReasoningStays } from '../AgentV3/FastLaneBudget';
 import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
@@ -12759,7 +12759,7 @@ async function noteBuildOutcome(
     // finalizer reads this ref instead and never the later binding.
     const buildObs: { previewRendered: boolean; telemetryRecorded: boolean } = { previewRendered: false, telemetryRecorded: false };
     /** What the model's last answer was (readTurnAnswer), carried to `answerOnlyNow` (answeredInsteadOfBuilding). */
-    const answeredHolder: { asked: boolean; declined: boolean } = { asked: false, declined: false };
+    const answeredHolder = { asked: false, declined: false, pointed: false, notOurs: false };
     /** OUR style-floor pass window (STYLE_RULES_RESUMED → the architect's loop returning), for the stop bill. */
     const stylePassWindow: { startedAt: number | null; endedAt: number | null } = { startedAt: null, endedAt: null };
     // ONE build must count ONCE. `finalizeOnDeadline` is guarded by `rb.ended`, but the advisory cap
@@ -14384,6 +14384,7 @@ async function noteBuildOutcome(
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         complex: buildIsComplex, // a complex app opens on KIMI, not the flash rung — see makeFastTextRunner
+        deadRungs: fastLaneDeadRungs, // account/model failures learned before the handoff still apply
         bench: buildBench,
         // P4 (fix/build-reliability) — sticky start, default OFF. STICKY_RUNG remembers the rung that
         // answered; QUALITY_ESCALATE alone only honours explicit upward escalations. Never below rung 0's
@@ -14447,6 +14448,7 @@ async function noteBuildOutcome(
         tier: powerLevelReqEffective,
         heal: true, // the tier's ladder minus its leading flash rung (admin 2026-08-13)
         noClaude: noClaudeBuild,
+        deadRungs: fastLaneDeadRungs,
         bench: buildBench, // a rung the build already benched stays benched in its heals
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
@@ -18544,56 +18546,40 @@ async function noteBuildOutcome(
         // a continuation that FAILS never loses the work already produced — we keep what we have.
         const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number; mayReason?: boolean }): Promise<string> => {
           const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt, genOpts?.mayReason === true);
-          let text = first.text;
-          let stopReason = first.stopReason;
-          // The call whose reply ends the text — the one a dropped half-written file came from (Q-166).
-          let lastBilledAs = first.billedAs;
-          let attempts = 0;
-          // The THIRD argument is what stops a reasoning-only response being "continued" three times
-          // into the same nothing — see shouldContinue's docblock (report 58fe8254).
-          while (shouldContinue(stopReason, attempts, text)) {
-            attempts += 1;
-            events.emit({ type: 'narration', agent: 'architect', text: `✍️ That file list was longer than one response allows — continuing it (${attempts}/${MAX_CONTINUATIONS}) so nothing is left half-written…`, ts: Date.now() });
-            let next: { text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } };
-            try {
-              // A CONTINUATION FACES THE SAME DEADLINE AS THE CALL IT CONTINUES. It is a fresh provider
-              // call, so without this the budget would bound only the first one and the continuation
-              // ladder would walk straight past it — the same gap the Claude retry loop had.
-              next = await fastGenerateOnce(system, continuationPrompt(text), genOpts?.deadlineAt, genOpts?.mayReason === true);
-            } catch (err) {
-              // A failed continuation must never discard the complete files we already have.
-              buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_CONTINUATION_FAILED', message: `A continuation of a truncated generation failed after ${attempts - 1} successful continuation(s) — keeping the files produced so far.`, autoResolved: false, detail: err instanceof Error ? err.message : String(err) });
-              break;
-            }
+          const generation = await continueFastLaneGeneration(first, {
+            // A continuation faces the same deadline as its first call, including the mayReason gate.
+            generate: (prompt) => fastGenerateOnce(system, prompt, genOpts?.deadlineAt, genOpts?.mayReason === true),
+            onAttempt: (attempt) => events.emit({ type: 'narration', agent: 'architect', text: `✍️ That file list was longer than one response allows — continuing it (${attempt}/${MAX_CONTINUATIONS}) so nothing is left half-written…`, ts: Date.now() }),
             // HONESTY (rule 5): when the model re-opened the cut file's own header and carried on
             // inside it, the two halves are WELDED rather than the second replacing the first — say
             // so, because a silent weld and a silent replace used to look identical in the report and
             // only one of them kept the file (build bb688add).
-            const rejoined = resumedFilePath(text, next.text);
-            if (rejoined) {
+            onRejoined: (rejoined) => {
               buildDiag.record({ phase: 'build', severity: 'info', code: 'FASTLANE_CONTINUATION_REJOINED', message: `A continuation re-opened ${rejoined} and carried on inside it — the two halves were joined, so the part already written was kept instead of being replaced by the remainder.`, autoResolved: true });
-            }
-            text = joinContinuation(text, next.text);
-            stopReason = next.stopReason;
-            lastBilledAs = next.billedAs;
+            },
+          });
+          if (generation.failure) {
+            const err = generation.failure.error;
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_CONTINUATION_FAILED', message: `A continuation of a truncated generation failed after ${generation.continued} successful continuation(s) — keeping the completed file blocks produced so far.`, autoResolved: false, detail: err instanceof Error ? err.message : String(err) });
           }
-          if (attempts > 0) {
-            buildDiag.record({ phase: 'build', severity: 'info', code: 'FASTLANE_CONTINUED', message: `A generation hit the output-token ceiling and was continued ${attempts} time(s) so no file was left half-written.`, autoResolved: true, detail: `finalStopReason=${stopReason ?? 'unknown'}` });
+          if (generation.continued > 0) {
+            // A successful round trip is not proof of a complete generation: the last call may still
+            // be cut off, or a later continuation may have failed. State the measured count only.
+            buildDiag.record({ phase: 'build', severity: 'info', code: 'FASTLANE_CONTINUED', message: `A generation hit the output-token ceiling and received ${generation.continued} successful continuation(s).`, autoResolved: true, detail: `finalStopReason=${generation.stopReason ?? 'unknown'} · continuationFailed=${generation.failure !== null}` });
           }
           // LAST LINE OF DEFENCE: continuations exhausted and the model is STILL mid-file. parseFileBlocks
           // deliberately accepts a final unterminated block (so a missing ENDFILE cannot swallow the next
           // file), which means a half-written file is indistinguishable from a complete one downstream —
           // it would be written to the workspace and shipped as built. Drop it and say so, honestly.
-          const halfWritten = isTruncatedStop(stopReason) ? unterminatedTailPath(text) : null;
-          if (halfWritten) {
-            const cut = text.lastIndexOf('<<<FILE');
-            if (cut > 0) text = text.slice(0, cut);
-            // The reply that carried it was cut off and its tail thrown away — its output is not billed.
-            discardTurnOutput(lastBilledAs.provider, lastBilledAs.model, lastBilledAs.outputTokens);
-            buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_TRUNCATED_FILE_DROPPED', message: `${halfWritten} was still being written when the output limit was reached after ${MAX_CONTINUATIONS} continuations — it was DISCARDED rather than saved half-finished.`, autoResolved: false });
-            events.emit({ type: 'narration', agent: 'architect', text: `⚠️ ${halfWritten} was cut off mid-write, so I discarded the partial file rather than saving a broken one — I'll rebuild it.`, ts: Date.now() });
+          generation.discardedReplies.forEach((reply) => {
+            discardTurnOutput(reply.billedAs.provider, reply.billedAs.model, reply.billedAs.outputTokens);
+          });
+          for (const dropped of [...generation.abandoned, ...(generation.dropped ? [generation.dropped] : [])]) {
+            const halfWritten = dropped.path;
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_TRUNCATED_FILE_DROPPED', message: `${halfWritten} was not closed after a truncated generation (${generation.attempts} continuation attempt(s), ${generation.continued} successful) — it was DISCARDED rather than saved with unverified contents.`, autoResolved: false });
+            events.emit({ type: 'narration', agent: 'architect', text: `⚠️ ${halfWritten} was left unfinished after a cut-off response, so I discarded that file rather than saving unverified contents — I'll rebuild it.`, ts: Date.now() });
           }
-          return text;
+          return generation.text;
         };
         const fastWriteRaw = async (files: { path: string; content: string }[]): Promise<WriteOutcome[]> => {
           // Write files with bounded concurrency instead of one serial E2B round trip each (SPEED).
@@ -19181,7 +19167,7 @@ async function noteBuildOutcome(
             events.emit({ type: 'narration', agent: 'architect', text: repairing ? 'Bringing in NavBharatAI\'s stronger engine to fix what the review found…' : 'Bringing in NavBharatAI\'s stronger engine to finish the build…', ts: Date.now() });
             const escRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner({ tier: powerLevelReqEffective, fromProvider: tier === 'opus' ? 'CLAUDE_OPUS' : 'CLAUDE', noClaude: noClaudeBuild, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage, onProviderError: (name, err) => { try { buildDiag.recordProviderFailure(name, err); } catch { /* best-effort */ } } }),
+              client: buildTurnRunner({ tier: powerLevelReqEffective, fromProvider: tier === 'opus' ? 'CLAUDE_OPUS' : 'CLAUDE', noClaude: noClaudeBuild, deadRungs: fastLaneDeadRungs, bench: buildBench, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage, onProviderError: (name, err) => { try { buildDiag.recordProviderFailure(name, err); } catch { /* best-effort */ } } }),
               // Opus ONLY in power mode — a power-off escalation caps at Sonnet, never Opus
               // (admin rule 2026-06-28). Escalation only runs in normal mode anyway.
               model: resolveModel(tier === 'opus' && onlyOpus),
@@ -19434,6 +19420,13 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* an advisory finding must never affect a build */ }
+      const finishingGuard = createFinishingPassGuard({
+        result: () => result,
+        aborted: () => abort.signal.aborted,
+        signal: abort.signal,
+        remainingMs: () => effectiveBuildSeconds === 0 ? Infinity : effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt),
+        record: (note) => buildDiag.record(note),
+      });
       if (result.timedOut === true) {
         recordFinishingPassesHeld(buildDiag);
         try {
@@ -19584,7 +19577,7 @@ async function noteBuildOutcome(
       // at their own moment, and the platform had by then overwritten it: the upsell found no refusal
       // in our own "please try again" and asked a user whose request the engine had declined for money.
       const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt, adAnswerFacts);
-      Object.assign(answeredHolder, { asked: modelAnswer.asked === true, declined: modelAnswer.declined === true });
+      Object.assign(answeredHolder, modelAnswer);
       // 🔴 Q-1019 — and the same line for the turn whose honest answer was the whole job. Recorded on its
       // own condition rather than folded into the one below, so the report says WHICH kind of answer ended
       // the turn; `recordAnsweredNotBuilt` carries its own try, so the handler gains no branch (TS2563).
@@ -20758,7 +20751,7 @@ async function noteBuildOutcome(
               if (patches.length === 0) return;
               const landed: SpacingSnapPatch[] = [];
               for (const patch of patches) {
-                const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => actuator.writeFile(workspaceId, patch.path, patch.content)));
+                const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => finishingGuard.writeOrThrow('design-consistency-heal', () => actuator.writeFile(workspaceId, patch.path, patch.content))));
                 if (!wrote) continue;
                 writtenFiles.set(patch.path, patch.content);
                 integrityFiles[patch.path] = patch.content;
@@ -20774,7 +20767,7 @@ async function noteBuildOutcome(
               const patch = kitRestorePatch(files);
               // Never on a read-only import/survey turn: there, the user's files are theirs, untouched.
               if (!patch || abort.signal.aborted || isImportTurn || !expectsArtifacts) return;
-              const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => actuator.writeFile(workspaceId, patch.path, patch.content)));
+              const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => finishingGuard.writeOrThrow('design-consistency-heal', () => actuator.writeFile(workspaceId, patch.path, patch.content))));
               if (!wrote) return;
               writtenFiles.set(patch.path, patch.content);
               integrityFiles[patch.path] = patch.content;
@@ -20995,7 +20988,7 @@ async function noteBuildOutcome(
               });
             }
             const designRepair = !design.ok && shouldRunIntegrityHeal({ gateEnabled: envFlag('AGENTV3_DESIGN_GATE'), resultOk: result.ok, expectsArtifacts, aborted: abort.signal.aborted });
-            if (designRepair || cssRepair) {
+            if ((designRepair || cssRepair) && finishingGuard.allow('design-consistency-heal')) {
               events.emit({
                 type: 'narration', agent: 'architect', ts: Date.now(),
                 text: designRepair
@@ -21003,13 +20996,6 @@ async function noteBuildOutcome(
                   : '🎨 Adding the styles your screens use but the stylesheet is missing…',
               });
               try {
-                const designRunner = new AgentRunner({
-                  ...baseRunnerOpts,
-                  client: buildTurnRunner(healRunnerOpts()),
-                  platformRequest: true,
-                  model: resolveModel(powerLevelReqEffective),
-                  persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
-                });
                 // GUARD THE REPAIR (2026-08-10). The other two post-build write passes are wrapped in
                 // verifyAfterFix — snapshot the GREEN app, apply, re-render, revert if it broke. That net
                 // cannot be strung here: this pass runs inside the post-answer integrity block, BEFORE the
@@ -21029,9 +21015,17 @@ async function noteBuildOutcome(
                 // `cssConsistencyError` is shared with the fast lane's tool-less whole-file repair, so it cannot
                 // name an edit_file call; THIS consumer has the tool, and is told how to add (autopsy 9c612cdb).
                 const cssAsk = cssRepair && cssErr ? `\n\n${cssErr}\n${APPEND_WITH_EMPTY_OLD_STRING}` : '';
-                const healed = await runInPass('design-consistency-heal', () => designRunner.run(
-                  `The app is built and compiles. ${designAsk}${cssAsk}${a11yAsk}`,
-                ));
+                // The analysis above awaits I/O. Re-read the clock when the runner actually starts,
+                // and give it only its remaining window, leaving the preview proof's reserve intact.
+                const healed = await finishingGuard.repairOrThrow('design-consistency-heal', (maxBuildMs, signal) => runInPass('design-consistency-heal', () => new AgentRunner({
+                  ...baseRunnerOpts,
+                  maxBuildMs,
+                  signal,
+                  client: buildTurnRunner(healRunnerOpts()),
+                  platformRequest: true,
+                  model: resolveModel(powerLevelReqEffective),
+                  persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+                }).run(`The app is built and compiles. ${designAsk}${cssAsk}${a11yAsk}`)));
                 try {
                   const afterHeal = Object.fromEntries(writtenFiles);
                   const brokenAfter = (await findSyntaxErrors(afterHeal).catch(() => [])).map((e) => e.path);
@@ -21070,7 +21064,8 @@ async function noteBuildOutcome(
                 if (healed.ok) {
                   // Same honesty rule as the integrity heal: keep the REAL build summary, take only the
                   // edits. A no-op heal must never replace the user's build result with its own chatter.
-                  result = { ...healed, summary: result.summary };
+                  // This optional pass contributes edits, not a replacement build result. Its own
+                  // local deadline must not erase the original run's timeout or successful verdict.
                   if (cssRepair) {
                     // Say what is true AFTER the repair, either way — the warning above describes the app before it.
                     const left = findUndefinedClasses({ ...integrityFiles, ...Object.fromEntries(writtenFiles) });
@@ -21913,6 +21908,10 @@ async function noteBuildOutcome(
       // `finishingPaths`, so the post-build reviewer is not sent to review NavBharatAI's own files.
       const finishingPaths = new Set<string>();
       const noteFinishingWrite = (path: string) => { finishingPaths.add(path); inBuildWriteTick++; };
+      // Keep optional-file orchestration in its own function: the chat handler is at TypeScript's
+      // control-flow limit. Its live write guard still reads the parent clock on every operation.
+      type FinishingResult = NonNullable<typeof result>;
+      const applyFinishingPasses = async (result: FinishingResult) => {
       // ⚠️ MOVED HERE FROM AFTER THE GREEN LATCH (autopsy f496c75b, 2026-09-30). It ran after the app was
       // verified, wrote with no pass name, and Green Freeze refused it — so on every PROVEN build the
       // sweep did nothing but add a GREEN_FREEZE_DEFERRED line ("src/game/FightGame.tsx"), and it ran
@@ -21924,7 +21923,7 @@ async function noteBuildOutcome(
       // construction (keep-on-any-doubt; never touches side-effect / namespace / default imports — see
       // UnusedImportSweep). Additive + best-effort; kill switch AGENTV3_IMPORT_SWEEP=off.
       try {
-        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && importSweepEnabled() && finishingPassMayRun(result)) {
+        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && importSweepEnabled() && finishingGuard.allow('unused-import-sweep')) {
           const src: Record<string, string> = {};
           for (const [p, c] of writtenFiles) {
             if (typeof c === 'string' && /\.(mjs|cjs|jsx?|tsx?)$/i.test(p) && !/\.d\.ts$/i.test(p)) src[p] = c;
@@ -21938,7 +21937,7 @@ async function noteBuildOutcome(
               // nothing after its summary. Every platform write after the answer names its pass; the census in
               // tests/aPlatformWriterIsNeverTheModel.test.ts fails on one that does not. The names here are on no
               // Green Freeze list, so on a latched app they are refused exactly as before — attribution only.
-              await runInPass('unused-import-sweep', () => actuator.writeFile(workspaceId, p, c));
+              await finishingGuard.writeOrThrow('unused-import-sweep', () => runInPass('unused-import-sweep', () => actuator.writeFile(workspaceId, p, c)));
               writtenFiles.set(p, c);
               inBuildWriteTick++; // a concurrent in-build proof must not save a tree this write changed
               try { getWorkspaceMemory(workspaceId).indexFile(p, c); } catch { /* index best-effort */ }
@@ -21957,20 +21956,20 @@ async function noteBuildOutcome(
       // copy ~450 lines of CSS it did not write, which is how every one-file app used to lose the kit.
       // It moves only the stylesheet the page already links; anything else and nothing changes.
       try {
-        if (singleHtmlFileRule && result.ok && expectsArtifacts) {
+        if (singleHtmlFileRule && result.ok && expectsArtifacts && finishingGuard.allow('single-file-kit-inline')) {
           const sandboxIndex = await actuator.readFile(workspaceId, 'index.html').catch(() => null);
           const kitCss = await actuator.readFile(workspaceId, 'style.css').catch(() => null);
           const cleanIndex = sandboxIndex == null ? null : withoutPreviewBridge('index.html', sandboxIndex);
           const inlined = cleanIndex != null && kitCss != null ? inlineLinkedStylesheet(cleanIndex, 'style.css', kitCss) : null;
           if (inlined) {
-            await runInPass('single-file-kit-inline', () => actuator.writeFile(
+            await finishingGuard.writeOrThrow('single-file-kit-inline', () => runInPass('single-file-kit-inline', () => actuator.writeFile(
               workspaceId, 'index.html',
               hasPreviewBridge(sandboxIndex ?? '') ? injectPreviewBridge(inlined, 'live') : inlined,
-            ));
+            )));
             writtenFiles.set('index.html', inlined);
             inBuildWriteTick++; // the model's own page, not a platform file: the reviewer still reads it
             try { getWorkspaceMemory(workspaceId).indexFile('index.html', inlined); } catch { /* index best-effort */ }
-            await actuator.runCommand(workspaceId, "rm -f 'style.css'").catch(() => null);
+            await finishingGuard.writeOrThrow('single-file-kit-inline', () => actuator.runCommand(workspaceId, "rm -f 'style.css'")).catch(() => {});
             const stillThere = await actuator.readFile(workspaceId, 'style.css').then(() => true).catch(() => false);
             if (!stillThere) {
               writtenFiles.delete('style.css');
@@ -21994,7 +21993,7 @@ async function noteBuildOutcome(
       // route smoke check. Writing the files costs nothing and leaves the user something real they
       // own: a net that runs in their own repo and their own CI whenever they want it. The report
       // says WRITTEN, never "passed" — a scaffold reported as a test run is a fake verdict.
-      if (process.env.AGENTV3_AUTO_E2E !== 'off' && !abort.signal.aborted) {
+      if (process.env.AGENTV3_AUTO_E2E !== 'off' && finishingGuard.allow('e2e-scaffold')) {
         try {
           // THE WHOLE PROJECT, NOT THIS TURN'S WRITES (admin report 2026-08-12). An edit build that
           // wrote one `.env` was judged on that one file and skipped with the reason "this project has
@@ -22011,6 +22010,18 @@ async function noteBuildOutcome(
             hasPreview: !!lastPreviewUrl,
           });
           if (decision.scaffold) {
+            // Exclude the scaffold before creating its TypeScript files. If the live guard defers a
+            // later write, a partial scaffold must still be harmless to the app's production build.
+            const beforeScaffoldConfig = await actuator.readFile(workspaceId, 'tsconfig.json').catch(() => null);
+            await excludeE2eBeforeScaffolding(beforeScaffoldConfig, {
+              mayModify: !isImportTurn,
+              write: (text) => finishingGuard.writeOrThrow('e2e-tsconfig-exclude', () => runInPass('e2e-tsconfig-exclude', () => actuator.writeFile(workspaceId, 'tsconfig.json', text))),
+              onWritten: (text, added) => {
+                writtenFiles.set('tsconfig.json', text);
+                noteFinishingWrite('tsconfig.json');
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'E2E_EXCLUDED_FROM_BUILD', message: e2eExcludeNote(added), autoResolved: true });
+              },
+            });
             // The port the app SAYS it serves on (its dev script, its config) — the suite used to assume
             // Vite's 5173 for every app, so a Next.js app on 3000 got a suite that could never reach it
             // (autopsy b47c56d8). Null keeps the Vite default, as before.
@@ -22023,7 +22034,7 @@ async function noteBuildOutcome(
               try { await actuator.readFile(workspaceId, path); exists = true; } catch { exists = false; }
               if (exists) continue;
               // Named, so the post-green ledger says who wrote it (db07e0af: our suite was filed under "build loop").
-              await runInPass('e2e-scaffold', () => actuator.writeFile(workspaceId, path, content));
+              await finishingGuard.writeOrThrow('e2e-scaffold', () => runInPass('e2e-scaffold', () => actuator.writeFile(workspaceId, path, content)));
               writtenFiles.set(path, content);
               noteFinishingWrite(path);
               added.push(path);
@@ -22042,7 +22053,7 @@ async function noteBuildOutcome(
               try { await actuator.readFile(workspaceId, AUTH_SPEC_PATH); authExists = true; } catch { authExists = false; }
               if (!authExists) {
                 const spec = buildAuthFlowSpec(auth);
-                await runInPass('e2e-scaffold', () => actuator.writeFile(workspaceId, AUTH_SPEC_PATH, spec));
+                await finishingGuard.writeOrThrow('e2e-scaffold', () => runInPass('e2e-scaffold', () => actuator.writeFile(workspaceId, AUTH_SPEC_PATH, spec)));
                 writtenFiles.set(AUTH_SPEC_PATH, spec);
                 noteFinishingWrite(AUTH_SPEC_PATH);
                 added.push(AUTH_SPEC_PATH);
@@ -22114,7 +22125,7 @@ async function noteBuildOutcome(
             for (const path of fixedPaths) {
               const stripped = stripCollidingAmbientShims(projectNow[path]);
               if (stripped.source === projectNow[path]) continue;
-              if (!(await writeUnlessFrozen(() => runInPass('ambient-shim-cleanup', () => actuator.writeFile(workspaceId, path, stripped.source))))) continue;
+              if (!(await writeUnlessFrozen(() => finishingGuard.writeOrThrow('ambient-shim-cleanup', () => runInPass('ambient-shim-cleanup', () => actuator.writeFile(workspaceId, path, stripped.source)))))) continue;
               projectNow[path] = stripped.source;
               writtenFiles.set(path, stripped.source);
               noteFinishingWrite(path);
@@ -22134,7 +22145,7 @@ async function noteBuildOutcome(
             if (tsconfigRaw) {
               const excluded = withE2eExcluded(tsconfigRaw);
               if (excluded.changed) {
-                await runInPass('e2e-tsconfig-exclude', () => actuator.writeFile(workspaceId, 'tsconfig.json', excluded.text));
+                await finishingGuard.writeOrThrow('e2e-tsconfig-exclude', () => runInPass('e2e-tsconfig-exclude', () => actuator.writeFile(workspaceId, 'tsconfig.json', excluded.text)));
                 writtenFiles.set('tsconfig.json', excluded.text);
                 noteFinishingWrite('tsconfig.json');
                 buildDiag.record({
@@ -22155,7 +22166,7 @@ async function noteBuildOutcome(
       // that decided nothing is meaningless, and writing ADR markdown into a repo the user asked us not to
       // touch is the same instruction violation the gates above close. Today `writtenFiles` is empty on a
       // survey turn so this could not fire — the gate makes that safety explicit instead of incidental.
-      if (result.ok && userId && writtenFiles.size > 0 && !isImportTurn) {
+      if (result.ok && userId && writtenFiles.size > 0 && !isImportTurn && finishingGuard.allow('architecture-note')) {
         // Awaited (bounded) so the file lands BEFORE the preview proof latches the app green; left
         // running past the bound, a late write is refused by the freeze exactly as before.
         await withTimeout((async () => {
@@ -22167,7 +22178,7 @@ async function noteBuildOutcome(
               // refusal and then calls onFileWrite would record a file the sandbox never received
               // (adversarial review 2026-08-12). Record-only-on-success keeps the two in step.
               let adrWritten = false;
-              try { await runInPass('architecture-note', () => actuator.writeFile(workspaceId, path, content)); adrWritten = true; } catch { /* refused or failed */ }
+              try { await finishingGuard.writeOrThrow('architecture-note', () => runInPass('architecture-note', () => actuator.writeFile(workspaceId, path, content))); adrWritten = true; } catch { /* refused or failed */ }
               if (adrWritten) onFileWrite?.(path, content);
               if (adrWritten) finishingPaths.add(path);
             }
@@ -22181,7 +22192,7 @@ async function noteBuildOutcome(
       // markers, no fake assertions); additive test files only, so it can never affect the app's runtime or
       // the build result. Best-effort — any failure is swallowed.
       try {
-        if (result.ok && expectsArtifacts && writtenFiles.size > 0) {
+        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && finishingGuard.allow('starter-tests')) {
           const sourceFiles = Array.from(writtenFiles.entries()).map(([path, content]) => ({ path, content }));
           // A skeleton imports `vitest`, which nothing installs. Written only where the release build
           // cannot type-check it — otherwise it would fail the user's publish and APK for a file they
@@ -22205,7 +22216,7 @@ async function noteBuildOutcome(
           await runInPass('starter-tests', async () => {
             for (const item of plan) {
               try {
-                await actuator.writeFile(workspaceId, item.testPath, item.content);
+                await finishingGuard.writeOrThrow('starter-tests', () => actuator.writeFile(workspaceId, item.testPath, item.content));
                 writtenFiles.set(item.testPath, item.content);
                 noteFinishingWrite(item.testPath);
                 try { getWorkspaceMemory(workspaceId).indexFile(item.testPath, item.content); } catch { /* index is best-effort */ }
@@ -22243,7 +22254,7 @@ async function noteBuildOutcome(
       // means the freeze is usually not armed yet; the name is what makes the guarantee hold on any
       // path that still reaches here latched.
       try {
-        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && finishingPassMayRun(result)) {
+        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && finishingGuard.allow('production-defaults')) {
           await runInPass('production-defaults', async () => {
           const idxPath = writtenFiles.has('index.html') ? 'index.html' : (writtenFiles.has('public/index.html') ? 'public/index.html' : 'index.html');
           let indexHtml: string | null = writtenFiles.get(idxPath) ?? null;
@@ -22314,7 +22325,7 @@ async function noteBuildOutcome(
             const replacement = existing != null && rel === SERVICE_WORKER_FILE ? upgradeGeneratedServiceWorker(existing) : null;
             if (existing != null && replacement == null) continue;
             try {
-              await actuator.writeFile(workspaceId, target, replacement ?? content);
+              await finishingGuard.writeOrThrow('production-defaults', () => actuator.writeFile(workspaceId, target, replacement ?? content));
               const written = replacement ?? content;
               writtenFiles.set(target, written);
               noteFinishingWrite(target);
@@ -22329,7 +22340,7 @@ async function noteBuildOutcome(
             const upgraded = upgradeGeneratedServiceWorker(await actuator.readFile(workspaceId, rootSw).catch(() => null));
             if (upgraded) {
               try {
-                await actuator.writeFile(workspaceId, rootSw, upgraded);
+                await finishingGuard.writeOrThrow('production-defaults', () => actuator.writeFile(workspaceId, rootSw, upgraded));
                 writtenFiles.set(rootSw, upgraded);
                 noteFinishingWrite(rootSw);
                 savedDefaults[rootSw] = upgraded;
@@ -22349,10 +22360,10 @@ async function noteBuildOutcome(
               // Visual Edit picker); the dev server injects it only when it starts, and nothing re-adds
               // it after a write. The user's saved source stays clean — the bridge is never theirs.
               const sandboxIndex = await actuator.readFile(workspaceId, idxPath).catch(() => '');
-              await actuator.writeFile(
+              await finishingGuard.writeOrThrow('production-defaults', () => actuator.writeFile(
                 workspaceId, idxPath,
                 hasPreviewBridge(sandboxIndex) ? injectPreviewBridge(honestIndex, 'live') : honestIndex,
-              );
+              ));
               writtenFiles.set(idxPath, honestIndex);
               noteFinishingWrite(idxPath);
               try { getWorkspaceMemory(workspaceId).indexFile(idxPath, honestIndex); } catch { /* index best-effort */ }
@@ -22377,6 +22388,8 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* app-scaffold defaults are best-effort — never affect the build result */ }
+      };
+      await applyFinishingPasses(result);
       // POST-GREEN FINISHING RE-CHECK (owner item 2, finishingRecheck.ts): the passes above can write after
       // this build was already proven green. One look; only a CONCLUSIVE non-render rolls back exactly their
       // files to the last green snapshot. Kill switch AGENTV3_POST_GREEN_RECHECK=off.
@@ -24436,7 +24449,7 @@ async function noteBuildOutcome(
           // It needs no preview and no browser, which is exactly why it is the one that still works on
           // the builds where every runtime check skipped. Our game kit alone is not a delivery.
           filesWritten: builderWroteCount(),
-          buildWasRequested: userAskedToBuildAnApp,
+          buildWasRequested: userAskedToBuildAnApp && !answerOnlyNow(),
           // "Live NSE prices" from code that only simulates them (Q-274, autopsy 241215d1).
           liveDataRequested: liveDataAsked,
           // "Drag-and-drop uploads" from an app that keeps the files as text in localStorage (Q-542, autopsy

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import ts from 'typescript';
 
 /**
  * EVERY RUNNER'S TOKENS MUST BE ATTRIBUTED TO THE PROVIDER THAT ACTUALLY RAN THEM.
@@ -87,9 +88,19 @@ describe('heal runners are attributed by construction', () => {
   });
 
   it('the factory attributes BOTH the provider and its token usage', () => {
-    const at = src.indexOf('const healRunnerOpts = ()');
-    expect(at, 'healRunnerOpts factory is missing').toBeGreaterThan(-1);
-    const factory = src.slice(at, at + 400);
+    // Inspect the initializer's syntax boundary: adding routing/memory options must not push the
+    // attribution callbacks outside an arbitrary character window.
+    const parsed = ts.createSourceFile('agentv3.ts', src, ts.ScriptTarget.Latest, true);
+    let factory: string | undefined;
+    const visit = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'healRunnerOpts') {
+        factory = node.initializer?.getText(parsed);
+        return;
+      }
+      if (factory === undefined) ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+    expect(factory, 'healRunnerOpts factory is missing').toBeDefined();
     expect(factory).toContain('onTurnComplete: captureTurnUsage');
     expect(factory).toContain('onProviderUsed: captureProvider');
     // …and still carries the routing + the absolute no-Claude guard it replaced. Since 2026-09-14 the

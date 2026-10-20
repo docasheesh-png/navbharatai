@@ -27,7 +27,7 @@ import { isDeadSandboxSignal, detectSilentDbFailure } from './sandbox/EngineerAI
 import { sandboxCost, describeSandboxCost } from './sandboxCost';
 import { redactProvidersText } from '../lib/providerRedaction';
 import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
-import { isModelUnavailableError } from './providerErrorClass';
+import { isModelUnavailableError, isProviderBalanceError } from './providerErrorClass';
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError, isReasoningRungHandoff, providerNeverAnswered, isSlowStreamAbandon } from './turnDeadline';
@@ -2974,6 +2974,7 @@ export class BuildDiagnostics {
       problems: capProblems(this.issues.filter((i) => i.severity !== 'info')),
       rootCause: deriveRootCause({
         issues: this.issues, errors: this.errors, review: this.reviewText, ok: this.ok, commands: this.commands,
+        endedAt: this.endedAt,
         // The serializer is the ONLY caller that can distinguish "this build never reported an
         // ending" from "the caller did not pass ok" — see the field's own comment.
         // …and, since 2026-09-13, "it has not ended YET" from "it ended without saying so".
@@ -3333,6 +3334,8 @@ export function classifyProviderFailure(reason: unknown): string {
   // for a cap on the reply, and `other:` is where this class hid for two nights across two vendors.
   // Checked here, above the generic tests, so a future reword of the marker cannot fall through them.
   if (isStarvedBudgetError(text)) return 'output-budget';
+  // Some providers report an unfunded account as 429. It cannot recover through throttle retries.
+  if (isProviderBalanceError(text)) return 'billing';
   if (/\b429\b|rate.?limit|too many requests|quota/.test(t)) return 'rate-limit';
   // OUR walk-away from a provider, before the generic "timed out" test the marker also matches — the same order
   // `wasteKindFor` uses, so the two classifiers of one error agree (autopsy 303e8a6f: this one said 'timeout',
@@ -3374,9 +3377,10 @@ const DEGRADED_BUCKETS = new Set(['timeout', 'silent', 'crawl', 'rate-limit', 's
  * outage case this file already fixed, not better: an outage at least might have passed on a retry.
  *
  * `auth` is here for the same reason and had the identical hole; `model-unavailable` had an ADMIN line
- * and still reached the upsell. One predicate now covers all three.
+ * and still reached the upsell. Explicit account funding failures belong here too: a 429 with no
+ * balance is a billing condition, not a passing throttle.
  */
-const OUR_CONFIGURATION_BUCKETS = new Set(['model-unavailable', 'auth', 'bad-request']);
+const OUR_CONFIGURATION_BUCKETS = new Set(['model-unavailable', 'auth', 'bad-request', 'billing']);
 
 /**
  * Did this build fail because of OUR configuration rather than the engine's ability or the app's
@@ -3384,7 +3388,8 @@ const OUR_CONFIGURATION_BUCKETS = new Set(['model-unavailable', 'auth', 'bad-req
  *
  * ⚠️ Requires a REPEAT (≥ `minCount`), deliberately. A single 400 can be one odd prompt hitting one
  * rung's schema, and suppressing an honest outcome on one stray failure would be its own dishonesty.
- * A bucket that repeats is a rung that cannot work — which is the thing worth being loud about. PURE.
+ * A bucket that repeats is a rung that cannot work — which is the thing worth being loud about.
+ * Explicit billing failures need no repeat: they name the account condition directly. PURE.
  */
 export function providerFailuresLookMisconfigured(
   reasons: Record<string, string> | null | undefined,
@@ -3399,7 +3404,9 @@ export function providerFailuresLookMisconfigured(
       const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(part);
       if (!m) return false;
       const n = Number(m[1]);
-      return Number.isFinite(n) && n >= minCount && OUR_CONFIGURATION_BUCKETS.has(m[2]);
+      // An explicit lack of funds is conclusive on the first occurrence. Retirement deliberately
+      // prevents repeats, so requiring three would hide the account problem after fixing retries.
+      return Number.isFinite(n) && n > 0 && (m[2] === 'billing' || n >= minCount) && OUR_CONFIGURATION_BUCKETS.has(m[2]);
     }));
 }
 
@@ -3990,6 +3997,8 @@ export function ineligibleUnresolvedNote(
 
 export function deriveRootCause(input: {
   issues: readonly BuildIssue[];
+  /** Provider callbacks arriving after the recorded ending remain telemetry, not a cause of that ending. */
+  endedAt?: number;
   errors?: readonly CapturedError[];
   review?: string;
   ok?: boolean;
@@ -4007,7 +4016,14 @@ export function deriveRootCause(input: {
    */
   stillRunning?: boolean;
 }): string | undefined {
-  const { issues, errors, review, ok } = input;
+  const { errors, review, ok } = input;
+  // Reports 16cabab2/958c1b5d retained provider callbacks over an hour after their endedAt. Preserve
+  // those calls and their cost in the report, but they cannot explain an earlier ending. Limit this
+  // filter to provider events: terminal/stop backfills and billing bookkeeping may legitimately be
+  // recorded after finish, and a live report has no end boundary at all.
+  const endedAt = typeof input.endedAt === 'number' && Number.isFinite(input.endedAt) ? input.endedAt : undefined;
+  const issues = endedAt === undefined ? input.issues
+    : input.issues.filter((i) => !(i.phase === 'provider' && Number.isFinite(i.ts) && i.ts > endedAt));
   /**
    * 🔴 THE ADVISORY CAP IS NOT AN OUTCOME FOR THE APP (report af3a3f7f, 2026-09-17).
    *

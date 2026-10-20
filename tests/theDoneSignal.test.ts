@@ -144,7 +144,7 @@ describe('WIRING — the check runs in the loop and the number reaches the repor
 
   it('the steer is appended to the SAME message the other steers ride', () => {
     // A steer computed and never attached is the decoration this repo has shipped before.
-    expect(runner).toContain("const steer = [truncationSteer, loopSteer, budgetText, doneText].filter(Boolean)");
+    expect(runner).toMatch(/const steer = \[[^\]]*\bdoneText\b[^\]]*\]\.filter\(Boolean\)/);
   });
 
   it('the mark is recorded even when the model keeps building', () => {

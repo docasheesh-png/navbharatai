@@ -67,9 +67,10 @@ describe('parseReviewOutput — no phantom criticals (66ec5c1e)', () => {
 
   it('does not treat "not a false positive" style confirmations as dismissals', () => {
     const parsed = parseReviewOutput('[CRITICAL] Payment fails — verified, this is a real, genuine bug, not a false positive is wrong wording; the order never saves.');
-    // The line contains "false positive" — but conservatism here is acceptable (demotes). Assert it does
-    // NOT crash and still yields a finding; the important invariant (no phantom criticals) holds above.
-    expect(parsed.length).toBeGreaterThanOrEqual(1);
+    // A confirmed failure keeps the severity the reviewer assigned; merely mentioning the words
+    // "false positive" cannot turn it into optional polish.
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].severity).toBe('critical');
   });
 });
 

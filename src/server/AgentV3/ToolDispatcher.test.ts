@@ -1224,6 +1224,23 @@ describe('ToolDispatcher — evaluate integration (more dimensions + generators)
     const out = await evalText(dd);
     expect(out).toContain('Authenticity');
     expect(out).toContain('NOT READY');
+    const readiness = await dd.assessBuildReadiness();
+    expect(readiness.blockers).toContain('2 fake/incomplete code issue(s) (placeholder / not-implemented / fake data): not-implemented @ src/api.ts:1, placeholder-throw @ src/api.ts:1');
+  });
+
+  it('bounds incomplete-code evidence while counting every blocker and never copies source text', async () => {
+    const dd = makeDispatcher('ws-eval-auth-evidence-bound');
+    await write(dd, 'src/api.ts', [
+      '// The source beside a finding must never be copied into a diagnostic label.',
+      'export const message = "Not implemented: credential-value-that-must-stay-out";',
+      'export const next = "Coming soon";',
+      'export const data = "Lorem ipsum";',
+      'export const dummyData = [];',
+    ].join('\n'));
+    const readiness = await dd.assessBuildReadiness();
+    const blocker = readiness.blockers.find((s) => s.includes('fake/incomplete code issue(s)'));
+    expect(blocker).toBe('4 fake/incomplete code issue(s) (placeholder / not-implemented / fake data): not-implemented @ src/api.ts:2, coming-soon @ src/api.ts:3, lorem-ipsum @ src/api.ts:4; 1 more');
+    expect(blocker).not.toContain('credential-value-that-must-stay-out');
   });
 
   it('flags an accessibility issue (image with no alt text)', async () => {

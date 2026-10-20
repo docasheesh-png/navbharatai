@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { glmCanDisableThinking, glmThinkingParam } from '../src/server/AgentV3/providers/glmThinking';
 import { parseOpenAiCompletion } from '../src/server/AgentV3/providers/OpenAiToolAdapter';
-import { shouldContinue, MAX_CONTINUATIONS } from '../src/server/AgentV3/FastLaneContinuation';
+import { shouldContinue, MAX_CONTINUATIONS, continueFastLaneGeneration } from '../src/server/AgentV3/FastLaneContinuation';
 import { providerFailuresLookMisconfigured, providerFailuresLookDegraded } from '../src/server/AgentV3/BuildDiagnostics';
 import { freeTierUpsellMessage } from '../src/server/AgentV3/FreeTierBuildRouting';
 import { TIER_LADDERS, PLAN_RUNG } from '../src/server/AgentV3/tierLadder';
@@ -163,9 +163,15 @@ describe('🔴 3 · continuing from nothing is re-issuing the same call', () => 
     expect(shouldContinue('max_tokens', 0)).toBe(true);
   });
 
-  it('the fast lane passes the text, so the guard is actually live', () => {
+  it('the fast lane uses the loop that refuses to continue an empty reply', async () => {
     const src = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
-    expect(src).toContain('while (shouldContinue(stopReason, attempts, text))');
+    expect(src).toContain('continueFastLaneGeneration(first, {');
+    let called = false;
+    const result = await continueFastLaneGeneration({ text: '', stopReason: 'max_tokens' }, {
+      generate: async () => { called = true; return { text: '', stopReason: 'max_tokens' }; },
+    });
+    expect(called).toBe(false);
+    expect(result.attempts).toBe(0);
   });
 });
 

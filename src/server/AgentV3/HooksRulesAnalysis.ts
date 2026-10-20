@@ -16,6 +16,8 @@
 // ts-morph is loaded lazily (like ASTAnalyzer) so it never costs anything until a check runs. The
 // analysis is deterministic and fully unit-tested.
 
+import { isAppAnalysisPath } from './appAnalysisPaths';
+
 export type HookViolationKind =
   | 'conditional-hook'
   | 'hook-after-return'
@@ -187,7 +189,7 @@ export async function analyzeHooksRules(files: Record<string, string>): Promise<
   let scanned = 0;
 
   for (const [path, content] of Object.entries(files)) {
-    if (!REACT_FILE.test(path) || typeof content !== 'string' || !content.includes('use')) continue;
+    if (!REACT_FILE.test(path) || !isAppAnalysisPath(path) || typeof content !== 'string' || !content.includes('use')) continue;
     scanned++;
     let sf: any;
     try {

@@ -2513,7 +2513,11 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      was proven green AND the finishing passes wrote files; those passes are gated on `result.ok &&
     //      expectsArtifacts` (false on every import/survey turn), so it never writes on a read-only turn. It
     //      writes back only the last green snapshot's own content for those files. Considered ✓.
-    expect(count).toBe(34);
+    //   1× the E2E BUILD EXCLUSION PREREQUISITE (cfd01074 sibling) — before create-only scaffold files,
+    //      `decision.scaffold` already refuses imports and `mayModify: !isImportTurn` independently
+    //      preserves the read-only turn. The callback records tsconfig only after a guarded write lands;
+    //      deferring the remaining scaffold can therefore never leave test TS breaking the app's build.
+    expect(count).toBe(35);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

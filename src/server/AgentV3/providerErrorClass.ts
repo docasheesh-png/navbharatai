@@ -15,6 +15,12 @@
 // PURE, dependency-free, and deliberately a leaf module: BuildDiagnostics and the provider chain both
 // import it, so it must never import either.
 
+/** Account funding is a permanent credential failure, even when a provider uses HTTP 429 for it. */
+export function isProviderBalanceError(reason: unknown): boolean {
+  const text = reason instanceof Error ? reason.message : String(reason ?? '');
+  return /credit balance is too low|\binsufficient[ _-](?:balance|credits?|funds)\b|\binsufficient_quota\b/i.test(text);
+}
+
 /**
  * A model that CANNOT answer on this account — wrong id, retired, or not on the key's plan.
  *

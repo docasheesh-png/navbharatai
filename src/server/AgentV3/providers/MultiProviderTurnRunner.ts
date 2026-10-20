@@ -24,7 +24,7 @@ import { plannedModelOf } from '../runnerChainSummary';
 import { modelAlwaysReasons } from './glmThinking';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
-import { isModelUnavailableError } from '../providerErrorClass';
+import { isModelUnavailableError, isProviderBalanceError } from '../providerErrorClass';
 import { isBudgetEndedError, isSlowStreamAbandon, isSilentAbandon, providerNeverAnswered, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
 import type { WasteKind } from '../providerWaste';
 import { isStarvedBudgetError, turnStarvedItsBudget } from '../floorBudget';
@@ -161,7 +161,6 @@ export interface MultiProviderOptions {
  * limits, timeouts and 5xx are TRANSIENT and stay retryable. PURE + unit-tested.
  */
 const FATAL_PROVIDER_PATTERNS: readonly RegExp[] = [
-  /credit balance is too low/i,           // Anthropic: account out of credits
   /\bauthentication_error\b/i,            // bad/revoked API key (Anthropic error type)
   /\bpermission_error\b/i,                // key lacks access to the model
   /invalid (?:x-)?api[- ]?key/i,          // generic invalid-key phrasing
@@ -171,7 +170,7 @@ const FATAL_PROVIDER_PATTERNS: readonly RegExp[] = [
 
 export function isFatalProviderError(error: unknown): boolean {
   const text = error instanceof Error ? error.message : String(error ?? '');
-  return FATAL_PROVIDER_PATTERNS.some((re) => re.test(text));
+  return isProviderBalanceError(error) || FATAL_PROVIDER_PATTERNS.some((re) => re.test(text));
 }
 
 /** A TIMEOUT failure (transient class, but grind-prone — see the consecutive-timeout bench). Pure. */
@@ -201,7 +200,7 @@ export function isServiceOverloadedError(error: unknown): boolean {
  * A size-gate skip ("skipped: prompt … exceeds the cheap-floor limit") is deliberately NOT matched. Pure. */
 export function isRateLimitProviderError(error: unknown): boolean {
   const text = error instanceof Error ? error.message : String(error ?? '');
-  return /\b429\b|rate[ _-]?limit|too many requests/i.test(text);
+  return !isProviderBalanceError(error) && /\b429\b|rate[ _-]?limit|too many requests/i.test(text);
 }
 
 /** The largest context window any provider in the fleet offers (Claude/Vertex/Gemini ≈ 1M tokens). */
@@ -303,6 +302,9 @@ export function sizeGatedRunner(inner: TurnRunner, skipOverChars: number, perBlo
 export function fatalProviderHint(reason: string): string {
   if (/credit balance is too low/i.test(reason)) {
     return ' [PLATFORM ISSUE — not your app: the AI provider account has run out of credits. Every build will fail until the NavBharatAI admin tops it up (Anthropic Console → Plans & Billing).]';
+  }
+  if (isProviderBalanceError(reason)) {
+    return ' [PLATFORM ISSUE — not your app: the AI provider account has insufficient balance or billing quota. The NavBharatAI admin must fund the account or correct its billing before this provider can answer.]';
   }
   if (isFatalProviderError(reason)) {
     return ' [PLATFORM ISSUE — not your app: the AI provider account/key needs attention from the NavBharatAI admin.]';

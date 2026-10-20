@@ -110,7 +110,7 @@ describe('🔒 every place that throws a cut-off reply away tells the ledger', (
   it('every cut-off detector in the route is followed by a discard', () => {
     // The three ways the route recognises a reply it is about to throw away. A NEW use of one without a
     // discard right behind it fails here.
-    for (const detector of ['unterminatedTailPath(text)', 'roadmapUnparseableDetail(', 'unusablePlanCause(']) {
+    for (const detector of ['generation.discardedReplies.forEach', 'roadmapUnparseableDetail(', 'unusablePlanCause(']) {
       let at = route.indexOf(detector);
       expect(at, detector).toBeGreaterThan(-1);
       while (at > -1) {

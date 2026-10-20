@@ -74,11 +74,11 @@ describe('findDuplicateStylesheets — a stylesheet imported by 2+ modules', () 
   it('detects the same global stylesheet imported from two modules (relative-path aware)', () => {
     const files = {
       'src/main.tsx': `import './styles/global.css';\nimport App from './App';`,
-      'src/App.tsx': `import '../styles/global.css';\nexport default () => null;`,
+      'src/components/App.tsx': `import '../styles/global.css';\nexport default () => null;`,
     };
     const dups = findDuplicateStylesheets(files);
     expect(dups).toHaveLength(1);
-    expect(dups[0].importers).toEqual(['src/App.tsx', 'src/main.tsx']);
+    expect(dups[0].importers).toEqual(['src/components/App.tsx', 'src/main.tsx']);
   });
 
   it('a stylesheet imported from exactly one module is NOT a duplicate', () => {
@@ -150,7 +150,7 @@ describe('findOrphanStylesheets — a stylesheet wired into nothing ships an uns
     expect(findOrphanStylesheets(files)).toEqual([{ stylesheet: 'src/index.css' }]);
   });
 
-  it('a side-effect import from ANY module clears it (path spelling variations match by filename)', () => {
+  it('a side-effect import from ANY module clears it (path spelling variations resolve to the same file)', () => {
     const files = {
       'src/index.css': 'body {}',
       'src/main.tsx': `import './index.css';\nimport App from './App';`,

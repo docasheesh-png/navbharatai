@@ -22,7 +22,8 @@ import { PARALLEL_WRITER_ROLES } from './parallelBuild';
 import { writerTaskSiblings, SIBLING_TASKS_INPUT_KEY } from './parallelSiblings';
 import { toolNameCouldProduceWork } from './toolWork';
 import { TASK_NOT_OFFERED } from './soloBuild';
-import { isTodoOnlyTurn, TODO_ONLY_TURN_STEER, nextTodoWithdrawal, toolsThisTurn, type TodoWithdrawal } from './todoOnlyTurn';
+import { isTodoOnlyTurn, TODO_ONLY_TURN_STEER, nextTodoWithdrawal, toolsThisTurn, runCanWrite, type TodoWithdrawal } from './todoOnlyTurn';
+import { initialExplorationProgress, advanceExplorationProgress } from './explorationProgress';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
@@ -675,6 +676,8 @@ export class AgentRunner {
     if (typeof dispatcher.beginConversation === 'function') dispatcher.beginConversation();
     /** Changes the dispatcher had made before this run — so a repair pass can ask about ITSELF (repairClaim.ts). */
     const changesAtRunStart = typeof dispatcher.changeCount === 'function' ? dispatcher.changeCount() : 0;
+    let explorationProgress = initialExplorationProgress(changesAtRunStart);
+    let explorationNarrated = false;
     /**
      * The dispatcher's change count when OUR last end-of-turn hand-back (style / unfinished) was pushed, and which
      * one it was — so its reply can be checked against what it really did (autopsy db07e0af, repairClaim.ts).
@@ -1789,7 +1792,23 @@ export class AgentRunner {
             }
           } catch { /* quality escalation is best-effort — it must never break a build */ }
         }
-        const steer = [truncationSteer, loopSteer, budgetText, doneText].filter(Boolean).concat(handoffText ? [handoffText] : []).join('\n\n') || null;
+        // Varied reads never trip an identical-call guard. Give a writer its observed no-change
+        // streak before it spends the whole futility window surveying the platform's own game kit.
+        const exploration = advanceExplorationProgress(explorationProgress, {
+          writingRun: expectsArtifacts && !this.opts.signal?.aborted && runCanWrite(tools.map((t) => t.name)),
+          changes: typeof dispatcher.changeCount === 'function' ? dispatcher.changeCount() : null,
+          toolNames: turn.toolUses.filter((_, idx) => resultBlocks[idx]?.is_error === false).map((tu) => tu.name),
+          editingExistingApp: this.opts.editingExistingApp === true,
+        });
+        explorationProgress = exploration.state;
+        if (exploration.steer) {
+          try { this.opts.onNote?.({ code: 'EXPLORATION_WITHOUT_CHANGE', message: exploration.steer.observation, detail: `hand-back ${exploration.steer.stage}; all reads remain available` }); } catch { /* diagnostics never block a build */ }
+          if (!explorationNarrated) {
+            events.emit({ type: 'narration', agent: agentRole, ts: Date.now(), text: 'The builder has been inspecting files without changing the project. I’ve asked it to make a concrete requested change or identify what is blocking it.' });
+            explorationNarrated = true;
+          }
+        }
+        const steer = [truncationSteer, loopSteer, budgetText, doneText, exploration.steer?.message].filter(Boolean).concat(handoffText ? [handoffText] : []).join('\n\n') || null;
         messages.push({ role: 'user', content: steer ? [...resultBlocks, { type: 'text', text: steer }] : resultBlocks });
         messageTs.push(Date.now());
         if (steer) platformMsgIdx.add(messages.length - 1);

@@ -167,7 +167,8 @@ describe('2 · a tab bar is not a way to save', () => {
     expect(yellow.headline).not.toMatch(/untested/);
     const green = releaseGate(base as never, { blockers: 0, highSeverity: 0, warnings: 0 });
     expect(green.state).toBe('green');
-    expect(green.headline).toMatch(/nothing to save/);
+    expect(green.headline).toMatch(/pressing its controls in a real browser held up/);
+    expect(green.headline).not.toMatch(/nothing to save/); // none derived is coverage, not proof no state is kept
     // What the report said, for contrast: the same app read as a data app.
     const before = releaseGate({ ...base, journeys: undefined } as never, { blockers: 0, highSeverity: 0, warnings: 1 });
     expect(before.headline).toMatch(/keeps what a user enters is untested/);

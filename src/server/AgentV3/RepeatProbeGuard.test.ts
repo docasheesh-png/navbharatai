@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   newRepeatProbeState, probeSignature, recordAndCheckRepeat, collectRepeatProbeSteer,
   loopGuardEnabled, loopGuardThreshold, repeatProbeSteer,
+  isProbeBanned,
 } from './RepeatProbeGuard';
 
 // Autopsy 2026-07-21: a weak build ran the SAME `grep "from '../types'"` ~6 times (each empty) and never
@@ -17,11 +18,27 @@ describe('probeSignature — stable, key-order independent', () => {
     expect(probeSignature('run_command', { command: 'grep x' }))
       .not.toBe(probeSignature('run_command', { command: 'grep y' }));
   });
+  it('preserves scalar types and JSON delimiters inside input values', () => {
+    expect(probeSignature('grep', { pattern: '1' })).not.toBe(probeSignature('grep', { pattern: 1 }));
+    expect(probeSignature('grep', { a: 'b,c:d' })).not.toBe(probeSignature('grep', { a: 'b', c: 'd' }));
+  });
   it('caps a huge string body but keeps it distinct', () => {
     const big1 = probeSignature('write_file', { path: 'a', content: 'A'.repeat(5000) });
     const big2 = probeSignature('write_file', { path: 'a', content: 'B'.repeat(5000) });
     expect(big1).not.toBe(big2);
     expect(big1.length).toBeLessThan(400); // bounded
+  });
+
+  it('does not ban a different long search sharing a prefix and length with a repeated one', () => {
+    const prefix = 'generated/'.repeat(24);
+    const first = { path: `${prefix}World.ts` };
+    const second = { path: `${prefix}Scene.ts` };
+    const state = newRepeatProbeState();
+    for (let i = 0; i < 6; i++) recordAndCheckRepeat(state, 'read_file', first);
+    expect(isProbeBanned(state, 'read_file', first)).toBe(true);
+    expect(isProbeBanned(state, 'read_file', second)).toBe(false);
+    expect(probeSignature('read_file', first)).not.toBe(probeSignature('read_file', second));
+    expect(probeSignature('read_file', second).length).toBeLessThan(400);
   });
 });
 

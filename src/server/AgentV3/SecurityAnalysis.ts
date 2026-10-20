@@ -10,6 +10,7 @@ import { PEM_PRIVATE_KEY_MARKER, containsPemPrivateKey } from '../lib/pemKeyMate
 import { isFirebaseWebConfigKey } from '../lib/firebaseWebConfig';
 import { enclosingTag } from './jsxTags';
 import { isLiveEnvFilePath } from '../../lib/envFile';
+import { codePositions } from './ProjectIntegrityChecks';
 
 export type Severity = 'high' | 'medium' | 'low';
 
@@ -73,7 +74,7 @@ export function isFixtureFile(file: string): boolean {
 export function isEnvSecretsFile(file: string): boolean {
   // The ONE definition lives in src/lib/envFile.ts so the client-safe modules (the phone-build
   // assembler, imported by the APK screen) share it without pulling this scanner into the web bundle.
-  return isLiveEnvFilePath(file);
+  return isLiveEnvFilePath(String(file ?? '').replace(/\\/g, '/'));
 }
 
 // Placeholder / non-real-credential markers. MUST be tested against the captured credential VALUE
@@ -605,6 +606,7 @@ const RULES: Rule[] = [
     re: /\bauthorization\b['"`]?\s*[:=]\s*(['"`])\s*(?:bearer|basic)\s+[^'"`]{8,}\1/i,
     message: 'Hardcoded Authorization credential (Bearer/Basic literal) — load the token from an environment variable instead of committing it.',
     ignore: (m) => PLACEHOLDER.test(m[0]),
+    demoDowngrade: true,
   },
   {
     rule: 'hardcoded-provider-token',
@@ -619,6 +621,7 @@ const RULES: Rule[] = [
     message: 'Hardcoded API credential (GitHub/Google/Slack/Stripe/Anthropic token) in source — remove it, load it from an environment variable, and rotate the key since it was committed.',
     contextual: 'around',
     ignore: (m, _line, around) => PLACEHOLDER.test(m[0]) || (/^AIza/.test(m[0]) && isFirebaseWebConfigKey(around)),
+    demoDowngrade: true,
   },
   {
     rule: 'unsafe-target-blank',
@@ -860,6 +863,27 @@ export function elementRelGuard(content: string, offset: number): string | null 
   return found.join(' ');
 }
 
+/** Type declarations describe env names but emit no value into the client bundle. */
+function typeOnlyEnvRanges(file: string, content: string): Array<[number, number]> {
+  if (/\.d\.[cm]?ts$/i.test(file)) return [[0, content.length]];
+  if (!/\.[cm]?tsx?$/i.test(file) || !/(?:VITE_|NEXT_PUBLIC_|REACT_APP_)/.test(content)) return [];
+  const mask = codePositions(content);
+  const declarations = /\b(?:interface\s+[\w$]+(?:\s*<[^{};\n]*>)?(?:\s+extends\s+[^{};]+)?\s*|type\s+[\w$]+(?:\s*<[^{};\n]*>)?\s*=\s*)\{/g;
+  const ranges: Array<[number, number]> = [];
+  for (const match of content.matchAll(declarations)) {
+    if (!mask[match.index!]) continue; // text inside a comment/string is not a declaration
+    const open = match.index! + match[0].length - 1;
+    if (!mask[open]) continue;
+    let depth = 1;
+    for (let at = open + 1; at < content.length; at++) {
+      if (!mask[at]) continue;
+      if (content[at] === '{') depth++;
+      else if (content[at] === '}' && --depth === 0) { ranges.push([open, at]); break; }
+    }
+  }
+  return ranges;
+}
+
 /** Scan one file's content for security findings. Returns [] for non-issues. */
 export function scanSecurity(file: string, content: string): SecurityFinding[] {
   const findings: SecurityFinding[] = [];
@@ -874,13 +898,24 @@ export function scanSecurity(file: string, content: string): SecurityFinding[] {
   // Credentials are EXPECTED (not a leak) in a fixture/demo file OR a dotenv secrets file — a value rule
   // there is downgraded to 'low' so a correct app never FAILS its readiness gate on credentials that belong
   // exactly where they are. A real secret hardcoded in real source still blocks.
-  const credsBelongHere = isFixtureFile(file) || isEnvSecretsFile(file);
+  const dotenvPath = /(?:^|\/)\.env(?:\.[a-z0-9_.-]+)?$/i.test(file.replace(/\\/g, '/'));
+  // `.env.sample` is a committed credential template, even though "sample" otherwise marks a fixture.
+  const credsBelongHere = isEnvSecretsFile(file) || (!dotenvPath && isFixtureFile(file));
+  const erasedEnvNames = typeOnlyEnvRanges(file, content);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.length > 4000) continue; // skip minified/huge lines
     for (const r of RULES) {
-      const m = r.re.exec(line);
+      let m = r.re.exec(line);
       if (!m) continue;
+      if (r.rule === 'client-exposed-secret' && erasedEnvNames.length > 0) {
+        const names = new RegExp(r.re.source, r.re.flags.includes('g') ? r.re.flags : `${r.re.flags}g`);
+        while ((m = names.exec(line)) !== null) {
+          const at = lineStart[i] + m.index;
+          if (!erasedEnvNames.some(([start, end]) => at >= start && at < end)) break;
+        }
+        if (!m) continue;
+      }
       const context = r.contextual === 'tag'
         ? enclosingTag(content, lineStart[i] + m.index) ?? undefined
         : r.contextual === 'element'
@@ -893,7 +928,11 @@ export function scanSecurity(file: string, content: string): SecurityFinding[] {
               ? content.slice(Math.max(0, lineStart[i] + m.index - 800), lineStart[i] + m.index + 800)
               : undefined;
       if (!(r.ignore && r.ignore(m, line, context))) {
-        const severity: Severity = credsBelongHere && r.demoDowngrade ? 'low' : r.severity;
+        // A real token under a public bundler prefix is deliberately exposed even in .env. It must
+        // remain high; a private server token in that same live env file belongs there.
+        const clientEnvValue = isEnvSecretsFile(file)
+          && /^\s*(?:export\s+)?(?:VITE_|NEXT_PUBLIC_|REACT_APP_)[A-Z0-9_]*\s*=/.test(line);
+        const severity: Severity = credsBelongHere && r.demoDowngrade && !clientEnvValue ? 'low' : r.severity;
         findings.push({ file, line: i + 1, severity, rule: r.rule, message: r.message });
       }
     }

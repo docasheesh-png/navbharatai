@@ -367,6 +367,10 @@ export function releaseGate(
   const unproven: string[] = [];
   const failures: string[] = [];
   const softFailures: string[] = [];
+  // Derivation describes what the runner could drive, not what the app can store. Reuse its reason
+  // in both the details and the headline so a button-driven app with saved state is never told it
+  // has "nothing to save" merely because no fill-and-submit journey was derived.
+  const noJourneyWhy = String(ev.journeyNoneWhy ?? '').trim().replace(/\s+/g, ' ').slice(0, 200);
 
   for (const key of Object.keys(RUNTIME_LABEL) as Array<keyof typeof RUNTIME_LABEL>) {
     const outcome = ev[key];
@@ -396,17 +400,17 @@ export function releaseGate(
       // streak and finished lessons in browser storage — the SAME false claim `noJourneyReason` was
       // making, in a second place, where only the first was fixed. When the derivation supplied its own
       // reason, that reason is the true one and is used; the generic line is the fallback.
-      const why = String(ev.journeyNoneWhy ?? '').trim().replace(/\s+/g, ' ').slice(0, 200);
-      unproven.push(why
-        ? `${why} (not a defect)`
+      unproven.push(noJourneyWhy
+        ? `${noJourneyWhy} (not a defect)`
         : 'there was no user journey here to drive, so none was proven (not a defect)');
     } else unproven.push(whyMissing(key, ev));
   }
-  // A game / dashboard / landing page with no data-entry surface at all: there is genuinely no "save"
-  // journey to prove, so the YELLOW headline must not imply one is missing.
+  // No form journey was derived. This alone cannot establish whether the app keeps state, so the
+  // headline describes the checks performed rather than inventing an absent save capability.
   const noDataJourney = ev.journeys === 'none-derivable';
   // Controls pressed in a real browser, none of them broken (see `explore`). Proof of interaction for every
-  // app; for an app with nothing to save it is the whole journey, so it may earn GREEN there and nowhere else.
+  // app; when no form journey was derived this is the interaction evidence the gate can grade. The
+  // derivation result does not establish that the app has no stored state.
   const pressedOk = ev.explore === 'passed' && (ev.explorePresses ?? 0) > 0;
   if (pressedOk) proven.push(`pressing ${ev.explorePresses} of its controls in a real browser broke nothing`);
 
@@ -462,7 +466,7 @@ export function releaseGate(
       state: 'green',
       headline: ev.journeys === 'passed'
         ? 'Shippable — it runs, and a real user journey held up end to end.'
-        : 'Shippable — it runs, it has nothing to save, and pressing its controls in a real browser held up.',
+        : 'Shippable — it runs, and pressing its controls in a real browser held up.',
       proven, unproven, failures,
     };
   }
@@ -474,14 +478,12 @@ export function releaseGate(
     f.warnings > 0 ? `${f.warnings} thing(s) worth a look${namedWarnings(f)}` : '',
     ...qualityCaveats,
   ].filter(Boolean).join(', ');
-  // The honest not-proven headline. For an app with no data-entry flow at all, "whether it SAVES anything
-  // is untested" is a category error — it saves nothing — so it gets a NEUTRAL line that neither invents a
-  // missing capability nor claims a verification we did not do. GREEN is still out of reach (a journey was
-  // never proven), so this only changes the WORDING of a YELLOW, never the verdict.
+  // A neutral coverage statement: no derived journey does not mean no data-entry flow or stored state.
+  // The derivation's reason, when available, is the same one already shown in unproven above.
   const notProvenHeadline = noDataJourney
     ? (pressedOk
-      ? `It runs, it has nothing to save, and pressing its controls in a real browser broke nothing${caveat ? ` (also: ${caveat})` : ''}.`
-      : `It runs and renders. This app has no data-entry flow to exercise, so there was no user journey to prove — its interactive behaviour was not machine-verified${caveat ? ` (also: ${caveat})` : ''}.`)
+      ? `It runs and renders, and pressing its controls in a real browser broke nothing${caveat ? ` (also: ${caveat})` : ''}.`
+      : `It runs and renders. No user journey was derived to drive${noJourneyWhy ? ` (${noJourneyWhy})` : ''} — its interactive behaviour was not machine-verified${caveat ? ` (also: ${caveat})` : ''}.`)
     : pressedOk
       ? `It runs and renders, and pressing its controls in a real browser broke nothing — but no save-and-reload journey was proven, so whether it keeps what a user enters is untested${caveat ? ` (also: ${caveat})` : ''}.`
       : `It runs and renders — but no user journey was proven, so whether it actually SAVES anything is untested${caveat ? ` (also: ${caveat})` : ''}.`;

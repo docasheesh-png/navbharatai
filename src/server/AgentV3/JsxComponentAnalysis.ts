@@ -13,6 +13,8 @@
 //     never mis-flagged.
 //   • Known JSX globals (React, Fragment) are always allowed.
 
+import { isAppAnalysisPath } from './appAnalysisPaths';
+
 export interface UndefinedComponent {
   file: string;
   line: number;
@@ -98,7 +100,7 @@ export async function analyzeJsxComponents(files: Record<string, string>): Promi
   let scanned = 0;
 
   for (const [path, content] of Object.entries(files)) {
-    if (!JSX_FILE.test(path) || typeof content !== 'string' || !content.includes('<')) continue;
+    if (!JSX_FILE.test(path) || !isAppAnalysisPath(path) || typeof content !== 'string' || !content.includes('<')) continue;
     scanned++;
     let sf: any;
     try { sf = project.createSourceFile(path, content, { overwrite: true }); } catch { continue; }

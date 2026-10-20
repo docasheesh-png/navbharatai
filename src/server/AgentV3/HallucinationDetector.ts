@@ -13,6 +13,8 @@
  * Pure + dependency-free + unit-tested. Operates on a `{ path: content }` file map (no sandbox).
  */
 
+import { isAppAnalysisPath } from './appAnalysisPaths';
+
 export type HallucinationKind = 'hallucinated-dependency' | 'unresolved-local-import' | 'placeholder-stub';
 
 export interface HallucinationSignal {
@@ -109,7 +111,7 @@ export function detectHallucinations(files: Record<string, string>, opts: Detect
   const signals: HallucinationSignal[] = [];
 
   for (const [path, content] of Object.entries(files)) {
-    if (typeof content !== 'string') continue;
+    if (typeof content !== 'string' || !isAppAnalysisPath(path)) continue;
     if (CODE_FILE.test(path)) {
       for (const spec of extractSpecifiers(content)) {
         if (spec.startsWith('.') || spec.startsWith('/')) {

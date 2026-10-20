@@ -142,3 +142,17 @@ export function e2eExcludeNote(added: string[]): string {
     + 'They need Playwright, which is not installed in your project — without this, your app would fail '
     + 'to build over a test file that is not part of it.';
 }
+
+/** Write a required build exclusion before creating any scaffold TypeScript. A refused write throws
+ * into the scaffold's existing catch, so no test files can land without their prerequisite. */
+export async function excludeE2eBeforeScaffolding(raw: string | null, deps: {
+  mayModify: boolean;
+  write: (text: string) => Promise<void>;
+  onWritten: (text: string, added: string[]) => void;
+}): Promise<void> {
+  if (!raw || !deps.mayModify) return;
+  const excluded = withE2eExcluded(raw);
+  if (!excluded.changed) return;
+  await deps.write(excluded.text);
+  deps.onWritten(excluded.text, excluded.added);
+}

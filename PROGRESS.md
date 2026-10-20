@@ -97511,3 +97511,38 @@ its own documentation): here it is a census re-written instead of re-used.
 **Next:** the 24 that remain, of which the payment-audit cluster (Q-881–Q-885, Q-891–Q-894) is the largest
 group; Q-891 and Q-894 genuinely need the admin (revenue columns, coupon policy) and stay blocked. Then
 Q-886 and Q-888 as their own rows of work, one at a time.
+
+### 2026-10-20 — Phase2 deadline body-exit hold added to PR #3852
+
+The recovery/asset checkpoint's original head `e379b88` passed the full local
+gate: 2,805 files /40,032 tests passed /67 skipped /0 failed, plus both
+typechecks, build/boot, imports/native/OAuth/bundle/server-dependency, audit,
+license and SBOM gates. PR #3852 opened, but main advanced with unrelated
+documentation PR #3851 during verification; both append-only progress histories
+were preserved by a clean main merge. The final combined state must be gated
+again before push. No remoteCI or merge success is claimed yet.
+
+The next sibling was the deadline finalizer marking a build exited and releasing
+ownership while an unabortable body or the finalizer's own awaited persistence
+could still run. Deadline response closure now differs from actual exit: install
+a captured nonreclaimable hold synchronously, share/join the finalizer, cancel
+future timers before cleanup awaits, guarantee stream closure on rejection, and
+keep the exact receipt/lease until real cleanup. Queue publication has its own
+barrier. Stopped-build and reaper paths cannot time-reclaim the deadline-held
+body. A failed deadline reports still stopping and disables automatic resume
+while exit is unconfirmed; changed files are not represented as confirmed saved.
+
+Focused tests exercise independently blocked body/finalizer completion,
+publication versus receipt settlement, heartbeat continuation across eight
+virtual stale windows, failed finalization, newer-map preservation and timer
+cleanup. Independent review caught and corrected early-timer/cleanup and
+lost-renewal release siblings. Full final-source local and exact-head remote
+coverage/database checks remain required.
+
+Still OPEN: physical provider command/source fences, ordinary Stop's older
+time-based local reclaim, fresh allocation ambiguity, complete state/origin
+preservation, queued resumable handoff and late external writes. Normal and
+deadline pricing/terminal paths can still interleave within the same attempt;
+stable operation refs dedupe debits but do not compare requested amounts or
+return prior debit amounts. No pricing policy changed. This bounded authority
+fix does not complete Phase2; phases3–6 remain unstarted.

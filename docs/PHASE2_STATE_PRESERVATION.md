@@ -1,6 +1,8 @@
 # Phase 2: recovery identity and private asset erasure
 
-This is a second scoped Phase 2 checkpoint. Phase 2 remains **IN PROGRESS**.
+This is a second scoped Phase 2 checkpoint, proposed in
+[PR #3852](https://github.com/docasheesh-png/navbharatai/pull/3852).
+Phase 2 remains **IN PROGRESS**.
 The queue/retry checkpoint [PR #3848](https://github.com/docasheesh-png/navbharatai/pull/3848)
 passed [both CI jobs](https://github.com/docasheesh-png/navbharatai/actions/runs/39378125233)
 at `7241043914134488c4f54b005988fc76cc62ef9d` and merged as
@@ -47,6 +49,41 @@ provider not-found response is not physical process-drain evidence or proof that
 all local databases, uploads, secrets and browser-origin data can be restored.
 Existing shared restore helpers still retain their best-effort per-file
 behavior. Runtime/source fencing and full state preservation remain open.
+
+## Deadline response versus actual body exit
+
+The deadline finalizer previously released ownership and marked the build exited
+while its own comment acknowledged an unabortable awaited body might still run.
+It could also be saving files after the body's finally had admitted a successor.
+
+A captured deadline now installs an immediate body-exit hold, shares one finalizer
+promise and closes its stream even when finalizer persistence fails. Both actual
+cleanup paths cancel future timers synchronously and join an active finalizer
+before releasing resources. Queue publication can finish before stream closure
+without retiring the execution receipt early. The lease heartbeat, stopped-build
+gate and reactive/proactive reapers honor this captured hold until actual exit.
+Losing shared ownership is reported and aborts work; it does not turn the held
+body into an exited receipt.
+
+An unfinished deadline result is non-resumable and explains that previous work
+is still stopping. It describes files changed, without promising successful
+persistence or automatic continuation. A retry is refused while the held work
+remains. Normal completion, pricing rules and wallet operation references retain
+their existing policies.
+
+Focused tests independently hold the body and finalizer, exercise both completion
+orders, keep a real lease implementation renewed across eight virtual stale
+windows, deny a competing token, verify publication/receipt separation and cover
+rejection, cleanup, reentrancy and captured-map protection. These are controlled
+process tests, not proof of physical provider cancellation.
+
+Actual handler exit still cannot establish that detached or timed-out SDK
+commands have drained. Ordinary Stop's older time-based local reclaim policy,
+remote lease expiry/fencing and the pre-existing normal-versus-deadline
+pricing/terminal race remain open. Stable wallet operation references prevent a
+second debit for the same reference; they do not validate equal amount snapshots
+or return the prior debit amount. This checkpoint does not claim one serialized
+settlement for all concurrent exits.
 
 ## Completed private asset objects
 

@@ -97766,6 +97766,7 @@ one intermediate sibling: a durable deletion chained after finalSave behind its
 own 15s wrapper. Both its raw deletion and wrapper now use the existing tracker;
 its actual-coordinator regression holds the delete and proves READY waits for
 the deletion to return. No final-step protocol or pricing behavior is added.
+
 ### 2026-10-20 — Phase2 old canonical-history erasure contract corrected
 
 Final5 at `24a502e` completed with 2,810 files /40,076 tests passing /67 skipped
@@ -97783,3 +97784,15 @@ byte assertion; the safe production file was restored unchanged. The restored
 history/profile/conversation/headroom cohort passes 4 files /12 tests. No
 production code, inventory, threshold or skip changed for this correction. The
 complete final-source suite and local checks must pass again before push/merge.
+
+The separate normal-module queue branch merged correction `00d3bc8` without
+changing production/configuration/package bytes. Its final focused cohort is
+21 files /312 tests passed, including held durable deletion, all queue/request/
+receipt/Stop/client guards, verified asset erasure and corrected canonical-history
+retention. Renewed sequential frontend/server types, imports/locals, native,
+OAuth, build, bundle, isolated-port boot and server dependency gates all passed.
+The held-delete test was strengthened to wait for the actual join boundary;
+removing owned-work registration then produced durable READY while obsolete.ts
+still existed, and failed. Safe source was restored exactly. The 21 real database
+drills exercise unchanged script/store/lease bytes. Complete suite and exact-head
+CI remain pending; final queued-step/source fencing remains OPEN.

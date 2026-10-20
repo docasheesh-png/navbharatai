@@ -99,6 +99,13 @@ lease state. The final run passed all 21 checks, including two explicitly
 injected post-commit ACK-loss race interleavings. No original check, timeout or
 drill count was weakened. The complete suite and exact-head CI remain pending.
 
+After the durable-deletion sibling and the corrected canonical-history test were
+integrated, the final focused cohort passed 21 files /312 tests, and sequential
+types/build/boot and the remaining quick gates passed again. The deletion
+negative control produced READY while its held source deletion had not run;
+the safe tracker was restored. No all-queue drain guarantee follows from these
+checks; the final queued-step boundary below remains open.
+
 This preserves the existing shared runtime and preview origin. It does not fence
 remote SDK commands already running, make source writes transactional across all
 workers, or establish state migration/replacement safety. A timed-out owned save

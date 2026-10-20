@@ -40,6 +40,15 @@ export interface AppFeature {
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
+    id: 'build_ownership_interruption',
+    name: 'Build paused for app protection',
+    path: 'Builder chat → build status',
+    description: 'If the service cannot confirm that a running build still owns its workspace, it stops that attempt to protect the app. This is a service interruption, not proof that the app is broken or that another build replaced it. A stop request can take time to finish.',
+    howToUse: 'Wait for the previous attempt to finish stopping, then retry from the same chat. Do not promise automatic resumption, complete recovery or successful verification from this message alone.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['build ownership', 'build stopped', 'workspace protection', 'retry build'],
+  },
+  {
     id: 'app_data_storage_access',
     name: 'App database and upload access controls',
     path: 'Publish → Database; generated app sign-in and upload integration',

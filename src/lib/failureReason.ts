@@ -129,6 +129,7 @@ export const OUTCOME_REASONS: Readonly<Record<string, FailureReason>> = {
   OUTCOME_FUTILE: { key: 'futile', label: 'Stopped because nothing was being produced (futility breaker)' },
   OUTCOME_DEPLOY_DRAIN: { key: 'deploy-drain', label: 'Interrupted by a NavBharatAI deploy (resumes on its own)' },
   OUTCOME_SUPERSEDED: { key: 'superseded', label: 'Replaced by a newer build on the same project' },
+  OUTCOME_AUTHORITY_UNAVAILABLE: { key: 'authority-unavailable', label: 'Build ownership could not be confirmed' },
   OUTCOME_REAPED: { key: 'reaped', label: 'Stopped reporting and was cleaned up by the reaper' },
   /**
    * Split out of `OUTCOME_STOPPED` on 2026-09-20: an abort whose signal carried no cause, i.e. one

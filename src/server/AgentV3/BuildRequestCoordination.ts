@@ -187,7 +187,13 @@ export function startBuildLeaseHeartbeat(opts: {
       }
       const heartbeatAt = Date.now();
       const renewal = await renewWorkspaceBuild(opts.store, { workspaceId: opts.workspaceId, token: opts.token, nowMs: heartbeatAt });
-      if (renewal === 'stop-requested' && build && !build.ended) abortBuild(build.abort, 'user-stop');
+      if (renewal === 'unknown' && build && !build.exited) {
+        // An unavailable store is not permission to keep building until another worker takes over.
+        // Abort cooperatively, but retain the local/body hold and keep trying to renew: an abort
+        // signal does not prove an already-dispatched sandbox command has actually stopped.
+        build.requiresBodyExit = true;
+        abortBuild(build.abort, 'authority-unavailable');
+      } else if (renewal === 'stop-requested' && build && !build.ended) abortBuild(build.abort, 'user-stop');
       else if (renewal === 'lost') {
         if (build && !build.ended) abortBuild(build.abort, 'lock-reclaimed');
         opts.lost();

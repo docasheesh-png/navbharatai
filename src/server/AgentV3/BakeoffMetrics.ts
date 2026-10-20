@@ -61,6 +61,7 @@ export function metricsFromEvents(events: Array<Record<string, unknown>>): Build
   let toolErrors = 0;
   let providerFallbacks = 0;
   let evidence: BuildEvidence | undefined;
+  let resultSeen = false;
 
   for (const e of events) {
     switch (e.type) {
@@ -70,6 +71,7 @@ export function metricsFromEvents(events: Array<Record<string, unknown>>): Build
         break;
       }
       case 'result': {
+        resultSeen = true;
         if (typeof e.ok === 'boolean') ok = e.ok;
         if (typeof e.billedUsd === 'number') billedUsd = e.billedUsd as number;
         evidence = evidenceFromResult(e);
@@ -82,7 +84,8 @@ export function metricsFromEvents(events: Array<Record<string, unknown>>): Build
         break;
       }
       case 'done': {
-        if (typeof e.ok === 'boolean') ok = ok || (e.ok as boolean);
+        // `done` may describe an earlier lane. It must never resurrect a failed final result.
+        if (!resultSeen && typeof e.ok === 'boolean') ok = e.ok;
         const readiness = e.readiness as { score?: unknown } | undefined;
         if (readiness && typeof readiness.score === 'number') readinessScore = readiness.score as number;
         break;

@@ -86,6 +86,10 @@ export function computePenaltyMs(violations: number, capMs = 30_000): number {
  */
 export function isGuardedPath(path: string): boolean {
   if (!path.startsWith('/api/')) return false;
+  // Probes are automated by design. A monitor sharing a hot address must still learn whether
+  // this process is alive/initialized, rather than causing a restart storm through a bot 429.
+  // Deep health, status, admin and similarly named application routes retain their protection.
+  if (/^\/api\/(?:v1\/)?(?:live|ready)\/?$/.test(path)) return false;
   // External MCP/OAuth clients are automated by design. These endpoints enforce their own
   // bounded rate limits and authentication; a bot-User-Agent heuristic would block real clients.
   if (/^\/api\/(?:v1\/)?failedbr\/(?:mcp|reports|oauth)(?:\/|$)/.test(path)) return false;

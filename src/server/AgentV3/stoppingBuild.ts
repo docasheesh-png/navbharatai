@@ -36,6 +36,12 @@ export interface StoppingBuild {
   stoppedAt?: number;
   /** Callbacks to run once the build exits. */
   exitWaiters?: Array<() => void>;
+  /** A deadline-closed stream retains its authority until the captured body actually exits. */
+  requiresBodyExit?: boolean;
+}
+
+export function hasBuildBodyExitHold(entry: StoppingBuild | null | undefined): boolean {
+  return entry?.requiresBodyExit === true && entry.exited !== true;
 }
 
 export type StoppedBuildGate = 'proceed' | 'refuse' | 'reclaim';
@@ -49,6 +55,7 @@ export type StoppedBuildGate = 'proceed' | 'refuse' | 'reclaim';
  */
 export function stoppedBuildGate(entry: StoppingBuild | null | undefined, nowMs: number, maxMs: number = STOP_DRAIN_MAX_MS): StoppedBuildGate {
   if (!entry || entry.exited === true) return 'proceed';
+  if (hasBuildBodyExitHold(entry)) return 'refuse';
   const stoppedAt = Number(entry.stoppedAt);
   if (!Number.isFinite(stoppedAt)) return 'reclaim';
   return nowMs - stoppedAt >= maxMs ? 'reclaim' : 'refuse';

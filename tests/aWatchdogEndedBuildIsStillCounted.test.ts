@@ -24,7 +24,7 @@ function functionBody(src: string, header: string): string {
 
 describe('a watchdog-ended build is still counted', () => {
   it('finalizeOnDeadline records the failure, and so does the settle', () => {
-    const fin = functionBody(route, 'const finalizeOnDeadline = async () => {');
+    const fin = functionBody(route, 'finalize: async () => {');
     expect(fin).toContain('recordFailureLedgerOnce(');
     const settleAt = route.indexOf('realCostRemainder: realCostRemainderForFailure');
     expect(settleAt).toBeGreaterThan(-1);

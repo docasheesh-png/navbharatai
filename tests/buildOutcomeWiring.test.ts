@@ -215,11 +215,11 @@ describe('🔒 a PERSISTED diagnostics report can never carry a stale success na
    * emits, not only the terminal one, so `finish()` is the one place that can put an honest string back.
    */
   it('the watchdog finalizer computes an honest pause message BEFORE finishing the report, and passes it on the not-ok branch', () => {
-    const i = route.indexOf('const finalizeOnDeadline = async () => {');
+    const i = route.indexOf('finalize: async () => {');
     expect(i).toBeGreaterThan(-1);
-    const body = functionBody(route, 'const finalizeOnDeadline = async () => {');
-    // A free build whose unattended chain is spent gets freePauseMessage instead (freeBuildTimeCap.ts) — still one value.
-    const pauseComputed = body.indexOf('const pauseMsgForReport = pauseResumable ? deadlinePauseMessage(writtenFiles.size) : freePauseMessage(writtenFiles.size);');
+    const body = functionBody(route, 'finalize: async () => {');
+    // The held body cannot grant auto-continuation; the same honest drain message reaches both report and result.
+    const pauseComputed = body.indexOf('const pauseMsgForReport = deadlineBodyExitMessage(writtenFiles.size);');
     const finishCall = body.indexOf('buildDiagRef?.finish(ok, ok ? buildResultRef?.summary : pauseMsgForReport.summary);');
     expect(pauseComputed).toBeGreaterThan(-1);
     expect(finishCall).toBeGreaterThan(-1);
@@ -229,7 +229,7 @@ describe('🔒 a PERSISTED diagnostics report can never carry a stale success na
   });
 
   it('the resumable-pause chat bubble and the persisted report summary are the SAME honest text — one computation, not two', () => {
-    const body = functionBody(route, 'const finalizeOnDeadline = async () => {');
+    const body = functionBody(route, 'finalize: async () => {');
     // The `else` branch (not-ok, resumable) must reuse the same value rather than recomputing it —
     // two independent calls to deadlinePauseMessage() could disagree if writtenFiles.size changed
     // between them, silently reopening this exact class of contradiction.

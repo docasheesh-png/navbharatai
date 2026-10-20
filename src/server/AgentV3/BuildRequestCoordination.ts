@@ -2,6 +2,7 @@ import type { Request, Response, RequestHandler } from 'express';
 import { renewWorkspaceBuild, LEASE_HEARTBEAT_MS, type BuildLeaseStore } from './workspaceBuildLease';
 import type { RunningBuild } from './runningBuildRegistry';
 import { abortBuild } from './buildAbortCause';
+import { hasBuildBodyExitHold } from './stoppingBuild';
 import { SandboxRecoveryUnavailableError, isSandboxRecoveryUnavailable } from './SandboxRecoveryError';
 import { redactProvidersText } from '../lib/providerRedaction';
 // Per-accepted-request coordination. This owns queue/receipt identity, not runtime/source fencing.
@@ -100,6 +101,8 @@ export function createBuildRequestCoordination(opts: {
       if (resultCaptured) void settlement.then(() => forward(obj));
       else forward(obj);
     },
+    /** Deliver a captured terminal event before closing its stream, without retiring its receipt. */
+    async flushPublication(): Promise<void> { await settlement; },
     async release(): Promise<void> {
       if (binding && !resultCaptured) {
         resultCaptured = true;
@@ -175,8 +178,10 @@ export function startBuildLeaseHeartbeat(opts: {
       const build = opts.build();
       if (build) {
         const holder = opts.current();
-        if (build.exited || (holder !== undefined && holder !== build)) { await opts.release(); return; }
-        if (!build.ended && holder !== build) { await opts.release(); return; }
+        if (!hasBuildBodyExitHold(build)) {
+          if (build.exited || (holder !== undefined && holder !== build)) { await opts.release(); return; }
+          if (!build.ended && holder !== build) { await opts.release(); return; }
+        }
       } else if (!opts.active() || Date.now() - opts.admittedAt > 5 * 60_000) {
         await opts.release(); return;
       }
@@ -186,7 +191,8 @@ export function startBuildLeaseHeartbeat(opts: {
       else if (renewal === 'lost') {
         if (build && !build.ended) abortBuild(build.abort, 'lock-reclaimed');
         opts.lost();
-        await opts.release();
+        // Lost authority is not body-exit proof. Its receipt/local hold still retires in real finally.
+        if (!hasBuildBodyExitHold(build)) await opts.release();
       }
     })().catch(() => { /* Unreachable ownership stays uncertain; no local success acknowledgement. */ });
   }, LEASE_HEARTBEAT_MS);

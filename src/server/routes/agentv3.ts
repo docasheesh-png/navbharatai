@@ -253,7 +253,7 @@ import { pastedFormatDecision, pastedHtmlDocument, pastedStorageKeys, pastedOneF
 import { aiInAppRule } from '../AgentV3/systemPrompt';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
 import { pickPaletteForPrompt, palettePromptBlock } from '../AgentV3/designPresets';
-import { deadlinePauseMessage } from '../AgentV3/DeadlinePause';
+import { closeDeadlineBuildStream, createBuildDeadlineFinalization, deadlineBodyExitMessage, joinBuildDeadlineFinalization, retainBuildUntilBodyExit, type BuildDeadlineFinalization } from '../AgentV3/BuildDeadlineLifecycle';
 import { flushDecision } from '../AgentV3/DurableFlush';
 import { enqueue as enqueueCommand, cancelItem as cancelQueueItem, queueSummary, type QueueItemSource } from '../AgentV3/BuildQueue';
 import {
@@ -501,7 +501,7 @@ import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMiscon
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
 import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
-import { freeBuildWindow, noteFreeBuildStartDurable, decideFreePauseDurable, freePauseMessage } from '../AgentV3/freeBuildTimeCap';
+import { freeBuildWindow, noteFreeBuildStartDurable, decideFreePauseDurable } from '../AgentV3/freeBuildTimeCap';
 import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
@@ -528,7 +528,7 @@ import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
 import { futilityMinutes, initialFutilityState, armedFutilityState, tickFutility, futilityDetail } from '../AgentV3/futilityBreaker';
 import { waitingForUserLine } from '../AgentV3/userWait';
-import { STOP_DRAIN_WAIT_MS, BUILD_STILL_STOPPING_CODE, BUILD_STILL_STOPPING_MESSAGE, stoppedBuildGate, waitForBuildExit, markBuildExited } from '../AgentV3/stoppingBuild';
+import { STOP_DRAIN_WAIT_MS, BUILD_STILL_STOPPING_CODE, BUILD_STILL_STOPPING_MESSAGE, stoppedBuildGate, waitForBuildExit, markBuildExited, hasBuildBodyExitHold } from '../AgentV3/stoppingBuild';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
 function sessionCostCapUsd(): number {
@@ -2296,6 +2296,7 @@ export function isBuildRunningForWorkspace(rb: RunningBuild | undefined, workspa
  * and it has been running past the stall window). A build with a live watcher, or a freshly-started one,
  * is genuinely active → keep the honest 409 (the client re-attaches, or the user Stops it). Pure + tested. */
 export function shouldReclaimBuildLock(existing: RunningBuild | undefined, now: number, staleMs = STALE_BUILD_SILENCE_MS, hardMaxMs = 0): boolean {
+  if (hasBuildBodyExitHold(existing)) return false;
   if (!existing || existing.ended) return true;
   // Abandoned: no live watcher AND SILENT past the stall window.
   //
@@ -10460,6 +10461,8 @@ async function noteBuildOutcome(
     // The build this lease belongs to, once it is registered — the heartbeat acts on THIS build only,
     // never on whatever later build happens to hold the same in-memory key.
     let buildLeaseRb: RunningBuild | null = null;
+    let deadlineFinalization: BuildDeadlineFinalization | undefined;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     const coordination = createBuildRequestCoordination({ workspaceId: leaseWorkspaceId, ownerId: userId,
       attemptId: buildLeaseToken, input: req.body, prompt: () => typedPrompt, store: getDb });
     const preflight = createBuildPreflightStream(res, coordination.publish);
@@ -10508,6 +10511,8 @@ async function noteBuildOutcome(
     };
 
     registerCleanup(async () => {
+      clearTimeout(deadlineTimer);
+      await joinBuildDeadlineFinalization(deadlineFinalization);
       preflight.cancel();
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       const unfinishedBuild = buildLeaseRb as RunningBuild | null; // Assigned inside the accepted async body.
@@ -12545,9 +12550,8 @@ async function noteBuildOutcome(
     // command that never returns), the normal result/error/finally path is never reached, so no
     // terminal event is emitted and the client spinner runs indefinitely (the heartbeat keeps the
     // stream "alive", so the client stall-watchdog never trips either). This timer force-emits a
-    // terminal result, aborts the run, frees the per-account slot, and ends the stream after the
-    // cap. It is cleared in `finally` on normal completion — and because JS is single-threaded it
-    // cannot interleave with the synchronous success/finally path, so it ONLY fires on a real overrun.
+    // terminal result, aborts the run, and closes the stream after the cap. The captured body keeps its
+    // authority until actual exit. Normal finally cancels the timer before any awaited cleanup.
     // P-ARCH+.1 — complexity-adaptive wall-clock. Compute the effective cap ONCE here (before the
     // deadline is armed) from a prompt-derived complexity signal, and thread this SAME value into every
     // downstream deadline/headroom check below. Threading a single value is what keeps the watchdog, the
@@ -12799,10 +12803,13 @@ async function noteBuildOutcome(
       sample: i.rootCause || '',
     });
     // Force-finalize a build that overran its wall-clock cap — or, once the build has already SUCCEEDED,
-    // its much shorter ADVISORY cap (see armAdvisoryCap). Extracted so the initial arm and the re-arm
-    // share one implementation. Guarded by rb.ended so it can never double-emit after a clean finish.
-    const finalizeOnDeadline = async () => {
-      if (rb.ended) return;
+    // its much shorter ADVISORY cap (see armAdvisoryCap). Timer calls share one finalizer; a cleanly
+    // ended stream skips it. This does not serialize the separate normal billing/settlement path.
+    deadlineFinalization = createBuildDeadlineFinalization({
+      build: rb,
+      begin: () => retainBuildUntilBodyExit(buildKey, rb, stoppingBuilds),
+      close: () => closeDeadlineBuildStream(buildKey, rb, runningBuilds, endBuild),
+      finalize: async () => {
       // WHICH cap fired, recorded on the signal so the runner stops blaming the user for it.
       //
       // This one function serves both deadlines, and they mean opposite things to the person waiting:
@@ -13067,17 +13074,15 @@ async function noteBuildOutcome(
       // Computed unconditionally (cheap, pure — just formats `writtenFiles.size`) so both the diagnostics
       // report and the emitted result below use the exact same honest text; not needed for reasoning
       // about the plain success (`ok`) case.
-      // A FREE build's unattended chain is bounded HERE (freeBuildTimeCap.ts): once this request's free
-      // windows have used their allowance, the pause is not resumable — the work is saved and one
-      // "continue" from the user buys the next window. A paid build, and a finished app, are untouched.
+      // Keep the free chain's existing spent-window accounting. Its allowance cannot authorize another
+      // writer while this deadline-closed body still holds the workspace.
       const freePause = !ok && freeTierBuildActive ? await decideFreePauseDurable(workspaceId, deadlineMs, firestoreFreeChainStore()) : null;
-      const pauseResumable = freePause ? freePause.resumable : true;
       if (freePause && !freePause.resumable) {
         try {
           buildDiagRef?.record({ phase: 'build', severity: 'info', code: 'FREE_BUILD_CHAIN_PAUSED', message: `Free build paused for the user: ${Math.round(freePause.spentSeconds / 60)} min of unattended windows used (allowance ${Math.round((freePause.allowanceSeconds ?? 0) / 60)} min). Not auto-continued.`, autoResolved: true });
         } catch { /* observation only */ }
       }
-      const pauseMsgForReport = pauseResumable ? deadlinePauseMessage(writtenFiles.size) : freePauseMessage(writtenFiles.size);
+      const pauseMsgForReport = deadlineBodyExitMessage(writtenFiles.size);
       let dl: BuildDiagnosticsReport | undefined;
       try {
         if (!ok) buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_TIMEOUT', message: `Build exceeded the ${Math.round(deadlineMs / 1000)}s wall-clock cap and was stopped.`, autoResolved: false });
@@ -13137,14 +13142,8 @@ async function noteBuildOutcome(
         emit({ type: 'result', ok: true, summary: watchdogSummary, steps: buildResultRef.steps ?? 0, billedUsd: watchdogBilledUsd, billedInr, ...(watchdogWalletDebit && watchdogWalletDebit.tokensDebited > 0 ? { walletTokensDebited: watchdogWalletDebit.tokensDebited, walletTokenBalance: watchdogWalletDebit.tokenBalance } : {}), ...(watchdogCostBreakdown ? { costBreakdown: watchdogCostBreakdown } : {}), ...(dl ? { diagnostics: dl } : {}) });
         announceBuildFinished(userId, true);
       } else {
-        // SEAMLESS WINDOW TRANSITION (admin "sabkuch automatically hona chahiye, user ko pata bhi na
-        // lage", 2026-07-20): a wall-clock pause that will be AUTO-CONTINUED must be INVISIBLE — no
-        // "time limit reached" chat bubble. We deliberately do NOT emit a pause narration here. The
-        // client's decideAutoContinue speaks only when it genuinely STOPS (budget/backstop/no-progress),
-        // showing an honest message THEN; while it keeps auto-continuing it stays silent, so a multi-
-        // window build reads as one continuous build. The `summary` is kept on the result for the record
-        // (never rendered as a bubble on the resumable path). RC-4's honest-wording lives in the client
-        // stopMessage now, so nothing here can claim "almost done".
+        // A terminal response is not body-exit proof. Show the honest pause without authorizing an
+        // unattended continuation while the captured body still holds its local and durable authority.
         const pauseMsg = pauseMsgForReport;
         // A build the watchdog ended never reached the settle, so the failure ledger would
         // not see it. Same entry, same cost expression, and the once-flag so a race records it once.
@@ -13169,30 +13168,21 @@ async function noteBuildOutcome(
             startedAt: billingCtx.buildStartedAt ?? Date.now(),
           }));
         } catch { /* the ledger must never change how a deadline ends */ }
-        // A pause that waits for the user (free chain spent) is NOT resumable, so the client renders its
-        // `summary` as the build's closing line — which is why freePauseMessage's summary is the full
-        // sentence. No separate narration: it would say the same thing twice.
-        // P-Layer3 — mark this result RESUMABLE so the client can auto-continue (bounded) without the
-        // user having to type "continue". A normal failure has no `resumable` flag, so it won't auto-retry.
-        // `filesWritten` is the PROGRESS signal (FleetOps): the client keeps auto-continuing a wall-clock
-        // pause while this strictly increases across windows, so a big full-stack app finishes unattended.
-        emit({ type: 'result', ok: false, resumable: pauseResumable, summary: pauseMsg.summary, steps: 0, billedUsd: 0, billedInr: 0, filesWritten: writtenFiles.size, ...(dl ? { diagnostics: dl } : {}) });
+        // Existing clients honor resumable:false. A later request must pass the stopping/lease gates;
+        // this result does not promise that an unabortable operation has drained.
+        emit({ type: 'result', ok: false, resumable: false, code: BUILD_STILL_STOPPING_CODE, summary: pauseMsg.summary, steps: 0, billedUsd: 0, billedInr: 0, filesWritten: writtenFiles.size, ...(dl ? { diagnostics: dl } : {}) });
       }
       // A deadline-finalized build's `finally` may never run (the body is stuck on an un-abortable
       // await) — persist the evidence layer HERE too, after the terminal emit so the recorder has
       // captured the result facts. The delta cursor makes a later finally call a no-op.
+      await coordination.flushPublication();
       await persistSessionTimeline();
-      try { clearGreenLatch(workspaceId); } catch { /* best-effort */ }
-      releaseBuildLock(buildKey, buildLockToken);
-      await releaseBuildLease();
-      if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
-      endBuild(rb);
-      // The deadline is the existing escape hatch for a body stuck on an un-abortable await: from here this
-      // build counts as gone, so a new build waiting on it (stoppingBuild.ts) may start.
-      if (stoppingBuilds.get(buildKey) === rb) stoppingBuilds.delete(buildKey);
-      markBuildExited(rb);
-    };
-    let deadlineTimer: ReturnType<typeof setTimeout> | undefined = deadlineMs > 0 ? setTimeout(finalizeOnDeadline, deadlineMs) : undefined;
+      // The controller closes the stream after this callback. The captured body retains its key, receipt, heartbeat
+      // and green latch until its real finally joins this finalizer and finishes its own cleanup.
+      },
+    });
+    const finalizeOnDeadline = deadlineFinalization.run;
+    deadlineTimer = deadlineMs > 0 ? setTimeout(finalizeOnDeadline, deadlineMs) : undefined;
     // ADVISORY CAP — the #1 "build stuck running" root cause: once the app is BUILT and durably saved,
     // the remaining post-build work (reviewer, reflection, project summary, memory persist, and above
     // all the GitHub push/merge NETWORK calls) is ADVISORY. A single hung advisory step used to hold
@@ -27571,6 +27561,9 @@ async function noteBuildOutcome(
       publishBuildException(err, crashReportForClient, emit);
       announceBuildFinished(userId, false);
     } finally {
+      // Deadline persistence is work from this attempt too. Join it before clearing any held resource.
+      clearTimeout(deadlineTimer);
+      await joinBuildDeadlineFinalization(deadlineFinalization);
       // GREEN FREEZE — clear this workspace's green latch no matter how the build ended, so a stale
       // latch can never freeze the EARLY writes of the NEXT build for the same workspace.
       try { clearGreenLatch(workspaceId); } catch { /* best-effort */ }
@@ -27669,9 +27662,7 @@ async function noteBuildOutcome(
           }
         }
       } catch { /* terminal-status stamp is best-effort — never affects the build */ }
-      // Normal completion reached the finally synchronously → cancel the wall-clock deadline so it
-      // can't fire after a clean finish (no double terminal event), and stop the heartbeat timer.
-      if (deadlineTimer) clearTimeout(deadlineTimer);
+      // The deadline was canceled at finally entry; diagnostics heartbeats can now stop too.
       clearInterval(diagHeartbeatTimer);
       // The build is over however it ended — success, failure, watchdog or Stop. The preview has been
       // holding updates back while the app was being settled; this is what lets them land. Emitted in

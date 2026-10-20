@@ -47,10 +47,10 @@ export function MaintenanceCard({ adminToken }: { adminToken: string }): React.R
     <p className="text-sm text-muted">Pause AI for everyone to control spending. AI tools and other service actions are paused; admin access, sign-in, wallet and payments stay available. Calls already sent may still have a cost.</p>
     {state && <>
       <blockquote className="rounded-lg bg-raised p-3 text-sm text-ink">{state.message}</blockquote>
-      {state.enabled && <p className="text-sm text-ink">{state.reason === 'kimi_quota' ? 'Automatic protection: repeated Kimi account token/quota failures.' : 'Maintenance is enabled.'} Resume only when you are ready.</p>}
+      {state.enabled && <p className="text-sm text-ink">{state.reason === 'kimi_quota' ? 'Automatic protection: repeated primary provider account token/quota failures.' : 'Maintenance is enabled.'} Resume only when you are ready.</p>}
       <label className="flex items-start gap-3 text-sm text-ink">
         <input type="checkbox" className="mt-1 h-5 w-5" checked={state.autoEnabled} disabled={busy || !!error} onChange={e => void save({ autoEnabled: e.target.checked })} />
-        <span><strong>Auto-on protection</strong><br />Turn Maintenance on after {state.threshold} Kimi account token/quota failures within {state.windowSeconds / 60} minutes. It stays on until you resume it. Temporary rate limits and oversized prompts do not trigger it.</span>
+        <span><strong>Auto-on protection</strong><br />Turn Maintenance on after {state.threshold} primary provider account token/quota failures within {state.windowSeconds / 60} minutes. It stays on until you resume it. Temporary rate limits and oversized prompts do not trigger it.</span>
       </label>
       {state.updatedAt && <p className="text-xs text-muted">Last changed: {new Date(state.updatedAt).toLocaleString()}</p>}
     </>}

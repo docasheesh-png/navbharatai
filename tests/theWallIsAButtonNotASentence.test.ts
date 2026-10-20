@@ -209,6 +209,7 @@ describe('Doctor AI: the offer lives in THIS session and is never restored as a 
 
   it('a refusal bubble carries the flag and drops the ⚠️ — a price is not a warning', () => {
     expect(body).toContain('needsCredit: !!noCredit');
-    expect(body).toContain('text: noCredit ? honest : `⚠️ ${honest}`');
+    // Maintenance is also an ordinary pause, while other failures keep their warning.
+    expect(body).toContain('text: noCredit || errData?.maintenance === true ? honest : `⚠️ ${honest}`');
   });
 });

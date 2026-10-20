@@ -1,6 +1,7 @@
 import type { Express, RequestHandler } from 'express';
 import { aiMaintenanceStore, MAINTENANCE_MESSAGE, MAINTENANCE_FAILURE_THRESHOLD, MAINTENANCE_FAILURE_WINDOW_MS } from '../lib/aiMaintenance';
 import { audit } from '../lib/audit';
+import { adminUsername } from '../lib/adminAuth';
 
 export function registerAiMaintenanceRoutes(app: Express, verifyAdminToken: RequestHandler): void {
   app.get('/api/admin/ai-maintenance', verifyAdminToken, async (_req, res) => {
@@ -18,7 +19,7 @@ export function registerAiMaintenanceRoutes(app: Express, verifyAdminToken: Requ
     }
     try {
       const state = await aiMaintenanceStore.set({ ...(enabled === undefined ? {} : { enabled }), ...(autoEnabled === undefined ? {} : { autoEnabled }) });
-      audit('ADMIN_AI_MAINTENANCE', { enabled: state.enabled, autoEnabled: state.autoEnabled });
+      audit('ADMIN_AI_MAINTENANCE', { admin: adminUsername(), enabled: state.enabled, autoEnabled: state.autoEnabled });
       res.json({ ...state, message: MAINTENANCE_MESSAGE, threshold: MAINTENANCE_FAILURE_THRESHOLD, windowSeconds: MAINTENANCE_FAILURE_WINDOW_MS / 1000 });
     } catch {
       res.status(503).json({ error: 'Maintenance could not be saved. Refresh to check the current status, then try again.' });

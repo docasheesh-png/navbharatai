@@ -167,6 +167,7 @@ import { collectionsNeedingRetention } from '../lib/DataRetentionManager';
  */
 const GROWING_COLLECTIONS: readonly string[] = [
   'app_builds', 'build_sessions', 'build_sessions_v2', 'build_history_v2', 'user_build_history', 'user_costs', 'server_logs',
+  'agentv3_build_requests',
   'metrics_snapshots', 'session_error_hints', 'hosting_usage', 'site_analytics',
   // One small document per finished phone build — the only per-run half of the build counters.
   'mobile_build_counted',

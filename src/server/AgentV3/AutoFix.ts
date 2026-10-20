@@ -157,6 +157,11 @@ export function autoFixMaxAttempts(): number {
   return Math.min(raw, 3);
 }
 
+// Chromium refusing automatic focus inside an embedded preview does not mean the app crashed.
+// Match only the browser's complete notice, and only console records below: thrown exceptions with
+// the same words remain actionable. Keep the raw console log; exclude this notice from repair inputs.
+const BLOCKED_AUTOFOCUS_NOTICE_RE = /^Blocked autofocusing on a <[a-z][a-z0-9-]*> element in a cross-origin subframe\.$/;
+
 // Noise that is not a real app defect — these should never trigger a repair pass.
 const NOISE = [
   /favicon\.ico/i,
@@ -221,6 +226,7 @@ export function filterActionableErrors(errors: unknown): RuntimeError[] {
     if (!e || typeof e !== 'object') continue;
     const text = typeof (e as RuntimeError).text === 'string' ? (e as RuntimeError).text.trim() : '';
     if (!text) continue;
+    if ((e as RuntimeError).kind === 'console' && BLOCKED_AUTOFOCUS_NOTICE_RE.test(text)) continue;
     if (NOISE.some((re) => re.test(text))) continue;
     const key = text.slice(0, 200);
     if (seen.has(key)) continue;
@@ -540,3 +546,4 @@ export function partitionServerDown(errors: RuntimeError[], previewUrl: string |
   for (const e of list) (direct(e) || echo(e) ? serverDown : app).push(e);
   return { serverDown, app };
 }
+

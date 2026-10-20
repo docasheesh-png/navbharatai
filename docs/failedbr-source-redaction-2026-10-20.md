@@ -139,3 +139,37 @@ invalidates it and an idempotent retry returns current stale truth. Reverting ro
 forwarding reproduced two failures before the
 source adapter's independent stability repair; digest CAS and read-only scope checks
 were not weakened. This is synthetic integration evidence, not a historical rerun.
+
+## Empty-test census syntax-boundary repair
+
+PR #3874 CI run `39498429831` reported `SourceSecretRedactor.test.ts:224` as an empty
+loop even though its body still contained assertions. The census's `for (...) {}`
+regex stopped at the first `)` inside a multiline header's source-code template,
+then treated that fixture's `function login(...) {}` as the real loop body. The
+same lexical-boundary class also missed empty loops with nested header parentheses
+and mistook multiline quoted/commented source for executable tests or loops.
+
+The test-only census now uses the existing TypeScript parser and each file's actual
+TS/TSX/JS/MJS extension to locate real bodies. Empty/comment-only blocks still fail;
+nonempty bodies and source fixtures do not. The previous call/loop scope is retained,
+including direct `suite.it(...)` calls; `test`, `describe`, modifier/computed calls,
+function/parameter/typed callbacks, explicit timeouts and `for await` are not newly
+added. No production source, existing redactor assertion, dependency, workflow,
+timeout or census exclusion was changed.
+
+A conservative lexical prefilter rejects only files containing no possible
+empty/comment-only brace block; it never decides a failure. This reduces AST work
+from 2,863 files to 1,331 while retaining nested-header cases and all JavaScript line
+terminators (LF, CRLF, CR, U+2028, U+2029), BOM and comment controls. Focused V8 coverage
+measured the full census at 9.295s, down from 15.706s before the prefilter, below the
+unchanged 20s test timeout.
+
+Local proof: the original census reproduced 1 failed / 1 passed with the exact
+reported line. The final focused cohort passes 240 tests in 2 files (18 census
+cases and all 222 unchanged redactor cases), including under V8 coverage. Reverting
+only the detector to its original implementation makes 11 of the 18 census tests
+fail, including the original report, nested headers, quoted fixtures and non-LF
+comment boundaries. The fixed detector was restored. Targeted strict TypeScript
+checking with unused-local checks, the repository unused-import gate and diff
+whitespace checks pass. These are focused local checks, not a full-suite or hosted
+CI result; exact-head hosted CI remains required before shipping.

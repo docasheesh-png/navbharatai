@@ -37,7 +37,10 @@ export type HistoryAccess =
   | { allowed: false; reason: 'no-session' | 'sign-in-required' | 'not-yours' };
 
 /**
- * May `uid` touch `build_history/{sessionId}`?
+ * Resolve an authorized request id to `build_history_v2/{workspaceId}`.
+ * `workspaceId` is the ONLY storage key callers may read or write, including when the request used
+ * a bare session id. An existence check on a caller's workspace cannot prove ownership of legacy
+ * global history: two accounts can create workspaces with the exact same session suffix.
  *
  * The three accepted shapes, and why each is exactly what the listing route produces:
  *  · `agentv3-anon-…`        — the documented capability case, allowed with or without a token.

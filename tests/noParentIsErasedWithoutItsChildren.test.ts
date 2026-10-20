@@ -84,8 +84,8 @@ const PARENT_IS_NEVER_DELETED: Record<string, string> = {
     + "listing when its author leaves is the admin's decision) with its subcollections owned by Q-682",
   promptAudits: 'the parent document is never written — only `promptAudits/{uid}/entries` exists, which '
     + 'is a USER_SCOPED_SUBCOLLECTIONS entry; registering the parent would report `deleted: 0` for ever',
-  build_history: "erased by `derivedIdErase.ts`, which sweeps its `versions` sub first — the id is a "
-    + 'bare sessionId that neither registry can express (Q-764)',
+  build_history: 'Q-764: the old global namespace has no trustworthy ownership metadata; retained '
+    + 'pending attribution, while canonical histories use build_history_v2 and erase versions first',
 };
 
 describe('Q-784 — no eraser deletes a parent and leaves its children unreachable', () => {

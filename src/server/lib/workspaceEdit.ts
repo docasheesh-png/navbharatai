@@ -202,7 +202,7 @@ export interface ApplyResult {
  */
 export async function applyFilesToApp(
   workspaceId: string,
-  sessionId: string,
+  _sessionId: string,
   patch: Record<string, string>,
   label: string,
   deps: { history?: HistoryDeps; workspace?: WorkspaceDeps } = {},
@@ -231,7 +231,7 @@ export async function applyFilesToApp(
   }
 
   const overwriting = Object.keys(changed).filter((p) => typeof current[p] === 'string');
-  const restore = await saveVerifiedRestorePoint(sessionId, current, overwriting, label, history);
+  const restore = await saveVerifiedRestorePoint(workspaceId, current, overwriting, label, history);
   if (!restore.ok) {
     return { ok: false, written: [], versionId: null, status: 503, error: restore.reason };
   }

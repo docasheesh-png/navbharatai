@@ -27,7 +27,7 @@ describe('GET /api/build-session/:sessionId', () => {
   it('🔒 checks ownership with the Q-780 rule BEFORE reading the store', () => {
     const check = body.indexOf('mayTouchBuildHistory(await verifyFirebaseToken(req), sessionId, countWorkspaceFiles)');
     const refuse = body.indexOf('if (!access.allowed) return res.status(refusalStatus(access.reason)).json({ error: refusalMessage(access.reason) })');
-    const load = body.indexOf('proBuildSessionStore.load(sessionId)');
+    const load = body.indexOf('proBuildSessionStore.load(access.workspaceId)');
     expect(check).toBeGreaterThan(-1);
     expect(refuse).toBeGreaterThan(check);
     expect(load).toBeGreaterThan(refuse);

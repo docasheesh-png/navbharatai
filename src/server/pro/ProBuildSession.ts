@@ -5,14 +5,17 @@
  * refreshes the browser (or reopens the tab), the last build result can be
  * immediately restored without re-running the build.
  *
- * Collection: `build_sessions`
- * Document:   sessionId
+ * Collection: `build_sessions_v2`
+ * Document:   full owner-scoped workspace id
+ * Legacy `build_sessions` has no owner proof and may contain arbitrary document ids, including ids
+ * shaped like other accounts' workspaces. It is retained but never used as an authorization fallback.
  *
  * Gracefully degrades: if Firestore is unavailable the build still completes
  * normally — the session store is write-once best-effort, never load-bearing.
  */
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
+import { isWorkspaceId } from '../lib/workspaceIdentity';
 
 export interface BuildSessionDoc {
   ok: boolean;
@@ -45,6 +48,7 @@ class ProBuildSessionStore {
   }
 
   async save(sessionId: string, result: Omit<BuildSessionDoc, 'savedAt'>): Promise<void> {
+    if (!isWorkspaceId(sessionId)) return;
     const db = this.getDb();
     if (!db || !sessionId) return;
     try {
@@ -60,17 +64,18 @@ class ProBuildSessionStore {
         totalSize += content.length;
       }
       doc.files = capped;
-      await db.collection('build_sessions').doc(sessionId).set(doc);
+      await db.collection('build_sessions_v2').doc(sessionId).set(doc);
     } catch {
       // Best-effort — never break the build response
     }
   }
 
   async load(sessionId: string): Promise<BuildSessionDoc | null> {
+    if (!isWorkspaceId(sessionId)) return null;
     const db = this.getDb();
     if (!db || !sessionId) return null;
     try {
-      const snap = await db.collection('build_sessions').doc(sessionId).get();
+      const snap = await db.collection('build_sessions_v2').doc(sessionId).get();
       if (!snap.exists) return null;
       return snap.data() as BuildSessionDoc;
     } catch {

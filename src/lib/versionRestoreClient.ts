@@ -1,12 +1,10 @@
 // The client half of the one version timeline (Q-128). PURE.
 
 /**
- * The key a workspace's versions are kept under: `build_history/{key}`.
+ * The session id older clients use in version-history API URLs.
  *
- * Mirrors `restorePointKey` (server/AgentV3/restorePoint.ts) — the writer — exactly: this user's own
- * `agentv3-{uid}-` prefix comes off; a workspace without it (an anonymous one, an imported or legacy id)
- * keeps its whole id. `tests/oneVersionTimeline.test.ts` runs both over the same cases, so the screen can
- * never list a key the writer does not write.
+ * The app picker uses bare session ids, so keep that UI/API contract. Storage uses the complete
+ * workspace id, including its owner; the server resolves this URL id after verifying the caller.
  */
 export function historyKeyFor(workspaceId: string | null | undefined, uid: string | null | undefined): string {
   const ws = String(workspaceId ?? '').trim();

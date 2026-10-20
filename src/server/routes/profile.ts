@@ -13,7 +13,7 @@ import type { Express, Request, Response } from 'express';
 import { doc, getDoc, getServerDb as getDb } from '../lib/serverDb';
 import { verifyFirebaseToken, verifyFirebaseIdentity, deleteAuthAccount, rateLimiter } from '../lib/authMiddleware';
 import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
-import { deleteUserDerivedIdData } from '../lib/derivedIdErase';
+import { deleteUserDerivedIdData, LEGACY_HISTORY_ERASURE_LIMITATION } from '../lib/derivedIdErase';
 import { deleteUserWorkspaceData } from '../lib/workspaceDataErase';
 import { eraseUserSnapshots, liveSnapshotEraseDeps } from '../lib/snapshotErase';
 import { eraseSyncedWorkspace, type SyncEraseFirestore } from '../lib/syncWorkspaceErase';
@@ -251,7 +251,7 @@ export function registerProfileRoutes(app: Express): void {
   });
 
   // ── DELETE /api/profile — right-to-be-forgotten (P-DATA.4) ──────────────────────
-  // Erase ALL of this user's data across every verified user-scoped collection. Identity is taken from
+  // Erase attributable data across the verified user-scoped collections. Identity is taken from
   // the VERIFIED Firebase token (never a body param), so a user can only ever delete their OWN data.
   // An explicit `{ "confirm": "DELETE" }` body is required so it can never fire by accident.
   app.delete('/api/profile', async (req: Request, res: Response) => {
@@ -260,7 +260,7 @@ export function registerProfileRoutes(app: Express): void {
     if ((req.body?.confirm) !== 'DELETE') {
       return res.status(400).json({
         error: 'Confirmation required',
-        hint: 'Send { "confirm": "DELETE" } to permanently erase all your data. This cannot be undone.',
+        hint: 'Send { "confirm": "DELETE" } to delete your account and erase attributable data. Old snapshots with unverified ownership require review. This cannot be undone.',
       });
     }
     const db = getRetentionDb();
@@ -268,7 +268,7 @@ export function registerProfileRoutes(app: Express): void {
     try {
       // DERIVED IDS FIRST OF ALL — BEFORE ANYTHING THAT DELETES THE KEYS THEY ARE DERIVED FROM.
       // `derivedIdErase` reaches documents whose id is BUILT from a key rather than equal to one:
-      // `bot_sessions/{botId}_{chatId}` (from the user's `bots`) and `build_history/{sessionId}` (from
+      // `bot_sessions/{botId}_{chatId}` (from the user's `bots`) and `build_history_v2/{workspaceId}` (from
       // `user_build_history` and the workspace id range). The two erasers below delete exactly those
       // parents, so running this second would resolve no keys, delete nothing, and report success —
       // the "an erase that LOOKS complete and is not" failure the apps eraser was written to prevent.
@@ -327,13 +327,14 @@ export function registerProfileRoutes(app: Express): void {
       const accountDeleted = account === 'deleted' || account === 'not-found';
       return res.json({
         ok: true,
-        // Say which of the two actually happened rather than one cheerful sentence for both. A user
-        // whose sign-in survived needs to know to email us, not to be told everything is gone.
+        // Account removal and data erasure are separate outcomes. Never claim every snapshot is gone:
+        // the old global history has no trustworthy ownership proof and per-store erasures can fail.
         message: accountDeleted
-          ? 'Your account and all of its data have been permanently deleted.'
-          : 'Your data has been permanently erased, but your sign-in could not be removed automatically. Please email info@navbharatai.com so we can finish it.',
+          ? `Your account has been deleted. Data erasure results are reported separately. ${LEGACY_HISTORY_ERASURE_LIMITATION.message}`
+          : `Your sign-in could not be removed automatically. Please email info@navbharatai.com so we can finish account deletion. Data erasure results are reported separately. ${LEGACY_HISTORY_ERASURE_LIMITATION.message}`,
         accountDeleted,
         account,
+        limitations: [LEGACY_HISTORY_ERASURE_LIMITATION],
         ...report,
         // Reported SEPARATELY rather than folded into the totals above: these are the user's built
         // apps, and someone checking whether their work is really gone should be able to see that line

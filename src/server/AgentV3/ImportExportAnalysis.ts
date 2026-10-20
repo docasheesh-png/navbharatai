@@ -11,6 +11,8 @@
 // known LOCAL file, skips modules that use `export *` (a wildcard re-export could legitimately provide
 // the name), and never touches node_modules. That keeps false positives near zero.
 
+import { isAppAnalysisPath } from './appAnalysisPaths';
+
 export type ImportMismatchKind = 'named-import-not-exported' | 'default-import-missing';
 
 export interface ImportMismatch {
@@ -105,7 +107,7 @@ export async function analyzeImportExports(files: Record<string, string>): Promi
   const sources = new Map<string, any>();
   const fileSet = new Set<string>();
   for (const [path, content] of Object.entries(files)) {
-    if (!CODE_FILE.test(path) || typeof content !== 'string') continue;
+    if (!CODE_FILE.test(path) || !isAppAnalysisPath(path) || typeof content !== 'string') continue;
     fileSet.add(path);
     try { sources.set(path, project.createSourceFile(path, content, { overwrite: true })); } catch { /* skip */ }
   }
@@ -254,7 +256,7 @@ function stripForCycles(src: string): string {
  */
 export function findCircularDependencies(files: Record<string, string>): CircularDependency[] {
   const fileSet = new Set(
-    Object.keys(files).filter((p) => CODE_FILE.test(p) && typeof files[p] === 'string'),
+    Object.keys(files).filter((p) => CODE_FILE.test(p) && isAppAnalysisPath(p) && typeof files[p] === 'string'),
   );
   // Adjacency: file → sorted unique local import targets (deterministic traversal).
   const adj = new Map<string, string[]>();
@@ -421,7 +423,7 @@ export function findUnusedDependencies(files: Record<string, string>): UnusedDep
   if (declared.length === 0) return [];
 
   const fileSet = new Set(
-    Object.keys(files).filter((p) => CODE_FILE.test(p) && typeof files[p] === 'string'),
+    Object.keys(files).filter((p) => CODE_FILE.test(p) && isAppAnalysisPath(p) && typeof files[p] === 'string'),
   );
   // Every bare-package name imported anywhere in the project.
   const importedPkgs = new Set<string>();

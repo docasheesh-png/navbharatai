@@ -11,6 +11,8 @@
 // param / destructuring), member-expression calls (`something.useX()`) are skipped (the object provides
 // it), and `React`/`use` globals are allowed. Never throws (empty result on any parse/lib issue).
 
+import { isAppAnalysisPath } from './appAnalysisPaths';
+
 export interface UndefinedHook {
   file: string;
   line: number;
@@ -76,7 +78,7 @@ export async function analyzeUndefinedHooks(files: Record<string, string>): Prom
   let scanned = 0;
 
   for (const [path, content] of Object.entries(files)) {
-    if (!CODE_FILE.test(path) || typeof content !== 'string' || !content.includes('use')) continue;
+    if (!CODE_FILE.test(path) || !isAppAnalysisPath(path) || typeof content !== 'string' || !content.includes('use')) continue;
     scanned++;
     let sf: any;
     try { sf = project.createSourceFile(path, content, { overwrite: true }); } catch { continue; }

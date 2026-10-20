@@ -5,6 +5,7 @@ import {
 } from './releaseGate';
 import { computeBuildConfidence, type BuildConfidenceInput } from './BuildConfidence';
 import { isNeverRootCause } from './BuildDiagnostics';
+import { noJourneyReason } from './journeyDerivation';
 
 /**
  * THE STATE EVERY GATE LEAVES OUT.
@@ -54,11 +55,12 @@ describe('a stateless app (a game) is judged honestly, not "it does not save any
   // anything is untested" — a category error for something that saves nothing.
   const game = ev({ preview: 'passed', pages: 'passed', journeys: 'none-derivable', typecheck: 'passed' });
 
-  it('renders + no data-entry flow → YELLOW, but the headline never implies a missing save', () => {
+  it('renders + no derived journey → YELLOW, but the headline never invents a missing capability', () => {
     const v = releaseGate(game, clean);
     expect(v.state).toBe('yellow'); // still not green — a journey was never proven
     expect(v.headline).not.toContain('SAVES anything');
-    expect(v.headline).toContain('no data-entry flow');
+    expect(v.headline).toContain('No user journey was derived');
+    expect(v.headline).not.toContain('no data-entry flow');
     expect(v.headline).toContain('not machine-verified');
   });
 
@@ -78,6 +80,55 @@ describe('a stateless app (a game) is judged honestly, not "it does not save any
 
   it('runtimeProven is unaffected — a game that rendered is still proven to RUN', () => {
     expect(runtimeProven(game)).toBe('passed');
+  });
+});
+
+describe('a button-driven app can save state without a derivable form journey', () => {
+  const files = {
+    'src/main.tsx': "import App from './App'; createRoot(document.getElementById('root')!).render(<App />);",
+    'src/App.tsx': [
+      'export default function App() {',
+      "  const [xp, setXp] = useState(() => Number(localStorage.getItem('xp') ?? 0));",
+      "  const finishLesson = () => { localStorage.setItem('xp', String(xp + 10)); setXp(xp + 10); };",
+      '  return <button onClick={finishLesson}>Finish lesson ({xp} XP)</button>;',
+      '}',
+    ].join('\n'),
+  };
+  const journeyNoneWhy = noJourneyReason(files);
+  const buttonApp = ev({ preview: 'passed', journeys: 'none-derivable', journeyNoneWhy });
+
+  it('the real derivation identifies saved state, and the headline preserves that reason', () => {
+    expect(journeyNoneWhy).toContain('does save state');
+    const v = releaseGate(buttonApp, clean);
+    expect(v.state).toBe('yellow');
+    expect(v.headline).toContain('does save state (browser storage in src/App.tsx)');
+    expect(v.unproven.join(' ')).toContain('does save state');
+    expect(v.headline).toContain('not machine-verified');
+    expect(v.headline).not.toMatch(/nothing to save|no data-entry flow/);
+  });
+
+  it.each([
+    ['green', clean],
+    ['yellow', { ...clean, warnings: 1 }],
+  ] as const)('pressing its controls still earns %s and makes no claim that it cannot save', (state, findings) => {
+    const v = releaseGate({ ...buttonApp, explore: 'passed', explorePresses: 3 }, findings);
+    expect(v.state).toBe(state);
+    expect(v.headline).toContain('pressing its controls');
+    expect(v.headline).not.toMatch(/nothing to save|no data-entry flow/);
+    expect(v.unproven.join(' ')).toContain('does save state');
+  });
+
+  it('an omitted reason describes coverage without guessing what the app stores', () => {
+    const v = releaseGate({ ...buttonApp, journeyNoneWhy: undefined }, clean);
+    expect(v.state).toBe('yellow');
+    expect(v.headline).toContain('No user journey was derived to drive');
+    expect(v.headline).not.toMatch(/nothing to save|no data-entry flow|undefined/);
+  });
+
+  it('normalizes a supplied reason identically in the headline and the details', () => {
+    const v = releaseGate({ ...buttonApp, journeyNoneWhy: '  saved state exists\n but no form was found  ' }, clean);
+    expect(v.headline).toContain('(saved state exists but no form was found)');
+    expect(v.unproven).toContain('saved state exists but no form was found (not a defect)');
   });
 });
 

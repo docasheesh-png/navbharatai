@@ -98,7 +98,7 @@ describe('the guard is actually wired to the heal', () => {
   it('snapshots BEFORE the repair runs — afterwards is too late', () => {
     const block = sectionUntil(route, 'const beforeHeal =', 'if (healed.ok)');
     expect(block).toContain('findSyntaxErrors(beforeHeal)');
-    expect(block.indexOf('const beforeHeal')).toBeLessThan(block.indexOf('designRunner.run'));
+    expect(block.indexOf('const beforeHeal')).toBeLessThan(block.indexOf("finishingGuard.repairOrThrow('design-consistency-heal'"));
   });
 
   it('really writes the original back, to the sandbox AND the durable store', () => {

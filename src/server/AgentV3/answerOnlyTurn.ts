@@ -17,6 +17,8 @@
 //
 // A turn that wrote even one file is a change and is judged exactly as before. PURE.
 
+import { answeredWithoutBuilding, type TurnAnswer } from './turnAnswer';
+
 export interface AnswerOnlyFacts {
   /** The route's own `expectsArtifacts`: was this turn asked to build or edit? */
   expectsArtifacts: boolean;
@@ -88,9 +90,14 @@ export function answerOnlyPreviewNarration(problems: readonly string[]): string 
  * AGENTV3_ANSWER_TURN_NOT_BUILD=off restores the old judgement.
  */
 export function answeredInsteadOfBuilding(
-  f: { builderWrote: number; asked?: boolean; declined?: boolean },
+  f: { builderWrote: number } & Partial<TurnAnswer>,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (String(env.AGENTV3_ANSWER_TURN_NOT_BUILD ?? '').trim().toLowerCase() === 'off') return false;
-  return Number(f.builderWrote) === 0 && (f.asked === true || f.declined === true);
+  // The APK flow and third-party capability boundary are already final answers to the nudge/retry
+  // readers. The gate must read the same answer rather than judging that handoff as an empty build.
+  return Number(f.builderWrote) === 0 && answeredWithoutBuilding({
+    asked: f.asked === true, declined: f.declined === true,
+    pointed: f.pointed === true, notOurs: f.notOurs === true,
+  });
 }

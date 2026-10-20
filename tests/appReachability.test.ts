@@ -157,7 +157,12 @@ describe('the wiring — parsed from the CODE, comments stripped', () => {
     const at = src.indexOf('const loadSplit = splitByReachability(authorship.ours, reach);');
     expect(at).toBeGreaterThan(-1);
     const block = src.slice(at, src.indexOf('const complianceHigh', at));
-    expect(block).toContain("const authHigh = loadSplit.loaded.filter((i) => i.severity === 'high').length;");
+    // Keep the actual findings for their diagnostic locations; both the count and the evidence must
+    // still come from the loaded half, never from every scanned or authored file.
+    expect(block).toContain("const authHigh = loadSplit.loaded.filter((i) => i.severity === 'high');");
+    expect(block).toContain('if (authHigh.length)');
+    expect(block).toContain('authHigh.slice(0, 3)');
+    expect(block).toContain('${authHigh.length} fake/incomplete code issue(s)');
     expect(block).toContain("severity: 'observation'");
     expect(block).toContain('unreachableCodeObservation(');
   });

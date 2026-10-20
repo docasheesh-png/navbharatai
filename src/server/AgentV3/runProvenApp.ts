@@ -86,6 +86,13 @@ export function runProvenApp(ev: Partial<RunEvidence> | null | undefined): RunPr
   if (e.pagesFailed === true) return { proven: false, reason: 'a page route failed to render in a real browser' };
   if (e.journeyFailed === true) return { proven: false, reason: 'a real user journey failed' };
   if (e.runtimeCrashBlocker === true) return { proven: false, reason: 'a deterministic runtime-crash defect stands' };
+  // A positive render cannot fill in a missing veto. In particular, undefined is not evidence that
+  // the later page/journey checks found no failure. Valid production callers provide every field;
+  // reject incomplete or malformed snapshots rather than silently holding their OK verdict.
+  const unconfirmed: Array<keyof RunEvidence> = (['stopped', 'deliveryRefused', 'previewFailed', 'pagesFailed', 'journeyFailed', 'runtimeCrashBlocker'] as const)
+    .filter((key) => e[key] !== false);
+  if (e.prodBuild !== 'ok' && e.prodBuild !== 'not-run') unconfirmed.push('prodBuild');
+  if (unconfirmed.length > 0) return { proven: false, reason: `runtime evidence is incomplete or invalid (${unconfirmed.join(', ')})` };
   const build = e.prodBuild === 'ok' ? ' and its production build succeeded' : '';
   return { proven: true, reason: `a real browser rendered it with a clean console${build}` };
 }

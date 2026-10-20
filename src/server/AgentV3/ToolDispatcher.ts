@@ -6506,8 +6506,14 @@ export class ToolDispatcher {
         } catch { reach = null; /* never let the walk fail the scan — not applicable is today's behaviour */ }
         this._lastReachability = reach;
         const loadSplit = splitByReachability(authorship.ours, reach);
-        const authHigh = loadSplit.loaded.filter((i) => i.severity === 'high').length;
-        if (authHigh) extra.push({ severity: 'high', label: `${authHigh} fake/incomplete code issue(s) (placeholder / not-implemented / fake data)` });
+        const authHigh = loadSplit.loaded.filter((i) => i.severity === 'high');
+        if (authHigh.length) {
+          // A count alone cannot explain a failed build (retained reports 3abc6a34 / 5f4e2b99 /
+          // 18b007c3 / 171804c6). Keep the detector's exact kind and location, never source snippets:
+          // a line that contains a stub can also contain credentials or private application data.
+          const sample = authHigh.slice(0, 3).map((i) => `${i.kind} @ ${i.file}:${i.line}`).join(', ');
+          extra.push({ severity: 'high', label: `${authHigh.length} fake/incomplete code issue(s) (placeholder / not-implemented / fake data): ${sample}${authHigh.length > 3 ? `; ${authHigh.length - 3} more` : ''}` });
+        }
         const unloadedHigh = loadSplit.unloaded.filter((i) => i.severity === 'high');
         if (unloadedHigh.length) {
           extra.push({

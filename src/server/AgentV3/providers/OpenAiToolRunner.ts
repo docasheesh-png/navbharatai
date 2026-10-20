@@ -459,12 +459,19 @@ export class OpenAiToolRunner implements TurnRunner {
     // one optional field and nothing else: re-sending a genuinely bad request unchanged would be a
     // retry loop around a deterministic failure, which the fourth absolute rule forbids by name. And
     // the retry happens only when we actually SENT the field — never on a call that had no opinion.
+    let waitingForResponse = true;
     const call = async (): Promise<OpenAiCompletionLike | OpenAiChatStream> => {
       try {
         return await this.client.chat.completions.create(request);
       } catch (err) {
         if (!('thinking' in request) || !isThinkingParamRejection(err)) throw err;
         rememberThinkingParamRejected(thinkingModel);
+        // The original request can reject AFTER our timeout or Stop has ended the turn. Dropping a
+        // rejected option is useful only while somebody still wants the answer; a late retry would
+        // start fresh provider work after the build had already moved on.
+        throwIfStopped(params.signal);
+        if (!waitingForResponse) throw err;
+        if (turnDeadline(configuredMs, params.deadlineAt).expired) throw new Error(BUDGET_EXHAUSTED_MESSAGE);
         const { thinking: _dropped, ...withoutThinking } = request;
         return this.client.chat.completions.create(withoutThinking);
       }
@@ -534,6 +541,7 @@ export class OpenAiToolRunner implements TurnRunner {
     let openedAt: number | null = null;
     const opened = Promise.resolve(call()).then((v) => { openedAt = Date.now(); return v; });
     const closeIfLate = (e: unknown) => {
+      waitingForResponse = false;
       opened.then((late) => { if (isChatStream(late)) { try { late.controller?.abort(); } catch { /* best-effort */ } } }, () => { /* already failed */ });
       throw e;
     };

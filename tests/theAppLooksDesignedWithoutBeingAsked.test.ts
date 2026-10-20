@@ -229,7 +229,8 @@ describe('5 · a one-file app keeps its design', () => {
     const at = route.indexOf("inlineLinkedStylesheet(cleanIndex, 'style.css', kitCss)");
     expect(at).toBeGreaterThan(0);
     const block = route.slice(at - 1200, at + 2600);
-    expect(block).toContain('if (singleHtmlFileRule && result.ok && expectsArtifacts)');
+    expect(block).toContain("if (singleHtmlFileRule && result.ok && expectsArtifacts && finishingGuard.allow('single-file-kit-inline'))");
+    expect(block).toContain("finishingGuard.writeOrThrow('single-file-kit-inline'");
     expect(block).toContain("withoutPreviewBridge('index.html', sandboxIndex)"); // never persist the preview bridge
     expect(block).toContain("writtenFiles.delete('style.css')");
     expect(block).toContain("removeWorkspaceFiles(workspaceId, ['style.css'])");

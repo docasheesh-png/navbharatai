@@ -66,6 +66,9 @@ describe('a check after a fix is a new question (Q-912, autopsy 50378049)', () =
       for (let i = 0; i < 6; i++) recordAndCheckRepeat(st, 'grep', grep.input, 3);
       expect(isProbeBanned(st, 'grep', grep.input)).toBe(true);
       noteMutations(st, [write]);
+      // Dispatch consults the ban BEFORE recording/counting this turn's probes. The first read of
+      // the changed tree must be allowed at that point, rather than being refused once first.
+      expect(isProbeBanned(st, 'grep', grep.input)).toBe(false);
       // The tree changed, so the same grep is a new question — and the count starts over.
       expect(recordAndCheckRepeat(st, 'grep', grep.input, 3)).toBeNull();
       expect(isProbeBanned(st, 'grep', grep.input)).toBe(false);

@@ -18,6 +18,7 @@
 // ban becomes real. The ban became real — see `PROBE_TOOLS` for the narrow set it applies to.
 
 import { isInertCommand } from './inertCommand';
+import { createHash } from 'node:crypto';
 
 /**
  * 🔒 THE ONLY TOOLS A BAN MAY EVER APPLY TO — and the narrowness is the whole safety argument.
@@ -130,8 +131,8 @@ export function loopGuardThreshold(env: NodeJS.ProcessEnv = process.env): number
 
 /**
  * A STABLE signature for a tool call: the tool name + a canonical JSON of its input (keys sorted, so key
- * order never changes the signature). Long string values are hashed-by-length-capped so a giant write_file
- * body doesn't bloat memory while still distinguishing different bodies. Pure; never throws.
+ * order never changes the signature). Long values retain a digest of their whole contents so a giant
+ * body stays bounded without confusing distinct paths or searches that only differ near the end.
  */
 export function probeSignature(toolName: string, input: unknown): string {
   let inputKey: string;
@@ -145,13 +146,13 @@ export function probeSignature(toolName: string, input: unknown): string {
 
 function canonical(v: unknown): string {
   if (v === null || typeof v !== 'object') {
-    const s = typeof v === 'string' ? v : JSON.stringify(v);
-    // Cap very long scalars so a huge file body stays bounded but still distinct (length + head).
-    return s.length > 200 ? `${s.length}:${s.slice(0, 120)}` : s;
+    const s = JSON.stringify(v) ?? String(v);
+    // JSON quoting preserves type and separators: {a:'b,c:d'} is not {a:'b',c:'d'}.
+    return s.length > 200 ? `${s.length}:sha256:${createHash('sha256').update(s).digest('hex')}` : s;
   }
   if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
   const obj = v as Record<string, unknown>;
-  return `{${Object.keys(obj).sort().map((k) => `${k}:${canonical(obj[k])}`).join(',')}}`;
+  return `{${Object.keys(obj).sort().map((k) => `${JSON.stringify(k)}:${canonical(obj[k])}`).join(',')}}`;
 }
 
 /**
@@ -223,7 +224,12 @@ export function repeatProbeSteer(toolName: string, times: number, threshold = 3)
 export function isProbeBanned(state: RepeatProbeState, toolName: string, input: unknown): boolean {
   try {
     if (!PROBE_TOOLS.has(toolName)) return false;
-    return state.banned.has(probeSignature(toolName, input));
+    const sig = probeSignature(toolName, input);
+    // Dispatch checks BEFORE recordAndCheckRepeat can reset the ban. Allow the first probe of a
+    // changed tree now; otherwise the model is falsely refused once after its repair.
+    const lastSeen = state.seenAt?.get(sig);
+    if (lastSeen !== undefined && (state.mutations ?? 0) > lastSeen) return false;
+    return state.banned.has(sig);
   } catch {
     return false;
   }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { parseTsconfig, typecheckReachesRoot, withE2eExcluded, e2eExcludeNote } from '../src/server/AgentV3/e2eTypecheck';
+import { parseTsconfig, typecheckReachesRoot, withE2eExcluded, e2eExcludeNote, excludeE2eBeforeScaffolding } from '../src/server/AgentV3/e2eTypecheck';
 import {
   importedModules, ambientModuleBlocks, stripCollidingAmbientShims, findAmbientShimCollisions,
 } from '../src/server/AgentV3/ambientModuleShim';
@@ -26,6 +26,34 @@ const NEXT_TSCONFIG = JSON.stringify({
 }, null, 2);
 
 const VITE_TSCONFIG = JSON.stringify({ compilerOptions: { strict: true }, include: ['src'] }, null, 2);
+
+describe('the scaffold build exclusion is a prerequisite', () => {
+  it('records the exclusion only after the config write lands', async () => {
+    const calls: string[] = [];
+    await excludeE2eBeforeScaffolding(NEXT_TSCONFIG, { mayModify: true,
+      write: async (text) => { expect(parseTsconfig(text)?.exclude).toContain('e2e'); calls.push('write'); },
+      onWritten: () => { calls.push('record'); },
+    });
+    expect(calls).toEqual(['write', 'record']);
+  });
+
+  it('a refused config write stops scaffolding and never records a change', async () => {
+    let recorded = false;
+    await expect(excludeE2eBeforeScaffolding(NEXT_TSCONFIG, { mayModify: true,
+      write: async () => { throw new Error('pass deferred'); },
+      onWritten: () => { recorded = true; },
+    })).rejects.toThrow('deferred');
+    expect(recorded).toBe(false);
+  });
+
+  it('does nothing to an import or an already isolated source tree', async () => {
+    for (const input of [{ raw: NEXT_TSCONFIG, mayModify: false }, { raw: VITE_TSCONFIG, mayModify: true }]) {
+      await excludeE2eBeforeScaffolding(input.raw, { mayModify: input.mayModify,
+        write: async () => { throw new Error('must not write'); }, onWritten: () => { throw new Error('must not record'); },
+      });
+    }
+  });
+});
 
 describe('parseTsconfig — a tsconfig is not plain JSON', () => {
   it('reads comments and trailing commas, which are legal there', () => {

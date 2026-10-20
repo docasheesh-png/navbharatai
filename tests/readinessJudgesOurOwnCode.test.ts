@@ -177,7 +177,14 @@ describe('the wiring — proven by reversion', () => {
     // Since 2026-09-17 (appReachability.ts) the count is taken from the OURS half after a second
     // split — by whether the app LOADS the file — so the authorship split is still the first gate.
     expect(DISPATCH).toContain('const loadSplit = splitByReachability(authorship.ours, reach);');
-    expect(DISPATCH).toContain("const authHigh = loadSplit.loaded.filter((i) => i.severity === 'high').length;");
+    const splitAt = DISPATCH.indexOf('const authorship = splitByAuthorship(issues, authoredSet);');
+    const loadedAt = DISPATCH.indexOf('const loadSplit = splitByReachability(authorship.ours, reach);', splitAt);
+    const countedAt = DISPATCH.indexOf("const authHigh = loadSplit.loaded.filter((i) => i.severity === 'high');", loadedAt);
+    expect(countedAt).toBeGreaterThan(loadedAt);
+    const blocker = DISPATCH.slice(countedAt, DISPATCH.indexOf('const unloadedHigh', countedAt));
+    expect(blocker).toContain('if (authHigh.length)');
+    expect(blocker).toContain('${authHigh.length} fake/incomplete code issue(s)');
+    expect(blocker).toContain('authHigh.slice(0, 3)');
     // …and the ones we did not write are still REPORTED, never dropped.
     expect(DISPATCH).toContain('preExistingCodeObservation(');
   });

@@ -97423,43 +97423,6 @@ Nine relevant files pass116/116 underNode22/UTC; no production code changed.
 The known-failing preflight was stopped and all final-source local checks must
 run again before push. No full-suite or remoteCI pass is claimed by this entry.
 
-### 2026-10-20 — Phase 2 recovery identity and completed asset erasure checkpoint
-
-PR #3848 subsequently passed both exact-head CI jobs at
-`7241043914134488c4f54b005988fc76cc62ef9d` and merged as
-`06f8065629debbd846c1f836241c5be9a5a8337e`. Remote coverage suite:
-39,947 passed /73 skipped /0 failed; downloaded real database evidence:
-14 distinct drills passed /0 failed. This supersedes only the earlier pending
-release status, not the open runtime/state-preservation boundaries.
-
-The next scoped checkpoint stops unknown identity reads and nonterminal
-reconnect errors from creating replacement sandboxes. Strict tri-state lookup,
-nominal retryable recovery error and public/nested retry propagation retain
-explicit-ID behavior and typed static-connect not-found source restoration.
-Actual SDK classification is exercised over loopback HTTP, and actual actuator
-lifecycle tests include timeout/late resolution and subsequent retry. Initial
-builder setup refuses before execution; registered preview JSON/stream routes
-report retry honestly without a false missing-package diagnosis. Only definite
-pre-builder refusal settles failed with a zero-step result; later failures retain
-unknown outcome. Extracted crash publishing preserves client redaction and raw
-admin diagnostics; the handler's down-only branch budget remains543.
-
-Account deletion now erases completed private asset spill bytes by a verified
-safe owner prefix, independent of lost Firestore metadata. Writer, reader and
-eraser share the bucket/object path definition. The planner also refuses the
-unowned anonymous namespace. The additive response reports unconfigured/partial
-storage removal separately and honestly. Actual spill→registeredDELETE tests
-preserve foreign/shared/APK objects and cover retry and authorization. Reverting
-the erasure to a success-shaped no-op reproduces retained owner bytes.
-
-Focused component checks pass; complete final-source local gates and exact-head
-CI are still required before this checkpoint can ship. Fresh-create ambiguity,
-first-allocation races, physical command/source fencing, best-effort restore
-sinks, complete local/browser state preservation, late uploads, historical
-buckets and ZIP chunk reconciliation remain OPEN. A separate review found queue
-bindings settle too early on resumable results; the next Phase2 slice will
-address that lifecycle. Phases3–6 remain unstarted. Detail and evidence limits:
-`docs/PHASE2_STATE_PRESERVATION.md`.
 ## 2026-10-20 — Q-1126 batch 2: the four-field ratchet 40 → 24, and the batch caught its own bad measurement
 
 **Fifteen rows cleared, and HOW they cleared is the finding.** Batch 1 had already corrected this row's
@@ -97512,6 +97475,107 @@ its own documentation): here it is a census re-written instead of re-used.
 group; Q-891 and Q-894 genuinely need the admin (revenue columns, coupon policy) and stay blocked. Then
 Q-886 and Q-888 as their own rows of work, one at a time.
 
+## 2026-10-20 — Q-886: a customer's own details never go into a log line whole (and Q-1227, found hunting it)
+
+**The defect was on the NORMAL path, not an error branch.** Three live sites printed a real person's
+details into the container log: `routes/payment.ts` logged `Name: … Email: … Phone: …` on EVERY Cashfree
+order; the same file logged the WHOLE webhook body whenever an event carried no order id — firing exactly
+when something was already wrong, so the worst payloads were the likeliest to print; and `routes/auth.ts`
+logged a full phone number on every successful OTP gate check. Nothing was wrong with wanting those lines:
+an order that fails is diagnosed from them. What was wrong is that the diagnosis needs an IDENTIFIER and
+the code printed an IDENTITY.
+
+**The sibling the hunt found is why this is a module and not three careful edits.** `phoneForLog` already
+existed and was already used — at `auth.ts:167`, eleven lines above `:229`, which printed the next phone
+in full. A rule that must be remembered at every log statement is a rule that will eventually be
+forgotten, and the forgetting is SILENT: a log line that says too much looks exactly like one that says
+enough. So `src/server/lib/piiForLog.ts` is one home (`emailForLog`, `nameForLog`, `webhookShapeForLog`,
+plus `phoneForLog` re-exported), every helper total — junk gives a safe string, never a throw, because a
+logging helper that can throw turns a diagnostic line into an outage.
+
+**The census is shape-based, and two drafts of it were wrong in instructive ways.** Banning the words
+"email"/"phone" near `console.log` flags `[CIRCUIT] ${p.name}` and misses `${cleanPhone}` — wrong in both
+directions, so the census matches the INTERPOLATION of a value whose identifier is a person's own detail.
+Then the first such draft forbade `customer[A-Z]…` wholesale and flagged `${customerIdClean}` **on the
+very line it was meant to bless**, which would have pushed the fix toward a log nobody can trace. An
+account id is OUR handle for "who"; name, email, phone and mobile are the person's. Both reasonings now
+sit beside the pattern rather than only in a commit message. The second draft flagged the fix's own
+`webhookShapeForLog(req.body)`, so the wrapped form is excluded explicitly.
+
+Locked by `tests/aCustomerIsNotIdentifiedInALog.test.ts` (11 tests). **Three reversions bite, one per
+original site:** the payment line back to Name/Email/Phone in full → 2 fail; the whole-body log back →
+2 fail; `auth.ts` back to a raw phone → 2 fail.
+
+### Q-1227 — two drifted `maskPhone` copies, recorded rather than bundled
+
+`src/lib/phoneNumber.ts` keeps the last FOUR digits; `src/server/lib/vaultPin.ts` the last TWO. Same name,
+different behaviour — the fourth rule's duplicated-code class in its worst shape, because a reader who
+checks one and trusts the other is wrong with no way to notice. No call site imports both, which is
+exactly why the drift stayed invisible.
+
+**It is NOT folded into Q-886 on purpose.** The `vaultPin` copy renders a string the USER reads — the
+fresh-sign-in destination hint — so unifying them is not a refactor; it changes what a person sees while
+verifying their identity, and if the last-two copy were the one kept, every OTP destination hint in the
+app would get less informative. Quietly changing a user-facing string while fixing log lines is the trade
+the first absolute rule forbids. 🟡 BLOCKED on the admin's choice of which masking the user should see,
+with last-4 recommended (it is what the rest of the product shows, and what `phoneForLog` already uses).
+
+**Q-888 is next** — the other row batch 2 moved from BLOCKED to OPEN: `routes/payment.ts:589` answers 400
+to a payment webhook we have definitively settled, so Cashfree re-sends it indefinitely.
+## 2026-10-20 — Candidate Weak scope/routing policy (Codex)
+
+Admin requested a lower-cost working-app policy, comparison with current routing, a small complexity call, and a Weak refusal/Strong-selector direction for oversized games. Implemented opt-in `AGENTV3_WEAK_SCOPE_POLICY=on` so current policy can be compared and restored. One strict three-label FlashX preflight before sandbox setup; unavailable/malformed classification does not start coding; exact tested templates skip it. Candidate default coding chain is FlashX/Kimi only; complex planning starts on Kimi. Added a shared text-repair allowance and disabled candidate Weak empty-build regeneration. Candidate measured ceiling defaults to $1 (configurable); accepted classifier usage joins the real ledger. Existing delivery proof remains authoritative. Added regression coverage and comparison in `docs/weak-tier-policy-comparison.md`.
+
+Open limits: not a universal one-pass repair budget across every agentic finishing gate; between-turn ledger checks can overshoot on a live call and do not account for unknown provider usage; imported repository scope requires file inspection, not this prompt-only gate. No paid-provider benchmark or live deployment claimed. No model success/savings percentages claimed. Verification results to be appended after the final gate.
+
+Verification checkpoint: 151 targeted tests passed; frontend/server typechecks passed; production build, bundle budget, boot smoke, unused-import, native-shell, and production-dependency checks passed. Framework eligibility moved unchanged to its module to keep the chat control-flow ratchet below the existing limit (543 → 542). Full-suite verification is NOT complete: automatic approval review rejected further interaction with the full run because a test was attempting a live Anthropic API request (credential/external-spend risk). No full-suite pass, CI-green PR, merge, deployment, or paid benchmark claimed. Candidate stays disabled by default pending complete verification.
+
+## 2026-10-20 — Weak candidate verification completed after admin test authorization
+
+Admin explicitly authorized the live-API-capable suite. Stable final run: **2,803 test files passed; 39,994 tests passed; 67 intentionally skipped; zero failures**. Both typechecks, production build, bundle budget, boot smoke, unused-import, OAuth protocol checks, native-shell and production dependency gates passed. Updated wiring assertions to follow the new runner parameters while retaining their stop/deadline/dead-rung guarantees. Test archive extraction now uses `--no-same-owner` in both sibling extractors, avoiding unrelated host ownership failures without changing archive contents. Invalid ladder overrides now fall back to the candidate's two-model policy rather than accidentally restoring the legacy chain. Classifier request is additionally locked by SDK mocks: one call, 8 output tokens, 5-second timeout, thinking disabled, no SDK retries, and measured usage forwarded. Candidate remains opt-in; no merge, deployment, paired app-generation benchmark, or first-attempt guarantee is claimed.
+
+## 2026-10-20 — Admin authorized PR #3853 merge and Weak policy activation
+
+Rechecked the exact PR head and green GitHub CI, then merged #3853 with an expected-head lease (merge commit 68528197949135513d2df97e3b4dee667036059a). Admin explicitly said to merge and turn on the policy. Activation is a separate additive Cloud Build configuration change: `_WEAK_SCOPE_POLICY=on`, `_WEAK_BUILD_COST_CEILING_USD=1`; trigger-level rollback remains available with `off`. Provider keys, explicit ladder overrides, and Normal/Strong routing are not changed. Deployment and runtime confirmation are pending; do not infer live activation merely from the merge.
+
+
+### 2026-10-20 — Phase 2 recovery identity and completed asset erasure checkpoint
+
+PR #3848 subsequently passed both exact-head CI jobs at
+`7241043914134488c4f54b005988fc76cc62ef9d` and merged as
+`06f8065629debbd846c1f836241c5be9a5a8337e`. Remote coverage suite:
+39,947 passed /73 skipped /0 failed; downloaded real database evidence:
+14 distinct drills passed /0 failed. This supersedes only the earlier pending
+release status, not the open runtime/state-preservation boundaries.
+
+The next scoped checkpoint stops unknown identity reads and nonterminal
+reconnect errors from creating replacement sandboxes. Strict tri-state lookup,
+nominal retryable recovery error and public/nested retry propagation retain
+explicit-ID behavior and typed static-connect not-found source restoration.
+Actual SDK classification is exercised over loopback HTTP, and actual actuator
+lifecycle tests include timeout/late resolution and subsequent retry. Initial
+builder setup refuses before execution; registered preview JSON/stream routes
+report retry honestly without a false missing-package diagnosis. Only definite
+pre-builder refusal settles failed with a zero-step result; later failures retain
+unknown outcome. Extracted crash publishing preserves client redaction and raw
+admin diagnostics; the handler's down-only branch budget remains543.
+
+Account deletion now erases completed private asset spill bytes by a verified
+safe owner prefix, independent of lost Firestore metadata. Writer, reader and
+eraser share the bucket/object path definition. The planner also refuses the
+unowned anonymous namespace. The additive response reports unconfigured/partial
+storage removal separately and honestly. Actual spill→registeredDELETE tests
+preserve foreign/shared/APK objects and cover retry and authorization. Reverting
+the erasure to a success-shaped no-op reproduces retained owner bytes.
+
+Focused component checks pass; complete final-source local gates and exact-head
+CI are still required before this checkpoint can ship. Fresh-create ambiguity,
+first-allocation races, physical command/source fencing, best-effort restore
+sinks, complete local/browser state preservation, late uploads, historical
+buckets and ZIP chunk reconciliation remain OPEN. A separate review found queue
+bindings settle too early on resumable results; the next Phase2 slice will
+address that lifecycle. Phases3–6 remain unstarted. Detail and evidence limits:
+`docs/PHASE2_STATE_PRESERVATION.md`.
 ### 2026-10-20 — Phase2 deadline body-exit hold added to PR #3852
 
 The recovery/asset checkpoint's original head `e379b88` passed the full local
@@ -97697,68 +97761,6 @@ byte assertion; the safe production file was restored unchanged. The restored
 history/profile/conversation/headroom cohort passes 4 files /12 tests. No
 production code, inventory, threshold or skip changed for this correction. The
 complete final-source suite and local checks must pass again before push/merge.
-## 2026-10-20 — Q-886: a customer's own details never go into a log line whole (and Q-1227, found hunting it)
-
-**The defect was on the NORMAL path, not an error branch.** Three live sites printed a real person's
-details into the container log: `routes/payment.ts` logged `Name: … Email: … Phone: …` on EVERY Cashfree
-order; the same file logged the WHOLE webhook body whenever an event carried no order id — firing exactly
-when something was already wrong, so the worst payloads were the likeliest to print; and `routes/auth.ts`
-logged a full phone number on every successful OTP gate check. Nothing was wrong with wanting those lines:
-an order that fails is diagnosed from them. What was wrong is that the diagnosis needs an IDENTIFIER and
-the code printed an IDENTITY.
-
-**The sibling the hunt found is why this is a module and not three careful edits.** `phoneForLog` already
-existed and was already used — at `auth.ts:167`, eleven lines above `:229`, which printed the next phone
-in full. A rule that must be remembered at every log statement is a rule that will eventually be
-forgotten, and the forgetting is SILENT: a log line that says too much looks exactly like one that says
-enough. So `src/server/lib/piiForLog.ts` is one home (`emailForLog`, `nameForLog`, `webhookShapeForLog`,
-plus `phoneForLog` re-exported), every helper total — junk gives a safe string, never a throw, because a
-logging helper that can throw turns a diagnostic line into an outage.
-
-**The census is shape-based, and two drafts of it were wrong in instructive ways.** Banning the words
-"email"/"phone" near `console.log` flags `[CIRCUIT] ${p.name}` and misses `${cleanPhone}` — wrong in both
-directions, so the census matches the INTERPOLATION of a value whose identifier is a person's own detail.
-Then the first such draft forbade `customer[A-Z]…` wholesale and flagged `${customerIdClean}` **on the
-very line it was meant to bless**, which would have pushed the fix toward a log nobody can trace. An
-account id is OUR handle for "who"; name, email, phone and mobile are the person's. Both reasonings now
-sit beside the pattern rather than only in a commit message. The second draft flagged the fix's own
-`webhookShapeForLog(req.body)`, so the wrapped form is excluded explicitly.
-
-Locked by `tests/aCustomerIsNotIdentifiedInALog.test.ts` (11 tests). **Three reversions bite, one per
-original site:** the payment line back to Name/Email/Phone in full → 2 fail; the whole-body log back →
-2 fail; `auth.ts` back to a raw phone → 2 fail.
-
-### Q-1227 — two drifted `maskPhone` copies, recorded rather than bundled
-
-`src/lib/phoneNumber.ts` keeps the last FOUR digits; `src/server/lib/vaultPin.ts` the last TWO. Same name,
-different behaviour — the fourth rule's duplicated-code class in its worst shape, because a reader who
-checks one and trusts the other is wrong with no way to notice. No call site imports both, which is
-exactly why the drift stayed invisible.
-
-**It is NOT folded into Q-886 on purpose.** The `vaultPin` copy renders a string the USER reads — the
-fresh-sign-in destination hint — so unifying them is not a refactor; it changes what a person sees while
-verifying their identity, and if the last-two copy were the one kept, every OTP destination hint in the
-app would get less informative. Quietly changing a user-facing string while fixing log lines is the trade
-the first absolute rule forbids. 🟡 BLOCKED on the admin's choice of which masking the user should see,
-with last-4 recommended (it is what the rest of the product shows, and what `phoneForLog` already uses).
-
-**Q-888 is next** — the other row batch 2 moved from BLOCKED to OPEN: `routes/payment.ts:589` answers 400
-to a payment webhook we have definitively settled, so Cashfree re-sends it indefinitely.
-## 2026-10-20 — Candidate Weak scope/routing policy (Codex)
-
-Admin requested a lower-cost working-app policy, comparison with current routing, a small complexity call, and a Weak refusal/Strong-selector direction for oversized games. Implemented opt-in `AGENTV3_WEAK_SCOPE_POLICY=on` so current policy can be compared and restored. One strict three-label FlashX preflight before sandbox setup; unavailable/malformed classification does not start coding; exact tested templates skip it. Candidate default coding chain is FlashX/Kimi only; complex planning starts on Kimi. Added a shared text-repair allowance and disabled candidate Weak empty-build regeneration. Candidate measured ceiling defaults to $1 (configurable); accepted classifier usage joins the real ledger. Existing delivery proof remains authoritative. Added regression coverage and comparison in `docs/weak-tier-policy-comparison.md`.
-
-Open limits: not a universal one-pass repair budget across every agentic finishing gate; between-turn ledger checks can overshoot on a live call and do not account for unknown provider usage; imported repository scope requires file inspection, not this prompt-only gate. No paid-provider benchmark or live deployment claimed. No model success/savings percentages claimed. Verification results to be appended after the final gate.
-
-Verification checkpoint: 151 targeted tests passed; frontend/server typechecks passed; production build, bundle budget, boot smoke, unused-import, native-shell, and production-dependency checks passed. Framework eligibility moved unchanged to its module to keep the chat control-flow ratchet below the existing limit (543 → 542). Full-suite verification is NOT complete: automatic approval review rejected further interaction with the full run because a test was attempting a live Anthropic API request (credential/external-spend risk). No full-suite pass, CI-green PR, merge, deployment, or paid benchmark claimed. Candidate stays disabled by default pending complete verification.
-
-## 2026-10-20 — Weak candidate verification completed after admin test authorization
-
-Admin explicitly authorized the live-API-capable suite. Stable final run: **2,803 test files passed; 39,994 tests passed; 67 intentionally skipped; zero failures**. Both typechecks, production build, bundle budget, boot smoke, unused-import, OAuth protocol checks, native-shell and production dependency gates passed. Updated wiring assertions to follow the new runner parameters while retaining their stop/deadline/dead-rung guarantees. Test archive extraction now uses `--no-same-owner` in both sibling extractors, avoiding unrelated host ownership failures without changing archive contents. Invalid ladder overrides now fall back to the candidate's two-model policy rather than accidentally restoring the legacy chain. Classifier request is additionally locked by SDK mocks: one call, 8 output tokens, 5-second timeout, thinking disabled, no SDK retries, and measured usage forwarded. Candidate remains opt-in; no merge, deployment, paired app-generation benchmark, or first-attempt guarantee is claimed.
-
-## 2026-10-20 — Admin authorized PR #3853 merge and Weak policy activation
-
-Rechecked the exact PR head and green GitHub CI, then merged #3853 with an expected-head lease (merge commit 68528197949135513d2df97e3b4dee667036059a). Admin explicitly said to merge and turn on the policy. Activation is a separate additive Cloud Build configuration change: `_WEAK_SCOPE_POLICY=on`, `_WEAK_BUILD_COST_CEILING_USD=1`; trigger-level rollback remains available with `off`. Provider keys, explicit ladder overrides, and Normal/Strong routing are not changed. Deployment and runtime confirmation are pending; do not infer live activation merely from the merge.
 ## 2026-10-20 — failed-build audit scope correction and persistent queue (PR #3846)
 
 **NOT COMPLETE under the fifth and sixth absolute rules.** The source milestone `f713e64` and its
@@ -98143,3 +98145,23 @@ Audit append now401 rows =341 OPEN /17 IN PROGRESS /43 four-field BLOCKED. This 
 one CI integration row to the earlier400; historical terminal class/app replay/whole
 report closure counts stay4/0/0. The separate next-batch worktree owns three newly
 prepared item ledgers and the typed-launch investigation; it is outside PR3856.
+
+
+### 2026-10-20 - preserve concurrent PR3856 integration and restart exact-tree verification
+
+Remote PR3856 advanced independently to5456d186c, adding main17a4c45ae
+(customer-log privacy PR3854) and the phase-two deadline/recovery/verified-owner
+erasure branch from PR3852. This local merge preserves those authored changes,
+all queue rows and both progress histories; they are not credited as new failed-
+report repairs by this audit. The sole restore-census conflict keeps the proven
+escape-aware scanner and its unchanged20-second timeout instead of the concurrent
+raw-only filter/60-second allowance. Corpus equivalence is checked again on the
+combined source; all final gates are pending for this tree.
+
+The fca616bb6 checkpoint passed all14 additional checks and14 real database
+drills, but its full coverage suite never ran: the superseded runner left a lock
+owned by a zombie PID. The next run uses its own coverage report directory; no
+active process lock is removed. This is a verification restart, not a green
+coverage claim. Audit append remains401 rows /119 individually enumerated items
+in2 reports,4 demonstrated terminal classes,0 historical app reruns and0 whole-
+report closures. No merge is authorized or performed.

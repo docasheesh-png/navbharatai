@@ -144,7 +144,8 @@ describe('🧩 a tested template opens on the first rung', () => {
     // The scaffold itself is kept since 303e8a6f (the ETA sizes a seeded build by its tier); the question is the same.
     expect(route).toContain("const seededScaffold = process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !isImportTurn ? goldenScaffoldForPrompt(prompt) : null;");
     expect(route).toContain('const scaffoldWillSeed = !!seededScaffold;');
-    expect(route).toContain('const promptComplexityDecision = scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(');
+    expect(route).toContain('async () => scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(');
+    expect(route).toContain('resolveWeakComplexity(weakAdmission,');
   });
 });
 

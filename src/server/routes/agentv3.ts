@@ -16365,16 +16365,16 @@ async function noteBuildOutcome(
           // net rather than the first.
           const platformComposed = isPlatformFixRequest(prompt);
           buildDiag.record({
-            phase: 'build', severity: 'info', code: 'USER_STOPPED_BUILD', autoResolved: true,
+            phase: 'build', severity: 'info', code: 'AGENT_STOPPED_BUILD', autoResolved: true,
             message: platformComposed
               ? 'The build was stopped by the engine while working on a request NavBharatAI itself composed — not by the user.'
-              : 'The user asked for this build to stop, and it was stopped.',
+              : 'NavBharatAI stopped this build using its stop_build tool — not a direct user cancellation.',
             detail: reason
-              ? (platformComposed ? `engine gave the reason: ${reason}` : `user said: ${reason}`)
+              ? `stop_build reason: ${reason}`
               : undefined,
           });
         } catch { /* the record must never be what prevents the stop */ }
-        abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'user-stop');
+        abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'agent-stop');
       });
       // C2 — load the project's own "never touch this" list and ARM THE GUARD before any tool runs.
       // Reading the file into the prompt alone would be a wish, not a rule: a model told nicely still
@@ -17250,6 +17250,7 @@ async function noteBuildOutcome(
         dispatcher,
         state,
         events,
+        platformComposed: isPlatformFixRequest(prompt),
         // AP-4 (flag-gated, default off): let frontend/backend WRITER sub-agents dispatch in parallel.
         // Paired with the lockedActuator write-lock above, so concurrent same-path writes can't clobber.
         parallelBuild,
@@ -19564,15 +19565,9 @@ async function noteBuildOutcome(
       // (it has the sentence the model was answering), and a second entry would double-count it.
       try {
         if (abortCauseOf(abort.signal) === 'user-stop' && !buildWasStopped(buildDiag.report().issues)) {
-          // The same platform-composed test the tool path applies, for the same reason: when the
-          // build's own prompt was composed by NavBharatAI, nothing in that run is the user's words,
-          // so the record must not say the user did it (autopsy fdd59ef8).
-          const platformComposed = isPlatformFixRequest(prompt);
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'USER_STOPPED_BUILD', autoResolved: true,
-            message: platformComposed
-              ? 'The build was stopped while working on a request NavBharatAI itself composed — not by the user.'
-              : 'The user asked for this build to stop, and it was stopped.',
+            message: 'The user asked for this build to stop, and it was stopped.',
             detail: 'Recorded from the build\'s abort signal — Stop and Unsend reach the run only that way.',
           });
         }
@@ -19592,7 +19587,7 @@ async function noteBuildOutcome(
       // finalizer writes its own for the deadline causes, and one ending must never carry two.
       try {
         if (abort.signal.aborted && !outcomeCodeOf(buildDiag.report().issues)) {
-          const outcome = abortOutcomeFor(abortCauseOf(abort.signal), { platformComposed: isPlatformFixRequest(prompt) });
+          const outcome = abortOutcomeFor(abortCauseOf(abort.signal));
           if (outcome) {
             buildDiag.record({
               phase: 'build', severity: outcome.severity, code: outcome.code, message: outcome.message,

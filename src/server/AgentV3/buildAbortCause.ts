@@ -34,6 +34,7 @@ import { BUILD_STOPPED_MESSAGE, stoppedCallServedBy } from './stopSignal';
 /** Why a build's abort signal was fired. */
 export type AbortCause =
   | 'user-stop'      // the user pressed Stop
+  | 'agent-stop'     // the builder called its stop_build tool
   | 'watchdog'       // the wall-clock cap was reached
   | 'advisory-cap'   // the build had already succeeded; post-build advisory work overran
   | 'deploy-drain'   // the server is restarting; the build resumes on its own
@@ -51,7 +52,7 @@ export type AbortCause =
  * above and not here fails to compile, and so does one listed here that the union does not have.
  */
 const EVERY_CAUSE: Readonly<Record<AbortCause, true>> = Object.freeze({
-  'user-stop': true, watchdog: true, 'advisory-cap': true, 'deploy-drain': true, 'lock-reclaimed': true,
+  'user-stop': true, 'agent-stop': true, watchdog: true, 'advisory-cap': true, 'deploy-drain': true, 'lock-reclaimed': true,
   reaper: true, 'cost-cap': true, futile: true, 'review-budget': true, 'recheck-budget': true,
   'repair-budget': true, unknown: true,
 });
@@ -113,6 +114,8 @@ export interface AbortSummaryContext {
    * same fact the live narration already told them ("this one is on us"). Absent/false = the wording is unchanged.
    */
   providerFault?: boolean;
+  /** The original request was composed by the platform; used to explain an agent-initiated stop accurately. */
+  platformComposed?: boolean;
 }
 
 /** What a seeded workspace holds, as the router will read it on the next message. */
@@ -157,6 +160,17 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
   if (ctx.providerFault === true && (cause === 'futile' || cause === 'watchdog')) return engineFaultEnding(saved, SEED_KEPT);
 
   switch (cause) {
+    case 'agent-stop': {
+      const who = ctx.platformComposed === true
+        ? 'NavBharatAI stopped this build while working on a request it had composed — you did not stop it.'
+        : 'NavBharatAI ended this build early using its stop tool.';
+      const kept = saved
+        ? ' Your files so far are saved — send another message and I\'ll continue from here.'
+        : seededOnly
+          ? ` I had not changed anything yet. ${SEED_KEPT}`
+          : ' No files had been written, so nothing was lost.';
+      return who + kept;
+    }
     case 'user-stop':
       // ⚠️ IT MUST NAME THE WAY BACK, and this file's own opening argues why: being blamed is bad,
       // "being blamed AND quietly denied the recovery path is what makes it costly". The old sentence
@@ -279,6 +293,7 @@ export function stoppedCallOwner(cause: AbortCause): StoppedCallOwner {
     case 'deploy-drain':
     case 'lock-reclaimed':
     case 'reaper':
+    case 'agent-stop':
       return 'our-platform';
     case 'unknown':
       return 'unknown';
@@ -302,6 +317,7 @@ const OUR_CLOCK_WORDS: Readonly<Record<string, string>> = Object.freeze({
 
 /** The platform event a cause names — admin-only report wording. */
 const OUR_PLATFORM_WORDS: Readonly<Record<string, string>> = Object.freeze({
+  'agent-stop': 'NavBharatAI stop_build ended the build',
   'deploy-drain': 'a deploy drained the build',
   'lock-reclaimed': 'a newer build reclaimed the lock',
   reaper: 'the zombie reaper ended the build',
@@ -441,6 +457,7 @@ export function isUserInitiated(cause: AbortCause): boolean {
 export function interruptedBeforeAnyVerdict(cause: AbortCause): boolean {
   switch (cause) {
     case 'user-stop':
+    case 'agent-stop':
     case 'deploy-drain':
     case 'lock-reclaimed':
     case 'reaper':

@@ -45,10 +45,10 @@ const STOP_RECORD = {
   message: 'The user asked for this build to stop, and it was stopped.',
 } as const;
 
-/** What it writes when the build's own prompt was composed by NavBharatAI (autopsy fdd59ef8). */
-const PLATFORM_STOP_RECORD = {
-  phase: 'build', severity: 'info', code: 'USER_STOPPED_BUILD', autoResolved: true,
-  message: 'The build was stopped while working on a request NavBharatAI itself composed — not by the user.',
+/** What the model's explicit stop_build tool writes; it is not a human cancellation. */
+const AGENT_STOP_RECORD = {
+  phase: 'build', severity: 'info', code: 'AGENT_STOPPED_BUILD', autoResolved: true,
+  message: 'NavBharatAI stopped this build using its stop_build tool — not a direct user cancellation.',
 } as const;
 
 describe('the two questions a stop has to answer, and why they are two', () => {
@@ -66,11 +66,9 @@ describe('the two questions a stop has to answer, and why they are two', () => {
     expect(stoppedByUser(r.issues)).toBe(true);
   });
 
-  it('a PLATFORM-composed prompt stops the build without blaming the user — the narrow answer stays no', () => {
-    // `buildWasStopped` asks "did this reach the point of having a capability to judge?" (no, either
-    // way). `stoppedByUser` asks "is it fair to say the USER did this?" (no — we composed the prompt).
+  it('the agent stop_build tool stops the build without blaming the user', () => {
     const d = b89ba6f8();
-    d.record({ ...PLATFORM_STOP_RECORD });
+    d.record({ ...AGENT_STOP_RECORD });
     const r = d.report();
     expect(buildWasStopped(r.issues)).toBe(true);
     expect(stoppedByUser(r.issues)).toBe(false);
@@ -108,9 +106,8 @@ describe('the route wiring — the CODE of the build handler, comments stripped'
     expect(at).toBeGreaterThan(-1);
     const body = code.slice(at, at + 900);
     expect(body).toContain("code: 'USER_STOPPED_BUILD'");
-    // The platform-composed test travels with it, so the record never blames the user for our prompt.
-    expect(body).toContain('isPlatformFixRequest(prompt)');
-    expect(body).toContain('not by the user.');
+    expect(body).toContain('The user asked for this build to stop');
+    expect(body).not.toContain('isPlatformFixRequest(prompt)');
   });
 
   it('it runs BEFORE both readers it exists to correct — the gate and the empty-build explanation', () => {
@@ -146,5 +143,14 @@ describe('the route wiring — the CODE of the build handler, comments stripped'
     expect(code).toContain("abortBuild(rb.abort, 'user-stop');");
     expect(code.match(/abortBuild\(rb\.abort, 'user-stop'\);/g)?.length).toBe(1);
     expect(code.match(/stopRegisteredBuild\(key, rb\);/g)?.length).toBe(2);
+  });
+
+  it('the model stop_build tool records an agent stop and aborts with its own cause', () => {
+    const at = code.indexOf('dispatcher.setStopBuild((reason) => {');
+    const body = code.slice(at, at + 1800);
+    expect(at).toBeGreaterThan(0);
+    expect(body).toContain("code: 'AGENT_STOPPED_BUILD'");
+    expect(body).toContain("'agent-stop'");
+    expect(body).not.toContain("'user-stop'");
   });
 });

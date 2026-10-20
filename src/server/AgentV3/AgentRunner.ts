@@ -180,6 +180,8 @@ export interface AgentRunnerOptions {
   lintGate?: boolean;
   /** When aborted (e.g. the user pressed Stop), the loop stops between turns. */
   signal?: AbortSignal;
+  /** The user's original request was composed by the platform, so agent-initiated stops can be explained honestly. */
+  platformComposed?: boolean;
   /**
    * 🔴 ROOT CAUSE (build report, alarm-app autopsy 2026-09-16). `builtSomething` at every abort/
    * timeout/step-cap exit below was computed as `totalToolUses > 0` — a counter PRIVATE to this one
@@ -924,6 +926,7 @@ export class AgentRunner {
         const cause = abortCauseOf(this.opts.signal as AbortSignal);
         const summary = abortSummary(cause, {
           minutes: maxBuildMs ? Math.round(maxBuildMs / 60000) : undefined,
+          platformComposed: this.opts.platformComposed,
           ...endingContext(),
         });
         await persist('stopped');

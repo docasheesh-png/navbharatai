@@ -3841,13 +3841,14 @@ export function outcomeCodeOf(
  */
 export function buildWasStopped(issues: readonly BuildIssue[] | null | undefined): boolean {
   if (!Array.isArray(issues)) return false;
-  return issues.some((i) => i?.code === 'USER_STOPPED_BUILD');
+  return issues.some((i) => i?.code === 'USER_STOPPED_BUILD' || i?.code === 'AGENT_STOPPED_BUILD');
 }
 
 export function stoppedByUser(issues: readonly BuildIssue[] | null | undefined): boolean {
   if (!Array.isArray(issues)) return false;
   return issues.some((i) => {
     if (typeof i?.message !== 'string') return false;
+    if (i.code === 'AGENT_STOPPED_BUILD') return false;
     if (i.code === 'USER_STOPPED_BUILD') return !i.message.includes('not by the user');
     // The outcome the abort funnel records for the user's own stop (abortOutcome.ts, 2026-09-18) — a
     // platform-composed stop is recorded under OUTCOME_STOPPED instead, so this code IS the user.

@@ -150,11 +150,13 @@ describe('3 · 🔒 census: a row closed because of a stop is information', () =
     const userStop = abortOutcomeFor('user-stop');
     expect(userStop?.code).toBe(ABORT_OUTCOME_CODES.userStopped);
     expect(userStop?.severity).toBe('info');
-    // A stop of a prompt NavBharatAI composed is not the user's choice: a different code, an error, and the
-    // route's `autoResolved` (code === userStopped) leaves it open.
-    const composed = abortOutcomeFor('user-stop', { platformComposed: true });
-    expect(composed?.code).not.toBe(ABORT_OUTCOME_CODES.userStopped);
-    expect(composed?.severity).toBe('error');
+    // Actor is determined by the abort cause, never by prompt provenance.
+    const user = abortOutcomeFor('user-stop');
+    expect(user?.code).toBe(ABORT_OUTCOME_CODES.userStopped);
+    expect(user?.severity).toBe('info');
+    const agent = abortOutcomeFor('agent-stop');
+    expect(agent?.code).not.toBe(ABORT_OUTCOME_CODES.userStopped);
+    expect(agent?.severity).toBe('error');
   });
 
   it('the route files the gate row in exactly one place, through the one decision', () => {

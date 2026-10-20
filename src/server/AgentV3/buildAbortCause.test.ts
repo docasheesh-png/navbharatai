@@ -13,7 +13,7 @@ import { abortBuild, abortCauseOf, abortSummary, isUserInitiated, type AbortCaus
  * user cannot report a sentence they never saw.
  */
 
-const ALL: AbortCause[] = ['user-stop', 'watchdog', 'advisory-cap', 'deploy-drain', 'lock-reclaimed', 'reaper', 'cost-cap', 'unknown'];
+const ALL: AbortCause[] = ['user-stop', 'agent-stop', 'watchdog', 'advisory-cap', 'deploy-drain', 'lock-reclaimed', 'reaper', 'cost-cap', 'unknown'];
 
 describe('the cause survives the abort', () => {
   it('round-trips through a real AbortController', () => {
@@ -81,6 +81,22 @@ describe('what the user is told', () => {
     // …and never promises saved files when there were none.
     expect(abortSummary('user-stop', { builtSomething: false })).toMatch(/nothing was lost/i);
     expect(abortSummary('user-stop', { builtSomething: false })).not.toMatch(/files so far are saved/i);
+  });
+
+  it('separates an agent stop from a human Stop and preserves the correct saved-work state', () => {
+    const platform = abortSummary('agent-stop', { platformComposed: true, builtSomething: false });
+    expect(platform).toMatch(/NavBharatAI stopped this build/i);
+    expect(platform).toMatch(/you did not stop it/i);
+    expect(platform).toMatch(/nothing was lost/i);
+    expect(platform).not.toMatch(/as you asked|you stopped/i);
+
+    const user = abortSummary('user-stop', { platformComposed: true, builtSomething: false });
+    expect(user).toMatch(/as you asked/i);
+    expect(user).not.toMatch(/you did not stop it/i);
+
+    const saved = abortSummary('agent-stop', { builtSomething: true });
+    expect(saved).toMatch(/files so far are saved/i);
+    expect(saved).toMatch(/continue/i);
   });
 
   it('the watchdog tells the user their work SURVIVED and how to continue', () => {

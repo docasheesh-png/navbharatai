@@ -18,13 +18,13 @@ const stripComments = (s: string): string =>
 const route = stripComments(readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8'));
 const dispatcher = stripComments(readFileSync(join(process.cwd(), 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8'));
 
-describe('the model\'s stop_build is the same stop as the button', () => {
-  it('records USER_STOPPED_BUILD, then raises the user-stop abort', () => {
+describe('the model\'s stop_build is distinct from the button', () => {
+  it('records AGENT_STOPPED_BUILD, then raises the agent-stop abort', () => {
     const at = route.indexOf('dispatcher.setStopBuild(');
     expect(at).toBeGreaterThan(0);
     const body = route.slice(at, at + 2500);
-    const recorded = body.indexOf("code: 'USER_STOPPED_BUILD'");
-    const aborted = body.indexOf("'user-stop')");
+    const recorded = body.indexOf("code: 'AGENT_STOPPED_BUILD'");
+    const aborted = body.indexOf("'agent-stop')");
     expect(recorded).toBeGreaterThan(0);
     expect(aborted).toBeGreaterThan(recorded);
   });
@@ -45,7 +45,8 @@ describe('every stop reaches the timeline, and the timeline is the only definiti
     expect(upsell).toBeGreaterThan(backfill);
   });
 
-  it('never reads a stop_build tool call as a stop', () => {
-    expect(route).not.toMatch(/toolWasUsed\(\s*['"]stop_build['"]\s*\)/);
+  it('reads stop state from the timeline, not from tool-call inference', () => {
+    expect(route).toContain('buildWasStopped(buildDiag.report().issues)');
+    expect(route).toContain('stoppedByUser(buildDiag.report().issues)');
   });
 });

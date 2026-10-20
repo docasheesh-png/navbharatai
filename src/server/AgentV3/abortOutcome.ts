@@ -83,11 +83,9 @@ export const ABORT_OUTCOME_CODES = Object.freeze({
 /**
  * The outcome to record for an aborted build, or `null` when this cause is recorded elsewhere.
  *
- * `platformComposed` — the build's own prompt was composed by NavBharatAI (a "Fix with AI" button, a
- * platform notice), so nothing in that run is the user's words and a stop must not be filed as the
- * user's doing (autopsy fdd59ef8). It only changes the `user-stop` case.
+ * The cause records WHO stopped the run. Prompt provenance is not used to infer whether a human pressed Stop.
  */
-export function abortOutcomeFor(cause: AbortCause, opts: { platformComposed?: boolean } = {}): AbortOutcome | null {
+export function abortOutcomeFor(cause: AbortCause): AbortOutcome | null {
   switch (cause) {
     case 'watchdog':
     case 'advisory-cap':
@@ -102,15 +100,15 @@ export function abortOutcomeFor(cause: AbortCause, opts: { platformComposed?: bo
       // the recheck's outcome, REVIEW_FUNCTIONAL_REPAIR_* / EXPLORE_REPAIR_*).
       return null;
     case 'user-stop':
-      return opts.platformComposed === true
-        ? {
-          code: ABORT_OUTCOME_CODES.stopped, severity: 'error',
-          message: 'Build outcome: STOPPED — the build was stopped while working on a request NavBharatAI itself composed; not by the user.',
-        }
-        : {
-          code: ABORT_OUTCOME_CODES.userStopped, severity: 'info',
-          message: 'Build outcome: STOPPED BY THE USER — that is why it ended. No failure of the app or the engine is implied.',
-        };
+      return {
+        code: ABORT_OUTCOME_CODES.userStopped, severity: 'info',
+        message: 'Build outcome: STOPPED BY THE USER — that is why it ended. No failure of the app or the engine is implied.',
+      };
+    case 'agent-stop':
+      return {
+        code: ABORT_OUTCOME_CODES.stopped, severity: 'error',
+        message: 'Build outcome: STOPPED BY NAVBHARATAI — its stop_build tool ended the run early; this was not a user cancellation or an app defect.',
+      };
     case 'cost-cap':
       return {
         code: ABORT_OUTCOME_CODES.costCeiling, severity: 'error',

@@ -97221,3 +97221,28 @@ them went with them.
 server file hands the upstream message over as the error a user reads — the sibling that does not exist
 yet — while still allowing it as `detail`, which is the deliberate, useful use. Reversion proof: the raw
 shape restored at one site → 2 fail; the GitHub-outage remap removed → 1 fail; restored → 8 pass.
+
+## 2026-10-20 — Q-1142: the model's stop tool was reported as the user's Stop
+
+Build `b5643e3a-f590-4bd0-b9be-ff2490fdf732` ended when the model called `stop_build`, but the summary
+said “Stopped, as you asked.” The exact root was shared identity: the UI Stop/Unsend and the model's
+`stop_build` callback both aborted with `user-stop`. Earlier code tried to infer the actor from whether
+NavBharatAI had composed the prompt; that is unsafe because a human can press Stop during a composed
+request. The actor must be the abort cause itself.
+
+The branch now keeps `user-stop` for a human Stop or Unsend and gives the model tool its own `agent-stop`
+cause. It writes `AGENT_STOPPED_BUILD`, produces an engine-stop summary/outcome, and is classified by the
+shared stop-call owner and interruption logic; prompt provenance only adjusts the wording of an already
+known agent stop. A full-repo search found exhaustive abort classifiers and legacy regression guards,
+which were updated alongside the primary route and runner. Build 1's unproven save/reload journey is a
+separate readiness limitation already associated with Q-107, and build 3 was an actual user stop, not a
+product defect.
+
+**Verification:** `npm ci` completed (optional native bindings could not compile without a Windows C++
+toolchain); focused regression run passed **9 files / 125 tests**; `npm run typecheck:server`,
+`npm run typecheck`, and `npm run native:guard` passed. The full `npm run test:coverage` run produced many
+failures in suites not directly touched here (including shell/Python assumptions on Windows and source/census
+checks) and was stopped before completion. Their baseline status is unknown; they have not been proven
+pre-existing by a baseline run, so
+the branch is **not CI-green**, was not pushed, and must not merge. No assertion that the entire build
+report is resolved is made until those failures are triaged and the repository's GitHub workflow passes.

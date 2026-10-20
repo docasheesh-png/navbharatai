@@ -205,7 +205,8 @@ describe('3 · three endings wearing one label', () => {
     expect(abortOutcomeFor('watchdog')).toBeNull();
     expect(abortOutcomeFor('advisory-cap')).toBeNull();
     expect(abortOutcomeFor('user-stop')?.code).toBe('OUTCOME_USER_STOPPED');
-    expect(abortOutcomeFor('user-stop', { platformComposed: true })?.code).toBe('OUTCOME_STOPPED');
+    expect(abortOutcomeFor('user-stop')?.code).toBe('OUTCOME_USER_STOPPED');
+    expect(abortOutcomeFor('agent-stop')?.code).toBe('OUTCOME_STOPPED');
     expect(abortOutcomeFor('cost-cap')?.code).toBe('OUTCOME_COST_CEILING');
     expect(abortOutcomeFor('futile')?.code).toBe('OUTCOME_FUTILE');
     expect(abortOutcomeFor('deploy-drain')?.code).toBe('OUTCOME_DEPLOY_DRAIN');

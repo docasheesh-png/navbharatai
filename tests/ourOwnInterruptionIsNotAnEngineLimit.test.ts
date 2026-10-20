@@ -25,6 +25,7 @@ const code = (p: string) => fs.readFileSync(path.join(process.cwd(), p), 'utf8')
 describe('which endings left nothing to judge', () => {
   it.each<[AbortCause, boolean]>([
     ['user-stop', true],
+    ['agent-stop', true],
     ['deploy-drain', true],
     ['lock-reclaimed', true],
     ['reaper', true],

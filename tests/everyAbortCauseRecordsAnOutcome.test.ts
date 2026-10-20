@@ -23,7 +23,7 @@ import { deriveRootCause, stoppedByUser, isAppFinding } from '../src/server/Agen
  */
 
 const ALL_CAUSES: readonly AbortCause[] = [
-  'user-stop', 'watchdog', 'advisory-cap', 'deploy-drain', 'lock-reclaimed', 'reaper', 'cost-cap', 'futile', 'unknown',
+  'user-stop', 'agent-stop', 'watchdog', 'advisory-cap', 'deploy-drain', 'lock-reclaimed', 'reaper', 'cost-cap', 'futile', 'unknown',
   // Autopsy 9c612cdb (Q-998): a pass's OWN budget — the review, the post-fix recheck, a repair. They abort that
   // pass's signal, never the build's, so `abortOutcomeFor` yields nothing for them (the pass records its own line);
   // they are listed here because this census exists so that no cause can hide.
@@ -91,22 +91,27 @@ describe('the fix: every cause maps to exactly one outcome, exhaustively', () =>
     }
   });
 
-  it('a user stop is INFO and names the user; every platform stop is an ERROR that does not', () => {
+  it('a human stop and an agent stop carry different causes and honest messages', () => {
     const user = abortOutcomeFor('user-stop');
     expect(user?.code).toBe(ABORT_OUTCOME_CODES.userStopped);
     expect(user?.severity).toBe('info');
-    for (const cause of ['cost-cap', 'futile', 'deploy-drain', 'lock-reclaimed', 'reaper', 'unknown'] as const) {
+    expect(stoppedByUser([issue(user!.code, user!.message, user!.severity)])).toBe(true);
+    const agent = abortOutcomeFor('agent-stop');
+    expect(agent?.code).toBe(ABORT_OUTCOME_CODES.stopped);
+    expect(agent?.severity).toBe('error');
+    expect(agent?.message).toMatch(/not a user cancellation/i);
+    expect(stoppedByUser([issue(agent!.code, agent!.message, agent!.severity)])).toBe(false);
+    for (const cause of ['agent-stop', 'cost-cap', 'futile', 'deploy-drain', 'lock-reclaimed', 'reaper', 'unknown'] as const) {
       const o = abortOutcomeFor(cause);
       expect(o?.severity, cause).toBe('error');
       expect(o?.message, cause).not.toMatch(/by the user|you stopped/i);
     }
   });
 
-  it('a stop on a PLATFORM-composed prompt is never filed as the user\'s doing (autopsy fdd59ef8)', () => {
-    const o = abortOutcomeFor('user-stop', { platformComposed: true });
-    expect(o?.code).toBe('OUTCOME_STOPPED');
-    expect(o?.message).toMatch(/not by the user/i);
-    expect(stoppedByUser([issue(o!.code, o!.message, o!.severity)])).toBe(false);
+  it('prompt provenance cannot turn a real human Stop into an agent stop', () => {
+    const o = abortOutcomeFor('user-stop');
+    expect(o?.code).toBe('OUTCOME_USER_STOPPED');
+    expect(stoppedByUser([issue(o!.code, o!.message, o!.severity)])).toBe(true);
   });
 
   it('an abort with NO cause is honestly unattributed — and since 2026-09-20 has its OWN code', () => {

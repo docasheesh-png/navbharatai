@@ -25,7 +25,7 @@ import { modelAuthoredPaths } from '../src/server/AgentV3/platformAuthored';
 
 const FALSE_EMPTY = /Nothing had been written|nothing had been produced|before anything was produced|before it produced anything|exactly as it was/i;
 const PROMISES_CONTINUE = /continue from/i;
-const CAUSES: AbortCause[] = ['user-stop', 'watchdog', 'advisory-cap', 'deploy-drain', 'lock-reclaimed', 'reaper', 'cost-cap', 'futile', 'unknown'];
+const CAUSES: AbortCause[] = ['user-stop', 'agent-stop', 'watchdog', 'advisory-cap', 'deploy-drain', 'lock-reclaimed', 'reaper', 'cost-cap', 'futile', 'unknown'];
 
 describe('1 · the report\'s stop: our template in the workspace, nothing of the build\'s own', () => {
   const template = new Map(Object.entries(goldenScaffoldFiles(GOLDEN_SCAFFOLDS.find((g) => g.id === 'ai-image')!)));

@@ -97816,6 +97816,53 @@ reversions were restored exactly. No production correction, threshold or skip
 was needed. The newer main's lower branch budget must be preserved on integration.
 Complete combined-source gates remain required before push/merge; final queued
 source fencing, ownership/migration and allocation protocols remain OPEN.
+## 2026-10-20 — Q-886: a customer's own details never go into a log line whole (and Q-1227, found hunting it)
+
+**The defect was on the NORMAL path, not an error branch.** Three live sites printed a real person's
+details into the container log: `routes/payment.ts` logged `Name: … Email: … Phone: …` on EVERY Cashfree
+order; the same file logged the WHOLE webhook body whenever an event carried no order id — firing exactly
+when something was already wrong, so the worst payloads were the likeliest to print; and `routes/auth.ts`
+logged a full phone number on every successful OTP gate check. Nothing was wrong with wanting those lines:
+an order that fails is diagnosed from them. What was wrong is that the diagnosis needs an IDENTIFIER and
+the code printed an IDENTITY.
+
+**The sibling the hunt found is why this is a module and not three careful edits.** `phoneForLog` already
+existed and was already used — at `auth.ts:167`, eleven lines above `:229`, which printed the next phone
+in full. A rule that must be remembered at every log statement is a rule that will eventually be
+forgotten, and the forgetting is SILENT: a log line that says too much looks exactly like one that says
+enough. So `src/server/lib/piiForLog.ts` is one home (`emailForLog`, `nameForLog`, `webhookShapeForLog`,
+plus `phoneForLog` re-exported), every helper total — junk gives a safe string, never a throw, because a
+logging helper that can throw turns a diagnostic line into an outage.
+
+**The census is shape-based, and two drafts of it were wrong in instructive ways.** Banning the words
+"email"/"phone" near `console.log` flags `[CIRCUIT] ${p.name}` and misses `${cleanPhone}` — wrong in both
+directions, so the census matches the INTERPOLATION of a value whose identifier is a person's own detail.
+Then the first such draft forbade `customer[A-Z]…` wholesale and flagged `${customerIdClean}` **on the
+very line it was meant to bless**, which would have pushed the fix toward a log nobody can trace. An
+account id is OUR handle for "who"; name, email, phone and mobile are the person's. Both reasonings now
+sit beside the pattern rather than only in a commit message. The second draft flagged the fix's own
+`webhookShapeForLog(req.body)`, so the wrapped form is excluded explicitly.
+
+Locked by `tests/aCustomerIsNotIdentifiedInALog.test.ts` (11 tests). **Three reversions bite, one per
+original site:** the payment line back to Name/Email/Phone in full → 2 fail; the whole-body log back →
+2 fail; `auth.ts` back to a raw phone → 2 fail.
+
+### Q-1227 — two drifted `maskPhone` copies, recorded rather than bundled
+
+`src/lib/phoneNumber.ts` keeps the last FOUR digits; `src/server/lib/vaultPin.ts` the last TWO. Same name,
+different behaviour — the fourth rule's duplicated-code class in its worst shape, because a reader who
+checks one and trusts the other is wrong with no way to notice. No call site imports both, which is
+exactly why the drift stayed invisible.
+
+**It is NOT folded into Q-886 on purpose.** The `vaultPin` copy renders a string the USER reads — the
+fresh-sign-in destination hint — so unifying them is not a refactor; it changes what a person sees while
+verifying their identity, and if the last-two copy were the one kept, every OTP destination hint in the
+app would get less informative. Quietly changing a user-facing string while fixing log lines is the trade
+the first absolute rule forbids. 🟡 BLOCKED on the admin's choice of which masking the user should see,
+with last-4 recommended (it is what the rest of the product shows, and what `phoneForLog` already uses).
+
+**Q-888 is next** — the other row batch 2 moved from BLOCKED to OPEN: `routes/payment.ts:589` answers 400
+to a payment webhook we have definitively settled, so Cashfree re-sends it indefinitely.
 ## 2026-10-20 — Candidate Weak scope/routing policy (Codex)
 
 Admin requested a lower-cost working-app policy, comparison with current routing, a small complexity call, and a Weak refusal/Strong-selector direction for oversized games. Implemented opt-in `AGENTV3_WEAK_SCOPE_POLICY=on` so current policy can be compared and restored. One strict three-label FlashX preflight before sandbox setup; unavailable/malformed classification does not start coding; exact tested templates skip it. Candidate default coding chain is FlashX/Kimi only; complex planning starts on Kimi. Added a shared text-repair allowance and disabled candidate Weak empty-build regeneration. Candidate measured ceiling defaults to $1 (configurable); accepted classifier usage joins the real ledger. Existing delivery proof remains authoritative. Added regression coverage and comparison in `docs/weak-tier-policy-comparison.md`.

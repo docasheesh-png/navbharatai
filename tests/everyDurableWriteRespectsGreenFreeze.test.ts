@@ -20,13 +20,13 @@ type Verdict =
   | 'user-asked';  // the user's own explicit edit or revert route, not a build pass
 
 const VERDICT: Record<string, [Verdict, number]> = {
-  'mergeWorkspaceFiles | workspaceId, Object.fromEntries(verdict.revert.map((f) => [f, beforeHeal[f]]))': ['landed', 1], // restores the pre-heal originals
+  // Shared automatic restore: applySnapshotRestore passes only successful sandbox writes to persist.
+  'mergeWorkspaceFiles | workspaceId, files': ['landed', 1],
   'mergeWorkspaceFiles | workspaceId, Object.fromEntries(writtenFiles)': ['landed', 3],
   'mergeWorkspaceFiles | workspaceId, files as Record<string, string>': ['user-asked', 1],
   'mergeWorkspaceFiles | workspaceId, foundation.files': ['pre-latch', 1],
   'mergeWorkspaceFiles | workspaceId, importedFiles': ['pre-latch', 1],
   'mergeWorkspaceFiles | workspaceId, seededScaffold': ['pre-latch', 1],
-  'mergeWorkspaceFiles | workspaceId, snap': ['user-asked', 1],
   'mergeWorkspaceFiles | workspaceId, ts.patch': ['pre-latch', 1],
   "mergeWorkspaceFiles | workspaceId, { 'package.json': finalPkg }": ['pre-latch', 1],
   'mergeWorkspaceFiles | workspaceId, { [filePath]: newSource }': ['user-asked', 1],
@@ -45,10 +45,9 @@ const VERDICT: Record<string, [Verdict, number]> = {
   'saveWorkspaceFiles | workspaceId, goldenFiles': ['pre-latch', 1],
   'saveWorkspaceFiles | workspaceId, savedDefaults': ['landed', 1],
   'saveWorkspaceFiles | workspaceId, savedSweep': ['landed', 1],
-  // The post-green finishing rollback (finishingRecheck.ts): only the snapshot files whose write landed.
-  'saveWorkspaceFiles | workspaceId, restoredFiles': ['landed', 1],
-  'saveWorkspaceFiles | workspaceId, snapshot': ['landed', 1],
-  'saveWorkspaceFiles | workspaceId, toSave': ['landed', 3],
+  // Final save starts with toSave and is reconciled to the applied tree after any partial restore.
+  'saveWorkspaceFiles | workspaceId, persisted': ['landed', 1],
+  'saveWorkspaceFiles | workspaceId, toSave': ['landed', 2],
   "saveWorkspaceFiles | workspaceId, { 'index.html': doc }": ['pre-latch', 1],
   "saveWorkspaceFiles | workspaceId, { 'index.html': inlined }": ['after-write', 1],
   'saveWorkspaceFiles | workspaceId, { [cfg.path]: cfg.content }': ['after-write', 1],
@@ -117,15 +116,25 @@ describe('Q-132: every direct durable write in the build route has a green-freez
   });
 
   it('a duplicated classified write in the actual route still fails the original multiplicity audit', () => {
-    const calls = durableWrites(`${route}\nsourcePublication.track(saveWorkspaceFiles(workspaceId, toSave));`);
+    const calls = durableWrites(`${route}\nsourcePublication.track(saveWorkspaceFiles(workspaceId, persisted));`);
     const changed = [...calls.entries()].filter(([key, count]) => VERDICT[key] && VERDICT[key][1] !== count)
       .map(([key, count]) => `${key} ×${count}`);
-    expect(changed).toEqual(['saveWorkspaceFiles | workspaceId, toSave ×4']);
+    expect(changed).toEqual(['saveWorkspaceFiles | workspaceId, persisted ×2']);
   });
 
   it('a genuinely new save in the actual route still requires its own green-freeze verdict', () => {
     const calls = durableWrites(`${route}\nsourcePublication.issue(() => saveWorkspaceFiles(workspaceId, newUnreviewedPayload));`);
     expect([...calls.keys()].filter((key) => !(key in VERDICT)))
       .toEqual(['saveWorkspaceFiles | workspaceId, newUnreviewedPayload']);
+  });
+  it('the final save follows applied restore outcomes rather than the planned snapshot', () => {
+    const start = route.indexOf("} else if (decision.action === 'restore')");
+    const end = route.indexOf('const finalSave =', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const restore = route.slice(start, end);
+    expect(restore).toContain('const outcome = await applyGreenSnapshotRestore(plan)');
+    expect(restore).toContain('persisted = snapshotRestoredFiles(toSave, plan, outcome)');
+    expect(route.slice(end, route.indexOf('\n', end))).toContain('saveWorkspaceFiles(workspaceId, persisted)');
   });
 });

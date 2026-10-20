@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { codeOnly, sectionUntil } from '../../../tests/helpers/sourceSlice';
+import { applySnapshotRestore, snapshotRestoreComplete } from './snapshotRestore';
 import {
   greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched,
   runInPass, currentPass, writeRefused, assertWriteAllowed, GreenFreezeError,
@@ -79,6 +81,31 @@ describe('the allowlist — the user\'s own requests still write to a green app'
     await runInPass('green-guard-restore', async () => {
       expect(writeRefused(WS, 'src/App.tsx')).toBe(false);
     });
+  });
+
+  it('the shared restore inherits its named pass through awaits and records only permitted writes', async () => {
+    const plan = { write: { 'src/App.tsx': 'green original' }, remove: [] };
+    const sandbox = new Map([['src/App.tsx', 'broken edit']]);
+    let durableWrites = 0;
+    const restore = (pass: string) => runInPass(pass, () => applySnapshotRestore(plan, {
+      stopped: () => false,
+      write: async (path, content) => {
+        await Promise.resolve();
+        assertWriteAllowed(WS, path);
+        sandbox.set(path, content);
+      },
+      remove: async () => ({ exitCode: 0 }),
+      persist: async () => { durableWrites++; return true; },
+    }));
+    const refused = await restore('unlisted-restore');
+    expect(snapshotRestoreComplete(plan, refused)).toBe(false);
+    expect(sandbox.get('src/App.tsx')).toBe('broken edit');
+    expect(durableWrites).toBe(0);
+    const allowed = await restore('green-guard-restore');
+    expect(snapshotRestoreComplete(plan, allowed)).toBe(true);
+    expect(sandbox.get('src/App.tsx')).toBe('green original');
+    expect(durableWrites).toBe(1);
+    expect(currentPass()).toBeNull();
   });
 
   it('a pass NOT on the allowlist is still refused — this is the whole point', async () => {
@@ -246,7 +273,10 @@ describe('it is wired into the build', () => {
   it('the three allowlisted passes are wrapped so their writes are permitted', () => {
     expect(routes).toContain("runInPass('runtime-error-autofix'");
     expect(routes).toContain("runInPass('feature-presence-heal'");
-    expect(routes).toContain("runInPass('green-guard-restore'");
+    const restore = codeOnly(sectionUntil(routes, 'const applyGreenSnapshotRestore =', 'const revertToGreenSnapshot ='));
+    expect(restore).toContain("pass = 'green-guard-restore'");
+    expect(restore).toContain('runInPass(pass, () => applySnapshotRestore(plan,');
+    expect(restore).toContain('write: (path, content) => actuator.writeFile(workspaceId, path, content)');
   });
 
   it('refused writes are recorded honestly and offered, not silently dropped', () => {

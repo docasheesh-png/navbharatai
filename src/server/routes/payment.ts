@@ -34,7 +34,7 @@ import {
 } from '../lib/giftCodes';
 import { readGiftDaily, giftDay, redeemGiftCode } from '../lib/giftCodeStore';
 import { appLockBlocks } from '../lib/appLockEnforce';
-import { classifyCashfreeWebhook, cashfreeWebhookOrderId } from '../lib/paymentReversal';
+import { classifyCashfreeWebhook, cashfreeWebhookOrderId, cashfreePaymentEventIsFailure } from '../lib/paymentReversal';
 import { emailForLog, nameForLog, phoneForLog, webhookShapeForLog } from '../lib/piiForLog';
 import { settleCashfreeReversal } from '../lib/paymentReversalStore';
 
@@ -590,10 +590,49 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       if (result.success) {
         console.log(`[CASHFREE WEBHOOK] Fulfilled order ${orderId} successfully!`);
         return res.status(200).json({ status: 'OK' });
-      } else {
-        console.error(`[CASHFREE WEBHOOK] Fulfillment failed for order ${orderId}: ${result.error}`);
-        return res.status(400).json({ error: result.error });
       }
+      /**
+       * 🔴 Q-888 — A SETTLED EVENT USED TO BE REJECTED, SO IT CAME BACK FOR EVER.
+       *
+       * Every `success: false` answered **400**, and Cashfree re-delivers a non-2xx. The retry was not a
+       * symptom of anything wrong: it was us refusing to acknowledge an answer we had already given.
+       *
+       * ⚠️ AND THE ROW'S OWN ACCOUNT OF WHY WAS WRONG — corrected here because the next reader would
+       * otherwise re-derive it. Q-888 said a PAYMENT_FAILED / USER_DROPPED order is "settled as EXPIRED"
+       * by `cashfreeOrderClosedUnpaid`. Measured: that predicate recognises only `EXPIRED` and
+       * `TERMINATED`, which are ORDER statuses, while `USER_DROPPED` and `FAILED` are PAYMENT statuses
+       * that never reach it. Those events fell through to "Order not paid or invalid status" instead —
+       * re-sent for ever just as reported, by a different path than the report described. So there are
+       * TWO things to tell apart here, not one.
+       *
+       * The route could not tell a DECISION from an OUTAGE because the function did not say, so it is
+       * the function that now says (`settled`). This branch only reads it:
+       *   · settled  ⇒ 200. We have decided; a redelivery would reach the same conclusion.
+       *   · anything else ⇒ non-2xx, so it IS redelivered. Acknowledging an event we could not complete
+       *     loses it, and losing a payment event costs a customer their credit.
+       *
+       * 502, not 400: a retryable failure is ours (no database, missing gateway keys, a payload we could
+       * not read), never a malformed request from the sender, and the status a gateway's own dashboard
+       * shows the admin should not blame Cashfree for our outage. The reversal path above already
+       * answers 502 for its own unreadable case, in its own words — this is the same rule, said once more.
+       */
+      if (result.settled) {
+        console.log(`[CASHFREE WEBHOOK] Order ${orderId} is settled and will not be fulfilled: ${result.error} — acknowledged, so it is not re-sent.`);
+        return res.status(200).json({ status: 'SETTLED' });
+      }
+      /**
+       * A FAILED ATTEMPT IS NEWS, NOT WORK. The order is usually still `ACTIVE` — the payer may try
+       * again — so the verifier rightly fulfils nothing and we rightly credit nothing. Re-delivering this
+       * event would report the same failed attempt for ever; a later successful attempt arrives as its
+       * own `PAYMENT_SUCCESS_WEBHOOK`. The gateway was still ASKED first (above), so an order that is in
+       * fact PAID is credited even when a stale failure event is what woke us.
+       */
+      if (cashfreePaymentEventIsFailure(req.body)) {
+        console.log(`[CASHFREE WEBHOOK] Order ${orderId}: the gateway reports a failed or dropped attempt (${result.error}) — acknowledged; the order stays open for a later attempt.`);
+        return res.status(200).json({ status: 'ATTEMPT_FAILED' });
+      }
+      console.error(`[CASHFREE WEBHOOK] Fulfillment could not be completed for order ${orderId}: ${result.error} — NOT acknowledged, so the gateway delivers it again.`);
+      return res.status(502).json({ error: 'This payment event could not be completed; please retry.' });
     } catch (error: any) {
       console.error('[CASHFREE WEBHOOK] Error handling webhook exception:', error);
       return sendSafeError(res, 500, 'Payment webhook processing failed.', error, 'cashfree webhook');

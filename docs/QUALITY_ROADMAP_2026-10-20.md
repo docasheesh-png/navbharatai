@@ -131,6 +131,18 @@ fixtures. Use it for the applicable database/process fault drills. Actual
 provider/E2B and Phase 3 paid-build runs still need configured access; local
 emulator evidence does not establish those external boundaries.
 
+Queue integration snapshot — 2026-10-20 12:48 UTC: `92fee9b` passed its full
+local suite (2,820 files /40,268 tests, 67 skipped, zero failures) and all quick
+gates. Substantive main `6cdc155` then required combined verification again.
+The [normal-module handoff checkpoint](PHASE2_QUEUE_MODULE_HANDOFF.md) retains
+main's applied snapshot tree and joins the whole shared restore job plus raw
+removal/report promises. Held durable writes, incomplete outcomes and deliberate
+tracker/payload reversions exercise this boundary. The renewed credential-free
+emulator run passed 21/21; combined complete suite and exact-head CI remain
+pending. Physical SDK drain, final queued-step/general source fencing, historical
+private ownership and fresh-allocation authority remain OPEN. Phase 2 is still
+in progress and phases 3–6 have not started.
+
 ## Phase 3 — reproducible quality baseline
 
 - Extend the existing 50-prompt / 15-prompt smoke harness rather than creating a

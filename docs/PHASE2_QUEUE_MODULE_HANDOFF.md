@@ -42,6 +42,16 @@ Import memory notes and file indexing remain synchronous context for the first
 model call. Their durable save runs beside the turn and joins normal retirement;
 a slow memory store does not add an unbounded wait before that first call.
 
+The shared automatic snapshot-restore adapter is also an owned application job.
+Its complete raw promise joins retirement, including durable merge/removal after
+sandbox operations; incomplete or rejected restoration marks publication uncertain.
+The raw removal command and its 20-second report are tracked separately, so a
+reporting timeout cannot hide a still-pending application promise. Callers keep
+the original restore outcome and Stop policy. The final save retains main's
+applied `persisted` tree, including partial-restore outcomes, rather than the
+attempted or planned tree. This establishes observed application-promise ownership;
+it does not establish physical SDK/process drain.
+
 ## User intent and clients
 
 Stop pauses the queue, invalidates handoffs and flags the current lease in one
@@ -160,3 +170,30 @@ Fresh allocation also remains a separate gate. Its reviewed
 is **not implemented** and preserves the independent review and local SDK retry
 evidence. Normal module handoff does not supply allocation idempotency, safe
 unknown-operation replay or complete restoration evidence.
+
+## Integration checkpoint — 2026-10-20 12:48 UTC
+
+The complete local suite at `92fee9b` passed 2,820 files /40,268 tests with
+67 skipped and zero failures; all quick gates passed. That result preceded the
+substantive main checkpoint `6cdc155`, so it does not establish the combined
+source as green. Main's runtime restoration changes, both source-writer census
+histories and payment changes are retained in this merge.
+
+Actual-route adapter proofs hold raw command, durable merge and durable deletion
+while checking exact predecessor lease, blocked B and pending A; incomplete and
+rejected restore outcomes pause without READY. Removing whole-restore tracking
+failed six cases; removing raw-command tracking failed the post-timeout ownership
+check. Replacing applied `persisted` bytes with attempted `toSave` failed the
+actual saved-byte assertion. All deliberate controls were restored exactly.
+
+The first 66-file combined focused run found one old expression-body pass-census
+assertion (65 files /1,490 tests passed, one failed). Its replacement follows the
+same `restoring` initializer to `runInPass`, checks the original return and retains
+all exact writer counts and allowed pass checks. The corrected census passed
+38 tests; combined final-source gates are required again. The renewed real
+Firestore/multiprocess drill passed all 21 checks on the incoming payment/store
+bytes. Exact-head remote CI remains required before merge.
+
+The corrected combined focused run passed all 66 files /1,491 tests before the
+new source freeze. These results and the renewed 21 drills do not replace the
+combined complete suite, quick gates or exact-head remote CI.

@@ -250,8 +250,8 @@ import { wantsSingleHtmlFile } from '../../lib/frameworkDetect';
 import { appFileCount, IMPORT_NOT_MERGED_MESSAGE, IMPORT_NOT_CHECKED_MESSAGE } from '../../lib/projectImportTarget';
 import { gitPushTarget, wipPushNote } from '../AgentV3/gitPushTarget';
 import { StaticProvider } from '../AgentV3/sandbox/AppMakerLab/generator/templates/StaticProvider';
-import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, prunedNarration, depsAddedByBuild, unusedDependencyLine, hasBuildScript } from '../AgentV3/unusedDepPrune';
-import { pruneDeadSalvageEnabled, deadSalvagedFiles, removeDeadSalvage } from '../AgentV3/deadSalvage';
+import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, packagePruneNote, prunedNarration, depsAddedByBuild, unusedDependencyLine, hasBuildScript } from '../AgentV3/unusedDepPrune';
+import { pruneDeadSalvageEnabled, deadSalvagedFiles, removeDeadSalvage, deadSalvageNote } from '../AgentV3/deadSalvage';
 import { pastedFormatDecision, pastedHtmlDocument, pastedStorageKeys, pastedOneFileRule, STATIC_SCAFFOLD_EXTRAS, PASTED_ONE_FILE_CODE } from '../AgentV3/pastedAppFormat';
 import { aiInAppRule } from '../AgentV3/systemPrompt';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
@@ -276,6 +276,7 @@ import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
 import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardRestoredRecord, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, removablePaths, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage, chooseRestoreBase, greenRestoreTurnStartEnabled, attemptIsHonoured } from '../AgentV3/GreenGuard';
+import { applySnapshotRestore, snapshotRestoreComplete, snapshotRestoreDetail, snapshotRestoreStopped, snapshotRestoredFiles, type SnapshotRestorePlan, type SnapshotRestoreOutcome } from '../AgentV3/snapshotRestore';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
@@ -2901,7 +2902,8 @@ function openAiJudgeCandidate(
 ): JudgeCandidate | null {
   if (!(apiKey || '').trim()) return null;
   try {
-    const client = new OpenAI({ apiKey, baseURL, timeout, maxRetries: 1 });
+    // The judge chain owns fallback. SDK retries would hide a second deterministic billing HTTP 429.
+    const client = new OpenAI({ apiKey, baseURL, timeout, maxRetries: 0 });
     const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
       const r = await client.chat.completions.create({
         model,
@@ -13334,19 +13336,29 @@ async function noteBuildOutcome(
      * and none of them touched `writtenFiles`, so the end-of-build save re-persisted the very change the
      * sandbox had just undone (see `reconcileCapturedWrites`).
      */
+    const applyGreenSnapshotRestore = (plan: SnapshotRestorePlan, stopped = () => snapshotRestoreStopped(abort.signal), noteWrite?: (path: string) => void, pass = 'green-guard-restore'): Promise<SnapshotRestoreOutcome> => {
+      const restoring = runInPass(pass, () => applySnapshotRestore(plan, {
+        stopped,
+        write: (path, content) => actuator.writeFile(workspaceId, path, content),
+        remove: (path) => sourcePublication.track(withTimeout(sourcePublication.track(actuator.runCommand(workspaceId, buildRemoveCommand([path]))), 20_000, 'green-guard-remove')),
+        captured: (applied) => {
+          reconcileCapturedWrites(writtenFiles, { ...applied, unchanged: 0 });
+          Object.keys(applied.write).forEach((path) => noteWrite?.(path));
+        },
+        persist: async (files) => (await mergeWorkspaceFiles(workspaceId, files)).status === 'saved',
+        forget: async (paths) => (await removeWorkspaceFiles(workspaceId, paths)) > 0,
+      }));
+      void sourcePublication.track(restoring.then((outcome) => snapshotRestoreComplete(plan, outcome) ? 'saved' : 'failed')).catch(() => {});
+      return restoring;
+    };
     const revertToGreenSnapshot = async (snap: Record<string, string>): Promise<void> => {
       // An EMPTY snapshot is a failed read, never a green app — and `restorePlan({}, cur)` would remove
       // every file in the workspace. Refuse; verifyAfterFix reports a revert that did not complete.
       if (!snap || Object.keys(snap).length === 0) throw new Error('refusing to restore from an empty snapshot');
       const cur = (await collectWorkspaceFiles(actuator, workspaceId)).files;
       const plan = restorePlan(snap, cur);
-      await runInPass('green-guard-restore', async () => {
-        for (const [p, c] of Object.entries(plan.write)) { try { await actuator.writeFile(workspaceId, p, c); } catch { /* per-file */ } }
-        const rm = buildRemoveCommand(plan.remove);
-        if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'vaf-remove'); } catch { /* best-effort */ } }
-      });
-      reconcileCapturedWrites(writtenFiles, plan);
-      await mergeWorkspaceFiles(workspaceId, snap).catch(() => {}); // durable revert too
+      const outcome = await applyGreenSnapshotRestore(plan);
+      if (!snapshotRestoreComplete(plan, outcome)) throw new Error(`Green snapshot restore did not complete: ${snapshotRestoreDetail(outcome)}`);
     };
     /**
      * The copy this build took, if any, and the hash of the source it was built from — compared with
@@ -20489,10 +20501,11 @@ async function noteBuildOutcome(
             const cands = pruneCandidates({ before: packageJsonAtBuildStart, after: pkgNow, unused: unusedDeps.map((u) => u.name), files: integrityFiles });
             if (cands.length > 0 && pkgNow) {
               const outcome = await pruneBuildAddedDeps(cands, pkgNow, {
+                signal: abort.signal,
                 run: (cmd) => actuator.runCommand(workspaceId, cmd),
                 read: (path) => actuator.readFile(workspaceId, path).catch(() => null),
               });
-              if (outcome.status === 'removed') {
+              if (outcome.status === 'removed' && !abort.signal.aborted) {
                 prunedDeps.push(...outcome.removed);
                 const changed: Record<string, string> = { 'package.json': outcome.packageJson };
                 if (outcome.lock && (writtenFiles.has('package-lock.json') || storeFiles['package-lock.json'] !== undefined)) changed['package-lock.json'] = outcome.lock;
@@ -20505,12 +20518,7 @@ async function noteBuildOutcome(
                 events.emit({ type: 'narration', agent: 'architect', text: prunedNarration(outcome.removed), ts: Date.now() });
               }
               buildDiag.record({
-                phase: 'build', severity: 'info', autoResolved: true,
-                code: outcome.status === 'removed' ? 'UNUSED_DEPS_REMOVED' : 'UNUSED_DEPS_KEPT',
-                message: outcome.status === 'removed'
-                  ? `Removed ${outcome.removed.length} package(s) this build added and never used: ${outcome.removed.join(', ')}. The production build passed without them.`
-                  : `Kept the unused package(s) this build added (${cands.join(', ')}): ${outcome.reason}.`,
-                detail: outcome.keptForPeers.length ? `kept because another installed package needs it: ${outcome.keptForPeers.join(', ')}` : undefined,
+                phase: 'build', ...packagePruneNote(outcome, cands, abort.signal.aborted),
               });
             }
           } catch { /* removing an unused package is housekeeping — it must never affect a build */ }
@@ -20523,19 +20531,16 @@ async function noteBuildOutcome(
             const dead = deadSalvagedFiles(salvagedThisBuild, integrityFiles);
             if (dead.length > 0) {
               const outcome = await removeDeadSalvage(dead, integrityFiles, hasBuildScript(integrityFiles['package.json'] ?? null), {
+                signal: abort.signal,
                 run: (cmd) => actuator.runCommand(workspaceId, cmd),
                 write: (path, content) => runInPass('dead-salvage-prune', () => actuator.writeFile(workspaceId, path, content)),
               });
-              if (outcome.status === 'removed') {
+              if (outcome.status === 'removed' && !abort.signal.aborted) {
                 for (const p of outcome.removed) { writtenFiles.delete(p); delete integrityFiles[p]; }
                 deletedThisBuild.push(...outcome.removed);
               }
               buildDiag.record({
-                phase: 'build', severity: 'info', autoResolved: true,
-                code: outcome.status === 'removed' ? 'DEAD_SALVAGE_REMOVED' : 'DEAD_SALVAGE_KEPT',
-                message: outcome.status === 'removed'
-                  ? `Removed ${outcome.removed.length} file(s) the fast lane wrote that the finished app never uses: ${outcome.removed.join(', ')}. The production build passed without them.`
-                  : `Kept ${dead.length} salvaged file(s) nothing refers to (${dead.join(', ')}): ${outcome.reason}.`,
+                phase: 'build', ...deadSalvageNote(outcome, dead, abort.signal.aborted),
               });
             }
           } catch { /* removing an unused file is housekeeping — it must never affect a build */ }
@@ -21072,19 +21077,16 @@ async function noteBuildOutcome(
                   const afterHeal = Object.fromEntries(writtenFiles);
                   const brokenAfter = (await findSyntaxErrors(afterHeal).catch(() => [])).map((e) => e.path);
                   const verdict = designHealDecision({ before: beforeHeal, after: afterHeal, brokenAfter, brokenBefore });
-                  for (const path of verdict.revert) {
-                    const original = beforeHeal[path];
-                    if (typeof original !== 'string') continue;
-                    // Named for the ledgers only. NOT 'design-consistency-heal' (allowlisted): that would widen what a
-                    // latched app lets through, which is a freeze decision, not an attribution one.
-                    try { await runInPass('design-heal-revert', () => actuator.writeFile(workspaceId, path, original)); } catch { /* per-file */ }
-                    writtenFiles.set(path, original);
-                  }
                   if (verdict.revert.length) {
-                    await mergeWorkspaceFiles(workspaceId, Object.fromEntries(verdict.revert.map((f) => [f, beforeHeal[f]]))).catch(() => {});
+                    // Only the guard's pre-heal bytes. The allowlisted undo checks actual writes and
+                    // persistence, so a failed restore cannot replace the captured record with fiction.
+                    const revertPlan = { write: Object.fromEntries(verdict.revert.map((path) => [path, beforeHeal[path]])), remove: [] };
+                    const outcome = await applyGreenSnapshotRestore(revertPlan, undefined, undefined, 'design-heal-revert');
+                    const complete = snapshotRestoreComplete(revertPlan, outcome);
                     buildDiag.record({
-                      phase: 'build', severity: 'warning', code: 'DESIGN_HEAL_REVERTED',
-                      message: designHealGuardNote(verdict), autoResolved: true,
+                      phase: 'build', severity: 'warning', code: complete ? 'DESIGN_HEAL_REVERTED' : 'DESIGN_HEAL_RESTORE_INCOMPLETE',
+                      message: complete ? designHealGuardNote(verdict) : 'The design repair left files unparseable, and its automatic rollback could not be fully confirmed.',
+                      detail: snapshotRestoreDetail(outcome), autoResolved: complete,
                     });
                   }
                 } catch { /* the guard is best-effort — it must never itself break a build */ }
@@ -22446,19 +22448,7 @@ async function noteBuildOutcome(
           return { rendered: isProvenGreenRender(shot, v), conclusive: v.rendered || (!v.inconclusive && !v.serverDown) };
         },
         loadSnapshot: () => loadWorkspaceFiles(greenWorkspaceKey(workspaceId)),
-        restore: async (plan) => {
-          const restoredFiles: Record<string, string> = {}; // only what actually landed is persisted
-          await runInPass('green-guard-restore', async () => {
-            for (const [path, content] of Object.entries(plan.write)) {
-              try { await actuator.writeFile(workspaceId, path, content); writtenFiles.set(path, content); noteFinishingWrite(path); restoredFiles[path] = content; } catch { /* per-file best-effort */ }
-            }
-          });
-          const rm = buildRemoveCommand(plan.remove);
-          if (rm) await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'post-green-remove').catch(() => null);
-          for (const path of plan.remove) writtenFiles.delete(path);
-          if (Object.keys(restoredFiles).length > 0) await saveWorkspaceFiles(workspaceId, restoredFiles).catch(() => {});
-          if (plan.remove.length > 0) await removeWorkspaceFiles(workspaceId, plan.remove).catch(() => {});
-        },
+        restore: (plan) => applyGreenSnapshotRestore(plan, () => abort.signal.aborted, noteFinishingWrite),
         record: (note) => { try { buildDiag.record({ phase: 'preview', ...note }); } catch { /* best-effort */ } },
       });
 
@@ -25986,7 +25976,8 @@ async function noteBuildOutcome(
               });
               buildDiag.record({
                 phase: 'build', severity: 'info', code: `GREEN_GUARD_${decision.action.toUpperCase()}`,
-                message: decision.reason, autoResolved: true,
+                message: decision.action === 'restore' ? 'The app was observed broken after this turn; the automatic restore result is recorded below.' : decision.reason,
+                autoResolved: decision.action !== 'restore',
               });
               if (decision.action === 'save') {
                 const projectSt = await saveWorkspaceFiles(workspaceId, toSave);
@@ -26022,18 +26013,11 @@ async function noteBuildOutcome(
                 const plan = restorePlan(snapshot, toSave, new Set(Object.keys(projectFilesAtTurnStart ?? {})));
                 // Keep the broken attempt before undoing it — nothing the user paid for is thrown away.
                 await saveWorkspaceFiles(attemptWorkspaceKey(workspaceId), toSave).catch(() => {});
-                await runInPass('green-guard-restore', async () => {
-                  for (const [path, content] of Object.entries(plan.write)) {
-                    try { await actuator.writeFile(workspaceId, path, content); } catch { /* per-file best-effort */ }
-                  }
-                });
-                const rm = buildRemoveCommand(plan.remove);
-                if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'green-guard-remove'); } catch { /* best-effort */ } }
-                reconcileCapturedWrites(writtenFiles, plan); // GT-4: a later deadline/advisory save must not resurrect the broken files
-                await saveWorkspaceFiles(workspaceId, snapshot);
-                saved = true;
-                persisted = snapshot;
-                if (plan.remove.length > 0) await removeWorkspaceFiles(workspaceId, plan.remove).catch(() => {});
+                const outcome = await applyGreenSnapshotRestore(plan);
+                // Final saves follow the APPLIED tree even on a partial restore, never the planned snapshot.
+                persisted = snapshotRestoredFiles(toSave, plan, outcome);
+                deletedThisBuild.push(...outcome.removed);
+                if (snapshotRestoreComplete(plan, outcome)) {
                 events.emit({ type: 'narration', agent: 'architect', text: greenGuardMessage(plan, chosen.kind), ts: Date.now() });
                 buildDiag.record({
                   phase: 'build', severity: 'warning', code: 'GREEN_GUARD_RESTORED',
@@ -26051,6 +26035,10 @@ async function noteBuildOutcome(
                   fromThisBuild: chosen.kind === 'green-snapshot' && fromThisBuild,
                   unchecked: chosen.kind === 'turn-start',
                 };
+                } else {
+                  events.emit({ type: 'narration', agent: 'architect', text: 'The automatic restore could not be fully confirmed. The earlier restore point is still available; please check it before your next change.', ts: Date.now() });
+                  buildDiag.record({ phase: 'build', severity: 'warning', code: 'GREEN_GUARD_RESTORE_INCOMPLETE', autoResolved: false, message: 'The automatic restore could not be fully confirmed in the sandbox and durable store; the final save follows only the changes confirmed in the sandbox.', detail: snapshotRestoreDetail(outcome) });
+                }
                 }
               } else if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop' })) {
                 // KEPT, BUT UNCHECKED — and the user hears so. This is the branch that used to be a
@@ -26065,7 +26053,7 @@ async function noteBuildOutcome(
               }
             } catch { /* the guard must never cost a user their save — fall through to the plain save */ }
           }
-          const finalSave = saved ? Promise.resolve() : sourcePublication.track(saveWorkspaceFiles(workspaceId, toSave)).catch(() => {});
+          const finalSave = saved ? Promise.resolve() : sourcePublication.track(saveWorkspaceFiles(workspaceId, persisted)).catch(() => {});
           // …AND THE DURABLE STORE FORGETS WHAT THIS BUILD DELETED (queue Q-106, fileDeletion.ts). The save
           // above can MERGE a partial set or carry a root manifest forward, so a deleted file would stay in
           // the index and come back with the next sandbox. Ordered AFTER the save: removing first would let

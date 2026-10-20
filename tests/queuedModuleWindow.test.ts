@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createBuildRequestCoordination, normalQueuedModuleRetirementAllowed, startBuildLeaseHeartbeat } from '../src/server/AgentV3/BuildRequestCoordination';
 import { BUILD_QUEUE_COLLECTION, createBuildQueueStore, __bindBuildQueueDbForTests, type QueueDb } from '../src/server/AgentV3/BuildQueueStore';
@@ -8,6 +10,8 @@ import type { RunningBuild } from '../src/server/AgentV3/runningBuildRegistry';
 import { createBuildSourcePublication } from '../src/server/AgentV3/BuildSourcePublication';
 import { persistBuildAssets } from '../src/server/AgentV3/buildAssets';
 import { withTimeout } from '../src/server/AgentV3/asyncUtils';
+import { applySnapshotRestore, snapshotRestoreComplete, snapshotRestoreStopped, type SnapshotRestorePlan } from '../src/server/AgentV3/snapshotRestore';
+import { buildRemoveCommand, reconcileCapturedWrites } from '../src/server/AgentV3/GreenGuard';
 
 const WS = 'agentv3-owner-session123';
 const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -340,5 +344,132 @@ describe('real queue/request coordination across normal successful module window
     const changedUuidReplay = createBuildRequestCoordination(nextOptions(f, handoff, C, R3));
     expect(await changedUuidReplay.admit()).toMatchObject({ status: 409, payload: { code: 'QUEUE_CLAIM_CONFLICT' } });
     await changedUuidReplay.release();
+  });
+});
+
+
+/** Execute the actual route adapter, including its publication tracking, with the real restore algorithm. */
+function restoreAdapter(source: ReturnType<typeof createBuildSourcePublication>, effects: {
+  write: (path: string, content: string) => Promise<void>;
+  remove: () => Promise<{ exitCode: number }>;
+  persist: (files: Record<string, string>) => Promise<{ status: string }>;
+  forget: (paths: string[]) => Promise<number>;
+  stopped?: () => boolean;
+}) {
+  const text = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+  const ast = ts.createSourceFile('agentv3.ts', text, ts.ScriptTarget.Latest, true);
+  let initializer: string | undefined;
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(ast) === 'applyGreenSnapshotRestore') initializer = node.initializer?.getText(ast);
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  expect(initializer).toBeTypeOf('string');
+  const compiled = ts.transpileModule(`const restore = ${initializer};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  const factory = new Function('runInPass', 'applySnapshotRestore', 'sourcePublication', 'snapshotRestoreStopped', 'abort', 'actuator', 'workspaceId', 'withTimeout', 'buildRemoveCommand', 'reconcileCapturedWrites', 'writtenFiles', 'mergeWorkspaceFiles', 'removeWorkspaceFiles', 'snapshotRestoreComplete', `${compiled}; return restore;`);
+  const captured = new Map([['src/App.tsx', 'broken repair'], ['src/extra.ts', 'new failed repair']]);
+  const restore = factory((_pass: string, job: () => Promise<unknown>) => job(), applySnapshotRestore, source, snapshotRestoreStopped,
+    new AbortController(), { writeFile: (_workspace: string, path: string, content: string) => effects.write(path, content), runCommand: effects.remove }, WS, withTimeout, buildRemoveCommand,
+    reconcileCapturedWrites, captured, (_workspace: string, files: Record<string, string>) => effects.persist(files),
+    (_workspace: string, paths: string[]) => effects.forget(paths), snapshotRestoreComplete) as typeof applySnapshotRestore;
+  return { restore: (plan: SnapshotRestorePlan) => (restore as any)(plan, effects.stopped), captured };
+}
+
+function heldEffect() {
+  let release!: () => void; let started!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  const entered = new Promise<void>((resolve) => { started = resolve; });
+  return { pending, entered, release, wait: async () => { started(); await pending; } };
+}
+const restorePlan: SnapshotRestorePlan = { write: { 'src/App.tsx': 'confirmed green source' }, remove: ['src/extra.ts'] };
+
+describe('actual shared snapshot restore publication before normal module handoff', () => {
+  it.each(['command', 'persist', 'forget'] as const)('keeps the exact predecessor lease and A pending until raw restore %s finishes', async (stage) => {
+    const f = await firstWindow(); const source = createBuildSourcePublication(); const held = heldEffect();
+    const durable = new Map([['src/App.tsx', 'broken repair'], ['src/extra.ts', 'new failed repair']]);
+    const sandbox = new Map(durable);
+    const adapter = restoreAdapter(source, {
+      write: async (path, content) => { sandbox.set(path, content); },
+      remove: async () => { if (stage === 'command') await held.wait(); sandbox.delete('src/extra.ts'); return { exitCode: 0 }; },
+      persist: async (files) => { if (stage === 'persist') await held.wait(); Object.entries(files).forEach(([path, content]) => durable.set(path, content)); return { status: 'saved' }; },
+      forget: async (paths) => { if (stage === 'forget') await held.wait(); paths.forEach((path) => durable.delete(path)); return paths.length; },
+    });
+    const restoring = adapter.restore(restorePlan); await held.entered;
+    f.publish(moduleResult); await f.request.flushPublication();
+    const delivery = vi.fn(async () => true); let joining = false;
+    const retirement = f.request.retireNormalModule(() => !source.uncertain(), delivery, () => { joining = true; return source.join(); });
+    try {
+      for (let i = 0; i < 100; i++) await Promise.resolve();
+      expect(joining).toBe(true);
+      expect((await f.queue.load(WS)).items[0].continuation?.phase).toBe('pending');
+      expect((await f.queue.claim(WS)).result).toBeNull();
+      expect(f.docs.has(`${WORKSPACE_BUILD_LEASE_COLLECTION}/${WS}`)).toBe(true);
+      expect(delivery).not.toHaveBeenCalled();
+      if (stage === 'persist') expect(durable.get('src/App.tsx')).toBe('broken repair');
+      if (stage === 'forget') expect(durable.has('src/extra.ts')).toBe(true);
+      held.release();
+      const outcome = await restoring;
+      expect(snapshotRestoreComplete(restorePlan, outcome)).toBe(true);
+      expect(await retirement).toBe(true);
+      expect([...durable]).toEqual([['src/App.tsx', 'confirmed green source']]);
+      expect([...sandbox]).toEqual([...durable]);
+      expect([...adapter.captured]).toEqual([...durable]);
+      expect((await f.queue.load(WS)).items[0].continuation?.phase).toBe('ready');
+      expect(f.docs.has(`${WORKSPACE_BUILD_LEASE_COLLECTION}/${WS}`)).toBe(false);
+    } finally { held.release(); await restoring; await retirement; }
+  });
+
+  it.each(['partial-persist', 'unconfirmed-delete', 'failed-command', 'stopped'] as const)('pauses without READY after %s while preserving the actual restore outcome', async (failure) => {
+    const f = await firstWindow(); const source = createBuildSourcePublication();
+    const adapter = restoreAdapter(source, {
+      write: async () => {}, remove: async () => ({ exitCode: failure === 'failed-command' ? 1 : 0 }),
+      persist: async () => ({ status: failure === 'partial-persist' ? 'partial' : 'saved' }),
+      forget: async (paths) => failure === 'unconfirmed-delete' ? 0 : paths.length,
+      stopped: () => failure === 'stopped',
+    });
+    const outcome = await adapter.restore(restorePlan);
+    expect(snapshotRestoreComplete(restorePlan, outcome)).toBe(false);
+    expect(outcome.failed.length).toBeGreaterThan(0);
+    f.publish(moduleResult); await f.request.flushPublication();
+    const delivery = vi.fn(async () => true);
+    expect(await f.request.retireNormalModule(() => !source.uncertain(), delivery, () => source.join())).toBe(false);
+    expect(delivery).not.toHaveBeenCalled();
+    expect((await f.queue.load(WS))).toMatchObject({ paused: true, items: [{ status: 'failed' }, { status: 'pending' }] });
+    expect((await f.queue.load(WS)).items[0].continuation).toBeUndefined();
+    expect(f.docs.has(`${WORKSPACE_BUILD_LEASE_COLLECTION}/${WS}`)).toBe(true);
+  });
+
+  it('keeps a raw command tracked after its reporting timeout and never recovers READY from its late completion', async () => {
+    vi.useFakeTimers(); const f = await firstWindow(); const source = createBuildSourcePublication(); const held = heldEffect();
+    let deleted = false;
+    const adapter = restoreAdapter(source, { write: async () => {}, remove: async () => { await held.wait(); deleted = true; return { exitCode: 0 }; }, persist: async () => ({ status: 'saved' }), forget: async (paths) => paths.length });
+    const restoring = adapter.restore(restorePlan); await held.entered;
+    await vi.advanceTimersByTimeAsync(20_000);
+    const outcome = await restoring;
+    expect(outcome.failed).toContain('src/extra.ts'); expect(deleted).toBe(false);
+    let joined = false;
+    const drain = source.join().then((safe) => { joined = true; return safe; });
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+    expect(joined).toBe(false); // The raw command remains owned after the whole helper reports failure.
+    f.publish(moduleResult); await f.request.flushPublication();
+    const retiring = f.request.retireNormalModule(() => !source.uncertain(), async () => true, () => source.join());
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(await drain).toBe(false);
+    expect(await retiring).toBe(false);
+    expect((await f.queue.load(WS)).paused).toBe(true);
+    held.release(); await vi.advanceTimersByTimeAsync(0);
+    expect(deleted).toBe(true);
+    expect((await f.queue.load(WS)).items[0].continuation).toBeUndefined();
+  });
+
+  it('observes a rejected restore status mapper while returning the original rejection to its caller', async () => {
+    const f = await firstWindow(); const source = createBuildSourcePublication();
+    const error = Error('restore ownership lookup failed');
+    const adapter = restoreAdapter(source, { write: async () => {}, remove: async () => ({ exitCode: 0 }), persist: async () => ({ status: 'saved' }), forget: async () => 1, stopped: () => { throw error; } });
+    await expect(adapter.restore(restorePlan)).rejects.toBe(error);
+    f.publish(moduleResult); await f.request.flushPublication();
+    expect(await f.request.retireNormalModule(() => !source.uncertain(), async () => true, () => source.join())).toBe(false);
+    expect((await f.queue.load(WS)).paused).toBe(true);
+    expect(f.docs.has(`${WORKSPACE_BUILD_LEASE_COLLECTION}/${WS}`)).toBe(true);
   });
 });

@@ -33,6 +33,10 @@ import { scanMarkup, enclosingTag, isHtmlElement, tagName, type ScannedTag } fro
 import { NEVER_PRESS, WRITE_VERBS } from './clickExplorer';
 import { blankOurMarkup } from './ourInjectedMarkup';
 import { isCanvasGameProject } from './gamePlaytest';
+import * as ts from 'typescript';
+import { localImportCandidates } from './ArchitectureAnalysis';
+import path from 'node:path';
+import { isBuiltin } from 'node:module';
 
 /** How a single element is addressed, in the order Playwright should be asked for it. */
 export type SelectorKind = 'testid' | 'name' | 'id' | 'placeholder' | 'label' | 'text' | 'role';
@@ -351,21 +355,114 @@ export function dataEntryEvidence(files: Record<string, string>): { path: string
 
 /** A file the app starts from, or one a framework loads by its place (Next `app/`, `pages/`). */
 const LOADED_BY_PLACE = /(?:^|\/)(?:main|index|App|_app|_document|layout|page)\.(?:tsx|jsx|ts|js)$|(?:^|\/)(?:app|pages|routes)\//;
-const IMPORT_SPEC = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'](\.{1,2}\/[^"']+)["']/g;
 
-function stemOf(path: string): string {
-  return path.replace(/^\.?\/+/, '').replace(/\.(?:tsx|jsx|ts|js|mjs)$/i, '').replace(/\/index$/, '');
+/** Literal module edges only. Computed loading or unparseable code cannot prove safe deletion. */
+function observableImports(file: string, source: string): string[] | null {
+  if (!/\.[cm]?[jt]sx?$/i.test(file)) {
+    // Embedded scripts require their own parser; do not silently discard their possible edges.
+    return /\.(?:vue|svelte|html)$/i.test(file) && /\b(?:import|require|script)\b/.test(source) ? null : [];
+  }
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, /x$/i.test(file) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  if ((sf as ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics?.length) return null;
+  const imports: string[] = [];
+  let unknown = false;
+  const add = (node: ts.Node | undefined): void => {
+    if (node && ts.isStringLiteralLike(node)) imports.push(node.text);
+    else unknown = true;
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node)) add(node.moduleSpecifier);
+    else if (ts.isExportDeclaration(node) && node.moduleSpecifier) add(node.moduleSpecifier);
+    else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) add(node.moduleReference.expression);
+    else if (ts.isCallExpression(node)) {
+      const expr = node.expression;
+      const cjs = ts.isIdentifier(expr) && expr.text === 'require'
+        || ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression) && expr.expression.text === 'module' && expr.name.text === 'require';
+      if (expr.kind === ts.SyntaxKind.ImportKeyword || cjs) add(node.arguments[0]);
+      else if (ts.isElementAccessExpression(expr) && ts.isIdentifier(expr.expression) && expr.expression.text === 'module') unknown = true;
+      else if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression) && expr.expression.text === 'require') unknown = true;
+      else if (/^import\s*\.\s*meta\s*(?:\.\s*glob(?:Eager)?\b|\[)/.test(expr.getText(sf))) unknown = true;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return unknown ? null : imports;
 }
 
-function joinRelative(fromFile: string, spec: string): string {
-  const parts = fromFile.replace(/^\.?\/+/, '').split('/');
-  parts.pop();
-  for (const seg of spec.split('/')) {
-    if (seg === '' || seg === '.') continue;
-    if (seg === '..') parts.pop();
-    else parts.push(seg);
+/** Configuration can override both a declared package and the conventional @/ source root. */
+function importProofMetadata(files: Record<string, string>): ((from: string, spec: string) => 'unknown' | 'local' | 'external') | null {
+  const manifests: Array<{ dir: string; external: Set<string> }> = [];
+  const localNames = new Set<string>();
+  const configs: Array<{ file: string; options: Record<string, unknown> }> = [];
+  const normalized = new Map(Object.entries(files).map(([p, src]) => [p.replace(/^\.?\/+/, ''), src]));
+  for (const [file, source] of normalized) {
+    if (/(^|\/)package\.json$/.test(file)) {
+      let data: { name?: unknown; dependencies?: unknown; devDependencies?: unknown; peerDependencies?: unknown; optionalDependencies?: unknown };
+      try { data = JSON.parse(source); } catch { return null; }
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+      if (typeof data.name === 'string') localNames.add(data.name);
+      const external = new Set<string>();
+      for (const section of [data.dependencies, data.devDependencies, data.peerDependencies, data.optionalDependencies]) {
+        if (section == null) continue;
+        if (typeof section !== 'object' || Array.isArray(section)) return null;
+        for (const [name, version] of Object.entries(section)) {
+          if (typeof version !== 'string' || !version.trim()) return null;
+          if (!/^(?:workspace:|file:|link:|portal:|\.|\/)/i.test(version)) external.add(name);
+        }
+      }
+      manifests.push({ dir: path.posix.dirname(file), external });
+    } else if (/(^|\/)(?:ts|js)config(?:\.[^/]+)?\.json$/.test(file)) {
+      const parsed = ts.parseConfigFileTextToJson(file, source);
+      if (parsed.error || !parsed.config || typeof parsed.config !== 'object') return null;
+      const config = parsed.config;
+      // Inheritance can change the base directory of a parent's paths, even when both files were read.
+      // Leave it unknown rather than claiming to have computed TypeScript's effective configuration.
+      if (config.extends) return null;
+      const options = config.compilerOptions ?? {};
+      if (typeof options !== 'object' || Array.isArray(options)) return null;
+      // These change resolution beyond the shared conventional candidate contract.
+      if (options.rootDirs?.length || options.moduleSuffixes?.length) return null;
+      if (options.baseUrl != null && !['.', './', 'src', './src'].includes(options.baseUrl)) return null;
+      if (options.paths != null && (typeof options.paths !== 'object' || Array.isArray(options.paths))) return null;
+      configs.push({ file, options });
+    } else if (/(^|\/)(?:vite|webpack|rollup|next|svelte|astro)\.config\.[cm]?[jt]s$/.test(file)) {
+      const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+      if ((sf as ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics?.length) return null;
+      let overrides = false;
+      const visit = (node: ts.Node): void => {
+        if ((ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) && node.name.getText(sf).replace(/['"]/g, '') === 'alias') overrides = true;
+        if (ts.isPropertyAccessExpression(node) && node.name.text === 'alias') overrides = true;
+        ts.forEachChild(node, visit);
+      };
+      visit(sf);
+      if (overrides) return null; // runtime mappings require a bundler-specific proof, never a guessed root
+    }
   }
-  return parts.join('/');
+  return (from, spec): 'unknown' | 'local' | 'external' => {
+    for (const { file, options } of configs) {
+      for (const [pattern, targets] of Object.entries(options.paths ?? {})) {
+        const pieces = pattern.split('*');
+        if (pieces.length > 2) return 'unknown';
+        const matches = pieces.length === 1 ? spec === pattern : spec.startsWith(pieces[0]) && spec.endsWith(pieces[1]);
+        if (!matches) continue;
+        // Only the conventional alias whose config proves the SAME source root is supported here.
+        // Custom / package-overriding mappings remain unknown, rather than adding a second TS resolver.
+        if (!['@/*', '~/*'].includes(pattern) || !Array.isArray(targets) || targets.length !== 1 || typeof targets[0] !== 'string') return 'unknown';
+        const root = /^(.*?(?:^|\/)src)\//.exec(from)?.[1] ?? 'src';
+        const configured = path.posix.normalize(path.posix.join(path.posix.dirname(file), String(options.baseUrl ?? '.'), targets[0]));
+        if (configured !== root + '/*') return 'unknown';
+      }
+    }
+    // This callback answers whether an UNRESOLVED specifier is proved external. An explicit local
+    // form is never external, and a dependency name alone is insufficient without its manifest.
+    if (/^(?:\.|\/|~|#|@\/)/.test(spec)) return 'local';
+    if (isBuiltin(spec)) return 'external';
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(spec) || /^data:/.test(spec)) return 'external';
+    const name = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
+    if (localNames.has(name)) return 'unknown';
+    const manifest = manifests.filter((m) => m.dir === '.' || from.startsWith(m.dir + '/')).sort((a, b) => b.dir.length - a.dir.length)[0];
+    return manifest?.external.has(name) === true ? 'external' : 'local';
+  };
 }
 
 /**
@@ -376,25 +473,33 @@ function joinRelative(fromFile: string, spec: string): string {
  *
  * The component files (`.tsx` / `.jsx`) that no other file imports and that no framework loads by its
  * name or place. Precision first: a file is set aside only when it is PROVEN unreferenced — any import
- * whose path resolves to it keeps it, and a graph with an entry missing or an import that resolves to no
- * file we were given sets nothing aside. PURE.
+ * whose path resolves to it keeps it. Missing / ambiguous local edges, computed loading and missing entries
+ * set nothing aside. The same resolver as the architecture graph supplies candidates, but a destructive
+ * decision requires ONE target, rather than its advisory first match. PURE.
  */
 export function unreferencedComponents(files: Record<string, string>): Set<string> {
+  const externalProof = importProofMetadata(files ?? {});
+  if (!externalProof) return new Set();
   const paths = Object.keys(files ?? {}).map((p) => p.replace(/^\.?\/+/, ''));
   const present = new Set(paths);
-  const stems = new Set(paths.map(stemOf));
   const referenced = new Set<string>();
   let imports = 0;
   for (const [raw, src] of Object.entries(files ?? {})) {
-    if (typeof src !== 'string') continue;
+    if (typeof src !== 'string') return new Set();
     const from = raw.replace(/^\.?\/+/, '');
-    IMPORT_SPEC.lastIndex = 0;
-    for (let m = IMPORT_SPEC.exec(src); m; m = IMPORT_SPEC.exec(src)) {
-      const target = joinRelative(from, m[1]);
-      // A graph with a hole proves nothing: an import of a file we were not given could be the one that
-      // shows the component, so nothing is called unreferenced.
-      if (!present.has(target) && !stems.has(stemOf(target))) return new Set();
-      referenced.add(stemOf(target));
+    const edges = observableImports(from, src);
+    if (!edges) return new Set();
+    for (const spec of edges) {
+      const binding = externalProof(from, spec);
+      if (binding === 'unknown') return new Set();
+      const candidates = localImportCandidates(from, spec, present);
+      if (candidates.length > 1) return new Set();
+      if (candidates.length === 0) {
+        // An explicit local / alias edge whose target was not read is a graph hole, not an orphan.
+        if (binding !== 'external') return new Set();
+        continue;
+      }
+      referenced.add(candidates[0]);
       imports++;
     }
   }
@@ -403,7 +508,7 @@ export function unreferencedComponents(files: Record<string, string>): Set<strin
   const out = new Set<string>();
   for (const p of paths) {
     if (!/\.(?:tsx|jsx)$/i.test(p) || LOADED_BY_PLACE.test(p)) continue;
-    if (!referenced.has(stemOf(p))) out.add(p);
+    if (!referenced.has(p)) out.add(p);
   }
   return out;
 }

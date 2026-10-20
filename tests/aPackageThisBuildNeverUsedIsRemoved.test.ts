@@ -4,11 +4,17 @@
 // passes without it. The user's own packages are never touched.
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { join } from 'node:path';
+import { abortBuild } from '../src/server/AgentV3/buildAbortCause';
 import { anchorOf, awaitedCallAt } from './helpers/sourceSlice';
 import { resolve } from 'path';
 import {
   depsAddedByBuild, pruneCandidates, isSafePackageName, parseNeeded, peerCheckScript, hasBuildScript,
-  pruneBuildAddedDeps, prunedNarration, pruneUnusedDepsEnabled, MAX_PRUNE,
+  pruneBuildAddedDeps, packagePruneNote, prunedNarration, pruneUnusedDepsEnabled, MAX_PRUNE,
 } from '../src/server/AgentV3/unusedDepPrune';
 
 const route = readFileSync(resolve(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
@@ -119,6 +125,105 @@ describe('removing, proving, and putting it back', () => {
     expect(f.commands.some((c) => c.includes('npm install'))).toBe(true);
   });
 
+  it('a nonzero restore command is not reported as packages being kept', async () => {
+    const f = fakeIo({ build: 1 });
+    const run = f.io.run;
+    f.io.run = async (cmd) => cmd.includes('npm install')
+      ? { exitCode: 1, stdout: '', stderr: 'restore copy failed' }
+      : run(cmd);
+    expect(await pruneBuildAddedDeps(['recharts'], AFTER, f.io)).toMatchObject({ status: 'restore-failed', tried: ['recharts'] });
+  });
+
+  it('a throwing restore command is not reported as packages being kept', async () => {
+    const f = fakeIo({ build: 1 });
+    const run = f.io.run;
+    f.io.run = async (cmd) => {
+      if (cmd.includes('npm install')) throw new Error('restore timed out');
+      return run(cmd);
+    };
+    expect((await pruneBuildAddedDeps(['recharts'], AFTER, f.io)).status).toBe('restore-failed');
+  });
+
+  it.each([0, 1])('Stop during the awaited production build (exit %i) prevents later restore commands', async (exitCode) => {
+    const controller = new AbortController();
+    const f = fakeIo({ build: 1 });
+    let finishBuild!: (value: { exitCode: number; stdout: string; stderr: string }) => void;
+    let enteredBuild!: () => void;
+    const entered = new Promise<void>((resolve) => { enteredBuild = resolve; });
+    const build = new Promise<{ exitCode: number; stdout: string; stderr: string }>((resolve) => { finishBuild = resolve; });
+    const run = f.io.run;
+    const pending = pruneBuildAddedDeps(['recharts'], AFTER, {
+      ...f.io,
+      signal: controller.signal,
+      run: async (cmd) => {
+        if (cmd.includes('npm run build')) { enteredBuild(); return build; }
+        return run(cmd);
+      },
+    });
+    await entered;
+    controller.abort();
+    finishBuild({ exitCode, stdout: '', stderr: 'finished after Stop' });
+    expect((await pending).status).toBe('interrupted');
+    expect(f.commands.some((c) => c.includes('npm install'))).toBe(false);
+  });
+
+  it('a budget ending during a failed build still allows the safety restore', async () => {
+    const controller = new AbortController();
+    const f = fakeIo({ build: 1 });
+    const run = f.io.run;
+    const out = await pruneBuildAddedDeps(['recharts'], AFTER, {
+      ...f.io, signal: controller.signal,
+      run: async (cmd) => {
+        const result = await run(cmd);
+        if (cmd.includes('npm run build')) abortBuild(controller, 'watchdog');
+        return result;
+      },
+    });
+    expect(out.status).toBe('reverted');
+    expect(f.commands.some((c) => c.includes('npm install'))).toBe(true);
+  });
+
+  it('a failed peer check cannot prove that no other package needs the candidate', async () => {
+    const f = fakeIo({});
+    const commands: string[] = [];
+    const out = await pruneBuildAddedDeps(['recharts'], AFTER, {
+      ...f.io, run: async (cmd) => { commands.push(cmd); return { exitCode: 1, stdout: '', stderr: 'peer check failed' }; },
+    });
+    expect(out.status).toBe('skipped');
+    expect(commands).toHaveLength(1);
+  });
+
+  it('the real restore shell returns the exact old manifests, including the absence of a lock', async () => {
+    const f = fakeIo({ build: 1 });
+    await pruneBuildAddedDeps(['recharts'], AFTER, f.io);
+    const command = f.commands.find((c) => c.includes('npm install'))!;
+    const scratch = mkdtempSync(join(tmpdir(), 'nbai-prune-restore-'));
+    try {
+      mkdirSync(join(scratch, 'bin'));
+      writeFileSync(join(scratch, 'bin/npm'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      for (const hadLock of [false, true]) {
+        writeFileSync(join(scratch, 'backup-package.json'), AFTER);
+        const backupLock = join(scratch, 'backup-package-lock.json');
+        if (hadLock) writeFileSync(backupLock, '{"old-lock":true}');
+        else rmSync(backupLock, { force: true });
+        writeFileSync(join(scratch, 'package.json'), '{}');
+        writeFileSync(join(scratch, 'package-lock.json'), '{"new-lock":true}');
+        await promisify(execFile)('sh', ['-c', command.replaceAll('/tmp/nbai-prune-', `${scratch}/backup-`)], {
+          cwd: scratch, env: { ...process.env, PATH: `${scratch}/bin:${process.env.PATH}` },
+        });
+        expect(readFileSync(join(scratch, 'package.json'), 'utf8')).toBe(AFTER);
+        expect(existsSync(join(scratch, 'package-lock.json'))).toBe(hadLock);
+        if (hadLock) expect(readFileSync(join(scratch, 'package-lock.json'), 'utf8')).toBe('{"old-lock":true}');
+      }
+    } finally { rmSync(scratch, { recursive: true, force: true }); }
+  });
+
+  it('incomplete recovery remains unresolved and never says the packages were kept', () => {
+    const note = packagePruneNote({ status: 'restore-failed', reason: 'copy failed', tried: ['recharts'], keptForPeers: [] }, ['recharts']);
+    expect(note).toMatchObject({ severity: 'warning', code: 'UNUSED_DEPS_RESTORE_INCOMPLETE', autoResolved: false });
+    expect(note.message).not.toMatch(/kept/i);
+  });
+
   it('a package another installed package needs is kept, before anything is uninstalled', async () => {
     const f = fakeIo({ peers: ['recharts'] });
     const out = await pruneBuildAddedDeps(['recharts'], AFTER, f.io);
@@ -161,8 +266,10 @@ describe('the route wiring (source guards)', () => {
   });
 
   it('a removed package is saved, and is no longer reported as unused', () => {
-    expect(route).toMatch(/if \(outcome\.status === 'removed'\) \{\s*prunedDeps\.push\(\.\.\.outcome\.removed\);/);
+    expect(route).toMatch(/if \(outcome\.status === 'removed' && !abort\.signal\.aborted\) \{\s*prunedDeps\.push\(\.\.\.outcome\.removed\);/);
     expect(route).toMatch(/for \(const u of unusedDeps\) \{\s*if \(prunedDeps\.includes\(u\.name\)\) continue;/);
     expect(route).toContain('await saveWorkspaceFiles(workspaceId, changed)');
+    expect(route).toMatch(/pruneBuildAddedDeps\(cands, pkgNow, \{\s*signal: abort\.signal,/);
+    expect(route).toContain('...packagePruneNote(outcome, cands, abort.signal.aborted)');
   });
 });

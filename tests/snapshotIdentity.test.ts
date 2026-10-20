@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles } from '../src/server/AgentV3/snapshotIdentity';
+import { snapshotRestoredFiles } from '../src/server/AgentV3/snapshotRestore';
 
 /**
  * IS THE SAVED COPY THE APP AS IT STANDS NOW? — answered by CONTENT, not by clocks.
@@ -67,6 +68,17 @@ describe('snapshotConfirmation — the copy is promoted only on a proven match',
     expect(snapshotConfirmation({ taken: null, persistedHash: 'x' }).action).toBe('none');
     expect(snapshotConfirmation({ taken: { url: 'not-a-url', filesHash: 'x' }, persistedHash: 'x' }).action).toBe('none');
   });
+
+  it('a partial rollback cannot promote a copy of the planned green snapshot', () => {
+    const attempt = { 'a.ts': 'broken a', 'b.ts': 'broken b', 'extra.ts': 'new' };
+    const snapshot = { 'a.ts': 'green a', 'b.ts': 'green b' };
+    const actual = snapshotRestoredFiles(attempt, { write: snapshot, remove: ['extra.ts'] }, {
+      restored: ['a.ts'], removed: [], failed: ['b.ts', 'extra.ts'], stopped: false,
+    });
+    expect(actual).toEqual({ 'a.ts': 'green a', 'b.ts': 'broken b', 'extra.ts': 'new' });
+    expect(snapshotConfirmation({ taken: { url, filesHash: workspaceContentHash(snapshot) }, persistedHash: workspaceContentHash(actual) }).action).toBe('stale');
+    expect(snapshotConfirmation({ taken: { url, filesHash: workspaceContentHash(actual) }, persistedHash: workspaceContentHash(actual) }).action).toBe('restamp');
+  });
 });
 
 describe('snapshotMatchesFiles — three answers, and "unknown" is one of them', () => {
@@ -114,8 +126,14 @@ describe('wiring — the build records the identity, the final save confirms it,
 
   it('🔒 the confirmation compares what was PERSISTED — the green guard may have restored a different tree', () => {
     expect(route).toContain('let persisted: Record<string, string> = toSave;');
-    const restore = route.indexOf('await saveWorkspaceFiles(workspaceId, snapshot);');
-    expect(route.slice(restore, restore + 120)).toContain('persisted = snapshot;');
+    const restore = route.indexOf('const outcome = await applyGreenSnapshotRestore(plan);', route.indexOf('let persisted: Record<string, string> = toSave;'));
+    const applied = route.indexOf('persisted = snapshotRestoredFiles(toSave, plan, outcome);', restore);
+    const complete = route.indexOf('if (snapshotRestoreComplete(plan, outcome))', applied);
+    const save = route.indexOf('const finalSave = saved ? Promise.resolve() : sourcePublication.track(saveWorkspaceFiles(workspaceId, persisted))', complete);
+    expect(restore).toBeGreaterThan(-1);
+    expect(applied).toBeGreaterThan(restore);
+    expect(complete).toBeGreaterThan(applied); // failed operations stay in the saved tree and its hash
+    expect(save).toBeGreaterThan(complete);
     // The claim is that the confirmation compares what was PERSISTED — not the exact call layout.
     const call = route.slice(route.indexOf('snapshotConfirmation({'));
     const args = call.slice(0, call.indexOf('});'));

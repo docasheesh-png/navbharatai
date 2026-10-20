@@ -146,12 +146,15 @@ describe('the route wires it the only safe way', () => {
   const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
 
   it('ONE revert for every verifyAfterFix site, and it reconciles the captured writes', () => {
-    expect(route.match(/'vaf-remove'/g)?.length).toBe(1);
+    expect(route.match(/const applyGreenSnapshotRestore =/g)?.length).toBe(1);
     // Four since 2026-09-28: the explorer repair (explorerRepair.ts) is the fourth verifyAfterFix site, same helper.
     // Five since 2026-09-30: the test-suite repair on a green app (autopsy 8e124182), same helper.
     expect(route.match(/revert: revertToGreenSnapshot,/g)?.length).toBe(5);
     const def = route.slice(route.indexOf('const revertToGreenSnapshot'), route.indexOf('const revertToGreenSnapshot') + 1200);
-    expect(def).toContain('reconcileCapturedWrites(writtenFiles, plan)');
+    expect(def).toContain('await applyGreenSnapshotRestore(plan)');
+    expect(def).toContain('if (!snapshotRestoreComplete(plan, outcome)) throw');
+    const door = route.slice(route.indexOf('const applyGreenSnapshotRestore'), route.indexOf('const revertToGreenSnapshot'));
+    expect(door).toContain('reconcileCapturedWrites(writtenFiles, { ...applied, unchanged: 0 })');
     // An empty snapshot is a failed read; restoring from it would delete the whole workspace.
     expect(def.indexOf("refusing to restore from an empty snapshot")).toBeGreaterThan(0);
     expect(def.indexOf("refusing to restore from an empty snapshot")).toBeLessThan(def.indexOf('restorePlan(snap, cur)'));

@@ -414,10 +414,11 @@ export async function runAiRepair(
 
 /**
  * The build's verdict on a candidate change, supplied by the caller (the sandbox runner). `changed` is
- * only the files that differ from the repository — the sandbox already holds everything else.
+ * only the files that differ from the repository — the sandbox already holds everything else. A blocked
+ * result means the workspace could not be safely released; it may never authorize an unverified commit.
  */
 export type VerifyFix = (changed: Record<string, string>) => Promise<
-  | { ran: false; reason: string }
+  | { ran: false; reason: string; blocked?: true }
   | { ran: true; ok: true }
   | { ran: true; ok: false; log: string; summary: string }
 >;
@@ -549,6 +550,11 @@ export async function runAiRepairLoop(
       return { outcome: 'fixed', fix: { files: changed, explanation: reply.explanation }, verified: true, rounds, asked, reason: '', rejected };
     }
     if (!verdict.ran) {
+      if ('blocked' in verdict && verdict.blocked) {
+        return none('gave-up', verdict.reason === 'interrupted'
+          ? 'The repair was interrupted before it could be completed, so no repository change was applied.'
+          : 'The workspace restore could not be confirmed, so this repair was stopped and no repository change was applied. Check the workspace before trying again.');
+      }
       if (sawVerifiedFailure) {
         return none('gave-up', 'NavBharatAI made a change but could not confirm it fixes the build, so it was not applied.');
       }

@@ -406,6 +406,23 @@ describe('🔒 census — every write the route makes after the model answers na
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && ts.isNewExpression(n.initializer) && n.initializer.expression.getText(sf) === 'AgentRunner') runnerVars.add(n.name.text);
   });
   const sites: Array<{ line: number; call: string; named: boolean }> = [];
+  let sharedRestore: ts.ArrowFunction | undefined;
+  walk(sf, (n) => {
+    if (ts.isVariableDeclaration(n) && n.name.getText(sf) === 'applyGreenSnapshotRestore' && n.initializer && ts.isArrowFunction(n.initializer)) sharedRestore = n.initializer;
+  });
+  const restoreSites: Array<{ line: number; named: boolean }> = [];
+  const restorePasses: string[] = [];
+  walk(sf, (n) => {
+    if (!ts.isCallExpression(n)) return;
+    const c = calleeText(sf, n);
+    if (sharedRestore && n.pos >= sharedRestore.pos && n.end <= sharedRestore.end && /^actuator\.(writeFile|writeBinaryFile)$/.test(c)) {
+      restoreSites.push({ line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1, named: insideCallTo(sf, n, new Set(['runInPass'])) });
+    }
+    if (c === 'applyGreenSnapshotRestore') {
+      const pass = n.arguments[3];
+      restorePasses.push(pass && ts.isStringLiteral(pass) ? pass.text : pass ? '<dynamic pass>' : 'green-guard-restore');
+    }
+  });
   const dispatcherMethods = new Set<string>();
   walk(sf, (n) => {
     if (!ts.isCallExpression(n) || n.pos < start || n.end > end) return;
@@ -420,8 +437,36 @@ describe('🔒 census — every write the route makes after the model answers na
   it('the region exists and the census sees the writers in it (a broken anchor must not pass silently)', () => {
     expect(start).toBeGreaterThan(POST_ANSWER_START.length);
     expect(end).toBeGreaterThan(start);
-    expect(sites.length).toBeGreaterThanOrEqual(45);
+    // Three per-site restore writers moved to ONE shared door before this region (46 → 43).
+    // Keep an exact count plus that door's census below, so deleting a writer or moving one out of
+    // the checked region cannot silently weaken the invariant.
+    expect(sites).toHaveLength(43);
     expect(runnerVars.size).toBeGreaterThanOrEqual(10);
+  });
+  it('the shared automatic restore is named and every caller uses an allowlisted restore pass', () => {
+    expect(sharedRestore).toBeDefined();
+    expect(sharedRestore!.end).toBeLessThan(start);
+    expect(sharedRestore!.parameters[3].initializer?.getText(sf)).toBe("'green-guard-restore'");
+    // The adapter now keeps its raw job for the publication barrier before returning it. The
+    // mutations must still live inside the SAME named pass; a surrounding tracker is not a pass.
+    expect(ts.isBlock(sharedRestore!.body)).toBe(true);
+    let restoring: ts.VariableDeclaration | undefined;
+    const returned: ts.ReturnStatement[] = [];
+    walk(sharedRestore!.body, (node) => {
+      if (ts.isVariableDeclaration(node) && node.name.getText(sf) === 'restoring') restoring = node;
+      if (ts.isReturnStatement(node)) returned.push(node);
+    });
+    expect(restoring?.initializer && ts.isCallExpression(restoring.initializer)).toBe(true);
+    const zone = restoring!.initializer as ts.CallExpression;
+    expect(zone.expression.getText(sf)).toBe('runInPass');
+    expect(zone.arguments[0].getText(sf)).toBe('pass');
+    expect(zone.arguments[1].getText(sf)).toContain('applySnapshotRestore(plan,');
+    expect(returned.map((node) => node.expression?.getText(sf))).toEqual(['restoring']);
+    expect(restoreSites).toHaveLength(1);
+    expect(restoreSites[0].named).toBe(true);
+    expect(restorePasses.sort()).toEqual(['design-heal-revert', 'green-guard-restore', 'green-guard-restore', 'green-guard-restore']);
+    for (const pass of restorePasses) expect(ALLOWED_PASSES.has(pass), pass).toBe(true);
+    expect(sharedRestore!.parameters[1].initializer?.getText(sf)).toContain('snapshotRestoreStopped(abort.signal)');
   });
   it('every one is inside runInPass — or is a listed exception with its reason', () => {
     const unnamed = sites.filter((s) => !s.named && !(s.call in ROUTE_EXCEPTIONS)).map((s) => `${ROUTE_PATH}:${s.line} ${s.call.slice(0, 120)}`);

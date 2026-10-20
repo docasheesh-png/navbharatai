@@ -190,7 +190,7 @@ import { getServerDb as getDb } from '../lib/serverDb';
 import { randomUUID } from 'crypto';
 import { processOwnerId } from '../lib/jobLease';
 import {
-  claimWorkspaceBuild, releaseWorkspaceBuild, requestWorkspaceBuildStop, workspaceBuildIsLive,
+  claimWorkspaceBuild, releaseWorkspaceBuild, workspaceBuildIsLive,
   BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
 } from '../AgentV3/workspaceBuildLease';
 import { getConnection } from '../lib/supabaseConnectionStore';
@@ -236,9 +236,10 @@ import { pastedAppFacts } from '../lib/pastedSource';
 import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote, strictReverify } from '../AgentV3/verifyAfterFix';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
-import { createBuildRequestCoordination, createBuildPreflightStream, buildRequestInputRejection, withBuildRequestCleanup, startBuildLeaseHeartbeat, rethrowBuildSetupRecoveryUnavailable, buildExceptionDetails, publishBuildException } from '../AgentV3/BuildRequestCoordination';
+import { createBuildRequestCoordination, createBuildPreflightStream, buildRequestInputRejection, withBuildRequestCleanup, startBuildLeaseHeartbeat, rethrowBuildSetupRecoveryUnavailable, buildExceptionDetails, publishBuildException, normalQueuedModuleRetirementAllowed, queuedContinuationBusyFields } from '../AgentV3/BuildRequestCoordination';
 import { isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable } from '../AgentV3/SandboxRecoveryError';
-import { loadQueue, mutateQueue, mutateQueueWithResult, claimQueuedCommand, recoverQueuedCommand, QueueStoreUnavailableError, QueueClaimConflictError } from '../AgentV3/BuildQueueStore';
+import { createBuildSourcePublication } from '../AgentV3/BuildSourcePublication';
+import { loadQueue, mutateQueue, mutateQueueWithResult, claimQueuedCommand, recoverQueuedCommand, stopWorkspaceQueueAndLease, QueueStoreUnavailableError, QueueClaimConflictError } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext, plannerDomainBrief } from '../AgentV3/RoleChats';
 import { summarizeFileTree, NAVBHARATAI_UI_MAP } from '../AgentV3/systemPrompt';
 import { SINGLE_HTML_FILE_RULE } from '../AgentV3/systemPrompt';
@@ -2120,10 +2121,19 @@ function broadcastBuild(rb: RunningBuild, e: unknown): void {
 }
 /** End every subscriber stream for a finished/stopped build. */
 function endBuild(rb: RunningBuild): void {
+  if (rb.deliveryClose) return;
   rb.ended = true;
   for (const s of rb.subscribers) { try { s.end(); } catch { /* already closed */ } }
   rb.subscribers.clear();
-  if (rb.key) { try { liveChannel.close(rb.key); } catch { /* best-effort */ } }
+  rb.deliveryClose = Promise.resolve().then(() => rb.key ? liveChannel.closeAndWait(rb.key) : true).catch(() => false);
+}
+
+/** Close the captured predecessor once before exposing READY; it cannot close a newer mirror later. */
+async function closeQueuedModuleDelivery(rb: RunningBuild, retireLocal: () => void): Promise<boolean> {
+  endBuild(rb);
+  if (!await rb.deliveryClose) return false;
+  retireLocal();
+  return true;
 }
 
 /**
@@ -6471,9 +6481,10 @@ async function noteBuildOutcome(
     // nothing, and leave the 409 loop unbreakable). Stop the FIRST live build found; free its lock.
     const candidates = buildKeyCandidates(verifiedStopUid, stopWorkspaceId, perWorkspaceLockEnabled());
     let wasRunning = false;
+    let queuedStopWorkspaceId = stopWorkspaceId;
     for (const key of candidates) {
       const rb = runningBuilds.get(key);
-      if (!rb || rb.ended) continue;
+      if (!rb || (rb.ended && (!rb.deliveryClose || rb.exited))) continue;
       // The anon bucket is shared: prefer the SESSION-aware cross-check when both sides know their
       // workspace (the anon build's id is agentv3-anon-<sid> while the client asks with its uid-based
       // id — same session, so exact match would wrongly refuse). When the stopping client doesn't know
@@ -6482,17 +6493,24 @@ async function noteBuildOutcome(
       if (key === 'anon' && userId && stopWorkspaceId && rb.workspaceId && !workspaceSessionsMatch(rb.workspaceId, stopWorkspaceId)) continue;
       // Frees the lock the build actually held — once its code has finished (autopsy 1219c639).
       stopRegisteredBuild(key, rb);
+      queuedStopWorkspaceId = rb.workspaceId ?? queuedStopWorkspaceId;
       wasRunning = true;
       break;
     }
     // Always unblock the caller's own key — unless a stopped build is still leaving under it.
     if (!stillStopping(candidates[0])) activeBuilds.delete(candidates[0]);
-    // Nothing to stop HERE — the build may be running on another instance (autopsy eed79815). Flag its
-    // workspace lease; the holder aborts on its next heartbeat. Only for a workspace the VERIFIED caller
-    // owns: a claimed id must never let one account stop another's build.
-    if (!wasRunning && stopWorkspaceId && verifiedStopUid && workspaceLeaseEnabled()
-      && workspaceOwnershipOk(verifiedStopUid, null, stopWorkspaceId)) {
-      wasRunning = await requestWorkspaceBuildStop(getDb() as unknown as BuildLeaseStore, { workspaceId: stopWorkspaceId }).catch(() => false);
+    // A continuation can be READY between server windows, with no live lease. Stop must invalidate
+    // that authority and flag the CURRENT lease in the same transaction, even when we stopped a local
+    // build above. Existing anonymous workspace capabilities retain their separate ownership policy.
+    if (queuedStopWorkspaceId && verifiedWorkspaceReadOk(verifiedStopUid, queuedStopWorkspaceId)) {
+      try {
+        const stopped = await stopWorkspaceQueueAndLease(queuedStopWorkspaceId);
+        wasRunning = wasRunning || stopped.result.leaseStopped || stopped.result.queuePaused;
+      } catch {
+        res.setHeader('Retry-After', '2');
+        res.status(503).json({ error: 'Your queued build could not be confirmed stopped. Please retry Stop.', code: 'QUEUE_STORE_UNAVAILABLE', retryable: true });
+        return;
+      }
     }
     res.json({ stopped: wasRunning });
   });
@@ -6520,6 +6538,17 @@ async function noteBuildOutcome(
     // SECURITY (mirrors /stop + the conversation routes): resolve the VERIFIED uid, never the claimed
     // body.userId — an unsend must not be able to purge another account's build by passing its id.
     const verifiedUid = (await verifiedIdentity(req))?.uid ?? null;
+
+    // Unsend/Edit revoke an idle queued handoff as well as an active window. A process-local Stop
+    // cannot revoke a READY ticket that another device may already be polling.
+    if (verifiedWorkspaceReadOk(verifiedUid, workspaceId)) {
+      try { await stopWorkspaceQueueAndLease(workspaceId); }
+      catch {
+        res.setHeader('Retry-After', '2');
+        res.status(503).json({ error: 'The queued request could not be confirmed stopped. Retry before taking back this message.', code: 'QUEUE_STORE_UNAVAILABLE', retryable: true });
+        return;
+      }
+    }
 
     // 1) Stop any in-flight build for this workspace (abort → close streams → free the lock), exactly
     //    like /stop. An unsend of a message whose build is still running must first halt that build.
@@ -10210,6 +10239,7 @@ async function noteBuildOutcome(
             ? 'This app is already building in another chat — connect to it (or stop it) instead of starting a second build.'
             : 'A build is already running for this account. Stop it before starting another.',
           resumable: isBuildRunning(buildKey),
+          ...queuedContinuationBusyFields(req.body),
         });
         return;
       }
@@ -11904,7 +11934,7 @@ async function noteBuildOutcome(
         const mem = getWorkspaceMemory(workspaceId);
         mem.recordNote(`Imported an existing app from ${opts.source}: ${written.length} files, framework ${framework}.`);
         for (const [p, c] of Object.entries(importedFiles).slice(0, 300)) mem.indexFile(p, c);
-        void saveWorkspaceMemoryFor(workspaceId, mem).catch(() => {});
+        await saveWorkspaceMemoryFor(workspaceId, mem).catch(() => {});
       } catch { /* memory is best-effort */ }
       // The AI turn must work WITH the landed app — never scaffold over it, and answer a plain
       // "read/analyze my app" ask with an honest survey of the real files.
@@ -12807,7 +12837,7 @@ async function noteBuildOutcome(
     // ended stream skips it. This does not serialize the separate normal billing/settlement path.
     deadlineFinalization = createBuildDeadlineFinalization({
       build: rb,
-      begin: () => retainBuildUntilBodyExit(buildKey, rb, stoppingBuilds),
+      begin: () => { coordination.invalidateQueuedWindow(); retainBuildUntilBodyExit(buildKey, rb, stoppingBuilds); },
       close: () => closeDeadlineBuildStream(buildKey, rb, runningBuilds, endBuild),
       finalize: async () => {
       // WHICH cap fired, recorded on the signal so the runner stops blaming the user for it.
@@ -13250,6 +13280,7 @@ async function noteBuildOutcome(
     // of every file the agent writes (reliable — straight from the write op, not a later listFiles that
     // can come back empty). See the "DURABLE FILE SAVE" block for the normal-completion path.
     const writtenFiles = new Map<string, string>();
+    const sourcePublication = createBuildSourcePublication();
     // Fake login / payment / OTP / email found in the WHOLE project (fakeFeatureScan.ts) — computed once at
     // the production-defaults pass (the red on-screen line), read again by the disclosure and the key ask.
     let fakeFeatures: FakeFeatureFinding[] = [];
@@ -15736,7 +15767,6 @@ async function noteBuildOutcome(
       // save at build-end (below) is still the authoritative snapshot; this is the
       // mid-build safety net. The user's GitHub branch receives a build only when it worked; a build that
       // did not is kept on its own `wip/` branch (Q-745, gitPushTarget.ts).
-      let _progressPersistTimer: ReturnType<typeof setTimeout> | null = null;
       // AUTOPSY 2026-07-06 ("yeh app nahi bani"): the sandbox + Cloud Run instance are EPHEMERAL — a
       // rotation/hard-kill mid-build loses everything not yet durably saved. The old code used a
       // RESETTING 3 s debounce, so a CONTINUOUS write burst (parallel specialist agents each writing
@@ -15825,17 +15855,16 @@ async function noteBuildOutcome(
         } catch { /* plan progress is best-effort — never affects the build */ }
         const flushFilesDurably = () => {
           _lastFileFlushAt = Date.now();
-          if (_progressPersistTimer) { clearTimeout(_progressPersistTimer); _progressPersistTimer = null; }
+          sourcePublication.cancelScheduled();
           if (writtenFiles.size > 0) {
-            saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)).catch(() => {});
+            sourcePublication.issue(() => saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles))).catch(() => {});
           }
         };
         if (flushDecision(_lastFileFlushAt, Date.now(), FILE_FLUSH_MAX_MS) === 'flush-now') {
           // Overdue — a burst has been sliding the debounce; flush NOW so a rotation can't wipe it.
           flushFilesDurably();
         } else {
-          if (_progressPersistTimer) clearTimeout(_progressPersistTimer);
-          _progressPersistTimer = setTimeout(flushFilesDurably, 3_000);
+          sourcePublication.schedule(flushFilesDurably, 3_000);
         }
       };
       // Arm the sub-agent spawn factory's forward-referenced holder now that the real callback
@@ -15985,7 +16014,7 @@ async function noteBuildOutcome(
       const stopInBuildGreen = events.subscribe((e) => {
         const t = (e as { type?: string }).type;
         if (t === 'preview' || (t === 'tool_result' && (e as { ok?: boolean }).ok === true)) {
-          void attemptInBuildGreen().then(() => { if (inBuildGreenAt > 0) stopInBuildGreen(); });
+          void sourcePublication.issue(attemptInBuildGreen).then(() => { if (inBuildGreenAt > 0) stopInBuildGreen(); });
         }
       }, false);
       // WHO WROTE AFTER THE APP WAS GREEN (postGreenWrites.ts) — the ledger every stronger protection
@@ -25778,7 +25807,7 @@ async function noteBuildOutcome(
           const planText = formatPlanState(state.snapshot().todos);
           if (planText) getWorkspaceMemory(workspaceId).recordNote(`PLAN_STATE\n${planText}`);
         } catch { /* plan-state capture is best-effort */ }
-        saveWorkspaceMemoryFor(workspaceId, getWorkspaceMemory(workspaceId)).catch(() => {});
+        sourcePublication.track(saveWorkspaceMemoryFor(workspaceId, getWorkspaceMemory(workspaceId))).catch(() => {});
       } catch { /* memory persist is best-effort */ }
 
       // DURABLE FILE SAVE: persist the build's source so it never vanishes. Start from the files
@@ -26010,7 +26039,7 @@ async function noteBuildOutcome(
               }
             } catch { /* the guard must never cost a user their save — fall through to the plain save */ }
           }
-          const finalSave = saved ? Promise.resolve() : saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
+          const finalSave = saved ? Promise.resolve() : sourcePublication.track(saveWorkspaceFiles(workspaceId, toSave)).catch(() => {});
           // …AND THE DURABLE STORE FORGETS WHAT THIS BUILD DELETED (queue Q-106, fileDeletion.ts). The save
           // above can MERGE a partial set or carry a root manifest forward, so a deleted file would stay in
           // the index and come back with the next sandbox. Ordered AFTER the save: removing first would let
@@ -27562,6 +27591,7 @@ async function noteBuildOutcome(
       announceBuildFinished(userId, false);
     } finally {
       // Deadline persistence is work from this attempt too. Join it before clearing any held resource.
+      sourcePublication.close();
       clearTimeout(deadlineTimer);
       await joinBuildDeadlineFinalization(deadlineFinalization);
       // GREEN FREEZE — clear this workspace's green latch no matter how the build ended, so a stale
@@ -27680,6 +27710,13 @@ async function noteBuildOutcome(
           if (outcomeBuildId) void buildOutcomeStore.startBuild(workspaceId, outcomeBuildId, buildResultRef?.ok === true).catch(() => {});
         }
       } catch { /* best-effort — never affects a build */ }
+      // Only this actual normal-body boundary may make a queued module handoff ready. Heartbeat
+      // release/initializer cleanup never supplies retirement proof. Physical SDK drain remains separate.
+      await coordination.retireNormalModule(() => normalQueuedModuleRetirementAllowed(abort.signal, rb, !sourcePublication.uncertain()),
+        () => closeQueuedModuleDelivery(rb, () => {
+          releaseBuildLock(buildKey, buildLockToken);
+          if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
+        }), () => sourcePublication.join());
       releaseBuildLock(buildKey, buildLockToken);
       // The workspace is free on every instance the moment this build ends (autopsy eed79815).
       await releaseBuildLease();

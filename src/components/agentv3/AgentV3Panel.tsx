@@ -88,6 +88,7 @@ import { loadDraft, saveDraft } from './composerDraft';
 import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
 import { claimCurrentQueueItem, reconcileCurrentQueue, QueueSessionScope, type QueueSessionSnapshot } from './queueSessionScope';
+import { awaitQueuedContinuation, queuedContinuationStartOptions } from './queuedContinuationClient';
 import { buildChatBlocks } from './activityTimeline';
 import { ChatToolbar } from '../chat/ChatToolbar';
 import { USER_TURN_CLASS, ASSISTANT_TURN_CLASS, USER_MESSAGE_CLASS, ASSISTANT_MESSAGE_CLASS, PLAIN_TEXT_CLASS, MESSAGE_ACTION_ROW_CLASS, CONVERSATION_COLUMN_CHILDREN_CLASS } from '../chat/conversation';
@@ -149,7 +150,7 @@ interface ChatMsg {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>, opts?: { live?: boolean }) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, errorBeforeBuildStarted, start, respond, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+  const { state, running, error, errorBeforeBuildStarted, start, respond, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop: stopBuild, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueState, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
@@ -1055,8 +1056,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const remixHandoffRef = useRef<ReturnType<typeof takeRemixHandoff>>(null);
   const sessionIdRef = useRef<string>('');
   const queueScopeRef = useRef(new QueueSessionScope());
+  const activeQueuedItemRef = useRef<{ id: string; claimToken?: string; scope: QueueSessionSnapshot } | null>(null);
+  const queueContinuationAbortRef = useRef<AbortController | null>(null);
+  const queueContinuationAttemptedRef = useRef(new Set<string>());
+  const [queueContinuationWaiting, setQueueContinuationWaiting] = useState(false);
+  useEffect(() => () => queueContinuationAbortRef.current?.abort(), []);
   const selectSessionId = (sessionId: string): void => {
-    if (sessionIdRef.current !== sessionId) queueScopeRef.current.invalidate();
+    if (sessionIdRef.current !== sessionId) {
+      queueScopeRef.current.invalidate();
+      queueContinuationAbortRef.current?.abort();
+      activeQueuedItemRef.current = null;
+      queueContinuationAttemptedRef.current.clear();
+    }
     sessionIdRef.current = sessionId;
   };
   if (!sessionIdRef.current) {
@@ -1097,6 +1108,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // continuity feature must compute that same id instead of silently going dead (`undefined`).
   const expectedWorkspaceId = (): string | undefined =>
     state.workspaceId || clientWorkspaceId(userId, sessionIdRef.current) || undefined;
+
+  const invalidateQueuedContinuation = useCallback(() => {
+    queueScopeRef.current.invalidate();
+    queueContinuationAbortRef.current?.abort();
+    activeQueuedItemRef.current = null;
+    setQueueContinuationWaiting(false);
+  }, []);
+
+  const stop = useCallback(() => {
+    invalidateQueuedContinuation();
+    stopBuild(state.workspaceId || clientWorkspaceId(userId, sessionIdRef.current) || undefined);
+  }, [invalidateQueuedContinuation, stopBuild, state.workspaceId, userId]);
 
   // HOW MUCH OF THE APP IS BUILT (admin 2026-09-20: "app kitne % ban gayi woh bhi likh kar aana
   // chahiye … 100% done - tap on preview!").
@@ -1211,6 +1234,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     : null;
   const handleUnsend = async (ts: number) => {
     if (unsending) return;
+    invalidateQueuedContinuation();
     setUnsending(true);
     try {
       // A message that reached the server (has a workspace) is purged server-side; a purely-local one
@@ -1233,6 +1257,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // take-back can't leave the message both in the thread AND in the composer.
   const handleEdit = async (ts: number, text: string) => {
     if (unsending) return;
+    invalidateQueuedContinuation();
     setUnsending(true);
     try {
       let purged = true;
@@ -1625,6 +1650,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     const text = (override?.text ?? prompt).trim();
     const sendFiles = override ? [] : files;
     if ((!text && sendFiles.length === 0) || running) return;
+    // A deliberate new message must not race a delayed automatic handoff from this visit.
+    queueContinuationAbortRef.current?.abort();
+    setQueueContinuationWaiting(false);
     // Stop live voice dictation the moment the message is sent (never leave the mic recording).
     if (listening) stopVoice();
     setQuickRepliesUsedTs(state.quickReplies?.ts ?? null); // any new message answers the clarity question
@@ -2050,7 +2078,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // as long as the plan STRICTLY advances — so a 40-module software project runs unattended, but
   // a stalled plan hands back honestly. Reuses the proven resume path (start('continue', …)).
   useEffect(() => {
-    if (!state.done || !state.resumable || running) return;
+    if (running || error || state.error || state.pendingPermission) {
+      queueContinuationAbortRef.current?.abort();
+      return;
+    }
+    if (!state.done || !state.resumable) return;
+    const queuedClaim = activeQueuedItemRef.current;
+    const queuedTicket = state.queueContinuation;
+    if (queuedClaim || queuedTicket) {
+      if (!queuedClaim || !queuedTicket || !queueScopeRef.current.isCurrent(queuedClaim.scope)) {
+        setQueueError('Review this queued step before continuing. Its previous progress is not confirmed for this visit.');
+        return;
+      }
+      if (queueContinuationAttemptedRef.current.has(queuedTicket.nonce)) return;
+      queueContinuationAttemptedRef.current.add(queuedTicket.nonce);
+    }
     // SPM-3: one pure decision for both loops — the classic bounded deadline-pause continue AND
     // the project-mode module chain (continues only while planRemaining strictly decreases, with
     // a fresh pause budget per completed module and an absolute backstop).
@@ -2096,9 +2138,31 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       ]);
     }
     if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
+    if (queuedClaim && queuedTicket) {
+      const controller = new AbortController();
+      queueContinuationAbortRef.current?.abort();
+      queueContinuationAbortRef.current = controller;
+      setQueueContinuationWaiting(true);
+      void awaitQueuedContinuation({
+        ticket: queuedTicket, claim: queuedClaim, scope: queueScopeRef.current, signal: controller.signal,
+        load: queueState, beforeBuild: onBeforeBuild,
+        run: (ticket, snapshot) => {
+          void start('continue', { ...queuedContinuationStartOptions(ticket, snapshot),
+            userId, email, onlyOpus, powerLevel, planFirst, thinking, framework, frameworkExplicit, appSignature: appSignaturePref() });
+        },
+      }).catch((failure) => {
+        if (!controller.signal.aborted && queueScopeRef.current.isCurrent(queuedClaim.scope)) setQueueError(failure instanceof Error ? failure.message : 'Queued continuation could not be confirmed. Review its progress.');
+      }).finally(() => {
+        if (queueContinuationAbortRef.current === controller) {
+          queueContinuationAbortRef.current = null;
+          setQueueContinuationWaiting(false);
+        }
+      });
+      return;
+    }
     start('continue', { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, appSignature: appSignaturePref() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.done, state.resumable, running]);
+  }, [state.done, state.resumable, state.queueContinuation?.nonce, running, error, state.error, state.pendingPermission]);
 
   // ── FIX #4.3 + #6: client-driven QUEUE executor + queue UI plumbing ─────────────────────────────
   // After a build SETTLES (and it is NOT a resumable SPM continue — handled above), this: (1) records
@@ -2106,7 +2170,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // command. Runs one step at a time (the serial invariant), pauses on error, and is inert when the
   // queue is empty (the server short-circuits /queue/next without a write). shouldRunNextQueued is the
   // pure, tested gate; the two refs prevent double-complete and re-entrant double-submit.
-  const activeQueuedItemRef = useRef<{ id: string; claimToken?: string; scope: QueueSessionSnapshot } | null>(null);
   const [queueError, setQueueError] = useState<string | null>(null);
   const queueClaimInFlightRef = useRef<symbol | null>(null);
   const queueWorkspaceId = expectedWorkspaceId();
@@ -2160,13 +2223,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
         claim: (workspaceId) => queueNext(workspaceId, resumeAfterFailure),
         beforeBuild: onBeforeBuild,
         run: (item, scope) => {
+          queueContinuationAbortRef.current?.abort();
+          queueContinuationAttemptedRef.current.clear();
+          // Each approved logical step starts its own budget; later windows of this step retain it.
+          autoContinueRef.current = 0;
+          planContinuesRef.current = 0;
+          lastPlanRemainingRef.current = null;
+          noProgressRef.current = 0;
+          lastFilesWrittenRef.current = null;
           activeQueuedItemRef.current = { id: item.id, claimToken: item.claimToken, scope };
           setQueueError(null);
           setUserMsgs((c) => [...c, { role: 'user', text: item.prompt, ts: Date.now() }]);
           if (state.narration.length > 0) {
             setAgentHistory((h) => [...h, ...withoutStaleLiveStatus(state.narration, false).map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) }))]);
           }
-          void start(item.prompt, { queueItemId: item.id, queueClaimToken: item.claimToken, userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: scope.sessionId, framework, frameworkExplicit, appSignature: appSignaturePref() });
+          void start(item.prompt, { queueItemId: item.id, queueClaimToken: item.claimToken, queueContinuationProtocol: 1, userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: scope.sessionId, framework, frameworkExplicit, appSignature: appSignaturePref() });
         },
       });
       if (outcome !== 'stale' && queueScopeRef.current.isCurrent(snapshot)) void refreshQueue();
@@ -2181,7 +2252,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   useEffect(() => {
     const hasError = !!(error || state.error);
     // (1) A queued command's build just settled → record its outcome (a failure pauses the queue below).
-    if (state.done && !running && activeQueuedItemRef.current) {
+    if (state.done && !running && !state.resumable && activeQueuedItemRef.current) {
       const ok = !hasError && state.ok !== false;
       const claim = activeQueuedItemRef.current;
       activeQueuedItemRef.current = null;
@@ -2267,6 +2338,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     setAddedSteps(new Set());
     queueScopeRef.current.invalidate();
     queueClaimInFlightRef.current = null;
+    queueContinuationAbortRef.current?.abort();
+    queueContinuationAttemptedRef.current.clear();
+    setQueueContinuationWaiting(false);
     activeQueuedItemRef.current = null;
     setQueueError(null);
     setQueueItems([]);
@@ -4351,11 +4425,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               onOpen: () => userActions.setTrayOpen(true),
             }]}
           />
-          {running ? (
+          {running || queueContinuationWaiting || !!state.queueContinuation || queueItems.some((item) => item.continuation) ? (
             // Attached + streaming here → Stop.
             <button
               onClick={stop}
-              title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)"
+              title="Stop this build and its queued continuation"
               className="ml-auto flex items-center gap-1 text-xs text-on-accent bg-red-600 hover:bg-red-500 rounded px-2 py-1"
             >
               <Square className="w-3.5 h-3.5" /> Stop
@@ -5229,6 +5303,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               <p>{queueError}</p>
               <button type="button" className="mt-1 text-accent-text" onClick={() => { void refreshQueue(); }}>Refresh queue</button>
             </div>}
+            {queueContinuationWaiting && <p className="mx-3 text-xs text-muted" role="status">Finishing the current work before continuing.</p>}
+            {!queueContinuationWaiting && (!!state.queueContinuation || queueItems.some((item) => item.continuation)) && <p className="mx-3 text-xs text-muted">This queued step is unfinished. Review its progress; Stop ends its automatic continuation.</p>}
             {queueOpen && queueItems.length > 0 && (
               <div className="mx-3 mt-1.5 p-2 bg-card border border-line rounded space-y-1 max-h-40 overflow-y-auto">
                 {!running && !queueItems.some((i) => i.status === 'running') && queueItems.some((i) => i.status === 'failed') && queueItems.some((i) => i.status === 'pending') && (

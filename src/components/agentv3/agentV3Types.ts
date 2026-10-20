@@ -6,6 +6,7 @@
 // communicate only via this JSON contract — normal client/server decoupling.
 
 import type { BuildPhase } from './previewReloadPolicy';
+import type { QueueContinuationTicket } from '../../lib/queueContinuation';
 
 /**
  * User-facing cost breakdown — mirrors the server's UserCostBreakdown (routes/agentv3.ts).
@@ -169,7 +170,7 @@ export type AgentV3WireEvent =
    * which opens the verify sheet instead of leaving the user reading a sentence with nowhere to go.
    */
   | { type: 'error'; message: string; ts: number; code?: string; diagnostics?: unknown }
-  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; budgetReached?: boolean; tokens?: number; planRemaining?: number; filesWritten?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string; appRendered?: boolean };
+  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; queueContinuation?: QueueContinuationTicket; budgetReached?: boolean; tokens?: number; planRemaining?: number; filesWritten?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string; appRendered?: boolean };
 
 /** One live agent card in the "AI Team" tracker (D9 — driven by REAL events only). */
 export interface AgentCard {
@@ -341,6 +342,8 @@ export interface AgentV3ClientState {
   diagnostics?: unknown;
   /** True when the build paused at the wall-clock limit and can be auto-continued (Layer 3). */
   resumable?: boolean;
+  /** A queued module proposes continuation; only a fresh READY queue row may authorize its next window. */
+  queueContinuation?: QueueContinuationTicket;
   /** SPM-3 (project mode): modules not yet done after this turn — drives the progress-monotone
    *  auto-continue guard (continue only while this number strictly decreases). */
   planRemaining?: number;

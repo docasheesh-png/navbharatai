@@ -97747,3 +97747,70 @@ at the root-fix/final-verification level; 550 other reports still await exhausti
 The four demonstrated historical terminal-source classes, zero historical app reruns and zero
 sixth-rule whole-report resolutions are unchanged. Next cfd01074 autopsy remains scratch-only
 while the final gate runs; no further source/doc scope expansion in this batch.
+
+
+### 2026-10-20 — second retained item ledger; conservative orphan authority and failed-gate privacy siblings
+
+The complete retained surface of the next non-user-stop report, cfd01074, is now recorded in
+`docs/failed-build-autopsy-cfd01074-2026-10-20.md`: **58 items**, each with its own **Q-1963–Q-2020**
+row. Buckets: **33 observed recoveries, 4 workarounds, 9 skips, 2 still-broken conditions and
+10 struggles**. States: **47 OPEN / 3 IN PROGRESS / 8 genuine four-field BLOCKED**. All 326 issue
+slots / 348 expanded occurrences, 17 problem mirrors, 63 model calls and 16 commands were inspected.
+Repetition/deduplication, clipped/null-exit payloads and overlapping latency remain explicit.
+The terminal cause is the explicit 1500-second platform cap; earlier recovered provider failures
+are not substituted for it. There was no historical saved-app/runtime replay or complete journey proof.
+
+**Q-2021 IN PROGRESS**, owner `codex/failed-build-claude-audit-20261020`, corrects a proven upstream
+contributor: relative-only orphan evidence ignored three retained alias imports and could delete
+live screens before spending model calls recreating them. I020–I022/Q-1982–Q-1984 retain those
+three individual effects and supported historical linkage; the full original graph is unavailable.
+`ArchitectureAnalysis.ts` shares local import candidates; `journeyDerivation.ts` uses AST module
+edges and conservative configuration/package authority; `ToolDispatcher.ts` reads that metadata
+on the actual cleanup path. Static/lazy/re-export/require, alias/root ambiguity, dynamic or unknown
+loading, unreadable/malformed metadata and shared journey/data-entry consumers are covered.
+Unknown authority cannot justify deletion, while ordinary packages and genuine unused components
+remain controlled. `tests/anImportedScreenIsNeverALeftover.test.ts` (41) and
+`tests/anUnknownImportIsNotOrphanEvidence.test.ts` (18) add **59 passing tests**. The focused sweep
+passes **11 files / 244 tests**, with **1 existing skipped test**; both typechecks and unused-import
+validation pass. Isolated original-three-source reversion yields **53 behavioral failures / 5
+passing controls**; final source passes **58 selected behaviors**, excluding one authority census.
+This is implemented class prevention pending the integrated final gate and merge, not a fifth
+demonstrated historical terminal class or proof of final app functionality.
+
+The second complete follow-up suite remained **RED: 39,822 PASS / 67 SKIP / 1 asynchronous
+Crashlytics privacy test FAIL**. All eleven prior wiring failures were gone; all eleven non-suite
+checks passed. **Q-2022 IN PROGRESS** separately records callback-based waiting in
+`tests/crashReportsCarryNoSecrets.test.ts`; a controlled 50 ms digest delay fails the original
+fixed wait and passes the repair. That investigation exposed **Q-2023** stale-authentication
+hash/clear ordering and **Q-2024** an old SDK load crossing module reset, both IN PROGRESS under
+the same follow-up owner. `src/lib/observability/index.ts` now uses auth revisions, reset generation
+and a shared SDK promise without the redundant cached-sink fast path. It preserves pending clears
+through failed/new hashes and SDK-ready ordering; native calls already dispatched are not cancelled.
+Final native/privacy proof: **71/71 passed**, both typechecks and unused-import validation green.
+Original-module reversion had seven behavior failures and five boundary passes; final source passes
+the selected twelve. The later cached-order case fails on the superseded checkpoint and passes
+current source. Reset is exercised through controlled test dependencies; no historical build-report
+or production telemetry incident is claimed. Earlier 70-test/checkpoint evidence was superseded.
+
+The primary checkpoint was rebased on fresh main `885ba41023c2f7327be956aadc71f79ee2840821`;
+the isolated source integration now starts from `27f25e050082d470849d6e99c21f1789e71592a1`.
+The earlier 43-file checkpoint was local and RED, not a published green PR. Only the combined,
+fully verified follow-up is planned for publication. Existing main queue/progress content is
+preserved byte-for-byte as a prefix; this progress update is append-only.
+
+Current audit append: **400 pending rows = 341 OPEN / 16 IN PROGRESS / 43 genuine four-field
+BLOCKED**. This is 338 earlier rows plus 58 historical item rows and Q-2021–Q-2024; it is not a
+count of fixed reports. The two retained ledgers have **119 items across only 2 reports**:
+**63 observed recoveries / 6 workarounds / 25 skips / 4 still-broken conditions / 21 struggles**.
+The remaining **549 reports still await exhaustive itemization**. Only six reports have a
+structured `generatedFiles` payload; other reports can retain partial source inside clipped
+tool previews. No claim of zero recoverable source characters in all other reports is made.
+The CSV links both ledgers while all original all-item-complete, historical-rerun and whole-report-
+resolved flags remain false. Audited original counts stay **4 demonstrated terminal platform
+classes / 0 historical application reruns / 0 sixth-rule whole-report resolutions**.
+
+Exact resume: run the combined frozen full gate for the follow-up, including Q-2021–Q-2024, then
+publish once green; merge only after the admin explicitly names this PR. Keep all implemented
+source/CI rows IN PROGRESS until merge.
+Remaining item-level prevention and Q-1894–Q-1897 stay open. Third-report expansion is paused;
+resume one-by-one Q-1300 work after this batch, without rewriting prior checkpoint history.

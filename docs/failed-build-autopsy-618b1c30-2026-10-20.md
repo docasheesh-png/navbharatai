@@ -1,8 +1,9 @@
 # Retained item autopsy: 618b1c30 — 2026-10-20
 
 **NOT COMPLETE: no whole report or historical application is resolved.** This is the first
-item-level ledger under Q-1300, distinct from the 551 terminal-cause reviews. The remaining
-**550 reports have no exhaustive item ledger yet**. All 61 items below remain pending, including one IN PROGRESS contributor and genuinely
+item-level ledger under Q-1300, distinct from the 551 terminal-cause reviews. Together with the
+[second retained ledger](failed-build-autopsy-cfd01074-2026-10-20.md), the two reports have 119
+individual item rows. The remaining **549 reports have no exhaustive item ledger yet**. All 61 items below remain pending, including one IN PROGRESS contributor and genuinely
 information-blocked; no historical generated application was rerun.
 
 Report: `618b1c30-93c9-47b4-9d36-22251920361e`, primary investigation **Q-1302**.
@@ -160,7 +161,8 @@ request/probe/final-journey evidence. Trace the exact handoff before adding a ne
 changing time, routing, billing or product policy. Preserve Hindi/Hinglish voice/device-action
 requirements across the native-to-web capability boundary; a web render is not device proof.
 
-Resume with the follow-up gate and Q-1899 proof, then the next retained non-user-stop report
-`cfd01074-7c40-4514-8f26-36ae07fdb1ae`, while these 61 unresolved item rows remain visible.
+Resume with the combined follow-up gate and the two retained ledgers, including the
+[58 cfd01074 items](failed-build-autopsy-cfd01074-2026-10-20.md). Continue the next unitemized
+report after this batch; these 61 unresolved item rows remain visible.
 The original count stays **4 demonstrated terminal platform classes / 0 historical app reruns /
 0 sixth-rule whole-report resolutions**. Remaining report-item coverage is tracked by Q-1300.

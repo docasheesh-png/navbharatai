@@ -3,9 +3,11 @@
 **NOT COMPLETE under CLAUDE.md rules five and six.** All 551 retained reports received an
 individual terminal-cause review; this is not the exhaustive item ledger for every warning,
 heal, fallback, skip, false finding and struggle point across all reports. **Q-1300** now has its
-first [retained-surface item ledger](failed-build-autopsy-618b1c30-2026-10-20.md): 61 items for
-618b1c30, still 46 OPEN / 1 IN PROGRESS / 14 genuinely information-blocked. The remaining 550 reports have no
-exhaustive item ledger yet; no original full transcript or historical application closure is implied.
+first two retained-surface item ledgers: [618b1c30](failed-build-autopsy-618b1c30-2026-10-20.md)
+with 61 items and [cfd01074](failed-build-autopsy-cfd01074-2026-10-20.md) with 58 items. These
+**119 items cover only two reports**: 93 OPEN / 4 IN PROGRESS / 22 genuinely information-blocked.
+The remaining **549 reports have no exhaustive item ledger yet**; no original full transcript or
+historical application closure is implied.
 
 The persistent [551-row report index](failed-build-audit-2026-10-20.csv) records each safe report ID,
 primary assessment, current source/tests, queue reference and next action. It contains no prompts,
@@ -118,23 +120,28 @@ as a contamination flag in the private evidence artifact.
 
 ## Queue and exact resume point
 
-This change adds **338 pending rows** without deleting or closing existing rows.
-Per-report IDs use `Q-(1301 + zero-based report-index)` within the reserved Q-1300–Q-1899 range;
-holes are intentional. The 61 individual retained-item rows map I001–I061 to Q-1900–Q-1960; Q-1961/Q-1962 record the two discovered Q-1899 siblings. Their current states are **294 OPEN**, **9 IN PROGRESS**, and **35 four-field
-BLOCKED**. Q-1890–Q-1893, Q-1898–Q-1899, Q-1928 and Q-1961–Q-1962 are IN PROGRESS, owned by the follow-up branch
-`codex/failed-build-claude-audit-20261020`. Q-1383/Q-1635/Q-1670/Q-1804 credit the four terminal
-source-class corrections merged in #3846, but remain OPEN / owner — for the remaining report-item
-review and unverified historical delivery. The other actionable investigations are also OPEN with
-no PR owner; the partial source changes do not implement their remaining work. Q-1300 is OPEN
-because full-item work remains incomplete: the first retained-surface ledger enumerates 61 items
-for one report, while the remaining 550 reports await itemization. That ledger's 46 OPEN / 1 IN PROGRESS / 14
-four-field BLOCKED item states are separate from these primary queue-row totals. The new blocked rows retain their
-four fields with owner —; merged #3846 does not own their external or missing-evidence dependencies.
-Known contributor fixes, mitigations and diagnostics remain credited to merged #3846 in their notes,
-while their independent terminal investigations stay OPEN. Only actual missing-information/external
-cases have four-field BLOCKED rows. The 220 `needs-investigation` assessments are **not** automatically
-declared blocked because their old generated-app checkout is absent. The CSV includes the current
-primary queue state and owner separately from its legacy assessment/coverage labels.
+This change adds **400 pending rows** without deleting or closing existing rows: **341 OPEN**,
+**16 IN PROGRESS**, and **43 genuine four-field BLOCKED**. Per-report IDs use
+`Q-(1301 + zero-based report-index)` within the reserved range; holes are intentional. The first
+61 individual items map I001–I061 to Q-1900–Q-1960; the second 58 map I001–I058 to Q-1963–Q-2020.
+Q-1961/Q-1962 record the two Q-1899 siblings, Q-2021 the shared unsafe-orphan class, and
+Q-2022–Q-2024 the failed-gate callback wait and two discovered native-identity source siblings.
+The IN-PROGRESS rows are Q-1890–Q-1893, Q-1898–Q-1899, Q-1928, Q-1961–Q-1962,
+Q-1982–Q-1984 and Q-2021–Q-2024, owned by `codex/failed-build-claude-audit-20261020` pending
+its complete gate and merge. No PR has been published for the red full-gate checkpoint.
+
+Q-1383/Q-1635/Q-1670/Q-1804 credit the four terminal source-class corrections merged in #3846,
+but remain OPEN / owner — for remaining report-item review and unverified historical delivery.
+Other independent investigations remain OPEN with no PR owner. Q-1300 remains OPEN: the two
+retained-surface ledgers enumerate 119 items while 549 reports await itemization; enumeration
+does not establish root-fix or final-verification completion. The first ledger is 46 OPEN /
+1 IN PROGRESS / 14 four-field BLOCKED; the second is 47 OPEN / 3 IN PROGRESS / 8 four-field
+BLOCKED. Item states, primary report rows and discovered source/CI items are distinct projections,
+not repaired-report counts. Every blocked row retains its four requirements with owner —.
+Known contributor fixes, mitigations and diagnostics remain credited to merged #3846 in notes;
+that PR does not own remaining terminal investigations or these follow-up source changes.
+The 220 legacy needs-investigation assessments are not automatically blocked because old generated
+source is absent. The CSV keeps queue state/owner separate from legacy assessment labels.
 
 **Q-1894 is OPEN / owner —:** source census found a possible warm-cache/restoration gap after a
 confirmed shell removal. The relevant path is `_fileCache` in
@@ -168,7 +175,8 @@ insufficient-balance HTTP429 evidence, including 25 original user-stop summaries
 bad rung does not fund that account, and the balance warning is not automatically the terminal cause.
 Existing E2E image work remains **Q-107**, not a newly claimed package-install fix.
 
-Resume with the follow-up final gate for Q-1890–Q-1893 and Q-1898–Q-1899, then Q-1300 and the actionable report rows,
+Resume with the combined follow-up final gate, including Q-1890–Q-1893, Q-1898–Q-1899 and Q-2021–Q-2024,
+then Q-1300 and the actionable report rows,
 including the four adjacent OPEN risks Q-1894–Q-1897: enumerate all report items, separate actual
 application findings from provider/process observations, inspect current siblings and prior
 PROGRESS entries, then prove each claimed root fix by behavior reversion. Keep each pending row
@@ -176,14 +184,18 @@ until its resolving PR is merged; no row is RESOLVED merely because this audit o
 Five-bucket totals across all 551 reports have **not** been computed and must not be invented from
 the disposition table. The first report's 61-item tally is 30 observed recoveries, 2 workarounds,
 16 skips/evidence gaps, 2 still-broken conditions and 11 struggle items, with counted deduplication
-and retention limits in its ledger. Next in one-by-one order: cfd01074-7c40-4514-8f26-36ae07fdb1ae.
+and retention limits in its ledger. The second report adds 33 observed recoveries, 4 workarounds,
+9 skips, 2 still-broken conditions and 10 struggles. **Two-report-only totals** are 63 recoveries,
+6 workarounds, 25 skips, 4 still-broken conditions and 21 struggles (119 items). No third report is
+expanded in this batch; remaining one-by-one work resumes after the combined frozen gate.
 
 ## Prevention and evidence still needed
 
 The highest-value next lever is complete, bounded final delivery evidence linked to the saved
 application: actual served entry/export graph, the final failing command or authenticity file:line,
-and trustworthy stop/deadline provenance. Only 6 retained reports contain any generated-file samples;
-545 contain none. A passing typecheck does not prove that the browser served the same module graph.
+and trustworthy stop/deadline provenance. Only **6 retained reports have a structured
+`generatedFiles` payload**. Other reports may retain partial source in clipped tool previews;
+absence of that structured field does not mean zero source characters survive. A passing typecheck does not prove that the browser served the same module graph.
 Use existing contracts and validators first; identify the precise missing handoff before adding a
 new subsystem. This is a prioritized investigation, not a claim that every future build is error-proof.
 
@@ -193,9 +205,10 @@ The tested source milestone `f713e64` had 2,780 passing test files, **39,717 pas
 both TypeScript checks, production build and whitespace validation. Those checks establish that
 source snapshot, not repaired historical apps. Hosted CI run `39359912519` passed for the original
 PR [#3846](https://github.com/docasheesh-png/navbharatai/pull/3846), which another session merged at
-03:33 UTC on 2026-10-20. The follow-up branch starts from main
-`adc53ee215beb5b7f7c5042245b2817c16a2deca`; the documentation and subsequent Q-1890–Q-1893 changes
-require their own final gate and merge. No deployment, historical app replay or sixth-rule
+03:33 UTC on 2026-10-20. The follow-up initially started at `adc53ee215beb5b7f7c5042245b2817c16a2deca` and is now
+rebased on fresh main `885ba41023c2f7327be956aadc71f79ee2840821`; its primary source checkpoint
+is `27f25e050082d470849d6e99c21f1789e71592a1` before the alias/docs integration. These changes
+require their own combined final gate and merge. No deployment, historical app replay or sixth-rule
 whole-report closure is claimed.
 
 The follow-up's first full-suite gate **failed 11 safety-wiring assertions across eight test files**;
@@ -222,3 +235,46 @@ typechecks and unused-import validation. Q-1928 tracks the historical preview it
 track the two discovered siblings. Full final gate and merge remain pending. This contributor
 class correction does not establish historical app convergence or increase the four demonstrated
 historical terminal-source class count.
+
+
+## Second retained report and latest gate boundary
+
+The [cfd01074 58-item ledger](failed-build-autopsy-cfd01074-2026-10-20.md) maps every retained
+warning/error, recovery, workaround, skip and struggle to its own Q-1963–Q-2020 row. All 326 issue
+slots / 348 expanded occurrences, 17 problem mirrors, 63 model calls and 16 commands were read.
+The explicit 1500-second platform stop remains the terminal event; recovered provider calls are
+contributors rather than replacement terminal causes. Late finishing writes and missing final
+journey proof remain open. Retention limits, overlap and deduplication are explicit in the ledger.
+
+**Q-2021 IN PROGRESS:** the actual cleanup graph ignored source-root alias edges, allowing three
+imported screens to be classified as leftovers. The source-class correction shares local import
+candidates, parses static/lazy/re-export/require edges and obtains package/compiler metadata at
+the real dispatcher boundary. Unknown, computed, ambiguous, malformed or unreadable graph authority
+cannot justify deletion. Genuine unused-screen cleanup, ordinary external packages and advisory
+first-match behavior remain controlled. Shared data-entry/journey consumers were included.
+Sources: `src/server/AgentV3/ArchitectureAnalysis.ts`, `src/server/AgentV3/journeyDerivation.ts`,
+`src/server/AgentV3/ToolDispatcher.ts`. Regressions: `tests/anImportedScreenIsNeverALeftover.test.ts`
+(41 cases) and `tests/anUnknownImportIsNotOrphanEvidence.test.ts` (18). Scoped validation:
+**59 new passed; 11 files / 244 passed / 1 existing skipped**, both typechecks and unused-import
+validation. Isolated original-three-source restoration fails **53 behaviors**, with 5 controls
+passing; final source passes all **58 selected behaviors**, excluding one authority census.
+Historical causal linkage is supported by complete import declarations inside a retained partial
+App preview, but the full historical graph/runtime was not replayed. No fifth terminal-report
+class or historical delivery closure is claimed.
+
+The second complete suite attempt was also **RED: 39,822 passed / 67 skipped / 1 failed**. All
+eleven old wiring failures were gone and all eleven non-suite checks passed. **Q-2022 IN PROGRESS**
+records the actual callback-wait defect in `tests/crashReportsCarryNoSecrets.test.ts`: a controlled
+50 ms digest delay failed the original fixed-delay wait and passed callback-based synchronization.
+This led to separate source findings, **Q-2023** stale authentication hash/clear ordering and
+**Q-2024** old SDK loading across reset. `src/lib/observability/index.ts` now uses auth revisions,
+generation ownership and one shared SDK promise, eliminating the redundant cached-sink fast path.
+Clears remain ordered before a succeeding identity even when a new hash fails or readiness resolves
+back-to-back. Already-dispatched native I/O is not cancelled. Final native/privacy validation is
+**71/71 passed**, with both typechecks and unused-import validation green. Original-module isolated
+proof had seven behavioral failures and five passing boundaries; final source passes all twelve
+selected source cases. The subsequently found cached-order case fails on the superseded checkpoint
+and passes current source. Reset is reproduced with test dependency injection; no historical
+build-report or production telemetry incident is asserted. Q-2022–Q-2024 remain IN PROGRESS until
+the combined final gate and merge. The original four-class / zero-rerun / zero-report-closure
+counts are unchanged; no red checkpoint has been published as a green PR.

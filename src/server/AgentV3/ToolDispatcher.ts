@@ -4690,12 +4690,14 @@ export class ToolDispatcher {
       if (sheets.length === 0 || sheets.length + code.length > ToolDispatcher.STYLE_NOTE_MAX_READS) return { missing: [], pages: [] };
       const project: Record<string, string> = {};
       let unreadSheet = false;
+      let unreadCode = false;
       await Promise.all([...sheets, ...code].map(async (p) => {
         try {
           const raw = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'style-resume-read');
           if (typeof raw === 'string') project[p] = withoutPreviewBridge(p, raw);
           else if (isProjectStylesheet(p)) unreadSheet = true;
-        } catch { if (isProjectStylesheet(p)) unreadSheet = true; }
+          else unreadCode = true;
+        } catch { if (isProjectStylesheet(p)) unreadSheet = true; else unreadCode = true; }
       }));
       if (unreadSheet) return { missing: [], pages: [] };
       // Only a class the KIT defines is left out: kitRestore puts that one back. An invented `nb-` name has
@@ -4741,9 +4743,23 @@ export class ToolDispatcher {
       // wired in by the architect after it returns, so naming them to the specialist would be premature.
       let orphans: string[] = [];
       try {
+        // Orphan evidence can remove source files. Unlike advisory CSS/design checks, it needs the
+        // module-binding metadata too: a dependency name may be a local TS or runtime alias instead.
+        // Bound extra reads; absent/unreadable/too-many bindings leave the destructive graph unknown.
+        const metadata = paths.filter((p) => !/(^|\/)(?:node_modules|\.git|dist|build|vendor)\//.test(p))
+          .filter((p) => /(^|\/)(?:package\.json|(?:ts|js)config(?:\.[^/]+)?\.json|(?:vite|webpack|rollup|next|svelte|astro)\.config\.[cm]?[jt]s)$/.test(p));
+        let unreadMetadata = metadata.length > 12;
+        const orphanProject = { ...project };
+        if (!unreadMetadata) await Promise.all(metadata.map(async (p) => {
+          try {
+            const value = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'orphan-binding-read');
+            if (typeof value !== 'string') unreadMetadata = true;
+            else orphanProject[p] = value;
+          } catch { unreadMetadata = true; }
+        }));
         let buildWrites: string[] = [];
         try { buildWrites = this._buildWrites ? [...this._buildWrites()] : []; } catch { buildWrites = []; }
-        orphans = orphansToHandBack({ project, written: [...this._writtenPaths, ...buildWrites], starterExpected: this._starterExpected });
+        if (!unreadCode && !unreadMetadata) orphans = orphansToHandBack({ project: orphanProject, written: [...this._writtenPaths, ...buildWrites], starterExpected: this._starterExpected });
       } catch { orphans = []; }
       // 🔒 A WHOLE-APP JUDGEMENT NEVER GOES TO A SPECIALIST (Q-066's principle, same as `orphans`): the
       // `onlyWritten` return above is taken before this point, so a sub-agent is never handed the whole

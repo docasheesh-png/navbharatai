@@ -692,3 +692,23 @@ Q-1223
 Q-1224
 Q-1225
 Q-963
+# Three rows closed 2026-10-20, each verified against origin/main or against measurement, never against a PR page.
+#
+# Q-1140 — one route to the deploy control. #3797, present in main by its merge commit 505211709.
+# Q-1141 — a starved flow read says so, and Q-1132's own signal is finally read. #3800, merge commit 4a1bb4a7f.
+#
+# Q-1131 — THE CI OUTAGE IS OVER, and it is closed the way Q-1082 was: an infrastructure fault that cleared
+# outside this repo, recorded with its measurement and no code fix, because there was never a code cause to fix.
+# MEASURED, not assumed: the 3-4 second / no-logs signature ran from run 11577 (2026-10-17 07:41:36 UTC) through
+# run 11711 (2026-10-19 11:20:07 UTC) — about 51.6 hours and ~135 runs, every one dying before a step executed.
+# It cleared at run 11712 (2026-10-19 12:37:07 UTC, 1518 s, success). In the 80 runs since, every run reaches a
+# real verdict: the failures among them (11721-11723, 11753-11765, 11777, 11782) each ran 900-1600 s, i.e. they
+# are test failures with logs, which is the OPPOSITE of this row's signature and is how we know it is gone.
+# Second time for this class (Q-1082, 2026-10-14 -> 2026-10-15). It is not root-caused in this repo and cannot
+# be: the fault is in the account's GitHub Actions, which no session can reach. What the two occurrences DID
+# establish is the discipline that held through both — a local full gate is evidence for a session, never an
+# authorisation to merge, and "CI green before any merge" meant holding for two days rather than merging on a
+# local green. Nothing was merged by this session while it was red.
+Q-1140
+Q-1141
+Q-1131

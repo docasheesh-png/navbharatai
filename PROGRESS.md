@@ -97278,6 +97278,41 @@ Final exact-source Node 22.23.3/UTC `npm test`: 2,790 files passed; 39,829 tests
 
 Required GitHub coverage CI and merge remain pending at this checkpoint. Legacy snapshot ownership attribution/recovery and actual deployed/staging verification remain explicit limitations, not completed migration or a 100/100 claim. No paid provider build, store binary or production data mutation was performed by the local checks.
 
+## 2026-10-20 — the CI outage ended, and three rows reached a final state (Q-1140, Q-1141, Q-1131)
+
+**Q-1131 is over, and it is closed with its measurement rather than with a code fix** — the same way Q-1082
+was, because the fault was never in this repo. The 3-4 second / no-logs signature ran from run **11577**
+(2026-10-17 07:41:36 UTC) through run **11711** (2026-10-19 11:20:07 UTC): about **51.6 hours, ~135 runs**,
+each dying before a single step executed, each with `get_job_logs` returning HTTP 404. It cleared at run
+**11712** (2026-10-19 12:37:07 UTC, 1518 s, success). The 80 runs since all reach a real verdict, and the
+proof that the signature is gone is in the FAILURES, not the successes: 11721-11723, 11753-11765, 11777 and
+11782 each ran 900-1600 s, i.e. they are ordinary test failures with logs — the opposite of this row.
+
+**What the two occurrences cost, stated plainly, because it is the part worth keeping.** Nothing was merged
+by this session across both outages. That was correct — CLAUDE.md's gate is CI green BEFORE merge, and a
+local full gate is evidence for a session, never an authorisation — but it is worth being honest about the
+shape of the price: work that was finished, gated green locally and pushed sat for two days, and in that
+window other sessions moved `main` far enough that every branch needed a merge and a re-gate before it could
+go anywhere. The lesson recorded on 2026-10-18 held up exactly: a full local gate takes about as long as the
+gap between other sessions' merges, so the re-gate is done immediately BEFORE the merge, not chased after
+every move of `main`.
+
+**Q-1140** (one route to the deploy control, finishing the admin's *"website connect, databse connect, backend
+connect ko simple banao"*) — **#3797**, verified present in `origin/main` by its merge commit `505211709`,
+not by a PR page. It carried nine further row closures with it.
+
+**Q-1141** (a starved flow read says so, and the signal my own half-done Q-1132 fix added is finally read) —
+**#3800**, merge commit `4a1bb4a7f`.
+
+**Each id is appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit as its removal from
+the open table, and the table was edited on a FRESH `main`** — `#3543` rebuilt it from a stale copy and
+silently reopened closed rows, which is the one mistake that pair of files exists to prevent.
+
+**Next, and it is now unblocked by the above:** Q-1135. Its only stated blocker was *"CI cannot verify a
+money-path change (Q-1131), and this is the class of code where a local gate is not enough."* That blocker
+has lifted, so the row is actionable again: the un-reconcilable-credit fact goes onto the order itself, in
+the SAME `runTransaction` `tx.update` that flips PENDING->SUCCESS, never as a second write (Q-613 exists to
+protect that one transaction).
 ### Phase 1 merged; Phase 2 coordination checkpoint — 2026-10-20
 
 Phase 1 later passed exact-head GitHub coverage CI (`https://github.com/docasheesh-png/navbharatai/actions/runs/39370215420`) and PR #3847 merged as `885ba41023c2f7327be956aadc71f79ee2840821`. The pending statement above is the earlier local checkpoint.

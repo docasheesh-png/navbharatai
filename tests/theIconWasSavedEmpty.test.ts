@@ -158,9 +158,36 @@ describe('a binary file the build made is saved with the app', () => {
 
   it('the route saves them after the kept save, never for a restored turn', () => {
     const route = read('src/server/routes/agentv3.ts');
-    expect(route).toContain('if (persisted === toSave && expectsArtifacts && !isImportTurn) {');
-    expect(route).toContain('persistBuildAssets(actuator as BuildAssetSource, workspaceId, { heldPaths: listWorkspaceAssetPaths, save: saveWorkspaceAssets })');
+    const finalSave = route.indexOf('const finalSave = saved ?');
+    const guard = route.indexOf('if (persisted === toSave && expectsArtifacts && !isImportTurn) {', finalSave);
+    const assets = route.indexOf('const assetsOutcome = await sourcePublication.track(withTimeout(', guard);
+    expect(finalSave).toBeGreaterThan(-1);
+    expect(guard).toBeGreaterThan(finalSave);
+    expect(assets).toBeGreaterThan(guard);
+    const block = route.slice(guard, route.indexOf('// THE COPY IS THE APP', assets));
+    expect(block).toContain('sourcePublication.track(persistBuildAssets(actuator as BuildAssetSource, workspaceId, {');
+    expect(block).toContain('heldPaths: listWorkspaceAssetPaths,');
+    expect(block).toContain('save: (assetWorkspaceId, assets) => saveWorkspaceAssets(assetWorkspaceId, assets, verified?.uid),');
     expect(read('src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts')).toContain("async readBinaryFile(workspaceId: string, filePath: string): Promise<string> {");
+  });
+
+  it.each([{ uid: 'verified-owner' }, null])('the actual route adapter preserves binary bytes and only the verified optional owner (%j)', async (verified) => {
+    const route = read('src/server/routes/agentv3.ts');
+    const assetBlock = route.slice(route.indexOf('const assetsOutcome = await sourcePublication.track(withTimeout('));
+    const adapter = assetBlock.match(/save: ([^\n]+),/)?.[1];
+    expect(adapter).toBeDefined();
+    const stored = new Map<string, { owner: string | undefined; dataUri: string }>();
+    const save = new Function('saveWorkspaceAssets', 'verified', `return (${adapter});`)(
+      async (workspaceId: string, files: Record<string, string>, owner: string | undefined) => {
+        for (const [path, dataUri] of Object.entries(files)) stored.set(`${workspaceId}/${path}`, { owner, dataUri });
+      }, verified,
+    );
+    const out = await persistBuildAssets({
+      listFiles: async () => ['public/owned-icon.png'], readBinaryFile: async () => png,
+    }, 'workspace-assets', { heldPaths: async () => [], save });
+    expect(out.saved).toEqual(['public/owned-icon.png']);
+    expect(stored.get('workspace-assets/public/owned-icon.png')).toEqual({ owner: verified?.uid, dataUri: `data:image/png;base64,${png}` });
+    expect(adapter).toBe('(assetWorkspaceId, assets) => saveWorkspaceAssets(assetWorkspaceId, assets, verified?.uid)');
   });
 });
 

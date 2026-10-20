@@ -106,6 +106,22 @@ negative control produced READY while its held source deletion had not run;
 the safe tracker was restored. No all-queue drain guarantee follows from these
 checks; the final queued-step boundary below remains open.
 
+At 2026-10-20 11:07 UTC, the complete queue preflight at `a64370b` had been
+stopped with exit 130 after two stale exact-source assertions expected the old
+untracked final save and direct asset callback. It is not passing evidence.
+The same kept-turn guard and save fallback remain in production. Their updated
+tests execute the actual source expressions, check saved text/binary bytes,
+verified-only optional asset ownership and swallowed fallback failure. Five
+focused files /125 tests passed; deliberate no-op save and dropped-owner
+reversions failed on missing bytes and the stored owner, then were restored.
+
+The previous state-preservation head `00d3bc8` passed 2,811 files /40,077 tests
+with 67 skipped locally. Its
+[running CI](https://github.com/docasheesh-png/navbharatai/actions/runs/39411761077)
+is superseded for review by newer main `6852819`. Current combined local/CI
+checks remain pending. Merge/CI outcomes are recorded by later release evidence;
+this timestamped snapshot is not a claim of current remote success.
+
 This preserves the existing shared runtime and preview origin. It does not fence
 remote SDK commands already running, make source writes transactional across all
 workers, or establish state migration/replacement safety. A timed-out owned save

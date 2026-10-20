@@ -112,6 +112,16 @@ Phase 1 acceptance:
   for committed-but-unacknowledged operations, retries and concurrent replay.
 
 These are findings and implementation directions, not completed Phase 2 fixes.
+
+Verification snapshot — 2026-10-20 11:07 UTC: state-preservation head `00d3bc8`
+passed its local complete suite (2,811 files, 40,077 tests passed, 67 skipped).
+[CI run 39411761077](https://github.com/docasheesh-png/navbharatai/actions/runs/39411761077)
+was running for that older head and is superseded for review after newer main
+`6852819`; the combined head needs new local/CI evidence. The queue preflight
+at `a64370b` was stopped with two obsolete save-wiring assertions and is not a
+passing full suite. Equivalent tracked-save/verified-owner tests now execute the
+actual production expressions and preserve byte/identity checks. Combined-source
+gates remain pending; this dated snapshot does not claim current CI success.
 Live cross-instance interruption and database-outage drills require a staging
 environment. The current runtime has no configured application/sandbox credentials;
 the owner has been asked for a configured environment reference, test account and

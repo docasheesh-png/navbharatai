@@ -97796,3 +97796,23 @@ removing owned-work registration then produced durable READY while obsolete.ts
 still existed, and failed. Safe source was restored exactly. The 21 real database
 drills exercise unchanged script/store/lease bytes. Complete suite and exact-head
 CI remain pending; final queued-step/source fencing remains OPEN.
+
+### 2026-10-20 11:07 UTC — Phase2 queue preflight and newer main require a new gate
+
+The state-preservation head `00d3bc8` passed its final6 local suite: 2,811 files,
+40,077 tests passed, 67 skipped, with all local quick gates green. CI run
+39411761077 was running for that head; newer main `6852819` now supersedes it for
+review, so current combined local/CI evidence is pending, not remotely passed.
+
+The queue complete preflight at `a64370b` was stopped with exit130 after two
+obsolete exact-source assertions: the plain final-save fallback now passes
+through the publication tracker, and the binary helper callback now forwards
+the verified optional owner. The kept-turn guard, conditional save, ordering and
+best-effort error handling remain intact. Tests execute those actual production
+expressions and assert saved text/binary bytes and identity. The 5-file/125-test
+cohort passed. A no-op fallback loses the stored text and fails; a dropped owner
+keeps the binary bytes but fails the stored verified-owner check. Both deliberate
+reversions were restored exactly. No production correction, threshold or skip
+was needed. The newer main's lower branch budget must be preserved on integration.
+Complete combined-source gates remain required before push/merge; final queued
+source fencing, ownership/migration and allocation protocols remain OPEN.

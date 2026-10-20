@@ -97667,3 +97667,15 @@ Phase2 remains IN PROGRESS. Legacy private access/migration, physical SDK/source
 fencing, full state/origin preservation and production-provider evidence remain
 OPEN. Phases3–6 have not started. Merge authorization remains conditional on
 green exact-head CI; no 100/100 or phase completion is inferred from these fixes.
+
+### 2026-10-20 — Phase2 final preflight preserves the handler branch ratchet
+
+The full final4 preflight at `9ca0ddd` found 544 branch tokens against the
+unchanged 543 chat-handler budget. It was stopped (exit130), not counted as a
+passing full suite. The verified-owner asset caller had added a redundant null
+coalescing fallback although its owner parameter already accepts undefined;
+removing only that fallback keeps the same verified-only identity and unverified
+legacy policy with one fewer branch. No budget, threshold or guard was raised.
+The headroom/real-asset/authenticated-preview cohort then passed 3 files /80 tests.
+All final-source typechecks, build/checks and full suite must pass again before
+push; PR #3852 remains unmerged and no remote CI success is claimed.

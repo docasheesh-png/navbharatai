@@ -11811,7 +11811,7 @@ async function noteBuildOutcome(
           try { await materializeAssets(actuator, workspaceId, assets); } catch { /* an asset failing never blocks the import */ }
           finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
         }
-        void saveWorkspaceAssets(workspaceId, assets, verified?.uid ?? null).catch(() => {});
+        void saveWorkspaceAssets(workspaceId, assets, verified?.uid).catch(() => {});
       }
       // SANDBOX-ONLY images (large images the durable store can't hold): materialize them for the LIVE
       // preview so imported apps aren't full of broken pictures — but do NOT persist them (a cold

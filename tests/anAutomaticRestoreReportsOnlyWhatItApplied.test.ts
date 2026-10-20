@@ -213,7 +213,11 @@ describe('automatic restore caller census', () => {
         const path = `${dir}/${entry.name}`;
         if (entry.isDirectory()) { scan(path); continue; }
         if (!/\.[cm]?tsx?$/.test(path) || /\.(?:test|spec)\.[^.]+$/.test(path)) continue;
-        const file = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);
+        const text = readFileSync(path, 'utf8');
+        // Every candidate name must contain one of these words. Avoid building an AST for files
+        // that cannot contain a candidate; the census still walks the whole source tree.
+        if (!/restore|revert|rollback/i.test(text)) continue;
+        const file = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
         function visit(node: ts.Node) {
           if (ts.isFunctionLike(node) && 'body' in node && node.body) {
             const parent = node.parent;
@@ -222,6 +226,8 @@ describe('automatic restore caller census', () => {
             if (name && /restore|revert|rollback/i.test(name)) {
               let mutates = false;
               function calls(child: ts.Node) {
+                // This is an existence check; one mutation proves the body needs classification.
+                if (mutates) return;
                 if (ts.isCallExpression(child) && /(?:\.(?:writeFiles?|writeBinaryFile|removeFile|runCommand|write|remove|execInContainer|run|restore|git)|(?:^|\.)apply(?:Green)?SnapshotRestore|writeWorkspaceFiles|mergeWorkspaceFiles|saveWorkspaceFiles|removeWorkspaceFiles|execPromise)$/.test(child.expression.getText(file))) mutates = true;
                 ts.forEachChild(child, calls);
               }
@@ -242,5 +248,7 @@ describe('automatic restore caller census', () => {
     }
     scan('src');
     expect([...found].sort()).toEqual(Object.keys(policies).sort());
-  });
+  // This intentionally parses production source across the repository, rather than one fixture.
+  // Give instrumented CI enough time for that corpus; no runtime recovery deadline changes.
+  }, 60_000);
 });

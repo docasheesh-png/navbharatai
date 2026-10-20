@@ -98634,3 +98634,40 @@ measurable: #3859 was gated **three times** (40,606 → 40,664 → 40,776 tests,
 under each run, and a gate run takes about as long as the interval between merges. The queue's integrity
 survived it — `main`'s closed register and open table hold 668 ids each with **zero** overlap and zero
 duplicates, so the #3543 reopening did not recur — but that was checked, not assumed.
+
+## 2026-10-20 — the gate list was wrong about CI's own test step, and a new row for the failure that revealed it
+
+### The gate gap (CLAUDE.md corrected in this change)
+
+Landing #3859 produced a CI failure that six local runs could not reproduce. Chasing it turned up the reason
+the local gate could not have seen it: **CI's test step is `npm run test:coverage`, not `npx vitest run`** —
+the command every "run vitest" instruction in `CLAUDE.md` named. Coverage instrumentation changes module
+evaluation and timing, so a plain `vitest run` is structurally blind to any failure living on that axis, which
+is precisely the axis of a `vi.getTimerCount()` race. This is the same stale-list failure the file already
+records for `scripts/noUnusedImports.mjs` (2026-09-10), repeated on a different step.
+
+A second gap the same day: **#3867 added `typecheck:benchmark` to `ci.yml` mid-session**, so a gate list
+assembled an hour earlier was already a step short. Both are now in the file, together with the only
+instruction that does not go stale — `grep -nE '^ +run:' .github/workflows/ci.yml` and gate on what it prints.
+
+### Q-2203 (new) — a released timer is not proven released
+
+`tests/queueRouteCompletion.test.ts:166` asserts `vi.getTimerCount()` is 0 immediately after `await request` on
+the build-authority refusal path. CI read 1 (run11842). The assertion is UNCHANGED by #3859 — `:96` on `main`,
+`:166` on that branch, moved only because 74 lines of new tests were inserted above it, with no +/- inside its
+block — and `main`'s CI is green on it.
+
+**It is recorded 🟡 BLOCKED rather than fixed, and that is a deliberate choice.** One CI failure against six
+local passes: the file alone 3x, the file alone under `--coverage` 2x, the whole suite on the identical commit,
+and then the full suite under CI's own `test:coverage` step (40,802 passed). A probe advancing 60 extra
+microtasks after `await request` saw the count at 0 on the first read. A race that will not reproduce cannot be
+root-caused honestly, and guessing would be a surface patch on the build route — which the fourth absolute rule
+forbids outright.
+
+**The class, and why hunting the siblings mattered:** asserting a resource has been released at a point that
+does not await the release. There are 13 `getTimerCount()` assertions across 8 files, and **eleven are sound** —
+`deploymentRegistry.test.ts:76` awaits the rejection that clears the deadline, `buildSourcePublication.test.ts:53`
+awaits `joined`. Only this one awaits a REQUEST whose cleanup is registered to run after the response. So the
+right fix, if it ever reproduces, is to make the handler's cleanup part of what the request promise awaits, so
+"response sent" and "timers cleared" cannot be observed out of order. The row says plainly that widening the
+assertion or quarantining the test is forbidden: it protects a real property.

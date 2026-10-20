@@ -12,6 +12,13 @@ describe('parseNdjson', () => {
 });
 
 describe('metricsFromEvents — objective build outcome', () => {
+  it.each([
+    [{ type: 'result', ok: false }, { type: 'done', ok: true }],
+    [{ type: 'done', ok: true }, { type: 'result', ok: false }],
+    [{ type: 'result', ok: true }, { type: 'result', ok: false }, { type: 'done', ok: true }],
+  ])('never upgrades a failed final result from an earlier lane completion: %j', (...events) => {
+    expect(metricsFromEvents(events).ok).toBe(false);
+  });
   it('counts DISTINCT files written and reads result/done fields', () => {
     const events = [
       { type: 'file_changed', change: { path: 'src/App.tsx', kind: 'create' } },

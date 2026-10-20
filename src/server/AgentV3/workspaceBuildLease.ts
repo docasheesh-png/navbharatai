@@ -84,7 +84,7 @@ export type LeaseRenewal =
   | 'stop-requested'
   /** No longer ours (it lapsed and a newer build took the workspace) — this build must stop writing. */
   | 'lost'
-  /** The store could not be reached. Keep building; the next beat tries again. */
+  /** The store could not be reached. Stop cooperatively and retain the body hold while retrying. */
   | 'unknown';
 
 /** PURE: the renewal outcome for a document read inside the heartbeat transaction. */

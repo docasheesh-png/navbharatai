@@ -64,6 +64,11 @@ export interface BenchRun {
   seconds: number;
   metrics: BuildMetrics;
   success: boolean;
+  /** Independent repetitions, not repair attempts. Stable IDs permit server-side reconciliation. */
+  requestId?: string;
+  sessionId?: string;
+  /** Transport failures leave the remote outcome and spend unknown. */
+  failure?: string;
 }
 
 export interface BenchResultFile {
@@ -74,6 +79,17 @@ export interface BenchResultFile {
   /** Flags the operator says were on for this run (recorded, not verified — the server owns them). */
   flags: string[];
   runs: BenchRun[];
+  /** Runner source/configuration, not a claim about the remote server's deployed commit or flags. */
+  execution?: {
+    status: 'running' | 'complete' | 'blocked';
+    plannedRuns: number;
+    sourceCommit: string;
+    sourceDirty: boolean;
+    fixtureSha256: string;
+    promptIds: string[];
+    repetitions: number;
+    nodeVersion: string;
+  };
 }
 
 export interface RateWithCi { n: number; successes: number; rate: number; low: number; high: number }
@@ -110,6 +126,20 @@ export interface BenchComparison {
   verdict: string;
 }
 
+/** Rates from different cohorts or interrupted batches cannot establish a gain. */
+export function comparisonGaps(baseline: BenchResultFile, candidate: BenchResultFile): string[] {
+  const gaps: string[] = [];
+  if (baseline.set !== candidate.set) gaps.push('different prompt sets');
+  const population = (file: BenchResultFile) => file.runs.map((r) => `${r.id}:${r.lang}:${r.complexity}:${r.attempt}`).sort();
+  if (JSON.stringify(population(baseline)) !== JSON.stringify(population(candidate))) gaps.push('different prompts or repetition counts');
+  for (const [label, file] of [['baseline', baseline], ['candidate', candidate]] as const) {
+    if (file.execution && (file.execution.status !== 'complete' || file.execution.plannedRuns !== file.runs.length)) gaps.push(`${label} batch is incomplete`);
+    if (file.runs.some((r) => r.failure)) gaps.push(`${label} has unreconciled transport/auth failures`);
+  }
+  if (baseline.execution && candidate.execution && baseline.execution.fixtureSha256 !== candidate.execution.fixtureSha256) gaps.push('different fixture contents');
+  return gaps;
+}
+
 function perPrompt(runs: readonly BenchRun[]): Map<string, boolean> {
   const by = new Map<string, { s: number; n: number }>();
   for (const r of runs) {
@@ -135,7 +165,8 @@ export function compareBench(baseline: BenchResultFile, candidate: BenchResultFi
   }
   const deltaPoints = Math.round((c.rate - b.rate) * 1000) / 10;
   const separated = c.low > b.high || b.low > c.high;
-  const verdict = separated
+  const gaps = comparisonGaps(baseline, candidate);
+  const verdict = gaps.length ? `Not comparable — ${gaps.join('; ')}. Reconcile or rerun matching complete cohorts before claiming a gain.` : separated
     ? (c.rate > b.rate ? `Candidate is better (${deltaPoints} pts, 95% intervals do not overlap).` : `Candidate is WORSE (${deltaPoints} pts, 95% intervals do not overlap).`)
     : `Not distinguishable at this sample size (${deltaPoints} pts; intervals overlap) — run the full set or more attempts before deciding.`;
   return { baseline: b, candidate: c, deltaPoints, fixed: fixed.sort(), broke: broke.sort(), verdict };
@@ -184,11 +215,14 @@ export function falsePositive(m: BuildMetrics): boolean {
   return buildSucceeded(m) && verifiedOutcome(m) === 'contradicted';
 }
 
-export interface MetricStat { n: number; mean: number | null; total: number }
+export interface MetricStat { n: number; mean: number | null; total: number; p50?: number | null; p95?: number | null }
 const stat = (xs: ReadonlyArray<number | null | undefined>): MetricStat => {
   const v = xs.filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
   const total = v.reduce((a, b) => a + b, 0);
-  return { n: v.length, mean: v.length ? total / v.length : null, total };
+  const sorted = [...v].sort((a, b) => a - b);
+  // Nearest-rank: with fewer than 20 samples the p95 is normally the maximum. Keep n alongside it.
+  const percentile = (p: number) => sorted.length ? sorted[Math.ceil(p * sorted.length) - 1] : null;
+  return { n: v.length, mean: v.length ? total / v.length : null, total, p50: percentile(0.5), p95: percentile(0.95) };
 };
 
 export interface EvidenceSummary {
@@ -236,7 +270,8 @@ export function summarizeEvidence(runs: readonly BenchRun[]): EvidenceSummary {
   }
   const seconds = (pick: (e: NonNullable<BuildMetrics['evidence']>) => number | null): MetricStat => {
     const s = stat(ms.map((m) => (m.evidence ? pick(m.evidence) : null)));
-    return { n: s.n, mean: s.mean === null ? null : s.mean / 1000, total: s.total / 1000 };
+    return { n: s.n, mean: s.mean === null ? null : s.mean / 1000, total: s.total / 1000,
+      p50: s.p50 == null ? null : s.p50 / 1000, p95: s.p95 == null ? null : s.p95 / 1000 };
   };
   return {
     runs: runs.length,
@@ -288,11 +323,13 @@ export function formatEvidenceSummary(s: EvidenceSummary, label: string): string
   const l = [`Evidence — ${label} (${s.runs} builds):`];
   l.push(`  model calls ${fmt(s.llmCalls.mean)}/build (failed ${fmt(s.llmCallsFailed.mean)}) · input ${fmt(s.inputTokens.mean)} tok (cached ${s.cachedShare === null ? 'n/a' : pct(s.cachedShare)}) · output ${fmt(s.outputTokens.mean)} tok`);
   l.push(`  provider cost $${fmt(s.realCostUsd.mean)}/build (total $${fmt(s.realCostUsd.total)}, n=${s.realCostUsd.n}) · build ${fmt(s.buildSeconds.mean)}s · model time ${fmt(s.modelSeconds.mean)}s`);
+  l.push(`  wall time p50 ${fmt(s.wallSeconds.p50 ?? null)}s / p95 ${fmt(s.wallSeconds.p95 ?? null)}s (n=${s.wallSeconds.n}) · provider cost p50 $${fmt(s.realCostUsd.p50 ?? null)} / p95 $${fmt(s.realCostUsd.p95 ?? null)} (n=${s.realCostUsd.n})`);
   l.push(`  gate: ${Object.entries(s.gate).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'} · preview: ${Object.entries(s.preview).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);
   const f = s.falsePositiveRate;
   l.push(`  of ${f.n} reported successes: ${s.successes.proven} proven · ${s.successes.contradicted} CONTRADICTED by the evidence (false-positive ${pct(f.rate)}, 95% CI ${pct(f.low)}–${pct(f.high)}) · ${s.successes.unproven} unproven`);
   const gaps = (['llmCalls', 'inputTokens', 'realCostUsd', 'buildSeconds'] as const).filter((k) => s[k].n < s.runs);
   if (gaps.length) l.push(`  ⚠️ not every build carried: ${gaps.map((k) => `${k} (${s[k].n}/${s.runs})`).join(', ')} — those means are over fewer builds`);
+  l.push('  Render + gate evidence is not proof of every requested critical journey. First-attempt success, edit preservation and full critical-flow success remain unmeasured without those observations; repetitions are independent builds, not repairs.');
   return l.join('\n');
 }
 

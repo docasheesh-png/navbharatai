@@ -17,6 +17,7 @@
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "typecheck:server": "tsc -p tsconfig.server.json",
+    "typecheck:benchmark": "tsc -p tsconfig.benchmark.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

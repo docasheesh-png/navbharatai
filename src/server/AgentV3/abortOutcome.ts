@@ -60,6 +60,7 @@ export const ABORT_OUTCOME_CODES = Object.freeze({
   futile: 'OUTCOME_FUTILE',
   deployDrain: 'OUTCOME_DEPLOY_DRAIN',
   superseded: 'OUTCOME_SUPERSEDED',
+  authorityUnavailable: 'OUTCOME_AUTHORITY_UNAVAILABLE',
   reaped: 'OUTCOME_REAPED',
   /** Shared with the wall-clock finalizer: "the run ended before it finished". */
   stopped: 'OUTCOME_STOPPED',
@@ -130,6 +131,11 @@ export function abortOutcomeFor(cause: AbortCause, opts: { platformComposed?: bo
       return {
         code: ABORT_OUTCOME_CODES.superseded, severity: 'error',
         message: 'Build outcome: SUPERSEDED — a newer build on the same project reclaimed this one\'s lock. Not a defect in the app.',
+      };
+    case 'authority-unavailable':
+      return {
+        code: ABORT_OUTCOME_CODES.authorityUnavailable, severity: 'error',
+        message: 'Build outcome: INTERRUPTED — the database could not confirm lease ownership, so this attempt was stopped to protect the workspace. No replacement build or app defect is implied.',
       };
     case 'reaper':
       return {

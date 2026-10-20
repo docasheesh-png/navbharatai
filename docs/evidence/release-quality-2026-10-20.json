@@ -1,0 +1,278 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-20",
+  "verdict": "blocked",
+  "auditCommit": "adc53ee215beb5b7f7c5042245b2817c16a2deca",
+  "implementationBase": "8e43c4039",
+  "branch": "fix/release-reliability-evidence",
+  "runtime": {
+    "node": "24.19.0",
+    "ciNodeMajor": 22,
+    "timezone": "UTC",
+    "platform": "linux"
+  },
+  "checks": {
+    "frontendTypecheck": "passed",
+    "serverStrictTypecheck": "passed",
+    "benchmarkStrictTypecheck": "passed",
+    "productionBuild": "passed",
+    "bootSmoke": "passed",
+    "bundleBudget": "passed",
+    "serverDependencies": "passed",
+    "nativeShellGuard": "passed",
+    "licenseGate": "passed",
+    "targetedRegression": {
+      "files": 13,
+      "testsPassed": 219,
+      "failed": 0
+    },
+    "interruptionAndHealthRegression": {
+      "files": 4,
+      "testsPassed": 55,
+      "failed": 0
+    },
+    "fullRegression": {
+      "status": "running",
+      "command": "npm test -- --maxWorkers=4"
+    },
+    "remoteCI": {
+      "status": "not-run"
+    },
+    "audit": {
+      "status": "passed-with-reviewed-exceptions",
+      "critical": 0,
+      "high": 4,
+      "moderate": 21,
+      "totalPackageEntries": 25,
+      "exceptionReviewBy": "2026-11-03"
+    },
+    "benchmark": {
+      "status": "dry-run-only",
+      "smokePrompts": 15,
+      "fullPrompts": 50,
+      "liveBuilds": 0,
+      "verifiedSuccessRate": null,
+      "firstAttemptSuccessRate": null,
+      "editPreservationRate": null
+    }
+  },
+  "bundleGzipKb": {
+    "firstPaint": 499.9,
+    "firstPaintBudget": 560,
+    "largestChunk": 260.6,
+    "totalJavaScript": 1551.6,
+    "css": 43.3
+  },
+  "probeLoad": {
+    "target": "local production /api/live",
+    "virtualUsers": 20,
+    "durationSeconds": 10,
+    "before": {
+      "count": 19283,
+      "errors": 19160,
+      "errorRate": 0.993621324482705,
+      "throughputRps": 1927.72,
+      "meanMs": 100.31,
+      "p50Ms": 32,
+      "p95Ms": 103,
+      "p99Ms": 2039,
+      "maxMs": 4033
+    },
+    "after": {
+      "count": 13941,
+      "errors": 0,
+      "errorRate": 0,
+      "throughputRps": 1393.82,
+      "meanMs": 14.25,
+      "p50Ms": 10,
+      "p95Ms": 35,
+      "p99Ms": 54,
+      "maxMs": 95
+    },
+    "limits": "Shared localhost caller; concurrent unit tests; not authenticated builder capacity or a real-device measurement."
+  },
+  "firestoreDrills": {
+    "emulatorVersion": "1.22.0",
+    "sha256": "9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c",
+    "passed": 14,
+    "failed": 0,
+    "cases": [
+      {
+        "name": "fresh cross-process reads see another worker enqueue",
+        "pass": true,
+        "ms": 622,
+        "evidence": {
+          "items": 1,
+          "distinctPids": [
+            11216,
+            11278
+          ]
+        }
+      },
+      {
+        "name": "two real workers admit exactly one queued command",
+        "pass": true,
+        "ms": 3471,
+        "evidence": {
+          "claims": [
+            null,
+            "first"
+          ],
+          "durableStatuses": [
+            "running",
+            "pending"
+          ]
+        }
+      },
+      {
+        "name": "live lease cannot be reclaimed by another attempt with the same process owner",
+        "pass": true,
+        "ms": 3504,
+        "evidence": {
+          "accepted": 1
+        }
+      },
+      {
+        "name": "expired attempt cannot renew or release a replacement lease",
+        "pass": true,
+        "ms": 91,
+        "evidence": {
+          "lateRenewal": "lost",
+          "durableToken": "replacement",
+          "expiryClock": "first claim timestamp explicitly backdated90001ms"
+        }
+      },
+      {
+        "name": "killed worker stays running until explicit stale recovery",
+        "pass": true,
+        "ms": 3617,
+        "evidence": {
+          "killedPid": 11832,
+          "recoveredItem": "crashed",
+          "recoveryClock": "explicit +90001ms",
+          "pausedUntilResume": true
+        }
+      },
+      {
+        "name": "stale completion cannot settle a newer generation",
+        "pass": true,
+        "ms": 469,
+        "evidence": {
+          "oldAttempt": "old-attempt",
+          "newStatus": "running"
+        }
+      },
+      {
+        "name": "commit acknowledgement loss stays unconfirmed and replay is durable",
+        "pass": true,
+        "ms": 3282,
+        "evidence": {
+          "actualCommittedItems": 1,
+          "response": "QUEUE_STORE_UNAVAILABLE",
+          "replayItems": 1,
+          "injection": "Throw once after actual emulator transaction committed"
+        }
+      },
+      {
+        "name": "two real wallet settlers charge the same build reference once",
+        "pass": true,
+        "ms": 3426,
+        "evidence": {
+          "tokensDebited": [
+            500,
+            0
+          ],
+          "balanceInr": 95,
+          "durableOperations": 1,
+          "immutableLedgerRows": 1,
+          "chain": {
+            "ok": true,
+            "problems": []
+          }
+        }
+      },
+      {
+        "name": "wallet commit acknowledgement loss replays without another debit after worker restart",
+        "pass": true,
+        "ms": 2995,
+        "evidence": {
+          "originalOutcome": "unconfirmed",
+          "replayTokensDebited": 0,
+          "balanceInr": 95,
+          "immutableLedgerRows": 1,
+          "injection": "Throw once after actual atomic wallet+operation+ledger commit"
+        }
+      },
+      {
+        "name": "two workers reserve one request identity and terminal replay cannot execute",
+        "pass": true,
+        "ms": 4336,
+        "evidence": {
+          "executorsAdmitted": 1,
+          "terminalReplay": "terminal",
+          "changedInput": "input-mismatch",
+          "stableBuildRef": true
+        }
+      },
+      {
+        "name": "uncertain request reservation commit cannot execute on restart",
+        "pass": true,
+        "ms": 2764,
+        "evidence": {
+          "originalOutcome": "unavailable",
+          "restartReplay": "in-progress",
+          "executorsAdmitted": 0,
+          "injection": "Throw once after actual receipt reservation commit"
+        }
+      },
+      {
+        "name": "real transport outage never grants an unverified build lease",
+        "pass": true,
+        "ms": 5355,
+        "evidence": {
+          "result": {
+            "ok": false,
+            "reason": "unavailable",
+            "holderHeartbeatAt": 0
+          },
+          "durableLease": null,
+          "injection": "Live loopback TCP proxy cuts existing and future gRPC connections; production4s claim deadline"
+        }
+      },
+      {
+        "name": "real transport outage never acknowledges a local-only queue write",
+        "pass": true,
+        "ms": 1741,
+        "evidence": {
+          "response": "QUEUE_STORE_UNAVAILABLE",
+          "durableQueue": null,
+          "injection": "Actual TCP outage plus250ms injected SDK deadline; killed before transport restoration"
+        }
+      },
+      {
+        "name": "production queue deadline rejects a raw TCP outage and a fresh worker retries after recovery",
+        "pass": true,
+        "ms": 6749,
+        "evidence": {
+          "response": "QUEUE_STORE_UNAVAILABLE",
+          "elapsedMs": 4003,
+          "durableItemsAfterRecovery": 1,
+          "injection": "TCP proxy cut only; no injected SDK error/deadline in this drill"
+        }
+      }
+    ],
+    "limits": [
+      "No paid model/E2B/Cloud Run calls",
+      "Recovery decision clocks explicitly advanced",
+      "ACK loss and some SDK deadlines injected around real emulator commits",
+      "Local production token parsing covered separately with SDK-boundary doubles"
+    ]
+  },
+  "releaseBlockers": [
+    "Legacy workspace IDs can collide across valid custom UID/session pairs; verified independent ownership and historical migration unresolved.",
+    "Cooperative abort is not remote command/source fencing; partition and stale automatic takeover require state-preserving runtime ownership.",
+    "Configured staging environment, test account and approved total spend are missing for real benchmark/provider interruption evidence.",
+    "First-attempt, full critical-flow, edit/import preservation and held-out benchmark outcomes remain unmeasured.",
+    "Route/UI modularization, frontend strict migration, real-device performance and production-like rollback/restore drills remain pending."
+  ]
+}

@@ -159,6 +159,9 @@ jobs:
       - name: Typecheck (server modules - strict guardrail)
         run: npm run typecheck:server
 
+      - name: Typecheck (benchmark tools - strict guardrail)
+        run: npm run typecheck:benchmark
+
       - name: Failed-report OAuth protocol and security checks
         run: node --experimental-strip-types scripts/failedReportOAuth.check.mjs
 

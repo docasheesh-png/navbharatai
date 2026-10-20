@@ -61,7 +61,8 @@ export interface BenchRun {
   lang: BenchPrompt['lang'];
   complexity: BenchPrompt['complexity'];
   attempt: number;
-  seconds: number;
+  /** Completed request duration; null while a checkpointed request is still in flight. */
+  seconds: number | null;
   metrics: BuildMetrics;
   success: boolean;
   /** Independent repetitions, not repair attempts. Stable IDs permit server-side reconciliation. */

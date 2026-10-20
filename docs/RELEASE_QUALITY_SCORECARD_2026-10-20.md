@@ -60,9 +60,9 @@ advancement are explicitly identified in the artifact. No paid model, E2B or
 Cloud Run calls are represented by those results.
 
 Final local product suite: **2,831 files and 40,404 tests passed; 67 skipped;
-zero failures** (462.27 seconds). Runtime source matches `ef54d679a`. A later
-benchmark CLI-only checkpoint follow-up passed 33 focused tests and strict
-typechecking. An earlier run used the outdated probe-test fixture and is not a
+zero failures** (462.27 seconds). Live builder, lease and probe source matches `ef54d679a`. A later
+benchmark-only checkpoint follow-up passed 61 focused tests and strict
+typechecking; in-flight duration stays unknown (`null`), never zero. An earlier run used the outdated probe-test fixture and is not a
 green gate; its correction also passed all 23 cache tests separately.
 
 Exact-head remote CI is published under [PR #3867 checks](https://github.com/docasheesh-png/navbharatai/pull/3867/checks).

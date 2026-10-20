@@ -40,7 +40,7 @@
       "durationSeconds": 462.27,
       "command": "npm test -- --maxWorkers=4",
       "startedAtCommit": "ef54d679ad5c3c4de1e23d926b72917c35eaf31d",
-      "scope": "Full product suite; runtime source unchanged after this commit. Benchmark CLI-only pre-submission-checkpoint follow-up additionally validated by focused tests and strict typecheck.",
+      "scope": "Full product suite; live builder/authorization/lease/probe source unchanged after the starting commit. Benchmark-only pre-submission-checkpoint/null-duration follow-up additionally validated by 61 focused tests and strict typechecks.",
       "previousRun": {
         "passed": 40403,
         "failed": 1,
@@ -143,11 +143,11 @@
     },
     "checkpointFollowup": {
       "status": "passed",
-      "files": 4,
-      "testsPassed": 33,
+      "files": 5,
+      "testsPassed": 61,
       "failed": 0,
       "strictTypecheck": "passed",
-      "evidence": "Local HTTP server reads the pending request/session IDs from disk while the request is still in flight; final artifact replaces the pending row and excludes bearer tokens."
+      "evidence": "Local HTTP server reads the pending request/session IDs from disk while the request is still in flight; final artifact replaces the pending row and excludes bearer tokens. In-flight duration is null and excluded from latency statistics, never recorded as a zero-second build."
     }
   },
   "bundleGzipKb": {

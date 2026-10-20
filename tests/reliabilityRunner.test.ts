@@ -43,7 +43,7 @@ describe('live benchmark protocol against a local scripted server (no provider c
       expect(requests).toHaveLength(1); // Authentication refusal must stop a batch, not poison every row.
       expect(requests[0].authorization).toBe('Bearer test-only-token');
       expect(requests[0].pending).toMatchObject({ requestId: requests[0].body.requestId,
-        sessionId: requests[0].body.sessionId, failure: 'request-in-progress', success: false });
+        sessionId: requests[0].body.sessionId, failure: 'request-in-progress', success: false, seconds: null });
       expect(requests[0].pending.metrics.billedUsd).toBeNull();
       const files = await readdir(output);
       expect(files).toHaveLength(1); // Atomic checkpoint leaves no pending temp file.

@@ -36,6 +36,8 @@ describe('success + comparison', () => {
     expect(s.realCostUsd).toMatchObject({ n: 0, mean: null, p50: null, p95: null });
     expect(s.billedUsd.n).toBe(0);
     expect(summarizeEvidence([]).wallSeconds).toMatchObject({ n: 0, p50: null, p95: null });
+    expect(summarizeEvidence([{ ...runs[0], seconds: null, failure: 'request-in-progress' }]).wallSeconds)
+      .toMatchObject({ n: 0, mean: null, p50: null, p95: null });
   });
   it('success is strict', () => {
     expect(buildSucceeded(M())).toBe(true);

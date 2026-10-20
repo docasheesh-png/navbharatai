@@ -95,7 +95,7 @@ async function main(): Promise<void> {
       const t0 = Date.now();
       const request = benchmarkRequest(p.prompt, token, env.BENCH_USER_ID, env.BENCH_EMAIL);
       const row = runs.length;
-      runs.push({ id: p.id, lang: p.lang, complexity: p.complexity, attempt, seconds: 0,
+      runs.push({ id: p.id, lang: p.lang, complexity: p.complexity, attempt, seconds: null,
         metrics: FAILED, success: false, requestId: request.requestId, sessionId: request.sessionId,
         failure: 'request-in-progress' });
       save();

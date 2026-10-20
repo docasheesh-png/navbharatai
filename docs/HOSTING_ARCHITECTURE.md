@@ -318,3 +318,32 @@ credential-less mode (`NAVBHARAT_APPS_CREDENTIALLESS_BUILD=on`), the job is thre
 The registries stay reachable, so installs work. **Verification is the admin's:** `scripts/verifyCredentiallessBuild.sh`
 in Cloud Shell builds the isolation probe this way and reads its `build-result.json`. `"identity": null` from
 inside `npm install` is the only evidence that counts. Gap (b), an egress allow-list, is separate (Q-820).
+
+## 12. Audit hardening — 2026-10-20
+
+The earlier gap table is historical. `serverRollback.ts` now feeds the existing Publish history picker
+with retained ready server revisions and performs owner-checked, lease-coordinated traffic rollback.
+Only revisions using the current dedicated runtime identity are eligible. A lost cloud acknowledgement
+keeps the lease until its stale horizon; success requires observed traffic to the selected revision.
+A fresh publish explicitly resets traffic to latest. Database/files are outside this rollback.
+
+New container publishes require a successful durable claim and a strict moderation-registry read.
+Public hosting additionally requires credential-less mode and operator attestations of verified build/network isolation at both availability and the hosting actuator; these are enforced prerequisites, **not**
+evidence that real Cloud Build/Google IAM is isolated. The two real-cloud verification scripts remain
+mandatory. A live unsafe-content rescan removes serving paths before recording a review hold. Static
+mirror removal happens before deleting the channel pointer; old orphan mirrors need reconciliation.
+
+Private App Mart rows use a one-hour capability minted after password verification, revoked by password
+rotation. They remain shared among everyone authorized for that app. Personal records need app login
+and row ownership. Existing private Supabase buckets need the regenerated `bucketSetupSql` applied;
+changing the generator alone does not change existing projects.
+
+BYO S3/Cloudinary uploads are now server-mediated, authenticated with the app's own database session,
+10 MB max with actual byte/type validation, bounded in-flight work and a transactional quota migration
+(`003_upload_quota.sql`). Per UTC day: 100 uploads/100 MB per user and 1,000 uploads/1 GB per app. Failed
+uploads retain their reservation. Missing auth/quota configuration refuses. Default public provider
+URLs are for public assets; private documents require private object access and authorized downloads.
+
+The edge meter already exists (`edgeTrafficMeter.ts`); its deployment and bill reconciliation are still
+unverified here. Backups/restore drills, egress enforcement and the failed-attempt timeline screen
+remain OPEN. See the itemized 2026-10-20 entry in `PROGRESS.md` for scope and proof boundaries.

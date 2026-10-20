@@ -1,0 +1,11 @@
+{
+  "organizationId": "hkfoligpzrmcasgtzeoe",
+  "newProjectRegion": "ap-south-1",
+  "existingProjectRef": "mtbdjypjlnjghapdtedj",
+  "isolation": "one-project-per-app",
+  "activation": "pending-billing-approval-and-runtime-secret-binding",
+  "proposedMaxTotalProjects": 2,
+  "estimatedProMicroBaselineUsdPerMonth": 35,
+  "estimateAsOf": "2026-10-20",
+  "includesExistingProject": true
+}

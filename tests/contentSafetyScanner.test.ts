@@ -1,8 +1,9 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { scanPublishedContent, publishScanBlocks, contentScanSummary } from '../src/server/AgentV3/ContentSafetyScanner';
+import { deploymentStore } from '../src/server/AgentV3/DeploymentStore';
 
 const dist = (html: string): Map<string, Buffer> => new Map([['dist/index.html', Buffer.from(html, 'utf-8')]]);
-afterEach(() => { delete process.env.AGENTV3_PUBLISH_SCAN; });
+afterEach(() => { delete process.env.AGENTV3_PUBLISH_SCAN; vi.restoreAllMocks(); });
 
 describe('ContentSafetyScanner — flags real abuse, spares real apps', () => {
   it('flags a crypto seed-phrase harvester (wallet drainer) as unsafe', () => {
@@ -58,6 +59,7 @@ describe('ContentSafetyScanner — flags real abuse, spares real apps', () => {
 });
 
 describe('withDeploymentPersistence — content scan wiring (block mode)', () => {
+  beforeEach(() => { vi.spyOn(deploymentStore, 'getStrict').mockResolvedValue(null); });
   it('block mode holds an unsafe app and never publishes it', async () => {
     process.env.AGENTV3_PUBLISH_SCAN = 'block';
     const { withDeploymentPersistence } = await import('../src/server/AgentV3/DeploymentStore');

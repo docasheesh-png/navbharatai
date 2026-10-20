@@ -19,7 +19,7 @@ import { hostedRepublishRefusal } from './hostedAppLifecycle';
 import { appsIdentities } from './appsIdentity';
 import type { DeploymentRecord } from './DeploymentStore';
 import { packWorkspaceArchive } from './sourceArchive';
-import { appsImageRepo, buildStagingBucket, buildTag, buildAppContainer } from './containerBuild';
+import { appsImageRepo, buildStagingBucket, buildTag, buildAppContainer, credentiallessBuildEnabled } from './containerBuild';
 import { planBackendEnv, backendEnvNote } from './backendEnvVars';
 
 /**
@@ -35,6 +35,13 @@ export function navBharatCloudEnabled(env: NodeJS.ProcessEnv = process.env): boo
 /** Is hosting open to everyone, or still admin-only? Default admin-only. */
 export function navBharatCloudPublic(env: NodeJS.ProcessEnv = process.env): boolean {
   return parseEnvFlag(env.NAVBHARAT_CLOUD_PUBLIC) ?? false;
+}
+
+/** Shared by availability and the actuator; an alternate caller cannot skip operator attestations. */
+function publicHostingSafetyReady(env: NodeJS.ProcessEnv): boolean {
+  return credentiallessBuildEnabled(env)
+    && parseEnvFlag(env.NAVBHARAT_APPS_BUILD_ISOLATION_VERIFIED) === true
+    && parseEnvFlag(env.NAVBHARAT_APPS_EGRESS_VERIFIED) === true;
 }
 
 export interface Availability {
@@ -86,9 +93,7 @@ export function hostingAvailability(
       message: 'Apps that need a server run on a hosting plan. Open Billing → Plans to start one — your app and its code are kept exactly as they are until then.',
     };
   }
-  if (!opts.isAdmin && (parseEnvFlag(env.NAVBHARAT_APPS_CREDENTIALLESS_BUILD) !== true
-    || parseEnvFlag(env.NAVBHARAT_APPS_BUILD_ISOLATION_VERIFIED) !== true
-    || parseEnvFlag(env.NAVBHARAT_APPS_EGRESS_VERIFIED) !== true)) {
+  if (navBharatCloudPublic(env) && !publicHostingSafetyReady(env)) {
     return { available: false, message: 'Server hosting is waiting for its isolation and network safety checks. Your app and data are kept.' };
   }
   const project = appsProject(env);
@@ -160,6 +165,9 @@ export async function hostAppOnNavBharatCloud(
   if (!project.projectId) return { ok: false, reason: 'unavailable', message: project.message };
   const ids = appsIdentities(project.projectId, env);
   if (!ids.ok) return { ok: false, reason: 'unavailable', message: ids.message };
+  if (navBharatCloudPublic(env) && !publicHostingSafetyReady(env)) {
+    return { ok: false, reason: 'unavailable', message: 'Public server hosting is waiting for its build isolation and network checks to be verified.' };
+  }
   const region = appsRegion(env);
 
   const archive = packWorkspaceArchive(opts.files ?? {});

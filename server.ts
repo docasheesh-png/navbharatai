@@ -987,8 +987,17 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
                       // HELD, not taken down: reversible by the admin, because a machine acting on a
                       // third party's list should never give the irreversible verdict.
                       hold: async (workspaceId, note) => {
-                        // The sweep lists ACTIVE apps only, so a held one is still serving (Q-703).
-                        await deploymentStore.setStatus(workspaceId, 'held', { heldFrom: 'active' });
+                        const [{ takeAppOffline }, { FirebaseHostingDeployer }] = await Promise.all([
+                          import('./src/server/AgentV3/hostedAppLifecycle'), import('./src/server/AgentV3/Deployment'),
+                        ]);
+                        // This scan flagged the CURRENTLY SERVING app, unlike a refused new version.
+                        // Remove every serving path first. Restore then requires an explicit republish.
+                        const held = await takeAppOffline(workspaceId, 'held', {
+                          deleteChannel: (id) => new FirebaseHostingDeployer().deleteChannel(id),
+                          get: (id) => deploymentStore.getStrict(id),
+                          setStatus: (id, status) => deploymentStore.setStatus(id, status, { heldFrom: 'unpublished' }),
+                        });
+                        if (!held) throw new Error('The app was removed but its review hold could not be recorded.');
                         await deploymentStore.setOutboundVerdict(workspaceId, { outboundNote: note, flagged: true });
                       },
                     });

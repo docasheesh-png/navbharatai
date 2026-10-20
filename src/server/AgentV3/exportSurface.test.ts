@@ -42,10 +42,11 @@ describe('scriptExportSurface — TS/TSX export extraction', () => {
     expect(out).toContain('Travel = "Travel",');
   });
 
-  it('trims an exported const/arrow to its head', () => {
+  it('retains actual source when an arrow return type must be inferred', () => {
     const out = scriptExportSurface('export const useNotes = (initial: Note[]) => {\n  return useState(initial);\n};')!;
-    expect(out).toContain('export const useNotes = …;');
-    expect(out).not.toContain('useState');
+    expect(out).toContain('export const useNotes = (initial: Note[]) => {');
+    expect(out).toContain('return useState(initial);');
+    expect(out).toContain('NOT a complete type contract');
   });
 
   it('keeps one-line type aliases, export lists and default exports', () => {
@@ -116,8 +117,8 @@ describe('signatureDependencyContext — the cheap, quality-preserving sibling c
     expect(surface).toContain('lateHelper'); // the enhancement
   });
 
-  it('is dramatically smaller than the full-body dump on realistic producers', () => {
-    const body = `export interface Note { id: string; text: string }\nexport function useNotes() {\n${'  // impl\n'.repeat(150)}  return [];\n}`;
+  it('still compresses explicitly typed producers without discarding callable information', () => {
+    const body = `export interface Note { id: string; text: string }\nexport function useNotes(): Note[] {\n${'  // impl\n'.repeat(150)}  return [];\n}`;
     const producers = Array.from({ length: 10 }, (_, i) => ({ path: `src/hooks/h${i}.ts`, content: body }));
     const full = dependencyContext(producers).length;
     const sig = signatureDependencyContext(producers).length;

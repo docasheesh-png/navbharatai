@@ -72,10 +72,10 @@
   "POST /api/workspace/changelog": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "POST /api/workspace/traceability": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "POST /api/workspace/version": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
-  "POST /api/failedbr/mcp": "external: authenticated remote MCP clients call the stateless read-only report tools (docs/FAILED_BUILD_REPORTS.md)",
+  "POST /api/failedbr/mcp": "external: authenticated remote MCP clients call the stateless report reads and explicitly consented autopsy metadata tool (docs/FAILED_BUILD_REPORTS.md)",
   "GET /api/failedbr/mcp": "external: remote MCP clients probe optional SSE support; authenticated requests receive 405 because this server uses JSON POST responses",
-  "POST /api/failedbr/oauth/register": "external: OAuth-enabled remote MCP clients discover and call this endpoint for read-only report access (docs/FAILED_BUILD_REPORTS.md)",
-  "GET /api/failedbr/oauth/authorize": "external: OAuth-enabled remote MCP clients discover and call this endpoint for read-only report access (docs/FAILED_BUILD_REPORTS.md)",
-  "POST /api/failedbr/oauth/token": "external: OAuth-enabled remote MCP clients discover and call this endpoint for read-only report access (docs/FAILED_BUILD_REPORTS.md)",
-  "POST /api/failedbr/oauth/revoke": "external: OAuth-enabled remote MCP clients discover and call this endpoint for read-only report access (docs/FAILED_BUILD_REPORTS.md)"
+  "POST /api/failedbr/oauth/register": "external: OAuth-enabled remote MCP clients discover and call this endpoint for scoped report access; optional autopsy metadata writes require fresh explicit consent (docs/FAILED_BUILD_REPORTS.md)",
+  "GET /api/failedbr/oauth/authorize": "external: OAuth-enabled remote MCP clients discover and call this endpoint for scoped report access; optional autopsy metadata writes require fresh explicit consent (docs/FAILED_BUILD_REPORTS.md)",
+  "POST /api/failedbr/oauth/token": "external: OAuth-enabled remote MCP clients discover and call this endpoint for scoped report access; optional autopsy metadata writes require fresh explicit consent (docs/FAILED_BUILD_REPORTS.md)",
+  "POST /api/failedbr/oauth/revoke": "external: OAuth-enabled remote MCP clients discover and call this endpoint for scoped report access; optional autopsy metadata writes require fresh explicit consent (docs/FAILED_BUILD_REPORTS.md)"
 }

@@ -46,7 +46,8 @@ describe('the nine tabs, in the order the admin accepted', () => {
 
   it('the page name says where the admin is', () => {
     expect(pageTitle('apkreports')).toBe('Builds · Phone builds');
-    expect(pageTitle('revenue')).toBe('Money');
+    expect(pageTitle('revenue')).toBe('Money · Revenue');
+    expect(pageTitle('ads')).toBe('Money · Ads');
   });
 
   it('an old tab id still lands on the page that holds its content', () => {
@@ -118,6 +119,8 @@ const FEATURE_HOME: Record<string, string | string[]> = {
   'only={ENGINE_REPORTS_ON.publishing}': 'publishing',
   "storeTab: 'review'": 'review',
   '<BotsLedgerPanel': 'bots',
+  // Money · Ads (2026-10-20): the admin's own product ads — form, picture crop, preview and list.
+  '<AdsPanel': 'ads',
   "detail: { view: 'gallery' }": 'review', // PR 3: the gallery review queue, opened from Apps → Review
   // Builds
   'onClick={clearAllReports}': 'reports',

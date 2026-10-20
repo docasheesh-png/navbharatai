@@ -100,6 +100,7 @@ export const PROCESS_ONLY_CODES = new Set([
   // recorded at problem severity and left in no registry at all.
   'COST_CEILING_REACHED',     // our spending ceiling stopped the build — our policy, not their code
   'FUTILITY_BREAKER',         // our own loop breaker stopped the build
+  'OUTCOME_UNEXPLAINED',      // the run ended not-ok and wrote no outcome — an engine hole, not their app
   'VERIFY_DID_NOT_RUN',       // our fast-lane typecheck could not execute — the class of RUNTIME_UNCHECKED
   'GREEN_GUARD_UNVERIFIED',   // "could not be opened to check this turn" — the class of PREVIEW_UNVERIFIED
   // A restore point OUR save did not keep (GT-6). The app rendered; the miss is the store, not the app.

@@ -98928,3 +98928,121 @@ session wrote.
 Another session added **375 new OPEN rows** (Q-1300–Q-2024). This morning the open table held a few dozen
 actionable rows; it now holds 517. Those rows are not touched here — a row somebody created an hour ago is
 theirs — but anyone reading "complete the remaining queue" needs to know the denominator moved.
+
+---
+
+## 2026-10-20 — Admin house ads: the admin's own products, shown to people who have not paid
+
+**Asked by the admin (2026-10-20):** *"admin panel me ads ka ek option banao! jahan admin apne kisi saman ka ads chala sake, admin — naam, description aur photo upload kare, aur user ko woh ads dikhne lage."* Placements, from the admin's own list: App Mart (a Sponsored tile between app tiles), Home (a small banner at the bottom), the success screen after publishing or posting to App Mart (a banner below the message, never an overlay), the phone app's App Mart (a bottom banner), and the public pages. **No full-screen ads** (the admin's ruling). **Only paid accounts are ad-free; a signed-in free user is shown ads like a visitor** (the admin's correction).
+
+### What was built (branch `claude/admin-house-ads`)
+
+| Piece | Where |
+|---|---|
+| The rules both sides share: places, limits, validation, the ONE status rule, pick-an-ad, the shape check on a served ad | `src/lib/houseAds.ts` |
+| The admin form's pure half (form → request body, DST-safe inclusive end date) and the picture crop (1200×300, JPEG, ≤ 300 KB, in the browser) | `src/lib/houseAdForm.ts`, `src/lib/houseAdImage.ts` |
+| Storage: two collections, `house_ads` (small) and `house_ad_images` (the picture), written picture-first / deleted ad-first | `src/server/lib/houseAdStore.ts` |
+| Who is shown an ad: `hasEverPaid` OR an active hosting plan ⇒ none; wallet unreadable ⇒ none | `src/server/lib/houseAdAudience.ts` |
+| Public routes `GET /api/ads/:placement`, `GET /api/ads/image/:id` | `src/server/routes/houseAds.ts` |
+| Admin routes `GET/POST /api/admin/ads`, `PUT/DELETE /api/admin/ads/:id` (admin token, audited) | `src/server/routes/admin.ts` |
+| Admin page **Money → Ads** (form, picture, live preview, list, on/off, edit, delete) | `src/components/admin/AdsPanel.tsx` |
+| The client's single way to ask, and the banner and tile | `src/lib/houseAdClient.ts`, `src/components/ads/` |
+| Screens that draw one | `NavAppStore.tsx` (tile, post-success, phone banner), `HomeView.tsx`, `PublishCelebration.tsx`, `PublishToNavStore.tsx` |
+
+Nothing changes for any user until the admin creates and turns on an ad: with no ad, every placement draws nothing.
+
+### Decisions taken without asking (all reversible; say so to change one)
+
+1. **"Dashboard" = Home.** There is no separate project-list screen; the banner is at the bottom of Home, which is also the phone app's home.
+2. **A link is optional and https-only**, so a tap can go to the admin's shop. No link ⇒ a picture and text, and no button.
+3. **Pictures are cropped to a 4:1 strip in the browser**, so the preview the admin approves is the file that is stored.
+4. **Each ad carries its own places and an optional start/end date**, and can be turned off without deleting it.
+5. **The Money tab now has two pages (Revenue, Ads)**, so the old page title "Money" became "Money · Revenue".
+6. **A change reaches every user within a minute** (the public list is read once a minute per instance; the admin's own instance sees it at once).
+7. **No counters** (impressions/clicks). Not asked for; the page says nothing it cannot back.
+
+### 🔴 ONE PLACEMENT NOT BUILT, ON PURPOSE — the server-rendered public pages (`/ai-app-builder`, `/pricing`, …)
+
+The admin listed "landing, pricing, blog, public pages". Those pages are static HTML for crawlers ("no script runs here"), and **they cannot tell who is reading**. A paying customer opening `/pricing` would be shown an ad — which breaks the admin's own rule (paid never sees one) and the hosting plan's own promise ("keeps NavBharatAI ad-free for you", `GalleryPanel.tsx`, `WebAppPlayer.tsx`). A tick box for a place that does nothing would be a control that lies, so `public_pages` is **absent from `HOUSE_AD_PLACEMENTS`** (a test fails if it comes back without a way to know the reader). There is also no blog in the repo.
+
+**Options, for the admin:** (a) leave the public pages ad-free — recommended, they are the pages that must stay fast and findable; (b) show the banner on the acquisition pages only (`/ai-app-builder`, `/indian-ai-assistant`, `/hindi-ai-assistant`, `/about`) and accept that a paying customer who opens one is shown it; (c) a small script that skips the banner when the browser holds a "paid" hint — this breaks the pages' "no script" design and the hint is not proof. **Status: 🟡 BLOCKED on that decision.**
+
+### Honest statement about the Privacy Policy
+
+The policy says NavBharatAI shows **no third-party advertising inside the product** (`privacyPolicy.ts`, pinned by `privacyPolicyTruth.test.ts`). That stays true **only while every ad here is the operator's own** — the admin form says "your own goods only". If the admin ever sells a slot to someone else, that sentence becomes false and must change first.
+
+### Proof, by reversion
+
+Thirteen bugs were put back one at a time and each made a test fail: a token that fails to verify treated as a visitor; the hosting-plan rule removed; a gifted balance counted as "paid"; an unreadable wallet counted as free; the picture signature check removed; SVG allowed; an http link allowed; a `javascript:` link in a served ad; an "off" ad still live; `public_pages` brought back; the client asking before sign-in is known; a viewer-blind cache key; the ad written before its picture.
+
+### Watch for on the first real ad
+
+Create one ad with every place ticked, then open Home, App Mart (5+ apps in the general view), publish an app and post one to App Mart, once as a signed-out visitor, once as a free signed-in user and once as a paid user — the paid user must see none. In the phone app only the bundle that carries this change shows it (a frontend change reaches phone users only through a fresh bundle); the server half is live at once.
+## 2026-10-20 — Q-1226 closed on another session's fix; Q-979 re-measured, and the first measurement was wrong
+
+### Q-1226 ✅ RESOLVED — by PR #3863 (`5315e95f8`), verified here before the row was closed
+
+**Problem:** the paid-recharge path read two independent stored fields — `tokenBalance` from
+`orderCreditedTokens(amountPaid)` and `remaining_balance` from `balanceAdded` — so an order whose recorded
+`amountPaid` was unreadable credited **0 tokens while adding the full ₹ amount** to the other view. Measured
+on the real `verifyPaymentInternal`: gateway ₹100 PAID, `amountPaid: 'legacy'` → `tokenBalance: 0`,
+`remaining_balance: 100`.
+
+**Root cause / class:** two reads of two different fields whose equality was *assumed* for every healthy row
+and enforced nowhere, so one junk field separated the views.
+
+**The fix (not mine):** `reconcileGatewayPaidAmount` normalises the gateway's verified `order_amount`;
+`settledGatewayOrder` writes it back as `amountPaid` and **re-derives** `balanceAdded = orderNetPaidInr(paid)`
+inside the same credit transaction; `computeCreditedWallet` reads that instead of the stored `balanceAdded`.
+The second independent input is gone — both views descend from one field. This is option **(a)**, the one the
+row recommended.
+
+**Why I verified rather than took it on trust, and the one thing I was looking for:** the amount-mismatch
+refusal moved from an inline `return { settled: true }` to a thrown `PaymentAmountMismatchError`. Had that
+throw landed in the generic catch it would have become `settled: false` → a 502 → Cashfree redelivering a
+*deterministic* mismatch forever, silently regressing Q-888. `payments.ts:536` catches it explicitly and
+returns `settled: true`; the ownership-changed throw correctly stays retryable. Contract intact.
+
+**Locked by:** `tests/aVerifiedPaymentCreditsOneAmount.test.ts` — the exact measured value (`'legacy'`) is in
+its hostile-input table at `:86`, alongside the 1-paisa tolerance, the refund basis and gift-field
+preservation at `:213`.
+
+**Stated plainly rather than quietly closed:** the row's class sentence was *"a wallet writer that is not
+mirrored"*, and this path still does not call `walletMirror.ts`. #3863 declines that in code — *"Do not route
+this through a gift-clamping writer: a paid top-up preserves existing gift tracking"* — and tests the gift
+preservation. The divergence the row measured is now structurally impossible; the literal centralisation is
+declined for a stated, tested reason. Recorded here so nobody reopens it as "walletMirror was never done"
+without reading why.
+
+### Q-979 — re-measured, and my own first measurement was wrong in a way worth recording
+
+**The claim I nearly wrote into the row:** that the chat handler's branches are spread evenly (34–67 per
+250-line window) with no hot region, so headroom would need many PRs.
+
+**What the right measurement says.** Branch tokens cluster hard inside *statement blocks*: the top two carry
+**105** and **90**, the top ten carry **306 = 56.5%** of the 542 budget, and the single best extraction is
+`landImportedProject` (`routes/agentv3.ts:11726`) at **131 branch tokens = 24.2% in one PR**. It is also the
+safest candidate — it already has an explicit parameter contract with the diagnostics callbacks injected, and
+its closure set measured with the TypeScript AST is 26 free identifiers of which 11 are globals, leaving ~13
+real handler-scope dependencies. One hazard: the body **assigns** to `framework` and `planningAttachmentText`,
+so the extraction must return those corrections or take setters.
+
+**Why the first number was wrong:** a window average smears a dense block across the sparse lines beside it.
+**Extraction acts on blocks, so the measurement has to be per block.** That is the third wrong number in one
+day from the same family — a re-implemented census (Q-1126 batch 3), a silently-failed comment strip (3,172
+vs 542, a 5.8x overcount), and now a window proxy. One lesson: *measure the unit you are going to act on,
+with the guard's own parser.*
+
+**Why no extraction was started:** PRs **#3859** and **#3862** both change `src/server/routes/agentv3.ts`. A
+689-line move there is the largest possible collision with live sessions, which the concurrency rules forbid.
+The measurement is the deliverable; the move waits for a fresh `main` and a re-measurement.
+
+### An operational fact, because it cost real time today
+
+**#3862 and #3860 were merged by a session other than this one** while this session was gating them — both
+recorded as `docasheesh-png`, which every session acts as, so the actor cannot be distinguished from the
+admin. The standing order this session works to states there is no second merger. There is. The cost is
+measurable: #3859 was gated **three times** (40,606 → 40,664 → 40,776 tests, all green) because `main` moved
+under each run, and a gate run takes about as long as the interval between merges. The queue's integrity
+survived it — `main`'s closed register and open table hold 668 ids each with **zero** overlap and zero
+duplicates, so the #3543 reopening did not recur — but that was checked, not assumed.

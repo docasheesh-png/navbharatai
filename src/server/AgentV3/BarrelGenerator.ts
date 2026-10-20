@@ -13,6 +13,8 @@
 // no existing index, and only when EVERY imported name resolves (a partial barrel would still break). Pure;
 // never throws — any parse/library problem yields no barrels.
 
+import { createExportCapabilities, emittedModuleSpecifier, EXPORT_CODE_FILE, resolveExportTarget } from './exportCapabilities';
+
 export interface BarrelStub {
   /** Path of the index file to create (e.g. 'src/components/Icons/index.ts'). */
   path: string;
@@ -22,8 +24,7 @@ export interface BarrelStub {
   exports: string[];
 }
 
-const CODE_FILE_RE = /\.(?:m?[jt]sx?)$/i;
-const RESOLVE_SUFFIXES = ['', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.cjs', '/index.tsx', '/index.ts', '/index.jsx', '/index.js'];
+const CODE_FILE_RE = EXPORT_CODE_FILE;
 
 let TsMorph: any;
 async function loadTsMorph(): Promise<any | null> {
@@ -51,8 +52,6 @@ function resolveBase(importer: string, spec: string, hasSrc: boolean): string | 
   return null;
 }
 
-interface LeafExports { named: Set<string>; hasDefault: boolean; }
-
 /**
  * For every folder-barrel import (`import { A, B } from '.../Icons'`) that does NOT resolve but whose folder
  * contains leaf files exporting A and B, generate `.../Icons/index.ts` re-exporting them. Pure; never throws.
@@ -76,70 +75,60 @@ export async function generateMissingBarrels(files: Record<string, string>): Pro
   }
   if (sources.size === 0) return [];
 
-  const exportsOf = (path: string): LeafExports => {
-    const shape: LeafExports = { named: new Set(), hasDefault: false };
-    const sf = sources.get(path);
-    if (!sf) return shape;
-    try {
-      const decls: Map<string, any[]> = sf.getExportedDeclarations?.() ?? new Map();
-      for (const name of decls.keys()) {
-        if (name === 'default') shape.hasDefault = true;
-        else shape.named.add(name);
-      }
-    } catch { /* unreadable → empty */ }
-    return shape;
+  const capabilities = createExportCapabilities(files);
+
+  const resolvesToFile = (base: string): boolean => resolveExportTarget('', `./${base}`, paths) !== null;
+  const leavesUnder = (base: string): string[] => [...paths].filter((p) => p.startsWith(`${base}/`) && CODE_FILE_RE.test(p) && !/\/index\.[cm]?[jt]sx?$/i.test(p));
+  const relLeaf = (base: string, leaf: string): string => {
+    // Explicit module formats need their output extension: extensionless .mjs/.cjs imports
+    // are not resolved by ordinary bundlers. Their TS counterparts use the same .mjs/.cjs
+    // specifiers, which TypeScript and esbuild resolve back to .mts/.cts source.
+    return `./${emittedModuleSpecifier(leaf.slice(base.length + 1))}`;
   };
+  const baseName = (leaf: string): string => leaf.slice(leaf.lastIndexOf('/') + 1).replace(/\.[cm]?[jt]sx?$/i, '');
 
-  const resolvesToFile = (base: string): boolean => RESOLVE_SUFFIXES.some((s) => paths.has(base + s));
-  const leavesUnder = (base: string): string[] => [...paths].filter((p) => p.startsWith(`${base}/`) && CODE_FILE_RE.test(p) && !/\/index\.(m?[jt]sx?)$/i.test(p));
-  const relLeaf = (base: string, leaf: string): string => `./${leaf.slice(base.length + 1).replace(/\.(m?[jt]sx?)$/i, '')}`;
-  const baseName = (leaf: string): string => leaf.slice(leaf.lastIndexOf('/') + 1).replace(/\.(m?[jt]sx?)$/i, '');
-
-  const stubs: BarrelStub[] = [];
-  const seenBarrel = new Set<string>();
-
+  // Combine all consumers BEFORE generating a barrel. Otherwise the first type-only consumer can
+  // hide a later runtime request (or the first subset can silently omit another consumer's exports).
+  const requested = new Map<string, Map<string, boolean>>();
   for (const [path, sf] of sources) {
-    let imports: any[];
-    try { imports = sf.getImportDeclarations(); } catch { continue; }
-    for (const imp of imports) {
-      let spec = '';
-      try { spec = imp.getModuleSpecifierValue?.() ?? ''; } catch { continue; }
+    for (const imp of sf.getImportDeclarations()) {
+      const spec = imp.getModuleSpecifierValue?.() ?? '';
       const base = resolveBase(path, spec, hasSrc);
-      if (!base || seenBarrel.has(base) || resolvesToFile(base)) continue; // resolves already, or not local
-      // Only NAMED imports; a default/namespace barrel isn't deterministically buildable.
-      let hasDefaultOrNs = false;
-      try { hasDefaultOrNs = !!imp.getDefaultImport?.() || !!imp.getNamespaceImport?.(); } catch { /* ignore */ }
-      if (hasDefaultOrNs) continue;
-      let named: string[];
-      try { named = (imp.getNamedImports?.() ?? []).map((n: any) => n.getName?.()).filter(Boolean); } catch { continue; }
-      if (named.length === 0) continue;
-      const leaves = leavesUnder(base);
-      if (leaves.length === 0) continue; // no folder / no leaves → genuinely missing, not a barrel
-
-      // Map each imported name to the unique leaf that provides it.
-      const lines: string[] = [];
-      const exported: string[] = [];
-      let allResolved = true;
-      for (const name of named) {
-        const providers: Array<{ leaf: string; kind: 'named' | 'default' }> = [];
-        for (const leaf of leaves) {
-          const ex = exportsOf(leaf);
-          if (ex.named.has(name)) providers.push({ leaf, kind: 'named' });
-          else if (ex.hasDefault && baseName(leaf) === name) providers.push({ leaf, kind: 'default' });
-        }
-        if (providers.length !== 1) { allResolved = false; break; } // ambiguous or absent → don't guess
-        const { leaf, kind } = providers[0];
-        lines.push(kind === 'named'
-          ? `export { ${name} } from '${relLeaf(base, leaf)}';`
-          : `export { default as ${name} } from '${relLeaf(base, leaf)}';`);
-        exported.push(name);
+      if (!base || resolvesToFile(base) || imp.getDefaultImport?.() || imp.getNamespaceImport?.()) continue;
+      let names = requested.get(base);
+      if (!names) { names = new Map(); requested.set(base, names); }
+      for (const ni of imp.getNamedImports?.() ?? []) {
+        const name = ni.getName();
+        const local = ni.getAliasNode?.()?.getText() ?? name;
+        const readsValue = capabilities.importsOf(path).some(b => b.from === spec && b.local === local && b.readsValue);
+        names.set(name, !!names.get(name) || readsValue);
       }
-      if (!allResolved) continue;
-
-      seenBarrel.add(base);
-      const header = `// Auto-generated barrel for '${base}' — re-exports the folder's modules the app imports.\n`;
-      stubs.push({ path: `${base}/index.ts`, content: `${header}${lines.sort().join('\n')}\n`, exports: exported.sort() });
     }
   }
+  const stubs: BarrelStub[] = [];
+  for (const [base, names] of requested) {
+    const leaves = leavesUnder(base);
+    if (!leaves.length || !names.size) continue;
+    const lines: string[] = [];
+    let allResolved = true;
+    for (const [name, readsValue] of names) {
+      const providers: Array<{ leaf: string; kind: 'named' | 'default'; typeOnly: boolean }> = [];
+      for (const leaf of leaves) {
+        const surface = capabilities.exportsOf(leaf);
+        if (surface.uncertain) continue;
+        const named = surface.exports.get(name);
+        const cap = named ?? (baseName(leaf) === name ? surface.exports.get('default') : undefined);
+        if (!cap || cap.runtime === 'unknown' || (readsValue && cap.runtime !== 'value')) continue;
+        providers.push({ leaf, kind: named ? 'named' : 'default', typeOnly: cap.runtime === 'erased' });
+      }
+      if (providers.length !== 1) { allResolved = false; break; }
+      const { leaf, kind, typeOnly } = providers[0];
+      lines.push(`export ${typeOnly ? 'type ' : ''}{ ${kind === 'named' ? name : `default as ${name}`} } from '${relLeaf(base, leaf)}';`);
+    }
+    if (!allResolved) continue;
+    const header = `// Auto-generated barrel for '${base}' — re-exports the folder's modules the app imports.\n`;
+    stubs.push({ path: `${base}/index.ts`, content: `${header}${lines.sort().join('\n')}\n`, exports: [...names.keys()].sort() });
+  }
+
   return stubs;
 }

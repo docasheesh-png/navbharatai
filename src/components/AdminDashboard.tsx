@@ -13,6 +13,7 @@ import { adultOptInSummary } from '../lib/adultContent';
 import { confirmCopy, ownerConfirmCopy, MODERATION_ROUTE, type ModerationAction } from '../lib/adminAppModeration';
 import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
 import { BotsLedgerPanel } from './admin/BotsLedgerPanel';
+import { AdsPanel } from './admin/AdsPanel';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
 import {
   ADMIN_TABS, ENGINE_REPORTS_ON, tabOfPage, tabDef, firstPageOf, pageTitle, pageBadge, pageHint,
@@ -4062,6 +4063,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     </div>
                   </div>
                   <p className="text-[11px] text-muted leading-snug">{firstPassHeadline(firstPass)} <span className="text-faint">Across EVERY build by every user — not only the ones someone reported.</span></p>
+                  {((firstPass.repaired ?? 0) > 0 || (firstPass.warningOnly ?? 0) > 0) && (
+                    <p className="text-[10px] text-muted mt-1.5 leading-snug">
+                      Of the {firstPass.healed} that delivered but were not right first time: {firstPass.repaired ?? 0} the engine repaired, {firstPass.warningOnly ?? 0} only left a warning. The headline stays the clean rate — a warning is not counted as a clean build.
+                    </p>
+                  )}
+                  {(firstPass.userStopped ?? 0) > 0 && (
+                    <p className="text-[10px] text-muted mt-1.5 leading-snug">
+                      {firstPass.userStopped} build(s) the user stopped are not counted as failures.
+                    </p>
+                  )}
                   {/* THE GAP IS THE SIGNAL (admin screenshot 2026-08-12). Complaints far below the
                       engine-wide rate is healthy self-selection — people report what broke. The two
                       being EQUAL would mean users are reporting a fair sample, which is much worse
@@ -4892,6 +4903,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               {/* Restoring a removed app is built in PR 3 (the server route exists; this screen does not offer it yet). */}
             </div>
+          )}
+
+          {/* ADS (admin 2026-10-20): the admin's own products shown to people who have not paid. The form, the picture
+              crop, the live preview and the list are `admin/AdsPanel.tsx`; the data is /api/admin/ads. */}
+          {activeTab === 'ads' && (
+            <AdsPanel headers={headers} />
           )}
 
           {/* ── APPS · BOTS (admin 2026-10-05) — who built which hosted chat bot, and whether a WhatsApp bot is signed ── */}

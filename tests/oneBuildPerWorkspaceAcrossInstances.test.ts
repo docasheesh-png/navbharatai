@@ -52,8 +52,8 @@ describe('the claim decision', () => {
     expect(leaseClaimDecision({ owner: 'A', heartbeatAt: NOW }, { owner: 'B', nowMs: NOW })).toBe('claim');
   });
 
-  it('this instance\'s own leftover never blocks it — its in-memory lock already decided', () => {
-    expect(leaseClaimDecision(live, { owner: 'instance-A', nowMs: NOW })).toBe('claim');
+  it('another live token remains busy even when it belongs to this process', () => {
+    expect(leaseClaimDecision(live, { owner: 'instance-A', nowMs: NOW })).toBe('busy');
   });
 
   it('liveness is the heartbeat, inclusive of the window edge', () => {
@@ -106,10 +106,10 @@ describe('the lease through a transactional store', () => {
     expect(docs.get(key)?.token).toBe('t2');
   });
 
-  it('FAILS OPEN — an unreachable or hanging store lets the build start, marked unverified', async () => {
-    expect(await claimWorkspaceBuild(fakeStore({ fail: true }).store, { workspaceId: WS, token: 't', owner: 'A' })).toEqual({ ok: true, verified: false });
-    expect(await claimWorkspaceBuild(fakeStore({ hang: true }).store, { workspaceId: WS, token: 't', owner: 'A' })).toEqual({ ok: true, verified: false });
-    expect(await claimWorkspaceBuild(null, { workspaceId: WS, token: 't', owner: 'A' })).toEqual({ ok: true, verified: false });
+  it('FAILS CLOSED — an unreachable or hanging store never grants admission', async () => {
+    expect(await claimWorkspaceBuild(fakeStore({ fail: true }).store, { workspaceId: WS, token: 't', owner: 'A' })).toEqual({ ok: false, reason: 'unavailable', holderHeartbeatAt: 0 });
+    expect(await claimWorkspaceBuild(fakeStore({ hang: true }).store, { workspaceId: WS, token: 't', owner: 'A' })).toEqual({ ok: false, reason: 'unavailable', holderHeartbeatAt: 0 });
+    expect(await claimWorkspaceBuild(null, { workspaceId: WS, token: 't', owner: 'A' })).toEqual({ ok: false, reason: 'unavailable', holderHeartbeatAt: 0 });
     expect(await renewWorkspaceBuild(fakeStore({ fail: true }).store, { workspaceId: WS, token: 't' })).toBe('unknown');
   }, 15_000);
 });
@@ -134,18 +134,18 @@ describe('🔒 the wiring', () => {
   const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
   const hook = readFileSync(join(__dirname, '..', 'src/hooks/useAgentV3Build.ts'), 'utf8');
 
-  it('the claim happens BEFORE the stream opens, so a refusal is a clean 409', () => {
-    const claimAt = route.indexOf('await claimWorkspaceBuild(buildLeaseStore,');
-    const flushAt = route.indexOf("// NDJSON stream (mirrors the Engineer route's streaming contract).");
-    expect(claimAt).toBeGreaterThan(0);
-    expect(flushAt).toBeGreaterThan(claimAt);
-    expect(route).toMatch(/res\.status\(409\)\.json\(\{ error: BUILD_RUNNING_ELSEWHERE_MESSAGE, code: BUILD_RUNNING_ELSEWHERE_CODE, resumable: false \}\)/);
+  it('mutation admission is awaited before actuator setup, with honest refusal before or after preflight headers', () => {
+    const admitted = route.indexOf('if (!(await admitBuild())) return;', route.indexOf('if (buildSandboxUnavailableInProd())'));
+    expect(admitted).toBeGreaterThan(0);
+    expect(admitted).toBeLessThan(route.indexOf('const rawActuator = buildActuator('));
+    expect(route).toContain('preflight.reject(409, { error: BUILD_RUNNING_ELSEWHERE_MESSAGE');
+    expect(route).toContain('preflight.reject(503, { error:');
   });
 
   it('the build\'s own finally and the deadline finalizer release the lease', () => {
     // Since autopsy 1219c639 the lock is released only by its owner (`releaseBuildLock`).
-    expect(route).toMatch(/releaseBuildLock\(buildKey, buildLockToken\);\n {6}\/\/ The workspace is free on every instance the moment this build ends \(autopsy eed79815\)\.\n {6}releaseBuildLease\(\);/);
-    expect(route).toMatch(/releaseBuildLock\(buildKey, buildLockToken\);\n {6}releaseBuildLease\(\);\n {6}if \(runningBuilds\.get\(buildKey\) === rb\) runningBuilds\.delete\(buildKey\);\n {6}endBuild\(rb\);/);
+    expect(route).toMatch(/releaseBuildLock\(buildKey, buildLockToken\);\n {6}\/\/ The workspace is free on every instance the moment this build ends \(autopsy eed79815\)\.\n {6}await releaseBuildLease\(\);/);
+    expect(route).toMatch(/releaseBuildLock\(buildKey, buildLockToken\);\n {6}await releaseBuildLease\(\);\n {6}if \(runningBuilds\.get\(buildKey\) === rb\) runningBuilds\.delete\(buildKey\);\n {6}endBuild\(rb\);/);
     expect(route).toContain('buildLeaseRb = rb;');
   });
 

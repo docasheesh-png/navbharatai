@@ -190,8 +190,8 @@ import { getServerDb as getDb } from '../lib/serverDb';
 import { randomUUID } from 'crypto';
 import { processOwnerId } from '../lib/jobLease';
 import {
-  claimWorkspaceBuild, renewWorkspaceBuild, releaseWorkspaceBuild, requestWorkspaceBuildStop, workspaceBuildIsLive,
-  LEASE_HEARTBEAT_MS, BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
+  claimWorkspaceBuild, releaseWorkspaceBuild, requestWorkspaceBuildStop, workspaceBuildIsLive,
+  BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
 } from '../AgentV3/workspaceBuildLease';
 import { getConnection } from '../lib/supabaseConnectionStore';
 import { provisionDatabaseForUser, freshAccessToken, databaseReadyNarration, connectedDatabaseAsleepNote } from '../lib/supabaseProvisionFlow';
@@ -236,7 +236,8 @@ import { pastedAppFacts } from '../lib/pastedSource';
 import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote, strictReverify } from '../AgentV3/verifyAfterFix';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
-import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
+import { createBuildRequestCoordination, createBuildPreflightStream, buildRequestInputRejection, withBuildRequestCleanup, startBuildLeaseHeartbeat } from '../AgentV3/BuildRequestCoordination';
+import { loadQueue, mutateQueue, mutateQueueWithResult, claimQueuedCommand, recoverQueuedCommand, QueueStoreUnavailableError, QueueClaimConflictError } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext, plannerDomainBrief } from '../AgentV3/RoleChats';
 import { summarizeFileTree, NAVBHARATAI_UI_MAP } from '../AgentV3/systemPrompt';
 import { SINGLE_HTML_FILE_RULE } from '../AgentV3/systemPrompt';
@@ -253,7 +254,7 @@ import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
 import { pickPaletteForPrompt, palettePromptBlock } from '../AgentV3/designPresets';
 import { deadlinePauseMessage } from '../AgentV3/DeadlinePause';
 import { flushDecision } from '../AgentV3/DurableFlush';
-import { enqueue as enqueueCommand, cancelItem as cancelQueueItem, claimNext as claimNextQueued, completeRunning as completeQueuedRunning, pendingItems as pendingQueueItems, runningItem as runningQueueItem, queueSummary, type QueueItem, type QueueItemSource } from '../AgentV3/BuildQueue';
+import { enqueue as enqueueCommand, cancelItem as cancelQueueItem, queueSummary, type QueueItemSource } from '../AgentV3/BuildQueue';
 import {
   deriveTitle,
   upsertConversationTurn,
@@ -6626,77 +6627,67 @@ async function noteBuildOutcome(
     res.status(404).json({ error: 'No running build to message — the team is idle. Just send normally.', code: 'NO_RUNNING_BUILD' });
   });
 
-  // ── Command QUEUE (FIX #4.2): durable per-app queue the serial executor drains one at a time ──
-  // Every endpoint is workspace-owner-gated (a user can only touch THEIR app's queue) and best-effort.
-
-  /** Enqueue a command for THIS app. `source`: 'user' (typed) | 'planner' | 'advisor' (a non-writing
-   *  chat handing work to the executor). Returns the updated queue + summary.
-   *  🔒 Every queue route takes the VERIFIED owner (audit 2026-10-11): a queued prompt becomes a build that
-   *  spends its owner's wallet, so the former claimed-uid owner fallback let
-   *  anyone who learned a workspace id and its owner's uid queue work on that owner's money. */
-  app.post('/api/agentv3/queue/enqueue', async (req: Request, res: Response) => {
+  // Durable queue endpoints: no cached admission or in-memory success after a database failure.
+  const queueRoute = (handler: (req: Request, res: Response) => Promise<void>) => async (req: Request, res: Response): Promise<void> => {
+    try { await handler(req, res); }
+    catch (e) {
+      if (!(e instanceof QueueStoreUnavailableError) && !(e instanceof QueueClaimConflictError)) throw e;
+      res.setHeader('Retry-After', '2');
+      res.status(e instanceof QueueClaimConflictError ? 409 : 503).json({ error: e.message, code: e.code, retryable: true });
+    }
+  };
+  app.post('/api/agentv3/queue/enqueue', queueRoute(async (req, res) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
-    if (!prompt) { res.status(400).json({ error: 'A non-empty prompt is required.' }); return; }
-    if (prompt.length > MAX_PROMPT_LEN) { res.status(400).json({ error: `Prompt is too long (max ${MAX_PROMPT_LEN} chars).` }); return; }
+    if (!prompt || prompt.length > MAX_PROMPT_LEN) { res.status(400).json({ error: `A prompt of 1–${MAX_PROMPT_LEN} characters is required.` }); return; }
     const source: QueueItemSource = req.body?.source === 'planner' || req.body?.source === 'advisor' ? req.body.source : 'user';
-    let added = true; let reason: string | undefined;
-    const queue = await mutateQueue(workspaceId, (q) => {
-      const r = enqueueCommand(q, { id: randomUUID(), prompt, source, createdTs: Date.now() });
-      added = r.added; reason = r.reason; return r.queue;
+    // A new request may supply an idempotency key. Legacy calls retain server-generated IDs.
+    const id = typeof req.body?.requestId === 'string' && /^[A-Za-z0-9_-]{8,80}$/.test(req.body.requestId) ? req.body.requestId : randomUUID();
+    const createdTs = Date.now();
+    const { queue, result } = await mutateQueueWithResult(workspaceId, (q) => {
+      const r = enqueueCommand(q, { id, prompt, source, createdTs });
+      return { queue: r.queue, result: { added: r.added, reason: r.reason } };
     });
-    res.json({ added, reason: added ? undefined : reason, summary: queueSummary(queue), items: queue.items });
-  });
-
-  /** Read THIS app's queue (items + summary) — for the queue UI and the executor's idle check. */
-  app.get('/api/agentv3/queue', async (req: Request, res: Response) => {
+    res.json({ ...result, summary: queueSummary(queue), items: queue.items, paused: queue.paused === true });
+  }));
+  app.get('/api/agentv3/queue', queueRoute(async (req, res) => {
     const workspaceId = typeof req.query?.workspaceId === 'string' ? req.query.workspaceId : '';
     if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const queue = await loadQueue(workspaceId);
-    res.json({ summary: queueSummary(queue), items: queue.items });
-  });
-
-  /** Cancel a PENDING command (a running one must be Stopped via the build). */
-  app.post('/api/agentv3/queue/cancel', async (req: Request, res: Response) => {
+    res.json({ summary: queueSummary(queue), items: queue.items, paused: queue.paused === true });
+  }));
+  app.post('/api/agentv3/queue/cancel', queueRoute(async (req, res) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const id = typeof req.body?.id === 'string' ? req.body.id : '';
     if (!id) { res.status(400).json({ error: 'An item id is required.' }); return; }
     const queue = await mutateQueue(workspaceId, (q) => cancelQueueItem(q, id));
-    res.json({ summary: queueSummary(queue), items: queue.items });
-  });
-
-  /** Atomically CLAIM the next pending command (→ 'running') for the serial executor. Returns the
-   *  claimed item, or `claimed:null` when one is already running or nothing is pending. The client-driven
-   *  executor calls this when the app goes idle, submits the returned prompt as a build, then calls
-   *  /queue/complete when that build settles. */
-  app.post('/api/agentv3/queue/next', async (req: Request, res: Response) => {
+    res.json({ summary: queueSummary(queue), items: queue.items, paused: queue.paused === true });
+  }));
+  app.post('/api/agentv3/queue/next', queueRoute(async (req, res) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
-    // Cheap short-circuit: a cached read tells us if there's anything to claim. When the queue is empty
-    // or one is already running (the common case — most builds are not queued), return WITHOUT a
-    // transaction/write, so the client-driven executor's per-settle probe costs ~nothing for non-queue users.
-    const current = await loadQueue(workspaceId);
-    if (pendingQueueItems(current).length === 0 || runningQueueItem(current)) {
-      res.json({ claimed: null, summary: queueSummary(current), items: current.items });
-      return;
-    }
-    let claimed: QueueItem | null = null;
-    const queue = await mutateQueue(workspaceId, (q) => { const r = claimNextQueued(q); claimed = r.claimed; return r.queue; });
-    res.json({ claimed, summary: queueSummary(queue), items: queue.items });
-  });
-
-  /** Mark the currently-running queued command done/failed (with an honest note) once its build settles.
-   *  A failure PAUSES the queue client-side (the user decides retry/skip/stop) — recorded here honestly. */
-  app.post('/api/agentv3/queue/complete', async (req: Request, res: Response) => {
+    const { queue, result: claimed } = await claimQueuedCommand(workspaceId, req.body?.resumeAfterFailure === true);
+    res.json({ claimed, summary: queueSummary(queue), items: queue.items, paused: queue.paused === true });
+  }));
+  // Completion is SERVER-owned. Old bundled clients omit item identity; their request remains a valid
+  // read/reconciliation hint. Applying its ok/note to the current row would let delayed A settle B.
+  app.post('/api/agentv3/queue/complete', queueRoute(async (req, res) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
-    const ok = req.body?.ok === true;
-    const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 300) : undefined;
-    const queue = await mutateQueue(workspaceId, (q) => completeQueuedRunning(q, ok, note));
-    res.json({ summary: queueSummary(queue), items: queue.items });
-  });
+    const queue = await loadQueue(workspaceId);
+    res.json({ summary: queueSummary(queue), items: queue.items, paused: queue.paused === true });
+  }));
+  // Explicit recovery never assumes that a different process is dead merely because we read its row.
+  app.post('/api/agentv3/queue/recover', queueRoute(async (req, res) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    const id = typeof req.body?.id === 'string' ? req.body.id : '';
+    if (!id) { res.status(400).json({ error: 'An item id is required.' }); return; }
+    const { queue, result: recovered } = await recoverQueuedCommand(workspaceId, id);
+    res.json({ recovered, summary: queueSummary(queue), items: queue.items, paused: queue.paused === true });
+  }));
 
   // SHIP TO MAIN (own-repo working-branch storage, slice 2): merge the user's `navbharatai/work`
   // branch into their repo's default branch via a PR — but ONLY when CI is green (or the repo has no
@@ -9884,7 +9875,7 @@ async function noteBuildOutcome(
     }
   });
 
-  app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), withBuildRequestCleanup(async (req: Request, res: Response, registerCleanup) => {
     // ⏱️ THE USER'S WAIT STARTS HERE — the first statement, before every await of the preamble (autopsy 303e8a6f,
     // adversarial review): the build's event stream used to take its own construction time as the origin, up to
     // ~30 s of checks later, so "Still working — Ns so far" still undercounted. Every user-visible clock reads this.
@@ -10451,83 +10442,91 @@ async function noteBuildOutcome(
     // a third. They overwrote each other's files and ran npm into one node_modules at once for fourteen
     // minutes. The workspace is now claimed in Firestore before the stream opens (so a refusal is a clean
     // 409), renewed every LEASE_HEARTBEAT_MS while the build runs, released when it ends, and flagged by
-    // a Stop pressed on any instance. Fails OPEN on a store error; see workspaceBuildLease.ts.
-    const leaseWorkspaceId = lockSessionId && SESSION_ID_RE.test(lockSessionId) ? deriveWorkspaceId(userId, lockSessionId) : null;
+    // a Stop pressed on any instance. An unavailable store refuses admission; see workspaceBuildLease.ts.
+    const leaseWorkspaceId = deriveWorkspaceId(userId, lockSessionId && SESSION_ID_RE.test(lockSessionId) ? lockSessionId : String(requestArrivedAt));
     const buildLeaseStore = leaseWorkspaceId && workspaceLeaseEnabled() ? (getDb() as unknown as BuildLeaseStore) : null;
     const buildLeaseToken = randomUUID();
-    const buildLeaseClaimedAt = Date.now();
     let buildLeaseHeld = false;
     let buildLeaseTimer: ReturnType<typeof setInterval> | undefined;
     // The build this lease belongs to, once it is registered — the heartbeat acts on THIS build only,
     // never on whatever later build happens to hold the same in-memory key.
     let buildLeaseRb: RunningBuild | null = null;
-    const releaseBuildLease = (): void => {
+    const coordination = createBuildRequestCoordination({ workspaceId: leaseWorkspaceId, ownerId: userId,
+      attemptId: buildLeaseToken, input: req.body, prompt: () => typedPrompt, store: getDb });
+    const preflight = createBuildPreflightStream(res, coordination.publish);
+    let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+    const releaseBuildLease = async (): Promise<void> => {
+      await coordination.release();
       if (buildLeaseTimer) { clearInterval(buildLeaseTimer); buildLeaseTimer = undefined; }
       if (!buildLeaseHeld || !buildLeaseStore || !leaseWorkspaceId) return;
       buildLeaseHeld = false;
-      void releaseWorkspaceBuild(buildLeaseStore, { workspaceId: leaseWorkspaceId, token: buildLeaseToken }).catch(() => {});
+      await releaseWorkspaceBuild(buildLeaseStore, { workspaceId: leaseWorkspaceId, token: buildLeaseToken }).catch(() => {});
     };
-    if (buildLeaseStore && leaseWorkspaceId) {
-      const claim = await claimWorkspaceBuild(buildLeaseStore, { workspaceId: leaseWorkspaceId, token: buildLeaseToken, owner: processOwnerId(), userId });
+    const admitBuild = async (): Promise<boolean> => {
+      preflight.cancel();
+      if (buildLeaseHeld) return true;
+    if (leaseWorkspaceId) {
+      const admittedAt = Date.now();
+      const claim = await claimWorkspaceBuild(buildLeaseStore, { workspaceId: leaseWorkspaceId, token: buildLeaseToken, owner: processOwnerId(), userId, nowMs: admittedAt });
       if (!claim.ok) {
         releaseBuildLock(buildKey, buildLockToken);
+        if (claim.reason === 'unavailable') {
+          preflight.reject(503, { error: 'Build ownership could not be confirmed. Please retry shortly.', code: 'BUILD_AUTHORITY_UNAVAILABLE', retryable: true });
+          return false;
+        }
         audit('AGENTV3_BUILD_RUNNING_ELSEWHERE', { userId, workspaceId: leaseWorkspaceId }, 'info');
         // resumable:false on purpose — /attach only reaches builds on THIS instance, so a resumable hint
         // would send the client to attach, 404, and tell the user the build "isn't live anymore".
-        res.status(409).json({ error: BUILD_RUNNING_ELSEWHERE_MESSAGE, code: BUILD_RUNNING_ELSEWHERE_CODE, resumable: false });
-        return;
+        preflight.reject(409, { error: BUILD_RUNNING_ELSEWHERE_MESSAGE, code: BUILD_RUNNING_ELSEWHERE_CODE, resumable: false });
+        return false;
       }
       buildLeaseHeld = claim.verified;
-      if (buildLeaseHeld) {
-        buildLeaseTimer = setInterval(() => {
-          void (async () => {
-            // Self-terminating, so an exit path that forgets to release cannot keep a dead build's lease
-            // alive: every exit deletes the in-memory lock, and an ended build is ended.
-            if (buildLeaseRb) {
-              // Held until this build's code has EXITED, not merely been stopped (autopsy 1219c639): a
-              // stopped build still leaving must keep every other instance out of the workspace too. It is
-              // released early only if a different build has taken the registry slot.
-              const holder = runningBuilds.get(buildKey);
-              if (buildLeaseRb.exited || (holder !== undefined && holder !== buildLeaseRb)) { releaseBuildLease(); return; }
-              if (!buildLeaseRb.ended && holder !== buildLeaseRb) { releaseBuildLease(); return; }
-            } else if (!activeBuilds.has(buildKey) || Date.now() - buildLeaseClaimedAt > 5 * 60_000) {
-              releaseBuildLease();
-              return;
-            }
-            const renewal = await renewWorkspaceBuild(buildLeaseStore, { workspaceId: leaseWorkspaceId, token: buildLeaseToken });
-            if (renewal === 'stop-requested' && buildLeaseRb && !buildLeaseRb.ended) {
-              abortBuild(buildLeaseRb.abort, 'user-stop');
-            } else if (renewal === 'lost') {
-              // A newer build owns the workspace now (this lease lapsed). Two builds must not share it.
-              if (buildLeaseRb && !buildLeaseRb.ended) abortBuild(buildLeaseRb.abort, 'lock-reclaimed');
-              buildLeaseHeld = false;
-              releaseBuildLease();
-            }
-          })().catch(() => { /* a heartbeat failure just lets the lease age; the next beat retries */ });
-        }, LEASE_HEARTBEAT_MS);
-        buildLeaseTimer.unref?.();
-      }
+      buildLeaseTimer = startBuildLeaseHeartbeat({ store: buildLeaseStore, workspaceId: leaseWorkspaceId,
+        token: buildLeaseToken, admittedAt, build: () => buildLeaseRb,
+        current: () => runningBuilds.get(buildKey), active: () => activeBuilds.has(buildKey),
+        release: releaseBuildLease, lost: () => { buildLeaseHeld = false; },
+      });
     }
 
-    // NDJSON stream (mirrors the Engineer route's streaming contract).
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders();
-    const send = (obj: unknown): void => {
-      if (!res.writableEnded) res.write(JSON.stringify(obj) + '\n');
+      const refused = await coordination.admit();
+      if (refused) {
+        releaseBuildLock(buildKey, buildLockToken);
+        await releaseBuildLease();
+        preflight.reject(refused.status, refused.payload);
+        return false;
+      }
+      return true;
     };
-    // FIRST-BYTE GUARANTEE — write one NDJSON event the instant the headers flush,
-    // BEFORE any setup (intent classify, free-chat router, sandbox actuator, build
-    // planning). Those steps can take several seconds, and a multi-second silent gap
-    // right after the headers makes a proxy / CDN / Cloud Run ingress (or a cold start)
-    // hand the browser an empty 200 — which the client reports as the misleading
-    // "No response from the v5.0 engine … the backend may be unreachable, or v5.0 is
-    // not enabled." This first byte forces the infra to commit to the stream and makes
-    // the client register a real event immediately, so a later failure surfaces its
-    // OWN honest terminal error instead of the bare "no response" message. A `ping` is
-    // the contract-safe choice: the client already ignores the 15 s keepalive pings.
+
+    registerCleanup(async () => {
+      preflight.cancel();
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      const unfinishedBuild = buildLeaseRb as RunningBuild | null; // Assigned inside the accepted async body.
+      if (!unfinishedBuild || !unfinishedBuild.exited) {
+        releaseBuildLock(buildKey, buildLockToken);
+        await releaseBuildLease();
+        if (unfinishedBuild) {
+          abortBuild(unfinishedBuild.abort, 'lock-reclaimed');
+          if (runningBuilds.get(buildKey) === unfinishedBuild) runningBuilds.delete(buildKey);
+          endBuild(unfinishedBuild);
+          if (stoppingBuilds.get(buildKey) === unfinishedBuild) stoppingBuilds.delete(buildKey);
+          markBuildExited(unfinishedBuild);
+        }
+      }
+    });
+
+    const invalidRequest = buildRequestInputRejection({ requestId: req.body?.requestId, sessionId: lockSessionId, ownerId: userId });
+    if (invalidRequest) {
+      releaseBuildLock(buildKey, buildLockToken);
+      res.status(invalidRequest.status).json(invalidRequest.payload);
+      return;
+    }
+
+    const send = preflight.send;
+    const openStream = preflight.open;
+    preflight.arm();
+    // First published event remains a ping. Read-only preflight progress is replayed in order after
+    // classification/admission, before the selected chat or builder emits its live events.
     send({ type: 'ping' });
     // PAID-PUBLIC low-balance notice (honest): when the affordability gate returned 'economy', the build
     // proceeds normally but the user is told, in-chat, that their balance is low. Emitted as a system
@@ -10548,9 +10547,9 @@ async function noteBuildOutcome(
     }
     // SSE keepalive: send a ping every 15 s so Chrome never throttles/drops the
     // connection when the tab is backgrounded or minimised. Cleared on response end.
-    const heartbeatTimer = setInterval(() => {
-      if (!res.writableEnded) res.write(JSON.stringify({ type: 'ping' }) + '\n');
-      else clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      preflight.ping();
+      if (res.writableEnded) clearInterval(heartbeatTimer);
     }, 15_000);
     res.on('close', () => clearInterval(heartbeatTimer));
 
@@ -10667,7 +10666,7 @@ async function noteBuildOutcome(
     // CONTEXT the gatekeeper needs to read INTENTION (not just wording): does a project already
     // exist in this session, and what did the user recently ask? Computed ONCE here (bounded), then
     // reused below for the deterministic safety-net so Firestore is read at most once. Best-effort.
-    const intentWorkspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
+    const intentWorkspaceId = leaseWorkspaceId;
     // Hydrate this workspace's memory from durable storage BEFORE reading recent requests / classifying
     // intent — on a COLD Cloud Run instance the in-process memory is empty, so a "continue" would look
     // like a brand-new build (the classifier reads recentRequests). Idempotent (a hydration flag stops
@@ -11210,6 +11209,7 @@ async function noteBuildOutcome(
       // gate cannot disagree, and a third one cannot be added without it. It needs the verified EMAIL,
       // not just the uid — the free list holds addresses.
       if (await importBlockedForPhone(await verifyFirebaseIdentity(req), getAdminAuthForPhone)) {
+        openStream();
         send({ type: 'error', message: IMPORT_NEEDS_PHONE_MESSAGE, code: 'phone-verification-required', ts: Date.now() } as never);
         send({ type: 'result', ok: false, summary: IMPORT_NEEDS_PHONE_MESSAGE, steps: 0, billedUsd: 0, billedInr: 0 });
         res.end();
@@ -11224,6 +11224,12 @@ async function noteBuildOutcome(
     // app instead of scaffolding a fresh build over it.
     let isEditMode = intent === 'edit_existing';
     if (isPlainChatTurn) {
+      // A queued conversational step still needs a captured claim. Plain legacy chat remains usable
+      // when the coordination store is unavailable; it cannot mutate source or settle a queued row.
+      if (await coordination.queuedChatNeedsAdmission()) {
+        if (!(await admitBuild())) return;
+      }
+      openStream();
       try {
         // "Text reply > build app" (admin decision, 2026-07-01): the TRUE last-resort classifier
         // default now prefers chat over a build for a genuinely ambiguous message — but that must
@@ -11447,7 +11453,7 @@ async function noteBuildOutcome(
           }), 8_000, 'persistChatTurn');
         } catch { /* persistence is best-effort — never blocks the reply */ }
         releaseBuildLock(buildKey, buildLockToken);
-        releaseBuildLease();
+        await releaseBuildLease();
         if (!res.writableEnded) res.end();
         return;
       } catch {
@@ -11464,15 +11470,18 @@ async function noteBuildOutcome(
     // sandbox needed) is unaffected. The stream headers are already flushed, so we emit a terminal
     // error event + clean up activeBuilds (same exit shape the chat path uses) rather than res.status().
     if (buildSandboxUnavailableInProd()) {
+      openStream();
       send({ type: 'narration', agent: 'architect', text: 'The build sandbox is not available on this server right now (cloud sandbox not configured), so I did not run the build. Your account was not charged. Please try again shortly or contact the admin.', ts: Date.now() });
       send({ type: 'error', message: 'Build sandbox (E2B) is not configured on the server — refusing to run the build on the host for safety.' });
       send({ type: 'result', ok: false, summary: 'Build sandbox not configured on the server.', steps: 0, billedUsd: 0, billedInr: 0 });
       releaseBuildLock(buildKey, buildLockToken);
-      releaseBuildLease();
+      await releaseBuildLease();
       if (!res.writableEnded) res.end();
       return;
     }
 
+    if (!(await admitBuild())) return;
+    openStream();
     // Register this build so it can be STOPPED and RE-ATTACHED to ("Resume") after the
     // original connection is lost. The client's response is the first subscriber; if it
     // disconnects we keep the build alive (still buffering) so the user can resume it.
@@ -11516,7 +11525,7 @@ async function noteBuildOutcome(
      * mask — which is almost every event.
      */
     // Platform lines in the user's language (autopsy eb58abaf, platformVoice.ts) — at the one door every event leaves by.
-    const emit = (e: unknown): void => { const ev = eventInUserVoice(redactEventForUser(honestResultEvent(e)), rb.voice); sessionTimeline.record(ev); broadcastBuild(rb, ev); };
+    const emit = (e: unknown): void => { const ev = eventInUserVoice(redactEventForUser(honestResultEvent(e)), rb.voice); coordination.publish(ev, (event) => { sessionTimeline.record(event); broadcastBuild(rb, event); }); };
     // Exposed to the finally so the LAST background checkpoint is flushed on every exit path
     // (success, error, abort). Held outside the try because `dispatcher` is block-scoped to it.
     let dispatcherForFlush: { flushCheckpoints: () => Promise<void>; markBuildActive: (active: boolean) => void; flushUnrecordedWrites: () => void } | undefined;
@@ -11543,7 +11552,7 @@ async function noteBuildOutcome(
     const parallelBuild = parallelBuildEnabled();
     const buildWriteLock = new PathWriteLock();
     const actuator = parallelBuild ? lockedActuator(rawActuator, buildWriteLock) : rawActuator;
-    const workspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
+    const workspaceId = intentWorkspaceId;
     // GREEN FREEZE — clear any stale green latch for this workspace at the VERY START, before a single
     // write. This is the robust fix for the leak the adversarial review found (2026-08-12): a prior
     // build for the same workspace can end via a reclaim / sweeper / drain path that bypasses the
@@ -13093,7 +13102,7 @@ async function noteBuildOutcome(
             try {
               const debitRes = await debitWalletForBuild(getDb() as any, userId, {
                 billedInr: watchdogBilledUsd * usdInrRate(),
-                buildRef: `${workspaceId}_${billingCtx.buildStartedAt}`,
+                buildRef: coordination.billingRef(`${workspaceId}_${billingCtx.buildStartedAt}`),
                 feature: 'build',
                 description: 'NavBharatAI Pro build (time-capped)',
               });
@@ -13166,7 +13175,7 @@ async function noteBuildOutcome(
       await persistSessionTimeline();
       try { clearGreenLatch(workspaceId); } catch { /* best-effort */ }
       releaseBuildLock(buildKey, buildLockToken);
-      releaseBuildLease();
+      await releaseBuildLease();
       if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
       endBuild(rb);
       // The deadline is the existing escape hatch for a body stuck on an un-abortable await: from here this
@@ -26737,14 +26746,14 @@ async function noteBuildOutcome(
         try {
           const debitRes = await debitWalletForBuild(getDb() as any, userId, {
             billedInr: effectiveBilledUsd * usdInrRate(),
-            buildRef: `${workspaceId}_${buildStartedAt}`,
+            buildRef: coordination.billingRef(`${workspaceId}_${buildStartedAt}`),
             feature: 'build',
             description: 'NavBharatAI Pro build',
           });
           if (debitRes.ok) {
             walletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance, ...(typeof debitRes.debitedInr === 'number' ? { debitedInr: debitRes.debitedInr } : {}), ...(typeof debitRes.absorbedInr === 'number' ? { absorbedInr: debitRes.absorbedInr } : {}) };
           } else {
-            console.error(`[AGENTV3 BILLING] Wallet debit FAILED for user ${userId} (build ${workspaceId}): ${debitRes.error} — cost was recorded but the balance was not decremented.`);
+            console.error(`[AGENTV3 BILLING] Wallet debit FAILED for user ${userId} (build ${workspaceId}): ${debitRes.error} — the debit outcome is unconfirmed; reconcile its stable build reference before retrying.`);
           }
         } catch (err: any) {
           console.error(`[AGENTV3 BILLING] Wallet debit threw for user ${userId}: ${err?.message || err}`);
@@ -27671,7 +27680,7 @@ async function noteBuildOutcome(
       } catch { /* best-effort — never affects a build */ }
       releaseBuildLock(buildKey, buildLockToken);
       // The workspace is free on every instance the moment this build ends (autopsy eed79815).
-      releaseBuildLease();
+      await releaseBuildLease();
       // Only clear the registry slot if it is STILL this build — a Stop may have already
       // replaced it with a newer run. End every attached stream.
       if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
@@ -27680,5 +27689,6 @@ async function noteBuildOutcome(
       if (stoppingBuilds.get(buildKey) === rb) stoppingBuilds.delete(buildKey);
       markBuildExited(rb);
     }
-  });
+
+  }));
 }

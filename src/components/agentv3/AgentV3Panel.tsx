@@ -87,6 +87,7 @@ import { showColdStart } from './coldStartPolicy';
 import { loadDraft, saveDraft } from './composerDraft';
 import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
+import { claimCurrentQueueItem, reconcileCurrentQueue, QueueSessionScope, type QueueSessionSnapshot } from './queueSessionScope';
 import { buildChatBlocks } from './activityTimeline';
 import { ChatToolbar } from '../chat/ChatToolbar';
 import { USER_TURN_CLASS, ASSISTANT_TURN_CLASS, USER_MESSAGE_CLASS, ASSISTANT_MESSAGE_CLASS, PLAIN_TEXT_CLASS, MESSAGE_ACTION_ROW_CLASS, CONVERSATION_COLUMN_CHILDREN_CLASS } from '../chat/conversation';
@@ -148,7 +149,7 @@ interface ChatMsg {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>, opts?: { live?: boolean }) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, errorBeforeBuildStarted, start, respond, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+  const { state, running, error, errorBeforeBuildStarted, start, respond, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
@@ -1053,6 +1054,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // panel adopts and the confirmation the user sees.
   const remixHandoffRef = useRef<ReturnType<typeof takeRemixHandoff>>(null);
   const sessionIdRef = useRef<string>('');
+  const queueScopeRef = useRef(new QueueSessionScope());
+  const selectSessionId = (sessionId: string): void => {
+    if (sessionIdRef.current !== sessionId) queueScopeRef.current.invalidate();
+    sessionIdRef.current = sessionId;
+  };
   if (!sessionIdRef.current) {
     // ADMIN RULE (2026-07-05 — REPLACES the retired 2026-07-01 always-fresh rule): the v5.0 chat is
     // STICKY. A reload, a tab switch, the phone being switched off — none of them change the chat;
@@ -1070,7 +1076,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     // resolve, so there is nothing here to race.
     const handoff = takeRemixHandoff();
     if (handoff) remixHandoffRef.current = handoff;
-    sessionIdRef.current = handoff?.sessionId || readStickySession(userId) || readStickySession(undefined) || newSessionId();
+    selectSessionId(handoff?.sessionId || readStickySession(userId) || readStickySession(undefined) || newSessionId());
     persistSessionId(sessionIdRef.current);
   }
   // Announce the handoff exactly once per mount, after the baton has been consumed above.
@@ -1433,7 +1439,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     if (!resume || resume.nonce === lastAppliedResumeNonce) return;
     lastAppliedResumeNonce = resume.nonce;
     const sid = resume.sessionId;
-    sessionIdRef.current = sid;
+    selectSessionId(sid);
     persistSessionId(sid); // keep the reopened project sticky across reloads too
     autoRestoredSessionRef.current = sid; // explicit resume → mark handled (auto-restore must not override)
     rehydratedWsRef.current = '';         // re-arm file rehydrate for the resumed workspace
@@ -2100,45 +2106,90 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // command. Runs one step at a time (the serial invariant), pauses on error, and is inert when the
   // queue is empty (the server short-circuits /queue/next without a write). shouldRunNextQueued is the
   // pure, tested gate; the two refs prevent double-complete and re-entrant double-submit.
-  const activeQueuedItemRef = useRef<string | null>(null);
-  const queueClaimInFlightRef = useRef(false);
+  const activeQueuedItemRef = useRef<{ id: string; claimToken?: string; scope: QueueSessionSnapshot } | null>(null);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const queueClaimInFlightRef = useRef<symbol | null>(null);
+  const queueWorkspaceId = expectedWorkspaceId();
+  const queueSessionId = sessionIdRef.current;
+  queueScopeRef.current.update(queueWorkspaceId, queueSessionId, userId);
+  const queueScopeGeneration = queueScopeRef.current.capture().generation;
 
   // Refresh the queue list shown in the UI (best-effort; also runs after enqueue/settle/cancel).
   const refreshQueue = useCallback(async () => {
-    setQueueItems(await queueList(expectedWorkspaceId()));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    await reconcileCurrentQueue({
+      scope: queueScopeRef.current,
+      load: queueList,
+      apply: (items) => { setQueueItems(items); setQueueError(null); },
+      onError: (e) => setQueueError(e instanceof Error ? e.message : 'Queue progress could not be confirmed. Please retry.'),
+    });
   }, [queueList]);
+
+  const recoverQueueItem = async (id: string): Promise<void> => {
+    const snapshot = queueScopeRef.current.capture();
+    try {
+      const recovered = await queueRecover(snapshot.workspaceId, id);
+      if (!queueScopeRef.current.isCurrent(snapshot)) return;
+      await refreshQueue();
+      if (!queueScopeRef.current.isCurrent(snapshot)) return;
+      if (!recovered) setQueueError('This step is still active, or it is too soon to confirm an interruption.');
+    } catch (e) {
+      if (queueScopeRef.current.isCurrent(snapshot)) setQueueError(e instanceof Error ? e.message : 'Could not confirm the interrupted step.');
+    }
+  };
+
+  const cancelQueueItem = async (id: string): Promise<void> => {
+    await reconcileCurrentQueue({
+      scope: queueScopeRef.current,
+      load: (workspaceId) => queueCancel(workspaceId, id),
+      apply: (items) => { setQueueItems(items); setQueueError(null); },
+      onError: (e) => setQueueError(e instanceof Error ? e.message : 'Queue update could not be confirmed. Please retry.'),
+    });
+  };
 
   // Claim + run the next queued command NOW. Shared by the settle-effect and the post-enqueue kick
   // (a fresh idle session has no settled build, so the effect alone would never start the queue).
   // The server's claimNext is the real serial guard — it refuses while one is running, atomically.
-  const claimAndRunNext = useCallback(async () => {
+  const claimAndRunNext = useCallback(async (resumeAfterFailure = false) => {
     if (running || queueClaimInFlightRef.current || state.pendingPermission) return;
-    queueClaimInFlightRef.current = true;
+    const claimOwner = Symbol('queue-claim');
+    queueClaimInFlightRef.current = claimOwner;
+    const snapshot = queueScopeRef.current.capture();
     try {
-      const item = await queueNext(expectedWorkspaceId());
-      if (!item) return;
-      activeQueuedItemRef.current = item.id;
-      setUserMsgs((c) => [...c, { role: 'user', text: item.prompt, ts: Date.now() }]);
-      if (state.narration.length > 0) {
-        setAgentHistory((h) => [...h, ...withoutStaleLiveStatus(state.narration, false).map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) }))]);
-      }
-      try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
-      start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, appSignature: appSignaturePref() });
-      void refreshQueue();
+      const outcome = await claimCurrentQueueItem({
+        scope: queueScopeRef.current,
+        claim: (workspaceId) => queueNext(workspaceId, resumeAfterFailure),
+        beforeBuild: onBeforeBuild,
+        run: (item, scope) => {
+          activeQueuedItemRef.current = { id: item.id, claimToken: item.claimToken, scope };
+          setQueueError(null);
+          setUserMsgs((c) => [...c, { role: 'user', text: item.prompt, ts: Date.now() }]);
+          if (state.narration.length > 0) {
+            setAgentHistory((h) => [...h, ...withoutStaleLiveStatus(state.narration, false).map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) }))]);
+          }
+          void start(item.prompt, { queueItemId: item.id, queueClaimToken: item.claimToken, userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: scope.sessionId, framework, frameworkExplicit, appSignature: appSignaturePref() });
+        },
+      });
+      if (outcome !== 'stale' && queueScopeRef.current.isCurrent(snapshot)) void refreshQueue();
+    } catch (e) {
+      if (queueScopeRef.current.isCurrent(snapshot)) setQueueError(e instanceof Error ? e.message : 'Could not confirm queue progress. Please retry.');
     } finally {
-      queueClaimInFlightRef.current = false;
+      if (queueClaimInFlightRef.current === claimOwner) queueClaimInFlightRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, state.pendingPermission, state.narration, queueNext, start, userId, email, onlyOpus, powerLevel, planFirst, thinking, framework, refreshQueue]);
+  }, [running, state.pendingPermission, state.narration, queueNext, start, userId, email, onlyOpus, powerLevel, planFirst, thinking, framework, frameworkExplicit, onBeforeBuild, refreshQueue]);
 
   useEffect(() => {
     const hasError = !!(error || state.error);
     // (1) A queued command's build just settled → record its outcome (a failure pauses the queue below).
     if (state.done && !running && activeQueuedItemRef.current) {
       const ok = !hasError && state.ok !== false;
+      const claim = activeQueuedItemRef.current;
       activeQueuedItemRef.current = null;
-      void queueComplete(expectedWorkspaceId(), ok, ok ? undefined : (error || state.error || 'build did not complete')).then(() => refreshQueue());
+      if (queueScopeRef.current.isCurrent(claim.scope)) {
+        void queueComplete(claim.scope.workspaceId, ok, ok ? undefined : (error || state.error || 'build did not complete'), claim).then(() => {
+          if (queueScopeRef.current.isCurrent(claim.scope)) void refreshQueue();
+        });
+      }
     }
     // (2) Idle after a non-resumable settle → claim + run the next queued command.
     if (!shouldRunNextQueued({
@@ -2146,21 +2197,37 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       buildSettled: state.done && !running && !state.resumable,
       pendingGate: !!state.pendingPermission,
       hasError,
-      claimInFlight: queueClaimInFlightRef.current,
+      claimInFlight: !!queueClaimInFlightRef.current,
     })) return;
     void claimAndRunNext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.resumable, running, state.pendingPermission, error, state.error]);
 
+  // A terminal result can precede the previous attempt's final durable flush. Retry admission
+  // while approved pending work waits; the server remains the authority and a paused queue stops here.
+  useEffect(() => {
+    if (running || error || state.error || queueError || state.pendingPermission || !queueItems.some((i) => i.status === 'pending') || queueItems.some((i) => i.status === 'running')) return;
+    const snapshot = queueScopeRef.current.capture();
+    const timer = setTimeout(() => { if (queueScopeRef.current.isCurrent(snapshot)) void claimAndRunNext(); }, 1000);
+    return () => clearTimeout(timer);
+  }, [queueItems, running, error, state.error, queueError, state.pendingPermission, claimAndRunNext]);
+
   // FIX #6 — approve a role chat's proposed step into THIS app's queue (the user's explicit click;
   // nothing is ever auto-enqueued). If the app is idle, kick the executor so the queue starts NOW.
   const addStepsToQueue = useCallback(async (steps: string[], source: 'planner' | 'advisor') => {
-    const ws = expectedWorkspaceId();
-    for (const step of steps) {
-      const ok = await queueEnqueue(ws, step, source);
-      if (ok) setAddedSteps((prev) => new Set(prev).add(step));
+    const snapshot = queueScopeRef.current.capture();
+    try {
+      for (const step of steps) {
+        const ok = await queueEnqueue(snapshot.workspaceId, step, source);
+        if (!queueScopeRef.current.isCurrent(snapshot)) return;
+        if (ok) setAddedSteps((prev) => new Set(prev).add(step));
+      }
+    } catch (e) {
+      if (queueScopeRef.current.isCurrent(snapshot)) setQueueError(e instanceof Error ? e.message : 'Your queued step could not be confirmed. Please retry.');
+      return;
     }
     await refreshQueue();
+    if (!queueScopeRef.current.isCurrent(snapshot)) return;
     if (!running && !state.pendingPermission) void claimAndRunNext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queueEnqueue, refreshQueue, running, state.pendingPermission, claimAndRunNext]);
@@ -2177,7 +2244,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   useEffect(() => {
     void refreshQueue();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [freshOpenNonce]);
+  }, [freshOpenNonce, queueWorkspaceId, queueSessionId, userId, queueScopeGeneration]);
 
   // Start a brand-new project: fresh sandbox/memory (new session id) and clear chat. Allowed even
   // while a build is actively streaming HERE — reset() detaches from that stream (the underlying
@@ -2198,6 +2265,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     setRoleThreads({ planner: [], advisor: [] });
     setRoleProposedSteps(null);
     setAddedSteps(new Set());
+    queueScopeRef.current.invalidate();
+    queueClaimInFlightRef.current = null;
+    activeQueuedItemRef.current = null;
+    setQueueError(null);
     setQueueItems([]);
     setQueueOpen(false);
     setChatMode('build');
@@ -2221,7 +2292,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   };
 
   const startNewSession = () => {
-    sessionIdRef.current = newSessionId();
+    selectSessionId(newSessionId());
     persistSessionId(sessionIdRef.current); // the new project is now the sticky one across reloads
     autoRestoredSessionRef.current = sessionIdRef.current; // mark handled → auto-restore won't load the old chat over this blank one
     rehydratedWsRef.current = '';            // re-arm file rehydrate for the new (empty) workspace
@@ -2539,7 +2610,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           for (const prefix of [`agentv3-${normalizeUid(userId)}-`, 'agentv3-anon-']) {
             if (restored.workspaceId.startsWith(prefix)) {
               const sid = restored.workspaceId.slice(prefix.length);
-              if (sid) { sessionIdRef.current = sid; persistSessionId(sid); }
+              if (sid) { selectSessionId(sid); persistSessionId(sid); }
               break;
             }
           }
@@ -2623,7 +2694,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
         const action = historyOpen404Action({ ageMs: rowTs ? Date.now() - rowTs : Number.POSITIVE_INFINITY, buildRunning });
         if (action === 'resume-live') {
           // The user reopened an IN-FLIGHT chat — re-attach its live build instead of declaring it lost.
-          sessionIdRef.current = sessionId;
+          selectSessionId(sessionId);
           persistSessionId(sessionId);
           autoRestoredSessionRef.current = sessionId;
           rehydratedWsRef.current = '';
@@ -2634,7 +2705,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
         if (action === 'not-saved-yet') {
           if (saved) {
             // Adopt the session so "send a message to continue" genuinely continues THIS project.
-            sessionIdRef.current = sessionId;
+            selectSessionId(sessionId);
             persistSessionId(sessionId);
             autoRestoredSessionRef.current = sessionId;
             rehydratedWsRef.current = '';
@@ -2662,14 +2733,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             item.id === `v3_${sessionId}` || item.id === id ? { ...item, deadTranscript: true } : item
           )));
           // Still adopt the session so "send a message to continue" genuinely continues THIS project.
-          sessionIdRef.current = sessionId;
+          selectSessionId(sessionId);
           persistSessionId(sessionId);
           autoRestoredSessionRef.current = sessionId;
           rehydratedWsRef.current = '';
         }
         return;
       }
-      sessionIdRef.current = sessionId;
+      selectSessionId(sessionId);
       persistSessionId(sessionId);
       autoRestoredSessionRef.current = sessionId;
       rehydratedWsRef.current = '';
@@ -5154,8 +5225,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 <div className="text-[10px] text-faint">Queued steps run one at a time in the Build chat — you approve, it executes.</div>
               </div>
             )}
+            {queueError && <div className="mx-3 text-xs text-danger" role="alert">
+              <p>{queueError}</p>
+              <button type="button" className="mt-1 text-accent-text" onClick={() => { void refreshQueue(); }}>Refresh queue</button>
+            </div>}
             {queueOpen && queueItems.length > 0 && (
               <div className="mx-3 mt-1.5 p-2 bg-card border border-line rounded space-y-1 max-h-40 overflow-y-auto">
+                {!running && !queueItems.some((i) => i.status === 'running') && queueItems.some((i) => i.status === 'failed') && queueItems.some((i) => i.status === 'pending') && (
+                  <button type="button" className="text-xs text-accent-text" onClick={() => { void claimAndRunNext(true); }}>Continue pending steps</button>
+                )}
                 {queueItems.map((item) => (
                   <div key={item.id} className="flex items-start gap-2 text-[11px]">
                     <span className={`shrink-0 mt-0.5 ${item.status === 'running' ? 'text-accent-text' : item.status === 'done' ? 'text-success' : item.status === 'failed' ? 'text-danger' : item.status === 'cancelled' ? 'text-faint' : 'text-muted'}`}>
@@ -5165,10 +5243,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       {item.prompt}
                       {item.note ? <span className="text-faint"> — {item.note}</span> : null}
                     </span>
+                    {item.status === 'running' && !running && (
+                      <button type="button" className="shrink-0 text-accent-text" onClick={() => { void recoverQueueItem(item.id); }}>Check interrupted step</button>
+                    )}
                     {item.status === 'pending' && (
                       <button
                         type="button"
-                        onClick={() => { void queueCancel(expectedWorkspaceId(), item.id).then(setQueueItems); }}
+                        onClick={() => { void cancelQueueItem(item.id); }}
                         title="Cancel this queued step"
                         className="shrink-0 text-faint hover:text-danger"
                       >

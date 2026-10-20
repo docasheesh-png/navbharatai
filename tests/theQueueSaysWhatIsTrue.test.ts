@@ -111,7 +111,7 @@ describe('🔒 RATCHET: the four fields a 🟡 BLOCKED row owes, and they may on
   // move. Had it come out higher, the number would have gone up with that reason stated, not been hidden.
   // Two further fills (Q-008, Q-1086 — see the Q-1126 row) then took it to 40.
   //
-  // BATCH 2 (2026-10-20) took it from 40 to 24, and HOW it got there is the part worth keeping: of the 15,
+  // BATCH 2 (2026-10-20) took it from 40 to 24, and BATCH 3 from 24 to 0, and HOW it got there is the part worth keeping: of the 15,
   // ELEVEN were rows whose information was already written down and whose only fault was the label it was
   // written under — Q-121's `**Re-checked 2026-10-04:**` fails this detector purely on its `Re-` prefix, so
   // it was RENAMED rather than padded with new prose. That is batch 1's own correction holding up a second
@@ -121,14 +121,27 @@ describe('🔒 RATCHET: the four fields a 🟡 BLOCKED row owes, and they may on
   // makes them OPEN. Both were re-verified against the live code first — and that mattered, because their
   // sibling Q-887 carried the same kind of note and had since been fixed.
   //
-  // 🔒 Set from a re-measurement made with THIS FILE'S OWN PARSER: 111 blocked rows, 24 deficient.
+  // 🔒 **BATCH 3 TOOK IT TO ZERO (2026-10-20), so this stopped being a ratchet and became an INVARIANT.**
+  // 154 blocked rows, 0 deficient, measured with this file's own parser. From here a NEW blocked row that
+  // omits a field fails CI outright — there is no slack left to absorb it, which is the 50/50 law's other
+  // half: do not just fix the instances, make the wrong branch impossible. If this number ever has to go
+  // UP again, that is a decision to argue for in writing, not a quiet edit.
+  //
+  // How the last 24 went, because it is the same story batch 1 found and batch 2 confirmed: 15 were rows
+  // whose information was already written and whose only fault was the LABEL it sat under — and in several,
+  // the missing `Why` was sitting in the row's own STATE column ("(admin console)", "(admin, money)",
+  // "a decision that is the admin's: what Doctor AI shows"), which this census cannot see because it reads
+  // only the body. One more (Q-881) was not deficient but MIS-FILED, the third such case. The remaining
+  // eight are the payment audit, where four fields were genuinely absent and are now written from the
+  // evidence each row already carried — and where nothing had been tried, the field SAYS "nothing yet"
+  // rather than carrying a plausible sentence. An invented `Needs:` is the defect Q-1126 exists to prevent.
   // 🔴 AND THE FIRST ATTEMPT SET IT TO 25, ONE NOTCH TOO LOOSE, WHICH IS WORTH THE LINES. The number came
   // from a python re-implementation of the parse that split on " | " and read ONLY the first body cell, so a
   // row whose body contains a pipe (Q-699) looked truncated and counted as deficient. The ratchet then
   // accepted a regression: undoing one label fill took the true count 24 → 25 and still passed. A ratchet is
   // only as honest as the measurement behind it, so the number must come from the detector above — never from
   // a second implementation of it, however careful.
-  const MISSING_FIELDS_BASELINE = 24;
+  const MISSING_FIELDS_BASELINE = 0;
 
   const blocked = rows.filter((r) => r.state.startsWith('🟡 BLOCKED'));
   /** A bolded field LABEL, never a word in running prose — that distinction is the whole correction above. */
@@ -162,7 +175,11 @@ describe('🔒 RATCHET: the four fields a 🟡 BLOCKED row owes, and they may on
     const incomplete = blocked.filter((r) => gapsOf(r.body).length > 0);
     expect(incomplete.length,
       `${incomplete.length} blocked rows are missing a required field. The baseline is ${MISSING_FIELDS_BASELINE} `
-      + '(Q-1126). It may go DOWN — lower this number when it does — and a NEW incomplete row must not push it up.',
+      + '(Q-1126, which reached ZERO on 2026-10-20 — so this is now an invariant, not a ratchet with slack). '
+      + 'A 🟡 BLOCKED row owes four things: what is blocked, why, what is required to unblock it, and what was '
+      + 'already tried — each as a **bolded label**, because that is all this census can see. If nothing has been '
+      + 'tried, say "nothing yet" and why; do NOT invent a plausible Needs — that is the defect Q-1126 exists to '
+      + 'prevent, and a row that admits a gap is worth more than one that hides it.',
     ).toBeLessThanOrEqual(MISSING_FIELDS_BASELINE);
   });
 

@@ -1,3 +1,5 @@
+import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
+import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction } from '../AgentV3/weakBuildPreflight';
 import { toSafeClientMessage } from '../lib/httpError';
 import { clarityGateEnabled, shouldJudgeClarity, judgeClarity, clarifyReply, categoryFromWords, bestGuessPrompt, type ClarityCategory, type QuickReply } from '../AgentV3/clarityGate';
 import { clarityJudgeAsk } from '../AgentV3/clarityJudgeAsk';
@@ -610,7 +612,7 @@ import { placePlatformContext } from '../lib/platformContext';
 import { previewAutoRepairEnabled, autoRepairPrecheck, autoRepairDecision, autoRepairPrompt, claimAutoRepair } from '../AgentV3/previewAutoRepair';
 import { clearPreviewGaveUp } from '../AgentV3/previewGiveUp';
 import { buildConfirmation, buildConfirmationEnabled, isOfferAcceptance, OFFER_LIFETIME_MS, BUILD_OFFER_STEER } from '../AgentV3/buildConfirmation';
-import { frameworkMismatchFromListing, messageNamesAFramework, answersFrameworkQuestion, frameworkQuestionMarker, frameworkQuestionSteer, frameworkAnswerNote } from '../AgentV3/frameworkQuestion';
+import { frameworkMismatchFromListing, shouldCheckFrameworkQuestion, answersFrameworkQuestion, frameworkQuestionMarker, frameworkQuestionSteer, frameworkAnswerNote } from '../AgentV3/frameworkQuestion';
 import type { FrameworkCoherence } from '../AgentV3/ProjectImport';
 import { attachmentMemoryEnabled, rememberableUid, saveAttachmentMemory, loadAttachmentMemory, deleteAttachmentMemory, shouldRecallAttachment, refersToEarlierAttachment } from '../lib/attachmentMemory';
 import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt, readerlessIntent, describeReaderOutcome, type ReaderOutcome } from '../AgentV3/IntentClassifier';
@@ -3452,7 +3454,7 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
   // already learned this (fastLaneRung.ts skips a reasoning opener); the planners were the sibling.
   // `planLadder` puts the tier's plan rung first (a rung that can be told not to think) and keeps the
   // tier's own ladder behind it, so nothing another tier forbids can be reached.
-  if (opts.plan) rungs = planLadder(level);
+  if (opts.plan) rungs = planLadder(level, process.env, opts.complex);
   // `afterLeadRung` is the EMPTY-BUILD RETRY's ladder: the first attempt produced nothing, so the rung
   // that produced nothing is dropped — by POSITION, because a provider can appear twice (Weak carries
   // GLM at two rungs, so `fromProvider` would find the wrong one). Applied to the TIER ladder, not on
@@ -11164,10 +11166,8 @@ async function noteBuildOutcome(
      * from the file LIST plus package.json, raced, and fail-open: anything unreadable builds as before.
      */
     let askFramework: FrameworkCoherence | null = null;
-    if (intent !== 'chat' && !frameworkAnswered && userAppExists && Array.isArray(projectFilePaths)
-      && process.env.AGENTV3_FRAMEWORK_COHERENCE !== 'off'
-      && zipImports.length === 0 && !(typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '')
-      && !messageNamesAFramework(prompt)) {
+    if (shouldCheckFrameworkQuestion({ intent, answered: frameworkAnswered, userAppExists, paths: projectFilePaths,
+      setting: process.env.AGENTV3_FRAMEWORK_COHERENCE, zipCount: zipImports.length, importUrl: req.body?.importUrl, prompt })) {
       try {
         const pkg = await raceTimeout(loadWorkspaceFilesByPath(intentWorkspaceId, ['package.json']), 3_000, 'frameworkQuestionPkg');
         const coherence = frameworkMismatchFromListing(projectFilePaths, pkg?.['package.json']);
@@ -11216,6 +11216,10 @@ async function noteBuildOutcome(
         return;
       }
     }
+    // Scope is checked before sandbox/setup. Imports need their files inspected and keep the import pipeline.
+    const weakAdmission = await weakAdmissionForTurn({ prompt, intent, importing: hasImportIntent, tier: powerLevelReqEffective });
+    const weakScopeBlocked = weakAdmissionBlocked(weakAdmission);
+    if (weakScopeBlocked) intent = 'chat';
     const isPlainChatTurn = intent === 'chat' && !hasImportIntent;
     // Surgical edit mode: the user is modifying an existing app (fix/change/update/
     // refactor/…), not building from scratch. When true, the build loop reads the
@@ -11247,8 +11251,8 @@ async function noteBuildOutcome(
         const clarifyWhatToBuild = askWhatToBuild || clarity !== null;
         // Q-200: the turn was diverted because a build was not confirmed, and no more specific answer took it.
         // The reply answers, then offers; the turn is remembered as an offer so a "yes" builds this request.
-        const answerThenOffer = offerToBuild && !askFramework && !clarifyWhatToBuild && !askUnrelated && !answerProjectElsewhere
-          && !answerPictureRequest && !answerSpreadsheet && !echoesPlatformNotice;
+        const answerThenOffer = allowWeakChatAction(weakScopeBlocked, offerToBuild && !askFramework && !clarifyWhatToBuild && !askUnrelated && !answerProjectElsewhere
+          && !answerPictureRequest && !answerSpreadsheet && !echoesPlatformNotice);
         let chatPrompt = attachmentContext
           ? `${prompt}\n\nThe user attached file(s); here is the extracted content:\n\n${attachmentContext}`
           : prompt;
@@ -11308,7 +11312,7 @@ async function noteBuildOutcome(
         // first is a per-workspace steer, the second carries today's search results. The key is a SHA-256 of
         // the prompt plus the model lane, so two different prompts can never share a reply (a 32-bit hash
         // could) and a cheap-lane answer is never served to a paid turn.
-        const cacheable = !answerThenOffer && !askUnrelated && !askFramework && !liveGrounded && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !answerSpreadsheet && !clarifyWhatToBuild && chatCacheEnabled();
+        const cacheable = allowWeakChatAction(weakScopeBlocked, !answerThenOffer && !askUnrelated && !askFramework && !liveGrounded && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !answerSpreadsheet && !clarifyWhatToBuild && chatCacheEnabled());
         const cacheKey = cacheable ? chatReplyCacheKey(prompt, Boolean(freeTierBuildActive || powerSpecResolved.cheapOnly)) : '';
         let reply: string;
         // The spreadsheet this reply carries, when it made one — rides on the narration line and the
@@ -11317,7 +11321,9 @@ async function noteBuildOutcome(
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
         /** The clarity question's chips, when this turn asks it (clarityGate.ts). */
         let clarifyChips: QuickReply[] | null = null;
-        if (clarity && !echoesPlatformNotice) {
+        if (weakScopeBlocked) {
+          reply = weakAdmissionReply(weakAdmission?.scope ?? null);
+        } else if (clarity && !echoesPlatformNotice) {
           // Written by the PLATFORM, not a model: one short question in the user's language + 3–4 chips. Billed 0.
           const r = clarifyReply(clarity.category, voiceOf(String(prompt ?? '')));
           reply = r.text;
@@ -11457,6 +11463,16 @@ async function noteBuildOutcome(
         if (!res.writableEnded) res.end();
         return;
       } catch {
+        // A chat-side error must never turn a refused scope into an unchecked paid build.
+        if (weakScopeBlocked) {
+          openStream();
+          const summary = weakAdmissionReply(weakAdmission?.scope ?? null);
+          send({ type: 'result', ok: false, summary, steps: 0, billedUsd: 0, billedInr: 0 });
+          releaseBuildLock(buildKey, buildLockToken);
+          await releaseBuildLease();
+          if (!res.writableEnded) res.end();
+          return;
+        }
         // The free router failed — do NOT error out. Fall through to the normal
         // build path so the user always gets an answer. (No return here.)
       }
@@ -13684,13 +13700,13 @@ async function noteBuildOutcome(
           && req.body?.confirmedFeatures == null && userAskedForAnAppToBeBuilt(prompt) && !userAskedForSmallScope(prompt)
           ? learnDomain(prompt)
           : null;
-      const promptComplexityDecision = scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
+      const promptComplexityDecision = await resolveWeakComplexity(weakAdmission, analysis?.complexityScore ?? 0, async () => scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
         // The intent rides along so the router reads the request exactly as the analysis did (review of 303e8a6f).
         { prompt: planning.sizing, score: analysis?.complexityScore ?? 0, buildIntent: intent },
         (p) => AIRouterManager.getRouter('free')
           .route(p, 'You are a classifier. Reply with one word only.')
           .then((r) => r.response.content),
-      );
+      ));
       // A build order over a big existing project is sized by that project, not by its five words
       // (autopsy 51ef24ad). See workspaceSizedComplexity.
       const complexityDecision = workspaceSizedComplexity(promptComplexityDecision, buildOrderReadAsEdit);
@@ -14031,6 +14047,7 @@ async function noteBuildOutcome(
        * would CHANGE THE BILL — which is the decision being measured, so it cannot be a side effect of
        * measuring it.
        */
+      recordWeakAdmissionUsage(weakAdmission, (usage) => providerLedger.add('GLM', usage, WEAK_SCOPE_MODEL));
       const shadowFastLaneLedger = createProviderUsageLedger();
       const captureShadowUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string): void => {
         shadowFastLaneLedger.add(used, usage, model);
@@ -14125,7 +14142,7 @@ async function noteBuildOutcome(
         // two events.
         if (!costCeilingFired) {
           try {
-            const verdict = checkCostCeiling(ledgerCostUsd(providerLedger.entries()), buildCostCeilingUsd());
+            const verdict = checkCostCeiling(ledgerCostUsd(providerLedger.entries()), buildCostCeilingUsd(process.env, weakCandidateActive(powerLevelReqEffective)));
             if (verdict.stop) {
               costCeilingFired = true;
               try {
@@ -14306,9 +14323,10 @@ async function noteBuildOutcome(
       // planner, the project planner and the fast lane's manifest are the first calls a build makes.
       // Both text-runner factories default every call to `thinking: false` — see answerNotDeliberate.ts
       // (autopsy 6a5fb04b: the roadmap planner reasoned its whole 4,000-token allowance away).
-      const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => withAnswerNotDeliberation(withStopSignal(buildTurnRunner({
+      const makeFastTextRunner = (onUsed?: (used: string) => void, heal = false, manualUsage = false): TurnRunner => withAnswerNotDeliberation(withStopSignal(buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
+        heal,
         complex: buildIsComplex, // a complex app opens past the flash rung — see the note above
         // Shared across every per-file runner this lane builds — the whole point of the change above.
         // A fresh runner per call is KEPT on purpose: `onUsed` must stay per-call, because the fast lane
@@ -14319,7 +14337,7 @@ async function noteBuildOutcome(
         onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
         // OBSERVATION ONLY — captureShadowUsage feeds the shadow ledger, never the billing one. This is
         // what makes the fast-lane billing question answerable without answering it by accident.
-        onTurnComplete: captureShadowUsage,
+        onTurnComplete: !manualUsage && heal && weakCandidateActive(powerLevelReqEffective) ? captureTurnUsage : captureShadowUsage,
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
@@ -14331,6 +14349,7 @@ async function noteBuildOutcome(
         tier: powerLevelReqEffective,
         noClaude: noClaudeBuild,
         plan: true,
+        complex: buildIsComplex,
         deadRungs: fastLaneDeadRungs,
         bench: buildBench,
         onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
@@ -14352,14 +14371,16 @@ async function noteBuildOutcome(
        * is why `answeringModel.ts` and `fastLaneCallIdentity` had to exist at all. A new repair gate that
        * calls the raw runner is now the thing `aCallOutsideTheLoopIsStillOnTheRecord` fails on.
        */
+      const takeWeakTextRepair = createWeakTextRepairAllowance(weakCandidateActive(powerLevelReqEffective));
       const recordedRepairCall = (system: string, user: string) => {
+        takeWeakTextRepair();
         // The same binding name the fast lane uses, and for the same reason: it is handed to the request
         // and to `fastLaneCallIdentity`'s Claude-default parameter, which `claudeRungModelId` answers
         // first. `aBuildIsNamedByItsLadderNotByClaude` §6(b) classifies the helper by this name.
         const fbModel = fastBuildModel();
         return recordedTextCall(
           {
-            makeRunner: (onUsed) => makeFastTextRunner(onUsed),
+            makeRunner: (onUsed) => makeFastTextRunner(onUsed, weakCandidateActive(powerLevelReqEffective)),
             identify: (reported, used, answered) => fastLaneCallIdentity(reported, used, fbModel, answered),
             recordLlmCall: (row) => buildDiag.recordLlmCall(row),
           },
@@ -18426,7 +18447,7 @@ async function noteBuildOutcome(
         let fastLaneReasoningRung: string | null = null;
         /** Q-926: the per-file calls a reasoning rung answered while the lane stayed on it — the measurement. */
         const laneReasoningStays: Array<{ model: string; ms: number }> = [];
-        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number, mayReason = false): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
+        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number, mayReason = false, heal = false): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
           // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
           // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
           // blind spot — a truncated (max_tokens) per-file generation is exactly what produces broken
@@ -18442,7 +18463,7 @@ async function noteBuildOutcome(
           // Whether the chain ever told us who served this call. The initialiser above is a DEFAULT,
           // not an observation — see fastLaneCallIdentity for what reading it as one cost.
           let providerReported = false;
-          const runner = makeFastTextRunner((used) => { usedProvider = used; providerReported = true; });
+          const runner = makeFastTextRunner((used) => { usedProvider = used; providerReported = true; }, heal, true);
           let t;
           try {
             // RESILIENT (admin 2026-07-07, "jab sab fail ho jaye to last me gemini/vertex"): the lane's
@@ -18531,11 +18552,11 @@ async function noteBuildOutcome(
         // on text we discarded. Continuing is provider-cap-agnostic (raising max_tokens only moves the
         // ceiling and can 400 on a provider whose real cap is lower), bounded to MAX_CONTINUATIONS, and
         // a continuation that FAILS never loses the work already produced — we keep what we have.
-        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number; mayReason?: boolean }): Promise<string> => {
-          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt, genOpts?.mayReason === true);
+        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number; mayReason?: boolean; repair?: boolean }): Promise<string> => {
+          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt, genOpts?.mayReason === true, genOpts?.repair === true);
           const generation = await continueFastLaneGeneration(first, {
             // A continuation faces the same deadline as its first call, including the mayReason gate.
-            generate: (prompt) => fastGenerateOnce(system, prompt, genOpts?.deadlineAt, genOpts?.mayReason === true),
+            generate: (prompt) => fastGenerateOnce(system, prompt, genOpts?.deadlineAt, genOpts?.mayReason === true, genOpts?.repair === true),
             onAttempt: (attempt) => events.emit({ type: 'narration', agent: 'architect', text: `✍️ That file list was longer than one response allows — continuing it (${attempt}/${MAX_CONTINUATIONS}) so nothing is left half-written…`, ts: Date.now() }),
             // HONESTY (rule 5): when the model re-opened the cut file's own header and carried on
             // inside it, the two halves are WELDED rather than the second replacing the first — say
@@ -18863,7 +18884,10 @@ async function noteBuildOutcome(
           // focus-offenders → contract-authority) instead of re-firing the identical repair call.
           // `contractPath` names the contract FILE the lane wrote (SimpleBuilder `contractModule`), so
           // the repair imports shared symbols from it instead of re-inventing a home for them.
-          const text = await fastGenerate(repairSystemPrompt(framework, strategy), repairUserPrompt(prompt, errors, currentFiles, contract, strategy, contractPath));
+          takeWeakTextRepair();
+          const weakRepair = weakCandidateActive(powerLevelReqEffective);
+          const text = await fastGenerate(repairSystemPrompt(framework, strategy), repairUserPrompt(prompt, errors, currentFiles, contract, strategy, contractPath),
+            weakRepair ? { repair: true, mayReason: true } : undefined);
           return parseFileBlocks(text).map((b) => ({ path: b.path, content: b.content }));
         };
         const fastLog = (msg: string) => events.emit({ type: 'narration', agent: 'architect', text: msg, ts: Date.now() });
@@ -18905,7 +18929,7 @@ async function noteBuildOutcome(
           stopLane: () => (fastLaneReasoningRung
             ? `the lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer; the lane's per-file budget cannot carry that, so the files finished so far go to the full builder now`
             : null),
-          writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3,
+          writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: weakCandidateActive(powerLevelReqEffective) ? 1 : 3,
           signal: abort.signal });
         // A STOP IS NOT A FALLBACK (autopsy 31254f9a): nothing is handed to the full builder after a Stop.
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : sb.stopped ? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
@@ -19476,7 +19500,7 @@ async function noteBuildOutcome(
           });
         } catch { /* a note must never fail a build */ }
       }
-      if (shouldRetryEmptyBuild({
+      if (!(weakCandidateActive(powerLevelReqEffective)) && shouldRetryEmptyBuild({
         expectsArtifacts,
         filesWritten: builderWroteCount(), // our game kit alone is not a build (see `builderWroteCount`)
         isEditMode,

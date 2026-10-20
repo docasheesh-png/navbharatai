@@ -308,6 +308,23 @@ describe('a queued crash user id belongs to the current authentication context',
     expect(userIds(h)).toEqual(['', hash.id]);
   });
 
+  it('back-to-back hash and SDK readiness cannot let the new id overtake an earlier clear', async () => {
+    const [hash] = await controlledHashes('uid-b');
+    const loading = deferred<CrashlyticsSink>();
+    const h = harness({ loadCrashlytics: () => loading.promise });
+    clearUserContext();
+    setUserContext('uid-b');
+    const cleared = h.nextUserId();
+    const delivered = h.nextUserId();
+    // No drain between these resolutions: the hash continuation can see the SDK become ready
+    // while the older clear is still queued on its promise.
+    hash.finish();
+    loading.resolve(h.sink);
+    expect(await cleared).toBe('');
+    expect(await delivered).toBe(hash.id);
+    expect(userIds(h)).toEqual(['', hash.id]);
+  });
+
   it('the latest uid also replaces an older id already queued behind the sink load', async () => {
     const [first, second] = await controlledHashes('uid-a', 'uid-b');
     const loading = deferred<CrashlyticsSink>();

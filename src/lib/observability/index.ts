@@ -66,7 +66,6 @@ export interface ObservabilityDeps {
 
 const state = {
   deps: null as ObservabilityDeps | null,
-  crashlytics: null as CrashlyticsSink | null,
   crashlyticsLoad: null as Promise<CrashlyticsSink | null> | null,
   reporting: false,
   recent: new Map<string, number>(),
@@ -167,18 +166,13 @@ export function admit(signature: string, now: number): boolean {
 function crashlytics(): Promise<CrashlyticsSink | null> {
   const deps = state.deps;
   if (!deps) return Promise.resolve(null);
-  if (state.crashlytics) return Promise.resolve(state.crashlytics);
   const gen = state.generation;
   if (!state.crashlyticsLoad) {
     // Loaded ONCE. A failed load is remembered as null, so a broken SDK is not retried in a loop.
-    state.crashlyticsLoad = deps.loadCrashlytics()
-      .then((sink) => {
-        if (state.generation !== gen) return null;
-        state.crashlytics = sink;
-        return sink;
-      })
-      .catch(() => null);
+    state.crashlyticsLoad = deps.loadCrashlytics().catch(() => null);
   }
+  // Ready and still-loading callers take the same promise path. A cached-sink shortcut could let
+  // a newer hashed id overtake an older queued clear, leaving the latest signed-in user cleared.
   return state.crashlyticsLoad.then((sink) => (state.generation === gen ? sink : null));
 }
 
@@ -271,7 +265,7 @@ export async function crashUserId(uid: string): Promise<string | null> {
   }
 }
 
-/** A queued id must still belong to this module instance and the latest authentication change. */
+/** Queued hashes follow the latest auth context; clears remain valid within the module instance. */
 function deliverUserId(id: string, generation: number, contextRevision?: number): Promise<void> {
   const current = () => state.generation === generation && state.deps?.enabled === true
     && (contextRevision === undefined || state.userContextRevision === contextRevision);
@@ -328,7 +322,6 @@ export function __resetObservability(): void {
   state.userContextRevision++;
   state.desiredUserId = '';
   state.deps = null;
-  state.crashlytics = null;
   state.crashlyticsLoad = null;
   state.reporting = false;
   state.recent.clear();

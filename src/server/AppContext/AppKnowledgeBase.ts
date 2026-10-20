@@ -40,6 +40,15 @@ export interface AppFeature {
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
+    id: 'platform_maintenance',
+    name: 'Service Maintenance',
+    path: 'Admin console → Monitor → Maintenance (administrators only)',
+    description: 'Administrators can pause AI service for everyone to control spending. During Maintenance, users see "navbharatai now in Maintenance, please try after some time". Sign-in, payments, wallet and admin recovery remain available. Automatic protection can pause service when the primary provider account repeatedly runs out of quota. The service remains paused until an administrator resumes it.',
+    howToUse: 'Administrators: open Maintenance at the top of Monitor, choose Turn on Maintenance to pause, or Resume AI service to reopen. Auto-on protection can be switched separately. Users: wait and try again later; adding credits to your wallet does not disable platform Maintenance.',
+    relatedFeatures: [],
+    keywords: ['maintenance', 'service paused', 'try after some time', 'ai band', 'ruk gaya', 'pause ai'],
+  },
+  {
     id: 'admin_failed_build_reports',
     name: 'Private failed build reports (admin only)',
     path: '/failedbr → Admin sign-in',

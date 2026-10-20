@@ -1,3 +1,4 @@
+import { assertAiAvailable } from '../../lib/aiMaintenance';
 
 import { AIProvider, AIProviderResponse, ProviderTelemetry } from './ProviderTypes';
 import { providerCooldownStore } from '../../lib/ProviderCooldownStore';
@@ -198,6 +199,7 @@ export class AIRouter {
    * keeping Claude strictly as the final safety net (Grok-primary/Claude-last law).
    */
   async routeRaced(prompt: string, systemPrompt?: string, images?: string[]): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+    await assertAiAvailable();
     const racers = this.providers.filter(p => !p.lastResort);
     const fallbacks = this.providers.filter(p => p.lastResort);
     const errors: string[] = [];
@@ -303,6 +305,7 @@ export class AIRouter {
     signal?: AbortSignal,
   ): Promise<StreamOutcome> {
     for (const p of providers) {
+      await assertAiAvailable();
       if (signal?.aborted) return { ok: false, reason: 'aborted' };
       if (!p.executeStream) continue;
       if (!this.acquire(p.name)) continue;
@@ -384,6 +387,7 @@ export class AIRouter {
     onChunk: (text: string) => void,
     signal?: AbortSignal,
   ): Promise<StreamOutcome> {
+    await assertAiAvailable();
     if (signal?.aborted) return { ok: false, reason: 'aborted' };
 
     // Get available providers (skip cooldowns on first pass)
@@ -478,6 +482,7 @@ export class AIRouter {
   }
 
   private async execute(prompt: string, schema?: any, systemPrompt?: string, images?: string[], modelOverride?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+    await assertAiAvailable();
     const targetSchema = schema?.type === 'OBJECT' ? schema : undefined;
     const errors: string[] = [];
     // Providers actually invoked this request. Pass 2 exists to retry providers that pass 1 SKIPPED
@@ -498,6 +503,7 @@ export class AIRouter {
           continue;
         }
 
+        await assertAiAvailable();
         const isHealthy = await provider.healthCheck().catch(() => false);
         if (!isHealthy) {
           console.log(`[ROUTER] ${provider.name} healthCheck=false, skipping`);

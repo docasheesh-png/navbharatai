@@ -448,6 +448,10 @@ export function useChatEngine(deps: ChatEngineDeps) {
             throw Object.assign(new Error(guestLimit), { guestLimit: true });
           }
           const errData = await response.json().catch(() => ({}));
+          if (errData?.maintenance === true && typeof errData.reply === 'string') {
+            setMessagesForTab(prev => [...prev, { id: `maintenance-${Date.now()}`, text: errData.reply, sender: 'ai', timestamp: new Date() }]);
+            return;
+          }
           if (response.status === 401) {
             setUser(null);
             setShowAuth(true);

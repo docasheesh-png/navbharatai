@@ -1,3 +1,4 @@
+import { assertAiAvailable, AiMaintenanceError } from '../../lib/aiMaintenance';
 // AgentV3 — multi-provider cost-routing orchestrator (phase 3).
 //
 // Wraps an ORDERED chain of TurnRunners so v5.0 runs each turn on the cheapest provider
@@ -920,6 +921,7 @@ export function makeMultiProviderTurnRunner(
           // 8000` starved glm-5.3 for 26 minutes on a repair, and `4000` starved the planner before it).
           // `raceStop` makes EVERY runner stop waiting on a stop, including one with no cancel handle of
           // its own; a streaming runner additionally closes its stream (it receives the same signal).
+          await assertAiAvailable();
           const result = await raceStop(runner.runTurn({
             ...params, canAbandonSlowStream, hasNextRung: i + 1 < chain.length,
             // The first-byte grace is EARNED by answering recently (firstByteGraceFor, owner 2026-10-18).
@@ -1016,6 +1018,8 @@ export function makeMultiProviderTurnRunner(
             // was serving it (autopsy 9c612cdb: the report could not say which engine ran the review).
             throw new BuildStoppedError({ provider: reportName, ...(chain[i].modelId ? { model: chain[i].modelId } : {}) });
           }
+          if (err instanceof AiMaintenanceError) throw err;
+          await assertAiAvailable(); // do not fall through to a paid rung after the auto trip
           lastError = err;
           fellBackFrom.push(reportName);
           opts.onProviderError?.(reportName, err);

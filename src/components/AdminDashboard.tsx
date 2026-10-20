@@ -1,3 +1,4 @@
+import { MaintenanceCard } from './admin/MaintenanceCard';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight} from 'lucide-react';
 import { effectiveDirection } from '../lib/adminUserSort';
@@ -1998,6 +1999,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   panel ke home page par to load dikhna chahiye" — and `/api/admin/load` had answered
                   it for weeks with nothing rendering it. It sits ABOVE the live monitor because a
                   ceiling that stops the whole platform outranks a chart of what it is doing now. */}
+              <MaintenanceCard adminToken={adminToken} />
               <LoadBoard adminToken={adminToken} />
 
               {/* LIVE MONITOR — real time-series from the platform's own telemetry. Everything below it

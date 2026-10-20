@@ -1,3 +1,4 @@
+import { assertAiAvailable, aiMaintenanceStore, MAINTENANCE_MESSAGE } from '../lib/aiMaintenance';
 // Amazon Nova Sonic bidirectional streaming session (server side).
 //
 // Nova Sonic is a real-time SPEECH-TO-SPEECH model reached ONLY through Bedrock's
@@ -138,6 +139,7 @@ export class SonicSession {
 
   // Transcript de-duplication (fixes the double-line bug — see sonicTranscript.ts) + the per-text-block
   // generationStage read from each contentStart, so the gate can drop SPECULATIVE and keep only FINAL.
+  private offMaintenance?: () => void;
   private readonly gate = new SonicTranscriptGate();
   private readonly textStage = new Map<string, string>();
 
@@ -165,8 +167,12 @@ export class SonicSession {
 
   /** Open the stream and send the init events (session, prompt, system text, audio start). */
   async start(): Promise<void> {
+    await assertAiAvailable();
     if (this.started) return;
     this.started = true;
+    this.offMaintenance = aiMaintenanceStore.onChange(state => {
+      if (state.enabled) { this.cb.onError?.(MAINTENANCE_MESSAGE); this.close(); }
+    });
 
     // 1) session + prompt config (24kHz audio out).
     this.queue.pushEvent({ sessionStart: { inferenceConfiguration: { maxTokens: 1024, topP: 0.9, temperature: 0.7 } } });
@@ -219,6 +225,7 @@ export class SonicSession {
 
   /** Gracefully end the conversation (close audio content, prompt, session). */
   close(): void {
+    this.offMaintenance?.(); this.offMaintenance = undefined;
     if (this.closed) return;
     this.closed = true;
     try {

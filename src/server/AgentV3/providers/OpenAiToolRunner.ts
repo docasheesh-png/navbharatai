@@ -1,3 +1,4 @@
+import { assertAiAvailable, aiMaintenanceStore } from '../../lib/aiMaintenance';
 // AgentV3 — OpenAI-compatible tool-use TurnRunner (multi-provider cost routing, phase 2).
 //
 // Implements the same TurnRunner contract as ClaudeClient, but speaks the OpenAI Chat
@@ -359,6 +360,18 @@ export class OpenAiToolRunner implements TurnRunner {
   ) {}
 
   async runTurn(params: RunTurnParams): Promise<TurnResult> {
+    await assertAiAvailable();
+    try { return await this.runAvailableTurn(params); }
+    catch (error) {
+      if (!process.env.VITEST && process.env.NODE_ENV !== 'test') {
+        await aiMaintenanceStore.recordFailure(this.opts.model || params.model, error);
+        await assertAiAvailable();
+      }
+      throw error;
+    }
+  }
+
+  private async runAvailableTurn(params: RunTurnParams): Promise<TurnResult> {
     const tools = toolDefsToOpenAI(params.tools);
     // P4c (AGENTV3_REASONING_PASSBACK, default OFF) — hand Kimi/GLM their own earlier reasoning back.
     const passbackModel = this.opts.model || params.model;

@@ -10,6 +10,7 @@ import { withLedgerV2 } from './ledgerV2';
 import { cashfreePaymentsAvailability } from './cashfreeCredentials';
 import { mintCodeForOrder } from './giftCodeStore';
 import { recordedReversedInr, settleRecordedReversalAtCredit } from './paymentReversal';
+import { unreconciledCreditPatch, type UnreconciledPatch } from './paymentReconciliation';
 import { applyOrderReversal } from './paymentReversalStore';
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
 import { orderCreditedTokens, recordedPlatformFee, type WalletCreditTx } from './orderCredit';
@@ -303,6 +304,11 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
 
     let isPaid = false;
     let cfOrderIdRef = 'cf_' + orderId;
+    // Q-1135: set only when the paid-vs-recorded check could not run, and then merged into the SAME
+    // `tx.update` that flips PENDING → SUCCESS below — never written separately, because Q-613 exists
+    // to keep that one transaction whole. Declared out here because the decision is made inside the
+    // provider-read block and consumed by the credit blocks after it.
+    let unreconciled: UnreconciledPatch | null = null;
 
     {
       const cfUrl = env === 'production'
@@ -354,7 +360,22 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
           return { success: false, error: 'This payment could not be verified — please contact support.' };
         }
         if (!Number.isFinite(expectedAmount)) {
-          console.error(`[CASHFREE] UNRECONCILED CREDIT for order ${orderId}: the provider charged ${paidAmount} but our record's amountPaid is ${JSON.stringify(txData.amountPaid)}, which is not a number. Crediting the server-recorded amount; the paid-vs-recorded check could NOT run.`);
+          /**
+           * 🔴 THIS LINE USED TO END "Crediting the server-recorded amount" — AND THAT WAS NOT TRUE.
+           *
+           * Measured on the real function (Q-1135, 2026-10-20): with `amountPaid` unreadable and the
+           * provider reporting ₹100, the wallet receives **0 tokens**, because the token figure comes
+           * from `orderCreditedTokens` → `creditableTokens`, which returns 0 for a non-finite amount.
+           * The ₹ view meanwhile adds `balanceAdded` in full. So the sentence described a credit that
+           * does not happen, and the two halves of one wallet move apart. The cause of THAT is its own
+           * row — the paid-recharge path does not go through `walletMirror.ts` — and it is a money
+           * decision, so it is not changed here. What is fixed here is the dishonesty: this log, and
+           * the order itself, now say what really happened.
+           */
+          console.error(`[CASHFREE] UNRECONCILED CREDIT for order ${orderId}: the provider charged ${paidAmount} but our record's amountPaid is ${JSON.stringify(txData.amountPaid)}, which is not a number. The paid-vs-recorded check could NOT run, and the token credit derives from that same unreadable amount — so this order is being settled with a token credit of ZERO and needs checking by hand.`);
+          // Q-1135: and the ORDER says so too, not only this log line. A log rolls; nobody greps it
+          // during a support call; the Revenue page cannot show what it cannot read.
+          unreconciled = unreconciledCreditPatch(paidAmount, txData.amountPaid, new Date().toISOString());
         } else if (Math.abs(paidAmount - expectedAmount) > 0.01) {
           console.error(`[CASHFREE] Amount mismatch for order ${orderId}: the provider charged ${paidAmount}, expected ${expectedAmount}. Refusing to credit.`);
           return { success: false, error: 'Payment amount mismatch detected — please contact support.' };
@@ -398,7 +419,7 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
         // had already been handled, and nothing would ever take it back.
         const reversal = settleRecordedReversalAtCredit(creditedWallet, fresh, orderCreditedTokens(fresh), orderId, nowIso);
         const wallet = reversal ? reversal.wallet : creditedWallet;
-        tx.update(txRef, { paymentStatus: 'SUCCESS', paymentReference: cfOrderIdRef, ...(reversal ? reversal.txPatch : {}) });
+        tx.update(txRef, { paymentStatus: 'SUCCESS', paymentReference: cfOrderIdRef, ...(reversal ? reversal.txPatch : {}), ...(unreconciled ?? {}) });
         tx.set(walletRef, withLedgerV2(tx, (c, i) => doc(db, c, i), String(walletRef.id ?? txData.userId), walletSnap.exists() ? walletSnap.data() : null, wallet, `cashfree:${orderId}`));
         return wallet;
       });
@@ -426,7 +447,10 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
         const snap = await tx.get(txRef);
         if (!snap.exists()) return false;
         if (snap.data().paymentStatus === 'SUCCESS') return false; // already claimed by a concurrent call
-        tx.update(txRef, { paymentStatus: 'SUCCESS', paymentReference: cfOrderIdRef });
+        // The unreconciled patch rides here too (Q-1135). This claim serves the PASS and GIFT products,
+        // whose orders read `amountPaid` from the same stored record — so they can be un-reconcilable in
+        // exactly the same way, and patching only the wallet branch would have left this one silent.
+        tx.update(txRef, { paymentStatus: 'SUCCESS', paymentReference: cfOrderIdRef, ...(unreconciled ?? {}) });
         return true;
       });
       if (!claimedNow) {

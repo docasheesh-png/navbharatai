@@ -163,7 +163,7 @@ steps:
       # the running server so the admin load board reports the real ceiling instead of a code default
       # that can drift away from it. One number, two consumers — the drift is unrepresentable.
       # (`--update-env-vars` adds/updates only these keys; every other Cloud Run env survives untouched.)
-      - 'NODE_ENV=production,PLATFORM_MAX_INSTANCES=${_MAX_INSTANCES}'
+      - 'NODE_ENV=production,PLATFORM_MAX_INSTANCES=${_MAX_INSTANCES},AGENTV3_WEAK_SCOPE_POLICY=${_WEAK_SCOPE_POLICY},AGENTV3_WEAK_BUILD_COST_CEILING_USD=${_WEAK_BUILD_COST_CEILING_USD}'
       - '--allow-unauthenticated'
       - '--cpu'
       - '2'
@@ -278,6 +278,9 @@ substitutions:
   # (§12 #1, `lib/jobLease.ts`) shipped FIRST, and why the next per-instance ceiling in that section —
   # the hot metrics document, §12 #4 — is the one to watch as this number is used.
   _MAX_INSTANCES: '100'
+  # Admin-authorized Weak policy activation (2026-10-20). Override the trigger to 'off' for rollback.
+  _WEAK_SCOPE_POLICY: 'on'
+  _WEAK_BUILD_COST_CEILING_USD: '1'
 
 options:
   logging: CLOUD_LOGGING_ONLY

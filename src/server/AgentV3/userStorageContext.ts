@@ -35,15 +35,15 @@ interface StorageProviderSpec {
 const STORAGE_PROVIDERS: Record<string, StorageProviderSpec> = {
   s3: {
     label: 'S3-compatible storage',
-    sdk: '@aws-sdk/client-s3 + @aws-sdk/s3-request-presigner',
+    sdk: '@aws-sdk/client-s3',
     envVars: ['S3_BUCKET', 'S3_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'],
-    note: 'Upload via a server-issued presigned PUT URL so the browser uploads DIRECTLY to storage (the secret never leaves the server). Works with AWS S3, Cloudflare R2, Supabase Storage or MinIO (set the optional S3_ENDPOINT).',
+    note: 'Use generate_storage("s3"): the app server verifies its own Supabase login, actual bytes/type and a durable daily quota before uploading. Apply migrations/003_upload_quota.sql and pass session.access_token to uploadFile. No reusable presigned URL is exposed. Works with AWS S3, Cloudflare R2 or MinIO (optional S3_ENDPOINT).',
   },
   cloudinary: {
     label: 'Cloudinary',
     sdk: 'cloudinary',
     envVars: ['CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET'],
-    note: 'Upload via a server-issued signature so the browser uploads DIRECTLY to Cloudinary (the api_secret never leaves the server).',
+    note: 'Use generate_storage("cloudinary"): upload through the app server after verified app Supabase login, actual byte/type checks and a durable daily quota. Apply migrations/003_upload_quota.sql and call uploadFile(file, session.access_token). The api_secret and reusable provider signatures never leave the server.',
   },
 };
 

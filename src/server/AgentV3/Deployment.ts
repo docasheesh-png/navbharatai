@@ -14,7 +14,7 @@
 import { GoogleAuth } from 'google-auth-library';
 import { hostingVersionConfig, type HostingVersionConfig } from './siteConfig';
 import { siteConfigStore } from './siteConfigStore';
-import { mirrorPublishToBucket, removePublishFromBucket } from './bucketPublish';
+import { mirrorPublishToBucket, removePublishFromBucket, publishedAppsBucket } from './bucketPublish';
 import { pickRollbackTarget, type HostingRelease, type RollbackTarget } from './publishRollback';
 import {
   bucketOnlyPublishEnabled,
@@ -367,6 +367,7 @@ export class FirebaseHostingDeployer {
         `[PUBLISH-BUCKET-ONLY] takedown left bucket objects for ${bucketOnlySubdomain(workspaceId)}: `
         + `${bucketOnlyRemoved.error ?? 'unknown'}`,
       );
+      throw new Error('The app bucket copy could not be confirmed removed. Please retry the takedown.');
     }
     return this.deleteChannelById(makeChannelId(workspaceId));
   }
@@ -395,30 +396,30 @@ export class FirebaseHostingDeployer {
       //
       // The mirror stores objects under `<sub>`, which Firebase derives from the channel id by
       // truncating it and appending a hash (see channelSubdomain). Nothing can reconstruct that from
-      // the id, and after the channel is gone there is nothing left to ask. Best-effort: a takedown
-      // must never fail because a lookup did, so an unreadable URL just means no bucket key.
+      // the id, and after the channel is gone there is nothing left to ask. An uncertain lookup
+      // must not destroy the only pointer to a mirror that may still be public.
       const subForBucket = await axios
         .get(`${HOSTING_API}/sites/${site}/channels/${channelId}`, { headers: { Authorization: `Bearer ${token}` } })
-        .then((r) => channelSubdomain(String((r.data as { url?: string })?.url ?? ''), site))
-        .catch(() => '');
-
-      await axios.delete(`${HOSTING_API}/sites/${site}/channels/${channelId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+        .then((r) => channelSubdomain(String((r.data as { url?: string })?.url ?? ''), site));
       // …and remove the bucket copy, so "take this app down" is true in BOTH places. Deleting only
       // the channel would leave the mirror serving the app the moment the Worker prefers the bucket —
-      // a takedown that looks complete and is not. Guarded: the channel is already gone, and failing
-      // the whole takedown over the mirror would be worse than an orphaned object we can sweep later.
+      // a takedown that looks complete and is not. Remove the mirror FIRST, while a failed attempt
+      // can still rediscover its key from the channel on retry.
       if (!subForBucket) {
         // Said out loud rather than passed over: this is the one case where the app is down on
         // Firebase and its bucket copy may still exist, and silence here is what would hide it.
         console.warn(`[PUBLISH-MIRROR] takedown could not resolve a bucket key for ${channelId} — any mirrored copy is untouched`);
+        if (publishedAppsBucket()) throw new Error('The published mirror could not be identified. Takedown is unconfirmed.');
       } else {
         const removed = await removePublishFromBucket(subForBucket);
         if (removed.attempted && !removed.deleted) {
           console.warn(`[PUBLISH-MIRROR] takedown left bucket objects for ${subForBucket}: ${removed.error ?? 'unknown'}`);
+          throw new Error('The published mirror could not be removed. Takedown is unconfirmed.');
         }
       }
+      await axios.delete(`${HOSTING_API}/sites/${site}/channels/${channelId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       return true;
     } catch (err) {
       const status = (err as AxiosError)?.response?.status;

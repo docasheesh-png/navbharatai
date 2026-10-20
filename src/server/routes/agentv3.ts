@@ -336,6 +336,7 @@ import {
 } from '../AgentV3/ShellSessions';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, findingAboutUntouchedCode, type UntouchedCodeReason, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { deployBackendToRender, resolveRenderKey, renderRequirement, findBackendUrl } from '../AgentV3/renderDeploy';
+import { serverRollbackStatus, rollbackServer } from '../AgentV3/serverRollback';
 import { readServerHalf, serverHalfFromFiles, SHAPE_MANIFESTS } from '../AgentV3/appServerHalf';
 import { attachRenderCustomDomain } from '../AgentV3/renderCustomDomain';
 import { createRenderService, fetchServiceEnvKeys } from '../AgentV3/renderCreateService';
@@ -538,7 +539,7 @@ function sessionCostCapUsd(): number {
   const v = parseFloat(process.env.SESSION_COST_CAP_USD ?? '');
   return Number.isFinite(v) && v > 0 ? v : 5.0;
 }
-import { deploymentStore, withDeploymentPersistence, isLiveDeployment, publishedAppList, pausedAppList, type DeploymentRecord } from '../AgentV3/DeploymentStore';
+import { deploymentStore, withDeploymentPersistence, readDeploymentForPublish, isLiveDeployment, publishedAppList, pausedAppList, type DeploymentRecord } from '../AgentV3/DeploymentStore';
 import { resolvePublishState } from '../AgentV3/publishState';
 import { ensureBootEnv, bootEnvNote, type BootEnvIo } from '../AgentV3/devSecretsBoot';
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
@@ -3862,11 +3863,8 @@ const serverPublishDeps: ServerPublishDeps = {
     cap: (await readHostingTierForQuota(ownerUid).catch(() => null))?.backendApps ?? null,
   }),
   store: firestoreDeployStore,
-  // Capped and fail-open, like the static path's takedown guard: a store outage must not block every publish.
-  existing: (workspaceId) => Promise.race([
-    deploymentStore.get(workspaceId),
-    new Promise<null>((r) => setTimeout(() => r(null), 3_000)),
-  ]),
+  // An uncertain registry cannot prove an app is unbanned. Keep the wait bounded and refuse new work.
+  existing: readDeploymentForPublish,
   // Scoped to THIS app; planBackendEnv then narrows it to the names the app's own code reads.
   vault: (ownerUid, workspaceId) => loadUserVaultSecrets(ownerUid, workspaceId),
   token: async () => {
@@ -8538,6 +8536,12 @@ async function noteBuildOutcome(
       res.json({ available: false, reason: 'never-published', message: 'This app is not published right now, so there is no live version to undo.' });
       return;
     }
+    if (rec?.providerId === NAVBHARAT_CLOUD_PROVIDER) {
+      const who = await verifyFirebaseIdentity(req);
+      if (!who || who.uid !== rec.userId) { res.status(403).json({ error: 'This app does not belong to this account.' }); return; }
+      res.json(await serverRollbackStatus(workspaceId, who.uid, rec));
+      return;
+    }
     const bucketOnly = bucketOnlyPublishEnabled();
     // A bucket-only app has no channel at all, so its history is not merely empty — it does not
     // exist. Asking for it would be a wasted call that could only fail.
@@ -8573,6 +8577,13 @@ async function noteBuildOutcome(
     const rec = await deploymentStore.get(workspaceId).catch(() => null);
     if (!isLiveDeployment(rec)) {
       res.status(409).json({ ok: false, error: 'This app is not published right now, so there is nothing to undo.' });
+      return;
+    }
+    if (rec?.providerId === NAVBHARAT_CLOUD_PROVIDER) {
+      const who = await verifyFirebaseIdentity(req);
+      if (!who) { res.status(401).json({ error: 'Please sign in again.' }); return; }
+      const result = await rollbackServer(workspaceId, who.uid, rec, typeof req.body?.versionName === 'string' ? req.body.versionName : '');
+      res.status(result.status).json(result.body);
       return;
     }
     const bucketOnly = bucketOnlyPublishEnabled();

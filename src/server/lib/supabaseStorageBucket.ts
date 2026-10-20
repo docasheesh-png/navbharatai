@@ -44,7 +44,7 @@ export interface BucketSpec {
   name: string;
   /**
    * `true` → anyone with the URL can READ the file (product images, avatars). Writes are still
-   * restricted to signed-in users. `false` → only signed-in users can read, via a signed URL.
+   * restricted to signed-in users. `false` → only the owner can read or mint a signed URL.
    */
   publicRead: boolean;
   /** Hard ceiling per file, in bytes. Enforced by Supabase itself, not by the app's own code. */
@@ -60,6 +60,7 @@ export function defaultBucketSpec(name = 'app-uploads'): BucketSpec {
 
 /** Single-quote a value for SQL. The names are validated too, but this is the layer that must not be skipped. */
 const lit = (v: string): string => `'${String(v).replace(/'/g, "''")}'`;
+const ident = (v: string): string => `"${v.replace(/"/g, '""')}"`;
 
 export type BucketSqlResult = { ok: true; sql: string } | { ok: false; message: string };
 
@@ -74,7 +75,7 @@ export type BucketSqlResult = { ok: true; sql: string } | { ok: false; message: 
  *   • WRITE (insert/update/delete) — signed-in users only, and only inside a folder named after their
  *     own uid. One user therefore cannot overwrite or delete another's file, which is the mistake a
  *     hand-written policy usually makes.
- *   • READ — everyone when `publicRead`, otherwise signed-in users only.
+ *   • READ — everyone when `publicRead`, otherwise the caller's own uid folder only.
  */
 export function bucketSetupSql(spec: BucketSpec): BucketSqlResult {
   const name = normalizeBucketName(spec?.name);
@@ -95,9 +96,14 @@ export function bucketSetupSql(spec: BucketSpec): BucketSqlResult {
     return '"' + id.replace(/"/g, '""') + '"';
   };
 
+  // Remove the pre-fix names too: long legacy identifiers were truncated by PostgreSQL.
+  const legacyDrops = ['read', 'insert', 'update', 'delete']
+    .map((suffix) => `drop policy if exists ${ident(`nbai_${name}_${suffix}`)} on storage.objects;`).join('\n');
+
   // `on conflict` + `drop policy if exists` make this safe to run again — a second build of the same
   // app must not fail because the bucket is already there.
   const sql = `
+${legacyDrops}
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (${lit(name)}, ${lit(name)}, ${spec.publicRead ? 'true' : 'false'}, ${Math.floor(spec.maxBytes)}, ${mimeSql})
 on conflict (id) do update

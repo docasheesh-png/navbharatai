@@ -61,7 +61,7 @@ export function recordedPlatformFee(txData: WalletCreditTx): number {
  */
 export function orderNetPaidInr(txData: WalletCreditTx): number {
   const amountPaid = typeof txData.amountPaid === 'number' && Number.isFinite(txData.amountPaid) ? txData.amountPaid : 0;
-  return Math.round((amountPaid - recordedPlatformFee(txData)) * 100) / 100;
+  return Math.max(0, Math.round((amountPaid - recordedPlatformFee(txData)) * 100) / 100);
 }
 
 /** The tokens a wallet order credits — the ONE formula both the credit and the clawback use. */

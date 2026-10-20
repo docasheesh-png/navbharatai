@@ -98107,6 +98107,33 @@ counted here. Original counts remain **4 terminal source classes / 0 historical 
 
 Rechecked the exact PR head and green GitHub CI, then merged #3853 with an expected-head lease (merge commit 68528197949135513d2df97e3b4dee667036059a). Admin explicitly said to merge and turn on the policy. Activation is a separate additive Cloud Build configuration change: `_WEAK_SCOPE_POLICY=on`, `_WEAK_BUILD_COST_CEILING_USD=1`; trigger-level rollback remains available with `off`. Provider keys, explicit ladder overrides, and Normal/Strong routing are not changed. Deployment and runtime confirmation are pending; do not infer live activation merely from the merge.
 
+## 2026-10-20 — Q-1226: one verified amount for paid credit and reversal
+
+The admin approved preparing the gateway-verified credit fix. The independent `amountPaid` and
+`balanceAdded` reads were the root cause: a malformed gross amount could buy zero tokens while the
+rupee view still rose. `computeCreditedWallet` now derives both deltas from `orderNetPaidInr`; invalid
+pure-helper inputs cannot reduce INR alone. `verifyPaymentInternal` strictly reads the confirmed
+provider amount, retains readable-mismatch refusal and the one-paisa tolerance, then revalidates the
+transaction-fresh order before using it. Gross and net are saved atomically with SUCCESS, wallet,
+reconciliation evidence and any pre-credit reversal markers. Later refunds therefore read exactly
+the basis used for the credit. Concurrent verification responses also read the committed net amount.
+
+Siblings covered: numeric legacy strings; malformed provider values; fee changes and amount/owner/
+product changes before the transaction; failed commits and duplicate concurrent calls; full/partial
+refunds and chargebacks before/after credit; gift minting and refund reduction; withdrawn pass
+settlement; store-pack credit and refund basis. Gift face value remains a separate product entitlement;
+paid top-ups preserve tracked/untracked gift fields and historical balance offsets. This intentionally
+does not adopt `mirroredCreditPatch`'s additional gift-field clamping as an unrelated policy migration.
+No new credit writer is introduced. The existing shared order arithmetic remains the credit/refund home.
+
+`aVerifiedPaymentCreditsOneAmount.test.ts` exercises the real settlement/reversal functions with an
+atomic in-memory database and mocked gateway, including 105,000 healthy amount/fee combinations.
+The old source-only coercion test now invokes the production reconciliation function; obsolete
+zero-token log expectations now describe the actual verified settlement. Historical SUCCESS orders
+are never blindly recredited: identifying and repairing previously affected live accounts remains a
+separate evidence-driven action. No live payment, balance mutation, deployment or merge is part of this
+change. Full verification and exact-head CI results belong in the PR record; this entry does not claim
+production repair or deployment.
 ## 2026-10-20 — Q-888: a settled webhook is acknowledged, a failed attempt is news, an outage is retried
 
 **The defect.** The signed-webhook route answered **400** to every `success: false` from
@@ -98157,3 +98184,15 @@ row is opened.
 merged while it ran, so main moved and the queue row still had to go on — a gate finishing on a state I was
 about to change would have produced a green I could honestly report and honestly believe about the wrong
 tree. One gate on the final state is both cheaper and the only one that means anything.
+
+
+### Q-1226 integration with concurrent Q-888 webhook settlement (2026-10-20)
+
+Main advanced to `6cdc155` while the payment verification gate was running. Preserve the newly merged
+`settled` versus retryable webhook contract alongside the gateway-normalized credit. A typed amount
+mismatch remains a settled refusal, including a mismatch on the transaction-fresh order; unreadable
+gateway data, changed owner/product, and failed transactions remain retryable. Missing fresh orders
+settle without any credit or entitlement. The existing webhook route is unchanged. Added a real signed
+webhook regression proving malformed stored amounts receive the correct net credit exactly once, and
+explicit refusal/retry assertions in the credit regressions. Both payment changes are retained; no
+external owner's changes are reverted. The previous-head suite is not a final combined-head pass.

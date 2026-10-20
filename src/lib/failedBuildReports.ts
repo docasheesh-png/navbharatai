@@ -1,4 +1,5 @@
 /** Private failed-report API contracts. No credentials or full reports in list rows. */
+import type { FailedReportAutopsyView } from './failedReportAutopsy';
 export interface FailedBuildRow {
   workspaceId: string;
   historyId: string;
@@ -7,6 +8,8 @@ export interface FailedBuildRow {
   endedAt: number;
   appLabel: string;
   rootCause: string | null;
+  reportDigest: string;
+  autopsy?: Pick<FailedReportAutopsyView, 'state' | 'revision'>;
 }
 export interface FailedBuildPage {
   reports: FailedBuildRow[];

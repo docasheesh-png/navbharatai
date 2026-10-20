@@ -98565,3 +98565,53 @@ session wrote.
 Another session added **375 new OPEN rows** (Q-1300–Q-2024). This morning the open table held a few dozen
 actionable rows; it now holds 517. Those rows are not touched here — a row somebody created an hour ago is
 theirs — but anyone reading "complete the remaining queue" needs to know the denominator moved.
+
+---
+
+## 2026-10-20 — Admin house ads: the admin's own products, shown to people who have not paid
+
+**Asked by the admin (2026-10-20):** *"admin panel me ads ka ek option banao! jahan admin apne kisi saman ka ads chala sake, admin — naam, description aur photo upload kare, aur user ko woh ads dikhne lage."* Placements, from the admin's own list: App Mart (a Sponsored tile between app tiles), Home (a small banner at the bottom), the success screen after publishing or posting to App Mart (a banner below the message, never an overlay), the phone app's App Mart (a bottom banner), and the public pages. **No full-screen ads** (the admin's ruling). **Only paid accounts are ad-free; a signed-in free user is shown ads like a visitor** (the admin's correction).
+
+### What was built (branch `claude/admin-house-ads`)
+
+| Piece | Where |
+|---|---|
+| The rules both sides share: places, limits, validation, the ONE status rule, pick-an-ad, the shape check on a served ad | `src/lib/houseAds.ts` |
+| The admin form's pure half (form → request body, DST-safe inclusive end date) and the picture crop (1200×300, JPEG, ≤ 300 KB, in the browser) | `src/lib/houseAdForm.ts`, `src/lib/houseAdImage.ts` |
+| Storage: two collections, `house_ads` (small) and `house_ad_images` (the picture), written picture-first / deleted ad-first | `src/server/lib/houseAdStore.ts` |
+| Who is shown an ad: `hasEverPaid` OR an active hosting plan ⇒ none; wallet unreadable ⇒ none | `src/server/lib/houseAdAudience.ts` |
+| Public routes `GET /api/ads/:placement`, `GET /api/ads/image/:id` | `src/server/routes/houseAds.ts` |
+| Admin routes `GET/POST /api/admin/ads`, `PUT/DELETE /api/admin/ads/:id` (admin token, audited) | `src/server/routes/admin.ts` |
+| Admin page **Money → Ads** (form, picture, live preview, list, on/off, edit, delete) | `src/components/admin/AdsPanel.tsx` |
+| The client's single way to ask, and the banner and tile | `src/lib/houseAdClient.ts`, `src/components/ads/` |
+| Screens that draw one | `NavAppStore.tsx` (tile, post-success, phone banner), `HomeView.tsx`, `PublishCelebration.tsx`, `PublishToNavStore.tsx` |
+
+Nothing changes for any user until the admin creates and turns on an ad: with no ad, every placement draws nothing.
+
+### Decisions taken without asking (all reversible; say so to change one)
+
+1. **"Dashboard" = Home.** There is no separate project-list screen; the banner is at the bottom of Home, which is also the phone app's home.
+2. **A link is optional and https-only**, so a tap can go to the admin's shop. No link ⇒ a picture and text, and no button.
+3. **Pictures are cropped to a 4:1 strip in the browser**, so the preview the admin approves is the file that is stored.
+4. **Each ad carries its own places and an optional start/end date**, and can be turned off without deleting it.
+5. **The Money tab now has two pages (Revenue, Ads)**, so the old page title "Money" became "Money · Revenue".
+6. **A change reaches every user within a minute** (the public list is read once a minute per instance; the admin's own instance sees it at once).
+7. **No counters** (impressions/clicks). Not asked for; the page says nothing it cannot back.
+
+### 🔴 ONE PLACEMENT NOT BUILT, ON PURPOSE — the server-rendered public pages (`/ai-app-builder`, `/pricing`, …)
+
+The admin listed "landing, pricing, blog, public pages". Those pages are static HTML for crawlers ("no script runs here"), and **they cannot tell who is reading**. A paying customer opening `/pricing` would be shown an ad — which breaks the admin's own rule (paid never sees one) and the hosting plan's own promise ("keeps NavBharatAI ad-free for you", `GalleryPanel.tsx`, `WebAppPlayer.tsx`). A tick box for a place that does nothing would be a control that lies, so `public_pages` is **absent from `HOUSE_AD_PLACEMENTS`** (a test fails if it comes back without a way to know the reader). There is also no blog in the repo.
+
+**Options, for the admin:** (a) leave the public pages ad-free — recommended, they are the pages that must stay fast and findable; (b) show the banner on the acquisition pages only (`/ai-app-builder`, `/indian-ai-assistant`, `/hindi-ai-assistant`, `/about`) and accept that a paying customer who opens one is shown it; (c) a small script that skips the banner when the browser holds a "paid" hint — this breaks the pages' "no script" design and the hint is not proof. **Status: 🟡 BLOCKED on that decision.**
+
+### Honest statement about the Privacy Policy
+
+The policy says NavBharatAI shows **no third-party advertising inside the product** (`privacyPolicy.ts`, pinned by `privacyPolicyTruth.test.ts`). That stays true **only while every ad here is the operator's own** — the admin form says "your own goods only". If the admin ever sells a slot to someone else, that sentence becomes false and must change first.
+
+### Proof, by reversion
+
+Thirteen bugs were put back one at a time and each made a test fail: a token that fails to verify treated as a visitor; the hosting-plan rule removed; a gifted balance counted as "paid"; an unreadable wallet counted as free; the picture signature check removed; SVG allowed; an http link allowed; a `javascript:` link in a served ad; an "off" ad still live; `public_pages` brought back; the client asking before sign-in is known; a viewer-blind cache key; the ad written before its picture.
+
+### Watch for on the first real ad
+
+Create one ad with every place ticked, then open Home, App Mart (5+ apps in the general view), publish an app and post one to App Mart, once as a signed-out visitor, once as a free signed-in user and once as a paid user — the paid user must see none. In the phone app only the bundle that carries this change shows it (a frontend change reaches phone users only through a fresh bundle); the server half is live at once.

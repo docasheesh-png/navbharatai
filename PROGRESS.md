@@ -98165,3 +98165,90 @@ active process lock is removed. This is a verification restart, not a green
 coverage claim. Audit append remains401 rows /119 individually enumerated items
 in2 reports,4 demonstrated terminal classes,0 historical app reruns and0 whole-
 report closures. No merge is authorized or performed.
+### 2026-10-20 — LOCAL next batch: three retained ledgers, not yet published or final-gated
+
+The isolated branch `codex/failed-build-next-ledgers-20261020` starts at
+`25a0c781528520619f8eac948fa620638d2211d8`, incorporating fresh main
+`3974c34d95db3f2c4384d1477317ba9cf275eacd`. Existing main/previous progress is preserved
+as an exact byte prefix; the closed register and all 400 earlier audit row states/owners stay intact.
+Only Q-1300 and primary notes Q-1304/Q-1307/Q-1309 are updated for the new retained itemization.
+
+Three fully cross-channel-reviewed retained ledgers are now recorded locally, each item with its
+own queue row: 6af23429 has 51 (Q-2025–Q-2075), b6283d2d has 42 (Q-2076–Q-2117), and
+12514b7f has 44 (Q-2118–Q-2161). Their 137 items are 129 OPEN / 8 genuine four-field BLOCKED;
+their five buckets are 15 observed recoveries / 11 workarounds / 51 skips / 17 still-broken /
+43 struggles. Missing command payloads, clipped previews and overlapping/mirrored observations
+are retained as explicit limits, not silently reconstructed. The fourth report's post-endedAt
+billing telemetry is excluded from terminal causality; the fifth report's local repair cancellation
+is distinct from its actual global cap and is not reported as a provider outage.
+
+Q-2162 is the active plain-TypeScript-server managed-launch class, IN PROGRESS on this next branch.
+The third report proves a 300.003-second foreground deadline; an inert helper counterexample
+proves current classifier discrepancy, while the exact deployed historical path/listener ownership
+is not replayed. Its individual historical item I015/Q-2039 remains OPEN pending scoped source
+proof. This contributor is not a fifth demonstrated historical terminal-root class.
+
+LOCAL next-batch scope: 5 ledgers / 256 individually queued retained items / 546 other reports
+awaiting repository item ledgers. Five-report-only buckets: 78 recoveries / 17 workarounds /
+76 skips / 21 still-broken / 64 struggles. Audit queue: 538 pending rows = 470 OPEN /
+17 IN PROGRESS / 51 four-field BLOCKED. The CSV changes only the three newly itemized rows;
+all original all-item-resolved, historical-rerun and whole-report-closure flags remain false.
+Six reports have structured generatedFiles payloads; other partial source can survive in tool previews.
+
+PR #3856 remains separate: 2 ledgers / 119 items / 549 remaining. Its old hosted suite failed
+one source-census 20-second timeout (40,154 passed / 1 failed / 73 skipped). The 25a integrated
+run was superseded and stopped while root repairs test performance under separately reserved
+Q-2163, without weakening assertions or raising timeouts. That primary row/correction and its
+later integration are outside this 538-row LOCAL draft. A new final primary gate is required;
+this next batch does not edit that PR or claim hosted green/merge.
+Original audited counts remain 4 demonstrated terminal platform classes / 0 historical app reruns /
+0 sixth-rule whole-report resolutions. Resume Q-2162 and recorded item-level prevention in this
+next branch; no sixth report is started. Publish this next batch only after its final gate passes;
+merge only after the admin explicitly names that PR. No source, test, commit, push or PR operation
+is part of this documentation checkpoint.
+
+
+### 2026-10-20 — next-batch rebase, approved platform-only closures and seven retained ledgers
+
+Fixed integration HEAD1 bf 8b 22a 03d 551 fb 27f 0 bb 622006 dff 18672c 2 ad/treeb 5e 3c 753 combines merged
+main 72c 3252d 0 faf 33 fd 51987 fbc 2b 9d 991f 7742953c and the later local census delta. Prior main and
+all earlier progress bytes remain intact. The old five-ledger/538-row draft above is superseded
+by this checkpoint, not rewritten. PR3856 was externally merged at 12:26:44 UTC. Its exact head
+5456d186caab683f5bec17f3aa5e0fb1506b6476 and main 72 share tree 813484 db 9c 1349164824 bf 025227175f 52b 3b 4f 0;
+required CI39418902451 had both build-and-test and queue-retry jobsSUCCESS on that exact tree.
+The older 5 dbfailed census run is a different head; the separate d 68 local gate passed 2,822 files / 40,289 tests / 67 skipped, all 14 additional
+checks and 14 database drills. This proves d 68 only; the new combined tree needs its own gate. No new PR has been created; root will integrate the later payments
+main change before final verification. Source/tests stayed frozen during this documentation work.
+
+Root approved closing twelve shared platform/source/CI rows only: Q1890–1893,Q1898–1899,
+Q1961–1962,Q2021–2024. Each has behavior reversion/sibling proof and exact merged source/CI
+evidence in docs/failed-build-audit-2026-10-20.md; IDs append to the closed register. This is
+not twelve historical applications or whole reports repaired. Four historical item rowsQ1928/
+Q1982–1984 becomeOPENowner — for remaining exact saved/served behavior evidence. Their source
+prevention credit remains, but no app replay or historical delivery equivalence is invented.
+
+Seven retained ledgers now enumerate 281 individually queued items:618b 61,cfd 58,6 af 51,b 62842,
+12514b44,78e 23,4 cf 2. The seven have 248 OPEN/0 IN PROGRESS/33 genuinefour-field BLOCKED, with 544 other
+reports awaiting repository item ledgers. Seven-report-only buckets:78 observedrecoveries/
+20 workarounds/84 skips/29 still-broken/70 struggles. PR3856's merged scope was 2 ledgers 119 items;
+this new branch adds 5 ledgers 162 items and 4 class/CIrows=166 new audit rows, then removes 12 merged
+platform rows: net+154 from mergedmain 400 →554 pending =497 OPEN/3 IN PROGRESS/54 four-field BLOCKED.
+The only active audit rowsQ2162,Q2163,Q2200 belong to codex/failed-build-next-ledgers-20261020.
+No future PR is claimed to add 554 new rows. Original all-item-closed/rerun/whole-report CSVflags
+remainfalse; userStop 4 cf remains authoritative and is not restarted or counted as an engine failure.
+
+Q-2162 directtyped-server lifecycle/shared literal revival:17 files 624 PASS/0 skip; isolatedbaseline
+37 behaviorFAIL/51 PASS, revivalconsumer 5 FAIL/83 PASS, final 88 PASS. HistoricalQ2039 remainsOPEN:
+the 300.003s/EADDRINUSE process sequence is not replayed. Q-2200 canonical 8 abort ETAclass:
+15 baselinebehaviorFAIL/3 healthycontrolsPASS→18 PASS;5 files 99 PASS/bothTSgreen. HistoricalQ2177
+remainsOPEN; no saved historical score or game is claimed repaired. Q-2163 stronger escape-aware
+census 18 PASS/oneCPU-V8 time 9.015s keeps unchanged 20 scap,2453 inputs and 18 policyentries; its
+final new-tree/hosted verification remains pending. Q-2201 isOPENowner — for advisory-cap delivery
+inference: current-source route transitions need behavioral reproduction; it is not the historic
+78 terminal cause or a fixed class. Futility timing/live narration/provider funding remain separate.
+
+Original audited counts remain 4 demonstrated terminal platform classes/0 historical app reruns/
+0 whole-report resolutions. This next branch is local/unpublished/not final-gated. Resume the new
+full gate after root's final-main integration and preserve every remaining item/class row.
+Publish once green; merge only after admin explicitly names the new PR. No commit/push/merge
+was performed by the documentation coordinator.

@@ -712,3 +712,20 @@ Q-963
 Q-1140
 Q-1141
 Q-1131
+
+# 2026-10-20:12 shared platform/source/CI classes only; historical item/report closure is not claimed.
+# PR3856 merged externally; head5456d186caab683f5bec17f3aa5e0fb1506b6476; main72c3252d0faf33fd51987fbc2b9d991f7742953c.
+# Exact shared tree813484db9c1349164824bf025227175f52b3b4f0; required CI39418902451 bothjobsSUCCESS.
+# Behavior reversion and sibling proofs: docs/failed-build-audit-2026-10-20.md. Separate local Q2163/newbranch gates remain pending.
+Q-1890
+Q-1891
+Q-1892
+Q-1893
+Q-1898
+Q-1899
+Q-1961
+Q-1962
+Q-2021
+Q-2022
+Q-2023
+Q-2024

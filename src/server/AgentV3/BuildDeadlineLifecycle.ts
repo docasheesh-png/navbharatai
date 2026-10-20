@@ -45,9 +45,5 @@ export async function joinBuildDeadlineFinalization(finalization: BuildDeadlineF
   await finalization?.join();
 }
 
-/** A deadline cannot authorize another writer while the current body is still retiring. */
-export function deadlineBodyExitMessage(filesChangedSoFar: number): { summary: string } {
-  const count = Number.isFinite(filesChangedSoFar) && filesChangedSoFar > 0 ? Math.floor(filesChangedSoFar) : 0;
-  const progress = count ? `${count} file${count === 1 ? '' : 's'} changed so far. ` : '';
-  return { summary: `Time limit reached — ${progress}The previous work is still stopping. Please retry after it finishes.` };
-}
+// Keep the established message module as the single source for observed progress and retry wording.
+export { deadlinePauseMessage as deadlineBodyExitMessage } from './DeadlinePause';

@@ -97558,3 +97558,14 @@ release or false exit marking. Existing behavioral deadline/lease tests exercise
 that invariant through actual lifecycle and transactional implementations. All
 final-source local gates must run again after this correction; remoteCI remains
 pending and PR #3852 is unmerged.
+
+### 2026-10-20 — Phase2 deadline message remains a single reachable module
+
+The subsequent preflight found the replaced deadline wording module unreachable.
+The deadline lifecycle now re-exports the established DeadlinePause helper,
+whose text matches the new body-exit hold: observed files changed, still stopping,
+retry after exit. Its original unit tests now prohibit saved/automatic-continuation
+promises and retain the no-fake-progress/near-success protections. The whole-source
+dead-code guard is unchanged; no exemption was added. That failed preflight was
+stopped and is not passing evidence. Focused and complete final-source checks
+must pass again before the updated PR head is pushed.

@@ -25,21 +25,31 @@
 // toward a log nobody can trace. Name, email, phone, mobile: those are the person's. The id is ours.
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripCodeComments } from '../src/server/AgentV3/stripCodeComments';
+import { sourceCensusFiles } from './helpers/sourceCensus';
 import { emailForLog, nameForLog, phoneForLog, webhookShapeForLog } from '../src/server/lib/piiForLog';
 
 const root = join(__dirname, '..');
 
-function serverFiles(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) { serverFiles(full, out); continue; }
-    if (!/\.ts$/.test(entry) || /\.test\.ts$/.test(entry)) continue;
-    out.push(full);
-  }
-  return out;
+/**
+ * 🔑 THE SHARED WALKER, NOT A PRIVATE ONE (2026-10-20).
+ *
+ * This file first hand-rolled its own `readdirSync` + `statSync` recursion. `tests/helpers/sourceCensus.ts`
+ * does the same walk and skips `.tmp-*` generated fixtures, which can vanish mid-walk — a private copy
+ * `statSync`s the disappearing path and fails CI for a reason that has nothing to do with what it checks.
+ * `tests/sourceCensusIsolation.test.ts` pins that behaviour, including that a REAL broken source still
+ * throws, so the skip cannot quietly swallow a genuine error.
+ *
+ * ⚠️ MEASURED WHILE MIGRATING, AND NOT SWEPT HERE ON PURPOSE: **109 other test files still hand-roll this
+ * walk.** The helper arrived hours ago in #3858, from another session, which migrated three. A 109-file
+ * mechanical sweep of another session's in-flight centralisation is exactly the race the concurrency rules
+ * forbid, and every one of those files has its own filter and ignore list to get wrong. The count is
+ * recorded as its own queue row instead; this change migrates only the census this session wrote.
+ */
+function serverFiles(dir: string): string[] {
+  return sourceCensusFiles(dir, (p) => /\.ts$/.test(p) && !/\.test\.ts$/.test(p));
 }
 
 /** A log call's whole argument text, per source line. Comments stripped: this file's own quotes of the

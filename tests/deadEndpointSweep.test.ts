@@ -103,7 +103,10 @@ function clientCalls(): Array<{ path: string; file: string }> {
   for (const file of files) {
     const src = stripMultilineTemplates(stripComments(readFileSync(file, 'utf8')));
     for (const m of [...src.matchAll(CALL)]) {
-      const path = m[1].replace(/\$\{[^}]*\}/g, SEGMENT).split('?')[0].replace(/\/$/, '');
+      const raw = m[1].replace(/\$\{[^}]*\}/g, SEGMENT).split('?')[0].replace(/\/$/, '');
+      // `/api/v1/...` is the canonical client path; apiVersionMiddleware rewrites it to the registered
+      // `/api/...` handler before routing, so the sweep resolves it the same way the server does.
+      const path = rewriteVersionedPath(raw) ?? raw;
       if (!path || path === '/api') continue;
       calls.push({ path, file: file.replace(process.cwd() + '/', '') });
     }

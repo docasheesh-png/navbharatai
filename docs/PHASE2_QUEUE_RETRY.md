@@ -55,6 +55,14 @@ preflight can open progress after one second; a later refusal then emits an hone
 retryable stream error and failed result without starting builder execution.
 HTTP stream establishment alone is not admission success.
 
+ZIP import obtains a verified lease before constructing or starting its sandbox.
+Busy ownership returns 409; unavailable or disabled coordination returns retryable
+503. Long imports keep their exact token alive until their actual work finishes,
+including after an HTTP disconnect. Observed Stop, uncertainty, takeover or local
+expiry blocks new sandbox operations and the durable merge. This is a check before
+each operation, not revocation of a provider call already in flight or an atomic
+source-store fence.
+
 ## Verification
 
 Required final-source local checks, the exact reviewed CI head and merge evidence

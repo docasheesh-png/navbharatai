@@ -97289,3 +97289,21 @@ The shared runtime is preserved. Safe lease hardening refuses unavailable/unveri
 **Phase 2 is not complete.** The rejected per-attempt runtime prototype remains locally on `codex/phase-2-build-safety` at `7c0642f`, not eligible to merge: fresh sandboxes change iframe origin and strand supported IndexedDB/localStorage/cookies/OAuth state, sandbox PostgreSQL/SQLite/uploads and generated session/JWT secrets. Passing source-file/container fault drills does not preserve those data. A stable isolated preview origin and verified state-preserving supervisor/drain or migration are required. Existing in-flight command and canonical-source fencing, external publishing/late-upload reconciliation, and automatic queued-step continuation across resumable windows remain open. The scoped sub-PR deliberately preserves runtime/source/snapshot behavior while these are designed. Details and evidence limits: `docs/PHASE2_QUEUE_RETRY.md`.
 
 Phases 3–6 remain unstarted in the owner's requested order. Configured staging, test account, stable preview proxy/domain reference and a spend limit have been requested for the remaining integration/benchmark work. A failure-only feed cannot establish an all-build success denominator. No permanent 100/100 score is asserted.
+
+
+### 2026-10-20 — Phase 2 checkpoint: ZIP admission and long-import lease sibling
+
+Full-suite preflight on the scoped queue/retry branch exposed the ZIP importer
+relying on fail-open admission. ZIP now claims verified ownership before actuator
+construction/ensureWorkspace, reports unavailable or disabled coordination as
+retryable503 and busy as409, and holds its exact token until actual finally.
+A response disconnect does not release it. Observed uncertainty/Stop/expiry/loss
+refuses new calls and durable merge; an already-running provider call is not fenced.
+The registered route and heartbeat helper pass55 focused tests, including180s
+virtual wall-clock imports; this is not180s production provider evidence.
+Two source-census tests now follow the extracted heartbeat and reused workspace
+identity, preserving Stop billing and clear-before-write checks. The worktree
+node_modules symlink was replaced with a real copied install, without changing
+package versions or weakening its directory guard. Final-source full checks and
+exact-head remote coverage/real-database drills are still required before push
+and merge. Phase2 remains IN PROGRESS; phases3–6 have not started.

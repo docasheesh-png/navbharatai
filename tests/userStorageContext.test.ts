@@ -23,8 +23,11 @@ describe('userStorageContext — connected-storage instruction for the builder',
     expect(ctx).toContain('S3_BUCKET');
     expect(ctx).toContain('AWS_ACCESS_KEY_ID');
     expect(ctx).toContain('DO NOT CREATE A NEW ONE');
-    // Presigned-upload guidance is carried through.
-    expect(ctx).toContain('presigned');
+    // Generation guidance must agree with the actual authenticated/quota-bound recipe.
+    expect(ctx).toContain('generate_storage("s3")');
+    expect(ctx).toContain('003_upload_quota.sql');
+    expect(ctx).toContain('session.access_token');
+    expect(ctx).not.toContain('uploads DIRECTLY');
   });
 
   it('emits a Cloudinary block with its exact env vars', () => {

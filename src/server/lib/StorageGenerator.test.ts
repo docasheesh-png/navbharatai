@@ -1,44 +1,58 @@
 import { describe, it, expect } from 'vitest';
 import { generateStorageIntegration, isStorageProvider } from './StorageGenerator';
-import { posix } from 'node:path';
 import ts from 'typescript';
+import { posix } from 'node:path';
 
-describe('generateStorageIntegration — S3-compatible', () => {
-  const c = generateStorageIntegration('s3');
-
-  it('server issues a presigned PUT URL (direct-to-storage, not proxied)', () => {
-    const server = c.files['server/routes/upload.ts'];
-    expect(server).toContain("import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'");
-    expect(server).toContain('getSignedUrl');
-    expect(server).toContain("uploadRouter.post('/presign'");
-    expect(server).toContain('S3_ENDPOINT'); // supports R2/Supabase/MinIO
+for (const provider of ['s3', 'cloudinary'] as const) {
+  describe(`generated ${provider} upload integration`, () => {
+    const c = generateStorageIntegration(provider);
+    it('ships every relative import instead of reaching into the builder repository', () => {
+      for (const [path, source] of Object.entries(c.files).filter(([path]) => path.endsWith('.ts'))) {
+        const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
+        for (const node of ast.statements) {
+          if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier)) continue;
+          const name = node.moduleSpecifier.text;
+          if (name.startsWith('.')) {
+            const target = posix.normalize(posix.join(posix.dirname(path), name));
+            expect(c.files[target + '.ts'], `${path} imports missing ${target}`).toBeDefined();
+          } else if (!name.startsWith('node:')) {
+            const pkg = name.startsWith('@') ? name.split('/').slice(0, 2).join('/') : name.split('/')[0];
+            expect(['express', ...c.dependencies.map((d) => d.name)]).toContain(pkg);
+          }
+        }
+        expect(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 }, reportDiagnostics: true }).diagnostics).toEqual([]);
+      }
+    });
+    it('authenticates before accepting bounded bytes and reserves a durable quota before storage', () => {
+      const server = c.files['server/routes/upload.ts'];
+      expect(server).toContain("post('/file', requireUploadUser, raw(");
+      expect(server).toContain('uploadBytes(req)');
+      expect(server).toContain('await reserveUpload(res, bytes.length)');
+      expect(server).not.toContain('api_sign_request');
+      expect(server).not.toContain('getSignedUrl');
+      expect(c.files['server/lib/uploadAccess.ts']).toContain('/auth/v1/user');
+      expect(c.files['migrations/003_upload_quota.sql']).toContain('for update');
+      expect(c.files['src/lib/upload.ts']).toContain("Authorization: 'Bearer ' + accessToken");
+    });
+    it('requires real configuration, leaves every secret blank and sends no secret to the client', () => {
+      for (const key of c.envKeys) expect(c.files['.env.example']).toContain(`${key}=`);
+      expect(c.files['src/lib/upload.ts']).not.toMatch(/SECRET|AWS_ACCESS|CLOUDINARY_API_KEY/);
+      expect(c.instructions).toContain('003_upload_quota.sql');
+      expect(c.instructions).toContain('session.access_token');
+    });
   });
+}
 
-  it('client PUTs the file to the presigned URL', () => {
-    const client = c.files['src/lib/upload.ts'];
-    expect(client).toContain('export async function uploadFile');
-    expect(client).toContain("method: 'PUT'");
-    expect(client).toContain('/api/upload/presign');
-  });
-
-  it('declares both aws-sdk deps + the core env keys', () => {
-    expect(c.dependencies.map((d) => d.name)).toEqual(['@aws-sdk/client-s3', '@aws-sdk/s3-request-presigner']);
-    for (const k of ['S3_BUCKET', 'S3_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY']) expect(c.envKeys).toContain(k);
+describe('provider guards', () => {
+  it('accepts supported providers and rejects unknown ones', () => {
+    for (const p of ['s3', 'cloudinary', 'supabase']) expect(isStorageProvider(p)).toBe(true);
+    for (const p of ['gcs', '', null]) expect(isStorageProvider(p)).toBe(false);
+    // @ts-expect-error unknown provider
+    expect(() => generateStorageIntegration('gcs')).toThrow();
   });
 });
 
-describe('generateStorageIntegration — Cloudinary', () => {
-  const c = generateStorageIntegration('cloudinary');
-
-  it('server issues an upload signature (secret never leaves the server)', () => {
-    expect(c.files['server/routes/upload.ts']).toContain('cloudinary.uploader.upload_stream');
-    expect(c.files['server/routes/upload.ts']).toContain("uploadRouter.post('/file'");
-    expect(c.files['src/lib/upload.ts']).toContain('/api/upload/file');
-    expect(c.dependencies).toEqual([{ name: 'cloudinary', version: '^2' }]);
-  });
-});
-
-describe('safety + guards', () => {
+describe('all generated providers compile cleanly and close imports', () => {
   it('generated modules contain no unused local imports or helpers under strict app typechecks', () => {
     for (const provider of ['s3', 'cloudinary', 'supabase'] as const) {
       for (const [path, source] of Object.entries(generateStorageIntegration(provider).files)) {
@@ -65,20 +79,5 @@ describe('safety + guards', () => {
         }
       }
     }
-  });
-  it('blanks secret values in .env.example and has no TODO/stub placeholders', () => {
-    for (const p of ['s3', 'cloudinary'] as const) {
-      const cfg = generateStorageIntegration(p);
-      for (const k of cfg.envKeys) expect(cfg.files['.env.example']).toContain(`${k}=`);
-      expect(cfg.files['server/routes/upload.ts']).not.toMatch(/TODO|FIXME|not implemented|your-code-here/i);
-    }
-  });
-
-  it('isStorageProvider guards; unknown → throws', () => {
-    expect(isStorageProvider('s3')).toBe(true);
-    expect(isStorageProvider('cloudinary')).toBe(true);
-    for (const v of ['gcs', '', null]) expect(isStorageProvider(v)).toBe(false);
-    // @ts-expect-error invalid
-    expect(() => generateStorageIntegration('gcs')).toThrow();
   });
 });

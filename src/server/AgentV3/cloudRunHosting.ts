@@ -219,6 +219,8 @@ export interface ServiceSpecInput {
  */
 export function buildServiceSpec(input: ServiceSpecInput): Record<string, unknown> {
   return {
+    // A new publish must release a previous rollback's pinned traffic target.
+    traffic: [{ type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', percent: 100 }],
     template: {
       // 🔒 Never the default account: whatever this identity can do, every line of the user's code can do.
       serviceAccount: input.serviceAccount,

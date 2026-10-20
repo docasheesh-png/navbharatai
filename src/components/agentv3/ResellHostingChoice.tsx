@@ -16,6 +16,7 @@ interface ResellSide {
   canStart: boolean;
   stopRef: string | null;
   terms?: readonly string[];
+  purchasePath?: '/api/agentv3/resell/database' | '/api/agentv3/resell/database/dedicated';
   /** RESELL_AUTO_RENEW: set on a paid row — whether it renews, so the switch can be shown. */
   autoRenew?: { on: boolean; ref: string; expiresAt: string };
 }
@@ -37,7 +38,6 @@ export interface ResellHostingChoiceProps {
 }
 
 const SERVER_PRICE = addonById('server')?.priceInr ?? 0;
-const DB_PRICE = addonById('shared_db')?.priceInr ?? 0;
 
 export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSettings, busy }: ResellHostingChoiceProps) {
   const [options, setOptions] = useState<ResellOptions | null>(null);
@@ -66,7 +66,9 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
       ? '/api/agentv3/resell/server'
       : kind === 'dedicated'
         ? '/api/agentv3/resell/database/dedicated'
-        : '/api/agentv3/resell/database';
+        : options?.database.purchasePath === '/api/agentv3/resell/database/dedicated'
+          ? '/api/agentv3/resell/database/dedicated'
+          : '/api/agentv3/resell/database';
     const timeout = kind === 'server' ? 10 * 60_000 : LONG_REQUEST_TIMEOUT_MS.provisionDatabase;
     try {
       const res = await authedFetch(path, {
@@ -173,7 +175,7 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
       </div>
       <p className="text-[11.5px] text-muted leading-relaxed">
         You can host it yourself, and you can connect your own database. Both stay free from us.
-        A database and API from NavBharatAI is ₹{DB_PRICE} for 30 days — both together, on the servers we already run, not a new machine.
+        Choose a database below to see its price and terms. Payment is taken only after it is ready.
         A custom server, once your plan's servers are full, is ₹{SERVER_PRICE}, taken only after it is live.
         Neither is sold from the add-on list. When auto-renew is shown, they renew every 30 days from your wallet until you switch it off here.
       </p>

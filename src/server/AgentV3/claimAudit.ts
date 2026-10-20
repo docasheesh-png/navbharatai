@@ -64,7 +64,7 @@ export interface MeasuredFacts {
    */
   fakeFeatures?: readonly string[];
   /** Optional precise evidence survives kind-only compatibility callers; local paths need wiring, not assumed keys. */
-  fakeFeatureEvidence?: readonly { kind: string; evidence?: 'local-login-path' }[];
+  fakeFeatureEvidence?: readonly { kind: string; evidence?: 'local-login-path' | 'local-upload-path' }[];
   /**
    * What the phone-size layout check found (mobileLayoutCheck.ts): 'passed' (fits, controls big enough to
    * tap), 'failed' (sideways scroll or too-small controls), 'not-run' (it did not measure the app). A size
@@ -444,6 +444,8 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
       claimed: `that ${spec.label} works`,
       measured: fake === 'login' && facts.fakeFeatureEvidence?.some((f) => f.kind === fake && f.evidence === 'local-login-path')
         ? `${spec.measured} — this local sign-in handler creates demo state and needs real authentication wiring; adding keys alone does not connect it`
+        : fake === 'upload' && facts.fakeFeatureEvidence?.some((f) => f.kind === fake && f.evidence === 'local-upload-path')
+          ? 'this upload handler only displays local demo success and needs real upload wiring with a confirmed result; adding keys alone does not connect it'
         : `${spec.measured} — it is a demo until the real provider's key is added (the red line on the app's screen says which)`,
     });
   }

@@ -19,6 +19,11 @@
 
 import { isInertCommand } from './inertCommand';
 import { createHash } from 'node:crypto';
+import { isPlanningOnlyRole, PLAN_YOURSELF_NOTE } from './AgentRegistry';
+import { defaultToolCatalog, isRecipeName, recipeListing } from './ToolCatalog';
+
+/** These tools MAY change the world; only their exact observed early-return receipts say otherwise. */
+const EFFECT_RECEIPT_TOOLS: ReadonlySet<string> = new Set(['update_preview', 'task', 'run_recipe']);
 
 /**
  * 🔒 THE ONLY TOOLS A BAN MAY EVER APPLY TO — and the narrowness is the whole safety argument.
@@ -74,6 +79,59 @@ export interface RepeatProbeState {
   mutations: number;
   /** signature → the `mutations` value when it was last counted. Absent ⇒ never seen. */
   seenAt: Map<string, number>;
+  /** Dispatch-proven no-effect invocation ID → full name/input signature (Q-1899). */
+  noEffectCalls: Map<string, string>;
+}
+
+/**
+ * A successful dispatcher early return need not be a mutation. Match the source-proven invocation AND
+ * its entire receipt, with the real before/after change count. Worker advice, recipe execution and a
+ * rebuild/heal with no source diff are still useful; failures or unmatched evidence remain conservative.
+ */
+export function noteToolEffect(
+  state: RepeatProbeState,
+  call: { id?: unknown; name?: unknown; input?: unknown },
+  result: { content?: unknown; is_error?: unknown },
+  before: number | null,
+  after: number | null,
+): void {
+  if (typeof call.id !== 'string') return;
+  state.noEffectCalls.delete(call.id); // a reused ID never inherits another invocation's receipt
+  if (typeof call.name !== 'string' || !EFFECT_RECEIPT_TOOLS.has(call.name)) return;
+  if (before === null || after === null || !Number.isFinite(before) || before < 0 || before !== after
+    || result.is_error !== false || typeof result.content !== 'string') return;
+  const input = call.input && typeof call.input === 'object' && !Array.isArray(call.input)
+    ? call.input as Record<string, unknown> : {};
+  let noEffect = false;
+  if (call.name === 'update_preview') {
+    const port = typeof input.port === 'number' ? input.port : typeof input.port === 'string' ? Number(input.port) : NaN;
+    noEffect = Number.isInteger(port) && port >= 1 && port <= 65535
+      && result.content === `The live preview on port ${port} is already published and no file has changed since — nothing to refresh. Do NOT call update_preview again until you change a file.`;
+  } else if (call.name === 'task') {
+    noEffect = typeof input.role === 'string' && isPlanningOnlyRole(input.role)
+      && typeof input.instruction === 'string' && result.content === PLAN_YOURSELF_NOTE;
+  } else {
+    // These are exactly run_recipe's pre-execution branches, using the same live catalogue/schema.
+    const recipe = typeof input.name === 'string' ? input.name : undefined;
+    if (!isRecipeName(recipe)) {
+      const lead = recipe && recipe !== 'list' ? `There is no recipe called "${recipe}". ` : '';
+      noEffect = result.content === `${lead}Available recipes and their inputs:\n\n${recipeListing()}`;
+    } else {
+      const inner = input.input;
+      const hasInput = !!inner && typeof inner === 'object' && !Array.isArray(inner) && Object.keys(inner).length > 0;
+      const def = defaultToolCatalog().find((tool) => tool.name === recipe);
+      const required = (def?.input_schema as { required?: string[] } | undefined)?.required ?? [];
+      noEffect = !hasInput && required.length > 0
+        && result.content === `run_recipe: "${recipe}" needs input. Its inputs:\n\n${recipeListing(recipe)}`;
+    }
+  }
+  if (noEffect) state.noEffectCalls.set(call.id, probeSignature(call.name, call.input));
+}
+
+/** Evidence belongs to this exact invocation; it can never make an edit or another tool a no-op. */
+export function isNoEffectToolCall(state: RepeatProbeState, call: { id?: unknown; name?: unknown; input?: unknown }): boolean {
+  return typeof call.name === 'string' && EFFECT_RECEIPT_TOOLS.has(call.name) && typeof call.id === 'string'
+    && state.noEffectCalls.get(call.id) === probeSignature(call.name, call.input);
 }
 
 /**
@@ -106,17 +164,22 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
  */
 export function noteMutations(
   state: RepeatProbeState,
-  toolUses: ReadonlyArray<{ name?: unknown; input?: unknown }>,
+  toolUses: ReadonlyArray<{ id?: unknown; name?: unknown; input?: unknown }>,
 ): void {
+  const before = state.mutations;
   for (const tu of toolUses) {
     if (typeof tu?.name !== 'string' || !MUTATING_TOOLS.has(tu.name)) continue;
     if (isInertCommandCall(tu)) continue; // it changed nothing, so nothing is a new question
+    if (isNoEffectToolCall(state, tu)) continue; // a successful no-change/help receipt cannot reset itself
     state.mutations += 1;
   }
+  // A mixed turn made useful work: its earlier already-current receipts cannot describe the new
+  // epoch. Be conservative even when the real mutation followed a batch of unchanged previews.
+  if (state.mutations > before) state.noEffectCalls.clear();
 }
 
 export function newRepeatProbeState(): RepeatProbeState {
-  return { counts: new Map(), steerAt: new Map(), banned: new Set(), mutations: 0, seenAt: new Map() };
+  return { counts: new Map(), steerAt: new Map(), banned: new Set(), mutations: 0, seenAt: new Map(), noEffectCalls: new Map() };
 }
 
 export function loopGuardEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -197,6 +260,20 @@ export function recordAndCheckRepeat(
  */
 export function repeatProbeSteer(toolName: string, times: number, threshold = 3): string {
   const escalated = times >= threshold * 2;
+  // update_preview may genuinely rebuild or heal without a file diff, so it is NEVER banned. Its
+  // observed no-effect repetitions still reach FINAL and the existing bounded no-op ending below.
+  if (toolName === 'update_preview') {
+    return `${escalated ? '[LOOP GUARD — FINAL]' : '[LOOP GUARD]'} The same preview request has repeated ${times} times without a useful change. `
+      + 'The published preview is already current. Stop refreshing it: make the next requested source change, use a different check, or finish with the evidence already available. '
+      + (escalated ? 'If this run keeps asking only for unchanged previews or other no-op steps, it will end honestly. ' : '')
+      + 'A preview that actually rebuilds or heals remains allowed.';
+  }
+  if (toolName === 'task' || toolName === 'run_recipe') {
+    return `${escalated ? '[LOOP GUARD — FINAL]' : '[LOOP GUARD]'} The same \`${toolName}\` request has returned only the same planning/catalogue guidance ${times} times without doing work. `
+      + 'Use the inputs and guidance already provided: write the requested change, delegate to an actual worker, or execute the recipe with its required input. '
+      + (escalated ? 'If this run keeps asking only for the same no-effect guidance, it will end honestly. ' : '')
+      + 'Real worker and recipe execution remain allowed.';
+  }
   const head = escalated
     ? `[LOOP GUARD — FINAL] You have now issued the SAME \`${toolName}\` call ${times} times, INCLUDING after ` +
       `being told to stop. This call is banned for the rest of this build — issuing it again wastes the ` +
@@ -249,13 +326,16 @@ export function bannedProbeMessage(toolName: string): string {
  */
 export function collectRepeatProbeSteer(
   state: RepeatProbeState,
-  toolUses: ReadonlyArray<{ name?: unknown; input?: unknown }>,
+  toolUses: ReadonlyArray<{ id?: unknown; name?: unknown; input?: unknown }>,
   threshold = 3,
 ): string | null {
   const steers: string[] = [];
   for (const tu of toolUses) {
     try {
       const name = typeof tu?.name === 'string' ? tu.name : 'tool';
+      // Same-turn real effects can share a spelling. Only exact dispatch-proven early returns earn
+      // the no-effect steer; a useful worker/recipe/publish is never told it only returned guidance.
+      if (EFFECT_RECEIPT_TOOLS.has(name) && !isNoEffectToolCall(state, tu)) continue;
       const s = recordAndCheckRepeat(state, name, tu?.input, threshold);
       if (s) steers.push(s);
     } catch { /* never let the guard break a build */ }
@@ -298,9 +378,10 @@ export const MAX_NO_OP_TURNS_AFTER_FINAL = 3;
 
 /** Is every call in this turn a no-op — an empty command or a refused probe? PURE over the injected check. */
 export function isNoOpTurn(
-  toolUses: ReadonlyArray<{ name?: unknown; input?: unknown }>,
+  toolUses: ReadonlyArray<{ id?: unknown; name?: unknown; input?: unknown }>,
   banned: (name: string, input: unknown) => boolean,
+  provenNoEffect: (call: { id?: unknown; name?: unknown; input?: unknown }) => boolean = () => false,
 ): boolean {
-  return toolUses.length > 0 && toolUses.every((tu) => isInertCommandCall(tu) || (typeof tu?.name === 'string' && banned(tu.name, tu.input)));
+  return toolUses.length > 0 && toolUses.every((tu) => isInertCommandCall(tu) || provenNoEffect(tu) || (typeof tu?.name === 'string' && banned(tu.name, tu.input)));
 }
 

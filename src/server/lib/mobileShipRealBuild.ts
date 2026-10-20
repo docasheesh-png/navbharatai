@@ -29,6 +29,7 @@ import { classifyBuildFailure } from './mobileBuildRepair';
 import { detectProjectKind } from './mobileProjectAssembler';
 import { envFlag } from './envFlag';
 import { ensureWorkspaceFilesInSandbox } from '../AgentV3/sandboxSeed';
+import { applySnapshotRestore, snapshotRestoreComplete, snapshotRestoreStopped } from '../AgentV3/snapshotRestore';
 import type { VerifyFix } from './mobileBuildAiRepair';
 
 /** Kill switch. Unset means ON: the check makes the ship cheaper, so it is the default. */
@@ -215,6 +216,8 @@ export interface RepairVerifyOptions {
   /** The failure class, so a class the sandbox cannot judge is refused before a machine is touched. */
   code: string;
   budgetMs?: number;
+  /** Optional caller cancellation/ownership signal; checked again after every awaited boundary. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -268,8 +271,10 @@ export function makeRepairVerifier(
   if (!actuator || !workspaceId) return undefined;
   if (!sandboxCanJudge(opts)) return undefined;
   const budgetMs = opts.budgetMs ?? realBuildBudgetMs();
+  const interrupted = () => ({ ran: false as const, reason: 'interrupted', blocked: true as const });
 
   return async (repoChanged) => {
+    if (opts.signal?.aborted) return interrupted();
     // The candidate, re-keyed by SANDBOX path. A repository path with no sandbox home is dropped here.
     const changed: Record<string, string> = {};
     for (const [repoPath, content] of Object.entries(repoChanged)) {
@@ -278,59 +283,99 @@ export function makeRepairVerifier(
     }
     // Presence, then seed, then presence again — a read that still fails means no machine holds the app.
     if (!(await sandboxHoldsApp(actuator, workspaceId))) {
+      if (opts.signal?.aborted) return interrupted();
       if (typeof actuator.listFiles === 'function') {
         await ensureWorkspaceFilesInSandbox(
-          actuator as { listFiles: (w: string) => Promise<string[]>; writeFile: RealBuildActuator['writeFile'] },
+          {
+            listFiles: (workspace) => actuator.listFiles!(workspace),
+            writeFile: async (workspace, path, content) => {
+              if (opts.signal?.aborted) throw new Error('repair verifier stopped before sandbox seed');
+              await actuator.writeFile(workspace, path, content);
+            },
+          },
           workspaceId,
         ).catch(() => undefined);
       }
-      if (!(await sandboxHoldsApp(actuator, workspaceId))) return { ran: false, reason: 'no-sandbox' };
+      if (opts.signal?.aborted) return interrupted();
+      const holdsApp = await sandboxHoldsApp(actuator, workspaceId);
+      if (opts.signal?.aborted) return interrupted();
+      if (!holdsApp) return { ran: false, reason: 'no-sandbox' };
     }
+    if (opts.signal?.aborted) return interrupted();
 
     // Snapshot what we are about to overwrite. A path the sandbox does not have is skipped, not created.
     const before: Record<string, string> = {};
     for (const path of Object.keys(changed)) {
+      if (opts.signal?.aborted) return interrupted();
       try {
         before[path] = await actuator.readFile(workspaceId, path);
       } catch { /* not in the sandbox — skipped below */ }
     }
+    if (opts.signal?.aborted) return interrupted();
     const toWrite = Object.keys(changed).filter((p) => p in before);
     if (toWrite.length === 0) return { ran: false, reason: 'nothing-to-test' };
+    const landed = new Set<string>();
 
-    const restore = async (only?: (path: string) => boolean): Promise<void> => {
-      for (const path of toWrite) {
-        if (only && !only(path)) continue;
-        await actuator.writeFile(workspaceId, path, before[path]).catch(() => undefined);
+    const restore = async (only?: (path: string) => boolean) => {
+      const plan = { write: Object.fromEntries(toWrite.filter((path) => landed.has(path) && (!only || only(path))).map((path) => [path, before[path]])), remove: [] };
+      const outcome = await applySnapshotRestore(plan, {
+        stopped: () => snapshotRestoreStopped(opts.signal),
+        write: (path, content) => actuator.writeFile(workspaceId, path, content),
+        remove: async () => ({ exitCode: 1 }), // the verifier never creates files to remove
+      });
+      if (snapshotRestoreComplete(plan, outcome)) return undefined;
+      return { ran: false as const, reason: outcome.stopped ? 'interrupted' : 'restore-incomplete', blocked: true as const };
+    };
+    const interruptedAfterWrite = async () => {
+      // A finite budget ending may still undo its own landed candidate. Stop/lost ownership may not.
+      if (!snapshotRestoreStopped(opts.signal)) {
+        const blocked = await restore();
+        if (blocked) return blocked;
       }
+      return interrupted();
     };
 
     try {
-      for (const path of toWrite) await actuator.writeFile(workspaceId, path, changed[path]);
+      for (const path of toWrite) {
+        if (opts.signal?.aborted) return await interruptedAfterWrite();
+        await actuator.writeFile(workspaceId, path, changed[path]);
+        landed.add(path);
+      }
     } catch {
-      await restore();
+      const blocked = await restore();
+      if (blocked) return blocked;
       return { ran: false, reason: 'unavailable' };
     }
+    if (opts.signal?.aborted) return await interruptedAfterWrite();
 
     let result: { success: boolean; logs: string } | null = null;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       result = await Promise.race([
         actuator.build(workspaceId),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), budgetMs)),
+        new Promise<null>((resolve) => { timeout = setTimeout(() => resolve(null), budgetMs); }),
       ]);
     } catch {
-      await restore();
+      const blocked = await restore();
+      if (blocked) return blocked;
       return { ran: false, reason: 'unavailable' };
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
     if (!result) {
-      await restore();
+      const blocked = await restore();
+      if (blocked) return blocked;
       return { ran: false, reason: 'timed-out' };
     }
+    if (opts.signal?.aborted) return await interruptedAfterWrite();
     if (result.success) {
       // Keep the app's own healed source in the workspace; put every repository-only file back.
-      await restore((p) => !isAppSource(p));
+      const blocked = await restore((p) => !isAppSource(p));
+      if (blocked) return blocked;
       return { ran: true, ok: true };
     }
-    await restore();
+    const blocked = await restore();
+    if (blocked) return blocked;
     const read = readRealBuildFailure(result.logs);
     return { ran: true, ok: false, log: String(result.logs || '').slice(-6000), summary: read.summary };
   };

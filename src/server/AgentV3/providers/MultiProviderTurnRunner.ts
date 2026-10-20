@@ -24,7 +24,7 @@ import { plannedModelOf } from '../runnerChainSummary';
 import { modelAlwaysReasons } from './glmThinking';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
-import { isModelUnavailableError, isProviderBalanceError } from '../providerErrorClass';
+import { isFatalProviderError, isModelUnavailableError, isProviderBalanceError } from '../providerErrorClass';
 import { isBudgetEndedError, isSlowStreamAbandon, isSilentAbandon, providerNeverAnswered, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
 import type { WasteKind } from '../providerWaste';
 import { isStarvedBudgetError, turnStarvedItsBudget } from '../floorBudget';
@@ -160,18 +160,7 @@ export interface MultiProviderOptions {
  * provider must be marked dead for the remainder of the run. Deliberately narrow: overloads, rate
  * limits, timeouts and 5xx are TRANSIENT and stay retryable. PURE + unit-tested.
  */
-const FATAL_PROVIDER_PATTERNS: readonly RegExp[] = [
-  /\bauthentication_error\b/i,            // bad/revoked API key (Anthropic error type)
-  /\bpermission_error\b/i,                // key lacks access to the model
-  /invalid (?:x-)?api[- ]?key/i,          // generic invalid-key phrasing
-  /api key (?:is )?(?:invalid|expired|revoked|disabled)/i,
-  /account (?:is )?(?:disabled|suspended|deactivated)/i,
-];
-
-export function isFatalProviderError(error: unknown): boolean {
-  const text = error instanceof Error ? error.message : String(error ?? '');
-  return isProviderBalanceError(error) || FATAL_PROVIDER_PATTERNS.some((re) => re.test(text));
-}
+export { isFatalProviderError } from '../providerErrorClass';
 
 /** A TIMEOUT failure (transient class, but grind-prone — see the consecutive-timeout bench). Pure. */
 export function isTimeoutProviderError(error: unknown): boolean {

@@ -2517,7 +2517,10 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      `decision.scaffold` already refuses imports and `mayModify: !isImportTurn` independently
     //      preserves the read-only turn. The callback records tsconfig only after a guarded write lands;
     //      deferring the remaining scaffold can therefore never leave test TS breaking the app's build.
-    expect(count).toBe(35);
+    // Two unconditional restore writers moved to the shared applied-outcome restore door (Q-1891).
+    // It reconciles captured writes only after a sandbox operation succeeds; no new survey writer.
+    expect(code).toContain('reconcileCapturedWrites(writtenFiles, { ...applied, unchanged: 0 })');
+    expect(count).toBe(33);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

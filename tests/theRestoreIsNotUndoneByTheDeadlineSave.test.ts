@@ -11,11 +11,15 @@ const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), '
 
 describe('the restore is not undone by the deadline save (GT-4)', () => {
   it('the restore branch reconciles writtenFiles before the snapshot is saved', () => {
-    const start = route.indexOf("decision.action === 'restore'");
+    const start = route.indexOf("} else if (decision.action === 'restore')");
     const end = route.indexOf('greenGuardRestoreFacts =', start);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
-    expect(route.slice(start, end)).toContain('reconcileCapturedWrites(writtenFiles, plan)');
+    const branch = route.slice(start, end);
+    expect(branch).toContain('await applyGreenSnapshotRestore(plan)');
+    expect(branch).toContain('persisted = snapshotRestoredFiles(toSave, plan, outcome)');
+    const door = route.slice(route.indexOf('const applyGreenSnapshotRestore'), route.indexOf('const revertToGreenSnapshot'));
+    expect(door).toContain('reconcileCapturedWrites(writtenFiles, { ...applied, unchanged: 0 })');
   });
 
   it('reconcile puts the good content back and drops files the restore removed', () => {

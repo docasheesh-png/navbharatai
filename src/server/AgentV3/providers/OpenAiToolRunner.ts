@@ -62,7 +62,7 @@ export interface OpenAiChatClient {
         stream?: true;
         /** Ask the provider to put token usage on the final chunk — a stream carries none otherwise. */
         stream_options?: { include_usage: true };
-      }): Promise<OpenAiCompletionLike | OpenAiChatStream>;
+      }, options?: { signal?: AbortSignal }): Promise<OpenAiCompletionLike | OpenAiChatStream>;
     };
   };
 }
@@ -472,10 +472,15 @@ export class OpenAiToolRunner implements TurnRunner {
     // one optional field and nothing else: re-sending a genuinely bad request unchanged would be a
     // retry loop around a deterministic failure, which the fourth absolute rule forbids by name. And
     // the retry happens only when we actually SENT the field — never on a call that had no opinion.
+    // Cancel the HTTP request as well as our wait, including while the provider has not opened a
+    // stream yet. A stream controller is available only after headers arrive. This asks the SDK to
+    // stop transport work; actual provider usage remains whatever the provider reports.
+    const requestAbort = new AbortController();
+    const requestOptions = { signal: requestAbort.signal };
     let waitingForResponse = true;
     const call = async (): Promise<OpenAiCompletionLike | OpenAiChatStream> => {
       try {
-        return await this.client.chat.completions.create(request);
+        return await this.client.chat.completions.create(request, requestOptions);
       } catch (err) {
         if (!('thinking' in request) || !isThinkingParamRejection(err)) throw err;
         rememberThinkingParamRejected(thinkingModel);
@@ -486,7 +491,7 @@ export class OpenAiToolRunner implements TurnRunner {
         if (!waitingForResponse) throw err;
         if (turnDeadline(configuredMs, params.deadlineAt).expired) throw new Error(BUDGET_EXHAUSTED_MESSAGE);
         const { thinking: _dropped, ...withoutThinking } = request;
-        return this.client.chat.completions.create(withoutThinking);
+        return this.client.chat.completions.create(withoutThinking, requestOptions);
       }
     };
 
@@ -555,6 +560,7 @@ export class OpenAiToolRunner implements TurnRunner {
     const opened = Promise.resolve(call()).then((v) => { openedAt = Date.now(); return v; });
     const closeIfLate = (e: unknown) => {
       waitingForResponse = false;
+      requestAbort.abort();
       opened.then((late) => { if (isChatStream(late)) { try { late.controller?.abort(); } catch { /* best-effort */ } } }, () => { /* already failed */ });
       throw e;
     };
@@ -580,11 +586,11 @@ export class OpenAiToolRunner implements TurnRunner {
           return withTimeout(opened, Math.max(1, firstAnswerMs - silentBoundMs), ordinaryBoundMessage); // ≥1 ms: 0 would disable the bound
         }
         throw e;
-      }).catch(closeIfLate),
+      }),
       params.signal,
       // A stream that opens AFTER the stop is closed on arrival, so it never generates for nobody.
       (late) => { if (isChatStream(late)) { try { late.controller?.abort(); } catch { /* best-effort */ } } },
-    );
+    ).catch(closeIfLate);
 
     let completion: OpenAiCompletionLike;
     let streamedText = false;

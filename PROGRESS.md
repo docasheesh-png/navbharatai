@@ -97755,6 +97755,353 @@ Verification checkpoint: 151 targeted tests passed; frontend/server typechecks p
 ## 2026-10-20 — Weak candidate verification completed after admin test authorization
 
 Admin explicitly authorized the live-API-capable suite. Stable final run: **2,803 test files passed; 39,994 tests passed; 67 intentionally skipped; zero failures**. Both typechecks, production build, bundle budget, boot smoke, unused-import, OAuth protocol checks, native-shell and production dependency gates passed. Updated wiring assertions to follow the new runner parameters while retaining their stop/deadline/dead-rung guarantees. Test archive extraction now uses `--no-same-owner` in both sibling extractors, avoiding unrelated host ownership failures without changing archive contents. Invalid ladder overrides now fall back to the candidate's two-model policy rather than accidentally restoring the legacy chain. Classifier request is additionally locked by SDK mocks: one call, 8 output tokens, 5-second timeout, thinking disabled, no SDK retries, and measured usage forwarded. Candidate remains opt-in; no merge, deployment, paired app-generation benchmark, or first-attempt guarantee is claimed.
+## 2026-10-20 — failed-build audit scope correction and persistent queue (PR #3846)
+
+**NOT COMPLETE under the fifth and sixth absolute rules.** The source milestone `f713e64` and its
+551 individualized terminal-cause reviews did not include the mandatory exhaustive per-warning,
+heal, workaround, skip, false-finding and struggle ledger, nor persistent queue/progress updates.
+This entry corrects that scope; it does not erase earlier records or turn partial work into completion.
+
+Persistent safe evidence index: `docs/failed-build-audit-2026-10-20.csv` (551 report rows), explained in
+`docs/failed-build-audit-2026-10-20.md`. All 94 retained-history cursor pages were exhausted and all
+551 full reports retrieved. Detailed reports, prompts and raw telemetry remain outside the repository.
+No historical generated app was rerun or independently verified.
+
+**Count corrected:** 26 legacy `fixed-this-turn` labels divide into **4 demonstrated new terminal
+platform class fixes, 7 contributor fixes with terminal outcome unresolved, 10 exploration mitigations,
+3 reporting/diagnosis changes, and 2 classes already covered before this PR**. They are not 26 repaired
+reports. Whole reports newly RESOLVED under rule six: **0**. The CSV preserves both the old label and
+the independently audited meaning. The four class mappings are listed in the companion document.
+
+**Queue:** 268 new rows, owner **#3846**, preserving all existing rows/owners and the closed
+register. **Q-1300 IN PROGRESS** owns full all-item/five-bucket enumeration for all 551 reports, including
+earlier findings in user-stop runs. Stable per-report IDs are Q-(1301 + index), with intentional holes;
+only genuine information/external gaps carry four-field BLOCKED rows. The 220 needs-investigation
+assessments remain actionable, not blanket blocked by missing app snapshots. Existing 67a2b0a2 work
+reuses Q-1120–Q-1122; external balance restoration remains related to Q-1210. Existing E2E image action
+remains Q-107. **Q-1890/Q-1891/Q-1892 IN PROGRESS** record live Stop during finishing restore, unchecked
+rollback/removal outcomes across route siblings, and the pre-open SDK abort/deadline gap. These were
+discovered while checking this PR; their owners are implementing/proving them, not claiming them resolved.
+
+**Exact next work:** continue Q-1300 itemization and the per-report primary investigations. For every
+item, name its origin/class, hunt siblings and prior fixes, prevent first-pass recurrence, prove the
+behavioral reversion, then record final merged-state validation or all four genuine blocked fields.
+Do not call the 551-row index an exhaustive item autopsy; five-bucket totals are still uncomputed.
+The prioritized proactive lever is bounded final saved/served delivery evidence using existing contracts
+and validators; do not prescribe source repair from a generic count or a recovered provider warning.
+
+Prior source-milestone verification: 2,780 test files / 39,717 tests passed, 67 skipped, zero failed;
+frontend/server typechecks and production build passed. Final docs and newly discovered source gaps
+require a fresh final gate before push. PR #3846 is not claimed merged or deployed by this entry.
+
+The four counted terminal platform classes also passed an isolated behavior-reversion audit:
+the same eight selected existing assertions passed on f713e64 and all eight failed when the four
+corresponding source modules were replaced by their baseline versions. The class/report/test matrix
+is in the companion document. Missing-module failures did not count; this still proves no historical
+application rebuild and no exhaustive all-item report closure. Queue census checks on this append:
+3 files / 22 tests passed (closed rows stay closed, unique IDs, valid states and four-field blockers).
+
+### 2026-10-20 — Q-1893: the fatal-account retirement hunt found the judge re-review sibling
+
+The builder-chain correction was not the whole class: a judge candidate chain could encounter a
+fatal account failure and call that same account again on a later review. **Q-1893 IN PROGRESS,
+owner #3846**, records the missed sibling rather than hiding it behind the first fix. The provider
+owner is applying the shared fatal-error predicate per candidate chain and disabling SDK automatic
+retry where the chain itself controls retry. Independent credentials, transient rate limits and a
+fresh chain stay eligible; no tier/order/pricing policy is changed. Focused behavior and reversion
+proof and the final gate are required before merge; this entry does not mark the item RESOLVED.
+
+This adds one row to the preceding append: **269 pending audit rows in total** (248 IN PROGRESS,
+21 four-field BLOCKED). The independently audited count stays **4 demonstrated terminal platform
+classes**, not 26 repaired reports; historical application reruns and sixth-rule whole-report
+closure remain **0**. Q-1300's exhaustive all-item/five-bucket work remains NOT COMPLETE.
+
+Q-1893 focused checkpoint: shared predicate in `providerErrorClass.ts`, preserved builder-runner
+consumer API, per-candidate retirement in `judgeChain.ts`, and `maxRetries: 0` only where the judge
+chain owns fallback. `tests/aPermanentJudgeFailureIsNotRetried.test.ts` adds 11 checks. Seven focused
+files / 139 tests passed. Isolated baseline restoration produced 7 failures / 4 passes (6 behavior
+assertions plus 1 source census); independent credentials, transient failures and fresh chains remain
+eligible. Final shared-state typechecks/CI and merge remain required; the row stays IN PROGRESS.
+
+### 2026-10-20 — ownership correction before the final gate
+
+The preceding 248-IN-PROGRESS count overstated what PR #3846 actually implements. Those pending
+historical primary investigations are not made active implementation work merely by assigning the
+current PR. The 269 new audit rows now correctly contain **240 OPEN / owner —**, **8 IN PROGRESS**,
+and **21 genuine four-field BLOCKED** rows. Q-1300 is OPEN: exhaustive all-warning/five-bucket
+enumeration has not started. Only Q-1383/Q-1635/Q-1670/Q-1804 (four audited terminal source classes)
+and Q-1890–Q-1893 (implemented source siblings pending final gate/merge) remain IN PROGRESS under #3846.
+Known contributor/mitigation/reporting changes are credited to this PR in notes without pretending
+their unresolved terminal investigations are implemented. No old pre-audit queue row or owner changed.
+The companion CSV now records current queue state/owner independently of the legacy code-coverage label.
+This is an honest work-state correction, not abandonment or closure: all-item work remains NOT COMPLETE,
+historical app reruns remain zero, and no report is newly RESOLVED under the sixth rule.
+
+### 2026-10-20 — Q-1894 remains an OPEN cache/restore investigation; final focused judge proof
+
+**Q-1894 OPEN / owner —** records a separate warm-cache risk found by broad source census:
+confirmed removals through shell commands may leave warm-only `_fileCache` keys that later flow
+through `mergeRestoreSources` during sandbox recreation. References:
+`src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts` (cache/restore path) and
+`src/server/AgentV3/sandboxRestore.ts`. The next step is origin-to-end reproduction through live
+cache invalidation and recreation, not a speculative restore-policy change; warm source may hold
+unpersisted work. The applied-result restoration fix does not claim cache invalidation, and this
+risk is not a proven historical terminal cause. No BLOCKED or RESOLVED status is invented.
+
+New audit queue totals are now **270 rows: 241 OPEN, 8 IN PROGRESS, 21 four-field BLOCKED**. Existing
+pre-audit rows are unchanged; Q-1300 is OPEN and exhaustive all-item/five-bucket enumeration has not
+started. The four counted terminal platform classes and zero historical-app/whole-report closure
+counts are unchanged. Q-1893's final focused validation passed 10 files / 163 tests and the server
+typecheck, with 12 cases now in its new regression file; its initial behavior-reversion proof remains
+7 failures / 4 passes (six behavior assertions and one source census). The final shared-state gate
+and merge remain required for all eight IN-PROGRESS source items.
+
+### 2026-10-20 — merged original source coverage; follow-up ownership and remaining siblings
+
+Another session merged PR #3846 at 03:33 UTC, after its hosted CI run 39359912519 succeeded.
+This session did not perform that merge. The follow-up now starts from main
+`adc53ee215beb5b7f7c5042245b2817c16a2deca` on `codex/failed-build-claude-audit-20261020`.
+Both this file and BUILD_REPORT_QUEUE.md preserve the complete fresh-main contents as their
+unchanged prefix, including the other session's appended progress. Earlier stanzas above describe
+their checkpoints; they do not assign the newly implemented follow-up fixes to merged #3846.
+
+**Queue ownership corrected after merge:** Q-1383/Q-1635/Q-1670/Q-1804 credit the four merged
+terminal source-class corrections but are OPEN / owner — for their remaining all-item review and
+unverified historical delivery. Only **Q-1890–Q-1893 remain IN PROGRESS**, owned by the follow-up
+branch until its PR exists; these fixes were not included in #3846. The 21 genuine four-field
+BLOCKED rows retain their requirements with owner —, not a merged partial PR. No pre-audit row,
+owner or closed-register entry changed. The CSV's 551 primary queue states/owners match the queue.
+
+**Q-1890/Q-1891 implemented scope:** live Stop after awaited finishing reads, then checked applied
+restore outcomes across eight automatic undo producers: finishing recheck, shared five-consumer
+verification callback, final GreenGuard, design-heal undo, deadSalvage, unusedDepPrune,
+mobileShipRealBuild with its repair/commit consumer, and EndgameRepair with the real removal port.
+`src/server/AgentV3/snapshotRestore.ts` admits each new mutation and reconciles only landed results;
+failed removals cannot erase bookkeeping or produce complete-rollback claims. Already dispatched
+work may finish and its actual outcome is retained. Pre-edit behavior failures covered finishing,
+prune, mobile and Endgame; targeted nonzero-rm, Stop and route-wiring reversions also failed.
+Final combined verification passed **18 files / 875 tests** and server typecheck. References:
+`tests/anAutomaticRestoreReportsOnlyWhatItApplied.test.ts` and
+`tests/anEndgameRollbackClaimsOnlyWhatLanded.test.ts`. This is the finite automatic undo class,
+not a claim about all forward writes or cache invalidation; final gate and follow-up merge remain.
+
+**Q-1892 implemented scope:** OpenAiToolRunner passes caller cancellation/deadlines into streamed
+and direct SDK opening before a response exists. All five cases in
+`tests/aStoppedOpenAiRequestIsCancelled.test.ts` passed and failed on baseline restoration.
+Q-1893's final provider combination passed **10 files / 163 tests** and server typecheck, including
+the SDK-opening and judge-chain siblings. Its 12-case judge regression preserves independent
+credentials, transient recovery, fresh chains and honest planned/served attribution. These are
+follow-up source-class proofs, not historical generated-app replays or routing/pricing changes.
+
+**Three further findings remain OPEN / owner —**, outside the eight corrected automatic undo
+producers; they have not been silently included in the fixed count:
+
+- **Q-1895:** restoreKitRules/snapSpacing in `src/server/routes/agentv3.ts` guard sandbox writes but
+  have no fresh Stop check before the subsequent durable merge. Reproduce the deferred boundary
+  and trace final-save preservation policy before changing it; already landed work must remain honest.
+- **Q-1896:** FileGuardian forward reseeding in the same route ignores writeWorkspaceFiles
+  written/skipped results before publishing/narrating the planned restored count. Reproduce partial
+  or refused writes and fix the forward-recovery result/consumer boundary separately.
+- **Q-1897:** a full continuation restart of the same truncated file can replace the partial via
+  LAST-wins parsing while discardedReplies remains empty. Local reproduction demonstrates the edge;
+  the existing per-contributor billing policy still needs tracing through discardTurnOutput, because
+  the first reply may also contain retained complete files. No billing source change or universal
+  full-reply refund is claimed. This is actionable OPEN, not an invented information blocker.
+
+Q-1894's warm-cache removal/recreation risk also remains OPEN, without a live reproduction.
+The append now contains **273 pending rows: 248 OPEN, 4 IN PROGRESS, 21 four-field BLOCKED**.
+Exact resume: finish the follow-up gate for Q-1890–Q-1893, then the Q-1300 full-item inventory and
+remaining primary/adjacent investigations. The 551 terminal-cause reviews still are **NOT COMPLETE**
+all-item/five-bucket autopsies. The audited original count remains **4 demonstrated terminal platform
+classes**, historical application reruns **0**, and sixth-rule whole reports newly RESOLVED **0**.
+
+Final documentation verification after these corrections: all **3 queue suites / 22 tests passed**;
+the 273-row state census matched 248 OPEN / 4 IN PROGRESS / 21 four-field BLOCKED. The 551 unique
+CSV report rows match the queue, every referenced source/test path exists, and every all-item,
+whole-report-resolved and historical-rerun flag remains false. Fresh-main prefixes and whitespace
+validation passed. The follow-up's full shared-state source gate, PR and merge remain root-owned.
+
+### 2026-10-20 — Q-1898: first follow-up final gate failed; integration proof required
+
+The first follow-up full-suite gate is **FAILED: 11 safety-wiring assertions across eight test
+files**, with 39,775 tests passed and 67 skipped. All ten non-suite checks passed; those results do
+not override the failed suite. **Q-1898 IN PROGRESS**, owner
+`codex/failed-build-claude-audit-20261020`, records the CI-autopsy integration work. Three agents
+are updating the existing guards to trace the new shared automatic-restore door and applied-state
+save, preserving the behavior/census guarantees; no skipped assertion or production change is
+planned. The relevant boundary reversions and a fresh complete final gate are required before
+claiming this integration resolved.
+
+The audit append now has **274 pending rows: 248 OPEN, 5 IN PROGRESS, 21 four-field BLOCKED**.
+Exact resume starts with Q-1898 proof and the follow-up final gate for Q-1890–Q-1893, then Q-1300
+and the remaining primary/adjacent investigations. This new CI item does not change the original
+**4 demonstrated terminal platform classes / 0 historical app reruns / 0 sixth-rule report closures**.
+The ongoing next report item-autopsy is scratch-only; no new historical repair is claimed.
+
+### 2026-10-20 — Q-1898 targeted integration repaired; Q-1899 preview contributor and first item ledger
+
+The Q-1898 assertion repairs are implemented: targeted validation batches passed **3 files / 62
+tests, 3 files / 70 tests, and 4 files / 57 tests**. They trace the shared restoration door and
+applied-state save, and deliberate removal of the relevant safety boundaries still fails. No
+assertion was skipped or production behavior changed for this integration repair. The earlier
+full-suite failure remains the last full-gate result until a complete rerun passes; Q-1898 stays
+IN PROGRESS rather than being called resolved from targeted tests.
+
+The next Q-1300 report review exposed **Q-1899 IN PROGRESS**, owner
+`codex/failed-build-claude-audit-20261020`: 26 successful unchanged update_preview requests counted
+as mutations and reset their own repeat evidence. RepeatProbeGuard and the narrow AgentRunner
+dispatch/loop region now require the actual unchanged acknowledgement plus unchanged dispatcher
+changeCount before calling an invocation no effect. Real edits, actual preview rebuild/heal, new
+ports, failed calls and same-turn useful progress remain allowed; update_preview is not blanket-
+banned. The report-shaped real-dispatcher replay now ends honestly after 8 unchanged calls.
+`tests/anUnchangedPreviewCannotResetItsLoopGuard.test.ts` adds **15 regressions**; combined focused
+verification passed **7 files / 250 tests**, both typechecks and unused-import validation. Isolated
+restoration of both original source files fails the selected 26-same-port behavior assertion;
+current source passes that identical selection. Full final gate and follow-up merge remain.
+This is a contributor correction, not proof the historical terminal cap or app delivery is fixed.
+
+**Q-1300 has started, not finished.** Its first retained-surface item ledger is persisted at
+`docs/failed-build-autopsy-618b1c30-2026-10-20.md`: **61 distinct rows, 47 OPEN / 14 genuine four-field
+BLOCKED**. Buckets: **30 observed recoveries, 2 workarounds, 16 skips/evidence gaps, 2 still-broken
+conditions, 11 struggles**. Every retained entry was inspected: 500 issue slots (516 expanded
+occurrences), 5 problem-view mirrors, 127 model calls and 40 commands. Repeated diagnostic
+locations and unchanged preview events are deduplicated transparently with occurrence counts;
+all 40 missing command exits, clipped previews, missing generated source/DOM and unfinished final
+feature proof remain explicit. No report command, raw prompt, model output or credential is
+executed or published. The late 40-call feature-presence heal remains a separate convergence
+investigation; neither true missing controls nor their final absence are invented from a capture.
+
+The remaining **550 reports have no exhaustive item ledger yet**. The 551-row index now links the
+first ledger separately from its still-false original all-item/whole-report/rerun completion flags.
+The pending primary/source queue append totals **275 rows: 248 OPEN / 6 IN PROGRESS / 21 four-field
+BLOCKED**; those totals are a separate projection from the first report's local item rows. No old
+pre-audit row or closed-register entry changed. Original audited counts remain **4 demonstrated
+terminal platform classes / 0 historical app reruns / 0 sixth-rule whole-report resolutions**.
+Exact resume: launch the complete frozen follow-up gate, then continue the next non-user-stop
+report `cfd01074-7c40-4514-8f26-36ae07fdb1ae` read-only in scratch; no further batch source/doc scope
+changes are authorized before that gate.
+
+### 2026-10-20 — individual queue rows required; Q-1899 complete sibling proof before final gate
+
+The separate 61-row document was not enough for rule six's persistent queue requirement.
+Every retained item now also has its own BUILD_REPORT_QUEUE.md row: **Q-1900–Q-1960 map exactly
+to I001–I061**. The preview contributor **I029 → Q-1928** is IN PROGRESS under the follow-up
+branch/Q-1899; the other **46 OPEN / 14 four-field BLOCKED** rows have owner —. Their 61-row
+ledger preserves each bucket, counted repetitions, causal certainty, source/sibling/test
+references and next action. No row is deleted or newly RESOLVED. The original primary rows
+remain, and Q-1300/Q-1302 plus the 551-report CSV link the item range explicitly.
+
+The Q-1899 class hunt also proved planning-only task and pure recipe-help siblings: baseline
+real-runner repetitions made 15 calls, zero writes/commands/spawn and zero changeCount delta,
+yet reset their epochs 15 times with no steer. They now have their own **Q-1961/Q-1962 IN
+PROGRESS** rows under the same follow-up branch. Exact invocation/result plus unchanged actual
+work counters are required to count these receipts as no effect; real delegation, executing
+recipes, source edits and preview rebuild/heal remain allowed. No tool is blanket-banned, and
+no routing, pricing or time-cap policy changed.
+
+Final scoped proof: **31 new regressions (15 preview + 16 siblings)** and **8 focused files /
+266 tests passed**, with both typechecks and unused-import validation green. Restoring both
+original production source files in isolation fails **all 8 selected behavior cases** (1 preview,
+3 planning-only roles, 4 recipe-help paths); final generic source passes the identical eight,
+with 14 unrelated tests unselected. No missing-module/export error was counted as RED. Tests:
+`tests/anUnchangedPreviewCannotResetItsLoopGuard.test.ts` and
+`tests/aPureToolReceiptCannotResetItsLoopGuard.test.ts`. The full frozen-state gate and merge
+remain pending; Q-1899/Q-1928/Q-1961/Q-1962 remain IN PROGRESS.
+
+Current audit queue append: **338 rows = 294 OPEN / 9 IN PROGRESS / 35 genuine four-field
+BLOCKED**. This is the earlier 275 primary/source rows plus 61 individual historical items and
+2 discovered sibling items, not 338 distinct repaired classes. Main's original queue/progress
+prefixes and closed register are preserved. The first retained report ledger remains incomplete
+at the root-fix/final-verification level; 550 other reports still await exhaustive itemization.
+The four demonstrated historical terminal-source classes, zero historical app reruns and zero
+sixth-rule whole-report resolutions are unchanged. Next cfd01074 autopsy remains scratch-only
+while the final gate runs; no further source/doc scope expansion in this batch.
+
+
+### 2026-10-20 — second retained item ledger; conservative orphan authority and failed-gate privacy siblings
+
+The complete retained surface of the next non-user-stop report, cfd01074, is now recorded in
+`docs/failed-build-autopsy-cfd01074-2026-10-20.md`: **58 items**, each with its own **Q-1963–Q-2020**
+row. Buckets: **33 observed recoveries, 4 workarounds, 9 skips, 2 still-broken conditions and
+10 struggles**. States: **47 OPEN / 3 IN PROGRESS / 8 genuine four-field BLOCKED**. All 326 issue
+slots / 348 expanded occurrences, 17 problem mirrors, 63 model calls and 16 commands were inspected.
+Repetition/deduplication, clipped/null-exit payloads and overlapping latency remain explicit.
+The terminal cause is the explicit 1500-second platform cap; earlier recovered provider failures
+are not substituted for it. There was no historical saved-app/runtime replay or complete journey proof.
+
+**Q-2021 IN PROGRESS**, owner `codex/failed-build-claude-audit-20261020`, corrects a proven upstream
+contributor: relative-only orphan evidence ignored three retained alias imports and could delete
+live screens before spending model calls recreating them. I020–I022/Q-1982–Q-1984 retain those
+three individual effects and supported historical linkage; the full original graph is unavailable.
+`ArchitectureAnalysis.ts` shares local import candidates; `journeyDerivation.ts` uses AST module
+edges and conservative configuration/package authority; `ToolDispatcher.ts` reads that metadata
+on the actual cleanup path. Static/lazy/re-export/require, alias/root ambiguity, dynamic or unknown
+loading, unreadable/malformed metadata and shared journey/data-entry consumers are covered.
+Unknown authority cannot justify deletion, while ordinary packages and genuine unused components
+remain controlled. `tests/anImportedScreenIsNeverALeftover.test.ts` (41) and
+`tests/anUnknownImportIsNotOrphanEvidence.test.ts` (18) add **59 passing tests**. The focused sweep
+passes **11 files / 244 tests**, with **1 existing skipped test**; both typechecks and unused-import
+validation pass. Isolated original-three-source reversion yields **53 behavioral failures / 5
+passing controls**; final source passes **58 selected behaviors**, excluding one authority census.
+This is implemented class prevention pending the integrated final gate and merge, not a fifth
+demonstrated historical terminal class or proof of final app functionality.
+
+The second complete follow-up suite remained **RED: 39,822 PASS / 67 SKIP / 1 asynchronous
+Crashlytics privacy test FAIL**. All eleven prior wiring failures were gone; all eleven non-suite
+checks passed. **Q-2022 IN PROGRESS** separately records callback-based waiting in
+`tests/crashReportsCarryNoSecrets.test.ts`; a controlled 50 ms digest delay fails the original
+fixed wait and passes the repair. That investigation exposed **Q-2023** stale-authentication
+hash/clear ordering and **Q-2024** an old SDK load crossing module reset, both IN PROGRESS under
+the same follow-up owner. `src/lib/observability/index.ts` now uses auth revisions, reset generation
+and a shared SDK promise without the redundant cached-sink fast path. It preserves pending clears
+through failed/new hashes and SDK-ready ordering; native calls already dispatched are not cancelled.
+Final native/privacy proof: **71/71 passed**, both typechecks and unused-import validation green.
+Original-module reversion had seven behavior failures and five boundary passes; final source passes
+the selected twelve. The later cached-order case fails on the superseded checkpoint and passes
+current source. Reset is exercised through controlled test dependencies; no historical build-report
+or production telemetry incident is claimed. Earlier 70-test/checkpoint evidence was superseded.
+
+The primary checkpoint was rebased on fresh main `885ba41023c2f7327be956aadc71f79ee2840821`;
+the isolated source integration now starts from `27f25e050082d470849d6e99c21f1789e71592a1`.
+The earlier 43-file checkpoint was local and RED, not a published green PR. Only the combined,
+fully verified follow-up is planned for publication. Existing main queue/progress content is
+preserved byte-for-byte as a prefix; this progress update is append-only.
+
+Current audit append: **400 pending rows = 341 OPEN / 16 IN PROGRESS / 43 genuine four-field
+BLOCKED**. This is 338 earlier rows plus 58 historical item rows and Q-2021–Q-2024; it is not a
+count of fixed reports. The two retained ledgers have **119 items across only 2 reports**:
+**63 observed recoveries / 6 workarounds / 25 skips / 4 still-broken conditions / 21 struggles**.
+The remaining **549 reports still await exhaustive itemization**. Only six reports have a
+structured `generatedFiles` payload; other reports can retain partial source inside clipped
+tool previews. No claim of zero recoverable source characters in all other reports is made.
+The CSV links both ledgers while all original all-item-complete, historical-rerun and whole-report-
+resolved flags remain false. Audited original counts stay **4 demonstrated terminal platform
+classes / 0 historical application reruns / 0 sixth-rule whole-report resolutions**.
+
+Exact resume: run the combined frozen full gate for the follow-up, including Q-2021–Q-2024, then
+publish once green; merge only after the admin explicitly names this PR. Keep all implemented
+source/CI rows IN PROGRESS until merge.
+Remaining item-level prevention and Q-1894–Q-1897 stay open. Third-report expansion is paused;
+resume one-by-one Q-1300 work after this batch, without rewriting prior checkpoint history.
+
+### 2026-10-20 — fresh-main rebase after connector interruption; new final gate pending
+
+The connector upload/catalog interruption ran from approximately 05:37 to 11:06 UTC. During it,
+main advanced from `885ba410` to `68528197949135513d2df97e3b4dee667036059a` through other sessions'
+PRs #3848–#3853. All five local checkpoints rebased cleanly; the pre-documentation HEAD is
+`459601558`. Existing fresh-main content and all previous progress remain unchanged as a prefix.
+
+The prior exact tree `3efec7ea` completed its local full gate: **2,798 files / 39,996 tests passed,
+67 skipped**, with **all 14 non-suite checks passed**. This proves that earlier tree only. The
+complete gate on the newly rebased fresh-main tree is **PENDING**; no follow-up PR was created.
+Resume with that complete gate, then publish once green; merge only after the admin explicitly
+names that PR. Do not treat the connector interruption or rebase as a new source repair.
+
+Persisted scope is unchanged: **2 ledgers / 119 items / 549 reports awaiting itemization**;
+the audit queue remains **400 pending rows = 341 OPEN / 16 IN PROGRESS / 43 four-field BLOCKED**.
+The third report's 51-item ledger is ready in scratch for the next batch and is not published or
+counted here. Original counts remain **4 terminal source classes / 0 historical app reruns /
+0 whole-report resolutions**. No queue, CSV, source or third-ledger publication change is included.
 
 ## 2026-10-20 — Admin authorized PR #3853 merge and Weak policy activation
 

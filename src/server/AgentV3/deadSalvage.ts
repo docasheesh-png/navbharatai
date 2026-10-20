@@ -17,6 +17,8 @@
 //
 // Kill switch: AGENTV3_PRUNE_DEAD_SALVAGE=off. PURE apart from the env read.
 
+import { applySnapshotRestore, snapshotRestoreComplete, snapshotRestoreStopped } from './snapshotRestore';
+
 export function pruneDeadSalvageEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_PRUNE_DEAD_SALVAGE ?? '').trim().toLowerCase() !== 'off';
 }
@@ -72,12 +74,14 @@ export function deadSalvagedFiles(salvaged: readonly string[], files: Record<str
 export interface DeadSalvageRun {
   run: (command: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
   write: (path: string, content: string) => Promise<void>;
+  signal?: AbortSignal;
 }
 
 export type DeadSalvageOutcome =
   | { status: 'removed'; removed: string[] }
   | { status: 'skipped'; reason: string }
-  | { status: 'reverted'; reason: string; tried: string[] };
+  | { status: 'reverted'; reason: string; tried: string[] }
+  | { status: 'restore-failed' | 'interrupted'; reason: string; tried: string[]; restored: string[]; failed: string[] };
 
 const SAFE_PATH = /^[\w./@-]+$/;
 
@@ -94,17 +98,54 @@ export async function removeDeadSalvage(
   const remove = dead.filter((p) => SAFE_PATH.test(p) && !p.includes('..') && typeof files[p] === 'string');
   if (remove.length === 0) return { status: 'skipped', reason: 'no candidates' };
   if (!hasBuildScript) return { status: 'skipped', reason: 'no build script to verify the removal with' };
-  const restore = async (): Promise<void> => {
-    for (const p of remove) { try { await io.write(p, files[p]); } catch { /* best-effort */ } }
+  if (io.signal?.aborted) return { status: 'skipped', reason: 'the build ended before files could be removed' };
+  const restore = async (reason: string): Promise<DeadSalvageOutcome> => {
+    const plan = { write: Object.fromEntries(remove.map((path) => [path, files[path]])), remove: [] };
+    const result = await applySnapshotRestore(plan, {
+      stopped: () => snapshotRestoreStopped(io.signal),
+      write: io.write,
+      remove: async () => ({ exitCode: 1 }), // this rollback only puts files back
+    });
+    if (snapshotRestoreComplete(plan, result)) return { status: 'reverted', reason, tried: remove };
+    return {
+      status: result.stopped ? 'interrupted' : 'restore-failed',
+      reason: `${reason}; ${result.stopped ? 'the build stopped before all files could be put back' : 'some files could not be put back'}`,
+      tried: remove, restored: result.restored, failed: result.failed,
+    };
   };
   try {
     const rm = await io.run(`rm -f ${remove.map((p) => `'${p}'`).join(' ')}`);
-    if (rm.exitCode !== 0) { await restore(); return { status: 'reverted', reason: 'the files could not be removed', tried: remove }; }
+    if (rm.exitCode !== 0) return await restore('the files could not be removed');
+    if (io.signal?.aborted) return await restore('the build ended before the removal could be verified');
     const build = await io.run('timeout 240 npm run build');
-    if (build.exitCode !== 0) { await restore(); return { status: 'reverted', reason: 'the app did not build without them', tried: remove }; }
+    if (build.exitCode !== 0) return await restore('the app did not build without them');
+    if (io.signal?.aborted) return {
+      status: 'interrupted', reason: 'the build ended before the verified removal could be recorded',
+      tried: remove, restored: [], failed: remove,
+    };
     return { status: 'removed', removed: remove };
   } catch {
-    await restore();
-    return { status: 'reverted', reason: 'the removal could not be completed', tried: remove };
+    return await restore('the removal could not be completed');
   }
+}
+
+/** A failed rollback is never described as files being kept. */
+export function deadSalvageNote(outcome: DeadSalvageOutcome, dead: readonly string[], stopped = false): {
+  severity: 'info' | 'warning'; code: string; autoResolved: boolean; message: string;
+} {
+  if (stopped && outcome.status === 'removed') return {
+    severity: 'warning', code: 'DEAD_SALVAGE_RESTORE_INCOMPLETE', autoResolved: false,
+    message: 'The unused-file cleanup finished in the sandbox as the build stopped; this pass did not update the saved project.',
+  };
+  if (outcome.status === 'restore-failed' || outcome.status === 'interrupted') return {
+    severity: 'warning', code: 'DEAD_SALVAGE_RESTORE_INCOMPLETE', autoResolved: false,
+    message: `The unused-file cleanup could not restore every file (${outcome.restored.length}/${outcome.tried.length} put back): ${outcome.reason}.`,
+  };
+  return {
+    severity: 'info', autoResolved: true,
+    code: outcome.status === 'removed' ? 'DEAD_SALVAGE_REMOVED' : 'DEAD_SALVAGE_KEPT',
+    message: outcome.status === 'removed'
+      ? `Removed ${outcome.removed.length} file(s) the fast lane wrote that the finished app never uses: ${outcome.removed.join(', ')}. The production build passed without them.`
+      : `Kept ${dead.length} salvaged file(s) nothing refers to (${dead.join(', ')}): ${outcome.reason}.`,
+  };
 }

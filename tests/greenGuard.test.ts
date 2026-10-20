@@ -283,17 +283,28 @@ describe('LAYER 2 WIRING — the guard is on the real save path and can never co
   it('the failed attempt is KEPT before anything is undone', () => {
     // The key moved behind attemptWorkspaceKey() when the "keep my changes" hatch began reading it —
     // one helper for the writer and the reader, so the two can never disagree about where it lives.
-    const keep = seg.indexOf('attemptWorkspaceKey(workspaceId)');
+    const keep = seg.indexOf('await saveWorkspaceFiles(attemptWorkspaceKey(workspaceId), toSave)');
+    const undo = seg.indexOf('const outcome = await applyGreenSnapshotRestore(plan)');
     expect(keep).toBeGreaterThan(-1);
-    expect(keep).toBeLessThan(seg.indexOf('saveWorkspaceFiles(workspaceId, snapshot)'));
+    expect(undo).toBeGreaterThan(keep);
   });
 
   it('the plain save still runs when the guard did not save — a user never loses their files', () => {
     // REPOINTED (2026-09-11): the same call is now BOUND to `finalSave`, because the snapshot
     // confirmation that follows must await the save it is about to outdate (snapshotIdentity.ts).
-    // The guarantee this test exists for is unchanged and still asserted: when the guard did not
-    // save, the plain save runs, and its failure is still swallowed.
-    expect(seg).toContain('const finalSave = saved ? Promise.resolve() : saveWorkspaceFiles(workspaceId, toSave).catch(() => {});');
+    // A partial undo changes only the files that landed. The fallback must save that actual tree,
+    // including failed restores, and must not replace it with either the old attempt or the whole plan.
+    const initial = seg.indexOf('let persisted: Record<string, string> = toSave;');
+    const undo = seg.indexOf('const outcome = await applyGreenSnapshotRestore(plan)');
+    const applied = seg.indexOf('persisted = snapshotRestoredFiles(toSave, plan, outcome)');
+    const complete = seg.indexOf('if (snapshotRestoreComplete(plan, outcome))', applied);
+    const finalSave = seg.indexOf('const finalSave = saved ? Promise.resolve() : saveWorkspaceFiles(workspaceId, persisted).catch(() => {});');
+    expect(initial).toBeGreaterThan(-1);
+    expect(undo).toBeGreaterThan(initial);
+    expect(applied).toBeGreaterThan(undo);
+    expect(complete).toBeGreaterThan(applied); // the applied tree is selected even when restoration was partial
+    expect(finalSave).toBeGreaterThan(complete);
+    expect(seg).not.toContain('persisted = snapshot;');
     expect(seg).toContain('/* the guard must never cost a user their save');
   });
 

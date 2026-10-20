@@ -457,6 +457,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   Set `off`/unset to disable. Works WITH the reactive stack: escalating 429 re-probe bench (#1801),
   GLM↔KIMI floor balance (#1802, kill switch `AGENTV3_FLOOR_BALANCE=off`), circuit breaker
   (`AGENTV3_CIRCUIT_BREAKER`, default on), and the GLM key-pool.)
+- **Shared reactive cooldown:** `AGENTV3_RATE_LIMIT_COOLDOWN_MS` defaults to **60,000 ms** when
+  absent, empty, whitespace-only or invalid. Only an explicit numeric `0` or case-insensitive `off`
+  disables this short shared cooldown; per-build benches and the separately configured sustained
+  circuit breaker remain independent. A valid nonnegative number keeps its existing meaning.
+  The production singleton reads it at process startup. The oldest-report source audit found that
+  `Number('')` had incorrectly disabled the documented default. Tests now exercise fresh real runner
+  instances, first-strike suppression, expiry/recovery and both deliberate disable forms. No live
+  environment value or provider policy was changed, and the historical deployed value is unknown.
 - **🟩 NVIDIA Nemotron 3 — judge, plan and ONE backstop rung (built 2026-09-19).** ✅ **LIVE: the admin
   SET `NEMOTRON_API_KEY` and `AGENTV3_NEMOTRON=weak` in Cloud Run on 2026-09-19**, the same day it
   merged — so the WEAK tier's judge and plan are the first Nemotron calls this platform has ever made,

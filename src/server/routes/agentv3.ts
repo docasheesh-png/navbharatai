@@ -13581,7 +13581,7 @@ async function noteBuildOutcome(
           const limit = futilityMinutes();
           const verdict = tickFutility(
             futilityState,
-            { filesWritten: writtenFiles.size, commandsRun, stepsDone: etaStepsDone, pathsRead: pathsReadNow() },
+            { filesWritten: writtenFiles.size, commandsRun, pathsRead: pathsReadNow(), stepsDone: etaStepsDone },
             limit,
           );
           futilityState = verdict.state;
@@ -18123,7 +18123,7 @@ async function noteBuildOutcome(
 
       // THE BUILD STARTS HERE, so the futility breaker's quiet window does too (futilityBreaker.ts,
       // `armedFutilityState`): everything above is the platform's own bounded preparation.
-      futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, stepsDone: etaStepsDone, pathsRead: pathsReadNow() });
+      futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, pathsRead: pathsReadNow(), stepsDone: etaStepsDone });
       futilityArmed = true;
 
       // Cost-ladder escalation (P3) — DORMANT unless AGENTV3_ESCALATION=on. When off,
@@ -18355,7 +18355,7 @@ async function noteBuildOutcome(
               // The seed is the platform's preparation, not the build moving. The futility breaker was armed
               // above ("THE BUILD STARTS HERE"), before the platform's seeds; re-armed now, so ~30 kit files and
               // the `three` install do not read as the builder making progress on its first quiet minute.
-              futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, stepsDone: etaStepsDone, pathsRead: pathsReadNow() });
+              futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, pathsRead: pathsReadNow(), stepsDone: etaStepsDone });
             }
           } catch (kitErr) {
             gameKitSeedFailed = true;

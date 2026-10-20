@@ -98413,6 +98413,57 @@ row is opened.
 merged while it ran, so main moved and the queue row still had to go on — a gate finishing on a state I was
 about to change would have produced a green I could honestly report and honestly believe about the wrong
 tree. One gate on the final state is both cheaper and the only one that means anything.
+## 2026-10-20 — Hosting, database, storage and App Mart audit hardening (Codex)
+
+User requested implementation of the infrastructure audit recommendations. Based on main `3974c34`
+(#3855); separate branch `codex/hosting-data-security-audit`. Existing open #3852/#3856 are separate
+recovery/account-erasure work and have not been overwritten. No production flags, IAM, customer data,
+provider accounts or billing settings have been changed by this branch.
+
+| Audit item / class | Change and regression evidence | State / actual limit |
+|---|---|---|
+| Private App Mart NavData accepted app-id-only access | Password-authorized, one-hour, app-scoped HMAC capability. Issued per open response outside the compiled cache; both data routes verify it, CORS supports its header, responses are no-store. Password rotation revokes prior capabilities. Actual iframe runtime surfaces refusals instead of fake empty rows. | CODE FIXED; `navDataPrivateAccess.test.ts` drives registered routes, cache/password rotation and iframe code. Rows remain app-shared, not per-user private records. Reopen after expiry. |
+| Private bucket read policy authorized every signed-in user | Read requires the caller's uid folder, matching writes. | CODE FIXED; `generatedUploadSecurity.test.ts` runs PostgreSQL RLS with separate roles. Existing customer buckets require applying the corrected generated SQL in their own project. |
+| Bucket migration was invalid SQL; long policy names collided after PostgreSQL truncation | SQL identifiers use double quotes and bounded hashed names. Remove known legacy names before replacing policies, including the old permissive read policy. | CODE FIXED; actual PostgreSQL execution, not string-only validation. |
+| Generated Cloudinary route imported builder-internal source; BYO signing routes lacked authorization and quotas | Both generators emit their complete authentication module and quota migration. Verify the app's own database session before parsing bytes. Bound actual file bytes/type, four active uploads per instance, and transactional daily per-user + per-app reservations. No reusable upload grant is given to clients. | CODE FIXED; `StorageGenerator.test.ts`, `generatedUploadSecurity.test.ts`. BYO files now traverse the app server. Requires app auth config and quota migration; missing services fail closed. Public provider URLs are public assets; sensitive files need private storage and authorized downloads. |
+| Deploy coordination and registry errors allowed new paid work / ban bypass | Durable claim must succeed. Missing/ambiguous transactions return retryable 503 before cloud work. Server-publish registry lookup is strict and bounded; allowance exceptions refuse. | CODE FIXED; `deployCoordinationOutage.test.ts`, `aServerAppHasOneLifecycle.test.ts`. Existing hosted apps remain running. |
+| Public hosting could use shared credential-bearing builds | Both availability and orchestration refuse public-mode builds unless credential-less mode is enabled. Admin-only probe path remains available. | MITIGATED, NOT live isolation proof. Run `verifyHostingIsolation.sh` AND `verifyCredentiallessBuild.sh` on the actual project before enabling public hosting. No GCP credentials/gcloud here. |
+| Rescan hold changed only registry state | Current live unsafe content goes through the common offline lifecycle, then records a held/offline status. Restoring requires republish. A refused NEW version continues to preserve the prior working version. | CODE FIXED; moderation wiring + lifecycle tests. |
+| Static takedown swallowed bucket failures and could lose the mirror pointer | Refuse bucket-only deletion failure. Resolve and remove the mirror before deleting the channel; retain the channel on uncertainty. Strict lifecycle reads refuse false offline claims. | CODE FIXED prospectively; `publishRemovalConfirmation.test.ts`. Legacy orphan mirrors whose channels were already deleted still need live inventory/reconciliation. |
+| Server rollback/history picker only used static Hosting releases | Existing owner-checked history picker reads retained ready Cloud Run revisions. Eligible revisions must use current runtime identity; foreign/current/legacy-privileged targets refuse. Rollback shares the deploy lease, uses etag, confirms actual traffic and records its operation. Uncertain cloud mutations retain the lease. New publish resets traffic to latest. | CODE IMPLEMENTED; `serverRollback.test.ts`. Real Cloud Run smoke test pending; it does not restore database or files. Failed-attempt timeline UI is still OPEN. |
+| Frontend metering / overage status could not be established | Existing edge meter/billing implementation retained; no duplicate meter or unverified billing activation. | OPEN LIVE VERIFICATION: deploy/configure serving-path Worker, compare real bytes/provider bills, then decide billing activation. Browser beacons remain unsuitable billing evidence. |
+| Database/files backup and recovery guarantee | No provider plan or backup policy was guessed; customer data remains in their account. | OPEN INFRA: authorized per-project backup/export + separate object backup, retention/budget, and a real restore drill. Code tests cannot prove recoverability. |
+| Unrestricted outbound network traffic | Resource caps and isolation/public gates retained. | OPEN INFRA/DESIGN: forced VPC egress + firewall/proxy enforcement with an app-specific approved destinations policy. An in-app allowlist cannot constrain hostile user code and was not presented as a fix. |
+
+Verification is recorded in the PR after the final-state gate. No production-readiness score or
+claim of live isolation, backup recovery, metering deployment or historical incident resolution.
+
+### Audit preflight corrections on frozen source
+
+The first credential-free/offline Node22 full run completed: 2,819 files, 40,138 passing tests,
+three failing assertions/tests, 68 skipped and two unhandled errors. This is NOT a passing gate.
+The two rescan assertions still required the old live-on-hold behavior and used fixed character
+windows that truncated the new removal sequence. They now inspect the whole registered sweep,
+require the common offline lifecycle and its reversible held/offline state, and retain the catch guard.
+The remaining shell test lacked npm in the isolated PATH; that verification environment is corrected.
+The two pg cleanup errors were caused by the verification-only network guard throwing synchronously
+before pg attached socket listeners; blocked connections now fail asynchronously without opening a
+socket. No production SQL/network code was weakened to accommodate the guard.
+
+The sibling guidance audit also found the tool catalogue, connected-storage hint and Settings entry
+still promising direct signed uploads. They now describe the same authenticated, byte-validated,
+quota-bound generated recipe and its actual configuration. A context regression checks that contract.
+Full final-source checks and hosted CI must pass again before this branch leaves the machine.
+
+### Static moderation sibling closure
+
+Final review found the static publish wrapper still used a fail-open registry lookup and only
+blocked takedowns. A held app could republish and overwrite its review status. Static and server
+publishing now share a bounded strict lookup and the same pure held/takedown refusal. The shared
+rule has no runtime store dependency. Unknown registry state refuses before provider work; missing
+records, owner-unpublished and plan-paused apps can still publish. Provider errors are redacted and
+deadline timers are cleared. Behavior tests exercise both moderation states, missing/known records,
+provider failure and a hung lookup; quota/content scan tests explicitly supply a readable registry.
 
 
 ### 2026-10-20 12:48 UTC — Phase2 main integration preserves applied restore bytes and owned jobs
@@ -98528,6 +98579,37 @@ The same run reported a SIGKILL of the real PGlite shim test worker. Its fixture
 
 Integrated latest main (6cdc155fa, including #3852, #3856 and #3857) before the final gates; only PROGRESS.md overlapped, and both append histories were retained. The candidate branch is now `codex/hosting-data-storage-hardening-integrated`.
 
+### Integration with the concurrent data-boundary remediation
+
+Integrated main `5474b0d0e` (#3858), preserving its supported-token user ownership, legacy-owner
+recovery, pagination, pre-query data-operation reservations and resell receipt fixes. Retained its
+stable short/hashed-long storage policy names and stricter input validation; also remove pre-fix
+legacy policy identifiers so permissive old reads cannot survive migration. The upload recipe has
+one complete implementation: the app's real Supabase session + transactional migration + actual
+byte validation + server-mediated S3/Cloudinary upload. The executable emitted-router tests now
+exercise that implementation through HTTP, including signed-out/forged identity, unavailable auth,
+oversized/mismatched actual content and exhausted/unavailable quotas before any provider upload.
+Preserved all-provider import/no-unused compilation coverage. Operator build/network attestations
+now guard the actual public hosting actuator as well as availability, including public-mode admin
+calls; admin-only probe bring-up remains possible. The full suite on the pre-integration source is
+obsolete; the final-state gate is repeated on the combined, committed tree before publication.
+
+### 2026-10-20 — Selected Supabase organization default (prepared, not activated)
+
+User explicitly chose the connected organization for apps built on NavBharatAI and selected a paid
+production estimate. Prepared a dedicated project per app default in Publish, correct product terms
+and price, stale shared-price request refusal, preservation of existing shared controls, and server-only
+org admission across quote/create/wallet/vault delivery. Capacity reads count existing org projects;
+missing approval/limit/credentials or malformed provider responses create nothing. An uncertain paid
+create/charge or interrupted process retains a durable operator-reconciled hold rather than expiring
+into another paid resource. Fixed ambiguous Supabase creation being falsely reported cleaned.
+
+Selected org hkfoligpzrmcasgtzeoe; restored existing project mtbdjypjlnjghapdtedj and verified healthy,
+with no public tables or Storage buckets. No plan upgrade, paid project creation, migration, default
+runtime activation or customer data move occurred. Prepared a dry-run Cloud Run configuration installer
+that references an existing pinned Secret Manager version and requires explicit organization/cost
+acknowledgement for application. Runtime management credentials and GCP deployment access are separate
+from the ChatGPT Supabase connection. See docs/DEFAULT_SUPABASE.md for live prerequisites and scope.
 ## 2026-10-20 — Q-881: the number that multiplies every bill gets a bound (and the two siblings the row never named)
 
 **The defect.** The whole validation on the live USD→INR rate was `Number.isFinite(rate) && rate > 0`, so

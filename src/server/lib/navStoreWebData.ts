@@ -19,10 +19,9 @@
 //   • over-quota is an HONEST 429 the app can show, never a silent drop and never our overdraft;
 //   • per-caller rate limits ride the platform's existing tested limiter at the route layer.
 //
-// PRIVACY, said honestly rather than implied: rows are keyed by the app's unguessable id. A private
-// (password) app's DATA is exactly as private as its id — the data API does not re-check the app
-// password, because the app's own fetch calls cannot carry it. Do not build medical records on a
-// guestbook API; the store's terms say what this is for.
+// Private apps require a short-lived capability minted only after password verification on open.
+// This remains APP-SHARED data, not per-user records. Personal records need an authenticated
+// database with row ownership; knowing a shared app password is not a user identity.
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';

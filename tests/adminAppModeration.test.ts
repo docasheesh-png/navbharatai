@@ -160,7 +160,7 @@ describe('the wiring — the capability must actually be reachable', () => {
     expect(route).toContain('deleteChannel: (workspaceId) => new FirebaseHostingDeployer().deleteChannel(workspaceId),');
     const life = readFileSync(join(__dirname, '..', 'src/server/AgentV3/hostedAppLifecycle.ts'), 'utf8');
     const fn = life.slice(life.indexOf('export async function takeAppOffline'));
-    const ch = fn.indexOf('await deps.deleteChannel(workspaceId);');
+    const ch = fn.indexOf('await deps.deleteChannel(workspaceId)');
     const sv = fn.indexOf('await removeHostedServersOrThrow(');
     const st = fn.indexOf('return deps.setStatus(workspaceId, status);');
     expect(ch).toBeGreaterThan(-1);
@@ -239,7 +239,8 @@ describe('Restore — a mistaken ban can be undone from the screen (admin panel 
   });
 
   it('🔒 both writers of a hold record what the app was, so a restore can know (Q-703)', () => {
-    expect(read('server.ts')).toContain("deploymentStore.setStatus(workspaceId, 'held', { heldFrom: 'active' })");
+    expect(read('server.ts')).toContain("takeAppOffline(workspaceId, 'held'");
+    expect(read('server.ts')).toContain("{ heldFrom: 'unpublished' }");
     expect(read('src/server/AgentV3/DeploymentStore.ts')).toContain("deploymentStore.setStatus(workspaceId, 'held', { heldFrom: existing?.status ?? 'none' })");
   });
 

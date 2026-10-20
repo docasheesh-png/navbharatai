@@ -96,6 +96,15 @@ describe('🔒 the two flags — inert by default, admin-only after that', () =>
     expect(a.message).not.toMatch(/NAVBHARAT_APPS_PROJECT/);
   });
 
+  it.each(['NAVBHARAT_APPS_CREDENTIALLESS_BUILD', 'NAVBHARAT_APPS_BUILD_ISOLATION_VERIFIED', 'NAVBHARAT_APPS_EGRESS_VERIFIED'])('public hosting refuses a missing %s at availability and orchestration, including admin publishes', async (key) => {
+    const env = { ...ON, NAVBHARAT_CLOUD_PUBLIC: 'on', NAVBHARAT_APPS_CREDENTIALLESS_BUILD: 'on', NAVBHARAT_APPS_BUILD_ISOLATION_VERIFIED: 'on', NAVBHARAT_APPS_EGRESS_VERIFIED: 'on', [key]: 'off' } as NodeJS.ProcessEnv;
+    for (const isAdmin of [true, false]) expect(hostingAvailability({ env, isAdmin, hasPlan: true }).available).toBe(false);
+    let called = false;
+    const outcome = await hostAppOnNavBharatCloud({ workspaceId: 'a', files: { 'index.js': '' }, existing: null, token: 't', env }, async () => { called = true; throw new Error('must not reach cloud'); });
+    expect(outcome).toMatchObject({ ok: false, reason: 'unavailable' });
+    expect(called).toBe(false);
+  });
+
   it('🔒 D4 holds all the way up here: the platform project is refused even for an admin', () => {
     const a = hostingAvailability({
       isAdmin: true,

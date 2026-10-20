@@ -1,10 +1,11 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { withDeploymentPersistence } from '../src/server/AgentV3/DeploymentStore';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { deploymentStore, withDeploymentPersistence } from '../src/server/AgentV3/DeploymentStore';
 
 // Slice 2 — the hosting quota is ENFORCED at the withDeploymentPersistence choke point. Under VITEST
 // the Firestore stores are skipped, so the monthly COUNT cap fails open (used=0). The SIZE ceiling is
 // deterministic (no store) so it is fully testable here; and BYO providers must always pass through.
-afterEach(() => { delete process.env.AGENTV3_DEPLOY_MAX_MB; });
+beforeEach(() => { vi.spyOn(deploymentStore, 'getStrict').mockResolvedValue(null); });
+afterEach(() => { delete process.env.AGENTV3_DEPLOY_MAX_MB; vi.restoreAllMocks(); });
 
 const filesOfMb = (mb: number): Map<string, Buffer> =>
   new Map([['dist/index.js', Buffer.alloc(Math.round(mb * 1024 * 1024))]]);

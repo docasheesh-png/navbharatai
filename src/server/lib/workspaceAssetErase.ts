@@ -1,14 +1,29 @@
 import * as admin from 'firebase-admin';
-import { planWorkspaceErase, type EraseRefusal } from './workspaceDataErase';
-import { workspaceAssetBucketName, workspaceAssetObjectPrefix } from './workspaceAssetStorage';
+import type { EraseRefusal } from './workspaceDataErase';
+import { workspaceAssetBucketName, workspaceAssetVerifiedOwnerPrefix } from './workspaceAssetStorage';
 import { notePersistenceFailure } from './persistenceHealth';
 
 export interface WorkspaceAssetEraseReport {
   attempted: boolean;
-  /** The configured bucket confirmed the prefix deletion; this cannot fence an in-flight upload. */
+  /** Overall removal remains unconfirmed because legacy objects have no verified ownership proof. */
   removed: boolean;
+  /** Confirms completed objects in the verified-owner namespace only; cannot fence in-flight uploads. */
+  verifiedOwnerObjectsRemoved: boolean;
   failures: string[];
+  limitations: string[];
   refusal?: EraseRefusal;
+}
+
+const LEGACY_OWNERSHIP_LIMITATION = 'Legacy workspace asset ownership cannot be confirmed; legacy objects are retained.';
+
+export function unconfirmedWorkspaceAssetEraseReport(): WorkspaceAssetEraseReport {
+  return {
+    attempted: false,
+    removed: false,
+    verifiedOwnerObjectsRemoved: false,
+    failures: [],
+    limitations: [LEGACY_OWNERSHIP_LIMITATION],
+  };
 }
 
 export interface WorkspaceAssetEraseDeps {
@@ -24,27 +39,28 @@ function liveDeps(): WorkspaceAssetEraseDeps {
 }
 
 /**
- * Erase completed private asset spills, including ones whose Firestore pointer was already erased.
- * The verified uid range supplies the exact object prefix; no ownership is guessed from pointers.
- * Bucket history, uploads still in flight and ZIP chunks need separate reconciliation.
+ * Erase completed spills written with a verified owner, even after their Firestore pointer is gone.
+ * Legacy workspace-id prefixes are ambiguous and never supply ownership proof for deletion.
+ * Legacy objects, bucket history, uploads still in flight and ZIP chunks need separate reconciliation.
  */
 export async function eraseUserWorkspaceAssetObjects(
   uid: string,
   deps: WorkspaceAssetEraseDeps = liveDeps(),
 ): Promise<WorkspaceAssetEraseReport> {
-  const plan = planWorkspaceErase(uid);
-  if (!plan.range) return { attempted: false, removed: false, failures: [], refusal: plan.refusal };
+  const report = unconfirmedWorkspaceAssetEraseReport();
+  const prefix = workspaceAssetVerifiedOwnerPrefix(uid);
+  if (!prefix) return { ...report, refusal: 'unusable-uid' };
   if (!deps.bucket) return {
-    attempted: false, removed: false,
+    ...report,
     failures: ['Workspace asset storage is not configured; removal could not be confirmed.'],
   };
   try {
-    await deps.deletePrefix(deps.bucket, workspaceAssetObjectPrefix(plan.range.startAt));
-    return { attempted: true, removed: true, failures: [] };
+    await deps.deletePrefix(deps.bucket, prefix);
+    return { ...report, attempted: true, verifiedOwnerObjectsRemoved: true };
   } catch (error) {
     notePersistenceFailure('workspace_assets', 'write', error);
     return {
-      attempted: true, removed: false,
+      ...report, attempted: true,
       failures: ['Workspace asset storage could not confirm removal.'],
     };
   }

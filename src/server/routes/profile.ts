@@ -13,10 +13,10 @@ import type { Express, Request, Response } from 'express';
 import { doc, getDoc, getServerDb as getDb } from '../lib/serverDb';
 import { verifyFirebaseToken, verifyFirebaseIdentity, deleteAuthAccount, rateLimiter } from '../lib/authMiddleware';
 import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
-import { deleteUserDerivedIdData, LEGACY_HISTORY_ERASURE_LIMITATION } from '../lib/derivedIdErase';
+import { deleteUserDerivedIdData, LEGACY_HISTORY_ERASURE_LIMITATION, WORKSPACE_OWNERSHIP_ERASURE_LIMITATION } from '../lib/derivedIdErase';
 import { deleteUserWorkspaceData } from '../lib/workspaceDataErase';
 import { eraseUserSnapshots, liveSnapshotEraseDeps } from '../lib/snapshotErase';
-import { eraseUserWorkspaceAssetObjects } from '../lib/workspaceAssetErase';
+import { eraseUserWorkspaceAssetObjects, unconfirmedWorkspaceAssetEraseReport } from '../lib/workspaceAssetErase';
 import { eraseSyncedWorkspace, type SyncEraseFirestore } from '../lib/syncWorkspaceErase';
 import { deIdentifyPublishedListings, getListingDb } from '../lib/publishedListingErase';
 import { sendSafeError } from '../lib/httpError';
@@ -269,43 +269,43 @@ export function registerProfileRoutes(app: Express): void {
     try {
       // DERIVED IDS FIRST OF ALL — BEFORE ANYTHING THAT DELETES THE KEYS THEY ARE DERIVED FROM.
       // `derivedIdErase` reaches documents whose id is BUILT from a key rather than equal to one:
-      // `bot_sessions/{botId}_{chatId}` (from the user's `bots`) and `build_history_v2/{workspaceId}` (from
-      // `user_build_history` and the workspace id range). The two erasers below delete exactly those
-      // parents, so running this second would resolve no keys, delete nothing, and report success —
-      // the "an erase that LOOKS complete and is not" failure the apps eraser was written to prevent.
+      // Exact-owner bot ids must be resolved before their parent records disappear. Legacy history
+      // references cannot prove ownership of a colliding physical key; those paths retain their
+      // records with explicit limitations instead of deriving ownership from the key.
       // Best-effort like the rest: reported, never thrown, so it can never block the deletion the user
       // actually asked for.
       const derived = await deleteUserDerivedIdData(identity.uid)
         .catch((e) => ({ uid: identity.uid, collections: [], totalDeleted: 0, keys: { bots: 0, historySessions: 0 }, error: e instanceof Error ? e.message : String(e) }));
       // …AND THE SNAPSHOTS OF THEIR APPS, ON OUR HOSTING (Q-795). A copy of each built app sits in the bucket
-      // (`s-…`) or a Firebase channel (`sn-…`), keyed by the workspace id. Those ids are listed only in the
-      // stores the apps eraser below deletes, so this runs BEFORE it — after, it would find nothing, delete
-      // nothing and report success. Best-effort like the rest: reported, never thrown.
+      // (`s-…`) or a Firebase channel (`sn-…`), keyed by the workspace id. Legacy attribution is
+      // refused before listing or deleting snapshots, with a separately reported ownership limitation.
       const snapshots = await eraseUserSnapshots(identity.uid, liveSnapshotEraseDeps())
         .catch((e) => ({ uid: identity.uid, workspaces: 0, bucketRemoved: 0, channelsRemoved: 0, failures: [e instanceof Error ? e.message : String(e)] }));
-      // Large private assets spill outside Firestore. Removing their pointer documents alone leaves
-      // the actual bytes behind. This exact-owner prefix works even if earlier erasure lost metadata.
-      // It cannot revoke an upload already in flight; that reconciliation remains a separate boundary.
+      // New private spills carry independently verified owner keys, so their completed bytes can be
+      // erased even after pointer loss. Legacy workspace-id keys have ambiguous ownership and stay
+      // retained for review; in-flight uploads also need separate reconciliation.
       const workspaceAssetObjects = await eraseUserWorkspaceAssetObjects(identity.uid)
-        .catch(() => ({ attempted: false, removed: false, failures: ['Workspace asset storage could not confirm removal.'] }));
+        .catch(() => ({
+          ...unconfirmedWorkspaceAssetEraseReport(),
+          failures: ['Workspace asset storage could not confirm removal.'],
+        }));
       // DATA FIRST, THEN THE CREDENTIAL. Erasing the sign-in first would strand any data whose
-      // deletion then failed, with the owner unable to sign in and retry.
+      // deletion then failed, with the owner unable to sign in and retry. Retained unverified records
+      // are disclosed even when sign-in removal succeeds.
       const report = await deleteUserData(db, identity.uid);
       // …AND THE APPS THEY BUILT. `deleteUserData` covers the platform's own user records and says so
       // in its header ("not generated apps"); PROGRESS.md carried the rest as an OPEN root cause twice.
-      // Without this a user could delete their account and leave every app they ever built sitting in
-      // our Firestore. Best-effort like the cascade above: a failure is reported, never thrown, so it
-      // can never block the account deletion the user actually asked for.
+      // Legacy workspace keys cannot independently establish ownership, so this registered path
+      // currently refuses attribution and reports retained records before any destructive selection.
       const apps = await deleteUserWorkspaceData(identity.uid)
         .catch((e) => ({ uid: identity.uid, collections: [], totalDeleted: 0, error: e instanceof Error ? e.message : String(e) }));
       // Deleting the documents is not deleting the ACCOUNT: without this the Auth record survives and
       // the person who asked to be deleted can sign back in to a blank account. That is not what the
       // button says, and not what Play's deletion requirement means.
       // …AND THE SYNCED WORKSPACE (Q-763). `user_workspaces/{uid}` is only a MANIFEST; the person's
-      // chat sessions and last built app live in `user_workspaces/{uid}__c{i}`. It was in no erase
-      // path at all, and registering it with the retention manager would have deleted the manifest
-      // and kept the chunks — an erase that reports success and leaves the data unreachable. Its own
-      // module deletes the chunks FIRST and the manifest LAST, so a partial failure can be retried.
+      // chat sessions and last built app live in `user_workspaces/{uid}__c{i}`. Those exact composite
+      // keys can also be another account's manifest. The dedicated module retains all unverified
+      // historical sync records and reports the ownership refusal.
       // Best-effort like the two above: reported, never thrown, so it cannot block the deletion.
       const syncDb = getDb() as unknown as SyncEraseFirestore | null;
       const synced = syncDb
@@ -336,15 +336,15 @@ export function registerProfileRoutes(app: Express): void {
         // Account removal and data erasure are separate outcomes. Never claim every snapshot is gone:
         // the old global history has no trustworthy ownership proof and per-store erasures can fail.
         message: accountDeleted
-          ? `Your account has been deleted. Data erasure results are reported separately. ${LEGACY_HISTORY_ERASURE_LIMITATION.message}`
-          : `Your sign-in could not be removed automatically. Please email info@navbharatai.com so we can finish account deletion. Data erasure results are reported separately. ${LEGACY_HISTORY_ERASURE_LIMITATION.message}`,
+          ? `Your account has been deleted. Data erasure results are reported separately. ${LEGACY_HISTORY_ERASURE_LIMITATION.message} ${WORKSPACE_OWNERSHIP_ERASURE_LIMITATION.message}`
+          : `Your sign-in could not be removed automatically. Please email info@navbharatai.com so we can finish account deletion. Data erasure results are reported separately. ${LEGACY_HISTORY_ERASURE_LIMITATION.message} ${WORKSPACE_OWNERSHIP_ERASURE_LIMITATION.message}`,
         accountDeleted,
         account,
-        limitations: [LEGACY_HISTORY_ERASURE_LIMITATION],
+        limitations: [LEGACY_HISTORY_ERASURE_LIMITATION, WORKSPACE_OWNERSHIP_ERASURE_LIMITATION],
         ...report,
         // Reported SEPARATELY rather than folded into the totals above: these are the user's built
         // apps, and someone checking whether their work is really gone should be able to see that line
-        // on its own. `refusal` appears only in the one case the eraser declines to guess at (see
+        // on its own. `refusal` appears when ownership cannot be independently proved (see
         // planWorkspaceErase) — surfaced, never swallowed.
         apps,
         // Likewise its own line: the cross-device workspace, which is neither a platform record nor a

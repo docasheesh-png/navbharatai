@@ -1,19 +1,7 @@
-/**
- * A DOCUMENT ID NOTHING CAN SEARCH BY — and the three stores that had one.
- *
- * 🔴 THE SHAPE (Q-762, Q-765). `adrDecisions` and `techDebt` key on `${userId}__${projectId}`, and
- * `app_ai_apps` keys on the app id. The erase registry is exact-match only by design — `docId` or a
- * field — so a composite id reaches it only if the BODY carries the uid. `adrDecisions` and `techDebt`
- * carried nothing: the person's own architecture decisions and tech-debt list outlived their account
- * with no way to find them. Both writers now store `userId`.
- *
- * ⚠️ A doc-id PREFIX RANGE was considered and refused. `workspaceDataErase.ts` documents why in its
- * own words: a uid that contains the separator makes `a__b` ambiguous with `a` + `b__…`, and getting
- * that wrong deletes a DIFFERENT person's data. A compliance gap is recoverable; that is not.
- *
- * These tests pin three things: both writers really store the field, the registry really queries it,
- * and — stated rather than implied — a row written BEFORE the change is NOT reached.
- */
+// Composite keys and workspace hashes can join multiple owners' historical data.
+// A latest userId field remains useful metadata, but does not authenticate earlier
+// merged arrays or nonce generations. Real-writer regressions live in
+// mixedOwnerEngineeringErasure.test.ts; these retain registry/field inventory coverage.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -25,6 +13,7 @@ const read = (rel: string): string => readFileSync(join(root, rel), 'utf8');
 type Row = Record<string, unknown>;
 class TinyFirestore implements RetentionFirestore {
   private data = new Map<string, Map<string, Row>>();
+  accessed: string[] = [];
   seed(c: string, id: string, row: Row): void {
     if (!this.data.has(c)) this.data.set(c, new Map());
     this.data.get(c)!.set(id, row);
@@ -35,6 +24,7 @@ class TinyFirestore implements RetentionFirestore {
     return this.data.get(n)!;
   }
   collection(name: string) {
+    this.accessed.push(name);
     const col = this.col(name);
     return {
       doc(id: string) {
@@ -55,12 +45,14 @@ class TinyFirestore implements RetentionFirestore {
 
 const KEYED_BY_USER_ID = ['adrDecisions', 'techDebt', 'app_ai_apps'] as const;
 
-describe('the three composite-id stores are erased by the field their writers store', () => {
-  it('🔒 each is in the registry, queried by `userId`', () => {
+describe('composite-id stores remain registered while legacy ownership is unverified', () => {
+  it('🔒 each keeps its userId inventory and explicit attribution refusal', () => {
     for (const name of KEYED_BY_USER_ID) {
       const entry = USER_SCOPED_COLLECTIONS.find((c) => c.collection === name);
       expect(entry, `${name} is in no erase path`).toBeTruthy();
-      expect(entry!.key, `${name} must be reached by its field, not its id`).toEqual({ field: 'userId' });
+      expect(entry!.key, `${name} metadata inventory remains intact`).toEqual({ field: 'userId' });
+      expect(entry!.erasePolicy).toBe('ownership-unverified');
+      expect(entry!.eraseRefusalReason).toMatch(/ownership cannot be confirmed/);
     }
   });
 
@@ -75,7 +67,7 @@ describe('the three composite-id stores are erased by the field their writers st
       .toMatch(/userId: userId \|\| ''/);
   });
 
-  it('the cascade deletes the right person\'s rows and nobody else\'s', async () => {
+  it('the cascade retains legacy rows regardless of latest userId while exact platform records still delete', async () => {
     const db = new TinyFirestore();
     db.seed('adrDecisions', 'victim__proj1', { userId: 'victim', records: [1] });
     db.seed('adrDecisions', 'bystander__proj1', { userId: 'bystander', records: [1] });
@@ -84,16 +76,20 @@ describe('the three composite-id stores are erased by the field their writers st
     db.seed('app_ai_apps', 'app-a', { userId: 'victim', workspaceId: 'agentv3-victim-s1' });
     db.seed('app_ai_apps', 'app-b', { userId: 'bystander', workspaceId: 'agentv3-bystander-s1' });
 
-    await deleteUserData(db, 'victim');
+    db.seed('users', 'victim', { own: true });
+    const report = await deleteUserData(db, 'victim');
 
-    expect(db.ids('adrDecisions')).toEqual(['bystander__proj1']);
-    expect(db.ids('techDebt')).toEqual(['bystander__proj2']);
-    expect(db.ids('app_ai_apps')).toEqual(['app-b']);
+    expect(db.ids('adrDecisions')).toEqual(['bystander__proj1', 'victim__proj1']);
+    expect(db.ids('techDebt')).toEqual(['bystander__proj2', 'victim__proj1']);
+    expect(db.ids('app_ai_apps')).toEqual(['app-a', 'app-b']);
+    expect(db.ids('users')).toEqual([]);
+    for (const name of KEYED_BY_USER_ID) {
+      expect(db.accessed).not.toContain(name);
+      expect(report.collections.find((entry) => entry.collection === name)).toMatchObject({ deleted: 0, refusal: 'ownership-unverified' });
+    }
   });
 
-  it('🟡 a row written BEFORE the field existed is NOT reached — the residue, stated not hidden', async () => {
-    // This is deliberately asserted rather than left to a comment. The honest claim is "new rows are
-    // covered", and a test that proved otherwise would be the thing to disbelieve.
+  it('🟡 a legacy row without owner metadata is retained too', async () => {
     const db = new TinyFirestore();
     db.seed('adrDecisions', 'victim__old', { records: [1], updatedAt: 'x' }); // no userId
     db.seed('techDebt', 'victim__old', { items: [1] });                        // no userId
@@ -102,10 +98,9 @@ describe('the three composite-id stores are erased by the field their writers st
     expect(db.ids('techDebt')).toEqual(['victim__old']);
   });
 
-  it('…and it self-heals on the next write, which is why it is a residue and not a hole', () => {
-    // `adrDecisions` replaces the whole document (`merge: false`) and `techDebt` merges into it, so an
-    // ACTIVE project's row gains `userId` the next time that project is built. Only an abandoned
-    // project's row stays unreachable. Pinned here so the claim in PROGRESS.md is checkable.
+  it('writers keep their existing metadata contracts; rewriting userId does not establish earlier ownership', () => {
+    // Both writers carry prior arrays into their next write; the real writer tests
+    // prove that replacing the parent userId does not attribute every retained item.
     expect(read('src/server/AgentV3/adrMemory.ts')).toMatch(/tx\.set\(ref, \{ userId,[\s\S]{0,80}\{ merge: false \}\)/);
     expect(read('src/server/AppMakerLab/intelligence/TechnicalDebtTracker.ts'))
       .toMatch(/\{ userId, items: merged[\s\S]{0,60}\{ merge: true \}\)/);

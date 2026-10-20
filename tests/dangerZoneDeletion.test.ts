@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { deletionOutcomeMessage } from '../src/components/settings/DangerZone';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { DangerZone, deletionOutcomeMessage } from '../src/components/settings/DangerZone';
 import { isTypedConfirmValid, DELETE_CONFIRM_WORD } from '../src/lib/deleteConfirm';
 
 // Google Play requires in-app account deletion for any app that lets people create an account, and
@@ -24,16 +26,19 @@ describe('the delete cannot fire by accident', () => {
 });
 
 describe('the outcome message never overstates what happened', () => {
-  it('reports a full deletion only when the server confirms the ACCOUNT went too', () => {
+  it('an account-removal acknowledgment never becomes proof that all data was erased', () => {
     const msg = deletionOutcomeMessage({ ok: true, accountDeleted: true });
-    expect(msg).toMatch(/account and all of its data have been permanently deleted/i);
+    expect(msg).toMatch(/Your account has been deleted/i);
+    expect(msg).toMatch(/Data removal is not fully confirmed/i);
+    expect(msg).toMatch(/ownership.*review/i);
+    expect(msg).not.toMatch(/all.*data.*deleted|data has been erased/i);
   });
 
-  it('says plainly when the DATA went but the sign-in survived', () => {
+  it('does not infer either data erasure or sign-in removal from an incomplete outcome', () => {
     // These genuinely differ: the Firestore wipe can succeed while the Auth SDK is unreachable. A
     // green tick there would leave someone believing they are gone when they can still sign in.
     const msg = deletionOutcomeMessage({ ok: true, accountDeleted: false });
-    expect(msg).toMatch(/sign-in could not be removed/i);
+    expect(msg).toMatch(/sign-in removal and data erasure are not fully confirmed/i);
     expect(msg).toMatch(/info@navbharatai\.com/);
     expect(msg).not.toMatch(/account and all of its data have been permanently deleted/i);
   });
@@ -43,11 +48,20 @@ describe('the outcome message never overstates what happened', () => {
     expect(msg).toBe('Server said this.');
   });
 
-  it('says NOTHING was changed when the request failed — never a partial-success guess', () => {
+  it('a missing acknowledgment never claims that no changes occurred', () => {
     for (const bad of [null, {}, { ok: false }, { ok: false, accountDeleted: true }]) {
       const msg = deletionOutcomeMessage(bad as never);
-      expect(msg).toMatch(/could not complete the deletion/i);
-      expect(msg).toMatch(/Nothing has been changed/i);
+      expect(msg).toMatch(/could not confirm the deletion outcome/i);
+      expect(msg).toMatch(/Some changes may already have completed/i);
+      expect(msg).not.toMatch(/nothing.*changed/i);
     }
+  });
+
+  it('discloses retained ownership-unverified data before the user can confirm account deletion', () => {
+    const html = renderToStaticMarkup(createElement(DangerZone, { signedIn: true }));
+    expect(html).toContain('Delete account');
+    expect(html).toMatch(/Older records whose ownership cannot be verified are/);
+    expect(html).toMatch(/retained for review, including workspaces, chat and voice conversations/);
+    expect(html).not.toMatch(/permanently removes your profile, chats, projects/);
   });
 });

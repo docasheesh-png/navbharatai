@@ -15,8 +15,8 @@ permanent 100/100 rating or leadership over other products.
 
 | Phase | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
-| 1 | Security and authorization | MERGED / CI VERIFIED | [PR #3847](https://github.com/docasheesh-png/navbharatai/pull/3847), [successful exact-head CI](https://github.com/docasheesh-png/navbharatai/actions/runs/39370215420), merged as `885ba41023c2f7327be956aadc71f79ee2840821`. Legacy recovery and dependency exceptions remain documented. |
-| 2 | Concurrent-build safety and recovery | IN PROGRESS | Queue/retry/import-lease [PR #3848](https://github.com/docasheesh-png/navbharatai/pull/3848) merged after [both CI jobs passed](https://github.com/docasheesh-png/navbharatai/actions/runs/39378125233), merge `06f8065629debbd846c1f836241c5be9a5a8337e`. [PR #3852](https://github.com/docasheesh-png/navbharatai/pull/3852) adds uncertain reconnect refusal, deadline body-exit holds and completed private asset erasure, pending final verification. See PHASE2_STATE_PRESERVATION.md. Full runtime/state preservation, queued resumable handoff and late-write reconciliation remain open. |
+| 1 | Security and authorization | MERGED / CI VERIFIED; OWNERSHIP FOLLOW-UP OPEN | [PR #3847](https://github.com/docasheesh-png/navbharatai/pull/3847), [successful exact-head CI](https://github.com/docasheesh-png/navbharatai/actions/runs/39370215420), merged as `885ba41023c2f7327be956aadc71f79ee2840821`. Phase2 review found that full legacy workspace IDs still collide for valid custom UID/session pairs; private access needs independent verified ownership, not a prefix. Legacy recovery and dependency exceptions remain documented. |
+| 2 | Concurrent-build safety and recovery | IN PROGRESS | Queue/retry/import-lease [PR #3848](https://github.com/docasheesh-png/navbharatai/pull/3848) merged after [both CI jobs passed](https://github.com/docasheesh-png/navbharatai/actions/runs/39378125233), merge `06f8065629debbd846c1f836241c5be9a5a8337e`. [PR #3852](https://github.com/docasheesh-png/navbharatai/pull/3852) adds uncertain reconnect refusal, deadline body-exit holds and verified-owner asset storage/erasure, pending final verification. See PHASE2_STATE_PRESERVATION.md. Legacy ownership, full runtime/state preservation, queued resumable handoff and late-write reconciliation remain open. |
 | 3 | Reproducible quality baseline | NOT STARTED | Start after Phase 2; use existing benchmark harness and real outcome evidence. |
 | 4 | Generated-app correctness | NOT STARTED | Start after Phase 3; prioritize measured failure cohorts. |
 | 5 | Maintainability and strict typing | NOT STARTED | Start after Phase 4; preserve behavior while extracting bounded modules. |
@@ -52,6 +52,17 @@ Acceptance: authorization regression tests and required CI pass; all discovered
 reachable high/critical dependency paths are fixed or explicitly remain OPEN,
 with no false claim of phase completion. A source audit is not a production
 penetration test or proof of the deployed policy.
+
+Follow-up found during Phase2: `agentv3-abc-d-session1` can mean owner `abc`
+with session `d-session1` or owner `abc-d` with session `session1`. Both are
+valid inputs. Requiring a verified token does not disambiguate the key, and
+fresh history/session collections using that same key do not solve this older
+collision. Workspace documents have no trustworthy historical owner stamp.
+Legacy prefix-only erasure must refuse attribution; private reads/writes need
+a prospective verified owner namespace/registry and a separately verified legacy
+migration. Checking current Auth accounts or parsing the key cannot establish
+historical ownership. This is an OPEN security boundary, not completed Phase1
+readiness, and blocks an unconditional 100/100 claim.
 
 ## Phase 2 — concurrent-build safety and recovery
 

@@ -18,14 +18,10 @@
 // instances" — which is what this report is. It needs no Redis: one small document per building
 // workspace, written every 20 seconds while a build runs, deleted when it ends.
 //
-// 🔒 IT FAILS OPEN, like `jobLease.ts` and unlike `webRiskBudget.ts`, and deliberately so: a lease the
-// store cannot read lets the build START. Failing closed would turn one Firestore blip into "nobody on
-// the platform can build"; failing open costs, at worst, today's behaviour for the length of the blip.
-//
-// 🔒 A STALE LEASE IS CLAIMABLE. An instance that crashes mid-build stops heartbeating, and after
-// `LEASE_STALE_MS` its lease stops blocking anybody — a crash can never lock a user out of their app.
-//
-// PURE decisions + a thin transactional I/O layer, so the rules are testable without a database.
+// A store failure refuses a new build. This lease coordinates admission only: it does not stop
+// commands already running, fence source writes, or prove a stale sandbox drained. Those remaining
+// Phase 2 boundaries require a state-preserving execution design before automatic takeover is safe.
+// Runtime IDs, preview origins and existing workspace source paths are unchanged here.
 
 /** A lease as it is stored. */
 export interface WorkspaceBuildLease {
@@ -58,9 +54,6 @@ export type LeaseClaimDecision = 'claim' | 'busy';
  * May a NEW build claim this workspace?
  *
  * - no lease, an unreadable one, or a stale one ⇒ claim;
- * - a lease held by THIS process ⇒ claim. This process's own in-memory lock has already decided whether
- *   a build is running here (the route checks it first), so a lease this process holds without a live
- *   build is a leftover from an exit path that did not release it — it must never block its own owner;
  * - otherwise ⇒ busy: a build is running on another instance, and starting a second one is the bug.
  * PURE.
  */
@@ -69,7 +62,6 @@ export function leaseClaimDecision(
   opts: { owner: string; nowMs: number; staleMs?: number },
 ): LeaseClaimDecision {
   if (!leaseIsLive(existing, opts.nowMs, opts.staleMs)) return 'claim';
-  if (existing?.owner === opts.owner) return 'claim';
   return 'busy';
 }
 
@@ -127,32 +119,33 @@ async function bounded<T>(p: Promise<T>, fallback: T): Promise<T> {
 
 export type LeaseClaimResult =
   | { ok: true; verified: boolean }
-  | { ok: false; holderHeartbeatAt: number };
+  | { ok: false; reason: 'busy' | 'unavailable'; holderHeartbeatAt: number };
 
 /**
- * Claim the workspace for a new build. `verified: false` means the store could not be reached and the
- * build was let through (fail-open — see the header).
+ * Claim before any build work. An unavailable/timed-out store is a retryable refusal, never authority.
  */
 export async function claimWorkspaceBuild(
   store: BuildLeaseStore | null | undefined,
   opts: { workspaceId: string; token: string; owner: string; userId?: string | null; nowMs?: number },
 ): Promise<LeaseClaimResult> {
-  if (!store || !opts.workspaceId) return { ok: true, verified: false };
+  if (!store || !opts.workspaceId || !opts.token) return { ok: false, reason: 'unavailable', holderHeartbeatAt: 0 };
   const nowMs = Number.isFinite(opts.nowMs) ? Number(opts.nowMs) : Date.now();
+  const deadline = Date.now() + LEASE_CALL_TIMEOUT_MS;
   const attempt = (async (): Promise<LeaseClaimResult> => {
     const ref = store.collection(WORKSPACE_BUILD_LEASE_COLLECTION).doc(opts.workspaceId);
     return store.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
       const existing = (snap.exists ? snap.data() : undefined) as Partial<WorkspaceBuildLease> | undefined;
       if (leaseClaimDecision(existing ?? null, { owner: opts.owner, nowMs }) === 'busy') {
-        return { ok: false as const, holderHeartbeatAt: Number(existing?.heartbeatAt) || 0 };
+        return { ok: false as const, reason: 'busy' as const, holderHeartbeatAt: Number(existing?.heartbeatAt) || 0 };
       }
       const lease: WorkspaceBuildLease = { token: opts.token, owner: opts.owner, heartbeatAt: nowMs, userId: opts.userId ?? null };
+      if (Date.now() >= deadline) throw new Error('Lease claim expired before commit');
       tx.set(ref, lease as unknown as Record<string, unknown>);
       return { ok: true as const, verified: true };
     });
   })();
-  return bounded(attempt, { ok: true, verified: false });
+  return bounded(attempt, { ok: false, reason: 'unavailable', holderHeartbeatAt: 0 });
 }
 
 /** Renew this build's lease. Never overwrites a lease that is no longer ours. */
@@ -161,14 +154,23 @@ export async function renewWorkspaceBuild(
   opts: { workspaceId: string; token: string; nowMs?: number },
 ): Promise<LeaseRenewal> {
   if (!store || !opts.workspaceId) return 'unknown';
-  const nowMs = Number.isFinite(opts.nowMs) ? Number(opts.nowMs) : Date.now();
+  const requestStartedAt = Date.now();
+  // This exact timestamp is persisted and must also bound the caller's local authority. An ACK's
+  // arrival time cannot grant a longer lease than the transaction actually wrote.
+  const heartbeatAt = Number.isFinite(opts.nowMs) ? Number(opts.nowMs) : requestStartedAt;
+  const deadline = requestStartedAt + LEASE_CALL_TIMEOUT_MS;
   const attempt = (async (): Promise<LeaseRenewal> => {
     const ref = store.collection(WORKSPACE_BUILD_LEASE_COLLECTION).doc(opts.workspaceId);
     return store.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
       const existing = (snap.exists ? snap.data() : undefined) as Partial<WorkspaceBuildLease> | undefined;
-      const verdict = leaseRenewalDecision(existing ?? null, opts.token);
-      if (verdict !== 'lost') tx.set(ref, { ...(existing as Record<string, unknown>), heartbeatAt: nowMs });
+      const currentTime = heartbeatAt + Math.max(0, Date.now() - requestStartedAt);
+      if (Date.now() >= deadline) throw new Error('Lease renewal expired before commit');
+      const stillLive = leaseIsLive(existing, currentTime) && currentTime < Number(existing?.heartbeatAt) + LEASE_STALE_MS;
+      const verdict = stillLive ? leaseRenewalDecision(existing ?? null, opts.token) : 'lost';
+      // A requested Stop does not prove the shared runtime drained. Keep its exact live token
+      // renewed until the captured build has actually exited and releases the lease.
+      if (verdict !== 'lost') tx.set(ref, { ...(existing as Record<string, unknown>), heartbeatAt });
       return verdict;
     });
   })();

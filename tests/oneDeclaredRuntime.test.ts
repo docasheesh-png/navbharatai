@@ -66,7 +66,9 @@ describe('🧭 CLASS GUARD: no workflow may name a different runtime', () => {
   it('🔴 THE TWO THAT HAD DRIFTED are on the declared version', () => {
     for (const file of ['ci.yml', 'dast.yml']) {
       const src = readFileSync(join(WORKFLOW_DIR, file), 'utf8');
-      expect([...src.matchAll(/^\s*node-version:\s*'?"?(\d+)/gm)].map((m) => Number(m[1])), file)
+      // A workflow can contain multiple jobs. Every declaration must agree, and an absent
+      // declaration still fails; the number of setup-node steps is not the runtime invariant.
+      expect([...new Set([...src.matchAll(/^\s*node-version:\s*'?"?(\d+)/gm)].map((m) => Number(m[1])))], file)
         .toEqual([requiredMajor()]);
     }
   });

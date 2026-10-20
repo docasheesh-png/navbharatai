@@ -33,7 +33,8 @@ import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { extractZipProjectFromDisk, freeDiskBytes, hasSpaceForUpload } from '../AgentV3/ProjectImportStream';
 import { writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
-import { claimWorkspaceBuild, releaseWorkspaceBuild, BUILD_RUNNING_ELSEWHERE_CODE, BUILD_RUNNING_ELSEWHERE_MESSAGE, type BuildLeaseStore } from '../AgentV3/workspaceBuildLease';
+import { claimWorkspaceBuild, BUILD_RUNNING_ELSEWHERE_CODE, BUILD_RUNNING_ELSEWHERE_MESSAGE, type BuildLeaseStore } from '../AgentV3/workspaceBuildLease';
+import { holdWorkspaceImportLease, WorkspaceImportLeaseError } from '../AgentV3/workspaceImportLease';
 import { processOwnerId } from '../lib/jobLease';
 import { getServerDb } from '../lib/serverDb';
 
@@ -429,6 +430,7 @@ export function registerZipUploadRoutes(app: Express): void {
       }
     }
     let releaseLease: (() => Promise<void>) | null = null;
+    let importLease: ReturnType<typeof holdWorkspaceImportLease> | null = null;
     try {
       // From DISK, streaming — never readFileSync: buffering the archive is what made big imports
       // impossible regardless of the advertised cap (see the module comment on ProjectImportStream).
@@ -441,35 +443,46 @@ export function registerZipUploadRoutes(app: Express): void {
         });
         return;
       }
-      // LAZY, and deliberately so (2026-08-06). The actuator classes pull the sandbox SDKs, ~1.5s of
-      // import work that this route needs only when someone actually finishes an upload. Loading it at
-      // module scope charged that to every server boot on a path that has nothing to do with building.
-      // Same module, so still the same process-wide singleton — a second instance would hand a
-      // session's next message a cold, empty sandbox.
-      const { buildActuator } = await import('./actuatorFactory');
-      const actuator = buildActuator();
-      // 'import' type starts the sandbox EMPTY so the user's app never gets scaffold files mixed in.
-      try { await actuator.ensureWorkspace(workspaceId, 'import'); }
-      catch {
-        res.status(503).json({ error: 'The workspace could not be started. Please retry the import in a moment.' });
-        return;
-      }
-      if ((process.env.AGENTV3_WORKSPACE_LEASE ?? '').trim().toLowerCase() !== 'off') {
+      {
         // The ADMIN handle — the one the build route's lease uses. This read the client SDK's handle until audit
         // 2026-10-11 (F9): that object has no `.collection()` / `.runTransaction()`, so the claim threw, failed
         // open, and an import could overwrite a workspace a build on another instance was writing.
-        const store = getServerDb() as unknown as BuildLeaseStore | null;
+        // Disabled coordination cannot grant an import authority, matching the build endpoint.
+        const store = ((process.env.AGENTV3_WORKSPACE_LEASE ?? '').trim().toLowerCase() !== 'off' ? getServerDb() : null) as unknown as BuildLeaseStore | null;
         const token = randomUUID();
-        const claim = await claimWorkspaceBuild(store, { workspaceId, token, owner: processOwnerId(), userId: uid });
-        if (!claim.ok) {
-          res.status(409).json({ code: BUILD_RUNNING_ELSEWHERE_CODE, error: BUILD_RUNNING_ELSEWHERE_MESSAGE });
+        const confirmedAtMs = Date.now();
+        const claim = await claimWorkspaceBuild(store, { workspaceId, token, owner: processOwnerId(), userId: uid, nowMs: confirmedAtMs });
+        if (!claim.ok || !claim.verified || !store) {
+          if (claim.ok || claim.reason === 'unavailable') {
+            res.setHeader('Retry-After', '2');
+            res.status(503).json({ code: 'BUILD_AUTHORITY_UNAVAILABLE', error: 'Import ownership could not be confirmed. Please retry shortly.', retryable: true });
+          } else {
+            res.status(409).json({ code: BUILD_RUNNING_ELSEWHERE_CODE, error: BUILD_RUNNING_ELSEWHERE_MESSAGE });
+          }
           return;
         }
-        releaseLease = () => releaseWorkspaceBuild(store, { workspaceId, token });
+        importLease = holdWorkspaceImportLease({ store, workspaceId, token, confirmedAtMs });
+        releaseLease = importLease.release;
+      }
+      // Obtain ownership before constructing or starting an actuator: ensureWorkspace may create or
+      // seed a sandbox, so even an import that is refused must not call it.
+      // LAZY: loading the sandbox SDKs is needed only after a complete, admitted upload.
+      importLease?.assertCurrent();
+      const { buildActuator } = await import('./actuatorFactory');
+      importLease?.assertCurrent();
+      const rawActuator = buildActuator();
+      const actuator = importLease ? importLease.guard(rawActuator) : rawActuator;
+      // 'import' type starts the sandbox EMPTY so the user's app never gets scaffold files mixed in.
+      try { await actuator.ensureWorkspace(workspaceId, 'import'); }
+      catch (error) {
+        if (error instanceof WorkspaceImportLeaseError) throw error;
+        res.status(503).json({ error: 'The workspace could not be started. Please retry the import in a moment.' });
+        return;
       }
       const { written, skipped } = await writeWorkspaceFiles(actuator, workspaceId, files);
       // Durable persist — without this the import lives only in an ephemeral sandbox and vanishes.
       // Durable outcome travels in the response (Q-735) — a save that did not happen is not reported as one.
+      importLease?.assertCurrent();
       const durable = await mergeWorkspaceFiles(workspaceId, files).catch(() => null);
       // HONEST OUTCOME (admin 2026-08-04). The extractor already counts every refusal in eight labelled
       // categories, and this response used to discard all of it — so a media-heavy 1 GB project reported
@@ -491,7 +504,12 @@ export function registerZipUploadRoutes(app: Express): void {
         paths: written.slice(0, 5000),
       });
     } catch (err: any) {
-      res.status(422).json({ error: err?.message || 'That file could not be read as a zip archive.' });
+      if (err instanceof WorkspaceImportLeaseError) {
+        res.setHeader('Retry-After', '2');
+        res.status(503).json({ code: err.code, error: err.message, retryable: true });
+      } else {
+        res.status(422).json({ error: err?.message || 'That file could not be read as a zip archive.' });
+      }
     } finally {
       if (typeof releaseLease === 'function') await releaseLease().catch(() => {});
       discard(uploadId); // the temp archive is never kept past a commit attempt

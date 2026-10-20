@@ -8,12 +8,32 @@ import express from 'express';
 import type { Server } from 'node:http';
 import { validChunkMeta, uploadOwnedBy, ZIP_CHUNK_BYTES, MAX_ARCHIVE_BYTES, registerZipUploadRoutes, _setChunkCapForTests } from './zipUpload';
 import { setServerDb } from '../lib/serverDb';
+import { captureRoutes, mockReq, mockRes } from '../../../tests/helpers/routeTestUtils';
 
 const setDb = (db: unknown): void => setServerDb(db as never);
 import { sharedAssemblyAllowed } from '../lib/zipUploadStore';
-import { WORKSPACE_BUILD_LEASE_COLLECTION, BUILD_RUNNING_ELSEWHERE_CODE } from '../AgentV3/workspaceBuildLease';
+import { claimWorkspaceBuild, WORKSPACE_BUILD_LEASE_COLLECTION, BUILD_RUNNING_ELSEWHERE_CODE, LEASE_STALE_MS, LEASE_HEARTBEAT_MS, type BuildLeaseStore } from '../AgentV3/workspaceBuildLease';
 
-const zipWrites = vi.hoisted(() => ({ paths: [] as string[], contents: [] as string[] }));
+const zipWrites = vi.hoisted(() => ({ paths: [] as string[], contents: [] as string[], actuators: 0, starts: 0, durable: 0, beforeWrite: null as (() => Promise<void>) | null }));
+
+function leaseDb(docs = new Map<string, Record<string, unknown>>()) {
+  return {
+    collection: (name: string) => ({ doc: (id: string) => `${name}/${id}` }),
+    runTransaction: async (fn: (tx: any) => Promise<unknown>) => fn({
+      get: async (ref: string) => ({ exists: docs.has(ref), data: () => docs.get(ref) }),
+      set: (ref: string, value: Record<string, unknown>) => { docs.set(ref, value); },
+      delete: (ref: string) => { docs.delete(ref); },
+    }),
+  };
+}
+
+vi.mock('../AgentV3/WorkspaceFileStore', async (original) => {
+  const actual = await original<typeof import('../AgentV3/WorkspaceFileStore')>();
+  return { ...actual, mergeWorkspaceFiles: (...args: Parameters<typeof actual.mergeWorkspaceFiles>) => {
+    zipWrites.durable++;
+    return actual.mergeWorkspaceFiles(...args);
+  } };
+});
 
 vi.mock('../lib/authMiddleware', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/authMiddleware')>();
@@ -25,16 +45,20 @@ vi.mock('../lib/authMiddleware', async (importOriginal) => {
 });
 
 vi.mock('./actuatorFactory', () => ({
-  buildActuator: () => ({
-    ensureWorkspace: async () => {},
+  buildActuator: () => {
+    zipWrites.actuators++;
+    return {
+    ensureWorkspace: async () => { zipWrites.starts++; },
     writeFile: async (_ws: string, path: string, content?: string) => {
+      await zipWrites.beforeWrite?.();
       zipWrites.paths.push(path);
       if (typeof content === 'string') zipWrites.contents.push(`${path}\n${content}`);
     },
     listFiles: async () => [] as string[],
     readFile: async () => { throw new Error('ENOENT'); },
     runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
-  }),
+    };
+  },
 }));
 
 describe('validChunkMeta', () => {
@@ -176,14 +200,18 @@ describe('zip commit takes the build lease', () => {
     setDb(null);
     zipWrites.paths.length = 0;
     zipWrites.contents.length = 0;
+    zipWrites.actuators = 0; zipWrites.starts = 0; zipWrites.durable = 0;
+    zipWrites.beforeWrite = null;
+    vi.useRealTimers();
     if (server) { server.close(); server = null; }
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
     dirs = [];
   });
 
-  it('a busy lease returns 409 and the actuator receives no writes', async () => {
+  it.each(['busy', 'missing', 'unreachable', 'disabled'] as const)('%s lease refuses before actuator creation, sandbox start or durable writes', async (availability) => {
     process.env.AGENTV3_IMPORT_REQUIRES_PHONE = 'off';
     delete process.env.AGENTV3_WORKSPACE_LEASE;
+    if (availability === 'disabled') process.env.AGENTV3_WORKSPACE_LEASE = 'off';
     const app = express();
     app.use(express.json());
     registerZipUploadRoutes(app);
@@ -210,29 +238,78 @@ describe('zip commit takes the build lease', () => {
     const workspaceId = 'agentv3-user1-sessionpr12';
     const key = `${WORKSPACE_BUILD_LEASE_COLLECTION}/${workspaceId}`;
     const docs = new Map<string, Record<string, unknown>>();
-    docs.set(key, { token: 'held-by-other', owner: 'other-instance', heartbeatAt: Date.now(), userId: 'user1' });
-    setDb({
-      collection: (name: string) => ({ doc: (id: string) => `${name}/${id}` }),
-      runTransaction: async (fn: (tx: {
-        get(ref: unknown): Promise<{ exists: boolean; data(): Record<string, unknown> | undefined }>;
-        set(ref: unknown, value: Record<string, unknown>): void;
-        delete(ref: unknown): void;
-      }) => Promise<unknown>) => fn({
-        get: async (ref) => ({ exists: docs.has(ref as string), data: () => docs.get(ref as string) }),
-        set: (ref, v) => { docs.set(ref as string, v); },
-        delete: (ref) => { docs.delete(ref as string); },
-      }),
-    } as never);
+    if (availability === 'busy') docs.set(key, { token: 'held-by-other', owner: 'other-instance', heartbeatAt: Date.now(), userId: 'user1' });
+    setDb(availability === 'missing' ? null : availability === 'unreachable'
+      ? { ...leaseDb(), runTransaction: async () => { throw new Error('UNAVAILABLE'); } }
+      : leaseDb(docs));
 
     const commit = await fetch(`${base}/api/zip-upload/commit`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: 'Bearer test' },
       body: JSON.stringify({ uploadId, workspaceId }),
     });
-    expect(commit.status).toBe(409);
-    const body = await commit.json() as { code?: string };
-    expect(body.code).toBe(BUILD_RUNNING_ELSEWHERE_CODE);
+    expect(commit.status).toBe(availability === 'busy' ? 409 : 503);
+    const body = await commit.json() as { code?: string; retryable?: boolean };
+    expect(body.code).toBe(availability === 'busy' ? BUILD_RUNNING_ELSEWHERE_CODE : 'BUILD_AUTHORITY_UNAVAILABLE');
+    if (availability !== 'busy') {
+      expect(body.retryable).toBe(true);
+      expect(commit.headers.get('retry-after')).toBe('2');
+    }
+    expect(zipWrites.actuators).toBe(0);
+    expect(zipWrites.starts).toBe(0);
+    expect(zipWrites.durable).toBe(0);
     expect(zipWrites.paths).toEqual([]);
+  });
+
+  it.each(['healthy', 'unknown'] as const)('a slow %s import keeps its lease beyond 90s even after the response disconnects', async (renewal) => {
+    // Advance the virtual wall clock while using the actual registered route and lease code.
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    process.env.AGENTV3_IMPORT_REQUIRES_PHONE = 'off';
+    delete process.env.AGENTV3_WORKSPACE_LEASE;
+    const routes = captureRoutes(registerZipUploadRoutes);
+    const begin = mockRes();
+    await routes.get('POST /api/zip-upload/begin')!(mockReq({ body: { fileName: 'slow.zip', fileSize: 128 } }), begin);
+    const { uploadId } = begin.body;
+    const srcDir = mkdtempSync(join(tmpdir(), 'nbai-zip-slow-')); dirs.push(srcDir);
+    writeFileSync(join(srcDir, 'App.tsx'), 'export const slow = true;');
+    const archive = join(tmpdir(), `nbai-zip-${uploadId}.zip`);
+    execFileSync('python3', ['-c', 'import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],"w"); z.write(sys.argv[2],"src/App.tsx"); z.close()', archive, join(srcDir, 'App.tsx')]);
+    const docs = new Map<string, Record<string, unknown>>(); const db = leaseDb(docs); setDb(db);
+    const transact = db.runTransaction;
+    let entered!: () => void, finish!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const writing = new Promise<void>((resolve) => { finish = resolve; });
+    zipWrites.beforeWrite = async () => { entered(); await writing; };
+    const workspaceId = 'agentv3-user1-slow-import';
+    const response = mockRes();
+    const commit = routes.get('POST /api/zip-upload/commit')!(mockReq({ body: { uploadId, workspaceId } }), response);
+    try {
+      await Promise.race([started, Promise.resolve(commit).then(() => { throw new Error(`Import ended before its held write: ${JSON.stringify(response.body)}`); })]);
+      response.destroy();
+      if (renewal === 'unknown') {
+        db.runTransaction = async () => { throw new Error('UNAVAILABLE'); };
+        await vi.advanceTimersByTimeAsync(LEASE_HEARTBEAT_MS);
+        db.runTransaction = transact;
+      }
+      await vi.advanceTimersByTimeAsync(LEASE_STALE_MS * 2 - (renewal === 'unknown' ? LEASE_HEARTBEAT_MS : 0));
+      expect((await claimWorkspaceBuild(db as BuildLeaseStore, { workspaceId, token: 'build-B', owner: 'worker-B' })).ok).toBe(false);
+      expect(zipWrites.durable).toBe(0);
+      expect(docs.has(`${WORKSPACE_BUILD_LEASE_COLLECTION}/${workspaceId}`)).toBe(true);
+    } finally {
+      db.runTransaction = transact;
+      finish(); await commit;
+    }
+    if (renewal === 'unknown') {
+      expect(response.statusCode).toBe(503);
+      expect(response.body.code).toBe('BUILD_AUTHORITY_UNAVAILABLE');
+      expect(zipWrites.durable).toBe(0);
+    } else {
+      expect(response.statusCode).toBe(200);
+      expect(zipWrites.durable).toBe(1);
+    }
+    expect(docs.has(`${WORKSPACE_BUILD_LEASE_COLLECTION}/${workspaceId}`)).toBe(false);
+    expect((await claimWorkspaceBuild(db as BuildLeaseStore, { workspaceId, token: 'build-B', owner: 'worker-B' })).ok).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
@@ -249,6 +326,7 @@ describe('BLD-4 — chunks settle, are index-addressed, and the 5 GB ceiling is 
     setDb(null);
     zipWrites.paths.length = 0;
     zipWrites.contents.length = 0;
+    zipWrites.actuators = 0; zipWrites.starts = 0; zipWrites.durable = 0;
     if (server) { server.close(); server = null; }
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
     dirs = [];
@@ -385,7 +463,9 @@ describe('BLD-4 — chunks settle, are index-addressed, and the 5 GB ceiling is 
     expect(Buffer.compare(part0, Buffer.from(slices[0]))).toBe(0);
     expect(part0.length).toBe(slices[0].length);
 
-    setDb(null);
+    // A successful import has an authoritative free lease; it never relies on an unavailable
+    // database admitting work. Chunk ordering remains proven by the actual landed source bytes.
+    setDb(leaseDb());
     const workspaceId = 'agentv3-user1-sessionpr19zip';
     const commit = await fetch(`${base}/api/zip-upload/commit`, {
       method: 'POST',

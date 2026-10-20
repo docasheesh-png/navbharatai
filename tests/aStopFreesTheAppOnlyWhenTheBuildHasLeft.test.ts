@@ -213,7 +213,9 @@ describe('5 · a stopped build holds the app until it has left', () => {
     expect((ROUTE.match(/markBuildExited\(rb\);/g) ?? []).length).toBe(2);
   });
   it('SOURCE: the cross-instance lease is kept while a stopped build is still leaving', () => {
-    expect(ROUTE).toContain('if (buildLeaseRb.exited || (holder !== undefined && holder !== buildLeaseRb)) { releaseBuildLease(); return; }');
+    const coordination = readFileSync('src/server/AgentV3/BuildRequestCoordination.ts', 'utf8');
+    expect(ROUTE).toContain('buildLeaseTimer = startBuildLeaseHeartbeat(');
+    expect(coordination).toContain('if (build.exited || (holder !== undefined && holder !== build)) { await opts.release(); return; }');
   });
 });
 

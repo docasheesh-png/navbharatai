@@ -32,6 +32,8 @@ const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
 const plain = (s: string) => s.replace(/\*\*/g, '').replace(/\\`/g, '`');
 const ROUTE = read('src/server/routes/agentv3.ts');
 const ROUTE_CODE = ROUTE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const COORDINATION = read('src/server/AgentV3/BuildRequestCoordination.ts');
+const COORDINATION_CODE = COORDINATION.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
 // ── The case matrix: one row per thing the user can be holding when they stop ────────────────────────────
 type Row = {
@@ -295,10 +297,11 @@ describe('B2 — one decision point, every Stop door reaches it', () => {
 
   it('every Stop door raises the same cause the rule reads: button, Unsend, typed "stop", lease stop', () => {
     // #3820: the typed stop now also passes WHEN it was asked for (rb.lastSteerAt) — the cause is unchanged.
-    const doors = ROUTE_CODE.match(/abortBuild\([^;]*'user-stop'(?:, rb\.lastSteerAt)?\)/g) ?? [];
+    const doors = `${ROUTE_CODE}\n${COORDINATION_CODE}`.match(/abortBuild\([^;]*'user-stop'(?:, rb\.lastSteerAt)?\)/g) ?? [];
     // stopRegisteredBuild (button + Unsend), the lease renewal, and the typed stop.
     expect(doors.length).toBe(3);
-    expect(ROUTE).toContain("abortBuild(buildLeaseRb.abort, 'user-stop')");
+    expect(ROUTE).toContain('buildLeaseTimer = startBuildLeaseHeartbeat(');
+    expect(COORDINATION_CODE).toContain("if (renewal === 'stop-requested' && build && !build.ended) abortBuild(build.abort, 'user-stop')");
   });
 
   it('a disconnect is not a Stop: closing the stream only clears the heartbeat', () => {

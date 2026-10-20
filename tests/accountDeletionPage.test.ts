@@ -90,6 +90,7 @@ describe('the page and the deletion code do not drift apart', () => {
       user_token_wallets: /wallet, token balance/i,
       user_costs: /usage records/i,
       user_build_history: /build history/i,
+      agentv3_build_requests: /build history/i,
       chat_sessions: /chat history/i,
       // Added to the eraser on 2026-09-17; the policy promised erasure and nothing erased them.
       user_vault_pin: /App Lock PIN/i,

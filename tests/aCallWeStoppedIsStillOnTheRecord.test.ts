@@ -150,25 +150,26 @@ describe('§1 a call OUR clock stopped is one record, as ours, with the engine a
 });
 
 // ── §2 · the user's Stop, byte for byte ─────────────────────────────────────────────────────────────────────
-describe('§2 the user\'s Stop is recorded exactly as it was (#3685, autopsy 15e69839)', () => {
+describe('§2 the user\'s Stop is recorded as it was, but names the engine that was serving (#3685, 15e69839, 03368870)', () => {
   // ⚠️ The ticket said "user stop → no record (as today)". That was true when the report was written; #3685 (merged
   // 2026-10-12) made a Stop record the call in flight as LLM_CALL_STOPPED. THAT is today, and it is what stays.
   const TODAY_KEYS = ['model', 'promptPreview', 'promptChars', 'responsePreview', 'responseChars', 'finishReason', 'toolCalls', 'inputTokens', 'outputTokens', 'latencyMs', 'ok', 'error'];
 
-  it('one record: the nominal model, the stop message, no provider, no cause — the same keys in the same order', async () => {
+  it('one record: the SERVED model and provider, the stop message, no cause (autopsy 03368870: a KIMI call was filed under benched GLM)', async () => {
     const { calls, result } = await runAndStop({
       client: thinksUntilStopped({ provider: 'KIMI', model: 'kimi-k2.7-code' }),
       stop: (c) => abortBuild(c, 'user-stop'),
     });
     expect(calls).toHaveLength(1);
-    expect(Object.keys(calls[0])).toEqual(TODAY_KEYS);
-    expect(calls[0].model).toBe('nominal-model');
+    expect(Object.keys(calls[0])).toEqual([...TODAY_KEYS, 'provider']);
+    expect(calls[0].model).toBe('kimi-k2.7-code');
+    expect('stopCause' in calls[0]).toBe(false);
     expect(calls[0].error).toBe(BUILD_STOPPED_MESSAGE);
     expect(result.summary).toMatch(/^Stopped, as you asked\./);
     const d = diag();
     d.recordLlmCall(calls[0] as never);
     const stopped = d.report().issues.find((i) => i.code === 'LLM_CALL_STOPPED')!;
-    expect(stopped.detail).toMatch(/^no provider had answered yet · it had been running \d+s$/);
+    expect(stopped.detail).toMatch(/^provider=KIMI · it had been running \d+s$/);
   });
 });
 
@@ -216,7 +217,7 @@ describe('§3 census — every abort cause is classified, and each is recorded a
         case 'user':
         case 'unknown':
           expect(call.error).toBe(BUILD_STOPPED_MESSAGE);
-          expect(call.model).toBe('nominal-model');
+          expect(call.model).toBe('kimi-k2.7-code'); // the served engine (autopsy 03368870)
           expect('stopCause' in call).toBe(false);
           expect(codes).toContain('LLM_CALL_STOPPED');
           break;
@@ -345,5 +346,16 @@ describe('§6 every model pass\'s signal can say why it stopped', () => {
       expect(route, name).toContain(`${name}.dispose()`);
       expect(route, name).not.toMatch(new RegExp(`${name}\\.abort\\(\\)`));
     }
+  });
+});
+
+describe('AGENTV3_STOP_SERVED_MODEL=off restores the nominal record', () => {
+  it('user stop → nominal model, no provider', async () => {
+    process.env['AGENTV3_STOP_SERVED_MODEL'] = 'off';
+    try {
+      const { calls } = await runAndStop({ client: thinksUntilStopped({ provider: 'KIMI', model: 'kimi-k2.7-code' }), stop: (c) => abortBuild(c, 'user-stop') });
+      expect(calls[0].model).toBe('nominal-model');
+      expect('provider' in calls[0]).toBe(false);
+    } finally { delete process.env['AGENTV3_STOP_SERVED_MODEL']; }
   });
 });

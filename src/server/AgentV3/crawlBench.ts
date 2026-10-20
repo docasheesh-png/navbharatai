@@ -57,3 +57,24 @@ export function crawlBenchUntil(abandonsOfThisRung: number, nowMs: number, windo
   if (windowMs === null || abandonsOfThisRung >= 2) return Number.POSITIVE_INFINITY;
   return nowMs + windowMs;
 }
+
+/**
+ * 🔴 A SILENT RUNG STAYS BENCHED FOR THE REST OF THE BUILD (autopsy ca99778e, 2026-10-17).
+ *
+ * The 180 s window above was made for a CRAWL: a provider that answers slowly may be fine three minutes later.
+ * Silence is a different fact. In ca99778e glm-4.7-flashx sent nothing for 15 s, was benched 180 s, was re-probed
+ * the moment the window ended (first word at 14 s, so it "answered"), and two calls later was silent again —
+ * the user watched the build flip Kimi → GLM → Kimi → GLM and paid each 15 s. A rung that went silent once in a
+ * build is not re-probed inside it (`Infinity`), so the build stays on the engine that is actually answering.
+ * The ladder can still never empty (`canBenchAnother`), and the CROSS-build memory still re-tries it later.
+ * Kill switch `AGENTV3_SILENCE_STICKY=off` restores the window-and-re-probe. PURE.
+ */
+export function silenceBenchIsSticky(env: Record<string, string | undefined> = process.env): boolean {
+  return String(env.AGENTV3_SILENCE_STICKY ?? '').trim().toLowerCase() !== 'off';
+}
+
+/** Until when a rung is benched after an abandon — a SILENT one is sticky (see above). PURE. */
+export function benchUntilAfterAbandon(input: { abandonsOfThisRung: number; nowMs: number; windowMs: number | null; silent: boolean; sticky: boolean }): number {
+  if (input.silent && input.sticky) return Number.POSITIVE_INFINITY;
+  return crawlBenchUntil(input.abandonsOfThisRung, input.nowMs, input.windowMs);
+}

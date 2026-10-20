@@ -24,6 +24,7 @@
 import { ALL_PUBLIC_LEGAL_PATHS } from './legalPaths';
 import { CHECKOUT_HANDOFF_PATH } from './checkoutHandoff';
 import { ROBOTS_PATH, SITEMAP_PATH } from './siteIndex';
+import { MARKETING_PATHS } from '../../content/marketing';
 
 /**
  * Path prefixes owned by real server route handlers registered AFTER the SPA catch-all. A request
@@ -38,6 +39,11 @@ export const SERVER_ROUTE_PREFIXES: readonly string[] = [
 
 /** Exact server-owned paths (with and without a trailing slash) that are NOT prefixes. */
 export const SERVER_ROUTE_EXACT: readonly string[] = [
+  '/.well-known/oauth-protected-resource',
+  '/.well-known/oauth-protected-resource/api/v1/failedbr/mcp',
+  '/.well-known/oauth-protected-resource/api/failedbr/mcp',
+  '/.well-known/oauth-authorization-server',
+  '/.well-known/oauth-authorization-server/api/v1/failedbr/oauth',
   '/guide',   // U-9 auto-generated docs site (routes/KnowledgeDocs.ts)
   '/status',  // U-15 public status page (routes/health.ts)
   ROBOTS_PATH,  // robots.txt and sitemap.xml (routes/siteIndex.ts) — a crawler must get the file, not index.html
@@ -51,6 +57,9 @@ export const SERVER_ROUTE_EXACT: readonly string[] = [
   // path listed by the route module but forgotten here would be swallowed by the catch-all and
   // answered with index.html — a 200 that looks alive to a human and is empty to a crawler.
   ...ALL_PUBLIC_LEGAL_PATHS,
+  // PUBLIC PRODUCT PAGES (/about, /pricing and the three product pages — routes/marketing.ts).
+  // Derived, like the legal list: a page forgotten here would be answered with the app shell.
+  ...MARKETING_PATHS,
 ];
 
 /**
@@ -64,3 +73,27 @@ export function spaFallbackShouldDefer(path: string): boolean {
   const noTrailing = p.length > 1 && p.endsWith('/') ? p.slice(0, -1) : p;
   return SERVER_ROUTE_EXACT.includes(noTrailing);
 }
+
+/**
+ * A FILE path the static handler did not find (SEO verification 2026-10-18, P2-6).
+ *
+ * The SPA catch-all runs AFTER express.static, so a path that reaches it and names a file — a stale
+ * `/assets/index-<old hash>.js` after a deploy, a mistyped `/logo.pngg`, `/favicon.ico` — is a file
+ * that does not exist. It used to be answered with index.html and a 200, which:
+ *   • tells a crawler a missing image is an HTML page (a soft-404);
+ *   • hands the browser HTML where it expected a script, so a stale chunk failed with a confusing
+ *     MIME-type error instead of a plain 404;
+ *   • and, worst, let the service worker CACHE that HTML as the image (sw.js caches any `res.ok`
+ *     image/json response), so the broken answer outlived the deploy that fixed it.
+ * A client-side route never names a file, so no app screen is affected. PURE.
+ */
+const STATIC_FILE_EXT = /\.(?:m?js|css|map|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot|json|txt|xml|webmanifest|wasm|mp3|mp4|webm|pdf|zip)$/i;
+
+export function isMissingStaticFilePath(path: string): boolean {
+  const p = typeof path === 'string' ? path : '';
+  if (!p.startsWith('/')) return false;
+  if (p.startsWith('/assets/')) return true;
+  const last = p.split('/').pop() ?? '';
+  return STATIC_FILE_EXT.test(last);
+}
+

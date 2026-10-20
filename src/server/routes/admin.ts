@@ -1,3 +1,4 @@
+import { registerAiMaintenanceRoutes } from './aiMaintenance';
 import crypto from 'crypto';
 import { AggregateField } from 'firebase-admin/firestore';
 import { WALLET_SUMMARY_FIELDS, USAGE_LOG_FIELDS, revenueToday } from '../lib/adminReadFields';
@@ -165,7 +166,8 @@ import { collectionsNeedingRetention } from '../lib/DataRetentionManager';
  * warning counts only what a human still has to decide.
  */
 const GROWING_COLLECTIONS: readonly string[] = [
-  'app_builds', 'build_sessions', 'user_build_history', 'user_costs', 'server_logs',
+  'app_builds', 'build_sessions', 'build_sessions_v2', 'build_history_v2', 'user_build_history', 'user_costs', 'server_logs',
+  'agentv3_build_requests',
   'metrics_snapshots', 'session_error_hints', 'hosting_usage', 'site_analytics',
   // One small document per finished phone build — the only per-run half of the build counters.
   'mobile_build_counted',
@@ -411,6 +413,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
     next();
   };
+
+  registerAiMaintenanceRoutes(app, verifyAdminToken);
 
   // ── P-SEC.3 — Admin MFA management (TOTP enrol / verify / disable / status) ──
   // All require a valid admin session (verifyAdminToken). Self-service enrolment

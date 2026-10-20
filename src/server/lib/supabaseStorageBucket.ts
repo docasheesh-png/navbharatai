@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /**
  * ZERO-SETUP FILE UPLOADS — a real storage bucket in the USER'S OWN Supabase project.
  *
@@ -42,7 +44,7 @@ export interface BucketSpec {
   name: string;
   /**
    * `true` → anyone with the URL can READ the file (product images, avatars). Writes are still
-   * restricted to signed-in users. `false` → only signed-in users can read, via a signed URL.
+   * restricted to signed-in users. `false` → only the owner can read or mint a signed URL.
    */
   publicRead: boolean;
   /** Hard ceiling per file, in bytes. Enforced by Supabase itself, not by the app's own code. */
@@ -58,6 +60,7 @@ export function defaultBucketSpec(name = 'app-uploads'): BucketSpec {
 
 /** Single-quote a value for SQL. The names are validated too, but this is the layer that must not be skipped. */
 const lit = (v: string): string => `'${String(v).replace(/'/g, "''")}'`;
+const ident = (v: string): string => `"${v.replace(/"/g, '""')}"`;
 
 export type BucketSqlResult = { ok: true; sql: string } | { ok: false; message: string };
 
@@ -72,23 +75,35 @@ export type BucketSqlResult = { ok: true; sql: string } | { ok: false; message: 
  *   • WRITE (insert/update/delete) — signed-in users only, and only inside a folder named after their
  *     own uid. One user therefore cannot overwrite or delete another's file, which is the mistake a
  *     hand-written policy usually makes.
- *   • READ — everyone when `publicRead`, otherwise signed-in users only.
+ *   • READ — everyone when `publicRead`, otherwise the caller's own uid folder only.
  */
 export function bucketSetupSql(spec: BucketSpec): BucketSqlResult {
   const name = normalizeBucketName(spec?.name);
   if (!BUCKET_NAME_RE.test(name)) {
     return { ok: false, message: 'A bucket name must be 3–63 characters, lowercase letters, numbers or dashes, and cannot start or end with a dash.' };
   }
-  if (!Number.isFinite(spec.maxBytes) || spec.maxBytes <= 0 || spec.maxBytes > 5 * 1024 * 1024 * 1024) {
+  if (!Number.isSafeInteger(spec.maxBytes) || spec.maxBytes <= 0 || spec.maxBytes > 5 * 1024 * 1024 * 1024) {
     return { ok: false, message: 'The per-file size limit must be between 1 byte and 5 GB.' };
   }
+  if ((spec.mimeTypes ?? []).some((m) => typeof m !== 'string' || !/^[\w.+-]+\/[\w.*+-]+$/.test(m))) return { ok: false, message: 'Every allowed MIME type must be valid.' };
   const mimes = (spec.mimeTypes ?? []).filter((m) => typeof m === 'string' && /^[\w.+-]+\/[\w.*+-]+$/.test(m));
   const mimeSql = mimes.length > 0 ? `array[${mimes.map(lit).join(', ')}]::text[]` : 'null';
-  const policy = (suffix: string) => lit(`nbai_${name}_${suffix}`);
+  const policy = (suffix: string) => {
+    const full = `nbai_${name}_${suffix}`;
+    // PostgreSQL truncates identifiers at 63 bytes; a long bucket must not collapse all
+    // four operation policies into the same name. Keep existing short names for migration.
+    const id = full.length <= 63 ? full : `nbai_h_${createHash('sha256').update(name).digest('hex').slice(0, 32)}_${suffix}`;
+    return '"' + id.replace(/"/g, '""') + '"';
+  };
+
+  // Remove the pre-fix names too: long legacy identifiers were truncated by PostgreSQL.
+  const legacyDrops = ['read', 'insert', 'update', 'delete']
+    .map((suffix) => `drop policy if exists ${ident(`nbai_${name}_${suffix}`)} on storage.objects;`).join('\n');
 
   // `on conflict` + `drop policy if exists` make this safe to run again — a second build of the same
   // app must not fail because the bucket is already there.
   const sql = `
+${legacyDrops}
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (${lit(name)}, ${lit(name)}, ${spec.publicRead ? 'true' : 'false'}, ${Math.floor(spec.maxBytes)}, ${mimeSql})
 on conflict (id) do update
@@ -99,7 +114,7 @@ on conflict (id) do update
 drop policy if exists ${policy('read')} on storage.objects;
 create policy ${policy('read')} on storage.objects for select
   to ${spec.publicRead ? 'public' : 'authenticated'}
-  using (bucket_id = ${lit(name)});
+  using (bucket_id = ${lit(name)}${spec.publicRead ? '' : ' and (storage.foldername(name))[1] = auth.uid()::text'});
 
 drop policy if exists ${policy('insert')} on storage.objects;
 create policy ${policy('insert')} on storage.objects for insert

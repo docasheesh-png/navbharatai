@@ -1,3 +1,4 @@
+import { MaintenanceCard } from './admin/MaintenanceCard';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight} from 'lucide-react';
 import { effectiveDirection } from '../lib/adminUserSort';
@@ -2013,6 +2014,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   panel ke home page par to load dikhna chahiye" — and `/api/admin/load` had answered
                   it for weeks with nothing rendering it. It sits ABOVE the live monitor because a
                   ceiling that stops the whole platform outranks a chart of what it is doing now. */}
+              <MaintenanceCard adminToken={adminToken} />
               <LoadBoard adminToken={adminToken} />
 
               {/* LIVE MONITOR — real time-series from the platform's own telemetry. Everything below it
@@ -2805,6 +2807,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             <span className={`text-[9px] font-black uppercase ${p.status === 'SUCCESS' ? (p.revenue ? 'text-success' : 'text-accent-text') : p.status === 'PENDING' ? 'text-warn' : 'text-danger'}`}>
                               {p.status === 'SUCCESS' && !p.revenue ? 'Free credit' : p.status}
                             </span>
+                            {/* Q-1135: this credit went through without the paid-vs-recorded check being able
+                                to run. The money arrived and the credit was our own recorded figure, so the row
+                                is not a failure — but it is the one row an audit must look at by hand. */}
+                            {p.unreconciled && <div className="text-[8px] font-bold text-warn normal-case" title="Our recorded amount for this order was unreadable, so the provider's figure had nothing to be compared against. The credit was the server-recorded amount. Check this one against the gateway by hand.">Not reconciled</div>}
                           </td>
                           <td className="py-2 px-2 text-body">{p.method}</td>
                           <td className="py-2 px-2 font-mono text-[9px] text-muted">
@@ -2823,6 +2829,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <span>
                     {purchases ? `Showing ${purchases.rows.length === 0 ? 0 : purchases.offset + 1}–${purchases.offset + purchases.rows.length} of ${purchases.total.toLocaleString('en-IN')}` : ''}
                     {purchases?.overall?.refundTracked === 'web-and-google-play' && <span className="ml-2 text-warn">· Refunds and chargebacks are recorded (₹{Number(purchases.overall.refundedInr || 0).toLocaleString('en-IN')} so far) and take their tokens back. Web payments: always. {playRefundCheckText(purchases.playRefundCheck)} App Store refunds are not recorded yet — check App Store Connect before treating an Apple row as final.</span>}
+                    {Number(purchases?.overall?.unreconciledRows || 0) > 0 && <span className="ml-2 text-warn">· {Number(purchases.overall.unreconciledRows).toLocaleString('en-IN')} credit{Number(purchases.overall.unreconciledRows) === 1 ? '' : 's'} could not be reconciled against the gateway's own figure (marked “Not reconciled” in the Status column). The money arrived and the credit was our recorded amount — check those rows against the gateway by hand.</span>}
                   </span>
                   <span className="flex gap-2">
                     <button disabled={!purchases || purchases.offset === 0 || purchasesLoading} onClick={() => setPurchaseQuery((q) => ({ ...q, offset: Math.max(0, q.offset - PURCHASE_PAGE) }))} className="px-2 py-1 rounded-lg bg-raised hover:bg-raised-hover disabled:opacity-40 text-ink">‹ Prev</button>

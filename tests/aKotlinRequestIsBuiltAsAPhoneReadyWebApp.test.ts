@@ -79,7 +79,11 @@ describe('a native mobile stack is named, like any stack we do not build', () =>
     expect(ROUTE, 'and the route still reads the one list').toContain('const requestNotes = requestNoteSet.notes;');
     expect(ROUTE).toContain('const plannerGoal = withRequestNotes(prompt, requestNotesText);');
     expect(ROUTE).toMatch(/projectPlanUserPrompt\(plannerGoal, ppScaffold\)/);
-    expect(ROUTE).toMatch(/createProjectPlan\(plannerGoal, framework, modules, Date\.now\(\)\)/);
+    // PIN MOVED WITH THE FIX (Q-1017, 2026-10-16), claim unchanged: the note still reaches the plan's goal, so
+    // every module turn still reads it — but the REQUEST and the notes are now handed over APART, because the
+    // goal's cap used to be applied to the join and the cut therefore always landed on the user's own spec
+    // (autopsy 042e472f raised that cap and left the class). The notes are kept whole inside.
+    expect(ROUTE).toMatch(/createProjectPlan\(prompt, framework, modules, Date\.now\(\), requestNotesText\)/);
     expect(ROUTE).not.toMatch(/projectPlanUserPrompt\(prompt, ppScaffold\)/);
   });
 });

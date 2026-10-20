@@ -24,16 +24,7 @@ import type { DeploymentRecord } from './DeploymentStore';
  * would put back exactly what the review is about. `unpublished` and `plan_paused` are NOT refused: the
  * owner took it down themselves, or their plan lapsed, and publishing again is how they bring it back.
  */
-export function hostedRepublishRefusal(existing: Pick<DeploymentRecord, 'status'> | null | undefined): string | null {
-  const status = existing?.status;
-  if (status === 'taken_down') {
-    return 'This app was taken down for a policy violation and cannot be published again. Contact support if you believe this is a mistake.';
-  }
-  if (status === 'held') {
-    return 'This app is held for review, so it cannot be published again until the review is finished. Contact support if you believe this is a mistake.';
-  }
-  return null;
-}
+export { hostedRepublishRefusal } from './hostedRepublish';
 
 /** Does this record describe an app that has (or had) a server on NavBharat Cloud? PURE. */
 export function recordHasHostedServer(rec: Pick<DeploymentRecord, 'providerId' | 'service'> | null | undefined): boolean {
@@ -110,7 +101,7 @@ export async function removeHostedServersOrThrow(
   return r;
 }
 
-export type OfflineStatus = 'taken_down' | 'unpublished' | 'plan_paused';
+export type OfflineStatus = 'taken_down' | 'unpublished' | 'plan_paused' | 'held';
 
 export interface OfflineDeps extends Partial<RemovalDeps> {
   deleteChannel: (workspaceId: string) => Promise<unknown>;
@@ -126,7 +117,9 @@ export interface OfflineDeps extends Partial<RemovalDeps> {
  * Returns whether the status was saved.
  */
 export async function takeAppOffline(workspaceId: string, status: OfflineStatus, deps: OfflineDeps): Promise<boolean> {
-  await deps.deleteChannel(workspaceId);
-  await removeHostedServersOrThrow(workspaceId, await deps.get(workspaceId).catch(() => null), deps);
+  const rec = await deps.get(workspaceId);
+  if (!rec) throw new Error('The deployment record could not be found. Offline status cannot be confirmed.');
+  if (await deps.deleteChannel(workspaceId) === false) throw new Error('The static app could not be confirmed removed. No offline status was written.');
+  await removeHostedServersOrThrow(workspaceId, rec, deps);
   return deps.setStatus(workspaceId, status);
 }

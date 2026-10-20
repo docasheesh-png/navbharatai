@@ -32,6 +32,7 @@ import { inBrowserRefusal } from './inBrowserRefusal';
 import { shouldShowNotServingSurface } from './previewFraming';
 import { pickedElementPrompt, type PickedElement } from './previewPick';
 import { authJsonHeaders } from '../../lib/authHeaders';
+import { previewRequest } from './previewRequest';
 import { readAnswer, isRecord } from '../../lib/serverAnswer';
 import { LIVE_SERVER_PAID_NOTE, LIVE_SERVER_PAID_TAG, isLiveServerNoticeDismissed, dismissLiveServerNotice } from '../../lib/liveServerNotice';
 import { previewAddressLabel } from './previewAddress';
@@ -386,9 +387,8 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
     setDiagResult(null);
     setDiagStage({ label: 'Contacting the sandbox', pct: 5, seconds: 0 });
     try {
-      const res = await fetch('/api/agentv3/preview-diagnose', {
+      const res = await previewRequest('/api/agentv3/preview-diagnose', {
         method: 'POST',
-        headers: await authJsonHeaders(),
         // stream:true → NDJSON: real stage events (+ seconds heartbeat during the long
         // install/boot step) followed by the terminal result — so a 30-90s cold boot shows
         // WHAT is happening and that it is alive, instead of one silent spinner.
@@ -659,9 +659,8 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
     try {
       let status: string | null = null;
       try {
-        const res = await fetch('/api/agentv3/preview-health', {
+        const res = await previewRequest('/api/agentv3/preview-health', {
           method: 'POST',
-          headers: await authJsonHeaders(),
           /**
            * Send the URL we are ACTUALLY DISPLAYING — `effectiveUrl`, the exact value the address bar
            * and the iframe render.
@@ -1280,9 +1279,8 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
         void (async () => {
           let healthy: boolean | null = null;
           try {
-            const hres = await fetch('/api/agentv3/preview-health', {
+            const hres = await previewRequest('/api/agentv3/preview-health', {
               method: 'POST',
-              headers: await authJsonHeaders(),
               body: JSON.stringify({ workspaceId, userId, email, framework, previewUrl: effectiveUrl }),
             });
             const h = await hres.json().catch(() => null) as { status?: unknown; serving?: unknown } | null;
@@ -1305,9 +1303,8 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
       }
       void (async () => {
         try {
-          await fetch('/api/agentv3/preview-error', {
+          await previewRequest('/api/agentv3/preview-error', {
             method: 'POST',
-            headers: await authJsonHeaders(),
             body: JSON.stringify({ workspaceId, userId, email, source, message: d.message.slice(0, 4000) }),
             keepalive: true,
           });

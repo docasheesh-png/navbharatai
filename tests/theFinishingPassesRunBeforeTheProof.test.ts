@@ -45,7 +45,8 @@ describe('ORDER: the four passes run before the app is latched green', () => {
 
   it('the architecture note is awaited (bounded), so it cannot land after the latch by racing it', () => {
     const at = src.indexOf('adrStore.record(');
-    const before = src.slice(src.lastIndexOf('if (result.ok && userId && writtenFiles.size > 0 && !isImportTurn)', at), at);
+    const before = src.slice(src.lastIndexOf('if (result.ok && userId && writtenFiles.size > 0 && !isImportTurn', at), at);
+    expect(before).toContain("!isImportTurn && finishingGuard.allow('architecture-note')");
     expect(before).toContain('await withTimeout((async () => {');
   });
 

@@ -4331,6 +4331,106 @@ price is not. Recorded as a queue row, not done here.
 |---|---|---|
 | `FREE_CHAT_ANSWER_ALL` | **on** | Free chat answers every question itself. The unconditional "lead with NavBharatAI Pro" prompt block is replaced by answer-first rules, and app-navigation context is injected only for messages about NavBharatAI. On a real app-build request the chat explains the idea (no code) and ends with ONE line in the user's language that it can be built in NavBharatAI Pro (the server appends it if the model omits it). |
 | `STUDENT_TEACHER_PROMO` | **on** | A new build whose prompt is a study/exam app gets one narration note, in the user's language: Mode → Teacher AI in NavBharatAI FREE to study and take exams. The build is not changed or blocked. |
+
+- **`AGENTV3_STREAM_FIRST_BYTE_GRACE_MS`** (NOT set; default **30000**; never below `AGENTV3_STREAM_THROUGHPUT_GRACE_MS`;
+  junk ⇒ default). Owner request 2026-10-18 + autopsy 2f46a4d8: a stream (or request) that has produced ZERO bytes
+  is queued, not crawling, so it is abandoned/benched as silent only after this grace instead of the 15 s
+  throughput grace. Applies to the builder and the fast-lane planner alike (`openAiStream.ts streamIsCrawling`,
+  `OpenAiToolRunner.ts` never-opened bound). A started stream is still judged at the throughput grace. Locked in
+  `tests/aQueuedRungGetsTimeToStart.test.ts`.
+
+- **`AGENTV3_BUG_HUNT_WAIT_MS`** (NOT set; default **30000**, was a hard-coded 90 s; clamped 5000–120000; junk ⇒
+  default). Owner 2026-10-18, autopsy 2f46a4d8: how long a finished, GREEN build waits for the deep-bug-hunt
+  offer's answer before ending without the hunt. `src/server/AgentV3/optionalBugHunt.ts bugHuntWaitMs`. Locked in
+  `tests/aFinishedBuildIsNotHeldOpen.test.ts`.
+
+- **`AGENTV3_LANE_AI_NEGATION`** (NOT set; default **on**; `off` ⇒ old behaviour). r6–r10 autopsy 2026-10-18: the fast
+  lane's `laneAiClient` no longer adds an in-app AI client when the prompt says "no AI" / "no API" / "offline"
+  (`NO_AI_RE`). `src/server/AgentV3/SimpleBuilder.ts laneAiClient`. Locked in `tests/noAiMeansNoAiClient.test.ts`.
+- **`AGENTV3_STYLE_NOTICE_LIVE`** (NOT set; default **on**; `off` ⇒ old sentence). r6–r10 autopsy 2026-10-18: when
+  the style hand-back (`STYLE_RULES_RESUMED`) fires after the preview is already published, the chat says the preview
+  is open and will refresh, instead of "before the preview opens". `src/server/AgentV3/handBackNotice.ts`. Locked in
+  `tests/theStylePassKnowsThePreviewIsOpen.test.ts`.
+
+- **`AGENTV3_STYLE_PASS_CAP_MS`** (NOT set; default **180000**; `0`/`off` ⇒ no cap, the old behaviour; junk ⇒
+  default). r6–r10 autopsy 2026-10-18: time cap on OUR style-floor pass. Checked between model turns; on expiry the
+  already-READY build ends with the model's pre-hand-back summary and note `STYLE_PASS_CAPPED`. No billing change.
+  `src/server/AgentV3/stylePassCap.ts`. Locked in `tests/theStylePassKnowsThePreviewIsOpen.test.ts`.
+- **`AGENTV3_SKIP_UNCHANGED_PREVIEW`** (NOT set; default **on**; `off` ⇒ old behaviour). r6–r10 autopsy 2026-10-18:
+  `update_preview` on the same port with no file changed since the last successful publish returns at once instead
+  of re-running the secrets write and port probe. `src/server/AgentV3/ToolDispatcher.ts previewRefreshIsRedundant`.
+  Locked in `tests/anUnchangedPreviewIsNotRepublished.test.ts`.
+- **`AGENTV3_STOP_FULL_NEEDS_GREEN_FIRST`** (NOT set; default **on**; `off` ⇒ "rendered at all ⇒ full price" as
+  before). Owner-approved 2026-10-18 (r6–r10 autopsy): a user-stopped build is charged in full only when this pass
+  saw the app render strictly BEFORE the stop was requested (Stop button time, or the arrival time of the mid-build
+  message a typed stop came from — `abortBuild(…, requestedAt)` / `abortRequestedAtOf`). Otherwise, including an
+  unknown render time, it is charged at our real cost (provider + sandbox), never above the decided bill.
+  `src/server/AgentV3/cancelledBuildBilling.ts`. Locked in `tests/aStopIsFullPriceOnlyIfTheAppRanFirst.test.ts`.
+
+- **`AGENTV3_STYLE_PASS_STOP_AT_COST`** (NOT set; default **on**; `off` ⇒ only the green-before-stop rule applies).
+  Owner-approved 2026-10-18 (r6–r10 autopsy): a user stop requested while OUR style-floor pass (`STYLE_RULES_RESUMED`
+  → the architect's loop returning) was running is charged at our real cost, never full price.
+  `src/server/AgentV3/cancelledBuildBilling.ts stoppedDuringOurStylePass`. Locked in
+  `tests/aStopDuringOurStylePassIsNotFullPrice.test.ts`.
+- **`AGENTV3_ANSWER_TURN_NOT_BUILD`** (NOT set; default **on**; `off` ⇒ old judgement). Owner-approved 2026-10-18
+  (r6–r10 autopsy): a build turn that wrote no files and only asked a question or declined (`readTurnAnswer`
+  `.asked`/`.declined`) is treated as an answer: the release gate is recorded as info (not RED/ERROR), the platform
+  does not start the starter preview for it, and no "engine slow"/upsell line is shown. The bill stays ₹0 (the
+  empty-build rule). `src/server/AgentV3/answerOnlyTurn.ts answeredInsteadOfBuilding`. Locked in
+  `tests/aQuestionTurnIsAnAnswerNotAFailedBuild.test.ts`.
+- **`AGENTV3_FIRST_BYTE_GRACE_NEEDS_RECENT`** (NOT set; default **on**; `off` ⇒ every rung gets the first-byte grace,
+  #3810 as merged) and **`AGENTV3_FIRST_BYTE_GRACE_RECENT_MS`** (NOT set; default **1800000** = 30 min). Owner-approved
+  2026-10-18 (r6–r10 autopsy): the zero-byte first-byte grace (`AGENTV3_STREAM_FIRST_BYTE_GRACE_MS`, 30 s) is given
+  only to a rung that answered within the window (silence memory `answeredAt`, set when the ladder clears a rung on
+  an answer); otherwise the old throughput grace (15 s) applies. Instance-local: a fresh instance, or silence memory
+  off, gives 15 s until the rung answers once. `src/server/AgentV3/providers/openAiStream.ts firstByteGraceFor`.
+  Locked in `tests/theFirstByteGraceIsEarned.test.ts`.
+
+- **`AGENTV3_REDTEAM_BUDGET_MS`** (NOT set; default **30000**, was a hard-coded 90 s checked only between cases; clamped
+  5000–300000). Build 2f46a4d8: the ~98 s silent gap between the GREEN gate and RUNTIME_VERIFIED was the red-team pass.
+  The whole pass now has this budget, every browser step is clipped to what remains, and every run records
+  `REDTEAM_RAN` (cases, seconds, crashes). `90000` restores the old budget. `src/server/AgentV3/FuzzProbe.ts`.
+  Locked in `tests/theRedTeamPassIsBoundedAndSaysSo.test.ts`.
+- `AGENTV3_TS_JSX_RENAME` (default on; `off` disables). JSX written into a `.ts` file is moved to `.tsx`:
+  the per-file builder's pre-write reconcile renames it and rewrites explicit `./X.ts` references; the agent's
+  `write_file` relocates only a NEW file whose importers use extension-less specifiers (otherwise unchanged).
+  Detection is high-precision (closing tag, fragment, or self-closing component) so generics never match.
+  `src/server/AgentV3/LanguageCoherence.ts tsFileHasJsx / tsxRelocationFor`. Locked in `tests/jsxInATsFileBecomesTsx.test.ts`.
+
+- `AGENTV3_POST_GREEN_RECHECK` (default on; `off` disables). After the finishing passes (e2e scaffold, architecture
+  note, production defaults) on a build already proven green, the preview is checked once; only a CONCLUSIVE
+  non-render rolls back exactly the finishing files to the last green snapshot (files it lacks are removed), then
+  re-checks. Records `POST_GREEN_RECHECK_OK` / `_INCONCLUSIVE` / `POST_GREEN_ROLLBACK` / `_SKIPPED`. No billing effect.
+  `src/server/AgentV3/finishingRecheck.ts`. Locked in `tests/finishingWritesAfterGreenAreRecheckedAndRolledBack.test.ts`.
+
+### `AGENTV3_WEAK_SCOPE_POLICY` — candidate Weak scope and two-coder policy (2026-10-20)
+
+Explicit `on` enables one bounded preflight, a two-model default ladder, complex Kimi planning, one shared text-repair allowance, and no whole-build empty-result retry. Off/unset preserves existing policy for comparison/rollback. Imports retain their separate inspection pipeline. `AGENTV3_LADDER_WEAK` remains the admin's deliberate experiment override. See `docs/weak-tier-policy-comparison.md` for scope and limitations.
+
+### `AGENTV3_WEAK_BUILD_COST_CEILING_USD`
+
+Candidate-policy Weak measured provider-cost ceiling, default $1; positive finite values capped at $50. A smaller enabled global `AGENTV3_BUILD_COST_CEILING_USD` wins. Applied between measured turns, not a guaranteed hard provider-invoice bound. This does not change user markup or wallet pricing.
+
+### Weak policy production activation (admin-authorized 2026-10-20)
+
+Cloud Build now passes `AGENTV3_WEAK_SCOPE_POLICY=${_WEAK_SCOPE_POLICY}` and `AGENTV3_WEAK_BUILD_COST_CEILING_USD=${_WEAK_BUILD_COST_CEILING_USD}` using additive `--update-env-vars`. Trigger substitution defaults are `on` and `1`; set `_WEAK_SCOPE_POLICY=off` and redeploy for persistent rollback. Direct Cloud Run edits are replaced by the trigger values on the next deployment. No provider key or explicit ladder override is changed.
+
+### User-app hosting isolation gates (2026-10-20)
+
+`NAVBHARAT_APPS_BUILD_ISOLATION_VERIFIED=on` and `NAVBHARAT_APPS_EGRESS_VERIFIED=on` are explicit operator attestations, default unset/false. For a non-admin publish, both AND `NAVBHARAT_APPS_CREDENTIALLESS_BUILD=on` are required in addition to the existing public hosting flag, plan and identities. Set build verification only after the existing real Cloud Build probe succeeds; set egress verification only after actual network policy and cross-tenant tests pass. They are not automatically set by CI or this change. Admin-only probes remain possible. These attestations do not create IAM/network controls; they prevent an unverified public rollout.
+
+## Managed Supabase default (prepared 2026-10-20; NOT verified live)
+
+- `NAVBHARAT_SUPABASE_TOKEN`: server-only Secret Manager binding, never app env/client output.
+- `NAVBHARAT_SUPABASE_ORG`, `NAVBHARAT_SUPABASE_REGION`: selected organization and new-project region.
+- `NAVBHARAT_SUPABASE_DEFAULT`: exact `on` selects the dedicated product for new Publish database offers.
+- `NAVBHARAT_SUPABASE_PRODUCTION_APPROVED`: exact `on` required for managed purchases after billing approval.
+- `NAVBHARAT_SUPABASE_MAX_PROJECTS`: explicit integer 1–999; counts all org projects, not an invoice cap.
+
+These are proposed runtime keys, not a claim they were configured by the admin.
+Lifecycle deletion retains access when new purchases are disabled. See
+`docs/DEFAULT_SUPABASE.md` for the dry-run installer, paid activation, retained creation holds,
+separate Storage backups and the required live pilot. User-selected platform defaults supersede
+older BYO-only guidance for this rollout; existing BYO and shared apps are not migrated.
 | `MOBILE_AI_LOGO` | **on when the image host is configured** | A mobile ship with no logo chosen generates one for the app through the platform image host (`serverAiLogoGenerator`, `appBranding.ts`) — **one image per app, saved in the workspace asset store and reused on later ships.** `off` skips the generation; the app then gets the explicit app-specific fallback mark instead (reported in the run summary). **It spends the image host's cost once per app that has no logo — whose wallet pays is an open admin decision (Q-1106).** |
 | `ADMIN_LOGIN_GLOBAL_CEILING` | **30** failed admin logins per 15 min, across ALL addresses | The admin login's account-level ceiling (`adminLoginShared.ts`): past it, addresses the admin has never successfully logged in from are refused until the window ends. **An address the admin has logged in from is exempt, so an attacker cannot lock the real admin out.** `off` disables only this ceiling (the per-address lockout, `ADMIN_LOGIN_LOCKOUT`, is separate); a value under 5 or a non-number falls back to 30. State lives in Firestore `admin_login_guard_v1` (every doc has `expireAt` — **a Firestore TTL policy on it is an admin-console action, Q-1111**). |
-

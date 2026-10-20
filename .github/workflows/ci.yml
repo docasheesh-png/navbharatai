@@ -14,6 +14,72 @@ on:
   workflow_dispatch:
 
 jobs:
+  queue-retry-drills:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci
+      - name: Download and verify the locked Firestore emulator
+        run: |
+          mkdir -p "$RUNNER_TEMP/phase2-safety"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { spawnSync } from 'node:child_process';
+          import assert from 'node:assert/strict';
+          const { firestore } = JSON.parse(readFileSync('node_modules/firebase-tools/lib/emulator/downloadableEmulatorInfo.json', 'utf8'));
+          const destination = `${process.env.RUNNER_TEMP}/phase2-safety/firestore.jar`;
+          const download = spawnSync('curl', ['--fail', '--silent', '--show-error', '--location', '--retry', '3', firestore.remoteUrl, '--output', destination], { stdio: 'inherit' });
+          assert.equal(download.status, 0, 'Emulator download failed');
+          const bytes = readFileSync(destination);
+          assert.equal(bytes.length, firestore.expectedSize);
+          assert.equal(createHash('sha256').update(bytes).digest('hex'), firestore.expectedChecksumSHA256);
+          NODE
+      - name: Real database and multiprocess queue/retry drills
+        env:
+          TZ: UTC
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:18781
+        run: |
+          java -Xmx512m -jar "$RUNNER_TEMP/phase2-safety/firestore.jar" --host 127.0.0.1 --port 18781 --project_id demo-navbharatai-phase2 --single_project_mode true --single_project_mode_error true > "$RUNNER_TEMP/phase2-safety/firestore.log" 2>&1 &
+          emulator_pid=$!
+          trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT
+          node --input-type=module <<'NODE'
+          import net from 'node:net';
+          const deadline = Date.now() + 30_000;
+          for (;;) {
+            const ready = await new Promise((resolve) => {
+              const socket = net.connect(18781, '127.0.0.1');
+              socket.once('connect', () => { socket.destroy(); resolve(true); });
+              socket.once('error', () => resolve(false));
+            });
+            if (ready) break;
+            if (Date.now() >= deadline) throw new Error('Local emulator did not start');
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+          NODE
+          node scripts/phase2-firestore-drills.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/firestore-drills.log"
+      - name: Upload build safety evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: phase2-queue-retry
+          path: ${{ runner.temp }}/phase2-safety/*.log
+          if-no-files-found: error
+
   build-and-test:
     runs-on: ubuntu-latest
     # Bounded well above the real cost (~10 min after the de-duplication below) so a genuine hang fails
@@ -26,10 +92,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 🔴 THE GATE RUNS THE RUNTIME IT GUARDS (Q-1060). This said '20' from the day the file was created
+      # (#3538) while the Dockerfile, the store workflows and @capacitor/cli 8 all run 22 — so the suite
+      # tested a runtime nobody ships, and any test needing the Capacitor CLI could not run here at all
+      # ("The Capacitor CLI requires NodeJS >=22.0.0"). The version is `engines.node` in package.json now,
+      # and tests/oneDeclaredRuntime.test.ts fails when any workflow drifts from it.
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       # npm's legacy `/v1/security/audits/quick` endpoint (used by `npm audit`) is being retired and now
@@ -88,6 +159,12 @@ jobs:
       - name: Typecheck (server modules - strict guardrail)
         run: npm run typecheck:server
 
+      - name: Typecheck (benchmark tools - strict guardrail)
+        run: npm run typecheck:benchmark
+
+      - name: Failed-report OAuth protocol and security checks
+        run: node --experimental-strip-types scripts/failedReportOAuth.check.mjs
+
       # ONE test run, not two (2026-08-06). This job ran `npm test` (`vitest run`) and then
       # `npm run test:coverage` (`vitest run --coverage`) — the SAME 12,400 tests twice, the second time
       # with coverage instrumentation, which is the slower of the two. The coverage run already produces
@@ -120,3 +197,4 @@ jobs:
       # requires survive that prune?" — via esbuild's own AST-accurate metafile, no Docker needed.
       - name: Server production-dependency gate (every runtime import must survive `npm prune --omit=dev`)
         run: npm run deps:server-gate
+

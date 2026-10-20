@@ -124,7 +124,8 @@ describe('6 · the wiring (source guards — tsc cannot see which lane runs a ch
   it('the architect lane checks the WHOLE project and repairs a real mismatch', () => {
     expect(route).toMatch(/const projectForCss = \{ \.\.\.integrityFiles, \.\.\.Object\.fromEntries\(writtenFiles\) \};/);
     expect(route).toMatch(/code: 'CSS_CLASSES_UNDEFINED'/);
-    expect(route).toMatch(/if \(designRepair \|\| cssRepair\)/);
+    expect(route).toContain("if ((designRepair || cssRepair) && finishingGuard.allow('design-consistency-heal'))");
+    expect(route).toContain("finishingGuard.repairOrThrow('design-consistency-heal'");
     expect(route).toMatch(/CSS_CLASSES_HEALED/);
   });
   it('the fast lane reads the project\'s stylesheets, not only this turn\'s writes', () => {

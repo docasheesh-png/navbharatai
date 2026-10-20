@@ -1,3 +1,4 @@
+import { assertAiAvailable, AiMaintenanceError } from '../../lib/aiMaintenance';
 // AgentV3 — multi-provider cost-routing orchestrator (phase 3).
 //
 // Wraps an ORDERED chain of TurnRunners so v5.0 runs each turn on the cheapest provider
@@ -15,20 +16,22 @@
 // move a build UP the ladder on quality signals; off by default.) PURE control flow; the runners are
 // injected, so this is fully unit-testable without any provider key.
 
+import { firstByteGraceFor } from './openAiStream';
 import { createStickyState, recordStickySuccess, stickyStartIndex, type StickyState } from '../reliability/stickyRung';
-import { crawlBenchWindowMs, mayAbandonCrawl, crawlBenchUntil } from '../crawlBench';
+import { crawlBenchWindowMs, mayAbandonCrawl, benchUntilAfterAbandon, silenceBenchIsSticky } from '../crawlBench';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { plannedModelOf } from '../runnerChainSummary';
 import { modelAlwaysReasons } from './glmThinking';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
-import { isModelUnavailableError } from '../providerErrorClass';
+import { isFatalProviderError, isModelUnavailableError, isProviderBalanceError } from '../providerErrorClass';
 import { isBudgetEndedError, isSlowStreamAbandon, isSilentAbandon, providerNeverAnswered, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
 import type { WasteKind } from '../providerWaste';
 import { isStarvedBudgetError, turnStarvedItsBudget } from '../floorBudget';
 import { abandonedTurnUsage } from '../unbilledTurns';
 import { turnDiscardedTruncatedOutput } from '../TruncationRecovery';
 import { reasoningAwareAsk } from '../reasoningAsk';
+import type { ProviderSilenceMemory } from '../providerSilenceMemory';
 import { BuildStoppedError, isBuildStoppedError, raceStop, throwIfStopped } from '../stopSignal';
 import {
   EMPTY_SLOW_RUNG_STATE, canBenchAnother, describeSlowRung, isRungTooSlow, recordSlowSample,
@@ -84,6 +87,12 @@ export interface MultiProviderOptions {
    * every runner it builds. Omitted ⇒ a private registry, exactly today's behaviour.
    */
   bench?: BuildBenchRegistry;
+  /**
+   * CROSS-BUILD silence memory (autopsy eb58abaf — see providerSilenceMemory.ts). When given, a rung that
+   * produced nothing for ANOTHER build within the window is opened past (only when a later rung exists),
+   * and this runner's own silences are recorded into it. Omitted ⇒ no cross-build effect (unit tests).
+   */
+  silenceMemory?: ProviderSilenceMemory;
   /**
    * One attempt produced NOTHING, and this is what it cost in wall clock.
    *
@@ -151,19 +160,7 @@ export interface MultiProviderOptions {
  * provider must be marked dead for the remainder of the run. Deliberately narrow: overloads, rate
  * limits, timeouts and 5xx are TRANSIENT and stay retryable. PURE + unit-tested.
  */
-const FATAL_PROVIDER_PATTERNS: readonly RegExp[] = [
-  /credit balance is too low/i,           // Anthropic: account out of credits
-  /\bauthentication_error\b/i,            // bad/revoked API key (Anthropic error type)
-  /\bpermission_error\b/i,                // key lacks access to the model
-  /invalid (?:x-)?api[- ]?key/i,          // generic invalid-key phrasing
-  /api key (?:is )?(?:invalid|expired|revoked|disabled)/i,
-  /account (?:is )?(?:disabled|suspended|deactivated)/i,
-];
-
-export function isFatalProviderError(error: unknown): boolean {
-  const text = error instanceof Error ? error.message : String(error ?? '');
-  return FATAL_PROVIDER_PATTERNS.some((re) => re.test(text));
-}
+export { isFatalProviderError } from '../providerErrorClass';
 
 /** A TIMEOUT failure (transient class, but grind-prone — see the consecutive-timeout bench). Pure. */
 export function isTimeoutProviderError(error: unknown): boolean {
@@ -192,7 +189,7 @@ export function isServiceOverloadedError(error: unknown): boolean {
  * A size-gate skip ("skipped: prompt … exceeds the cheap-floor limit") is deliberately NOT matched. Pure. */
 export function isRateLimitProviderError(error: unknown): boolean {
   const text = error instanceof Error ? error.message : String(error ?? '');
-  return /\b429\b|rate[ _-]?limit|too many requests/i.test(text);
+  return !isProviderBalanceError(error) && /\b429\b|rate[ _-]?limit|too many requests/i.test(text);
 }
 
 /** The largest context window any provider in the fleet offers (Claude/Vertex/Gemini ≈ 1M tokens). */
@@ -294,6 +291,9 @@ export function sizeGatedRunner(inner: TurnRunner, skipOverChars: number, perBlo
 export function fatalProviderHint(reason: string): string {
   if (/credit balance is too low/i.test(reason)) {
     return ' [PLATFORM ISSUE — not your app: the AI provider account has run out of credits. Every build will fail until the NavBharatAI admin tops it up (Anthropic Console → Plans & Billing).]';
+  }
+  if (isProviderBalanceError(reason)) {
+    return ' [PLATFORM ISSUE — not your app: the AI provider account has insufficient balance or billing quota. The NavBharatAI admin must fund the account or correct its billing before this provider can answer.]';
   }
   if (isFatalProviderError(reason)) {
     return ' [PLATFORM ISSUE — not your app: the AI provider account/key needs attention from the NavBharatAI admin.]';
@@ -599,6 +599,8 @@ export interface BuildBenchRegistry {
    * first sticky runner, so a registry built before this field existed stays exactly the same shape.
    */
   sticky?: StickyState;
+  /** Rungs already announced as opened past for a recent cross-build silence (said once per build). */
+  crossBuildSilenceSaid?: Set<string>;
 }
 
 export function createBuildBenchRegistry(): BuildBenchRegistry {
@@ -762,6 +764,10 @@ export function makeMultiProviderTurnRunner(
   const slowKeptAnyway = bench.slowKeptAnyway;
   const distinctSlowRungs = new Set(chain.map(slowKeyFor)).size;
   const crawlWindowMs = crawlBenchWindowMs();
+  // Silence is not re-probed inside a build (autopsy ca99778e — see `silenceBenchIsSticky`).
+  const silenceSticky = silenceBenchIsSticky();
+  // Other instances' silences are pulled in now, in the background, so the first call can already use them.
+  try { void opts.silenceMemory?.refresh?.(now()); } catch { /* best-effort */ }
   return {
     // What this chain plans to call first — for records only, never sent (see TurnRunner.plannedModel).
     // `NamedRunner` carries the same identifying fields as `ChainRung`, so the one reader both use is shared.
@@ -829,6 +835,20 @@ export function makeMultiProviderTurnRunner(
           fellBackFrom.push(name);
           continue;
         }
+        // 🔴 SILENT FOR ANOTHER BUILD A MOMENT AGO (autopsy eb58abaf). Opened past only when a later rung of a
+        // DIFFERENT key exists, so this can never empty the ladder; when the window ends the rung is tried again.
+        if (opts.silenceMemory) {
+          const silentUntil = opts.silenceMemory.until(benchKey, now());
+          if (silentUntil > now() && chain.slice(i + 1).some((e) => slowKeyFor(e) !== benchKey)) {
+            fellBackFrom.push(name);
+            const said = (bench.crossBuildSilenceSaid ??= new Set());
+            if (!said.has(benchKey)) {
+              said.add(benchKey);
+              try { opts.onProviderBenched?.(reportName, `${chain[i].modelId ? `${chain[i].modelId} ` : ''}sent nothing for a recent build — opened past for ${Math.round((silentUntil - now()) / 1000)}s more, so this build does not wait out the same silence`); } catch { /* telemetry only */ }
+            }
+            continue;
+          }
+        }
         // Retired earlier this run — either the whole provider (account fatal) or just this one model
         // (a rung whose id this account cannot reach). Checked in that order; both mean "do not spend
         // another round-trip re-proving an answer that cannot change".
@@ -892,12 +912,16 @@ export function makeMultiProviderTurnRunner(
           // 8000` starved glm-5.3 for 26 minutes on a repair, and `4000` starved the planner before it).
           // `raceStop` makes EVERY runner stop waiting on a stop, including one with no cancel handle of
           // its own; a streaming runner additionally closes its stream (it receives the same signal).
+          await assertAiAvailable();
           const result = await raceStop(runner.runTurn({
             ...params, canAbandonSlowStream, hasNextRung: i + 1 < chain.length,
+            // The first-byte grace is EARNED by answering recently (firstByteGraceFor, owner 2026-10-18).
+            firstByteGraceMs: firstByteGraceFor(opts.silenceMemory?.answeredAt?.(benchKey) ?? 0, now()),
             maxTokens: reasoningAwareAsk(params.maxTokens, chain[i].modelId),
           }), params.signal);
           /** This rung's own time — not the rungs tried, skipped or abandoned before it (see TurnResult.attemptMs). */
           const answeredInMs = Math.max(0, now() - attemptStartedAt);
+          try { opts.silenceMemory?.clear(benchKey, now()); } catch { /* best-effort */ }
           timeoutStreak.delete(reportName); // a success resets the family's consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
           cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone
@@ -985,6 +1009,8 @@ export function makeMultiProviderTurnRunner(
             // was serving it (autopsy 9c612cdb: the report could not say which engine ran the review).
             throw new BuildStoppedError({ provider: reportName, ...(chain[i].modelId ? { model: chain[i].modelId } : {}) });
           }
+          if (err instanceof AiMaintenanceError) throw err;
+          await assertAiAvailable(); // do not fall through to a paid rung after the auto trip
           lastError = err;
           fellBackFrom.push(reportName);
           opts.onProviderError?.(reportName, err);
@@ -1050,6 +1076,27 @@ export function makeMultiProviderTurnRunner(
             const kind = wasteKindFor(err);
             if (kind) opts.onAttemptWasted?.(reportName, kind, Math.max(0, now() - attemptStartedAt));
           } catch { /* telemetry only — it must never replace the error below */ }
+          if (providerNeverAnswered(err)) {
+            try { opts.silenceMemory?.record(slowKeyFor(chain[i]), now()); } catch { /* memory is best-effort */ }
+          }
+          // 🔴 A SILENT TIMEOUT IS THE SAME FACT AS A SILENT ABANDON (autopsy eb58abaf). When the call was not
+          // allowed to walk away (one abandon per build already spent), the provider's silence ended at the
+          // ordinary first-answer bound instead — and landed in the timeout branch, which strikes ONE KEY and
+          // benches the family only after two. The next call then opened on another key of the same silent
+          // service. Silence is a property of the rung (family::model), so it is benched exactly like the
+          // crawl bench below: a window, then one re-probe; never the last engine.
+          if (!isSlowStreamAbandon(err) && isTimeoutProviderError(err) && providerNeverAnswered(err) && !isBudgetEndedError(err)) {
+            try {
+              const silentKey = slowKeyFor(chain[i]);
+              if (!slowBenched.has(silentKey) && canBenchAnother(slowBenched.size, distinctSlowRungs)) {
+                slowBenched.add(silentKey);
+                const windowed = crawlWindowMs !== null && !silenceSticky;
+                if (windowed) bench.slowBenchUntil.set(silentKey, now() + (crawlWindowMs as number));
+                else bench.slowBenchUntil.delete(silentKey);
+                opts.onProviderBenched?.(reportName, `${chain[i].modelId ? `${chain[i].modelId} ` : ''}had not started answering after ${Math.round(Math.max(0, now() - attemptStartedAt) / 1000)}s — skipped on every key${windowed ? ` for ${Math.round((crawlWindowMs as number) / 1000)}s, then tried once more` : ' for the rest of this build'}, so the ladder can reach the next engine instead of waiting it out`);
+              }
+            } catch { /* the bench is bookkeeping — it must never replace the error below */ }
+          }
           if (isSlowStreamAbandon(err)) {
             bench.abandonedSlowRung = true;
             try {
@@ -1063,7 +1110,7 @@ export function makeMultiProviderTurnRunner(
               bench.crawlReprobed.delete(slowKey);
               if (!slowBenched.has(slowKey) && canBenchAnother(slowBenched.size, distinctSlowRungs)) {
                 slowBenched.add(slowKey);
-                const until = crawlBenchUntil(abandons, now(), crawlWindowMs);
+                const until = benchUntilAfterAbandon({ abandonsOfThisRung: abandons, nowMs: now(), windowMs: crawlWindowMs, silent: isSilentAbandon(err), sticky: silenceSticky });
                 if (Number.isFinite(until)) bench.slowBenchUntil.set(slowKey, until);
                 else bench.slowBenchUntil.delete(slowKey);
                 const elapsedMs = Math.max(0, now() - attemptStartedAt);

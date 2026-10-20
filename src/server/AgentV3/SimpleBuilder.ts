@@ -32,7 +32,7 @@ import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports
 import { parseTscErrors, endgameDeterministicPass, endgameRepairEnabled, ensureReactValueImport } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import type { FastLanePhases } from './fastLanePhases';
-import { fileBudgetForPrompt, fileBudgetInstruction } from './fileBudget';
+import { fileBudgetForPrompt, fileBudgetInstruction, foldPlanToBudget } from './fileBudget';
 import { generateMissingCssModules } from './CssModuleGenerator';
 import { missingViteEnvTypes } from './viteEnvTypes';
 import { generateMissingBarrels } from './BarrelGenerator';
@@ -47,7 +47,7 @@ import { frameworkShipsDesignKit } from './designKitReach';
 import { kitClasses } from './kitRestore';
 import { TODO_RIDES_WITH_WORK } from './todoOnlyTurn';
 import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason, mayStayOnReasoningRung, wavesFor } from './FastLaneBudget';
-import { contractEnumAsConstEnabled, stringEnumsAsConstObjects } from './contractEnums';
+import { contractEnumAsConstEnabled, stringEnumsAsConstObjects, contractEnumHeaderLine, contractEnumsSentence } from './contractEnums';
 import { contractRenameHeaderLine, type ContractRename } from './contractRenames';
 import { readWriteOutcomes, type WriteOutcome } from './writeOutcomes';
 
@@ -452,6 +452,13 @@ function entryFilesHint(framework: string): string {
 /** Words that say the APP ITSELF uses AI (not that the user wants an AI to build it). */
 const IN_APP_AI_RE = /\b(?:ai|a\.i\.|artificial intelligence|gpt|chatgpt|openai|llm|gemini|chatbot|ai[- ]powered|machine learning|smart (?:suggestions?|replies|categori[sz]ation))\b/i;
 
+/**
+ * Words that say the user does NOT want AI / network calls in the app (r6–r10 autopsy, 2026-10-18): "no API",
+ * "without AI", "offline", "bina AI", "AI nahi". `IN_APP_AI_RE` fired on the bare word "AI" in prompts like
+ * "simple notes app, no AI, no API, works offline", and the lane wired src/lib/ai.ts anyway. PURE.
+ */
+export const NO_AI_RE = /\b(?:no|without|not?\s+using|don'?t\s+(?:use|want|need)|bina|without\s+any)\s+(?:any\s+)?(?:ai|a\.i\.|api|apis|gpt|llm|internet|network|backend)\b|\b(?:ai|api)\s+(?:nahi|nahin|mat|na)\b|\b(?:fully\s+)?offline\b|\bno[- ]internet\b/i;
+
 /** Where NavBharatAI's keyless AI client lives in a browser app (the `generate_ai` recipe writes the same file). */
 export const LANE_AI_CLIENT_PATH = 'src/lib/ai.ts';
 
@@ -473,6 +480,7 @@ export function laneAiClient(prompt: string, framework: string | undefined, env:
   if (!appAiGatewayEnabled(env)) return null;
   if (!frameworkSupportsContractFile(framework)) return null;
   if (!IN_APP_AI_RE.test(String(prompt ?? ''))) return null;
+  if (NO_AI_RE.test(String(prompt ?? '')) && (env.AGENTV3_LANE_AI_NEGATION ?? '').trim().toLowerCase() !== 'off') return null; // the user said no AI / no API / offline
   const content = generateAiIntegration('navbharat').files[LANE_AI_CLIENT_PATH];
   return content ? { path: LANE_AI_CLIENT_PATH, content } : null;
 }
@@ -1269,8 +1277,18 @@ export function contractImport(statement: string): string | null {
  * `renamed` — the renames `prepareSharedContract` made (build 9c612cdb, Q-985): each becomes ONE strict header
  * line (`contractRenameHeaderLine`), because this file is what the hand-off says to read first and what every
  * later turn reads. The write-time heal reads those lines back, so their format is a pinned protocol.
+ *
+ * `enumsAsConst` (Q-1027) — the enums the same door rewrote as `as const` objects. They used to be rewritten
+ * in SILENCE: `prepareSharedContract` returned the list and nothing read it, so no autopsy could see the
+ * normaliser fire and the model was never told the name no longer refers to a type (the TS2702 residual
+ * `contractEnums.ts` warns about). Named here for the same reason a rename is: this is the file the hand-off
+ * says to read first.
  */
-export function contractModule(contract: string | undefined, renamed: readonly ContractRename[] = []): ContractModule | null {
+export function contractModule(
+  contract: string | undefined,
+  renamed: readonly ContractRename[] = [],
+  enumsAsConst: readonly string[] = [],
+): ContractModule | null {
   let text = String(contract ?? '').replace(/\r\n?/g, '\n');
   text = text.replace(/^[ \t]*```[a-zA-Z]*[ \t]*$/gm, ''); // fences the prompt asked it not to add
   const kept: string[] = [];
@@ -1320,6 +1338,10 @@ export function contractModule(contract: string | undefined, renamed: readonly C
     '// Shared contract — the enums, interfaces and types every file of this app imports from here.',
     '// Written by NavBharatAI before any other file, so all files agree on these names by construction.',
     ...renamed.map(contractRenameHeaderLine),
+    // An enum this door rewrote is named here too (Q-1027). It used to be rewritten silently: `enumsAsConst`
+    // was returned and NOTHING read it, so no autopsy could see it fire and the model could not know the name
+    // no longer refers to a type — which is the TS2702 residual contractEnums.ts warns about.
+    ...enumsAsConst.map(contractEnumHeaderLine),
   ];
   const source = `${[...header, ...(imports.length ? ['', ...imports] : []), '', joined].join('\n')}\n`;
   return { source, symbols };
@@ -1446,8 +1468,17 @@ export function prepareSharedContract(
  *
  * `renamed` (Q-985): a type `prepareSharedContract` moved off a component's name is NAMED here, so the
  * architect never writes the component's name where it means the data.
+ *
+ * `enumsAsConst` (Q-1027): and an enum the same door rewrote, for the same reason — the contract shown here
+ * has ALREADY been normalised, so without this the architect reads `as const` objects with nothing to say
+ * why, and no warning that a member used as a TYPE is now a TS2702.
  */
-export function blueprintAdvisoryBlock(manifest: SimpleFileSpec[], contract?: string, renamed: readonly ContractRename[] = []): string {
+export function blueprintAdvisoryBlock(
+  manifest: SimpleFileSpec[],
+  contract?: string,
+  renamed: readonly ContractRename[] = [],
+  enumsAsConst: readonly string[] = [],
+): string {
   if (!manifest || manifest.length === 0) return '';
   const fileList = manifest.map((f) => `  - ${f.path}${f.purpose ? ` — ${f.purpose}` : ''}`).join('\n');
   const parts = [
@@ -1469,6 +1500,11 @@ export function blueprintAdvisoryBlock(manifest: SimpleFileSpec[], contract?: st
         ...renamed.map((r) => `  - ${r.from} → ${r.to} (${r.from} is the component${r.component ? ` in ${r.component}` : ''})`),
       );
     }
+    // 🔁 AND THE ENUMS THE SAME DOOR REWROTE (Q-1027). This block already named a rename and said nothing
+    // about a normalised enum, although the contract shown above it has already been rewritten — so the
+    // architect read `as const` objects with nothing to say why, and no warning that a member used as a
+    // TYPE is now a TS2702. The blueprint lane is the sibling the row never mentioned.
+    if (enumsAsConst.length > 0) parts.push(contractEnumsSentence(enumsAsConst));
   }
   return parts.join('\n');
 }
@@ -1852,6 +1888,12 @@ export interface SimpleBuildResult {
    */
   contractRenames?: ContractRename[];
   /**
+   * The enums this lane rewrote as `as const` objects (`prepareSharedContract`, Q-1027) — carried for the
+   * same reason the renames are: the full builder never saw the contract call, and a member written as a
+   * TYPE against an `as const` object is a TS2702 it cannot diagnose from the error alone. Absent when none.
+   */
+  contractEnumsAsConst?: string[];
+  /**
    * FALSE when the verify gate was wired but could not EXECUTE (sandbox infra failure) — the app
    * shipped UNVERIFIED, so the caller must NOT skip its own downstream gates. True = tsc really ran
    * and passed; undefined = verify was not wired at all.
@@ -2090,6 +2132,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // The contract renames (Q-985) — hoisted for the same reason as `plannedPaths`: the hand-off needs them
   // after the closure is gone.
   let contractRenames: ContractRename[] = [];
+  /** The enums the contract door rewrote as `as const` objects (Q-1027) — carried, so it is not silent. */
+  let contractEnumsAsConst: string[] = [];
   try {
     files = await withTimeout((async () => {
       deps.log?.('Planning the file list…');
@@ -2177,6 +2221,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         }
         v2Contract = validateManifestContract(manifest.map((m) => m.path), raw);
         if (v2Contract.dropped.length) deps.log?.(`Ignoring ${v2Contract.dropped.length} planned import(s) of files not in the plan: ${v2Contract.dropped.slice(0, 6).join('; ')}.`);
+      }
+      const foldedPlan = foldPlanToBudget(manifest, fileBudgetForPrompt(request));
+      if (foldedPlan.folded.length) {
+        deps.log?.(foldedPlan.note ?? '');
+        manifest.splice(0, manifest.length, ...foldedPlan.files);
       }
       plannedFiles = manifest.length;
       plannedPaths = manifest.map((f) => f.path);
@@ -2281,8 +2330,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           const prepared = prepareSharedContract(contract, manifest);
           contract = prepared.contract;
           contractRenames = prepared.renamed;
+          contractEnumsAsConst = prepared.enumsAsConst;
           if (prepared.renamed.length > 0) {
             deps.log?.(`🏷️ Renamed ${prepared.renamed.map((r) => `${r.from} → ${r.to}`).join(', ')} in the shared contract so no data type shares a component's name.`);
+          }
+          // 🔴 SAID, like the rename beside it (Q-1027). The normaliser used to run in silence, so a reader
+          // of the build could not tell whether it had fired — and `enumsAsConst` had no reader at all.
+          if (prepared.enumsAsConst.length > 0) {
+            deps.log?.(`🔁 Rewrote ${prepared.enumsAsConst.join(', ')} in the shared contract as \`as const\` object(s), so a file written on its own can use the plain value.`);
           }
         }
       } else if (shareContract) {
@@ -2301,7 +2356,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // Decided BEFORE file one so every per-file prompt can name the path, and written FIRST so the
       // dependency context of every tier carries its export surface like any other produced file.
       if (contract && contractFileEnabled() && frameworkSupportsContractFile(deps.framework)) {
-        const mod = contractModule(contract, contractRenames);
+        const mod = contractModule(contract, contractRenames, contractEnumsAsConst);
         if (mod) {
           contractPath = contractFilePath(manifest);
           const planned = manifest.findIndex((f) => f.path === contractPath);
@@ -2775,6 +2830,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       phases: phasesNow(),
       plannedPaths,
       ...(contractRenames.length ? { contractRenames } : {}),
+      ...(contractEnumsAsConst.length ? { contractEnumsAsConst } : {}),
     };
   }
 
@@ -3022,6 +3078,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         // Capture the REAL compiler error (capped) so the build report can be mined for the true cause.
         verifyErrors: (verdict.errors || '').trim().slice(0, 2000) || undefined,
         ...(contractRenames.length ? { contractRenames } : {}),
+        ...(contractEnumsAsConst.length ? { contractEnumsAsConst } : {}),
       };
     }
     files = [...byPath.values()];

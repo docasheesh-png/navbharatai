@@ -165,7 +165,9 @@ describe('WIRING — a contract nothing calls is a comment', () => {
   it('the route forwards it, and a CONTINUATION carries it too', () => {
     const src = read('src/server/routes/agentv3.ts');
     // Since Q-926 the continuation also carries the per-file stay decision.
-    expect(src).toContain('fastGenerateOnce(system, continuationPrompt(text), genOpts?.deadlineAt, genOpts?.mayReason === true)');
+    expect(src).toContain('continueFastLaneGeneration(first, {');
+    expect(src).toContain('generate: (prompt) => fastGenerateOnce(system, prompt, genOpts?.deadlineAt, genOpts?.mayReason === true, genOpts?.repair === true)');
+    expect(read('src/server/AgentV3/FastLaneContinuation.ts')).toContain('deps.generate(continuationPrompt(text))');
     expect(src).toMatch(/deadlineAt,/);
   });
 });

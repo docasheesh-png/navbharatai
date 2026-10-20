@@ -23,11 +23,20 @@ describe('the end-of-build refresh', () => {
   });
 
   it('runs every post-copy pass first — they all sit above it', () => {
-    for (const pass of ["runInPass('vaccine-repair'", "runInPass('runtime-error-autofix'", "runInPass('reviewer-functional-repair'", "runInPass('green-guard-restore'"]) {
-      const at = route.indexOf(pass);
-      expect(at, pass).toBeGreaterThan(-1);
-      expect(at, pass).toBeLessThan(refreshAt);
+    for (const pass of ['vaccine-repair', 'runtime-error-autofix', 'reviewer-functional-repair']) {
+      const calls = [...route.matchAll(new RegExp(`runInPass\\('${pass}'`, 'g'))];
+      expect(calls.length, pass).toBeGreaterThan(0);
+      for (const call of calls) expect(call.index, pass).toBeLessThan(refreshAt);
     }
+    // The green restore now has one shared mutation door. Check every invocation and every
+    // verified-repair callback, rather than mistaking the early helper definition for its last use.
+    expect(route).toContain("pass = 'green-guard-restore'");
+    expect(route).toContain('runInPass(pass, () => applySnapshotRestore(plan, {');
+    const restores = [...route.matchAll(/\bapplyGreenSnapshotRestore\s*\(/g)];
+    const verifiedRepairRestores = [...route.matchAll(/revert:\s*revertToGreenSnapshot\b/g)];
+    expect(restores).toHaveLength(4);
+    expect(verifiedRepairRestores).toHaveLength(5);
+    for (const call of [...restores, ...verifiedRepairRestores]) expect(call.index).toBeLessThan(refreshAt);
   });
 
   it('the explorer repair runs BEFORE the copy is taken, so it cannot leave it stale', () => {

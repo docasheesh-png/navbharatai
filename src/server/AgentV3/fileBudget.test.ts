@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fileBudgetForPrompt, fileBudgetInstruction, overBudgetNote } from './fileBudget';
+import { fileBudgetForPrompt, fileBudgetInstruction, overBudgetNote, foldPlanToBudget, fileBudgetReport } from './fileBudget';
 import { manifestUserPrompt, manifestSystemPrompt } from './SimpleBuilder';
 
 const TODO = 'Build a to-do list app: add, edit, complete and delete tasks, organise them by category, filter by all/active/done, and save everything in the browser so it persists on reload.';
@@ -66,6 +66,30 @@ describe('overBudgetNote — honest telemetry, never a silent trim', () => {
     const b = fileBudgetForPrompt(TODO);
     expect(overBudgetNote(NaN, b)).toBeNull();
     expect(overBudgetNote(-1, b)).toBeNull();
+  });
+});
+
+describe('foldPlanToBudget — over the ceiling is co-located, never dropped', () => {
+  const budget = { maxFiles: 3, label: 'simple' as const };
+  const spec = (path: string) => ({ path, purpose: `purpose of ${path}` });
+
+  it('leaves a plan inside the ceiling untouched', () => {
+    const files = [spec('src/App.tsx'), spec('src/a.ts')];
+    expect(foldPlanToBudget(files, budget)).toEqual({ files, folded: [], note: null });
+  });
+
+  it('keeps the entry and folds the extras into the last kept file', () => {
+    const files = [spec('src/App.tsx'), spec('src/a.ts'), spec('src/b.ts'), spec('src/c.ts'), spec('src/d.ts')];
+    const out = foldPlanToBudget(files, budget);
+    expect(out.files.map((f) => f.path)).toEqual(['src/App.tsx', 'src/a.ts', 'src/b.ts']);
+    expect(out.folded).toEqual(['src/c.ts', 'src/d.ts']);
+    expect(out.files[2].purpose).toContain('src/c.ts');
+    expect(out.files[2].purpose).toContain('src/d.ts');
+    expect(out.files[2].purpose).toContain('ALSO INCLUDE IN THIS SAME FILE');
+    expect(out.note).toContain('folded into src/b.ts');
+    const report = fileBudgetReport(files.length, budget, out) ?? '';
+    expect(report).toContain('nothing was trimmed');
+    expect(report).toContain('src/c.ts');
   });
 });
 

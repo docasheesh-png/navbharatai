@@ -36,7 +36,7 @@ describe('bucketSetupSql — the bucket', () => {
   it('is idempotent — a second build of the same app must not fail', () => {
     const sql = sqlOf();
     expect(sql).toContain('on conflict (id) do update');
-    expect((sql.match(/drop policy if exists/g) || []).length).toBe(4);
+    expect((sql.match(/drop policy if exists/g) || []).length).toBe(8); // legacy + current identifiers
   });
 
   it('rejects a name that could break the path or the SQL', () => {
@@ -61,10 +61,10 @@ describe('bucketSetupSql — the bucket', () => {
     }
   });
 
-  it('drops MIME entries that are not MIME types rather than passing them through', () => {
-    const sql = sqlOf({ ...defaultBucketSpec(), mimeTypes: ['image/png', "junk'; drop table x; --"] });
-    expect(sql).toContain("'image/png'");
-    expect(sql).not.toContain('drop table');
+  it('rejects invalid MIME restrictions instead of silently weakening the allow-list', () => {
+    for (const mimeTypes of [['image/png', "junk'; drop table x; --"], ['not-a-type']]) {
+      expect(bucketSetupSql({ ...defaultBucketSpec(), mimeTypes }).ok).toBe(false);
+    }
   });
 
   it('writes null (any type) when no MIME filter is given', () => {
@@ -100,6 +100,8 @@ describe('bucketSetupSql — the access rules, which are the whole security mode
     const sql = sqlOf({ ...defaultBucketSpec(), publicRead: false });
     expect(sql).toMatch(/for select\s+to authenticated/);
     expect(sql).toContain('false,'); // public = false on the bucket row
+    const readPolicy = sql.slice(sql.indexOf('for select'), sql.indexOf('drop policy', sql.indexOf('for select')));
+    expect(readPolicy).toContain('(storage.foldername(name))[1] = auth.uid()::text');
   });
 
   it('always writes rules — a bucket without them accepts nothing and explains nothing', () => {

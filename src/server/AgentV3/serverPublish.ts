@@ -13,7 +13,7 @@
 
 import type { Availability, HostAppOutcome } from './hostApp';
 import type { DeploymentRecord } from './DeploymentStore';
-import { TrackedDeploy, deployEventLine, type DeployStore, type DeployFailureCategory } from './hostedDeployments';
+import { TrackedDeploy, deployEventLine, type DeployStore, type DeployClaim, type DeployFailureCategory } from './hostedDeployments';
 
 export interface ServerPublishInput {
   workspaceId: string;
@@ -28,7 +28,7 @@ export interface ServerPublishInput {
 export interface ServerPublishDeps {
   serverCap: (input: { ownerUid: string; workspaceId: string; isAdmin: boolean }) => Promise<Availability>;
   store: DeployStore;
-  /** The workspace's deployment record; null when none or unreadable (fail-open, like the static guard). */
+  /** null means absent; an unreadable registry must reject, so a ban can never become a new app. */
   existing: (workspaceId: string) => Promise<DeploymentRecord | null>;
   vault: (ownerUid: string, workspaceId: string) => Promise<Record<string, string> | null>;
   token: () => Promise<string | null>;
@@ -71,10 +71,17 @@ export async function runServerPublish(input: ServerPublishInput, deps: ServerPu
     ({ status, live: false, ready: false, body: { error, code: 'needs-server-hosting', ...extra } });
 
   const cap = await deps.serverCap({ ownerUid: input.ownerUid, workspaceId: input.workspaceId, isAdmin: input.isAdmin })
-    .catch(() => ({ available: true, message: '' })); // an unreadable count fails open — see serverAppLimit
+    .catch(() => ({ available: false, message: 'Your server allowance could not be confirmed. Please retry; no build was started.' }));
   if (!cap.available) return { status: 403, live: false, ready: false, body: { error: cap.message, code: 'server_app_limit' } };
 
-  const claim = await deps.store.claim(input.workspaceId, input.ownerUid, now());
+  let claim: DeployClaim;
+  try {
+    claim = await deps.store.claim(input.workspaceId, input.ownerUid, now());
+  } catch {
+    return fail(503, 'Deployment coordination is temporarily unavailable. Please retry shortly; no new build was started.', {
+      code: 'deploy-coordination-unavailable', retryable: true,
+    });
+  }
   if (!claim.claimed) {
     return {
       status: 409, live: false, ready: false,
@@ -92,7 +99,9 @@ export async function runServerPublish(input: ServerPublishInput, deps: ServerPu
   };
 
   try {
-    const existing = await deps.existing(input.workspaceId).catch(() => null);
+    let existing: DeploymentRecord | null;
+    try { existing = await deps.existing(input.workspaceId); }
+    catch { return await failWith(503, 'unavailable', 'The deployment registry is temporarily unavailable. Please retry; no build was started.'); }
     const vaultSecrets = await deps.vault(input.ownerUid, input.workspaceId).catch(() => null);
     const token = await deps.token().catch(() => null);
     if (!token) return await failWith(503, 'unavailable', 'Hosting could not authenticate with Google Cloud just now. Nothing was changed.');

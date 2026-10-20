@@ -23,6 +23,9 @@
  * Kill switch: `AGENTV3_ASK_UNRELATED=off` restores the old edit-always behaviour.
  */
 import { SCAFFOLD_PATHS, couldBeAppCode } from './userProjectFiles';
+// ⚠️ "add it to this app" below is a LITERAL on purpose (Q-1037): it is registered in
+// `platformSuggestedReplies.ts` and pinned equal to that constant by a test, but
+// `tests/aPromiseToTheUserHasAHandler.test.ts` reads SHIPPED STRINGS and cannot see through an import.
 import { textWords } from './textWords';
 
 export function askUnrelatedEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -161,7 +164,9 @@ export function unrelatedRequestSteer(existingHint: string, hadAttachment: boole
     + 'nothing to do with it. Do NOT build anything and do NOT pretend to. In two or three short sentences, in '
     + 'the user\'s own language: say in a few words what their current app is, and ask which they want — '
     + '(1) add this INTO their current app, or (2) make it as a NEW, separate app. Say exactly how to answer: '
-    + 'for (1) reply "add it to this app"; for (2) tap "New" in the header (on a phone: More → New chat) and send the '
+    + 'for (1) reply "add it to this app" — tell them to write that phrase EXACTLY as it is, in English, even '
+    + 'though the rest of your reply is in their language, because the platform recognises those exact words '
+    + 'and a translation of them would not be; for (2) tap "New" in the header (on a phone: More → New chat) and send the '
     + 'same request there, which keeps the current app untouched.'
     + (hadAttachment ? ' They attached a file with this message: tell them to attach it again with their answer, because a file goes only with the message it was sent with.' : '')
     + ' Be warm and brief.';

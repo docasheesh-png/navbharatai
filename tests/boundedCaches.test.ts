@@ -81,7 +81,8 @@ describe('BoundedCache — the one shape a per-instance cache may take', () => {
 function call(guard: ReturnType<typeof adaptiveGuard>, address: string, auth?: string): Promise<number> {
   return new Promise((resolve) => {
     const req = {
-      path: '/api/live', method: 'GET',
+      // Exercise a guarded app endpoint: liveness probes intentionally bypass this policy.
+      path: '/api/pro-chat', method: 'GET',
       headers: { 'x-forwarded-for': address, 'user-agent': 'Mozilla/5.0 (Linux; Android 14) Chrome/128', ...(auth ? { authorization: auth } : {}) },
       socket: { remoteAddress: '10.0.0.1' },
     } as never;

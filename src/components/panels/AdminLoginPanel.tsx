@@ -9,10 +9,12 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { Lock } from 'lucide-react';
 import { AdminDashboard } from '../AdminDashboard';
+import { FailedBuildReportsPage } from '../admin/FailedBuildReportsPage';
 import type { AdminFooterApi } from '../admin/adminFooterApi';
 
 export interface AdminLoginPanelProps {
   isAdmin: boolean;
+  failedReports?: boolean;
   adminEmail: string;
   adminPassword: string;
   adminError: string;
@@ -38,6 +40,7 @@ export interface AdminLoginPanelProps {
 
 export function AdminLoginPanel({
   isAdmin,
+  failedReports,
   adminEmail,
   adminPassword,
   adminError,
@@ -114,7 +117,7 @@ export function AdminLoginPanel({
           </form>
         </motion.div>
       ) : (
-        <AdminDashboard adminToken={adminToken} onLogout={onLogout} mobileFooter={mobileFooter} onFooterApi={onFooterApi} />
+        failedReports ? <FailedBuildReportsPage token={adminToken} onLogout={onLogout} /> : <AdminDashboard adminToken={adminToken} onLogout={onLogout} mobileFooter={mobileFooter} onFooterApi={onFooterApi} />
       )}
     </div>
   );

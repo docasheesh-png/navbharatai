@@ -96,6 +96,13 @@ import { mergeDotEnv, gitignoreWithEnv, dotEnvValue } from '../secrets/appSecret
 import { ensureBootEnv, ENV_SCAN_COMMAND } from './devSecretsBoot';
 import { envNamesFromGrep, detectDatabaseProvider } from './ImportPreview';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
+
+/** PURE. A bash result that says the dev server is UP on a port, with no preview published yet. */
+export function shouldAutoPublishPreview(bashOutput: string, previewPublished: boolean, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (previewPublished || String(env.AGENTV3_AUTO_PREVIEW ?? '').trim().toLowerCase() === 'off') return false;
+  const v = parseDevServerHealthLine(String(bashOutput ?? ''));
+  return !!v && v.up && Number.isInteger(v.port) && (v.port as number) > 0;
+}
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled, modelDesignLine } from './writeTimeQualityCheck';
@@ -115,7 +122,7 @@ import { currentPass, runInPass, inPlatformPass, isGreenLatched, assertWriteAllo
 import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemovedOperands, removedRecordedPaths } from './shellWriteTargets';
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
-import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames } from './tscErrorCause';
+import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames, mistypedImport } from './tscErrorCause';
 import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckWarmupCommand, WARMUP_COMPILED_MARKER, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
@@ -196,12 +203,15 @@ import { looksLikeDbUnreachable } from './sandbox/EngineerAI/actuators/sandboxHe
 import { extractMissingPrismaExports, isEnumConsumerFile, fixDanglingEnumConsumer } from './prismaEnumConsumers';
 import type { BackendProvisionResult } from './sandbox/EngineerAI/actuators/IEngineerActuator';
 import { nextBuildRepairHint, nextMiddlewareCorrectPath } from './frameworkBuildHints';
+import { tsxRelocationFor, tsFileHasJsx, tsJsxRenameEnabled } from './LanguageCoherence';
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessTimeoutMs, readinessVerdict, unassessedReadinessReport, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { STARTER_ENTRY_CONTENT, STARTER_ENTRY_PATHS, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
 import { isUiComponentPath, entryLateNote, MIN_SCREENS_BEFORE_NOTE, entryFirstWriteNote } from './earlyPreview';
+import { autoStyleFloorEnabled, autoStyleSheet, withAutoStyleImport, AUTO_STYLE_PATH } from './autoStyleFloor';
+import { entryAutoWireEnabled, isAutoWiredEntry, isScreenPath, zeroPropExport, childrenOnlyProvider, autoWiredEntry, autoWiredNote, type WiredExport } from './entryAutoWire';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, droppedRelativeImports, droppedImportOrphanLabel, importStem } from './buildAuthorship';
 import { loadedMissingPackageUses, notInstalledBlockerLabel, undeclaredInstalledLabel, type MissingPackageUse } from './missingPackageBlockers';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
@@ -655,6 +665,27 @@ type InstallOutcome = 'installed' | 'busy' | 'failed' | 'skipped';
 /** How many writes may retry an import install that stood down under the background install's lock. */
 export const MAX_DEFERRED_IMPORT_INSTALLS = 6;
 
+/**
+ * True when an update_preview would republish exactly what is already live: same port, and no change made since
+ * that publish. PURE. AGENTV3_SKIP_UNCHANGED_PREVIEW=off ⇒ never redundant (the old behaviour).
+ */
+export function previewRefreshIsRedundant(
+  last: { port: number; changes: number } | null,
+  port: number,
+  changesNow: number,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (String(env.AGENTV3_SKIP_UNCHANGED_PREVIEW ?? '').trim().toLowerCase() === 'off') return false;
+  return !!last && last.port === port && last.changes === changesNow;
+}
+
+/** The batch-write refusal: what was NOT written first, then the full summary. PURE. */
+export function batchRefusalText(written: readonly string[], notWritten: ReadonlyArray<{ path: string; failed: string }>, summary: string): string {
+  const head = `Not written (${notWritten.length} file(s) — rewrite these): ${notWritten.map((r) => `${r.path} — ${r.failed}`).join('; ')}`;
+  const ok = written.length ? `\nWritten (do not rewrite these): ${written.join(', ')}` : '';
+  return `${head}${ok}\n\n${summary}`;
+}
+
 export class ToolDispatcher {
   /**
    * May this dispatcher publish? DENIED unless the composition root grants it — see the `deploy` case.
@@ -884,6 +915,11 @@ export class ToolDispatcher {
    * Has this agent changed the project yet — itself or through a sub-agent? The done signal asks it, so
    * an edit is never judged "complete" by the score of the app it has not touched (autopsy 1389f0d5).
    */
+  /** True once the app's live preview has been published to the user (port verified). */
+  hasPublishedPreview(): boolean {
+    return this.previewPublished;
+  }
+
   wroteAnything(): boolean {
     this.flushUnrecordedWrites();
     return this._writtenPaths.size > 0 || this._delegateWrote;
@@ -907,6 +943,10 @@ export class ToolDispatcher {
   // re-ran update_preview + npm run dev in a loop until the step cap — ~10 min burned on an
   // unreachable preview). Counted per dispatcher (= per build for the Architect).
   private previewFails = 0;
+  /** A live preview was published by this dispatcher (update_preview emitted a `preview` event). */
+  private previewPublished = false;
+  /** The port and change count of the last update_preview that published (previewRefreshIsRedundant). */
+  private lastPublishedPreview: { port: number; changes: number } | null = null;
   /** Per-dispatcher incremental cache, so two builds never share one tsbuildinfo (TD-18). */
   private readonly tsBuildInfoId = randomUUID().slice(0, 8);
 
@@ -941,10 +981,12 @@ export class ToolDispatcher {
    * Unset ⇒ the tool reports honestly that it cannot stop, rather than claiming it did.
    */
   private stopBuild?: (reason: string) => void;
+  private stopRequestSource: () => string = () => '';
 
   /** Wire the stop. Called once per build by the composition root. */
-  setStopBuild(fn: (reason: string) => void): void {
+  setStopBuild(fn: (reason: string) => void, readUserMessage: () => string = () => ''): void {
     this.stopBuild = fn;
+    this.stopRequestSource = readUserMessage;
   }
 
   /**
@@ -2414,10 +2456,9 @@ export class ToolDispatcher {
         const rm = await this.actuator
           .runCommand(this.workspaceId, `rm -f -- '${p}'`)
           .catch(() => ({ exitCode: -1, stdout: '', stderr: '' }));
-        if (rm.exitCode === 0) {
-          try { this.state?.recordFileChange({ path: p, kind: 'delete' }, 'architect'); } catch { /* UI count is best-effort */ }
-          await this.reconcileDeletions([p]);
-        }
+        if (rm.exitCode !== 0) throw new Error(`Could not remove created repair file ${p}.`);
+        try { this.state?.recordFileChange({ path: p, kind: 'delete' }, 'architect'); } catch { /* UI count is best-effort */ }
+        await this.reconcileDeletions([p]);
       },
     };
   }
@@ -3856,6 +3897,11 @@ export class ToolDispatcher {
       const { fixHere, waiting } = splitByRemedy(errors, tsPaths, sources);
       s.ownErrorsSurfaced += fixHere.length;
       s.waitingErrorsSurfaced = (s.waitingErrorsSurfaced ?? 0) + waiting.length;
+      // And the ones whose path is proven WRONG rather than early (Q-1029) — counted from the same split,
+      // so the number in the summary is the number of notes the model was actually shown. They are part of
+      // `fixHere` (that is what `remedyFileFor` returning null means), so this never double-counts a wait.
+      s.mistypedImportsSurfaced = (s.mistypedImportsSurfaced ?? 0)
+        + fixHere.filter((e) => mistypedImport(e, sources) !== null).length;
       if (fixHere.length > 0) {
         try { getWorkspaceMemory(this.workspaceId).recordError(`write-typecheck: ${fixHere.length} error(s) in ${tsPaths.join(', ')}`); } catch { /* audit best-effort */ }
       }
@@ -4022,6 +4068,19 @@ export class ToolDispatcher {
         this.flushUnrecordedWrites(); // every write this call made reaches the saved project
       }
       // A RECIPE'S DEPENDENCY IS INSTALLED, NOT NAMED (recipeDependencyLine.ts) — one door for every recipe.
+      // 🔴 AUTO PREVIEW (autopsy 778d7c58): a bash that brought the dev server UP used to end with the hint
+      // "call update_preview" — and the user, seeing nothing, pressed Stop at 76 s, one tool call before the
+      // preview. A dev server that is UP and not yet published is published HERE, by the platform, every
+      // time — whichever command started it. Kill switch AGENTV3_AUTO_PREVIEW=off.
+      if (!visual && call.name === 'bash' && shouldAutoPublishPreview(content, this.previewPublished)) {
+        const port = parseDevServerHealthLine(content)!.port!;
+        try {
+          const pv = await this.run({ id: `${call.id}-auto-preview`, name: 'update_preview', input: { port } } as ToolUse, agent);
+          content = `${content}\n\n[platform] The live preview was published automatically on port ${port} — do NOT call update_preview again.\n${pv.slice(0, 400)}`;
+        } catch (e) {
+          content = `${content}\n\n[platform] Automatic preview on port ${port} did not publish (${e instanceof Error ? e.message.slice(0, 200) : String(e)}).`;
+        }
+      }
       const recipeCalled = call.name === 'run_recipe'
         ? String((call.input as Record<string, unknown> | undefined)?.name ?? '')
         : call.name;
@@ -4309,6 +4368,62 @@ export class ToolDispatcher {
     } catch { return ''; }
   }
 
+  /** The last provisional entry the platform wrote (entryAutoWire.ts) — rewritten only while it is still ours. */
+  private _autoWiredEntry: string | null = null;
+  /**
+   * 🔴 SCREENS ON DISK, STARTER ON SCREEN (autopsy ca99778e). When this agent has written screens and the entry is
+   * still our starter — or our own earlier shell — the platform writes a provisional src/App.tsx that mounts them,
+   * so the user's preview shows the app being built. Never over a real entry; never on a module turn that does not
+   * own the entry. Returns the note the writer reads, or ''.
+   */
+  private async entryAutoWireFor(files: Record<string, string>): Promise<string> {
+    if (!entryAutoWireEnabled() || this._starterExpected) return '';
+    const paths = Object.keys(files ?? {}).map((p) => p.replace(/^\.?\/+/, ''));
+    if (paths.some((p) => STARTER_ENTRY_PATHS.includes(p))) { this._autoWiredEntry = null; return ''; }
+    if (!paths.some(isUiComponentPath)) return '';
+    try {
+      const read = async (path: string): Promise<string> => (path in files ? files[path] : await withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'entry-autowire-read'));
+      let entryPath = '';
+      let current: string | null = null;
+      for (const p of ['src/App.tsx', 'src/App.jsx']) {
+        try {
+          const c = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'entry-autowire-entry');
+          if (typeof c === 'string') { entryPath = p; current = c; break; }
+        } catch { /* try the next */ }
+      }
+      if (!entryPath || typeof current !== 'string') return '';
+      // Ours to (re)write only while it is byte-for-byte our starter, or the exact shell THIS agent last wrote —
+      // a shell another agent wrote lists screens this one never saw, so it is not rewritten from here.
+      const ours = this._autoWiredEntry !== null && current === this._autoWiredEntry;
+      if (!ours && (isAutoWiredEntry(current) || !(await entryIsStillTheStarter(
+        (path) => withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'entry-autowire-starter'),
+      )))) return '';
+      const written = [...this._writtenPaths].map((p) => p.replace(/^\.?\/+/, ''));
+      if (written.filter(isUiComponentPath).length < MIN_SCREENS_BEFORE_NOTE) return '';
+      const screens: WiredExport[] = [];
+      const skipped: string[] = [];
+      let provider: WiredExport | null = null;
+      for (const p of written.filter(isUiComponentPath).sort()) {
+        let content = '';
+        try { content = String(await read(p) ?? ''); } catch { continue; }
+        if (!provider) provider = childrenOnlyProvider(p, content);
+        if (!isScreenPath(p)) continue;
+        const exp = zeroPropExport(p, content);
+        if (exp) screens.push(exp); else skipped.push(p);
+      }
+      if (screens.length === 0) return '';
+      const next = autoWiredEntry(screens.slice(0, 8), entryPath, provider);
+      if (next === current) return '';
+      await this.inPlatformPass('entry-autowire', () => this.actuator.writeFile(this.workspaceId, entryPath, next));
+      this._autoWiredEntry = next;
+      try { this.onFileWrite?.(entryPath, next); } catch { /* durable mirror is best-effort */ }
+      try { this.state?.recordFileChange({ path: entryPath, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
+      // The shell IS the entry write the two notes asked for — neither is said after it.
+      this._entryLateNoted = true; this._entryFirstNoted = true;
+      return autoWiredNote(entryPath, screens.slice(0, 8), skipped);
+    } catch { return ''; }
+  }
+
   private async writeSteeringNotes(files: Record<string, string>): Promise<string> {
     const paths = Object.keys(files ?? {});
     if (paths.length === 0) return '';
@@ -4406,6 +4521,9 @@ export class ToolDispatcher {
     const style = await this.styleWriteNotes(files);
     // Screens written while the entry is still the starter (autopsy 68f0a486) — the user sees none of them.
     // Carried on `shadow` (the "what the preview will not show" notes) so the guarded sum keeps its shape.
+    // The platform wires those screens itself FIRST (autopsy ca99778e): the note alone lost three times, and a
+    // wired entry silences it (the note would ask for a write that has already happened).
+    shadow += await this.entryAutoWireFor(files);
     shadow += await this.entryLateNoteFor(paths);
     // A light/dark switch that sets a class or attribute nothing styles (autopsy 8257ca59) — said while open.
     const theme = await this.deadThemeSwitchNotes(files);
@@ -4572,12 +4690,14 @@ export class ToolDispatcher {
       if (sheets.length === 0 || sheets.length + code.length > ToolDispatcher.STYLE_NOTE_MAX_READS) return { missing: [], pages: [] };
       const project: Record<string, string> = {};
       let unreadSheet = false;
+      let unreadCode = false;
       await Promise.all([...sheets, ...code].map(async (p) => {
         try {
           const raw = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'style-resume-read');
           if (typeof raw === 'string') project[p] = withoutPreviewBridge(p, raw);
           else if (isProjectStylesheet(p)) unreadSheet = true;
-        } catch { if (isProjectStylesheet(p)) unreadSheet = true; }
+          else unreadCode = true;
+        } catch { if (isProjectStylesheet(p)) unreadSheet = true; else unreadCode = true; }
       }));
       if (unreadSheet) return { missing: [], pages: [] };
       // Only a class the KIT defines is left out: kitRestore puts that one back. An invented `nb-` name has
@@ -4623,9 +4743,23 @@ export class ToolDispatcher {
       // wired in by the architect after it returns, so naming them to the specialist would be premature.
       let orphans: string[] = [];
       try {
+        // Orphan evidence can remove source files. Unlike advisory CSS/design checks, it needs the
+        // module-binding metadata too: a dependency name may be a local TS or runtime alias instead.
+        // Bound extra reads; absent/unreadable/too-many bindings leave the destructive graph unknown.
+        const metadata = paths.filter((p) => !/(^|\/)(?:node_modules|\.git|dist|build|vendor)\//.test(p))
+          .filter((p) => /(^|\/)(?:package\.json|(?:ts|js)config(?:\.[^/]+)?\.json|(?:vite|webpack|rollup|next|svelte|astro)\.config\.[cm]?[jt]s)$/.test(p));
+        let unreadMetadata = metadata.length > 12;
+        const orphanProject = { ...project };
+        if (!unreadMetadata) await Promise.all(metadata.map(async (p) => {
+          try {
+            const value = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'orphan-binding-read');
+            if (typeof value !== 'string') unreadMetadata = true;
+            else orphanProject[p] = value;
+          } catch { unreadMetadata = true; }
+        }));
         let buildWrites: string[] = [];
         try { buildWrites = this._buildWrites ? [...this._buildWrites()] : []; } catch { buildWrites = []; }
-        orphans = orphansToHandBack({ project, written: [...this._writtenPaths, ...buildWrites], starterExpected: this._starterExpected });
+        if (!unreadCode && !unreadMetadata) orphans = orphansToHandBack({ project: orphanProject, written: [...this._writtenPaths, ...buildWrites], starterExpected: this._starterExpected });
       } catch { orphans = []; }
       // 🔒 A WHOLE-APP JUDGEMENT NEVER GOES TO A SPECIALIST (Q-066's principle, same as `orphans`): the
       // `onlyWritten` return above is taken before this point, so a sub-agent is never handed the whole
@@ -4728,6 +4862,47 @@ export class ToolDispatcher {
   /** Every project stylesheet a module written this build imports (autopsy 1389f0d5). */
   private readonly _importedSheets = new Set<string>();
 
+  /** Screen → its classes no real stylesheet defines, as last measured (autoStyleFloor.ts). */
+  private readonly _floorMissing = new Map<string, string[]>();
+  private _floorSheet = '';
+  /**
+   * 🔴 SCREENS SHOWN AS RAW HTML FOR A WHOLE BUILD (autopsy ca99778e). Lays the platform's style floor for the
+   * classes still undefined: a plain sheet imported first from the Vite mount, rewritten as the set changes. It is
+   * invisible to the undefined-class question (`collectDefinedClasses` skips it), so every net still asks the
+   * builder for real rules. Vite React only; never throws.
+   */
+  private async layAutoStyleFloor(checked: readonly string[], missingBy: ReadonlyMap<string, string[]>): Promise<void> {
+    if (!autoStyleFloorEnabled() || this._starterExpected) return;
+    try {
+      for (const p of checked) {
+        const m = missingBy.get(p);
+        if (m && m.length) this._floorMissing.set(p, m); else this._floorMissing.delete(p);
+      }
+      const all = new Set<string>();
+      for (const m of this._floorMissing.values()) for (const c of m) all.add(c);
+      const sheet = autoStyleSheet(all);
+      if (sheet === this._floorSheet || (!sheet && !this._floorSheet)) return;
+      let mountPath = '';
+      let mount: string | null = null;
+      for (const p of ['src/main.tsx', 'src/main.jsx']) {
+        try {
+          const c = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'style-floor-mount');
+          if (typeof c === 'string') { mountPath = p; mount = c; break; }
+        } catch { /* try the next */ }
+      }
+      if (!mountPath || typeof mount !== 'string') return;
+      const body = sheet || '/* navbharatai:auto-style-floor — every class has a real rule now. */\n';
+      await this.inPlatformPass('style-floor', () => this.actuator.writeFile(this.workspaceId, AUTO_STYLE_PATH, body));
+      this._floorSheet = sheet;
+      try { this.onFileWrite?.(AUTO_STYLE_PATH, body); } catch { /* durable mirror is best-effort */ }
+      const nextMount = withAutoStyleImport(mount);
+      if (nextMount) {
+        await this.inPlatformPass('style-floor', () => this.actuator.writeFile(this.workspaceId, mountPath, nextMount));
+        try { this.onFileWrite?.(mountPath, nextMount); } catch { /* durable mirror is best-effort */ }
+      }
+    } catch { /* a floor is best-effort — the notes below are unchanged */ }
+  }
+
   private async undefinedClassNotes(files: Record<string, string>): Promise<string> {
     try {
       // What this write teaches about the project: the sheets it writes, and the sheets its modules import.
@@ -4795,7 +4970,7 @@ export class ToolDispatcher {
         }
       };
       recount();
-      if (missingBy.size === 0) return '';
+      if (missingBy.size === 0) { await this.layAutoStyleFloor(screens, missingBy); return ''; }
       // Something is still missing: before saying so, read every stylesheet in the project — a class a
       // parent component's sheet defines is not "undefined". Paid only when there is something to say.
       let listed: Set<string> | null = null;
@@ -4805,6 +4980,8 @@ export class ToolDispatcher {
         await readInto([...listed].filter((p) => isProjectStylesheet(p)).slice(0, 30));
         recount();
       } catch { /* the note then speaks from what was read, as before */ }
+      // The user sees readable screens meanwhile (autopsy ca99778e) — the note below still asks for real rules.
+      await this.layAutoStyleFloor(screens, missingBy);
       // A sheet the screen itself imports that the project does not have (autopsy 120eb52f). Claimed only
       // from a listing we really read — a file we merely failed to read is not "missing".
       const absentImport = (screen: string): string | undefined => {
@@ -5136,6 +5313,28 @@ export class ToolDispatcher {
             path = corrected;
           }
         }
+        // JSX IN A `.ts` FILE (owner item 3): esbuild/tsc reject JSX under `.ts`, so the build dies on a
+        // valid component. Write it as `.tsx` instead — only for a NEW file whose importers (if any) use
+        // extension-less specifiers, so nothing is clobbered and no import needs rewriting. Otherwise the
+        // write proceeds unchanged. Kill switch AGENTV3_TS_JSX_RENAME=off.
+        if (tsJsxRenameEnabled() && /\.ts$/.test(path) && tsFileHasJsx(reqStr(input, 'content'))) {
+          try {
+            const listed = await this.actuator.listFiles(this.workspaceId).catch(() => null);
+            const rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT);
+            const importers = getWorkspaceMemory(this.workspaceId).impactRadius(rel).direct;
+            const importerContents: string[] = [];
+            for (const imp of importers.slice(0, 20)) {
+              const c = await this.actuator.readFile(this.workspaceId, imp).catch(() => null);
+              if (typeof c === 'string') importerContents.push(c);
+              else { importerContents.push(`'./${rel.split('/').pop()}'`); break; } // unreadable importer → treat as unsafe
+            }
+            const to = tsxRelocationFor(rel, reqStr(input, 'content'), listed ? new Set(listed) : null, importerContents);
+            if (to) {
+              try { getWorkspaceMemory(this.workspaceId).recordAudit(`[TS-JSX] wrote ${rel} as ${to} (contains JSX)`); } catch { /* audit best-effort */ }
+              path = to;
+            }
+          } catch { /* best-effort — the write proceeds at the original path */ }
+        }
         // Middleware relocation (above) can change the path. guardedWrite applies the config pin,
         // preview-bridge strip, probe, package pin, import dedupe and design-kit keep — once.
         const wrote = await this.guardedWrite(path, reqStr(input, 'content'), { agent, source: 'write_file', allowOverwrite: true });
@@ -5355,7 +5554,10 @@ export class ToolDispatcher {
           ? `\nWritten (do not rewrite these): ${written.join(', ')}\nNot written: ${notWritten.map((r) => `${r.path} — ${r.failed}`).join('; ')}`
           : '';
         const summary = `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}${kitKeepNotes}${twinNotes}${batchSizeNote(dedupedByPath.size)}${notWrittenLine}`;
-        if (notWritten.length > 0) refuse(summary);
+        // 🔴 A REFUSAL LEADS WITH WHAT FAILED (r6–r10 autopsy, 2026-10-18). The rejection used to open with
+        // "Wrote 2 file(s)…" and put "Not written" last, after every steering note — where a capped tool result
+        // cut it off, so the model read a success and never rewrote the missing files.
+        if (notWritten.length > 0) refuse(batchRefusalText(written, notWritten, summary));
         return summary;
       }
 
@@ -6319,8 +6521,14 @@ export class ToolDispatcher {
         } catch { reach = null; /* never let the walk fail the scan — not applicable is today's behaviour */ }
         this._lastReachability = reach;
         const loadSplit = splitByReachability(authorship.ours, reach);
-        const authHigh = loadSplit.loaded.filter((i) => i.severity === 'high').length;
-        if (authHigh) extra.push({ severity: 'high', label: `${authHigh} fake/incomplete code issue(s) (placeholder / not-implemented / fake data)` });
+        const authHigh = loadSplit.loaded.filter((i) => i.severity === 'high');
+        if (authHigh.length) {
+          // A count alone cannot explain a failed build (retained reports 3abc6a34 / 5f4e2b99 /
+          // 18b007c3 / 171804c6). Keep the detector's exact kind and location, never source snippets:
+          // a line that contains a stub can also contain credentials or private application data.
+          const sample = authHigh.slice(0, 3).map((i) => `${i.kind} @ ${i.file}:${i.line}`).join(', ');
+          extra.push({ severity: 'high', label: `${authHigh.length} fake/incomplete code issue(s) (placeholder / not-implemented / fake data): ${sample}${authHigh.length > 3 ? `; ${authHigh.length - 3} more` : ''}` });
+        }
         const unloadedHigh = loadSplit.unloaded.filter((i) => i.severity === 'high');
         if (unloadedHigh.length) {
           extra.push({
@@ -6767,12 +6975,19 @@ export class ToolDispatcher {
       }
 
       case 'stop_build': {
-        const reason = (optStr(input, 'reason') || '').slice(0, 300);
+        const reason = (optStr(input, 'reason') || '').trim();
         if (!this.stopBuild) {
           // HONEST, NOT SILENT. Returning "stopped." with nothing wired would make the model tell the
           // user their build had ended while it carried on — the exact fake-success the second
           // absolute rule forbids.
           refuse('Could not stop this build — stopping is not available here. Tell the user plainly, and keep going or wrap up.');
+        }
+        // The model classifies intent; it cannot invent WHO requested cancellation. In build
+        // 1b38d662 it supplied its own server-restart plan and the record called that "user said".
+        // Check against the composition root's trusted message, never tool-supplied provenance.
+        const request = this.stopRequestSource().trim();
+        if (!request || !reason || reason !== request) {
+          refuse('Could not stop this build: reason must exactly quote the latest user message asking to end the whole build. A dev server restart, browser retry or tool repair is not a user cancellation. Keep working; use bash to restart the dev server.');
         }
         this.stopBuild(reason);
         return 'Stopping this build now. The files written so far are saved; the user can resume with one message.';
@@ -9796,7 +10011,7 @@ export class ToolDispatcher {
       }
 
       case 'generate_storage': {
-        // U-4 recipe — real BYO file uploads (S3-compatible presigned / Cloudinary signed). Pure generator.
+        // U-4 recipe — authenticated, byte-bounded BYO uploads with a durable quota. Pure generator.
         const sProvider = optStr(input, 'provider');
         if (!isStorageProvider(sProvider)) return 'generate_storage: pass provider = "supabase" (zero setup) | "s3" | "cloudinary".';
         const scfg = generateStorageIntegration(sProvider);
@@ -11193,6 +11408,13 @@ export class ToolDispatcher {
         if (!Number.isInteger(port) || port < 1 || port > 65535) {
           refuse('port must be an integer 1–65535');
         }
+        // 🔴 NOTHING CHANGED, NOTHING TO REFRESH (r6–r10 autopsy, 2026-10-18). The model re-called update_preview
+        // on the same port with no file written since the last successful publish, and each call re-ran the
+        // secrets write and the bounded port probe for a preview the user already had. The dev server hot-reloads;
+        // a call with no change has nothing to publish. AGENTV3_SKIP_UNCHANGED_PREVIEW=off restores the old path.
+        if (previewRefreshIsRedundant(this.lastPublishedPreview, port, this.changeCount())) {
+          return `The live preview on port ${port} is already published and no file has changed since — nothing to refresh. Do NOT call update_preview again until you change a file.`;
+        }
         if (!this.actuator.getPortUrl) {
           throw new Error('Live preview is not available in this sandbox.');
         }
@@ -11366,6 +11588,8 @@ export class ToolDispatcher {
         // these same files, carries the signature. Gated by the user's Settings → General toggle;
         // best-effort so it can never break/block a working preview.
         await this.injectAppSignatureIntoIndexHtml();
+        this.previewPublished = true;
+        this.lastPublishedPreview = { port, changes: this.changeCount() };
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
         // The url is handed to you (not withheld) because your OWN next steps need it — screenshot,
         // curl, a browser check. It must never appear in your reply to the person: they already see
@@ -11506,6 +11730,7 @@ export class ToolDispatcher {
         });
         if (!publishable.ok) throw new Error(publishable.reason);
         const url = await this.deploy(this.workspaceId, files);
+        this.previewPublished = true;
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
         // P-PIPE.78 — honest bundle size from the dist map we already downloaded (zero extra I/O,
         // pure, never throws). Tells the user how heavy their shipped app is.

@@ -138,7 +138,10 @@ describe('the LAST door the Pass could come through is shut', () => {
      * time, or a late webhook, pays us and receives nothing. Refusing NEW orders while still honouring
      * existing ones is the honest order to withdraw a paid product in.
      */
-    expect(fulfil).toContain("String(txData.productType || '') === 'professional_pass'");
+    // Q-1226 fulfills from the verified, transaction-fresh row, not the original stale read.
+    expect(fulfil).toContain("String(settled.productType || '') === 'professional_pass'");
+    expect(fulfil).toContain('passEntitlementForPayment(settled.amountPaid)');
+    expect(fulfil).toContain('professionalPassStore.grant(settled.userId, entitlement.days, plan)');
     expect(fulfil).toMatch(/KEPT ON PURPOSE/);
   });
 });

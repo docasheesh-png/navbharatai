@@ -1,3 +1,4 @@
+import { assertAiAvailable } from '../lib/aiMaintenance';
 import Anthropic from '@anthropic-ai/sdk';
 import { modelSupportsAdaptiveThinking } from './models';
 import { claudeBlockedInZone, NoClaudeInWeakBuildError } from './noClaudeZone';
@@ -211,6 +212,8 @@ export interface RunTurnParams {
    * d382b398: two concurrent calls each got "yes" before either abandon was counted).
    */
   canAbandonSlowStream?: (o?: { peek?: boolean }) => boolean;
+  /** The zero-byte grace THIS rung has earned (openAiStream `firstByteGraceFor`); absent ⇒ the configured grace. */
+  firstByteGraceMs?: number;
   /**
    * Set by the multi-provider ladder: is there another rung after the one running this call? A call
    * bounded by our own deadline then waits less for its first answer (autopsy 12c642ed — see
@@ -433,6 +436,7 @@ export class ClaudeClient implements TurnRunner {
 
   /** Run one assistant turn with optional native tools. */
   async runTurn(params: RunTurnParams): Promise<TurnResult> {
+    await assertAiAvailable();
     // UNBREAKABLE WEAK-MODULE GUARD (admin absolute rule, 2026-07-13). This is the ONE chokepoint where
     // every Claude call — builder, judge, plan, any heal gate, whether or not the call site remembered to
     // thread a flag — must pass. When a weak/free build is in progress a no-Claude zone is active, and
@@ -560,6 +564,7 @@ export class ClaudeClient implements TurnRunner {
     for (;;) {
       // A stopped build starts no request, and no RETRY either — a retry is a new call nobody will read.
       throwIfStopped(signal);
+      await assertAiAvailable();
       try {
         return signal
           ? await this.getClient().messages.create(createParams, { signal })

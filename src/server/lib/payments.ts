@@ -10,9 +10,10 @@ import { withLedgerV2 } from './ledgerV2';
 import { cashfreePaymentsAvailability } from './cashfreeCredentials';
 import { mintCodeForOrder } from './giftCodeStore';
 import { recordedReversedInr, settleRecordedReversalAtCredit } from './paymentReversal';
+import { unreconciledCreditPatch, reconcileGatewayPaidAmount, PaymentAmountMismatchError } from './paymentReconciliation';
 import { applyOrderReversal } from './paymentReversalStore';
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
-import { orderCreditedTokens, recordedPlatformFee, type WalletCreditTx } from './orderCredit';
+import { orderCreditedTokens, orderNetPaidInr, recordedPlatformFee, type WalletCreditTx } from './orderCredit';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import { parseEnvNumber } from './envNumber';
 import {
@@ -99,29 +100,15 @@ export function computeCreditedWallet(
   const w = current || {};
   const n = (v: any): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
   const amountPaid = n(txData.amountPaid);
-  const balanceAdded = n(txData.balanceAdded);
+  const balanceAdded = orderNetPaidInr(txData);
   // THE PLATFORM FEE (see platformFee.ts). The wallet is credited the NET of the payment; the fee is
   // NavBharatAI's revenue and never reaches the balance. `totalMoneySpent` below still records the
   // GROSS — that field answers "how much has this user paid us", which is the full amount.
   const platformFee = recordedPlatformFee(txData);
-  // SECURITY C4 stands: the tokens still derive from the VERIFIED paid amount, only now net of our
-  // own server-written fee — never from anything the client sent.
-  //
-  // 🔴 ONE CREDIT PATH (2026-09-12, when the Vishwakarma entry pass was deleted). There used to be
-  // two, chosen by `isVishwakarmaOrder`, and the only thing that genuinely differed between them was
-  // the pass: the Vishwakarma branch subtracted ₹100 before minting tokens. With the pass gone the
-  // two were arithmetically IDENTICAL, and that was verified rather than assumed, both ways:
-  //   • web recharge — `amountPaid` is GROSS and `balanceAdded` is the net the route computed, so
-  //     `netPaid = amountPaid − platformFee === balanceAdded`;
-  //   • Play / Apple top-up — carries no `platformFeeInr` (the store's cut is taken before payout and
-  //     recorded separately as `storeNetInr`), so `recordedPlatformFee` returns 0 and
-  //     `netPaid === amountPaid === balanceAdded`.
-  // Collapsing them removes the duplicated money arithmetic this file's own header warns about: a
-  // money rule with two homes is free to drift between them, which is exactly how the pass price came
-  // to read ₹50 on one screen and ₹100 on another.
-  //
-  // 🔒 `orderCreditedTokens` (orderCredit.ts) is the net-paid → tokens formula, and the refund clawback
-  // (paymentReversal.ts) reads the SAME function, so a refund removes exactly what this added (Q-614).
+  // Q-1226: the two wallet views share ONE net-paid basis, never an independent balanceAdded.
+  // Cashfree normalizes amountPaid from its verified response before calling this function; store
+  // purchases use their verified pack credit. Refunds read this same persisted basis (orderCredit.ts).
+  // Do not route this through a gift-clamping writer: a paid top-up preserves existing gift tracking.
   const tokensToCredit = orderCreditedTokens(txData);
 
   const update: Record<string, any> = {};
@@ -268,15 +255,72 @@ async function fulfilGiftOrder(db: any, txRef: any, orderId: string, txData: any
   return { success: true, data: { giftCode: code, giftFaceInr: faceNow, paidInr: Number(txData.amountPaid) || 0, buyerUid: txData.userId } };
 }
 
-export async function verifyPaymentInternal(orderId: string): Promise<{ success: boolean; data?: any; error?: string }> {
+/** Normalize the fresh order and the audit in the same transaction that settles it. */
+function settledGatewayOrder(
+  fresh: Record<string, any>,
+  original: Record<string, any>,
+  paidAmount: number,
+  orderId: string,
+  nowIso: string,
+) {
+  // The wallet target/product was selected before the provider read. A changed owner or product
+  // must be retried from a fresh lookup, never credited to the stale target.
+  if (fresh.userId !== original.userId || String(fresh.productType || '') !== String(original.productType || '')) {
+    throw new Error('This payment changed during verification. Please try again.');
+  }
+  const verified = reconcileGatewayPaidAmount(paidAmount, fresh.amountPaid);
+  const unreconciled = verified.unreadableRecorded
+    ? unreconciledCreditPatch(verified.amountPaid, fresh.amountPaid, nowIso)
+    : null;
+  if (unreconciled) {
+    console.error(`[CASHFREE] UNRECONCILED CREDIT for order ${orderId}: the paid-vs-recorded check could NOT run. Settling from the verified gateway amount and recorded fee; the original amount is retained on the order for review.`);
+  }
+  const paid = { ...fresh, amountPaid: verified.amountPaid } as WalletCreditTx & Record<string, any>;
+  const isWallet = !['gift_code', 'professional_pass'].includes(String(fresh.productType || ''));
+  // A gift's face value is a distinct server-written product entitlement, not the buyer's wallet.
+  const paymentPatch = { amountPaid: verified.amountPaid, balanceAdded: isWallet ? orderNetPaidInr(paid) : 0 };
+  return { settled: { ...paid, ...paymentPatch }, paymentPatch, unreconciled };
+}
+
+/**
+ * 🔑 `settled` SAYS WHETHER A FAILURE IS FINAL, AND IT EXISTS FOR THE WEBHOOK (Q-888).
+ *
+ * The signed-webhook route used to answer **400** to every `success: false`, so Cashfree re-sent an
+ * event we had already decided about — an amount mismatch, an order this server never created, an
+ * EXPIRED or TERMINATED order — and delivered it again, forever. The route could not tell a decision
+ * from an outage, because this function did not say.
+ *
+ * ⚠️ A FAILED or USER_DROPPED ATTEMPT IS NOT ONE OF THESE, and Q-888's row said it was. Those are
+ * PAYMENT statuses; `cashfreeOrderClosedUnpaid` recognises only the ORDER statuses EXPIRED and
+ * TERMINATED, so such an event lands on "Order not paid or invalid status" with the order still open.
+ * It is retryable HERE (the order may yet be paid) and acknowledged by the ROUTE (re-sending a failed
+ * attempt reports the same failure for ever) — `cashfreePaymentEventIsFailure` makes that call, because
+ * only the route can see which event woke it.
+ *
+ * `settled: true` means THIS ORDER WILL NEVER BE FULFILLED AND THAT IS THE ANSWER — the gateway says it
+ * closed unpaid, the amounts disagree, it is not an order this server created, or a pass payment was
+ * below the price and is recorded for a manual refund. Re-delivery would reach the same conclusion.
+ *
+ * 🔴 ABSENT MEANS RETRYABLE, AND THAT DEFAULT IS DELIBERATE. A missing database, unreadable gateway
+ * credentials or a PAID order whose `order_amount` cannot be read are conditions that may clear; a
+ * later delivery fulfils the order. Acknowledging an event we could not complete LOSES it, and losing
+ * a payment event costs a customer their credit, so the unflagged direction is the safe one. The
+ * reversal path above answers 502 for the same reason, in its own words.
+ * `tests/aSettledWebhookIsNotRejected.test.ts` fails if a failure return omits the field, so the next
+ * one cannot inherit either behaviour by accident.
+ */
+export async function verifyPaymentInternal(orderId: string): Promise<{ success: boolean; data?: any; error?: string; settled?: boolean }> {
   const db = getDb() as any;
-  if (!db) return { success: false, error: 'Database not initialized' };
+  // retryable (settled: false): no database is an outage, not a verdict on this order.
+  if (!db) return { success: false, error: 'Database not initialized', settled: false };
 
   try {
     const txRef = doc(db, 'payment_transactions', orderId);
     const txSnap = await getDoc(txRef);
     if (!txSnap.exists()) {
-      return { success: false, error: 'Transaction record not found' };
+      // settled: not an order this server created. The reversal path already answers 200/IGNORED for
+      // its own unknown-order case; re-delivering this one forever would never produce a different answer.
+      return { success: false, error: 'Transaction record not found', settled: true };
     }
 
     const txData = txSnap.data();
@@ -297,12 +341,15 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
     const availability = cashfreePaymentsAvailability();
     if (!availability.ok) {
       console.error(`[CASHFREE] Cannot verify order ${orderId}: ${availability.code}`);
-      return { success: false, error: availability.message };
+      // retryable: the platform's own gateway keys are missing or test keys are live. Once the admin
+      // fixes that, a re-delivery fulfils the order; acknowledging it now would strand the payer.
+      return { success: false, error: availability.message, settled: false };
     }
     const { clientId, clientSecret, mode: env } = availability;
 
     let isPaid = false;
     let cfOrderIdRef = 'cf_' + orderId;
+    let verifiedPaidAmount: number | null = null;
 
     {
       const cfUrl = env === 'production'
@@ -320,15 +367,9 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
 
       const orderDetails = response.data;
       if (orderDetails.order_status === 'PAID') {
-        // Reconcile what Cashfree actually charged against the amount we recorded at create
-        // time. Without this, a tampered/mismatched local record could credit more than was
-        // paid. If they diverge beyond a 1-paisa rounding tolerance, refuse to credit.
-        const paidAmount = Number(orderDetails.order_amount);
-        const expectedAmount = Number(txData.amountPaid);
-        if (Number.isFinite(paidAmount) && Number.isFinite(expectedAmount) && Math.abs(paidAmount - expectedAmount) > 0.01) {
-          console.error(`[CASHFREE] Amount mismatch for order ${orderId}: Cashfree charged ${paidAmount}, expected ${expectedAmount}. Refusing to credit.`);
-          return { success: false, error: 'Payment amount mismatch detected — please contact support.' };
-        }
+        // Reject an unreadable/non-positive gateway amount or a real mismatch. Numeric legacy
+        // strings are accepted but normalized to a number before either credit view can read them.
+        verifiedPaidAmount = reconcileGatewayPaidAmount(orderDetails.order_amount, txData.amountPaid).amountPaid;
         isPaid = true;
         cfOrderIdRef = orderDetails.cf_order_id || 'cf_' + orderId;
       } else if (cashfreeOrderClosedUnpaid(orderDetails.order_status)) {
@@ -341,7 +382,9 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
             tx.update(txRef, { paymentStatus: 'EXPIRED', expiredAt: new Date().toISOString(), providerOrderStatus: String(orderDetails.order_status) });
           }
         });
-        return { success: false, error: 'This payment was not completed.' };
+        // settled: Cashfree says this order can never be paid, and it has just been marked EXPIRED.
+        // This is Q-888's own case — PAYMENT_FAILED / USER_DROPPED, answered 400 and re-sent forever.
+        return { success: false, error: 'This payment was not completed.', settled: true };
       }
     }
 
@@ -357,30 +400,32 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
       const walletRef = doc(db, 'user_token_wallets', await creditWalletId(db, txData.userId));
       const credited = await runTransaction(db, async (tx: any) => {
         const snap = await tx.get(txRef);
-        if (!snap.exists() || snap.data().paymentStatus === 'SUCCESS') return null; // claimed by a concurrent call
+        if (!snap.exists()) return null;
+        if (snap.data().paymentStatus === 'SUCCESS') return { alreadyProcessed: true as const, balanceAdded: snap.data().balanceAdded };
         const walletSnap = await tx.get(walletRef);
         const walletData = walletSnap.exists() ? walletSnap.data() : newWalletFor(txData.userId);
         const nowIso = new Date().toISOString();
-        const fresh = snap.data() as WalletCreditTx & Record<string, unknown>;
+        const { settled: fresh, paymentPatch, unreconciled } = settledGatewayOrder(snap.data(), txData, verifiedPaidAmount!, orderId, nowIso);
         const { wallet: creditedWallet } = computeCreditedWallet(walletData, fresh, nowIso);
         // A refund or chargeback recorded on this order BEFORE it was credited (Q-614) is taken back in
         // this same transaction — otherwise the credit would add the full amount after the reversal
         // had already been handled, and nothing would ever take it back.
         const reversal = settleRecordedReversalAtCredit(creditedWallet, fresh, orderCreditedTokens(fresh), orderId, nowIso);
         const wallet = reversal ? reversal.wallet : creditedWallet;
-        tx.update(txRef, { paymentStatus: 'SUCCESS', paymentReference: cfOrderIdRef, ...(reversal ? reversal.txPatch : {}) });
+        tx.update(txRef, { paymentStatus: 'SUCCESS', paymentReference: cfOrderIdRef, ...paymentPatch, ...(reversal ? reversal.txPatch : {}), ...(unreconciled ?? {}) });
         tx.set(walletRef, withLedgerV2(tx, (c, i) => doc(db, c, i), String(walletRef.id ?? txData.userId), walletSnap.exists() ? walletSnap.data() : null, wallet, `cashfree:${orderId}`));
-        return wallet;
+        return { wallet, balanceAdded: fresh.balanceAdded, alreadyProcessed: false as const };
       });
-      if (!credited) {
-        return { success: true, data: { alreadyProcessed: true, balanceAdded: txData.balanceAdded } };
+      if (!credited) return { success: false, error: 'Transaction record not found', settled: true };
+      if (credited.alreadyProcessed) {
+        return { success: true, data: { alreadyProcessed: true, balanceAdded: credited.balanceAdded } };
       }
       return {
         success: true,
         data: {
-          balanceAdded: txData.balanceAdded,
-          currentBalance: credited.remaining_balance,
-          tokenBalance: credited.tokenBalance,
+          balanceAdded: credited.balanceAdded,
+          currentBalance: credited.wallet.remaining_balance,
+          tokenBalance: credited.wallet.tokenBalance,
         },
       };
     }
@@ -394,14 +439,17 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
       // a gift order claimed but not yet minted is resumed by the SUCCESS branch at the top.
       const claimedNow = await runTransaction(db, async (tx: any) => {
         const snap = await tx.get(txRef);
-        if (!snap.exists()) return false;
-        if (snap.data().paymentStatus === 'SUCCESS') return false; // already claimed by a concurrent call
-        tx.update(txRef, { paymentStatus: 'SUCCESS', paymentReference: cfOrderIdRef });
-        return true;
+        if (!snap.exists()) return null;
+        if (snap.data().paymentStatus === 'SUCCESS') return { settled: snap.data(), alreadyProcessed: true };
+        const { settled, paymentPatch, unreconciled } = settledGatewayOrder(snap.data(), txData, verifiedPaidAmount!, orderId, new Date().toISOString());
+        tx.update(txRef, { paymentStatus: 'SUCCESS', paymentReference: cfOrderIdRef, ...paymentPatch, ...(unreconciled ?? {}) });
+        return { settled, alreadyProcessed: false };
       });
-      if (!claimedNow) {
-        return { success: true, data: { alreadyProcessed: true, balanceAdded: txData.balanceAdded } };
+      if (!claimedNow) return { success: false, error: 'Transaction record not found', settled: true };
+      if (claimedNow.alreadyProcessed) {
+        return { success: true, data: { alreadyProcessed: true, balanceAdded: claimedNow.settled.balanceAdded } };
       }
+      const settled = claimedNow.settled;
 
       // ⚠️ KEPT ON PURPOSE AFTER THE PASS WAS WITHDRAWN (admin 2026-08-10, "pass system hata do").
       // New pass orders are refused at creation (`pass_withdrawn` in routes/payment.ts), so nothing can
@@ -415,32 +463,34 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
       // PENDING→SUCCESS claim above already guarantees this runs exactly once per paid order (webhook +
       // client poll can't double-grant). Days/plan come from the tx doc, falling back to the server
       // config (never trusts the client for the entitlement length).
-      if (String(txData.productType || '') === 'professional_pass') {
+      if (String(settled.productType || '') === 'professional_pass') {
         // SECURITY (money): the entitlement is DERIVED from the amount actually paid — which the block
         // above has already reconciled against what Cashfree really charged — times the SERVER's own
         // price. The client's `passDays` is deliberately ignored: it used to be trusted, so an order of
         // `{ amount: 1, passDays: 36500 }` bought a hundred-year pass for one rupee. Same defect class
         // as the C4 wallet fix (credited tokens derive from the verified paid amount), applied here.
-        const entitlement = passEntitlementForPayment(txData.amountPaid);
-        const plan = String(txData.passPlan || 'monthly');
+        const entitlement = passEntitlementForPayment(settled.amountPaid);
+        const plan = String(settled.passPlan || 'monthly');
         if (entitlement.days <= 0) {
           // Paid, but not enough for a single period. The order-creation guard should have refused this,
           // so reaching here means money moved with nothing to grant — record it loudly for a refund
           // rather than silently swallowing the payment.
           console.error(
-            `[PASS] Order ${orderId} paid ₹${txData.amountPaid} — below the ₹${professionalPassPriceInr()} pass price. ` +
+            `[PASS] Order ${orderId} paid ₹${settled.amountPaid} — below the ₹${professionalPassPriceInr()} pass price. ` +
             `NOTHING granted; this payment needs a manual refund.`,
           );
           try { await updateDoc(txRef, { fulfilmentError: 'amount_below_pass_price', fulfilledAt: new Date().toISOString() }); } catch { /* logged above */ }
-          return { success: false, error: 'That payment did not cover the Professional Pass price. Please contact support for a refund.' };
+          // settled: recorded as `fulfilmentError` above and awaiting a manual refund. Re-running this
+          // reaches the same conclusion, and the order already carries the record of it.
+          return { success: false, error: 'That payment did not cover the Professional Pass price. Please contact support for a refund.', settled: true };
         }
         if (entitlement.capped) {
           console.error(
-            `[PASS] Order ${orderId} paid ₹${txData.amountPaid} — covers more than the ${MAX_PASS_PERIODS}-period ` +
+            `[PASS] Order ${orderId} paid ₹${settled.amountPaid} — covers more than the ${MAX_PASS_PERIODS}-period ` +
             `automatic maximum. Granted ${entitlement.days} days; the remainder needs an admin decision.`,
           );
         }
-        const expiresAt = await professionalPassStore.grant(txData.userId, entitlement.days, plan);
+        const expiresAt = await professionalPassStore.grant(settled.userId, entitlement.days, plan);
         try {
           await updateDoc(txRef, {
             passDaysGranted: entitlement.days,
@@ -467,17 +517,24 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
        * order creation — never from a client field. Same rule as the Pass entitlement one block up,
        * and for the same reason: the amount paid and the thing delivered are two different numbers.
        */
-      if (String(txData.productType || '') === 'gift_code') {
-        return fulfilGiftOrder(db, txRef, orderId, txData);
+      if (String(settled.productType || '') === 'gift_code') {
+        return fulfilGiftOrder(db, txRef, orderId, settled);
       }
 
       // Unreachable: wallet products are claimed and credited in one transaction above; pass and gift
       // orders returned in their branches.
     }
 
-    return { success: false, error: 'Order not paid or invalid status' };
+    // retryable: the gateway still has this order OPEN (not paid, not closed-unpaid), so the payer may
+    // yet complete it and a later delivery of this same event can fulfil it. Acknowledging now would
+    // throw away the one notification that becomes useful the moment the money arrives.
+    return { success: false, error: 'Order not paid or invalid status', settled: false };
   } catch (err: any) {
     console.error('[CASHFREE] Internal verification failed:', err.message);
-    return { success: false, error: err.message };
+    // Q-888: a readable amount mismatch is a decision, including one found on the fresh row.
+    // Keep it distinct from unreadable gateway data, ownership changes, and transaction failures.
+    if (err instanceof PaymentAmountMismatchError) return { success: false, error: err.message, settled: true };
+    // retryable: an unexpected exception is an outage by definition, never a verdict on this order.
+    return { success: false, error: err.message, settled: false };
   }
 }

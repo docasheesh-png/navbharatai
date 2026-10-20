@@ -207,5 +207,25 @@ export function looksLikeRefusal(text: string | null | undefined): boolean {
   if (!head) return false;
   return /\b(?:i (?:cannot|can't|can not|won't|will not)|i'm not able to|i am not able to)\b[^.]{0,80}\b(?:create|build|make|generate|help|assist|produce|write|provide)\b/.test(head)
     || /\bmy refusal stands\b/.test(head)
-    || /\bi (?:cannot|can't|won't) help with\b/.test(head);
+    || /\bi (?:cannot|can't|won't) help with\b/.test(head)
+    || looksLikeHindiRefusal(head);
+}
+
+/**
+ * Report 77a2ecf5 declined in Hinglish six times; the English-only predicate let both the build
+ * nudge and the higher-rung empty retry override it. Read the same bounded opening, requiring a
+ * first-person inability to build/help, not a feature negation ("fake login nahi banaunga").
+ * Quoted labels and fenced code are not the model speaking; conditional examples are not refusals.
+ */
+function looksLikeHindiRefusal(head: string): boolean {
+  const prose = head.split(/```|~~~/, 1)[0].replace(/`[^`\n]*`/g, '').replace(/[*_]/g, '');
+  return prose.split(/[.!?।;\n]+/).some((part) => {
+    const statement = part.trim().slice(0, 220);
+    if (!/^(?:(?:main|mai|mein|hum)\b|(?:मैं|मै|हम)(?:\s|$))/u.test(statement)) return false;
+    if (/\b(?:agar|yadi|if)\b|(?:अगर|यदि)/u.test(statement)) return false;
+    return /\b(?:(?:nahi|nahin|nhi)\s+(?:bana|build|create|generate)\s+|(?:bana|build|create|generate)\s+(?:nahi|nahin|nhi)\s+)(?:sakta|sakti|sakte)\b/.test(statement)
+      || /\b(?:madad|help|assist)\s+(?:nahi|nahin|nhi)\s+kar\s+(?:sakta|sakti|sakte)\b/.test(statement)
+      || /(?:(?:नहीं|नही)\s+(?:बना|बिल्ड|जनरेट|निर्मित)\s+|(?:बना|बिल्ड|जनरेट|निर्मित)\s+(?:नहीं|नही)\s+)(?:सकता|सकती|सकते)(?:\s|$)/u.test(statement)
+      || /(?:मदद|सहायता)\s+(?:नहीं|नही)\s+कर\s+(?:सकता|सकती|सकते)(?:\s|$)/u.test(statement);
+  });
 }

@@ -48,13 +48,43 @@ describe('the merge', () => {
     expect(st.index()).toEqual(STARTER); // never an index pointing at files that are not there
   });
 
-  it('one lost batch among several is a PARTIAL save, named', async () => {
+  it('one batch lost ONCE is retried in smaller batches and saved (build d62bf22d)', async () => {
     const big = Array.from({ length: 900 }, (_, i) => [`f${i}.ts`, 'x'] as const);
     const st = store({ commit: (i) => (i === 1 ? 'lost' : 'ok') });
     const r = await mergeIntoStore(st.s, big, 1);
+    expect(r).toMatchObject({ status: 'saved', indexed: 900, unconfirmed: [] });
+  });
+
+  it('a batch that is lost EVERY time is a PARTIAL save, named — after a bounded number of rounds', async () => {
+    const big = Array.from({ length: 900 }, (_, i) => [`f${i}.ts`, 'x'] as const);
+    let commits = 0;
+    const docs = new Map<string, string>();
+    let index: string[] = [];
+    const s: MergeStore = {
+      commit: async (batch) => {
+        commits++;
+        if (batch.some(([p]) => p === 'f450.ts')) throw new Error('4 DEADLINE_EXCEEDED');
+        for (const [p, c] of batch) docs.set(p, c);
+      },
+      read: async (paths) => new Map(paths.map((p) => [p, docs.get(p)])),
+      readIndex: async () => index,
+      writeIndex: async (paths) => { index = paths; },
+    };
+    const r = await mergeIntoStore(s, big, 2);
     expect(r.status).toBe('partial');
+    expect(r.unconfirmed).toContain('f450.ts');
     expect(r.indexed + r.unconfirmed.length).toBe(900);
-    expect(r.unconfirmed.length).toBeGreaterThan(0);
+    expect(r.unconfirmed.length).toBeLessThan(450); // the retry rounds saved most of the lost batch
+    expect(commits).toBeLessThan(20); // bounded — never a retry loop
+    expect(index).not.toContain('f450.ts');
+  });
+
+  it('the index update runs through the store\'s queue when it has one', async () => {
+    const calls: string[] = [];
+    const st = store({ commit: 'ok' });
+    const s: MergeStore = { ...st.s, serialize: async (fn) => { calls.push('queued'); return fn(); } };
+    expect((await mergeIntoStore(s, imported)).status).toBe('saved');
+    expect(calls).toEqual(['queued']);
   });
 
   it('an index that cannot be written is a failure, never a claimed save', async () => {
@@ -82,7 +112,10 @@ describe('the import reports what the store did', () => {
     const { readFileSync } = await import('node:fs');
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
     expect(route).not.toMatch(/try \{ await mergeWorkspaceFiles\(workspaceId, importedFiles\); \} catch/);
-    expect(route).toMatch(/const durable = await mergeWorkspaceFiles\(workspaceId, importedFiles\)/);
-    expect(route).toContain("code: 'IMPORT_NOT_DURABLE'");
+    // Since build d62bf22d the save runs beside the turn and is settled before the report (importDurableSave.ts).
+    expect(route).toContain('const saveImport = () => mergeWorkspaceFiles(workspaceId, importedFiles);');
+    expect(route).not.toMatch(/await mergeWorkspaceFiles\(workspaceId, importedFiles\)/);
+    const mod = readFileSync('src/server/AgentV3/importDurableSave.ts', 'utf8');
+    expect(mod).toContain("code: 'IMPORT_NOT_DURABLE'");
   });
 });

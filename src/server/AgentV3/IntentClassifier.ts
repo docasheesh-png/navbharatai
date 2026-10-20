@@ -31,6 +31,11 @@
 // module shared with the client, so the platform's own generated prompt has a single definition.
 import { isPlatformContinuePrompt } from '../../lib/continueBuildPrompts';
 import { isPlatformFixRequest, looksLikeMachineError } from '../../lib/platformFixRequest';
+import { platformSuggestedReply } from './platformSuggestedReplies';
+// `wantsAttemptBack` is consulted rather than re-listed: GreenGuard owns that phrase list ON PURPOSE
+// (exact-phrase, substring-matched, with the Hinglish forms real users type), and a second copy here is
+// the drift `platformSuggestedReplies.ts` exists to end. GreenGuard.ts imports nothing, so no cycle.
+import { wantsAttemptBack } from './GreenGuard';
 
 export type BuildIntent = 'chat' | 'new_build' | 'edit_existing';
 
@@ -943,6 +948,23 @@ export function hasNegation(lower: string): boolean {
 
 export function classifyIntentWithConfidence(message: string): IntentWithConfidence {
   const result = classifyIntentWithConfidenceCore(message);
+  /**
+   * 🔴 THE DEVANAGARI CAP DOES NOT APPLY TO OUR OWN WORDS (Q-1037, measured 2026-10-17).
+   *
+   * The cap exists because *"a classifier that cannot read a script must never CLAIM confidence about
+   * text in it"* — which is about a GUESS. A registered suggested reply is not a guess: it is an exact
+   * match against a phrase this platform itself wrote and then told the user to type, and `fakeFeatureScan`
+   * writes that phrase in twelve languages, Hindi among them (`असली बनाओ`).
+   *
+   * ⚠️ Measured, the cap turned that one back into a coin toss. LOW is what sends a turn to the LLM
+   * intention reader (`routes/agentv3.ts`: `intent = smart.intent`), so a Hindi user who typed exactly
+   * what we asked them to had their request re-decided by a model, while an English user's was certain.
+   * Capping our own sentence protects nothing and costs the one user the cap was written to protect.
+   *
+   * Nothing else changes: a message that merely CONTAINS Devanagari, or a Hindi build order, is still
+   * capped exactly as before.
+   */
+  if (result.signal === 'platform-suggested-reply') return result;
   if (result.confidence === 'high' && containsDevanagari(message)) {
     return { ...result, confidence: 'low' };
   }
@@ -954,6 +976,28 @@ function classifyIntentWithConfidenceCore(message: string): IntentWithConfidence
   if (!text) return { intent: 'new_build', confidence: 'low' };
 
   const lower = text.toLowerCase();
+
+  /**
+   * Step 0a — THE PLATFORM'S OWN SUGGESTED REPLY, read rather than guessed (Q-1037).
+   *
+   * These are the phrases NavBharatAI tells the user to type — `Reply "add it"`, `reply "make it
+   * real"`, `reply "add it to this app"`, `reply "keep my changes"`. We wrote them, so there is
+   * nothing to infer: see `platformSuggestedReplies.ts` for what each was measured to do before this
+   * check existed (the worst was "add it", which ended as a chat answer instead of adding the
+   * feature, and "keep my changes", whose restore was reachable only if the LLM reader happened to
+   * agree).
+   *
+   * FIRST in the ladder, ahead of the answer-only and mood rules, because none of them can be about
+   * one of these: our phrases carry no question, no negation and no deliverable to name. HIGH is safe
+   * for the same reason — every registered phrase is an EDIT of the app that is here, and there is no
+   * reading of "add it" that creates a fresh app, so the hard lock decides nothing a reader could
+   * decide better.
+   */
+  const suggested = platformSuggestedReply(text);
+  if (suggested) return { intent: suggested.intent, confidence: 'high', signal: 'platform-suggested-reply' };
+  // GreenGuard's restore phrase, matched by its own module so the two lists cannot drift. Substring by
+  // design there — "keep my changes and add a login" is one turn that does both — and an edit either way.
+  if (wantsAttemptBack(text)) return { intent: 'edit_existing', confidence: 'high', signal: 'platform-suggested-reply' };
 
   // Step 0 — the user explicitly said DON'T build / just answer, or asked a pure state question.
   // Absolute priority: an instruction/question must never be out-voted by a keyword inside it.

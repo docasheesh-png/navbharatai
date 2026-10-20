@@ -169,7 +169,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         properties: {
           reason: {
             type: 'string',
-            description: "The user's own words, quoted, that asked for the stop. For the build record.",
+            description: "The exact complete latest user message asking for the stop, without quotation marks or paraphrase. Checked against the real user message. Never supply your own plan (including restarting the dev server).",
           },
         },
         required: ['reason'],
@@ -938,9 +938,11 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         'access rules are created inside the user\'s own database project and the app uploads with the public ' +
         'anon key, so there are NO keys for the user to paste. Use it whenever the app has (or will have) a ' +
         'NavBharatAI-provisioned database. The other two are Bring-Your-Own keys, for a user who already has ' +
-        'that storage: "s3" (AWS S3 / Cloudflare R2 / MinIO via a presigned URL) or "cloudinary" ' +
-        '(image-focused, signed upload) — the user pastes their keys into .env; NavBharatAI never stores them. ' +
-        'All three upload DIRECTLY to storage (never proxied through the app server). Never overwrites an ' +
+        'that storage: "s3" (AWS S3 / Cloudflare R2 / MinIO) or "cloudinary". These two recipes use an ' +
+        'authenticated server route: configure the app Supabase login, apply migrations/003_upload_quota.sql, ' +
+        'then call uploadFile(file, session.access_token). Actual bytes/type, size and durable daily quotas ' +
+        'are checked before storing. Credentials stay server-side; no reusable upload signature is exposed. ' +
+        'Only the Supabase recipe uploads directly to storage. Never overwrites an ' +
         'existing .env.example.',
       input_schema: {
         type: 'object',

@@ -67,7 +67,8 @@ describe("the import names its own long stretches (autopsy faa98da9)", () => {
   const importPhases = [
     "enterPhase?.('importing your project\\'s files')",
     "enterPhase?.('adding your project\\'s images and fonts')",
-    "enterPhase?.('saving your project so it survives a restart')",
+    // The durable save is no longer a stretch of the turn: since build d62bf22d it runs beside it
+    // (importDurableSave.ts), so it is not named as a phase the user is waiting on.
   ];
 
   for (const call of importPhases) {

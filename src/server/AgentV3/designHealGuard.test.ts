@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { sectionUntil } from '../../../tests/helpers/sourceSlice';
+import { codeOnly, sectionUntil } from '../../../tests/helpers/sourceSlice';
 import { designHealDecision, designHealGuardNote } from './designHealGuard';
+import { applySnapshotRestore, snapshotRestoreComplete } from './snapshotRestore';
 
 // The design repair writes to an app that has just been built but not yet verified. If it leaves a page
 // unparseable, nothing today puts that page back — the break simply surfaces later as a preview that
@@ -61,6 +62,22 @@ describe('what the guard puts back', () => {
     expect(d.keep).toEqual(['b.tsx']);
   });
 
+  it('the shared restore lands and persists only the selected pre-heal bytes', async () => {
+    const sandbox = { ...B, 'a.tsx': 'broken', 'b.tsx': 'restyled' };
+    const decision = designHealDecision({ before: B, after: sandbox, brokenAfter: ['a.tsx'] });
+    const plan = { write: Object.fromEntries(decision.revert.map((path) => [path, B[path as keyof typeof B]])), remove: [] };
+    const persisted: Record<string, string>[] = [];
+    const outcome = await applySnapshotRestore(plan, {
+      stopped: () => false,
+      write: async (path, content) => { sandbox[path as keyof typeof sandbox] = content; },
+      remove: async () => { throw new Error('a design undo must not delete a file'); },
+      persist: async (files) => { persisted.push(files); return true; },
+    });
+    expect(snapshotRestoreComplete(plan, outcome)).toBe(true);
+    expect(sandbox).toEqual({ ...B, 'b.tsx': 'restyled' });
+    expect(persisted).toEqual([{ 'a.tsx': B['a.tsx'] }]);
+  });
+
   it('ignores a file the heal newly CREATED — there is nothing to restore it to', () => {
     const d = designHealDecision({ before: B, after: { ...B, 'new.tsx': 'x' }, brokenAfter: ['new.tsx'] });
     expect(d.revert).toEqual([]);
@@ -98,15 +115,21 @@ describe('the guard is actually wired to the heal', () => {
   it('snapshots BEFORE the repair runs — afterwards is too late', () => {
     const block = sectionUntil(route, 'const beforeHeal =', 'if (healed.ok)');
     expect(block).toContain('findSyntaxErrors(beforeHeal)');
-    expect(block.indexOf('const beforeHeal')).toBeLessThan(block.indexOf('designRunner.run'));
+    expect(block.indexOf('const beforeHeal')).toBeLessThan(block.indexOf("finishingGuard.repairOrThrow('design-consistency-heal'"));
   });
 
   it('really writes the original back, to the sandbox AND the durable store', () => {
     // Reverting only in memory would leave the broken file on disk and in the saved project — the
     // "looks fixed, still broken" state.
-    const block = sectionUntil(route, 'for (const path of verdict.revert)', 'if (healed.ok)');
-    expect(block).toContain('actuator.writeFile(workspaceId, path, original)');
-    expect(block).toContain('mergeWorkspaceFiles(');
+    const block = codeOnly(sectionUntil(route, 'const verdict = designHealDecision', 'if (healed.ok)'));
+    expect(block).toContain('write: Object.fromEntries(verdict.revert.map((path) => [path, beforeHeal[path]]))');
+    expect(block).toContain("applyGreenSnapshotRestore(revertPlan, undefined, undefined, 'design-heal-revert')");
+    expect(block).toContain('snapshotRestoreComplete(revertPlan, outcome)');
+    expect(block).toContain("code: complete ? 'DESIGN_HEAL_REVERTED' : 'DESIGN_HEAL_RESTORE_INCOMPLETE'");
+    expect(block).not.toContain('writtenFiles.set(path, original)');
+    const door = codeOnly(sectionUntil(route, 'const applyGreenSnapshotRestore =', 'const revertToGreenSnapshot ='));
+    expect(door).toContain('write: (path, content) => actuator.writeFile(workspaceId, path, content)');
+    expect(door).toContain("persist: async (files) => (await mergeWorkspaceFiles(workspaceId, files)).status === 'saved'");
   });
 
   it('identifies itself to Green Freeze', () => {

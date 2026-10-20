@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { codeOnly, sectionUntil } from '../../../tests/helpers/sourceSlice';
+import { applySnapshotRestore, snapshotRestoreComplete } from './snapshotRestore';
 import {
   greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched,
   runInPass, currentPass, writeRefused, assertWriteAllowed, GreenFreezeError,
@@ -79,6 +81,31 @@ describe('the allowlist — the user\'s own requests still write to a green app'
     await runInPass('green-guard-restore', async () => {
       expect(writeRefused(WS, 'src/App.tsx')).toBe(false);
     });
+  });
+
+  it('the shared restore inherits its named pass through awaits and records only permitted writes', async () => {
+    const plan = { write: { 'src/App.tsx': 'green original' }, remove: [] };
+    const sandbox = new Map([['src/App.tsx', 'broken edit']]);
+    let durableWrites = 0;
+    const restore = (pass: string) => runInPass(pass, () => applySnapshotRestore(plan, {
+      stopped: () => false,
+      write: async (path, content) => {
+        await Promise.resolve();
+        assertWriteAllowed(WS, path);
+        sandbox.set(path, content);
+      },
+      remove: async () => ({ exitCode: 0 }),
+      persist: async () => { durableWrites++; return true; },
+    }));
+    const refused = await restore('unlisted-restore');
+    expect(snapshotRestoreComplete(plan, refused)).toBe(false);
+    expect(sandbox.get('src/App.tsx')).toBe('broken edit');
+    expect(durableWrites).toBe(0);
+    const allowed = await restore('green-guard-restore');
+    expect(snapshotRestoreComplete(plan, allowed)).toBe(true);
+    expect(sandbox.get('src/App.tsx')).toBe('green original');
+    expect(durableWrites).toBe(1);
+    expect(currentPass()).toBeNull();
   });
 
   it('a pass NOT on the allowlist is still refused — this is the whole point', async () => {
@@ -246,7 +273,10 @@ describe('it is wired into the build', () => {
   it('the three allowlisted passes are wrapped so their writes are permitted', () => {
     expect(routes).toContain("runInPass('runtime-error-autofix'");
     expect(routes).toContain("runInPass('feature-presence-heal'");
-    expect(routes).toContain("runInPass('green-guard-restore'");
+    const restore = codeOnly(sectionUntil(routes, 'const applyGreenSnapshotRestore =', 'const revertToGreenSnapshot ='));
+    expect(restore).toContain("pass = 'green-guard-restore'");
+    expect(restore).toContain('runInPass(pass, () => applySnapshotRestore(plan,');
+    expect(restore).toContain('write: (path, content) => actuator.writeFile(workspaceId, path, content)');
   });
 
   it('refused writes are recorded honestly and offered, not silently dropped', () => {
@@ -268,16 +298,22 @@ describe('the latch cannot leak into the next build', () => {
   it('the latch is cleared at the VERY START of a build, before any write', () => {
     // The robust fix: build B clears any stale latch a bypassed teardown of build A may have left,
     // BEFORE build B writes a line — so no teardown path can freeze the next build's generation.
-    // Anchored on the DERIVATION rather than on whatever comment happens to follow the clear. The old
-    // anchor pinned the next line's text, so an unrelated insertion below it broke the test without
-    // anything about the guarantee changing. This states the guarantee directly: the workspace id is
-    // derived, and clearing the latch is the very next thing that happens to it.
-    const derive = routes.indexOf('const workspaceId = deriveWorkspaceId(userId, req.body?.sessionId);');
-    const clearAtStart = routes.indexOf('clearGreenLatch(workspaceId); } catch { /* best-effort */ }', derive);
-    const latch = routes.indexOf('latchGreen(workspaceId,');
+    // The accepted build reuses its preflight workspace identity. Follow that identity through both
+    // aliases, then require the clear before the first sandbox operation and before either green latch.
+    // An exact spelling of the old inline derivation missed this unchanged guarantee after extraction.
+    const derive = routes.indexOf('const leaseWorkspaceId = deriveWorkspaceId(');
+    const intent = routes.indexOf('const intentWorkspaceId = leaseWorkspaceId;', derive);
+    const build = routes.indexOf('const workspaceId = intentWorkspaceId;', intent);
+    const clearAtStart = routes.indexOf('clearGreenLatch(workspaceId); } catch { /* best-effort */ }', build);
+    const firstSandboxOperation = routes.slice(build).search(/actuator\.(?:ensureWorkspace|writeFile|writeBinaryFile)\(/);
+    const latch = routes.indexOf('latchGreen(workspaceId,', build);
     expect(derive).toBeGreaterThan(-1);
-    expect(clearAtStart).toBeGreaterThan(-1);
-    expect(clearAtStart).toBeLessThan(latch); // cleared before it could ever be set this build
+    expect(intent).toBeGreaterThan(derive);
+    expect(build).toBeGreaterThan(intent);
+    expect(clearAtStart).toBeGreaterThan(build);
+    expect(firstSandboxOperation).toBeGreaterThan(-1);
+    expect(clearAtStart).toBeLessThan(build + firstSandboxOperation);
+    expect(clearAtStart).toBeLessThan(latch);
   });
 
   it('re-latching is a no-op — a mutated tree can never overwrite the real green snapshot', () => {

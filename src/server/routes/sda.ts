@@ -1,3 +1,5 @@
+import { placePlatformContext, platformContextInSystemEnabled } from '../lib/platformContext';
+import { cleanTurns } from '../../lib/platformTags';
 import crypto from 'crypto';
 import { BoundedCache } from '../lib/boundedCache';
 import { sdaStoreKey } from '../lib/clinical/sdaStoreKey';
@@ -407,7 +409,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // doctor focused; the model is told to use and cite these.
       const kbQuery = `${message} ${clinicalEntry.patientData?.chiefComplaint || ''} ${clinicalEntry.redFlags.join(' ')}`;
       const kbBlock = formatKnowledgeForPrompt(retrieveClinicalKnowledge(kbQuery));
-      const SDA_SYSTEM_FINAL = [SDA_SYSTEM, sdaAppCtx, kbBlock, LINK_POLICY, INDIA_TERRITORIAL_INTEGRITY, CREATOR_IDENTITY].filter(Boolean).join('\n\n');
+      const SDA_SYSTEM_BASE = [SDA_SYSTEM, sdaAppCtx, kbBlock, LINK_POLICY, INDIA_TERRITORIAL_INTEGRITY, CREATOR_IDENTITY].filter(Boolean).join('\n\n');
 
       // Extract structured data from response (simple heuristic)
       const extractPatientUpdate = (text: string, msg: string): Record<string, any> => {
@@ -435,24 +437,43 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       const VERBATIM_TAIL = 20;
       const recentMsgs = storedMsgs.slice(-VERBATIM_TAIL);
       const olderMsgs = storedMsgs.length > VERBATIM_TAIL ? storedMsgs.slice(0, -VERBATIM_TAIL) : [];
-      const olderContextEntry: Array<{ role: 'user' | 'assistant'; content: string }> = olderMsgs.length > 0
+      // 🔴 THE CASE SNAPSHOT AND THE EARLIER-SESSION DIGEST ARE THE PLATFORM'S, NOT THE DOCTOR'S (admin
+      // 2026-10-17, the "[Follow-up …]" leak class). They used to travel as invented turns — a "user"
+      // message "[CASE_CONTEXT]…[/CASE_CONTEXT] Continue the clinical assessment…" and a canned assistant
+      // "Understood." — so the model was told, in the doctor's own seat, things the doctor never typed.
+      // They now go to the system prompt through the one door (lib/platformContext.ts); the history the
+      // model sees is the real conversation and nothing else. Kill switch: PLATFORM_CONTEXT_IN_SYSTEM=off.
+      const olderDigest = olderMsgs.length > 0
+        ? olderMsgs.map(m => `${m.role === 'user' ? 'Dr' : 'SDA'}: ${String(m.content).slice(0, 120)}`).join('\n')
+        : '';
+      const contextInSystem = platformContextInSystemEnabled();
+      const SDA_SYSTEM_FINAL = contextInSystem
+        ? placePlatformContext({
+            system: SDA_SYSTEM_BASE,
+            user: '',
+            blocks: [
+              clinicalSnapshot ? { label: 'Recorded case data so far (continue the assessment; never re-ask anything recorded here)', body: clinicalSnapshot } : null,
+              olderDigest ? { label: `Earlier in this session (${olderMsgs.length} exchanges before the recent history)`, body: olderDigest } : null,
+            ],
+          }).system
+        : SDA_SYSTEM_BASE;
+      const olderContextEntry: Array<{ role: 'user' | 'assistant'; content: string }> = !contextInSystem && olderMsgs.length > 0
         ? [
             {
               role: 'user' as const,
-              content: `[EARLIER SESSION — ${olderMsgs.length} exchanges before the recent history below]\n` +
-                olderMsgs.map(m => `${m.role === 'user' ? 'Dr' : 'SDA'}: ${String(m.content).slice(0, 120)}`).join('\n'),
+              content: `[EARLIER SESSION — ${olderMsgs.length} exchanges before the recent history below]\n` + olderDigest,
             },
             { role: 'assistant' as const, content: 'Acknowledged. I have the complete session history.' },
           ]
         : [];
 
       const historyForAI: Array<{ role: 'user' | 'assistant'; content: string }> = [
-        ...(clinicalSnapshot ? [
+        ...(!contextInSystem && clinicalSnapshot ? [
           { role: 'user' as const, content: `[CASE_CONTEXT]\n${clinicalSnapshot}\n[/CASE_CONTEXT]\nContinue the clinical assessment. Do NOT re-ask anything already recorded in the context above.` },
           { role: 'assistant' as const, content: 'Understood. Full clinical context loaded. Continuing without repeating any question already answered.' },
         ] : []),
         ...olderContextEntry,
-        ...recentMsgs.map(m => ({ role: m.role, content: m.content })),
+        ...cleanTurns(recentMsgs.map(m => ({ role: m.role, content: m.content }))),
       ];
 
       let reply = '';

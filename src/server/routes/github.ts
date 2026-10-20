@@ -3,6 +3,7 @@ import axios from 'axios';
 import { isLiveEnvFilePath } from '../../lib/envFile';
 import type { Express, Request, Response } from 'express';
 import { sendSafeError } from '../lib/httpError';
+import { sendGithubApiError } from '../lib/githubApiError';
 
 /**
  * SAFETY (never break — admin 2026-07-20): update a branch ref to a new commit WITHOUT force.
@@ -92,40 +93,17 @@ export function registerGithubRoutes(app: Express): void {
 
       res.json({ files, tree });
     } catch (err: any) {
-      console.error('Fetch Error:', err.response?.data || err.message);
-      res.status(err.response?.status || 500).json({ error: err.response?.data?.message || err.message });
+      sendGithubApiError(res, err, 'fetch', 'github fetch');
     }
   });
 
-  app.post('/api/github/file', async (req: Request, res: Response) => {
-    const token = req.headers.authorization?.split(' ')[1];
-    const { owner, repo, path } = req.body;
-    if (!token) return res.status(401).json({ error: 'Unauthorized' });
-
-    try {
-      const headers = { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' };
-      const response = await axios.get(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, { headers });
-
-      const content = Buffer.from(response.data.content, 'base64').toString('utf-8');
-      res.json({ content, sha: response.data.sha });
-    } catch (err: any) {
-      res.status(err.response?.status || 500).json({ error: err.response?.data?.message || err.message });
-    }
-  });
-
-  app.post('/api/github/branches', async (req: Request, res: Response) => {
-    const token = req.headers.authorization?.split(' ')[1];
-    const { owner, repo } = req.body;
-    if (!token) return res.status(401).json({ error: 'Unauthorized' });
-
-    try {
-      const headers = { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' };
-      const response = await axios.get(`https://api.github.com/repos/${owner}/${repo}/branches`, { headers });
-      res.json({ branches: response.data.map((b: any) => b.name) });
-    } catch (err: any) {
-      res.status(err.response?.status || 500).json({ error: err.response?.data?.message || err.message });
-    }
-  });
+  // `POST /api/github/file` and `POST /api/github/branches` — DELETED 2026-10-17 (Q-1133's touch of this
+  // file; CLAUDE.md's undecided-route rule). Both sat in `uncalledApiRoutesBaseline.json` as `undecided`.
+  // Decided by evidence, not by sweep: no client file references either path today, and
+  // `git log -S` over `src/` excluding `src/server` finds NO commit that ever added one — so unlike a
+  // route a bundled phone app might still carry, these never had a caller to bundle. The repo already
+  // took this exact decision one route below, for the same reason. If a screen ever needs them, a
+  // thirteen-line axios read is cheaper to re-add than an unowned route is to keep.
 
   // `POST /api/github/push` — DELETED 2026-10-11 (Q-600 batch five). The older duplicate of push-enhanced
   // below. Its one client caller, App.tsx `pushToRepo`, was reachable only through GitPanel's `onPush`, which
@@ -300,7 +278,7 @@ export function registerGithubRoutes(app: Express): void {
     } catch (err: any) {
       console.error('[PUSH_ENHANCED] push failed:', err.response?.data || err.message);
       // Do NOT echo the raw GitHub response body to the client; route through the safe error helper.
-      sendSafeError(res, err.response?.status || 500, err.response?.data?.message || 'Push to GitHub failed. Please try again.', err, 'github push-enhanced');
+      sendGithubApiError(res, err, 'push', 'github push-enhanced');
     }
   });
 }

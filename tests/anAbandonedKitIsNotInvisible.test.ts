@@ -41,6 +41,8 @@ const KIT = generateGameShell().files;
 const GAME_CANVAS = 'src/game/GameCanvas.tsx';
 
 const project = (over: Record<string, string> = {}): Record<string, string> => ({
+  // Destructive orphan proof also needs to know this import is an external package, not a local alias.
+  'package.json': JSON.stringify({ dependencies: { react: '^19.0.0' } }),
   'src/main.tsx': "import App from './App';\n",
   'src/App.tsx': "import { World } from './World';\nexport default function App() { return <World />; }\n",
   'src/World.tsx': 'export function World() { return <canvas />; }\n',

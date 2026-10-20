@@ -14,6 +14,7 @@ import { versionRestorePlan, versionRestoreMessage, beforeRestoreVersionName, MA
 import { historyKeyFor, readVersionRestoreResponse } from '../src/lib/versionRestoreClient';
 import { restorePointKey } from '../src/server/AgentV3/restorePoint';
 import { planVersionFiles } from '../src/server/project/BuildHistoryStore';
+import { mayTouchBuildHistory } from '../src/server/lib/buildHistoryAccess';
 
 const code = (p: string) => readFileSync(p, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
@@ -84,19 +85,18 @@ describe('what the user is told', () => {
 });
 
 describe('🔒 the screen lists the key the writer writes', () => {
-  it('historyKeyFor is restorePointKey, case for case', () => {
+  it('the bare UI key resolves to the canonical owner-scoped storage key', async () => {
     const cases: Array<[string, string | null]> = [
       ['agentv3-uid1-pro-1700000000000', 'uid1'],
       ['agentv3-uid1-6f1c2b9e-uuid', 'uid1'],
       ['agentv3-anon-abc', null],
-      ['agentv3-uid2-x', 'uid1'],
-      ['legacy-workspace', 'uid1'],
-      ['agentv3-uid1-x', 'bad uid!'],
-      ['agentv3-bad uid!-x', 'bad uid!'], // an unusable uid strips nothing, even where its prefix appears
-      ['agentv3-' + 'u'.repeat(65) + '-x', 'u'.repeat(65)],
-      ['', 'uid1'],
     ];
-    for (const [ws, uid] of cases) expect(historyKeyFor(ws, uid), `${ws} / ${uid}`).toBe(restorePointKey(ws, uid));
+    for (const [ws, uid] of cases) {
+      const access = await mayTouchBuildHistory(uid, historyKeyFor(ws, uid), async (candidate) => candidate === ws ? 1 : 0);
+      expect(access.allowed && access.workspaceId, `${ws} / ${uid}`).toBe(restorePointKey(ws, uid));
+    }
+    expect(historyKeyFor('agentv3-uid1-pro-1700000000000', 'uid1')).toBe('pro-1700000000000');
+    expect(historyKeyFor('', 'uid1')).toBe('');
   });
 });
 

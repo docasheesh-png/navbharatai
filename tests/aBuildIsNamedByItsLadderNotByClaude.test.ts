@@ -245,6 +245,12 @@ describe('§4 · a Claude rung is named by the id it pins — one function for t
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('§5 · the pure readers', () => {
+  it('a Stop never claims that the engine was not asked to work', () => {
+    const route = codeOnlyText(read('src/server/routes/agentv3.ts'));
+    expect(route).not.toContain('so no engine was ever asked to build anything');
+    expect(route).toContain('A stopped build does not establish a capability limit');
+  });
+
   it('buildRecordModel: delivered → delivered family → "no call was made" → planned → unknown', () => {
     expect(buildRecordModel({ delivered: 'kimi-k2.7-code', deliveredFamily: 'KIMI', planned: 'glm-4.7-flashx', anyCallMade: true })).toBe('kimi-k2.7-code');
     expect(buildRecordModel({ delivered: '  ', deliveredFamily: 'KIMI', planned: 'glm-4.7-flashx', anyCallMade: true })).toBe('KIMI');
@@ -252,7 +258,10 @@ describe('§5 · the pure readers', () => {
     expect(buildRecordModel({ anyCallMade: true })).toBe('unknown');
     // A build no model touched does not name a model — not even the one it planned (autopsy 120eb52f).
     expect(buildRecordModel({ planned: 'glm-4.7-flashx', anyCallMade: false })).toBe(NO_MODEL_CALL_MADE);
-    expect(NO_MODEL_CALL_MADE).toBe('none (no model call was made)');
+    expect(NO_MODEL_CALL_MADE).toBe('none (no completed model response recorded)');
+    // 2e06d8bd attempted a 113 s call, then cancelled it before any response. An empty ledger
+    // cannot truthfully say that no call was made.
+    expect(buildRecordModel({ planned: 'glm-4.7-flashx', anyCallMade: false })).not.toContain('no model call was made');
   });
 
   it('plannedModelOf: the first rung\'s id, else its family; a pool rung reports its model', () => {

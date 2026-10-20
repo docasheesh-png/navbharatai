@@ -1,4 +1,5 @@
 import { isNeverAppPort } from '../../../neverAppPorts';
+import { unquoteToken } from '../../../shellNormalize';
 /**
  * Force a dev server to listen on 0.0.0.0 so it is reachable through the E2B
  * sandbox's external preview URL (e.g. `{port}-{id}.e2b.app`). A localhost-only
@@ -429,7 +430,94 @@ export function pathsAsBasenames(segment: string): string {
   return String(segment ?? '').replace(/(?:[\w.@~$-]*\/)+([\w.@-]*)/g, '$1');
 }
 
+/** A direct file launch, using the same Node-entry policy as the host/port helpers. */
+function directNodeServerInvocation(segment: string): boolean | undefined {
+  // Only literal command words are considered. Quoted data after another executable, eval bodies
+  // and unknown wrapper/option grammars must not become managed launches through a substring.
+  const args: string[] = [];
+  const rawArgs: string[] = [];
+  const words = /(?:[^\s'"\\]+|\\.|'[^']*'|"(?:[^"\\]|\\.)*")+/g;
+  let end = 0;
+  let complete = true;
+  for (const match of segment.matchAll(words)) {
+    // An unmatched quote is not permission to inspect the fragment after it as executable argv.
+    if (segment.slice(end, match.index).trim()) complete = false;
+    args.push(unquoteToken(match[0]));
+    rawArgs.push(match[0]);
+    end = match.index + match[0].length;
+  }
+  if (segment.slice(end).trim()) complete = false;
+  let at = 0;
+  let assignments: 'shell' | 'env' | 'none' = 'shell';
+  while (at < args.length) {
+    if (/^[A-Za-z_]\w*=/.test(args[at])) {
+      if (assignments === 'none' || (assignments === 'shell' && !/^[A-Za-z_]\w*=/.test(rawArgs[at]))) return false;
+      at++; continue;
+    }
+    const wrapper = pathsAsBasenames(args[at]);
+    if (/^(?:env|nohup|exec|cross-env)$/.test(wrapper)) {
+      assignments = /^(?:env|cross-env)$/.test(wrapper) ? 'env' : 'none';
+      at++; continue;
+    }
+    if (wrapper === 'npx') {
+      at++;
+      while (/^(?:-y|--yes|--no-install|--)$/.test(args[at] ?? '')) at++;
+      break;
+    }
+    if (/^(?:npm|pnpm|yarn|bun)$/.test(wrapper) && /^(?:exec|dlx)$/.test(args[at + 1] ?? '')) {
+      at += 2;
+      if (args[at] === '--') at++;
+      break;
+    }
+    if (wrapper === 'timeout') {
+      at++;
+      while ((args[at] ?? '').startsWith('-')) {
+        const option = args[at++];
+        if (option === '--') break;
+        if (TIMEOUT_OPTS_WITH_ARG.has(option)) {
+          if (!args[at] || args[at].startsWith('-')) return false;
+          at++;
+          continue;
+        }
+        if (/^(?:--(?:foreground|preserve-status|verbose)|--(?:signal|kill-after)=.+|-[sk].+)$/.test(option)) continue;
+        // Help/version and invalid options exit without launching the payload.
+        return false;
+      }
+      if (!/^\d+[smhd]?$/.test(args[at] ?? '')) return undefined;
+      at++;
+      assignments = 'none';
+      continue;
+    }
+    break;
+  }
+  const tool = pathsAsBasenames(args[at] ?? '').replace(/@[\w.-]+$/, '');
+  if (!/^(?:node|tsx|ts-node|nodemon|ts-node-dev)$/.test(tool)) return undefined;
+  if (!complete) return false;
+  const options = args.slice(at + 1);
+  if (options.some((arg) => /^(?:--(?:help|version|test(?:[-=].*)?|check|eval|print)(?:=|$)|-[hHvVecp]$)/.test(arg))) return false;
+  // Watchers already have their own long-running policy below, even when watching a non-server file.
+  if (/^(?:nodemon|ts-node-dev)$/.test(tool) || options[0] === 'watch' || options.some((arg) => /^--watch(?:[-=]|$)/.test(arg))) return undefined;
+  const takesValue = new Set(['--loader', '--import', '--require', '-r', '--project', '-P', '--tsconfig']);
+  let fileAt = 0;
+  while ((options[fileAt] ?? '').startsWith('-')) {
+    const option = options[fileAt++];
+    if (option === '--') break;
+    if (takesValue.has(option)) { if (!options[fileAt]) return undefined; fileAt++; continue; }
+    if (/^--(?:loader|import|require|project|tsconfig)=/.test(option)) continue;
+    if (/^--(?:enable-source-maps|no-warnings|transpile-only|esm|files)$/.test(option)) continue;
+    return undefined;
+  }
+  const file = (options[fileAt] ?? '').replace(/[)}]+$/, '');
+  if (!/^[\w@./-]+\.(?:[cm])?[jt]sx?$/.test(file)) return undefined;
+  const name = file.slice(file.lastIndexOf('/') + 1).replace(/\.(?:[cm])?[jt]sx?$/, '');
+  if (/(?:^|[._-])(?:test|spec|build|seed|migrate|migration|lint|check|typecheck|setup|generate)(?:$|[._-])/.test(name)) return false;
+  // Inspect the actual entry argument alone; a later string argument saying "server" is not evidence.
+  return isNodeServerCommand(`${tool} ${file}`) ? true : undefined;
+}
+
 function isDevServerInvocation(rawSegment: string): boolean {
+  const directNode = directNodeServerInvocation(rawSegment);
+  if (directNode !== undefined) return directNode;
   const segment = pathsAsBasenames(rawSegment);
   // Installing a package called "dev" is not running one. This is checked FIRST so that every
   // keyword rule below is spared the option-flag ambiguity, and it lives HERE rather than in
@@ -660,6 +748,57 @@ export function isOneShotSegment(segment: string): boolean {
   return ONE_SHOT_PREFIX.test(withoutGroupingPrefix(segment));
 }
 
+/** Shared literal command boundaries; callers retain their existing separator policy. */
+export function shellCommandSegments(command: string, options: {
+  or?: boolean; newlines?: boolean; background?: boolean;
+} = {}): string[] {
+  const segments: string[] = [];
+  let start = 0;
+  let quote: "'" | '"' | null = null;
+  const substitutions: Array<{ quote: "'" | '"' | null; close: ')' | '`'; depth: number }> = [];
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (ch === '\\' && quote !== "'") { i++; continue; }
+    // Substitutions are opaque here: an operator inside one is not a new outer command.
+    if (quote !== "'" && ch === '`') {
+      if (substitutions.at(-1)?.close === '`') quote = substitutions.pop()!.quote;
+      else { substitutions.push({ quote, close: '`', depth: 0 }); quote = null; }
+      continue;
+    }
+    if (quote !== "'" && ch === '$' && command[i + 1] === '(') {
+      substitutions.push({ quote, close: ')', depth: 1 }); quote = null; i++; continue;
+    }
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') { quote = ch; continue; }
+    const substitution = substitutions.at(-1);
+    if (substitution) {
+      if (substitution.close === ')') {
+        if (ch === '(') substitution.depth++;
+        if (ch === ')' && --substitution.depth === 0) quote = substitutions.pop()!.quote;
+      }
+      continue;
+    }
+    if (ch === '#' && (i === 0 || /[\s;&|()]/.test(command[i - 1]))) {
+      segments.push(command.slice(start, i));
+      const newline = command.indexOf('\n', i);
+      if (newline < 0) return segments;
+      i = newline; start = newline + 1; continue;
+    }
+    const paired = (ch === '&' || (ch === '|' && options.or !== false)) && command[i + 1] === ch;
+    const background = options.background && ch === '&' && command[i + 1] !== '&' &&
+      command[i + 1] !== '>' && !/[&>|]/.test(command[i - 1] ?? '');
+    if (ch !== ';' && !paired && !(options.newlines && ch === '\n') && !background) continue;
+    segments.push(command.slice(start, i));
+    if (paired) i++;
+    start = i + 1;
+  }
+  segments.push(command.slice(start));
+  return segments;
+}
+
 export function isLongRunningCommand(rawCommand: string): boolean {
   if (!rawCommand) return false;
   const command = withoutHeredocBodies(rawCommand);
@@ -677,7 +816,7 @@ export function isLongRunningCommand(rawCommand: string): boolean {
   // orphaned + reaped exactly like the original "Killed right after ready" bug, just via a different
   // code path. So: a one-shot-prefixed segment's OWN text is never checked for a dev-server pattern,
   // but every OTHER segment still is — the whole command is long-running if ANY of those matches.
-  const segments = command.split(/&&|\|\||;/).map(withoutGroupingPrefix);
+  const segments = shellCommandSegments(command).map(withoutGroupingPrefix);
   // A segment the agent BOUNDED with a short `timeout N` is a smoke test, not a server to manage —
   // see timeBoxedSeconds for the 103 seconds this cost on a command whose own output said the server
   // had started. Same shape as ONE_SHOT_PREFIX: a segment whose form proves it exits.

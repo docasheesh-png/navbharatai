@@ -7,6 +7,8 @@
 // (cheap→Claude escapes — the higher, the weaker the floor and the smaller the saving), and billed
 // cost. The runner (scripts/agentv3-bakeoff.ts) does the I/O and feeds raw stream text here.
 
+import { evidenceFromResult, type BuildEvidence } from './reliability/benchEvidence';
+
 /** One build's objective outcome, derived from its NDJSON stream + attached diagnostics report. */
 export interface BuildMetrics {
   /** Distinct files the build actually wrote (via file_changed events). 0 = the Gemini trap. */
@@ -27,6 +29,11 @@ export interface BuildMetrics {
   geminiTrap: boolean;
   /** An error event was emitted. */
   errored: boolean;
+  /**
+   * What the build cost and proved, read from its own report (reliability/benchEvidence.ts). OPTIONAL so a result file
+   * written before it existed — and the runner's own FAILED stand-in — still type-check and compare.
+   */
+  evidence?: BuildEvidence;
 }
 
 /** Parse a raw NDJSON stream body into JSON event objects (skips blank / non-JSON lines). */
@@ -53,6 +60,8 @@ export function metricsFromEvents(events: Array<Record<string, unknown>>): Build
   let toolCalls = 0;
   let toolErrors = 0;
   let providerFallbacks = 0;
+  let evidence: BuildEvidence | undefined;
+  let resultSeen = false;
 
   for (const e of events) {
     switch (e.type) {
@@ -62,8 +71,10 @@ export function metricsFromEvents(events: Array<Record<string, unknown>>): Build
         break;
       }
       case 'result': {
+        resultSeen = true;
         if (typeof e.ok === 'boolean') ok = e.ok;
         if (typeof e.billedUsd === 'number') billedUsd = e.billedUsd as number;
+        evidence = evidenceFromResult(e);
         const diag = e.diagnostics as { issues?: Array<{ code?: unknown }> } | undefined;
         for (const issue of diag?.issues ?? []) {
           if (issue.code === 'TOOL_CALL') toolCalls++;
@@ -73,7 +84,8 @@ export function metricsFromEvents(events: Array<Record<string, unknown>>): Build
         break;
       }
       case 'done': {
-        if (typeof e.ok === 'boolean') ok = ok || (e.ok as boolean);
+        // `done` may describe an earlier lane. It must never resurrect a failed final result.
+        if (!resultSeen && typeof e.ok === 'boolean') ok = e.ok;
         const readiness = e.readiness as { score?: unknown } | undefined;
         if (readiness && typeof readiness.score === 'number') readinessScore = readiness.score as number;
         break;
@@ -95,6 +107,7 @@ export function metricsFromEvents(events: Array<Record<string, unknown>>): Build
     providerFallbacks,
     geminiTrap: ok && filesCreated === 0,
     errored,
+    ...(evidence ? { evidence } : {}),
   };
 }
 

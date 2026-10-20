@@ -97,6 +97,13 @@ export interface DebitedWallet {
    * it in full. Nothing was applied. Only a hold can see this; an ordinary debit clamps instead.
    */
   refused?: boolean;
+  /**
+   * 🔴 WHAT WAS ACTUALLY TAKEN (r6–r10 autopsy, 2026-10-18). When the overdraft floor caps a charge, the
+   * caller used to report the PRE-cap bill as "charged". These say what left the wallet (₹, derived from the
+   * whole tokens debited) and what the floor made us absorb. Absent on a no-op.
+   */
+  debitedInr?: number;
+  absorbedInr?: number;
 }
 
 /**
@@ -212,7 +219,7 @@ export function computeDebitedWallet(
     ...(appended.droppedCount > n(w[LEDGER_DROPPED_FIELD]) ? { [LEDGER_OPENING_AT_FIELD]: now } : {}),
     updatedAt: now,
   };
-  return { wallet, tokensDebited: tokens, applied: true };
+  return { wallet, tokensDebited: tokens, applied: true, debitedInr: billedInr, absorbedInr: floored.absorbedInr > 0 ? floored.absorbedInr : 0 };
 }
 
 export interface WalletRollupTx {
@@ -482,7 +489,7 @@ export function computeRolledUpSettle(
 }
 
 export type WalletDebitResult =
-  | { ok: true; tokensDebited: number; tokenBalance: number; refused?: boolean }
+  | { ok: true; tokensDebited: number; tokenBalance: number; refused?: boolean; debitedInr?: number; absorbedInr?: number }
   | { ok: false; error: string };
 
 
@@ -531,6 +538,9 @@ export async function debitWalletForBuild(
 ): Promise<WalletDebitResult> {
   if (!db) return { ok: false, error: 'Database not initialized' };
   if (!userId) return { ok: false, error: 'Missing userId' };
+  // Without an attempt identity neither the durable operation record nor the embedded ledger can
+  // recognize a replay. Refuse before any I/O rather than turning a retry into a second charge.
+  if (typeof tx.buildRef !== 'string' || !tx.buildRef.trim()) return { ok: false, error: 'Missing buildRef' };
   if (!Number.isFinite(tx.billedInr) || tx.billedInr <= 0) {
     return { ok: false, error: `Non-debitable amount: ${tx.billedInr}` };
   }
@@ -564,6 +574,8 @@ export async function debitWalletForBuild(
       tokensDebited: debited.tokensDebited,
       tokenBalance: typeof debited.wallet.tokenBalance === 'number' ? debited.wallet.tokenBalance : 0,
       ...(debited.refused ? { refused: true } : {}),
+      ...(typeof debited.debitedInr === 'number' ? { debitedInr: debited.debitedInr } : {}),
+      ...(typeof debited.absorbedInr === 'number' ? { absorbedInr: debited.absorbedInr } : {}),
     };
   } catch (err: any) {
     return { ok: false, error: err?.message || 'Wallet debit transaction failed' };

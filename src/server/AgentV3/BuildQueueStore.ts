@@ -1,101 +1,154 @@
-// AgentV3 — durable per-app command QUEUE persistence (FIX #4.2).
-//
-// The queue is the spine of the 3-role model: it must survive reloads, Cloud Run instance rotations,
-// and days between sessions, and it is written CONCURRENTLY (the planner + advisor chats both enqueue
-// while the executor drains). So mutations run in a Firestore TRANSACTION (read → apply the pure op →
-// write) to avoid a lost update, and reads are strict (corrupt storage → an empty queue, never a
-// half-queue). Mirrors ProjectPlanStore's firebase-admin/best-effort/VITEST-skip conventions.
-
+// Durable queue coordination. Reads are authoritative; an unavailable store never acknowledges work.
 import * as admin from 'firebase-admin';
-import { BoundedCache } from '../lib/boundedCache';
-import { emptyQueue, serializeQueue, parseStoredQueue, type CommandQueue } from './BuildQueue';
+import { randomUUID } from 'node:crypto';
+import { emptyQueue, serializeQueue, parseStoredQueue, claimNext, runningItem, type CommandQueue, type QueueItem } from './BuildQueue';
 import { getServerDb } from '../lib/serverDb';
+import { BoundedCache } from '../lib/boundedCache';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
+import { leaseIsLive, WORKSPACE_BUILD_LEASE_COLLECTION, LEASE_STALE_MS, LEASE_CALL_TIMEOUT_MS } from './workspaceBuildLease';
 
-const COLLECTION = 'build_queues_v3';
-const CACHE_TTL_MS = 2 * 60 * 60 * 1000;
+export const BUILD_QUEUE_COLLECTION = 'build_queues_v3';
+export const BUILD_QUEUE_CALL_TIMEOUT_MS = LEASE_CALL_TIMEOUT_MS;
 
-let _db: admin.firestore.Firestore | null = null;
-
-function getDb(): admin.firestore.Firestore | null {
-  if (process.env.VITEST) return null;
-  if (_db) return _db;
+// A timed-out call has an unknown durable outcome. Late completion never becomes a fake success.
+async function queueDeadline<T>(operation: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    // Collision-free shared admin handle (getFirestore(app, dbId)) — no per-store .settings() race.
-    _db = getServerDb();
-    return _db;
-  } catch (e) {
-    notePersistenceFailure('build_queue', 'init', e);
-    return null;
+    return await Promise.race([operation, new Promise<T>((_, reject) => {
+      timer = setTimeout(() => reject(new QueueStoreUnavailableError()), BUILD_QUEUE_CALL_TIMEOUT_MS);
+    })]);
+  } finally { if (timer) clearTimeout(timer); }
+}
+
+export class QueueStoreUnavailableError extends Error {
+  readonly code = 'QUEUE_STORE_UNAVAILABLE';
+  constructor() { super('Your queue could not be confirmed. Please retry shortly.'); }
+}
+export class QueueClaimConflictError extends Error {
+  readonly code = 'QUEUE_CLAIM_CONFLICT';
+  constructor() { super('This queued step is already attached to another build. Refresh the queue before retrying.'); }
+}
+export interface QueueBuildBinding { itemId: string; claimToken: string; attemptId: string; }
+export interface QueueDb {
+  collection(name: string): { doc(id: string): any };
+  runTransaction<T>(fn: (tx: any) => Promise<T>): Promise<T>;
+}
+
+function decode(workspaceId: string, data: any): CommandQueue {
+  if (!data) return emptyQueue(workspaceId);
+  let raw: any;
+  try { raw = JSON.parse(data.queue); } catch { throw new QueueStoreUnavailableError(); }
+  if (raw?.workspaceId !== workspaceId || (raw.paused !== undefined && typeof raw.paused !== 'boolean') || !Array.isArray(raw?.items)) throw new QueueStoreUnavailableError();
+  for (const item of raw.items) {
+    if (!item || (item.claimToken !== undefined && (typeof item.claimToken !== 'string' || !item.claimToken))
+      || (item.boundAttemptId !== undefined && (typeof item.boundAttemptId !== 'string' || !item.boundAttemptId))
+      || (item.claimedAt !== undefined && (typeof item.claimedAt !== 'number' || !Number.isFinite(item.claimedAt)))) throw new QueueStoreUnavailableError();
   }
+  const q = parseStoredQueue(workspaceId, raw);
+  if (q.items.length !== raw.items.length || new Set(q.items.map((i) => i.id)).size !== q.items.length) throw new QueueStoreUnavailableError();
+  return q;
 }
 
-interface CacheEntry { queue: CommandQueue; at: number; }
-// Bounded, O(1) per access (audit 2026-10-11): an entry expires CACHE_TTL_MS after it was written and the least
-// recently used workspace is evicted at the bound. The old `pruneCache` walked every entry on every read/write.
-const cache = new BoundedCache<string, CacheEntry>({ maxEntries: 2_000, ttlMs: CACHE_TTL_MS });
-
-
-/** Load a workspace's queue (cache → Firestore). Always returns a queue (empty when none). Never throws. */
-export async function loadQueue(workspaceId: string): Promise<CommandQueue> {
-  const hit = cache.get(workspaceId);
-  if (hit) return hit.queue;
-  const db = getDb();
-  if (!db) return emptyQueue(workspaceId);
-  try {
-    const snap = await db.collection(COLLECTION).doc(workspaceId).get();
-    const data = snap.exists ? snap.data() : null;
-    const queue = data && typeof data.queue === 'string' ? parseStoredQueue(workspaceId, data.queue) : emptyQueue(workspaceId);
-    cache.set(workspaceId, { queue, at: Date.now() });
-    return queue;
-  } catch {
-    return emptyQueue(workspaceId); // do NOT cache a read failure
-  }
+/** Independent store instances share only the database, never an admission cache. */
+export function createBuildQueueStore(db: QueueDb | null) {
+  const run = async <R>(workspaceId: string, op: (q: CommandQueue, lease: any) => { queue: CommandQueue; result: R }, withLease = false): Promise<{ queue: CommandQueue; result: R }> => {
+    if (!db) throw new QueueStoreUnavailableError();
+    try {
+      const ref = db.collection(BUILD_QUEUE_COLLECTION).doc(workspaceId);
+      return await queueDeadline(db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const lease = withLease ? await tx.get(db.collection(WORKSPACE_BUILD_LEASE_COLLECTION).doc(workspaceId)) : null;
+        const current = decode(workspaceId, snap.exists ? snap.data() : null);
+        const leaseData = lease?.exists ? lease.data() : null;
+        if (leaseData && (typeof leaseData.token !== 'string' || !leaseData.token || typeof leaseData.owner !== 'string'
+          || typeof leaseData.heartbeatAt !== 'number' || !Number.isFinite(leaseData.heartbeatAt))) throw new QueueStoreUnavailableError();
+        const out = op(current, leaseData);
+        if (out.queue !== current) tx.set(ref, { workspaceId, queue: serializeQueue(out.queue), savedAt: Date.now(), version: 1 });
+        return out; // Return the committed callback's result, never a closure mutated by a retried callback.
+      }));
+    } catch (e) {
+      if (e instanceof QueueClaimConflictError) throw e;
+      notePersistenceFailure('build_queue', 'write', e);
+      throw new QueueStoreUnavailableError();
+    }
+  };
+  return {
+    async load(workspaceId: string): Promise<CommandQueue> {
+      if (!db) throw new QueueStoreUnavailableError();
+      try {
+        const snap: any = await queueDeadline(db.collection(BUILD_QUEUE_COLLECTION).doc(workspaceId).get());
+        return decode(workspaceId, snap.exists ? snap.data() : null);
+      } catch (e) { notePersistenceFailure('build_queue', 'read', e); throw new QueueStoreUnavailableError(); }
+    },
+    mutate<R>(workspaceId: string, op: (q: CommandQueue) => { queue: CommandQueue; result: R }) { return run(workspaceId, op); },
+    claim(workspaceId: string, token = randomUUID(), now = Date.now(), resumeAfterFailure = false) {
+      return run(workspaceId, (q, lease) => {
+        if (leaseIsLive(lease, now)) return { queue: q, result: null as QueueItem | null };
+        const next = claimNext(resumeAfterFailure && q.paused ? { ...q, paused: false } : q, { token, at: now });
+        return { queue: next.queue, result: next.claimed };
+      }, true);
+    },
+    bind(workspaceId: string, prompt: string, attemptId: string, expected?: { itemId?: string; claimToken?: string }) {
+      const legacyToken = randomUUID();
+      return run(workspaceId, (q, lease) => {
+        const item = runningItem(q);
+        if (!item || item.prompt !== prompt.trim()) {
+          if (expected?.itemId || expected?.claimToken) throw new QueueClaimConflictError();
+          return { queue: q, result: null as QueueBuildBinding | null };
+        }
+        if (!leaseIsLive(lease, Date.now()) || lease.token !== attemptId) throw new QueueClaimConflictError();
+        if ((expected?.itemId && expected.itemId !== item.id) || (expected?.claimToken && expected.claimToken !== item.claimToken)
+          || (item.boundAttemptId && item.boundAttemptId !== attemptId)) throw new QueueClaimConflictError();
+        const binding = { itemId: item.id, claimToken: item.claimToken || legacyToken, attemptId };
+        const queue = { ...q, items: q.items.map((i) => i.id === item.id ? { ...i, claimToken: binding.claimToken, claimedAt: i.claimedAt ?? Date.now(), boundAttemptId: attemptId } : i) };
+        return { queue, result: binding };
+      }, true);
+    },
+    settle(workspaceId: string, binding: QueueBuildBinding, ok: boolean, note?: string) {
+      return run(workspaceId, (q) => {
+        const item = q.items.find((i) => i.id === binding.itemId);
+        if (!item || item.status !== 'running' || item.claimToken !== binding.claimToken || item.boundAttemptId !== binding.attemptId) return { queue: q, result: false };
+        const queue = { ...q, ...(!ok ? { paused: true } : {}), items: q.items.map((i) => i.id === item.id ? { ...i, status: ok ? 'done' as const : 'failed' as const, ...(note ? { note: note.slice(0, 300) } : {}) } : i) };
+        return { queue, result: true };
+      });
+    },
+    recover(workspaceId: string, itemId: string, now = Date.now()) {
+      return run(workspaceId, (q, lease) => {
+        const item = runningItem(q);
+        // A brief gap between claim and /chat is normal. Recovery is explicit, identity-bound and atomic with the lease read.
+        if (!item || item.id !== itemId || leaseIsLive(lease, now) || now - (item.claimedAt ?? item.createdTs) <= LEASE_STALE_MS) return { queue: q, result: false };
+        return { queue: { ...q, paused: true, items: q.items.map((i) => i.id === itemId ? { ...i, status: 'failed' as const, note: 'Interrupted step. Review it before continuing the roadmap.' } : i) }, result: true };
+      }, true);
+    },
+    async delete(workspaceId: string) {
+      if (!db) throw new QueueStoreUnavailableError();
+      try { await queueDeadline(db.collection(BUILD_QUEUE_COLLECTION).doc(workspaceId).delete()); }
+      catch (e) { notePersistenceFailure('build_queue', 'write', e); throw new QueueStoreUnavailableError(); }
+    },
+  };
 }
 
-/**
- * Apply a pure queue operation transactionally (read → op → write) so concurrent enqueues from the
- * planner/advisor chats can't lose an update. Falls back to load→apply→save when there's no db
- * (VITEST / outage) — single-instance in-process, still correct. Returns the resulting queue; the
- * in-process cache is always updated so the same instance stays consistent even through an outage.
- */
-export async function mutateQueue(workspaceId: string, op: (q: CommandQueue) => CommandQueue): Promise<CommandQueue> {
-  const db = getDb();
-  if (!db) {
-    const next = op(cache.get(workspaceId)?.queue ?? emptyQueue(workspaceId));
-    cache.set(workspaceId, { queue: next, at: Date.now() });
-    return next;
-  }
-  const ref = db.collection(COLLECTION).doc(workspaceId);
-  try {
-    const result = await db.runTransaction(async (tx) => {
-      const snap = await tx.get(ref);
-      const data = snap.exists ? snap.data() : null;
-      const current = data && typeof data.queue === 'string' ? parseStoredQueue(workspaceId, data.queue) : emptyQueue(workspaceId);
-      const next = op(current);
-      tx.set(ref, { workspaceId, queue: serializeQueue(next), savedAt: Date.now(), version: 1 }, { merge: false });
-      return next;
-    });
-    cache.set(workspaceId, { queue: result, at: Date.now() });
-    return result;
-  } catch (e) {
-    notePersistenceFailure('build_queue', 'write', e);
-    // Best-effort fallback: apply in-process so the caller still gets a coherent result this instance.
-    const next = op(cache.get(workspaceId)?.queue ?? emptyQueue(workspaceId));
-    cache.set(workspaceId, { queue: next, at: Date.now() });
-    return next;
-  }
+let injected: QueueDb | null | undefined;
+// Legacy unit tests retain an explicit test-only backend; production has no in-memory fallback.
+const testDocs = new BoundedCache<string, any>({ maxEntries: 2000 });
+const testDb: QueueDb = {
+  collection: (name) => ({ doc: (id) => {
+    const key = `${name}/${id}`;
+    return { key, get: async () => ({ exists: testDocs.has(key), data: () => testDocs.get(key) }), delete: async () => { testDocs.delete(key); } };
+  } }),
+  runTransaction: async (fn) => fn({ get: (ref: any) => ref.get(), set: (ref: any, data: any) => testDocs.set(ref.key, data) }),
+};
+function store() {
+  const db = injected !== undefined ? injected : process.env.VITEST ? testDb : getServerDb();
+  return createBuildQueueStore(db as admin.firestore.Firestore | null);
 }
-
-/** Remove a workspace's queue (project abandoned / reset). Never throws. */
-export async function deleteQueue(workspaceId: string): Promise<void> {
-  cache.delete(workspaceId);
-  const db = getDb();
-  if (!db) return;
-  try { await db.collection(COLLECTION).doc(workspaceId).delete(); } catch (e) { notePersistenceFailure('build_queue', 'write', e); }
-}
-
-/** Test-only: reset the in-process cache between unit tests. */
-export function __clearBuildQueueCacheForTests(): void {
-  cache.clear();
-}
+export function __bindBuildQueueDbForTests(db: QueueDb | null | undefined): void { injected = db; }
+export function __clearBuildQueueCacheForTests(): void { testDocs.clear(); injected = undefined; }
+export const loadQueue = (workspaceId: string) => store().load(workspaceId);
+export const mutateQueueWithResult = <R>(workspaceId: string, op: (q: CommandQueue) => { queue: CommandQueue; result: R }) => store().mutate(workspaceId, op);
+export const mutateQueue = async (workspaceId: string, op: (q: CommandQueue) => CommandQueue) => (await store().mutate(workspaceId, (q) => ({ queue: op(q), result: null }))).queue;
+export const claimQueuedCommand = (workspaceId: string, resumeAfterFailure = false) => store().claim(workspaceId, undefined, undefined, resumeAfterFailure);
+export const bindQueuedBuild = (workspaceId: string, prompt: string, attemptId: string, expected?: { itemId?: string; claimToken?: string }) => store().bind(workspaceId, prompt, attemptId, expected);
+export const settleQueuedBuild = (workspaceId: string, binding: QueueBuildBinding, ok: boolean, note?: string) => store().settle(workspaceId, binding, ok, note);
+export const recoverQueuedCommand = (workspaceId: string, itemId: string) => store().recover(workspaceId, itemId);
+export const deleteQueue = (workspaceId: string) => store().delete(workspaceId);

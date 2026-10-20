@@ -45,9 +45,9 @@ describe('1 · a STOPPED build is never asked for money', () => {
     // ⚠️ WIDENED, NOT WEAKENED (2026-09-26): a seventh suppression reason, `interrupted` — our own
     // platform cutting the build short (deploy / lock takeover / reaper / unknown) — was added as a
     // further clause. What this guards is unchanged: a stop suppresses the upsell AND is recorded.
-    expect(route).toMatch(/if \(!refused && !stopped(?: && !\w+)*\) \{/);
+    expect(route).toMatch(/if \(!refused && !stopped(?: && !\w+(?:\(\))?)*\) \{/);
     expect(route).toMatch(/if \(refused \|\| degraded \|\| misconfigured \|\| starved \|\| stopped(?: \|\| \w+)*\) \{/);
-    expect(read('src/server/routes/agentv3.ts')).toContain('the build was STOPPED, so no engine was ever asked to build anything');
+    expect(read('src/server/routes/agentv3.ts')).toContain('A stopped build does not establish a capability limit');
   });
 });
 

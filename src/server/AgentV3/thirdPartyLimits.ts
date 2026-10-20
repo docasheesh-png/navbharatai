@@ -71,6 +71,14 @@ const AD_REMOVAL_ASKED = new RegExp([
   String.raw`\bget\s+rid\s+of\s+(?:all\s+|the\s+)?${AD_WORD}\b`,
   // The complaint after the first build: "ads are still playing", "ads abhi bhi aa rahe hain".
   String.raw`\b${AD_WORD}\s+(?:are\s+|is\s+)?(?:still|abhi\s+bhi|ab\s+bhi|phir\s+bhi)\s+(?:play|show|appear|run|com|aa|chal)\w*`,
+  // 🔴 THE FORM AN INDIAN USER ACTUALLY TYPES FIRST, AND IT WAS MISSING (found writing Q-1019's test,
+  // 2026-10-15). Hindi is subject-object-VERB, so the removal word comes AFTER the ad word — "ads hata do",
+  // "ads nikal do", "ads band karo" — and every removal alternative above is verb-then-noun. So none of
+  // Q-990's three layers fired for the request its own user base is most likely to send: the builder was
+  // never told, the user was never warned at the start, and the honest end line never appeared. The ad word
+  // must sit directly beside the removal verb, so precision is unchanged.
+  String.raw`\b${AD_WORD}\s+(?:ko\s+|sab\s+|sare\s+|saare\s+)?(?:hata|hatao|hata\s*d|hata\s*dij|nikal|nikaal|band\s*kar|remove\s*kar|off\s*kar)\w*`,
+  '(?:विज्ञापन|ऐड्स?)\\s*(?:को\\s*|सब\\s*|सारे\\s*)?(?:हटा|हटाओ|निकाल|बंद\\s*कर)',
   // Hinglish: "bina ads ke", "ads nahi chahiye".
   String.raw`\bbina\s+(?:koi\s+|kisi\s+)?(?:ads|adds|advertisements?|vigyapan)\b`,
   String.raw`\bbina\s+(?:ad|add)\s+(?:ke|ki|ka)\b`,
@@ -154,6 +162,77 @@ function ownPlayers(players: readonly string[]): string {
   return `${list} own player${names.length === 1 ? '' : 's'}`;
 }
 
+// ── 2b. What the app itself serves — the measured half of "adds no ads of its own" ───────────────────────
+
+/**
+ * 🔴 Q-1018 (2026-10-15). "The app adds no ads of its own" is the honest half of this module's sentence,
+ * and it was asserted on every build without ever being checked. It is not a safe assumption: NavBharatAI's
+ * OWN Monetization wizard generates an AdSense block (`generateAdsense` in src/lib/paymentSetup.ts — the
+ * `pagead2.googlesyndication.com` loader and an `<ins class="adsbygoogle">` slot). So a user who added ads
+ * through our own feature and then asked about ads was told, by us, that their app adds none — a false
+ * statement about their app, in the one sentence whose whole purpose is honesty about ads.
+ *
+ * This is the same class the module was built for (Q-990: a property asserted with no measured fact to hold
+ * it against), turned on our own sentence rather than on the model's.
+ */
+export type OwnAdNetwork = 'Google AdSense' | 'Google Ad Manager' | 'Google AdMob' | 'Amazon' | 'Media.net' | 'Taboola' | 'Outbrain' | 'Adsterra' | 'PropellerAds';
+
+/** Where an app's own ad code lives: the player source set, plus the manifests that declare a mobile ad SDK. */
+const OWN_AD_SOURCE = /(?:\.(?:[cm]?[jt]sx?|html?|vue|svelte|astro|gradle|plist|xml)|(?:^|\/)package\.json)$/i;
+
+/**
+ * Each marker is the network's own loader, publisher id or SDK package — never a bare product name, so a
+ * comment ("no ads"), a CSS class that HIDES an ad, or prose about advertising can never match. Precision
+ * first, exactly as the player rules above: a missed network costs today's sentence, a false one costs a
+ * user a warning about ads they do not have.
+ */
+const OWN_AD_RULES: ReadonlyArray<{ network: OwnAdNetwork; re: RegExp }> = [
+  { network: 'Google AdSense', re: /\bpagead2\.googlesyndication\.com|\bca-pub-\d{10,}|\badsbygoogle\s*=\s*window\.adsbygoogle|class=["'][^"']*\badsbygoogle\b/i },
+  { network: 'Google Ad Manager', re: /\bsecurepubads\.g\.doubleclick\.net|\bgoogletag\.cmd\b|\bgoogletag\.defineSlot\b/i },
+  { network: 'Google AdMob', re: /\bca-app-pub-\d{10,}|['"](?:react-native-google-mobile-ads|@capacitor-community\/admob|@react-native-admob\/admob|@admob-plus\/[\w-]+)['"]|\bcom\.google\.android\.gms\.ads\b|\bGADApplicationIdentifier\b/i },
+  { network: 'Amazon', re: /\b(?:c|aax)\.amazon-adsystem\.com|\bapstag\b/i },
+  { network: 'Media.net', re: /\bcontextual\.media\.net\b/i },
+  { network: 'Taboola', re: /\bcdn\.taboola\.com\b|\b_taboola\b/i },
+  { network: 'Outbrain', re: /\bwidgets\.outbrain\.com\b|\bOBR\.extern\b/i },
+  { network: 'Adsterra', re: /\b(?:adsterra\.com|highperformanceformat\.com)\b/i },
+  { network: 'PropellerAds', re: /\b(?:propellerads\.com|propu\.sh)\b/i },
+];
+
+/**
+ * Which ad networks the app serves ITSELF — the ads that ARE ours to remove, as opposed to the ones inside
+ * another service's player. Give it the WHOLE project, exactly as `projectAdServingPlayers` wants. PURE.
+ */
+export function projectOwnAdSdks(files: Readonly<Record<string, string>> | null | undefined): OwnAdNetwork[] {
+  const found = new Set<OwnAdNetwork>();
+  for (const [path, content] of Object.entries(files ?? {})) {
+    const p = String(path).replace(/\\/g, '/');
+    if (!OWN_AD_SOURCE.test(p) || NOT_APP_SOURCE.test(p) || TEST_FILE.test(p)) continue;
+    const text = String(content ?? '');
+    if (!text) continue;
+    for (const rule of OWN_AD_RULES) {
+      if (found.has(rule.network)) continue;
+      if (rule.re.test(text)) found.add(rule.network);
+    }
+  }
+  const order: readonly OwnAdNetwork[] = ['Google AdSense', 'Google Ad Manager', 'Google AdMob', 'Amazon', 'Media.net', 'Taboola', 'Outbrain', 'Adsterra', 'PropellerAds'];
+  return order.filter((n) => found.has(n));
+}
+
+/** "Google AdSense" · "Google AdSense and Taboola". */
+function networkList(networks: readonly string[]): string {
+  return networks.length === 1 ? networks[0] : `${networks.slice(0, -1).join(', ')} and ${networks[networks.length - 1]}`;
+}
+
+/**
+ * The second half of the honest sentence, MEASURED (Q-1018). Empty when the app serves no ads of its own —
+ * the caller then keeps the "adds no ads of its own" wording, which is now a CHECKED statement. PURE.
+ */
+export function ownAdsSentence(ownAds: readonly OwnAdNetwork[] | null | undefined): string {
+  const list = ownAds ?? [];
+  if (list.length === 0) return '';
+  return `the app also carries its own ad slots (${networkList([...list])}) — those ARE yours to switch off, so ask me to remove them and I will`;
+}
+
 // ── 3. When the builder is told ───────────────────────────────────────────────────────────────────────────
 
 export interface ThirdPartyLimitAskInput {
@@ -189,23 +268,53 @@ export async function editTurnAdServingPlayers(
   load: () => Promise<Readonly<Record<string, string>> | null | undefined>,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AdServingPlayer[]> {
-  if (!turn.editTurn || turn.importTurn || !thirdPartyLimitsEnabled(env) || !adRemovalRequested(prompt)) return [];
+  return (await editTurnAdFacts(prompt, turn, load, env)).players;
+}
+
+/** What an ad question is judged against: the other service's players, and the app's own ad slots. */
+export interface AdFacts {
+  players: AdServingPlayer[];
+  ownAds: OwnAdNetwork[];
+}
+
+/**
+ * Both ad facts from ONE project load (Q-1018). The player question and the own-ads question are asked of
+ * the same files at the same moment, so they can never describe two different versions of the project — and
+ * the durable store is read once per turn, not twice. Same gate as above: nothing is loaded on a turn that
+ * did not ask about ads. A failed load is "nothing known", never an error. PURE apart from `load`.
+ */
+export async function editTurnAdFacts(
+  prompt: string | null | undefined,
+  turn: { editTurn: boolean; importTurn: boolean },
+  load: () => Promise<Readonly<Record<string, string>> | null | undefined>,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AdFacts> {
+  if (!turn.editTurn || turn.importTurn || !thirdPartyLimitsEnabled(env) || !adRemovalRequested(prompt)) return { players: [], ownAds: [] };
   try {
-    return projectAdServingPlayers(await load());
+    const files = await load();
+    return { players: projectAdServingPlayers(files), ownAds: projectOwnAdSdks(files) };
   } catch {
-    return [];
+    return { players: [], ownAds: [] };
   }
 }
 
 /** The builder's instruction. Empty when nothing needs saying. PURE. */
-export function thirdPartyLimitsBuilderNote(asked: boolean, players: readonly string[] = []): string {
+export function thirdPartyLimitsBuilderNote(asked: boolean, players: readonly string[] = [], ownAds: readonly OwnAdNetwork[] = []): string {
   if (!asked) return '';
   const where = players.length > 0 ? ownPlayers(players) : "YouTube's own player (or the player of whichever site the video comes from)";
   return [
     `THIRD-PARTY PLAYER NOTE — the user asked for videos with no ads. A video embedded from YouTube, Dailymotion, Twitch or Facebook plays inside ${where}, and that player shows its own ads on videos whose owners earn from them. A page that embeds the player cannot reach inside it, so the app cannot switch those ads off. (Vimeo's player shows no ads.)`,
-    '- Add no ads of your own, and keep the app\'s own screens free of clutter around the player.',
+    // 🔴 Q-1018, the PREVENT half: when the app really DOES carry its own ad slots, "add none of your own"
+    // is not the instruction the turn needs — the user asked for the ads to go, and THESE ones are ours to
+    // take out. Saying only "add none" left the one removable ad on the screen and then told the user the
+    // app adds no ads of its own. Measured, so the instruction is never guessed.
+    ownAds.length > 0
+      ? `- The app already serves its OWN ads (${networkList([...ownAds])}). Those ARE yours to remove and the user just asked you to: take out the ad script, the ad slot markup and any ad component, in every file that has them. Then add no ads of your own.`
+      : '- Add no ads of your own, and keep the app\'s own screens free of clutter around the player.',
     '- Never call the app "ad-free" and never say ads are removed, blocked or skipped — not in the UI, the page title, the meta description, the README, a code comment or your reply.',
-    '- The FIRST sentence of your reply says plainly that ads inside the video site\'s own player may still play on videos whose owners earn from them, and that the app adds no ads of its own.',
+    ownAds.length > 0
+      ? '- The FIRST sentence of your reply says plainly that ads inside the video site\'s own player may still play on videos whose owners earn from them, and names the app\'s own ad slots you removed.'
+      : '- The FIRST sentence of your reply says plainly that ads inside the video site\'s own player may still play on videos whose owners earn from them, and that the app adds no ads of its own.',
     '- The user is already told this at the start of the build — do NOT spend a turn explaining it or asking whether to proceed. Go straight to the work the request asks for.',
   ].join('\n');
 }
@@ -278,8 +387,11 @@ export function adFreeClaim(summary: string | null | undefined): string | null {
   return null;
 }
 
-function measuredLine(players: readonly string[]): string {
-  return `the videos play in ${ownPlayers(players)}, and ads inside that player may still play on videos whose owners earn from them — an app that embeds the player cannot switch those off. The app adds no ads of its own`;
+function measuredLine(players: readonly string[], ownAds: readonly OwnAdNetwork[] = []): string {
+  // 🔴 Q-1018: the second half is MEASURED now. It used to assert "adds no ads of its own" on every build,
+  // including one whose app carries the AdSense block our own Monetization wizard put there.
+  const own = ownAdsSentence(ownAds);
+  return `the videos play in ${ownPlayers(players)}, and ads inside that player may still play on videos whose owners earn from them — an app that embeds the player cannot switch those off. ${own || 'The app adds no ads of its own'}`;
 }
 
 /**
@@ -292,13 +404,15 @@ export function adFreeClaimCorrection(
   summary: string | null | undefined,
   players: readonly string[] | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
+  /** The app's own ad networks — see the note on `thirdPartyLimitsEndLine` for why it sits after `env`. */
+  ownAds: readonly OwnAdNetwork[] = [],
 ): string {
   if (!thirdPartyLimitsEnabled(env)) return '';
   const list = players ?? [];
   if (list.length === 0) return '';
   const text = String(summary ?? '');
   if (!adFreeClaim(text) || adsMayStillPlaySaid(text)) return '';
-  const bullet = `- The line above claiming that the app is ad-free is not supported — ${measuredLine(list)}.`;
+  const bullet = `- The line above claiming that the app is ad-free is not supported — ${measuredLine(list, ownAds)}.`;
   const lines = text.trimEnd().split('\n');
   let i = lines.length - 1;
   while (i >= 0 && lines[i].startsWith('- ')) i -= 1;
@@ -316,12 +430,16 @@ export function thirdPartyLimitsEndLine(
   summary: unknown,
   players: readonly string[] | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
+  // 🔴 AFTER `env`, DELIBERATELY (Q-1018). `env` is passed positionally by ~15 existing call sites; moving
+  // a tested signature's parameters to satisfy a convention is a diff whose only possible effect is a
+  // mistake. The app's own ad networks (`projectOwnAdSdks`) — [] means "measured, and it serves none".
+  ownAds: readonly OwnAdNetwork[] = [],
 ): string {
   if (!thirdPartyLimitsEnabled(env) || typeof summary !== 'string') return '';
   const list = players ?? [];
   if (list.length === 0 || !adRemovalRequested(prompt)) return '';
   if (adsMayStillPlaySaid(summary)) return '';
-  const line = measuredLine(list).replace(/^the videos/, 'The videos in this app');
+  const line = measuredLine(list, ownAds).replace(/^the videos/, 'The videos in this app');
   return `\n\nℹ️ **About ads:** ${line}.`;
 }
 
@@ -334,15 +452,19 @@ export function thirdPartyLimitsEndLine(
 export function withThirdPartyLimitsEndLine<T extends { ok?: boolean; summary?: unknown }>(
   result: T,
   prompt: string | null | undefined,
-  players: readonly string[] | null | undefined,
+  // 🔴 THE FACTS, NOT JUST THE PLAYERS (Q-1018). Taking the pair here is what lets the route pass
+  // `await adFactsNow()` inline: the chat handler sits ON TypeScript's control-flow limit (TS2563, raised
+  // three times on 2026-10-14), so one new local there costs more than a parameter shape does here.
+  facts: Partial<AdFacts> | null | undefined,
   onTold?: (players: readonly string[]) => void,
   env: NodeJS.ProcessEnv = process.env,
 ): T {
   try {
     if (!result || result.ok !== true) return result;
-    const line = thirdPartyLimitsEndLine(prompt, result.summary, players, env);
+    const players = facts?.players ?? [];
+    const line = thirdPartyLimitsEndLine(prompt, result.summary, players, env, facts?.ownAds ?? []);
     if (!line) return result;
-    try { onTold?.(players ?? []); } catch { /* a report line never costs the user the sentence */ }
+    try { onTold?.(players); } catch { /* a report line never costs the user the sentence */ }
     return { ...result, summary: `${result.summary as string}${line}` };
   } catch {
     return result;
@@ -355,6 +477,105 @@ export function withThirdPartyLimitsEndLine<T extends { ok?: boolean; summary?: 
  */
 export function claimReportWithAdFree(contradictionCount: number, auditSummary: string, adFreeFix: string, players: readonly string[]): string {
   return [contradictionCount > 0 ? auditSummary : '', adFreeFix ? thirdPartyLimitReportNote(players, 'claim') : ''].filter(Boolean).join(' · ');
+}
+
+// ── 5. When the honest answer IS the turn (Q-1019) ───────────────────────────────────────────────────────
+
+/**
+ * 🔴 Q-1019 (2026-10-15). An edit turn whose whole ask is *"remove the ads"* on an app that plays videos in
+ * YouTube's own player has ONE correct outcome: say that those ads are not the app's to switch off, and
+ * change nothing. The platform then filed that turn as a FAILED build — "The build produced no files.
+ * Please try again" written over the honest answer, the empty-build retry fired to produce the same answer
+ * again on a stronger rung, and on the free tier the upsell asked the user to add credits for it.
+ *
+ * That is the e628efd4 class, and `turnAnswer.ts` already holds the precedent one property over: a model
+ * POINTING at NavBharatAI's own APK flow is a final answer (autopsy 0c2a987a, `pointed`), not an empty
+ * build. This is the same shape for a third-party player, with one difference that matters — the verdict is
+ * taken from MEASURED FACTS about the project, not from reading the model's prose for a refusal.
+ *
+ * ⚠️ WHY `ownAds` MUST BE EMPTY, AND IT IS NOT A DETAIL. If the app serves its OWN ads (Q-1018 measures
+ * exactly that), then "remove the ads" IS something we can do — the ad script and the slot markup come out —
+ * so a turn that wrote nothing genuinely failed, and the retry it would otherwise skip is the right
+ * behaviour. The two rows are one fact read twice.
+ *
+ * ⚠️ AND THE AD REMOVAL MUST BE THE WHOLE ASK. "remove the ads and add dark mode" that wrote nothing is a
+ * half-answered turn: the retry might deliver the dark mode, so suppressing it would trade one problem for
+ * another. `adRemovalIsTheWholeAsk` is deliberately conservative — in any doubt it answers false and the
+ * turn behaves exactly as it does today.
+ */
+export interface AdRemovalAnsweredInput {
+  /** The user's words for this turn. */
+  prompt: string | null | undefined;
+  /** The model's OWN words, before any platform rewrite (`modelsOwnWords`). */
+  modelText: string | null | undefined;
+  /** An edit of an app that exists — never a new build (there is nothing to have removed ads from). */
+  editTurn: boolean;
+  /** An import / survey turn is the user's own code and is never judged by this module. */
+  importTurn?: boolean;
+  /** The WHOLE project's ad-serving players (`projectAdServingPlayers`). */
+  players: readonly string[] | null | undefined;
+  /** The WHOLE project's OWN ad networks (`projectOwnAdSdks`) — these ARE ours to remove. */
+  ownAds: readonly OwnAdNetwork[] | null | undefined;
+}
+
+/**
+ * Connectors that mean a second ask, in the languages this app is actually used in. Hindi/Hinglish included
+ * because the request this fires on is typed by Indian users ("ads hata do aur dark mode bhi add karo").
+ */
+const ANOTHER_ASK = /\b(?:and|also|plus|then|additionally|besides|aur|bhi|phir|saath)\b|[;&]|\+/i;
+
+/**
+ * Is removing the ads the ONLY thing this turn asks for? Conservative by design: one short clause, one
+ * sentence, no connector that could introduce a second ask. A longer or compound request answers false,
+ * which leaves today's behaviour exactly as it is. PURE.
+ */
+export function adRemovalIsTheWholeAsk(prompt: string | null | undefined): boolean {
+  const text = String(prompt ?? '').trim();
+  if (!text || text.length > 160) return false;
+  if (!adRemovalRequested(text)) return false;
+  // More than one sentence, or any line break, is more than one ask as far as this predicate is concerned.
+  if (/\n/.test(text)) return false;
+  if (/[.!?]\s*\S/.test(text)) return false;
+  return !ANOTHER_ASK.test(text);
+}
+
+/**
+ * Did this turn ANSWER the user rather than fail — because the only thing asked for is the one thing an app
+ * that embeds another service's player cannot do? All six conditions must hold; see the block above for why
+ * each one is there. PURE.
+ */
+export function adRemovalAnsweredNotBuilt(input: AdRemovalAnsweredInput, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!thirdPartyLimitsEnabled(env)) return false;
+  if (!input || input.editTurn !== true || input.importTurn === true) return false;
+  if ((input.players?.length ?? 0) === 0) return false;
+  if ((input.ownAds?.length ?? 0) > 0) return false;
+  if (!adRemovalIsTheWholeAsk(input.prompt)) return false;
+  // The model has to have actually GIVEN the honest answer. Without this the platform would be deciding
+  // what the model said, which is the very class `turnAnswer.ts` exists to close.
+  return adsMayStillPlaySaid(input.modelText);
+}
+
+/**
+ * Record that the honest answer finished the turn — every condition and the try live HERE, so the chat
+ * handler gains no branch and no try block (it sits ON TypeScript's control-flow limit, TS2563). Info,
+ * never a cause: it describes what the engine correctly did NOT do.
+ */
+export function recordAnsweredNotBuilt(
+  diag: { record(r: { phase: 'build'; severity: 'info'; code: string; message: string; autoResolved: boolean }): unknown },
+  answered: boolean,
+  message: string,
+): void {
+  if (!answered) return;
+  try {
+    diag.record({ phase: 'build', severity: 'info', code: 'TURN_ANSWERED_NOT_OURS', message, autoResolved: true });
+  } catch { /* an advisory line must never affect a build */ }
+}
+
+/** The report line for a turn the honest answer finished. Never user-facing. PURE. */
+export function adRemovalAnsweredNote(players: readonly string[]): string {
+  return `The only thing this turn asked for was removing ads that live inside ${ownPlayers(players.length > 0 ? players : ['YouTube'])}, which an app embedding that player cannot switch off. `
+    + 'The model said so and changed nothing, so its answer was left as the answer — not retried, not replaced with '
+    + '"the build produced no files", and no upsell was offered. The app serves no ads of its own (measured).';
 }
 
 /** The admin-only report line. PURE. */

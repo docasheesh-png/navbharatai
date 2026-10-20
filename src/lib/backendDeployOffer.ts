@@ -31,6 +31,24 @@ export type BackendKeySource = 'user' | 'server' | null;
  */
 export const DEPLOY_BACKEND_LABEL = 'Deploy backend';
 
+/**
+ * WHERE THAT BUTTON IS, in one sentence, for every surface that has to name it.
+ *
+ * 🔑 THE SAME REASON `DEPLOY_BACKEND_LABEL` IS SHARED, one level up. THREE surfaces now tell a user
+ * with a server-half app where to go — the domain screen's words when its host cannot navigate
+ * (`deployBackendWayForward`), the build's closing "what this app still needs" notice
+ * (`serverNeedText`), and this panel's own steps. Three copies of a route agree only until one of
+ * them is edited, and a route that is subtly wrong in one place is worse than no route: the user
+ * follows it, finds nothing, and stops believing the next instruction too.
+ *
+ * It stays ENGLISH in every language's notice, exactly as `Plans`, `Database` and `Publish` already
+ * do inside the localised strings in buildNeeds.ts — it names buttons whose own labels are English on
+ * the screen the user is being sent to. A translated route would send them looking for a button that
+ * is not there.
+ */
+export const DEPLOY_BACKEND_ROUTE =
+  'NavBharatAI Pro → "Publish" (at the top of the chat, or the More sheet → Publish) → "Deploy backend"';
+
 export interface BackendDeployOffer {
   /** Render the panel at all. False for an ordinary static app, where publish simply works. */
   show: boolean;
@@ -60,14 +78,18 @@ const SAVE_KEY_STEPS = [
   'Create a free account at render.com — this is your account and your billing, never NavBharatAI’s.',
   'In Render, open Account Settings → API Keys and create a key.',
   'Save it in NavBharatAI under Settings → Secrets & API Keys as RENDER_API_KEY.',
-  'Come back here and press Publish again.',
+  // "again" was right while this card could only follow a refusal. It can now appear BEFORE any
+  // press (see `serverHalf` below), and a user who has pressed nothing should not be told "again".
+  'Come back here and press Publish.',
 ];
 
 /** GitHub not connected yet: the first step is genuinely theirs, and the Connect button is offered. */
 const REPO_STEPS = [
   'Your code has to live in a GitHub repository first — that is what a host reads it from.',
   'Connect GitHub, then push this app to a repo of your own.',
-  'Come back here and press Publish again.',
+  // "again" was right while this card could only follow a refusal. It can now appear BEFORE any
+  // press (see `serverHalf` below), and a user who has pressed nothing should not be told "again".
+  'Come back here and press Publish.',
 ];
 
 /**
@@ -98,16 +120,46 @@ const PUSH_STEPS = [
  */
 export function backendDeployOffer(input: {
   code?: string | null;
+  /**
+   * 🔴 THE APP'S OWN SHAPE, KNOWN WITHOUT ANY PRESS (admin 2026-10-17: "backend connect ko simple
+   * banao").
+   *
+   * Counted in the user's steps, "backend connect" was: press Publish -> be REFUSED -> this card
+   * appears -> connect GitHub -> push a repo -> save a key -> Deploy. It began with a failure,
+   * because the only input this function had was a refusal code, and that code only exists after a
+   * 422. The app's own files always said it had a server half.
+   *
+   * ⚠️ WHY IT IS A SEPARATE INPUT AND NOT A SYNTHESISED CODE. The shortcut is to hand this function
+   * `'backend-deploy-available'` from a status read. Do NOT: the panel stores that value, and
+   * `shouldAutoDeployBackend` below watches the TRANSITION into it precisely so that "reacting to
+   * the code merely BEING set" cannot start a deploy because somebody reopened a panel — in their
+   * own Render account, on their own bill. So the FACT shows the card, a FRESH REFUSAL drives the
+   * auto-deploy, and nothing here can be mistaken for the other.
+   *
+   * `canDeploy` is the same question the two refusal codes already encode (a key resolved, or none),
+   * so the fact maps onto the SAME branches below rather than adding a third shape of this panel.
+   */
+  serverHalf?: { canDeploy: boolean } | null;
   ownRepo?: { owner: string; repo: string } | null;
   githubConnected?: boolean;
   keySource?: BackendKeySource;
   /** The workspace the deploy request is built from. Without it there is no request to send. */
   workspaceId?: string;
 }): BackendDeployOffer {
-  const code = String(input.code ?? '');
+  const refusal = String(input.code ?? '');
   const none: BackendDeployOffer = {
     show: false, title: '', canDeploy: false, repoPath: '', steps: [], cta: 'none', note: '',
   };
+  /**
+   * A real refusal always wins — it is the freshest, most specific thing we know about this app, and
+   * it is what the panel behaved on before this input existed. The FACT is the fallback, so a user
+   * who has not pressed anything yet still sees the card.
+   */
+  const code: PublishRefusalCode = refusal === 'needs-server-hosting' || refusal === 'backend-deploy-available'
+    ? refusal
+    : input.serverHalf
+      ? (input.serverHalf.canDeploy ? 'backend-deploy-available' : 'needs-server-hosting')
+      : '';
   if (code !== 'needs-server-hosting' && code !== 'backend-deploy-available') return none;
 
   const title = 'Your app has a server half';

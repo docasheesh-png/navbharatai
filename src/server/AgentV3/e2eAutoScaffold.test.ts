@@ -164,7 +164,7 @@ describe('wired into every build, and honest about what it did', () => {
 
   it('writes create-only, so a file the user owns is never overwritten', () => {
     const at = route.indexOf('AGENTV3_AUTO_E2E');
-    const block = route.slice(at, at + 2200);
+    const block = route.slice(at, route.indexOf('// GA-6', at));
     expect(block).toContain('if (exists) continue;');
   });
 

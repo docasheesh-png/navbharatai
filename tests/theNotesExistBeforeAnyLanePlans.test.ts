@@ -117,20 +117,25 @@ describe('🔴 THE WIRING — the blueprint lane no longer plans from the bare r
   it('the ONE computation happens ABOVE the lane that plans first', () => {
     const computed = ROUTE.indexOf('const requestNoteSet = requestNotesFor({');
     const blueprint = ROUTE.indexOf('P-ARCH+.3 — up-front BLUEPRINT');
-    const manifest = ROUTE.indexOf('manifestUserPrompt(withRequestNotes(prompt, requestNotesText), scaffold)');
+    const manifest = ROUTE.indexOf('manifestUserPrompt(withRequestNotes(prompt, requestNotesText), scaffold, prompt)');
     expect(computed, 'the one computation must be findable').toBeGreaterThan(0);
     expect(blueprint).toBeGreaterThan(computed);
     expect(manifest).toBeGreaterThan(computed);
   });
 
   it('the file manifest and the shared contract both read the notes', () => {
-    expect(ROUTE).toContain('manifestUserPrompt(withRequestNotes(prompt, requestNotesText), scaffold)');
+    expect(ROUTE).toContain('manifestUserPrompt(withRequestNotes(prompt, requestNotesText), scaffold, prompt)');
     expect(ROUTE).toContain('contractUserPrompt(withRequestNotes(prompt, requestNotesText), manifest)');
   });
 
-  it('🔒 the FILE BUDGET still measures the user\'s request, not our notes (Q-991 measured 13 → 25)', () => {
-    // The notes open the prompt the manifest is PLANNED from; the budget beside it reads the bare prompt.
-    expect(ROUTE).toContain('overBudgetNote(manifest.length, fileBudgetForPrompt(prompt))');
+  it('🔒 BOTH file budgets measure the user\'s request, not our notes (Q-991 measured 13 → 25; Q-1017)', () => {
+    // The notes open the prompt the manifest is PLANNED from, and NEITHER budget may be sized from them.
+    // The one recorded as telemetry reads the bare prompt:
+    expect(ROUTE).toContain('fileBudgetReport(parsedForBudget.length, fileBudgetForPrompt(prompt), foldedManifest)');
+    // ...and so does the one spliced into the prompt the MODEL reads. `manifestUserPrompt`'s third argument
+    // (`sizeFrom`) defaults to its first, so omitting it sized the user's app from our own instructions —
+    // the same question answered twice, differently (Q-1017, 2026-10-16).
+    expect(ROUTE).toContain('manifestUserPrompt(withRequestNotes(prompt, requestNotesText), scaffold, prompt)');
   });
 
   it('🔒 the aggregator READS the one result — it does not derive the same facts again', () => {

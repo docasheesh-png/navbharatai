@@ -160,3 +160,41 @@ export function withoutOpenerPolicy<T extends Record<string, unknown>>(headers: 
   }
   return out as T;
 }
+
+/**
+ * A STRICT CSP FOR THE SCRIPT-FREE PUBLIC PAGES — the legal pages (routes/legal.ts) and the product
+ * pages (routes/marketing.ts). Production-hardening pass, 2026-10-19.
+ *
+ * The app's policy above has to allow inline and eval'd script and a list of CDNs, because the app and
+ * its in-browser preview need them. These pages need NONE of that: they are complete server-rendered
+ * HTML, contract-tested to contain no executable script (the only <script> is a JSON-LD data block,
+ * which a browser never runs), one inline <style>, and on the product pages a same-origin favicon. Yet
+ * they render text an admin can edit (About overrides) and long Markdown documents, so the policy is
+ * the second wall behind the HTML escaping: even an escaping bug could not run a script here.
+ *
+ *   default-src 'none'        nothing loads unless listed below
+ *   img-src 'self'            the favicon
+ *   style-src 'unsafe-inline' the page's own <style> block (no stylesheet is fetched)
+ *   connect-src 'self'        moot with no script, but audit tools (Lighthouse's robots.txt and
+ *                             llms.txt checks) fetch same-origin files FROM the page; 'none' made
+ *                             them report a valid robots.txt as invalid
+ *   base-uri / form-action 'none'   no <base> hijack, no form posts — these pages have no forms
+ *   frame-ancestors 'self'    exactly as the app's policy (and X-Frame-Options: SAMEORIGIN)
+ *
+ * NOT for /status (it runs an inline poller) or anything the SPA serves.
+ */
+export const STATIC_PAGE_CSP = [
+  "default-src 'none'",
+  "img-src 'self'",
+  "style-src 'unsafe-inline'",
+  "connect-src 'self'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'self'",
+  'upgrade-insecure-requests',
+].join('; ');
+
+/** Replace the app CSP (already set by Helmet) with STATIC_PAGE_CSP on one response. */
+export function useStaticPageCsp(res: { setHeader: (k: string, v: string) => unknown }): void {
+  res.setHeader('Content-Security-Policy', STATIC_PAGE_CSP);
+}

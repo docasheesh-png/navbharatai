@@ -62,11 +62,23 @@ export function registerBuildRoutes(app: Express): void {
 
   // G1.2 — Refresh-safe build recovery. Client calls this on mount to restore
   // the last completed build for a sessionId without re-running the build.
+  //
+  // 🔒 THE SAME HOLE AS Q-780, ON THE ROUTE Q-780 MISSED (production-hardening pass, 2026-10-19). This
+  // returns the app's whole `files` map — the user's source code — and it had NO authentication: the
+  // session id was treated as a capability, but `App.tsx` mints it as `pro-${Date.now()}`, a guessable
+  // millisecond timestamp. The three build-history routes below were closed with mayTouchBuildHistory;
+  // this read now passes the same rule, with the same refusals (which do not reveal whether a session
+  // exists). The store has had no writer since the legacy engine was retired, so what it still holds
+  // is old builds — exactly the data nobody is watching.
   app.get('/api/build-session/:sessionId', async (req: Request, res: Response) => {
     try {
       const { sessionId } = routeParams(req.params);
       if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ error: 'sessionId required' });
-      const session = await proBuildSessionStore.load(sessionId);
+      const access = await mayTouchBuildHistory(await verifyFirebaseToken(req), sessionId, countWorkspaceFiles);
+      if (!access.allowed) return res.status(refusalStatus(access.reason)).json({ error: refusalMessage(access.reason) });
+      // Legacy bare records have no persisted owner. Never fall back to them: a second account can
+      // create its own workspace with the same session id. Existing records are retained for review.
+      const session = await proBuildSessionStore.load(access.workspaceId);
       if (!session) return res.status(404).json({ error: 'not found' });
       return res.json(session);
     } catch {
@@ -85,8 +97,12 @@ export function registerBuildRoutes(app: Express): void {
       // `agentv3-anon-…` keeps its documented capability model.
       const access = await mayTouchBuildHistory(await verifyFirebaseToken(req), sessionId, countWorkspaceFiles);
       if (!access.allowed) return res.status(refusalStatus(access.reason)).json({ error: refusalMessage(access.reason) });
-      const versions = await buildHistoryStore.list(sessionId);
-      return res.json({ versions });
+      const versions = await buildHistoryStore.list(access.workspaceId);
+      // This notice is the same for every empty owner history and never probes a global legacy id.
+      // It explains the security migration without revealing whether somebody else's old rows exist.
+      return res.json({ versions, ...(versions.length === 0 && access.as === 'owner' ? {
+        historyNotice: 'Restore points saved before the security update require account ownership verification before they can be opened. Your current app is unchanged.',
+      } : {}) });
     } catch {
       return res.status(500).json({ error: 'failed to load history' });
     }
@@ -101,7 +117,7 @@ export function registerBuildRoutes(app: Express): void {
       // i.e. the user's source code.
       const access = await mayTouchBuildHistory(await verifyFirebaseToken(req), sessionId, countWorkspaceFiles);
       if (!access.allowed) return res.status(refusalStatus(access.reason)).json({ error: refusalMessage(access.reason) });
-      const version = await buildHistoryStore.get(sessionId, versionId);
+      const version = await buildHistoryStore.get(access.workspaceId, versionId);
       if (!version) return res.status(404).json({ error: 'version not found' });
       return res.json(version);
     } catch {
@@ -146,7 +162,7 @@ export function registerBuildRoutes(app: Express): void {
       }
       if (Object.keys(files).length === 0) return res.status(400).json({ error: 'no readable files to checkpoint' });
       const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim().slice(0, 120) : 'Manual checkpoint';
-      await buildHistoryStore.save(sessionId, {
+      await buildHistoryStore.save(access.workspaceId, {
         commitMessage: name,
         fileCount: Object.keys(files).length,
         files,

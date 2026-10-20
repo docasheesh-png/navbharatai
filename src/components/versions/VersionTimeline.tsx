@@ -26,7 +26,7 @@ export interface TimelineVersion {
 }
 
 export interface VersionTimelineProps {
-  /** `build_history/{historyKey}` — the app's workspace id minus this user's own prefix (`historyKeyFor`). */
+  /** API request id (`historyKeyFor`); the server resolves it to owner-scoped storage. */
   historyKey: string;
   /** Where a restore writes. Absent ⇒ the list is read-only (another app is being viewed). */
   workspaceId?: string;
@@ -55,6 +55,7 @@ export function VersionTimeline({ historyKey, workspaceId, userId, email, onRest
   const [points, setPoints] = useState<TimelineVersion[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [historyNotice, setHistoryNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; ok: boolean } | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -64,6 +65,7 @@ export function VersionTimeline({ historyKey, workspaceId, userId, email, onRest
   const canRestore = !!workspaceId;
 
   const load = useCallback(async (key: string) => {
+    setHistoryNotice('');
     if (!key) { setPoints([]); return; }
     setLoading(true);
     try {
@@ -71,6 +73,7 @@ export function VersionTimeline({ historyKey, workspaceId, userId, email, onRest
       const data = await res.json().catch(() => null);
       if (!res.ok) { setPoints([]); setLoadFailed(true); return; }
       setLoadFailed(false);
+      setHistoryNotice(typeof data?.historyNotice === 'string' ? data.historyNotice : '');
       setPoints(data && Array.isArray(data.versions) ? (data.versions as TimelineVersion[]) : []);
     } catch {
       // "We could not read your versions" and "you have none" are different facts.
@@ -183,11 +186,11 @@ export function VersionTimeline({ historyKey, workspaceId, userId, email, onRest
         ) : points.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-center px-6">
             <History className="w-9 h-9 text-faint" />
-            <p className="text-sm text-faint">{loadFailed ? 'Could not load your versions' : 'No saved versions yet'}</p>
+            <p className="text-sm text-faint">{loadFailed ? 'Could not load your versions' : historyNotice ? 'No restore points available here yet' : 'No saved versions yet'}</p>
             <p className="text-xs text-faint">
               {loadFailed
                 ? 'Your versions are safe — we just could not read them right now. Please try again in a moment.'
-                : 'Each build is saved here automatically — your first one will show up as a version to restore.'}
+                : historyNotice || 'Each build is saved here automatically — your first one will show up as a version to restore.'}
             </p>
           </div>
         ) : (

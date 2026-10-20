@@ -1,3 +1,5 @@
+import { createPendingRequestIdentities } from '../lib/requestIdentity';
+import { confirmedQueueResponse, confirmedQueueClaim, confirmedEnqueue, type QueueResponseItem } from '../lib/queueResponse';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clockKeptOnReattach, clockFromAttach } from '../components/agentv3/buildClock';
 import { agentV3Reducer, adoptWorkspace as adoptWorkspaceState } from '../components/agentv3/agentV3Reducer';
@@ -55,7 +57,7 @@ export interface UseAgentV3Build {
    * there is no app code a "Fix with AI" could refer to (autopsy fdd59ef8).
    */
   errorBeforeBuildStarted: boolean;
-  start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean; confirmedFeatures?: { include: string[]; exclude: string[] } }) => Promise<void>;
+  start: (prompt: string, opts?: { requestId?: string; queueItemId?: string; queueClaimToken?: string; userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean; confirmedFeatures?: { include: string[]; exclude: string[] } }) => Promise<void>;
   /** Approve or reject a pending plan/permission gate (P4). */
   respond: (requestId: string, approved: boolean) => Promise<void>;
   /** A project import gave this session a workspace without a build — adopt it unless one is already live. */
@@ -102,12 +104,13 @@ export interface UseAgentV3Build {
   /** Revert the last merge on the repo default branch (own-repo storage). Returns an honest result. */
   revertLastMerge: (opts: { repo: string; userId?: string; email?: string; githubToken?: string }) => Promise<RevertResult>;
   /** Queue executor (FIX #4.3): claim the next queued command (or null); mark the running one complete. */
-  queueNext: (workspaceId?: string) => Promise<{ id: string; prompt: string } | null>;
-  queueComplete: (workspaceId: string | undefined, ok: boolean, note?: string) => Promise<void>;
+  queueNext: (workspaceId?: string, resumeAfterFailure?: boolean) => Promise<{ id: string; prompt: string; claimToken?: string } | null>;
+  queueComplete: (workspaceId: string | undefined, ok: boolean, note?: string, claim?: { id: string; claimToken?: string }) => Promise<void>;
   /** Queue UI (FIX #6): enqueue a command, list this app's queue, cancel a pending item. */
   queueEnqueue: (workspaceId: string | undefined, prompt: string, source: 'user' | 'planner' | 'advisor') => Promise<boolean>;
   queueList: (workspaceId?: string) => Promise<QueueItemView[]>;
   queueCancel: (workspaceId: string | undefined, id: string) => Promise<QueueItemView[]>;
+  queueRecover: (workspaceId: string | undefined, id: string) => Promise<boolean>;
   /** Ask the server whether a build is running for this account (sets serverBuildRunning). Pass
    *  `workspaceId` to scope the check to the CALLER's session — omitting it falls back to the
    *  account-wide check, which is what caused a different session's still-running build to
@@ -157,14 +160,7 @@ export interface BillingBlock {
 }
 
 /** One command in the per-app queue, as the queue UI renders it (matches the server's QueueItem). */
-export interface QueueItemView {
-  id: string;
-  prompt: string;
-  source: 'user' | 'planner' | 'advisor';
-  status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
-  createdTs: number;
-  note?: string;
-}
+export type QueueItemView = QueueResponseItem;
 
 /** Result of "Ship to main" (own-repo storage, slice 2) — an honest, renderable outcome. */
 export interface ShipResult {
@@ -1098,49 +1094,51 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   // QUEUE EXECUTOR (FIX #4.3, client-driven): claim the next queued command (server atomically moves it
   // to 'running'). Returns the claimed { id, prompt } or null when nothing is runnable. Best-effort.
-  const queueNext = useCallback(async (workspaceId?: string): Promise<{ id: string; prompt: string } | null> => {
+  const queueNext = useCallback(async (workspaceId?: string, resumeAfterFailure = false): Promise<{ id: string; prompt: string; claimToken?: string } | null> => {
     if (!workspaceId) return null;
     try {
       const res = await fetch('/api/agentv3/queue/next', {
         method: 'POST', headers: await authJsonHeaders(),
-        body: JSON.stringify({ workspaceId, userId: userIdRef.current, email: emailRef.current }),
+        body: JSON.stringify({ workspaceId, resumeAfterFailure, userId: userIdRef.current, email: emailRef.current }),
       });
-      if (!res.ok) return null;
       const j = await res.json().catch(() => ({}));
-      const c = j?.claimed;
-      return c && typeof c.id === 'string' && typeof c.prompt === 'string' ? { id: c.id, prompt: c.prompt } : null;
-    } catch { return null; }
+      if (!res.ok) throw new Error(j?.error || 'Queue coordination is unavailable. Please retry.');
+      const queue = confirmedQueueResponse(j);
+      if (queue.paused) throw new Error('The queue paused after an interrupted or failed step. Review it before continuing pending steps.');
+      const c = confirmedQueueClaim(j);
+      return c ? { id: c.id, prompt: c.prompt, claimToken: c.claimToken } : null;
+    } catch (e) { throw e instanceof Error ? e : new Error('Could not confirm the queued step. Please retry.'); }
   }, []);
 
   /** Mark the running queued command done/failed once its build settled (a failure pauses the queue). */
-  const queueComplete = useCallback(async (workspaceId: string | undefined, ok: boolean, note?: string): Promise<void> => {
+  const queueComplete = useCallback(async (workspaceId: string | undefined, ok: boolean, note?: string, claim?: { id: string; claimToken?: string }): Promise<void> => {
     if (!workspaceId) return;
     try {
       await fetch('/api/agentv3/queue/complete', {
         method: 'POST', headers: await authJsonHeaders(),
-        body: JSON.stringify({ workspaceId, ok, note, userId: userIdRef.current, email: emailRef.current }),
+        body: JSON.stringify({ workspaceId, ok, note, itemId: claim?.id, claimToken: claim?.claimToken, userId: userIdRef.current, email: emailRef.current }),
       });
-    } catch { /* best-effort — a stale 'running' item self-heals to 'failed' on next load */ }
+    } catch { /* Server owns completion; an interrupted claim requires explicit lease-backed recovery. */ }
   }, []);
 
   // QUEUE UI (FIX #6): enqueue / list / cancel for this app's durable command queue. All best-effort.
-  const parseQueueItems = (j: unknown): QueueItemView[] => {
-    const items = (j as { items?: unknown })?.items;
-    return Array.isArray(items)
-      ? items.filter((i): i is QueueItemView => !!i && typeof (i as QueueItemView).id === 'string' && typeof (i as QueueItemView).prompt === 'string')
-      : [];
-  };
-
+  const pendingQueueRequestIds = useRef(createPendingRequestIdentities());
+  const pendingBuildRequestIds = useRef(createPendingRequestIdentities());
   const queueEnqueue = useCallback(async (workspaceId: string | undefined, prompt: string, source: 'user' | 'planner' | 'advisor'): Promise<boolean> => {
     if (!workspaceId || !prompt.trim()) return false;
+    const requestKey = JSON.stringify([workspaceId, prompt.trim(), source]);
+    const requestId = pendingQueueRequestIds.current.begin(requestKey);
     try {
       const res = await fetch('/api/agentv3/queue/enqueue', {
         method: 'POST', headers: await authJsonHeaders(),
-        body: JSON.stringify({ workspaceId, prompt, source, userId: userIdRef.current, email: emailRef.current }),
+        body: JSON.stringify({ workspaceId, prompt, source, requestId, userId: userIdRef.current, email: emailRef.current }),
       });
       const j = await res.json().catch(() => ({}));
-      return res.ok && j?.added === true;
-    } catch { return false; }
+      if (!res.ok) throw new Error(j?.error || 'Your queued step could not be confirmed. Please retry.');
+      const added = confirmedEnqueue(j);
+      pendingQueueRequestIds.current.acknowledge(requestKey, requestId);
+      return added;
+    } catch (e) { throw e instanceof Error ? e : new Error('Your queued step could not be confirmed. Please retry.'); }
   }, []);
 
   const queueList = useCallback(async (workspaceId?: string): Promise<QueueItemView[]> => {
@@ -1149,9 +1147,10 @@ export function useAgentV3Build(): UseAgentV3Build {
       const params = new URLSearchParams({ workspaceId });
       if (userIdRef.current) params.set('userId', userIdRef.current);
       const res = await fetch(`/api/agentv3/queue?${params.toString()}`, { headers: await authJsonHeaders() });
-      if (!res.ok) return [];
-      return parseQueueItems(await res.json().catch(() => ({})));
-    } catch { return []; }
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error || 'Queue progress is temporarily unavailable. Please retry.');
+      return confirmedQueueResponse(j).items;
+    } catch (e) { throw e instanceof Error ? e : new Error('Queue progress could not be confirmed. Please retry.'); }
   }, []);
 
   const queueCancel = useCallback(async (workspaceId: string | undefined, id: string): Promise<QueueItemView[]> => {
@@ -1161,9 +1160,22 @@ export function useAgentV3Build(): UseAgentV3Build {
         method: 'POST', headers: await authJsonHeaders(),
         body: JSON.stringify({ workspaceId, id, userId: userIdRef.current, email: emailRef.current }),
       });
-      if (!res.ok) return [];
-      return parseQueueItems(await res.json().catch(() => ({})));
-    } catch { return []; }
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error || 'Queue progress is temporarily unavailable. Please retry.');
+      return confirmedQueueResponse(j).items;
+    } catch (e) { throw e instanceof Error ? e : new Error('Queue progress could not be confirmed. Please retry.'); }
+  }, []);
+
+  const queueRecover = useCallback(async (workspaceId: string | undefined, id: string): Promise<boolean> => {
+    if (!workspaceId || !id) return false;
+    const res = await fetch('/api/agentv3/queue/recover', {
+      method: 'POST', headers: await authJsonHeaders(), body: JSON.stringify({ workspaceId, id }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j?.error || 'Could not confirm whether this step was interrupted. Please retry.');
+    confirmedQueueResponse(j);
+    if (typeof j?.recovered !== 'boolean') throw new Error('Recovery progress could not be confirmed. Refresh the queue before retrying.');
+    return j.recovered;
   }, []);
 
   const respond = useCallback(async (requestId: string, approved: boolean) => {
@@ -1327,7 +1339,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   }, []);
 
   const start = useCallback(
-    async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean; confirmedFeatures?: { include: string[]; exclude: string[] } }) => {
+    async (prompt: string, opts?: { requestId?: string; queueItemId?: string; queueClaimToken?: string; userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean; confirmedFeatures?: { include: string[]; exclude: string[] } }) => {
       if (running) return;
       // V4-1a — remember this turn's shape so an interrupted build can auto-continue itself
       // (attachments/importUrl deliberately dropped: the continue-turn resumes from durable files).
@@ -1383,14 +1395,7 @@ export function useAgentV3Build(): UseAgentV3Build {
       // so the `catch` below can read it (see shouldSurfaceStreamError).
       let sawResult = false;
 
-      try {
-        const res = await fetch('/api/agentv3/chat', {
-          method: 'POST',
-          // SECURITY (C1): send the Firebase ID token so the server derives identity from the VERIFIED
-          // token, not the body.userId (which it no longer trusts). forceRefresh=true mints a fresh
-          // token so a stale/expired cached one self-heals instead of arriving unverifiable.
-          headers: await authJsonHeaders(true),
-          body: JSON.stringify({
+      const executionBody = {
             prompt,
             userId: opts?.userId,
             email: opts?.email,
@@ -1401,6 +1406,8 @@ export function useAgentV3Build(): UseAgentV3Build {
             planFirst: opts?.planFirst !== false,
             thinking: opts?.thinking === true,
             sessionId: opts?.sessionId,
+            queueItemId: opts?.queueItemId,
+            queueClaimToken: opts?.queueClaimToken,
             // Role chats (FIX #5): 'planner' | 'advisor' routes the turn into the read-only role lane
             // (no tools, no build lock) — absent for normal builder turns.
             chatRole: opts?.chatRole || undefined,
@@ -1422,7 +1429,20 @@ export function useAgentV3Build(): UseAgentV3Build {
             // missing token simply falls back to the platform's invisible storage. Read at send time
             // so a GitHub sign-in mid-session is picked up immediately.
             githubToken: (() => { try { return localStorage.getItem('gh_token') || undefined; } catch { return undefined; } })(),
-          }),
+      };
+      const requestKey = JSON.stringify(executionBody);
+      const requestId = opts?.requestId || (!opts?.chatRole && auth.currentUser && opts?.sessionId && /^[A-Za-z0-9_-]{6,64}$/.test(opts.sessionId))
+        ? pendingBuildRequestIds.current.begin(requestKey, opts?.requestId) : undefined;
+      let receiptRefused = false;
+
+      try {
+        const res = await fetch('/api/agentv3/chat', {
+          method: 'POST',
+          // SECURITY (C1): send the Firebase ID token so the server derives identity from the VERIFIED
+          // token, not the body.userId (which it no longer trusts). forceRefresh=true mints a fresh
+          // token so a stale/expired cached one self-heals instead of arriving unverifiable.
+          headers: await authJsonHeaders(true),
+          body: JSON.stringify({ ...executionBody, requestId }),
           signal: controller.signal,
         });
 
@@ -1437,6 +1457,11 @@ export function useAgentV3Build(): UseAgentV3Build {
             resumable = body.resumable === true;
           } catch {
             /* non-JSON error body */
+          }
+          // A verified terminal receipt confirms that this logical request has ended. No retry is
+          // executed here; a later deliberate Send may create a new turn. Unknown/in-progress stays pinned.
+          if (body.code === 'BUILD_REQUEST_TERMINAL' && body.requestState === 'terminal') {
+            pendingBuildRequestIds.current.acknowledge(requestKey, requestId);
           }
           // PAID-PUBLIC (billing PR 5): credits ran out → the server refused the build pre-start with a
           // clean 402 (no build was started). Render a dedicated "Add credits" screen from the structured
@@ -1545,7 +1570,15 @@ export function useAgentV3Build(): UseAgentV3Build {
             // `done`, so `done` is not build-terminal. Further events still render; `running` clears as
             // soon as the result is known. A resumable (deadline-paused) result clears running too — the
             // bounded auto-continue re-arms it via state.resumable.
+            if (event.type === 'error' && typeof (event as { code?: unknown }).code === 'string'
+              && String((event as { code?: unknown }).code).startsWith('BUILD_REQUEST_')) {
+              receiptRefused = true;
+              if ((event as { code?: unknown }).code === 'BUILD_REQUEST_TERMINAL' && (event as { requestState?: unknown }).requestState === 'terminal') {
+                pendingBuildRequestIds.current.acknowledge(requestKey, requestId);
+              }
+            }
             if ((event as { type?: string }).type === 'result' && !isStale(gen)) {
+              if (!receiptRefused) pendingBuildRequestIds.current.acknowledge(requestKey, requestId);
               sawResult = true; // build is terminal — a later stream drop is not a failure
               sawResultRef.current = true; // WATCHDOG — a later "not running" probe = finished, not stalled
               resultWorkspaceRef.current = workspaceIdRef.current;
@@ -1697,5 +1730,5 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
 
-  return { state, running, error, errorBeforeBuildStarted, start, respond, restore, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
+  return { state, running, error, errorBeforeBuildStarted, start, respond, restore, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

@@ -626,6 +626,39 @@ export const VEHICLE_CAMERA_RULE_LINES: readonly string[] = [
 ];
 
 /**
+ * FORWARD DIRECTION — ONE CONVENTION FOR EVERY RUNNING / RACING GAME (admin 2026-10-16).
+ *
+ * Admin: every runner or racer NavBharatAI built (car, bike, human runner; endless runner, 3D racer) moved
+ * the WRONG way — the player and the world came OUT of the screen toward the user instead of going INTO it.
+ *
+ * 🔑 ROOT CAUSE. The guide stated forward only for a DRIVEN vehicle under the kit's chase camera
+ * (VEHICLE_CAMERA_RULE_LINES: "every model faces its local +Z", camera behind it). It said nothing for the
+ * other half of the genre — the FIXED camera of an endless runner or a lane racer, which is how most of them
+ * are written: three.js's camera looks down −Z, so a runner placed in front of it and moved along +Z (the kit's
+ * "forward", driveVehicle at heading 0) runs AT the camera, showing its face; and obstacles moved along −Z
+ * drift AWAY, so the player seems to run backwards. The 2D templates never named the scroll direction either.
+ * These lines are the one convention, stated so a builder with or without the kit can follow it.
+ */
+export const FORWARD_DIRECTION_RULE_LINES: readonly string[] = [
+  '➡️ FORWARD DIRECTION (every running, racing, riding or flying game — car, bike, runner, plane):',
+  'the player always moves INTO the screen, AWAY from the camera. Never toward the user.',
+  '• 3D (three.js): the camera sits BEHIND and ABOVE the player and looks forward. Forward is world −Z',
+  '  (three.js cameras look down −Z). A fixed/runner camera: camera.position.set(0, 3, player.z + 7);',
+  '  camera.lookAt(0, 1, player.z - 10). Kit models face their local +Z, so the player model gets',
+  '  rotation.y = Math.PI to face −Z (set it BEFORE createVehicleState, and driveVehicle then drives −Z).',
+  '• ENDLESS RUNNER / LANE RACER (player stays near z = 0, world scrolls): obstacles, coins and road tiles',
+  '  SPAWN FAR AHEAD at negative z (e.g. z = −80) and move +Z toward the camera (o.position.z += speed*dt);',
+  '  recycle one once o.position.z > camera.position.z. NEVER spawn at +z, never move the world along −Z.',
+  '  If instead the player moves, it moves along −Z (player.position.z -= speed*dt) and the camera follows',
+  '  at player.z + d.',
+  '• Babylon.js is left-handed: forward is +Z there; the camera still sits behind (at −Z of the player).',
+  '• 2D SIDE RUNNER: the player faces and runs RIGHT; the world (ground, obstacles, parallax) scrolls LEFT',
+  '  (x -= speed*dt); new obstacles appear at the right edge.',
+  '• 2D TOP-DOWN RACER: the car points UP the screen; the road and traffic scroll DOWN (y += speed*dt);',
+  '  new traffic appears at the top.',
+];
+
+/**
  * THE GAME RULE FOR A WRITING SUB-AGENT (admin 2026-10-11, build 46e2d74b; critic item P-3).
  *
  * The architect's prompt carries the whole game section; a Frontend or Fullstack specialist handed a game
@@ -645,6 +678,7 @@ export const GAME_KIT_RULE = [
   'run_recipe({ name: "generate_game_…" }) recipes the game needs. A player\'s vehicle has a NON-ZERO',
   'starting speed unless the user asked for a standing start.',
   ...VEHICLE_CAMERA_RULE_LINES,
+  ...FORWARD_DIRECTION_RULE_LINES,
 ].join('\n');
 
 export function architectSystemPrompt(framework?: string, opts?: { parallelBuild?: boolean }): string {
@@ -1016,6 +1050,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     // face-on, the driver's left is the screen's right, so correct steering read as mirrored. Bugs 1 and 2
     // were ONE defect. The camera half is now stated in plain three.js, true with or without the kit.
     ...VEHICLE_CAMERA_RULE_LINES.map((l) => `  ${l}`),
+    ...FORWARD_DIRECTION_RULE_LINES.map((l) => `  ${l}`),
     '  With the kit: move a car, bike or ridden animal with driveVehicle(vehicle, state, input.axis(), dt)',
     '  (state from createVehicleState; both in src/game/three/objects.ts) — it owns those signs — and keep',
     '  the camera behind it: camera: \'chase\' or ctx.follow(vehicle) in the game shell, or a',

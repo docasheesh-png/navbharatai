@@ -68,6 +68,7 @@ import { footerTapPlan, type ModeFooterKey } from './lib/footerSheets';
 import { startFreshCase, CASE_ID_KEY, CASE_DOC_KEY } from './lib/sdaCaseStore';
 import { newSdaCaseId } from './lib/sdaCaseId';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
+import { warmModeChunksWhenIdle } from './lib/warmModeChunks';
 import { ActionDot } from './components/ActionDot';
 import type { ActionTone } from './lib/actionNavigator';
 import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, recentTargetFromId, startsFreshOnPick, recentModeEntries, recentRowClosable, nextRecentAfterClose, lastChatClosed, activeModeId } from './components/chat/modePicker';
@@ -158,6 +159,7 @@ import OfflineBanner from './components/OfflineBanner';
 import { Message, ChatSession, ApiKeys, ViewType, SettingsScreen, FileSystem, ErrorContext } from './types';
 import { isEmptyConversation, sameTranscript, sameFileMap, cleanTitle } from './lib/chatHistory';
 import { claimDeviceSessions, readDeviceSessionsFor } from './lib/deviceSessions';
+import { shapeSessions } from './lib/sessionShape';
 import { sanitizeFirestoreData } from './lib/firestoreUtils';
 import { safeLocalJson } from './lib/safeLocalJson';
 
@@ -196,6 +198,10 @@ export default function App() {
   const { logs, addLog } = useDevLogs();
   const { theme, setTheme, preferredLanguage, setPreferredLanguage, mode, setMode, enabledModules, setEnabledModules, isThemePickerOpen, setIsThemePickerOpen } = useSettings();
   // ───────────────────────────────────────────────────────────────────────
+
+  // The screens a Mode pick opens are fetched while the browser is idle, so the pick finds them cached
+  // (lib/warmModeChunks.ts — measured: the first switch to each AI was 6-8x slower than the next).
+  useEffect(() => { warmModeChunksWhenIdle(); }, []);
 
   // Startup: evict large cached data if localStorage is > 3 MB to keep space for Firebase auth
   useEffect(() => {
@@ -448,7 +454,7 @@ export default function App() {
   // bookmark reopens it) and restore / on leaving. replaceState (not push) so it never pollutes history.
   useEffect(() => {
     try {
-      const onAdminPath = window.location.pathname.replace(/\/+$/, '') === '/admin';
+      const onAdminPath = ['/admin', '/failedbr'].includes(window.location.pathname.replace(/\/+$/, ''));
       if (activeView === 'admin' && !onAdminPath) window.history.replaceState(null, '', '/admin');
       else if (activeView !== 'admin' && onAdminPath) window.history.replaceState(null, '', '/');
     } catch { /* history unavailable — best effort */ }
@@ -622,9 +628,15 @@ export default function App() {
     return id;
   });
 
-  // G1.2 — on mount, try to restore the last completed build for this session.
+  // G1.2 — once signed in, try to restore the last completed build for this session.
   // Best-effort: any failure is silent so the normal empty-state UI shows instead.
+  // ONLY FOR A SIGNED-IN USER, AND ONCE: the route now requires the session's owner (Q-780 rule), so a
+  // signed-out visitor's request could only be refused — it used to hit the server on every first visit
+  // and log a 404 in the console of every visitor to the homepage.
+  const buildSessionRestoreTried = useRef(false);
   useEffect(() => {
+    if (!user?.uid || buildSessionRestoreTried.current) return;
+    buildSessionRestoreTried.current = true;
     let cancelled = false;
     fetchBuildSession(currentProSessionId).then((saved) => {
       if (cancelled || !saved || !saved.files || Object.keys(saved.files).length === 0) return;
@@ -637,7 +649,7 @@ export default function App() {
     }).catch(() => {});
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // run once on mount only
+  }, [user?.uid]); // once, when a signed-in user is first known
 
   // Tracks whether the initial cloud load finished — guards the auto-save effect
   // so we never overwrite cloud data before we've pulled it in.
@@ -656,7 +668,9 @@ export default function App() {
     //    account's chats; another account's are removed here, before anything reads them (see
     //    lib/deviceSessions.ts — they used to be loaded into, and synced up for, whoever signed in next).
     claimDeviceSessions(user.uid);
-    const local = readDeviceSessionsFor(user.uid) as ChatSession[];
+    // shapeSessions at the door here too: it also strips platform tags a chat saved while they leaked
+    // (lib/platformTags.ts), so neither the list nor a reopened chat shows them.
+    const local = shapeSessions(readDeviceSessionsFor(user.uid)) as unknown as ChatSession[];
     setSessions(local);
 
     // 2) Cloud: pull cross-device workspace and merge (newer lastUpdated wins)
@@ -665,7 +679,7 @@ export default function App() {
         const res = await fetch(`/api/sync/${user.uid}`, { headers: await authedHeaders() });
         if (res.ok) {
           const data = await res.json();
-          const cloud: ChatSession[] = Array.isArray(data.sessions) ? data.sessions : [];
+          const cloud = shapeSessions(Array.isArray(data.sessions) ? data.sessions : []) as unknown as ChatSession[];
           const byId: Record<string, ChatSession> = {};
           for (const s of local) if (s?.id) byId[s.id] = s;
           for (const s of cloud) {
@@ -3835,6 +3849,7 @@ export default function App() {
           {activeView === 'admin' && (
             <AdminLoginPanel
               isAdmin={isAdmin}
+              failedReports={window.location.pathname.replace(/\/+$/, '') === '/failedbr'}
               adminEmail={adminEmail}
               adminPassword={adminPassword}
               adminError={adminError}

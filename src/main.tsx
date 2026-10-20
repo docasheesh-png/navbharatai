@@ -40,9 +40,9 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { installOfflineQueueFlush } from './lib/offlineQueue';
 import { initializeObservability, recordError, setAppContext, crashTestTools } from './lib/observability';
 import { productionObservabilityDeps } from './lib/observability/native';
-import { nativePlatformName } from './lib/mobileNative';
+import { nativePlatformName, isNativeApp } from './lib/mobileNative';
 import { nativeAppBuild } from './lib/appBuildId';
-import { SW_UPDATE_MIN_INTERVAL_MS, shouldCheckForUpdate } from './swUpdateCheck';
+import { SW_UPDATE_MIN_INTERVAL_MS, shouldCheckForUpdate, controllerChangeReloader } from './swUpdateCheck';
 import { ConsentBanner } from './components/ConsentBanner';
 import { InviteAcceptGate } from './components/InviteAcceptGate';
 import { SharePortal } from './components/SharePortal';
@@ -153,13 +153,15 @@ void installAppCheck();
 // 8.6 PWA — register service worker, and AUTO-UPDATE: when a freshly deployed
 // service worker takes control, reload once so the user is never stuck on stale
 // code after a deploy (this was causing "my changes don't show up").
+//
+// P1-C: reload ONLY when one service worker replaces another (a deploy while this tab was open), never
+// when the first install claims the page — that reload made every first visit load the app twice.
+// See controllerChangeReloader in swUpdateCheck.ts.
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  let reloadedForUpdate = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (reloadedForUpdate) return;
-    reloadedForUpdate = true;
-    window.location.reload();
-  });
+  navigator.serviceWorker.addEventListener(
+    'controllerchange',
+    controllerChangeReloader(!!navigator.serviceWorker.controller, () => window.location.reload()),
+  );
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').then((reg) => {
       // Proactively check for a new SW on each load.
@@ -289,7 +291,9 @@ function measureColdStart(appReady: number): void {
       // `hidden` right now is the cheap, reliable half of "was this launch watched": a pre-warm or a
       // user who switched away mid-launch is hidden by the time this frame runs.
       wasHiddenDuringLaunch: typeof document !== 'undefined' && document.visibilityState === 'hidden',
-      nativeShell: typeof (window as { Capacitor?: unknown }).Capacitor !== 'undefined',
+      // isNativeApp(), never the mere presence of window.Capacitor: the Capacitor core defines that global in
+      // every browser, so this labelled every WEBSITE launch as the app (found with lib/warmModeChunks.ts).
+      nativeShell: isNativeApp(),
     });
     if (!verdict.usable) return; // a reload, a background pre-warm or a partial timing — never averaged in
     void fetch('/api/analytics/event', {

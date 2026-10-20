@@ -12,9 +12,58 @@
 /** What separates one note from the next, and the notes from the prompt they open. */
 export const REQUEST_NOTE_SEPARATOR = '\n\n---\n\n';
 
-/** A prompt opened by the request notes; the prompt unchanged when there are none. PURE. */
+/**
+ * A prompt opened by the request notes; the prompt unchanged when there are none. The separator joins two
+ * things, so it is written only when there ARE two — an empty side would otherwise leave a bare `---` for a
+ * model to read as a missing section (found by Q-1017's own test). PURE.
+ */
 export function withRequestNotes(prompt: string, notesText: string): string {
-  return notesText ? `${notesText}${REQUEST_NOTE_SEPARATOR}${prompt}` : prompt;
+  if (!notesText) return prompt;
+  if (!prompt) return notesText;
+  return `${notesText}${REQUEST_NOTE_SEPARATOR}${prompt}`;
+}
+
+// ── THE CAP BELONGS TO THE REQUEST, NEVER TO THE JOIN (Q-1017, 2026-10-16) ───────────────────────────────
+//
+// 🔴 WHAT WENT WRONG, AND WHY RAISING THE CAP WAS NOT THE FIX. `createProjectPlan` capped its goal at
+// MAX_GOAL_CHARS and the route handed it the JOINED text — our notes first, the user's request after. So the
+// cut always landed on the user's own words, and the notes' length decided how many of them survived: a
+// ~1,100-char stack note ate 1,100 characters of the spec before the spec was even measured.
+//
+// Autopsy 042e472f (2026-10-01) met this exact failure — a spec's closing requirements cut off the end — and
+// the fix was to raise the cap from 4,000 to 6,000. That is the fourth rule's forbidden shape: the cliff
+// moved, the class survived, and a longer spec walks off the new edge the same way. The CONDITION is that one
+// scalar bound was applied AFTER a join of two different things, so one part's size silently spent the
+// other's budget.
+//
+// 🔑 SO THE BOUND IS APPLIED BEFORE THE JOIN, TO THE REQUEST ALONE. The notes are ours, they are few and
+// short, and they are kept whole; the request gets the whole cap to itself, so the same spec keeps the same
+// characters whatever notes ride with it. And when the request really is longer than the cap, the text SAYS
+// so (the fifth rule's step 5) instead of letting the reader believe the spec ended there.
+
+/** The marker that tells a reader the request itself was longer than its cap — never silent. */
+export const REQUEST_TRUNCATION_MARKER = '[… the request above was longer than this build records and was cut here]';
+
+export interface BoundedRequestNotes {
+  /** The notes whole, opening a request capped on its own. */
+  text: string;
+  /** True when the REQUEST exceeded the cap — the notes never cause this and never suffer it. */
+  requestTruncated: boolean;
+}
+
+/**
+ * The same join as `withRequestNotes`, with the cap where it belongs: on the request. The notes are kept
+ * whole, so no note can shorten the user's words, and the surviving prefix of a given request is identical
+ * whether it carries six notes or none. PURE.
+ */
+export function withRequestNotesBounded(prompt: string, notesText: string, maxRequestChars: number): BoundedRequestNotes {
+  const request = prompt || '';
+  const cap = Number.isFinite(maxRequestChars) && maxRequestChars > 0 ? Math.floor(maxRequestChars) : 0;
+  const requestTruncated = request.length > cap;
+  const kept = requestTruncated
+    ? `${request.slice(0, cap)}\n\n${REQUEST_TRUNCATION_MARKER}`
+    : request;
+  return { text: withRequestNotes(kept, notesText), requestTruncated };
 }
 
 // ── THE LIST ITSELF, COMPUTED ONCE (Q-1016, 2026-10-15) ──────────────────────────────────────────────────
@@ -44,7 +93,7 @@ import { unknownNameNoteEnabled, unknownNamesInRequest, unknownNameBuilderNote }
 import { requestScopeVerdict, type RequestScopeReason } from './requestScope';
 import { scriptRequestNoteEnabled, scriptDeliverableRequested, liveDataRequested, scriptRequestBuilderNote } from './scriptRequest';
 import { namedNonSmartphone, nonSmartphoneBuildRule } from './deviceTarget';
-import { thirdPartyLimitAsked, thirdPartyLimitsBuilderNote } from './thirdPartyLimits';
+import { thirdPartyLimitAsked, thirdPartyLimitsBuilderNote, type OwnAdNetwork } from './thirdPartyLimits';
 import { analyzeRequirementGaps } from '../lib/RequirementGapAnalyzer';
 
 export interface RequestNoteInputs {
@@ -60,12 +109,16 @@ export interface RequestNoteInputs {
   /** The WHOLE project's ad-serving players — the route's own async read (`editTurnAdFacts`). */
   thirdPartyPlayers?: readonly string[];
   /**
-   * ⚠️ NOT THREADED YET, DELIBERATELY. #3753 (Q-1018) adds the app's OWN ad networks as a third argument
-   * to `thirdPartyLimitsBuilderNote`, and that PR is green but unmerged; this branch is cut from `main`,
-   * where the argument does not exist. Stacking branches to borrow it would be worse than one recorded
-   * follow-up: when #3753 lands, pass its `ownAds` through here so the blueprint lane hears that note too.
+   * …and its OWN ad networks (`projectOwnAdSdks`, Q-1018) — the ads that ARE ours to remove, as opposed to
+   * the ones inside another service's player.
+   *
+   * ✅ THREADED ON MERGE, AS THIS FIELD'S FIRST VERSION PROMISED. Q-1016 shipped with it typed `never`,
+   * because #3753 (which adds this third argument to `thirdPartyLimitsBuilderNote`) was green but unmerged
+   * and this module was written against a `main` that did not have it. Stacking branches to borrow it would
+   * have been worse than one recorded follow-up; both have now landed, so the note the blueprint lane reads
+   * names the app's own ad slots too.
    */
-  thirdPartyOwnAds?: never;
+  thirdPartyOwnAds?: readonly OwnAdNetwork[];
 }
 
 /** The list, the joined text, and every fact the notes were derived from. */
@@ -138,7 +191,7 @@ export function requestNotesFor(input: RequestNoteInputs): RequestNotesResult {
     { code: 'unknown-name', text: unknownNameNote },
     { code: 'request-scope', text: requestScopeText },
     { code: 'device', text: keypadPhone ? nonSmartphoneBuildRule(keypadPhone.device, keypadPhone.kind) : '' },
-    { code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, players) },
+    { code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, players, input.thirdPartyOwnAds ?? []) },
   ];
 
   return {

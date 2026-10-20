@@ -34,12 +34,15 @@ describe('the sandbox reports how it was really obtained', () => {
     }
   });
 
-  it('records the failed resume INSIDE the catch, where the reason still exists', () => {
+  it('records a terminally missing resume INSIDE the catch, after refusing uncertain failures', () => {
     // By the time the File Guardian sees an empty sandbox, why it is empty is gone. This is the only
     // place that knows we asked for a specific machine and were refused.
-    const at = actuator.indexOf("} catch {\n        sandbox = await withTimeout(Sandbox.create(");
+    const at = actuator.indexOf('} catch (error) {', actuator.indexOf('Sandbox.connect(resumeId'));
     expect(at).toBeGreaterThan(-1);
-    const block = actuator.slice(at, at + 900);
+    const block = actuator.slice(at, actuator.indexOf('\n    } else {', at));
+    const refusal = block.indexOf('if (!(error instanceof SandboxNotFoundError)) throw new SandboxRecoveryUnavailableError();');
+    expect(refusal).toBeGreaterThan(-1);
+    expect(refusal).toBeLessThan(block.indexOf('Sandbox.create('));
     expect(block).toContain("this._sandboxOrigin.set(workspaceId, 'created-after-failed-resume');");
   });
 });

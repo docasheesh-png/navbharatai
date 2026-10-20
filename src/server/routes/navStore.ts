@@ -19,6 +19,7 @@
 import type { GrantEmail } from '../AgentV3/featureFlag';
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
+import { canAccessNavData, withNavDataAccess, NAVDATA_TOKEN_HEADER } from '../lib/navDataAccess';
 import { SharedReadCache } from '../lib/boundedCache';
 import { inspectApk, MAX_APK_BYTES, publishableApkLimitBytes } from '../lib/apkInspect';
 import axios from 'axios';
@@ -953,7 +954,8 @@ export function registerNavStoreRoutes(app: Express): void {
    * checked HERE, before any file leaves the server, which is what makes "private" true rather than
    * decorative. POST so the password travels in a body, never in a URL that lands in logs/history.
    */
-  app.post('/api/nav-store/web/app/:id/open', async (req: Request, res: Response) => {
+  const playerOpenLimiter = rateLimiter({ name: 'store-player-open', authed: 600, anon: 300, noun: 'app opens', anonGlobalPerHour: 50_000 });
+  app.post('/api/nav-store/web/app/:id/open', playerOpenLimiter, async (req: Request, res: Response) => {
     try {
       const appId = String(routeParam(req.params.id) || '');
       /**
@@ -1024,7 +1026,8 @@ export function registerNavStoreRoutes(app: Express): void {
         }
       }
       bumpWebAppCounter(found.id, 'runs');
-      res.json({ html: compiled.html, name: found.name });
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.json({ html: withNavDataAccess(compiled.html, found), name: found.name });
     } catch (e) {
       logStoreError('web/open', e);
       res.status(502).json({ error: 'Could not open that app.' });
@@ -1419,7 +1422,8 @@ export function registerNavStoreRoutes(app: Express): void {
   const dataCors = (res: Response) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', `Content-Type, ${NAVDATA_TOKEN_HEADER}`);
+    res.setHeader('Cache-Control', 'private, no-store');
   };
   app.options('/api/nav-store/web/app/:id/data/:collection', (_req: Request, res: Response) => {
     dataCors(res);
@@ -1436,6 +1440,9 @@ export function registerNavStoreRoutes(app: Express): void {
     try {
       const found = await getWebApp(String(routeParam(req.params.id) || ''));
       if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
+      if (!canAccessNavData(found, req.get(NAVDATA_TOKEN_HEADER))) {
+        return res.status(401).json({ error: 'Private app access has expired or is missing. Reopen the app and enter its password.', requiresPassword: true });
+      }
       const result = await addDataRow(found.id, collection, req.body?.data);
       if (!result.ok) return res.status(result.status).json({ error: result.reason });
       res.json({ ok: true, row: result.row });
@@ -1452,6 +1459,9 @@ export function registerNavStoreRoutes(app: Express): void {
     try {
       const found = await getWebApp(String(routeParam(req.params.id) || ''));
       if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
+      if (!canAccessNavData(found, req.get(NAVDATA_TOKEN_HEADER))) {
+        return res.status(401).json({ error: 'Private app access has expired or is missing. Reopen the app and enter its password.', requiresPassword: true });
+      }
       res.json({ rows: await listDataRows(found.id, collection, Number(req.query.limit) || 50) });
     } catch (e) {
       logStoreError('web/data read', e);

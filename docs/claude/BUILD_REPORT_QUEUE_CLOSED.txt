@@ -567,3 +567,186 @@ Q-969
 Q-973
 Q-1038
 Q-1070
+Q-1061
+Q-1062
+Q-1063
+Q-1066
+Q-1069
+Q-1017
+
+# Closed 2026-10-16 — the in-flight sweep: 61 rows claimed an open PR while ZERO PRs were open.
+# Every owner was resolved to a MERGED pull request before its row was removed (26 numbered PRs, the merged
+# claude/new-session-gx9294 branch, #3681 for Q-866, #3683 for Q-880, #3755 for Q-1124). Q-1011's row named a
+# still-open part with no row of its own; it was carried out as Q-1125 rather than deleted with the row.
+Q-808
+Q-866
+Q-867
+Q-868
+Q-880
+Q-982
+Q-983
+Q-984
+Q-985
+Q-986
+Q-987
+Q-988
+Q-989
+Q-990
+Q-991
+Q-992
+Q-993
+Q-994
+Q-995
+Q-996
+Q-997
+Q-998
+Q-999
+Q-1000
+Q-1011
+Q-1013
+Q-1015
+Q-1016
+Q-1018
+Q-1019
+Q-1020
+Q-1021
+Q-1022
+Q-1024
+Q-1026
+Q-1028
+Q-1029
+Q-1030
+Q-1032
+Q-1033
+Q-1034
+Q-1035
+Q-1036
+Q-1039
+Q-1040
+Q-1041
+Q-1043
+Q-1060
+Q-1080
+Q-1081
+Q-1084
+Q-1090
+Q-1091
+Q-1092
+Q-1093
+Q-1094
+Q-1095
+Q-1096
+Q-1097
+Q-1123
+Q-1124
+# …and three the first pass missed: Q-1089's problem text contains escaped pipes (\|), so a naive
+# cell split mis-read its columns; Q-1088 and Q-1082 already carried ✅ in their state column.
+Q-1089
+Q-1088
+Q-1082
+# Closed 2026-10-16/17 — merged PRs, registered on the fresh main that carries them.
+# #3768 (Q-1031: the append saves the anchor, not the look).
+Q-1031
+# #3771 (Q-1027: the enum normaliser is not silent).
+Q-1027
+# #3769 answered Q-1127's open half and fixed its cause in product code: the 12 s were
+# `vehicleShapeHalves`, O(run²) regex backtracking inside `writeSteeringNotes` on the agent's
+# critical path at EVERY write — not, as my row guessed first, the test's own fake store. Bounded
+# by `MAX_WORD_RUN = 512` in `handWrittenVehicleScan.ts`. Q-1128 and Q-1129 are that PR's own rows.
+Q-1127
+Q-1128
+Q-1129
+Q-1125
+# #3775 merged (Q-1037: the platform recognises the words it put in the user's mouth) — the row's own
+# corrections are in its PR body and in platformSuggestedReplies.ts, including the two mistakes it
+# records: the census I duplicated already existed as aPromiseToTheUserHasAHandler, and my first
+# "one home" refactor blinded it.
+Q-1037
+# Nine rows closed 2026-10-17 — every owner PR verified present in origin/main by its merge commit,
+# not by a PR page. None of them was merged by this session: CI has been dying in 3-4 seconds all day
+# (log download HTTP 404, the Q-1082/Q-1131 symptom), so the merges were made elsewhere while this
+# session held the line on "CI green before any merge". Their full ledgers stay in PROGRESS.md.
+#   #3782 Q-887 (no upstream body reaches the browser) · #3784 Q-889 (one encoded redirect value, Host
+#   checked) · #3785 Q-890 (the amount check cannot be skipped) · #3773 Q-1023 (the parenthetical says
+#   what counts) · #3779 Q-1132 (the flow read waits for its frames) · #3788 Q-1136 (the DNS check says
+#   only what it checked) · #3789 Q-1137 (a named action is reachable on every host) · #3791 Q-1138 +
+#   Q-1139 (backend connect without failing first; Q-707 reopened by its own cost gate, and the third
+#   definition my own census could not see).
+Q-887
+Q-889
+Q-890
+Q-1023
+Q-1132
+Q-1136
+Q-1137
+Q-1138
+Q-1139
+Q-1133
+Q-1200
+Q-1201
+Q-1202
+Q-1203
+Q-1204
+Q-1205
+Q-1223
+Q-1224
+Q-1225
+Q-963
+# Three rows closed 2026-10-20, each verified against origin/main or against measurement, never against a PR page.
+#
+# Q-1140 — one route to the deploy control. #3797, present in main by its merge commit 505211709.
+# Q-1141 — a starved flow read says so, and Q-1132's own signal is finally read. #3800, merge commit 4a1bb4a7f.
+#
+# Q-1131 — THE CI OUTAGE IS OVER, and it is closed the way Q-1082 was: an infrastructure fault that cleared
+# outside this repo, recorded with its measurement and no code fix, because there was never a code cause to fix.
+# MEASURED, not assumed: the 3-4 second / no-logs signature ran from run 11577 (2026-10-17 07:41:36 UTC) through
+# run 11711 (2026-10-19 11:20:07 UTC) — about 51.6 hours and ~135 runs, every one dying before a step executed.
+# It cleared at run 11712 (2026-10-19 12:37:07 UTC, 1518 s, success). In the 80 runs since, every run reaches a
+# real verdict: the failures among them (11721-11723, 11753-11765, 11777, 11782) each ran 900-1600 s, i.e. they
+# are test failures with logs, which is the OPPOSITE of this row's signature and is how we know it is gone.
+# Second time for this class (Q-1082, 2026-10-14 -> 2026-10-15). It is not root-caused in this repo and cannot
+# be: the fault is in the account's GitHub Actions, which no session can reach. What the two occurrences DID
+# establish is the discipline that held through both — a local full gate is evidence for a session, never an
+# authorisation to merge, and "CI green before any merge" meant holding for two days rather than merging on a
+# local green. Nothing was merged by this session while it was red.
+Q-1140
+Q-1141
+Q-1131
+
+# 2026-10-20:12 shared platform/source/CI classes only; historical item/report closure is not claimed.
+# PR3856 merged externally; head5456d186caab683f5bec17f3aa5e0fb1506b6476; main72c3252d0faf33fd51987fbc2b9d991f7742953c.
+# Exact shared tree813484db9c1349164824bf025227175f52b3b4f0; required CI39418902451 bothjobsSUCCESS.
+# Behavior reversion and sibling proofs: docs/failed-build-audit-2026-10-20.md. Separate local Q2163/newbranch gates remain pending.
+Q-1890
+Q-1891
+Q-1892
+Q-1893
+Q-1898
+Q-1899
+Q-1961
+Q-1962
+Q-2021
+Q-2022
+Q-2023
+Q-2024
+# Four rows closed 2026-10-20, each verified by its PR's merge commit being an ancestor of origin/main —
+# not by a PR page saying "merged". This is bookkeeping debt being paid: all four were resolved earlier the
+# same day and their rows were left sitting in the open table, three reading IN PROGRESS and Q-1126 OPEN
+# with its PR named. The sixth rule is that a row leaves the open table when its PR merges, with its id
+# appended here in the SAME commit; doing it for Q-1140/1141/1131 that morning and then not keeping it up
+# is exactly how a queue starts lying about what is done.
+#
+# Q-886  — a customer's own details never go into a log line whole (#3854, merge commit 17a4c45ae).
+# Q-888  — a settled webhook is acknowledged, a failed attempt is news, an outage is retried (#3857, 6cdc155fa).
+# Q-1135 — an un-reconciled credit is recorded on the order, not only in a log line (#3850, 32aa60d84).
+# Q-1126 — the four-field gap reaches ZERO and the ratchet becomes an invariant (#3861, bb96e3ab6).
+Q-886
+Q-888
+Q-1135
+Q-1126
+
+# 2026-10-20: Q-1226 was resolved by ANOTHER session's PR #3863 (5315e95f8), not by the session that
+# raised it. Verified independently before closing: the measured 'legacy' amountPaid case is in that
+# PR's own test table, and Q-888's settled/retryable webhook contract survived the refusal moving from
+# an inline return to a thrown PaymentAmountMismatchError (payments.ts catches it and keeps settled:true).
+Q-1226

@@ -28,6 +28,7 @@
 // abort sites already have the controller in hand, and the runner already has the signal.
 
 import { BUDGET_REACHED_MESSAGE } from './turnDeadline';
+import { providerDegradedMessage } from './laneFailure';
 import { BUILD_STOPPED_MESSAGE, stoppedCallServedBy } from './stopSignal';
 
 /** Why a build's abort signal was fired. */
@@ -37,6 +38,7 @@ export type AbortCause =
   | 'advisory-cap'   // the build had already succeeded; post-build advisory work overran
   | 'deploy-drain'   // the server is restarting; the build resumes on its own
   | 'lock-reclaimed' // a newer build took over an abandoned lock
+  | 'authority-unavailable' // the store could not confirm this build still owns its lease
   | 'reaper'         // the zombie reaper cleaned up a build that stopped reporting
   | 'cost-cap'       // the build spent past its cost ceiling (buildCostCeiling.ts)
   | 'futile'         // the build produced nothing for the whole window (futilityBreaker.ts)
@@ -50,7 +52,7 @@ export type AbortCause =
  * above and not here fails to compile, and so does one listed here that the union does not have.
  */
 const EVERY_CAUSE: Readonly<Record<AbortCause, true>> = Object.freeze({
-  'user-stop': true, watchdog: true, 'advisory-cap': true, 'deploy-drain': true, 'lock-reclaimed': true,
+  'user-stop': true, watchdog: true, 'advisory-cap': true, 'deploy-drain': true, 'lock-reclaimed': true, 'authority-unavailable': true,
   reaper: true, 'cost-cap': true, futile: true, 'review-budget': true, 'recheck-budget': true,
   'repair-budget': true, unknown: true,
 });
@@ -58,7 +60,7 @@ export const ALL_ABORT_CAUSES: readonly AbortCause[] = Object.freeze(Object.keys
 
 const TAG = '__nbaiAbortCause';
 
-interface CauseCarrier { [TAG]: AbortCause }
+interface CauseCarrier { [TAG]: AbortCause; requestedAt?: number }
 
 function isCarrier(v: unknown): v is CauseCarrier {
   return typeof v === 'object' && v !== null && typeof (v as Record<string, unknown>)[TAG] === 'string';
@@ -70,8 +72,11 @@ function isCarrier(v: unknown): v is CauseCarrier {
  * Every abort site must go through this. A bare `controller.abort()` is exactly the state this module
  * exists to remove — it produces a signal that cannot answer the only question the user has.
  */
-export function abortBuild(controller: { abort: (reason?: unknown) => void }, cause: AbortCause): void {
-  const carrier: CauseCarrier = { [TAG]: cause };
+export function abortBuild(controller: { abort: (reason?: unknown) => void }, cause: AbortCause, requestedAt?: number): void {
+  // WHEN the stop was ASKED FOR (r6–r10 autopsy, 2026-10-18) — the moment the person pressed Stop or sent the
+  // message the stop came from, not the moment the abort landed. cancelledBuildBilling compares it with when
+  // the app was first seen running. Defaults to now: every abort site is the request itself, except a typed stop.
+  const carrier: CauseCarrier = { [TAG]: cause, requestedAt: Number.isFinite(requestedAt) ? (requestedAt as number) : Date.now() };
   try {
     controller.abort(carrier);
   } catch {
@@ -92,6 +97,13 @@ export function abortCauseOf(signal: { reason?: unknown } | undefined | null): A
   return isCarrier(signal.reason) ? signal.reason[TAG] : 'unknown';
 }
 
+/** When the recorded abort was requested (epoch ms), or null when the signal carries no recorded cause. */
+export function abortRequestedAtOf(signal: { reason?: unknown } | undefined | null): number | null {
+  if (!signal || !isCarrier(signal.reason)) return null;
+  const at = (signal.reason as CauseCarrier).requestedAt;
+  return typeof at === 'number' && Number.isFinite(at) ? at : null;
+}
+
 export interface AbortSummaryContext {
   /** The wall-clock cap in minutes, for the watchdog message. */
   minutes?: number;
@@ -106,6 +118,12 @@ export interface AbortSummaryContext {
    * edit of it. The route computes this with the router's own test (`seedStateOf`). Ignored when `builtSomething`.
    */
   seed?: SeedState | null;
+  /**
+   * The build's own record says OUR ENGINE took its time (`engineTimeDominated`, autopsy 67a2b0a2). Then the stop is not
+   * the request's doing and the sentence must not send the person back to "add more detail" or "rephrase" — the
+   * same fact the live narration already told them ("this one is on us"). Absent/false = the wording is unchanged.
+   */
+  providerFault?: boolean;
 }
 
 /** What a seeded workspace holds, as the router will read it on the next message. */
@@ -123,6 +141,18 @@ export function seedKeptSentence(seed: SeedState): string {
     : "The starting files are kept in your workspace — send another message and I'll continue from them.";
 }
 
+/**
+ * The ending when our engine, not the request, is why nothing (or not enough) was built. ONE sentence source for
+ * every cause that can meet it, so the summary, the live narration (`providerDegradedMessage`) and the release gate
+ * cannot tell three stories about one build again (autopsy b89ba6f8 named that defect; 67a2b0a2 met it in the
+ * futile and the wall-clock endings). PURE.
+ */
+function engineFaultEnding(saved: boolean, seedKept: string): string {
+  if (saved) return "NavBharatAI's engine was running slowly, so this build could not finish — this one is on us, not on your app. Your files so far are saved — send another message and I'll continue from here.";
+  if (seedKept) return `NavBharatAI's engine was running slowly, so this build could not finish — this one is on us, not on your app. I had not changed anything yet. ${seedKept}`;
+  return providerDegradedMessage();
+}
+
 export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): string {
   const mins = typeof ctx.minutes === 'number' && ctx.minutes > 0 ? ctx.minutes : null;
   const saved = ctx.builtSomething === true;
@@ -134,6 +164,10 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
     : seededOnly
       ? ` I had not changed anything yet. ${SEED_KEPT}`
       : ' Nothing was lost; try again or rephrase.';
+
+  // Our engine's slowness is never the request's fault, whichever clock ended the build (see `providerFault`).
+  // A user's own Stop is the one ending it cannot override: they asked for it.
+  if (ctx.providerFault === true && (cause === 'futile' || cause === 'watchdog')) return engineFaultEnding(saved, SEED_KEPT);
 
   switch (cause) {
     case 'user-stop':
@@ -160,6 +194,8 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
       return 'NavBharatAI restarted (a deploy) while this build was running. Your files are safe and the build resumes automatically.';
     case 'lock-reclaimed':
       return 'This build was replaced by a newer one you started on the same project.' + (saved ? ' Its files so far are saved.' : '');
+    case 'authority-unavailable':
+      return 'Build ownership could not be confirmed, so I stopped this attempt to protect your app. Wait for it to finish stopping before retrying.';
     case 'reaper':
       return `This build stopped responding and was cleaned up.${resume}`;
     case 'cost-cap':
@@ -210,7 +246,8 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
  * The wall-clock cap reached between turns (not an abort): the same sentence source as every other ending, so
  * the three states can never drift apart again. It used to be an inline copy in AgentRunner. PURE.
  */
-export function timedOutSummary(minutes: number, ctx: Pick<AbortSummaryContext, 'builtSomething' | 'seed'> = {}): string {
+export function timedOutSummary(minutes: number, ctx: Pick<AbortSummaryContext, 'builtSomething' | 'seed' | 'providerFault'> = {}): string {
+  if (ctx.providerFault === true) return engineFaultEnding(ctx.builtSomething === true, !ctx.builtSomething && ctx.seed ? seedKeptSentence(ctx.seed) : '');
   if (ctx.builtSomething === true) return `I stopped after about ${minutes} min to avoid an endless loop. Your files so far are saved — send another message and I'll continue from here.`;
   if (ctx.seed) return `I stopped after about ${minutes} min — the build wasn't making progress (often a preview that won't come up), and had not changed anything yet. ${seedKeptSentence(ctx.seed)}`;
   return `I stopped after about ${minutes} min — the build wasn't making progress (often a preview that won't come up). Nothing was lost; try again or rephrase.`;
@@ -256,6 +293,7 @@ export function stoppedCallOwner(cause: AbortCause): StoppedCallOwner {
       return 'our-clock';
     case 'deploy-drain':
     case 'lock-reclaimed':
+    case 'authority-unavailable':
     case 'reaper':
       return 'our-platform';
     case 'unknown':
@@ -282,6 +320,7 @@ const OUR_CLOCK_WORDS: Readonly<Record<string, string>> = Object.freeze({
 const OUR_PLATFORM_WORDS: Readonly<Record<string, string>> = Object.freeze({
   'deploy-drain': 'a deploy drained the build',
   'lock-reclaimed': 'a newer build reclaimed the lock',
+  'authority-unavailable': 'the database could not confirm build ownership',
   reaper: 'the zombie reaper ended the build',
 });
 
@@ -332,8 +371,16 @@ export function stoppedCallFields(cause: AbortCause, err: unknown, nominalModel:
 } {
   const ownMessage = err instanceof Error ? err.message : String(err);
   const owner = stoppedCallOwner(cause);
-  if (owner !== 'our-clock' && owner !== 'our-platform') return { model: nominalModel, error: ownMessage, extra: {} };
   const servedBy = stoppedCallServedBy(err);
+  if (owner !== 'our-clock' && owner !== 'our-platform') {
+    // 🔴 A USER STOP NAMES THE ENGINE THAT WAS RUNNING (autopsy 03368870, 2026-10-18). This branch used to
+    // record the chain's NOMINAL first rung, so a KIMI call the user stopped after 66 s was filed under
+    // glm-4.7-flashx — a model benched for that build — and read as "a benched GLM was still called".
+    // The error text is unchanged (still the user's Stop); only the model is the served one, when known.
+    // `AGENTV3_STOP_SERVED_MODEL=off` restores the old record.
+    const useServed = (process.env['AGENTV3_STOP_SERVED_MODEL'] ?? '').trim().toLowerCase() !== 'off';
+    return { model: (useServed ? servedBy?.model : undefined) ?? nominalModel, error: ownMessage, extra: useServed && servedBy ? { provider: servedBy.provider } : {} };
+  }
   return {
     model: servedBy?.model ?? nominalModel,
     error: stoppedCallError(cause, ownMessage),
@@ -421,6 +468,7 @@ export function interruptedBeforeAnyVerdict(cause: AbortCause): boolean {
     case 'user-stop':
     case 'deploy-drain':
     case 'lock-reclaimed':
+    case 'authority-unavailable':
     case 'reaper':
     case 'unknown':
       return true;

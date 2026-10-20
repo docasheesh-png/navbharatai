@@ -24,6 +24,7 @@ import { appCheckSiteKey, appCheckStats } from '../lib/appCheck';
 import { scheduler } from '../lib/ScheduledJobs';
 import { tickAuth, firestoreRunLog, SCHEDULER_TICK_HEADER, type RunLogStore } from '../lib/schedulerTick';
 import { getServerDb } from '../lib/serverDb';
+import { siteOrigin } from '../lib/siteIndex';
 
 // Set true once the server has finished initialization (wired from server.ts).
 let serverReady = false;
@@ -285,7 +286,7 @@ export function registerHealthRoutes(app: Express): void {
 
   // U-15 — public status page (self-contained, polls /api/health).
   app.get('/status', (_req: Request, res: Response) => {
-    res.type('html').send(renderStatusPageHtml());
+    res.type('html').send(renderStatusPageHtml(siteOrigin()));
   });
 
   // DR — trigger a Firestore export. Admin-gated; returns an honest result (incl. a clear

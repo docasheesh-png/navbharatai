@@ -34,7 +34,8 @@ import {
 } from '../lib/giftCodes';
 import { readGiftDaily, giftDay, redeemGiftCode } from '../lib/giftCodeStore';
 import { appLockBlocks } from '../lib/appLockEnforce';
-import { classifyCashfreeWebhook, cashfreeWebhookOrderId } from '../lib/paymentReversal';
+import { classifyCashfreeWebhook, cashfreeWebhookOrderId, cashfreePaymentEventIsFailure } from '../lib/paymentReversal';
+import { emailForLog, nameForLog, phoneForLog, webhookShapeForLog } from '../lib/piiForLog';
 import { settleCashfreeReversal } from '../lib/paymentReversalStore';
 
 /**
@@ -299,12 +300,39 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         customerNameClean = customerNameClean.substring(0, 40);
       }
 
-      // Secure return_url generation with SSL enforcement for cloud preview environment
-      const host = req.get('host') || 'localhost:3000';
+      /**
+       * Q-889 (b) — THE HOST HEADER IS CHECKED FOR SHAPE, NOT TRUSTED.
+       *
+       * `return_url` is where the payment provider sends the person after they pay, and it was built
+       * straight from `req.get('host')` — a value the CLIENT sends. A request carrying a crafted Host
+       * would have the provider return the payer to that host instead of to this app.
+       *
+       * ⚠️ WHY A SHAPE CHECK AND NOT A CONFIGURED ORIGIN, which is the stronger fix. There is no
+       * canonical-origin constant in this repo today (searched: `PUBLIC_ORIGIN`, `APP_ORIGIN`,
+       * `APP_URL`, `SITE_URL` — the only hits belong to GENERATED apps' database provisioning, not to
+       * the platform). Introducing one means a new Cloud Run key, and a key that is unset or wrong
+       * does not degrade this flow — it BREAKS it, because the payer is never returned. With CI down
+       * (Q-1131) that is the trade the first absolute rule forbids, so the configured-origin version
+       * is Q-1134 and waits for the admin.
+       *
+       * This check costs nothing and cannot refuse a real deployment: a legitimate Host is a bare
+       * `host[:port]` of letters, digits, dots and hyphens. The vectors a crafted Host uses — `@` to
+       * smuggle a different authority, a second value after a comma, whitespace, a slash, a scheme —
+       * are exactly what the shape rejects. A request whose Host is not a host is a malformed
+       * request, so it is refused rather than answered with a guess.
+       */
+      const rawHost = req.get('host') || 'localhost:3000';
+      if (!/^[A-Za-z0-9.-]+(?::\d{1,5})?$/.test(rawHost)) {
+        return sendSafeError(res, 400, 'That request could not be verified. Please reload the page and try again.', `rejected Host: ${rawHost.slice(0, 80)}`, 'payment create-order host');
+      }
+      const host = rawHost;
       const protocol = (host.includes('localhost') || host.includes('127.0.0.1')) ? 'http' : 'https';
       const secureReturnUrl = `${protocol}://${host}/api/payment/verify-redirect?order_id={order_id}`;
 
-      console.log(`[CASHFREE] Payload inputs - Name: ${customerNameClean}, Email: ${customerEmailClean}, Phone: ${customerPhoneClean}, ID: ${customerIdClean}, Amount: ${finalAmount}, ReturnURL: ${secureReturnUrl}`);
+      // Q-886: an order that fails is diagnosed from this line, so it keeps the ORDER's identifiers and
+      // the amount. It used to keep the PAYER's identity too — name, email and phone in full, on every
+      // order, on the normal path. The user id is the handle for "who"; the rest is masked.
+      console.log(`[CASHFREE] Payload inputs - order ${orderId}, user ${customerIdClean}, name ${nameForLog(customerNameClean)}, email ${emailForLog(customerEmailClean)}, phone ${phoneForLog(customerPhoneClean)}, Amount: ${finalAmount}, ReturnURL: ${secureReturnUrl}`);
 
       const cfResponse = await axios.post(cfUrl, {
         order_id: orderId,
@@ -342,13 +370,32 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         throw new Error(data.message || 'Payment Session ID not generated');
       }
     } catch (error: any) {
+      /**
+       * 🔴 Q-887 — THIS WAS THE ONE SITE IN THIS FILE THAT ANSWERED THE BROWSER BY HAND.
+       *
+       * It returned `details: detailedError` — the payment provider's own response body, whole — plus an
+       * `error` string that interpolated the provider's message and named the provider. The real error
+       * belongs in the server log, and it still goes there; what the browser gets is a sentence written
+       * for the person reading it.
+       *
+       * ⚠️ WHY IT SURVIVED THE SWEEP THAT FIXED THE REST, because that is the class and not the line.
+       * The 2026-07-19 sweep behind `lib/httpError.ts` was shaped around one expression —
+       * `res.status(500).json({ error: err.message })` — and this site had already assembled its own
+       * variable out of `error.response?.data`, so the shape it was hunting was not here. This very file
+       * calls `sendSafeError` at four OTHER sites; only the fifth kept its hand-rolled answer. A door
+       * four of five callers use is not a door, and nothing failed when the fifth walked past it.
+       *
+       * `sendSafeError` logs the full raw detail, strips URLs, secrets and vendor names from what the
+       * client sees, and echoes a redacted detail only outside production.
+       */
       const detailedError = error.response?.data || {};
-      const errorMessage = detailedError.message || error.message;
-      console.error(`[CASHFREE] Order creation failed. Full detailed payload:`, JSON.stringify(detailedError, null, 2));
-      return res.status(500).json({
-        error: `Cashfree integration error: ${errorMessage}`,
-        details: detailedError
-      });
+      return sendSafeError(
+        res,
+        500,
+        'The payment could not be started. Nothing has been charged — please try again in a moment.',
+        detailedError.message ? detailedError : error,
+        'payment create-order',
+      );
     }
   });
 
@@ -484,7 +531,10 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       // `cashfreeWebhookOrderId`. A refund event used to fail right here with "Order ID missing".
       const orderId = cashfreeWebhookOrderId(req.body);
       if (!orderId) {
-        console.warn('[CASHFREE WEBHOOK] Missing order_id in webhook body:', req.body);
+        // Q-886: this printed the WHOLE body — the payer's name, email and phone included — and it fired
+        // exactly when something was already wrong, so the worst payloads were the likeliest to be
+        // printed. The diagnosis needs the SHAPE (which keys arrived, which event), never the values.
+        console.warn(`[CASHFREE WEBHOOK] Missing order_id in webhook body: ${webhookShapeForLog(req.body)}`);
         return res.status(400).json({ error: 'Order ID missing in webhook payload' });
       }
 
@@ -540,10 +590,49 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       if (result.success) {
         console.log(`[CASHFREE WEBHOOK] Fulfilled order ${orderId} successfully!`);
         return res.status(200).json({ status: 'OK' });
-      } else {
-        console.error(`[CASHFREE WEBHOOK] Fulfillment failed for order ${orderId}: ${result.error}`);
-        return res.status(400).json({ error: result.error });
       }
+      /**
+       * 🔴 Q-888 — A SETTLED EVENT USED TO BE REJECTED, SO IT CAME BACK FOR EVER.
+       *
+       * Every `success: false` answered **400**, and Cashfree re-delivers a non-2xx. The retry was not a
+       * symptom of anything wrong: it was us refusing to acknowledge an answer we had already given.
+       *
+       * ⚠️ AND THE ROW'S OWN ACCOUNT OF WHY WAS WRONG — corrected here because the next reader would
+       * otherwise re-derive it. Q-888 said a PAYMENT_FAILED / USER_DROPPED order is "settled as EXPIRED"
+       * by `cashfreeOrderClosedUnpaid`. Measured: that predicate recognises only `EXPIRED` and
+       * `TERMINATED`, which are ORDER statuses, while `USER_DROPPED` and `FAILED` are PAYMENT statuses
+       * that never reach it. Those events fell through to "Order not paid or invalid status" instead —
+       * re-sent for ever just as reported, by a different path than the report described. So there are
+       * TWO things to tell apart here, not one.
+       *
+       * The route could not tell a DECISION from an OUTAGE because the function did not say, so it is
+       * the function that now says (`settled`). This branch only reads it:
+       *   · settled  ⇒ 200. We have decided; a redelivery would reach the same conclusion.
+       *   · anything else ⇒ non-2xx, so it IS redelivered. Acknowledging an event we could not complete
+       *     loses it, and losing a payment event costs a customer their credit.
+       *
+       * 502, not 400: a retryable failure is ours (no database, missing gateway keys, a payload we could
+       * not read), never a malformed request from the sender, and the status a gateway's own dashboard
+       * shows the admin should not blame Cashfree for our outage. The reversal path above already
+       * answers 502 for its own unreadable case, in its own words — this is the same rule, said once more.
+       */
+      if (result.settled) {
+        console.log(`[CASHFREE WEBHOOK] Order ${orderId} is settled and will not be fulfilled: ${result.error} — acknowledged, so it is not re-sent.`);
+        return res.status(200).json({ status: 'SETTLED' });
+      }
+      /**
+       * A FAILED ATTEMPT IS NEWS, NOT WORK. The order is usually still `ACTIVE` — the payer may try
+       * again — so the verifier rightly fulfils nothing and we rightly credit nothing. Re-delivering this
+       * event would report the same failed attempt for ever; a later successful attempt arrives as its
+       * own `PAYMENT_SUCCESS_WEBHOOK`. The gateway was still ASKED first (above), so an order that is in
+       * fact PAID is credited even when a stale failure event is what woke us.
+       */
+      if (cashfreePaymentEventIsFailure(req.body)) {
+        console.log(`[CASHFREE WEBHOOK] Order ${orderId}: the gateway reports a failed or dropped attempt (${result.error}) — acknowledged; the order stays open for a later attempt.`);
+        return res.status(200).json({ status: 'ATTEMPT_FAILED' });
+      }
+      console.error(`[CASHFREE WEBHOOK] Fulfillment could not be completed for order ${orderId}: ${result.error} — NOT acknowledged, so the gateway delivers it again.`);
+      return res.status(502).json({ error: 'This payment event could not be completed; please retry.' });
     } catch (error: any) {
       console.error('[CASHFREE WEBHOOK] Error handling webhook exception:', error);
       return sendSafeError(res, 500, 'Payment webhook processing failed.', error, 'cashfree webhook');
@@ -551,8 +640,23 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
   });
 
   app.get('/api/payment/verify-redirect', (req: Request, res: Response) => {
-    const order_id = req.query.order_id as string;
-    res.redirect(`/?payment=check&order_id=${order_id}`);
+    /**
+     * Q-889 (a) — the value is ENCODED, and it is ONE value.
+     *
+     * It was interpolated raw: `/?payment=check&order_id=${order_id}`. The row's own assessment is
+     * right that this is not an open redirect — the target is a fixed same-origin path and the value
+     * only ever lands in a query string — but an unencoded value can still carry `&`, `#` or `=` and
+     * so add or overwrite other parameters on the page it lands on.
+     *
+     * ⚠️ AND IT WAS NOT ALWAYS A STRING. `req.query.order_id` is typed `as string` here, which is a
+     * claim and not a check: `?order_id=a&order_id=b` makes Express hand back an ARRAY, and
+     * `encodeURIComponent(['a','b'])` would quietly encode "a,b". The first value is taken, so the
+     * cast is now true rather than asserted.
+     */
+    const raw = req.query.order_id;
+    const orderId = Array.isArray(raw) ? raw[0] : raw;
+    const safe = typeof orderId === 'string' ? encodeURIComponent(orderId) : '';
+    res.redirect(`/?payment=check&order_id=${safe}`);
   });
 
   app.post('/api/payment/redeem-coupon', paymentLimiter, async (req: Request, res: Response) => {

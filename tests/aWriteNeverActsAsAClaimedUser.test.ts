@@ -51,7 +51,7 @@ describe('a write never acts as a claimed user', () => {
   it('every build-queue route requires the VERIFIED workspace owner', () => {
     const src = readFileSync('src/server/routes/agentv3.ts', 'utf8');
     const queue = handlers(src).filter((h) => h.path.startsWith('/api/agentv3/queue'));
-    expect(queue.map((h) => h.path).sort()).toEqual(['/api/agentv3/queue', '/api/agentv3/queue/cancel', '/api/agentv3/queue/complete', '/api/agentv3/queue/enqueue', '/api/agentv3/queue/next']);
+    expect(queue.map((h) => h.path).sort()).toEqual(['/api/agentv3/queue', '/api/agentv3/queue/cancel', '/api/agentv3/queue/complete', '/api/agentv3/queue/enqueue', '/api/agentv3/queue/next', '/api/agentv3/queue/recover']);
     for (const h of queue) {
       expect(h.body, h.path).toMatch(/assertVerifiedWorkspaceOwner\(req, workspaceId\)/);
       expect(h.body, h.path).not.toMatch(/[^d]assertWorkspaceOwner\(req/);

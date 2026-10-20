@@ -66,6 +66,16 @@ describe('the page satisfies what Play actually asks for', () => {
   it('states the token-balance consequence instead of letting someone find out afterwards', () => {
     expect(ACCOUNT_DELETION).toMatch(/not refundable on deletion/i);
   });
+
+  it('discloses automatic legacy retention before confirmation and does not promise every saved version is erased', () => {
+    const limitation = ACCOUNT_DELETION.indexOf('Automatic deletion retains older records');
+    expect(limitation).toBeGreaterThan(0);
+    expect(limitation).toBeLessThan(ACCOUNT_DELETION.indexOf('## What is deleted'));
+    expect(ACCOUNT_DELETION).toMatch(/chat and voice conversations, cross-device workspace copies, saved versions, hosted snapshots, engineering notes, app identity records and uploaded assets/);
+    expect(ACCOUNT_DELETION).toMatch(/not deleted by guessing/);
+    expect(ACCOUNT_DELETION).toMatch(/cannot confirm completion.*until ownership review finishes/);
+    expect(ACCOUNT_DELETION).not.toMatch(/every saved version of every app you could have restored/);
+  });
 });
 
 describe('the URL is actually served', () => {
@@ -90,6 +100,7 @@ describe('the page and the deletion code do not drift apart', () => {
       user_token_wallets: /wallet, token balance/i,
       user_costs: /usage records/i,
       user_build_history: /build history/i,
+      agentv3_build_requests: /build history/i,
       chat_sessions: /chat history/i,
       // Added to the eraser on 2026-09-17; the policy promised erasure and nothing erased them.
       user_vault_pin: /App Lock PIN/i,
@@ -212,6 +223,8 @@ describe('the built-app eraser and the page do not drift apart', () => {
       project_plans_v3: /projects and built apps/i,
       app_engineering_memory_v1: /projects and built apps/i,
       app_ai_settings: /projects and built apps/i,
+      build_history_v2: /build history and diagnostics/i,
+      build_sessions_v2: /build history and diagnostics/i,
       // Q-134 (2026-10-05): two stores the erase now reaches, each named on the page.
       workspace_user_actions_v1: /the list of things the builder asked you to do/i,
       code_reviews: /the review comments left on them/i,

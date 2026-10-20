@@ -48,9 +48,10 @@ describe('Q-976 · the overrun is measured on one clock', () => {
 describe('Q-977 · every finishing write names its pass, so the post-green ledger never blames the model for ours', () => {
   const route = read('src/server/routes/agentv3.ts');
   const lines = route.split('\n');
-  /** Line ranges of the two finishing passes that wrap their whole body in runInPass. */
+  /** Line ranges of the passes that wrap their whole body in runInPass (incl. the post-green finishing
+   *  rollback, finishingRecheck.ts, which writes under the named `green-guard-restore` pass). */
   const wrappedBlocks = lines.flatMap((l, i) => {
-    if (!/await runInPass\('(?:starter-tests|production-defaults)'/.test(l)) return [];
+    if (!/await runInPass\('(?:starter-tests|production-defaults|green-guard-restore)'/.test(l)) return [];
     const indent = l.search(/\S/);
     let end = i + 1;
     // The pass ends at its own `});` — its body is not always indented under it.

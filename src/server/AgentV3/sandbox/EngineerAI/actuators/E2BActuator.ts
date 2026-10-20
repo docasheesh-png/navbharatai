@@ -1,4 +1,5 @@
-import { Sandbox } from 'e2b';
+import { shouldSeedStarter } from './seedStarter';
+import { Sandbox, SandboxNotFoundError } from 'e2b';
 import { parseNpmAuditSummary } from '../../../npmAuditSummary';
 import { shouldRunAuditFix, AUDIT_FIX_COMMAND, AUDIT_FIX_TIMEOUT_MS } from '../../../npmAuditFix';
 import { commandFailureResult, commandLogTail } from '../../../../lib/sandboxCommandError';
@@ -6,7 +7,7 @@ import type { CommandHandle } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
 import { starterFilesToComplete, MAX_FRAGMENT_FILES, isOurStarterFile, starterTemplates } from '../../../starterFragment';
 import { applyStrictTrial } from '../../../strictTrial';
-import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
+import { IEngineerActuator, BackendProvisionResult, EnsureWorkspaceOptions } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
 import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS, buildPrebundleStaleCheckCommand, VITE_PREBUNDLE_DIR } from './devServerHost';
@@ -23,6 +24,7 @@ import { postgresWatchdogCommand, mergeEnvVar } from '../../../postgresProvision
 import { resolveTemplateId } from './fullstackRouting';
 import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
 import { resumeSandboxChoice } from '../../../sandboxResumeChoice';
+import { SandboxRecoveryUnavailableError, isSandboxRecoveryUnavailable, rethrowSandboxRecoveryUnavailable } from '../../../SandboxRecoveryError';
 import { sandboxLifecycle } from '../../../previewWake';
 import { countRunningSandboxes, type LiveSandboxCount } from '../../../liveSandboxCount';
 import { reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, shouldMarkPausedAfterFailure, actionAfterPauseFailure } from '../../../sandboxReaper';
@@ -1551,11 +1553,11 @@ export class E2BActuator implements IEngineerActuator {
   }
 
   /**
-   * Obtain a sandbox for a workspace that has none in this instance's memory: resume the workspace's
-   * own machine if we can, create one if we cannot — and in the second case, PUT THE APP BACK.
+   * Obtain a sandbox for a workspace that has none in this instance's memory: reconnect its recorded
+   * machine, or create/restore only after a successful no-id read or terminal reconnect-not-found.
    *
-   * Split out of `getSandbox` so the in-flight lock above has something to hold. The resume/create
-   * branching below is unchanged.
+   * Split out of `getSandbox` so the in-flight lock above has something to hold. Unknown recovery
+   * refuses without creating or restoring a replacement.
    */
   private async _createSandbox(workspaceId: string, resumeSandboxId?: string, framework?: string): Promise<Sandbox> {
     // Every create/connect is bounded by SANDBOX_CREATE_TIMEOUT_MS so a slow E2B can
@@ -1567,14 +1569,25 @@ export class E2BActuator implements IEngineerActuator {
     // recycle, and on every other instance behind the load balancer. The workspace's real sandbox id was
     // durable the whole time; only the wake route ever read it. Without this, a cold instance fell
     // through to `Sandbox.create()` — a brand-new EMPTY machine, with an empty replay cache to match.
-    // Bounded and best-effort: a slow store just means today's behaviour (create), never a hang.
-    const durableResumeId = resumeSandboxId
-      ? undefined
-      : await withTimeout(sandboxStore.get(workspaceId), 3_000, 'sandboxStore.get').catch(() => null);
+    // Unknown storage is not a missing id: replacing a possibly live machine would strand its data
+    // and origin. An explicit id does not need another read; the resume rollback flag stays intact.
+    const explicitResumeId = typeof resumeSandboxId === 'string' ? resumeSandboxId.trim() : '';
+    const resumeEnabled = sandboxResumeEnabled();
+    let durableResumeId: string | undefined;
+    if (!explicitResumeId && resumeEnabled) {
+      let identity;
+      try {
+        identity = await withTimeout(sandboxStore.lookupRecoveryIdentity(workspaceId), 3_000, 'sandboxStore.lookupRecoveryIdentity');
+      } catch {
+        throw new SandboxRecoveryUnavailableError();
+      }
+      if (identity.state === 'unavailable') throw new SandboxRecoveryUnavailableError();
+      if (identity.state === 'found') durableResumeId = identity.sandboxId;
+    }
     const resumeId = resumeSandboxChoice({
-      explicit: resumeSandboxId,
+      explicit: explicitResumeId,
       durable: durableResumeId,
-      resumeEnabled: sandboxResumeEnabled(),
+      resumeEnabled,
     });
     if (resumeId) {
       // Reconnect to the persisted sandbox — auto-resumes it if paused, restoring
@@ -1586,7 +1599,11 @@ export class E2BActuator implements IEngineerActuator {
         await sandbox.setTimeout(sandboxLifetimeMs()).catch(() => {});
         this._lastLifetimeExtend.set(workspaceId, Date.now());
         this._sandboxOrigin.set(workspaceId, 'resumed');
-      } catch {
+      } catch (error) {
+        // At this specific SDK boundary Sandbox.connect maps API code 404 to this class. Transport,
+        // authentication, rate-limit and deadline failures leave the target's state unknown. Broad
+        // dead-sandbox message matching is appropriate for handle eviction, not machine replacement.
+        if (!(error instanceof SandboxNotFoundError)) throw new SandboxRecoveryUnavailableError();
         sandbox = await withTimeout(Sandbox.create(this._opts(undefined, framework)), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
         freshCreate = true;
         // THE CASE THE OLD LINE COULD NOT SAY. We had an id, asked for it, and were refused — so this
@@ -1754,10 +1771,10 @@ export class E2BActuator implements IEngineerActuator {
    */
   private readonly _ensuring = new Map<string, Promise<void>>();
 
-  async ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
+  async ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string, opts?: EnsureWorkspaceOptions): Promise<void> {
     const inFlight = this._ensuring.get(workspaceId);
     if (inFlight) return inFlight;
-    const run = this._ensureWorkspaceOnce(workspaceId, projectType, resumeSandboxId)
+    const run = this._ensureWorkspaceOnce(workspaceId, projectType, resumeSandboxId, shouldSeedStarter(projectType, opts))
       .finally(() => { if (this._ensuring.get(workspaceId) === run) this._ensuring.delete(workspaceId); });
     this._ensuring.set(workspaceId, run);
     return run;
@@ -1774,18 +1791,19 @@ export class E2BActuator implements IEngineerActuator {
    * whose app then rendered in a real browser 12 minutes later was reported as never having run and
    * made free. So setup gets the same recovery, once: drop the corpse, try again.
    */
-  private async _ensureWorkspaceOnce(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
+  private async _ensureWorkspaceOnce(workspaceId: string, projectType?: string, resumeSandboxId?: string, seedStarter = true): Promise<void> {
     try {
-      return await this._ensureWorkspaceAttempt(workspaceId, projectType, resumeSandboxId);
+      return await this._ensureWorkspaceAttempt(workspaceId, projectType, resumeSandboxId, seedStarter);
     } catch (e) {
+      if (isSandboxRecoveryUnavailable(e)) throw e;
       const msg = e instanceof Error ? e.message : String(e);
       if (!isDeadSandboxError(msg) && !/ timed out after /.test(msg)) throw e;
       this._dropSandbox(workspaceId);
-      return await this._ensureWorkspaceAttempt(workspaceId, projectType, resumeSandboxId);
+      return await this._ensureWorkspaceAttempt(workspaceId, projectType, resumeSandboxId, seedStarter);
     }
   }
 
-  private async _ensureWorkspaceAttempt(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
+  private async _ensureWorkspaceAttempt(workspaceId: string, projectType?: string, resumeSandboxId?: string, seedStarter = true): Promise<void> {
     // Per SETUP, not per machine (autopsy 3d1bfe2a): a second build on the same machine reprinted the
     // first build's "completed 11 missing template file(s)" although this setup put back nothing.
     this._starterCompleted.delete(workspaceId);
@@ -1801,12 +1819,18 @@ export class E2BActuator implements IEngineerActuator {
       // 🔴 …unless what is there is only a PIECE of our own starter (autopsy 19641ab5, starterFragment.ts):
       // "the directory exists" is not "the project is set up". Best-effort and bounded; a failure here is
       // today's behaviour exactly.
-      await this._completeStarterFragment(sandbox, workspaceId, projectType).catch(() => {});
+      // An import's workspace is the user's project — never completed into our starter (build d62bf22d).
+      if (seedStarter) await this._completeStarterFragment(sandbox, workspaceId, projectType).catch(() => {});
       this._kickoffPlaywright(sandbox, workspaceId);
       return;
     }
 
     await withTimeout(sandbox.files.makeDir(WORKSPACE_ROOT), 15_000, 'files.makeDir');
+
+    // 🔴 AN IMPORT STARTS EMPTY (build d62bf22d). `'import'` used to fall through `_templateFilesFor` to
+    // vite-react, so the "empty" import workspace got our 11-file starter, the import landed beside it, and
+    // the leftover src/App.tsx + root index.html were later judged "the app is still the starter".
+    if (!seedStarter) { this._kickoffPlaywright(sandbox, workspaceId); return; }
 
     // Resolve template: fall back to vite-react for unknown/auto types (`_templateFilesFor`, shared with
     // the starter-fragment completion so the two can never seed different templates).
@@ -2035,7 +2059,10 @@ export class E2BActuator implements IEngineerActuator {
       // identical here, and wrongly reporting "no files" would make the File Guardian think the
       // project vanished. The slow path settles it.
       if (paths.length > 0) return paths.filter((p) => !isIgnoredListPath(p));
-    } catch { /* fall through to the original listing — never worse than before */ }
+    } catch (error) {
+      rethrowSandboxRecoveryUnavailable(error);
+      /* Ordinary listing failures still fall through to the original enumeration. */
+    }
     const entries = await this.fileOp(workspaceId, 'files.list', (sb) => sb.files.list(WORKSPACE_ROOT, { depth: 10 }));
     return entries
       .filter(e => e.type === 'file')
@@ -2111,7 +2138,8 @@ export class E2BActuator implements IEngineerActuator {
    * failure this closes (a migration that ran before `npm install` and died with "drizzle-kit: not
    * found"). Uses the SAME staleness check and installer as the dev-server boot, so there is one
    * install implementation and the two can never drift; a warm tree returns instantly with
-   * `ran: false`. Never throws — the caller decides what to do with an honest failure.
+   * `ran: false`. Ordinary install failures return an honest result; uncertain workspace recovery
+   * propagates so the caller cannot mistake it for missing project dependencies.
    */
   async ensureDependencies(workspaceId: string): Promise<{ ok: boolean; ran: boolean; log: string }> {
     // Held for the install's real duration — an install is the longest single sandbox operation
@@ -2130,6 +2158,7 @@ export class E2BActuator implements IEngineerActuator {
       const res = await this._npmInstall(sandbox, workspaceId);
       return { ok: res.success, ran: true, log: res.log };
     } catch (err: any) {
+      rethrowSandboxRecoveryUnavailable(err);
       return { ok: false, ran: false, log: err?.message ? String(err.message) : String(err) };
     } finally {
       release();
@@ -2523,7 +2552,8 @@ export class E2BActuator implements IEngineerActuator {
             // got ECONNREFUSED — because a URL existed either way. The shared note says only what the
             // SELECT 1 actually proved (admin task 1, 2026-08-05).
             stdout += ` ${provisionOutcomeNote({ verified: prov?.dbVerified === true, failure: prov?.dbVerifyFailure ?? 'no-output' })}`;
-          } catch {
+          } catch (error) {
+            rethrowSandboxRecoveryUnavailable(error);
             stdout += ' (PostgreSQL provision reported errors — retrying anyway).';
           }
         }
@@ -2669,7 +2699,10 @@ export class E2BActuator implements IEngineerActuator {
           priorRunMs += Date.now() - t0; // the attempt that died is still command time, not ours
           const recreateStartedAt = Date.now();
           try { sb = await this.getSandbox(workspaceId); sandboxMs += Date.now() - recreateStartedAt; continue; } // recreate (replays source) + retry once
-          catch { /* recreate itself failed (E2B down) → fall through to an honest error */ }
+          catch (recoveryError) {
+            rethrowSandboxRecoveryUnavailable(recoveryError);
+            /* Other reconnect failures retain the original command diagnostics below. */
+          }
         }
         // Each channel keeps its OWN real content — `err.stderr || err.message` used to replace an
         // empty stderr with "exit status 2" even when the real diagnostics sat in stdout (tsc prints
@@ -3251,7 +3284,8 @@ ${paintWaitJs('p')}
     try {
       const sandbox = await this.getSandbox(workspaceId);
       return await sandbox.pty.kill(pid);
-    } catch {
+    } catch (error) {
+      rethrowSandboxRecoveryUnavailable(error);
       return false; // sandbox already gone ⇒ the PTY is gone with it
     }
   }

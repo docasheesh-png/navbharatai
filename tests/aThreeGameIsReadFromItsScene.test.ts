@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { makeTempDir } from './helpers/tempDir';
 import {
   gamePlaytestModule, gamePlaytestConfig, parsePlaytest, playtestVerdict, sceneVerdict,
-  CAMERA_FACES_VEHICLE_FIX, STEERING_MIRRORED_FIX, type PlaytestRun, probeStarved, probeStarvedNote,
+  CAMERA_FACES_VEHICLE_FIX, STEERING_MIRRORED_FIX, type PlaytestRun, sceneUnread,
 } from '../src/server/AgentV3/gamePlaytest';
 
 /** A three.js racer. `cam`: behind the car, in front of it, or fixed; `treadmill`: the car stays and the world moves. */
@@ -135,8 +135,18 @@ describe.skipIf(!haveBrowser)('a three.js racer is read from its own scene, in a
     const v = sceneVerdict(run.scene);
     expect(v.faces, 'the camera is behind the car in this fixture').not.toBe(true);
     expect(v.mirrored, 'this fixture steers correctly').not.toBe(true);
-    if (probeStarved(run.scene)) {
-      expect(probeStarvedNote(run.scene), 'a starved probe must say so, never return a bare null').toMatch(/page starved/);
+    /**
+     * 🔴 AND THIS BRANCH WAS STILL THE FLAKE (Q-1097) — it asked the wrong question. It branched on
+     * `probeStarved`, a FRAME COUNT, while the reading it guards has geometric floors. Measured twice on a
+     * real browser: `{faces:false, mirrored:null}` with 180 frames — not starved by the count, and still no
+     * steering reading, so this fell through to the `else` and demanded a verdict that did not exist.
+     * It now branches on the reason the VERDICT itself could not be given, from the same read.
+     */
+    const u = sceneUnread(run.scene);
+    if (u.faces || u.mirrored) {
+      for (const why of [u.faces, u.mirrored].filter(Boolean)) {
+        expect(why, 'an unread axis must say why, never a bare null').toMatch(/\S/);
+      }
     } else {
       expect(v).toEqual({ faces: false, mirrored: false });
     }
@@ -146,24 +156,47 @@ describe.skipIf(!haveBrowser)('a three.js racer is read from its own scene, in a
 
   it('🔒 a camera in FRONT of the car is read from the scene, and named', async () => {
     const run = await play('/three-front');
-    expect(sceneVerdict(run.scene).faces).toBe(true);
-    const v = playtestVerdict(run, DRIVING);
-    expect(v.score!.cameraFacesVehicle).toBe(true);
-    expect(v.message).toContain(CAMERA_FACES_VEHICLE_FIX);
+    const s = sceneVerdict(run.scene), u = sceneUnread(run.scene);
+    // Never a WRONG claim, whatever the machine was doing: this camera really is in front of the car.
+    expect(s.faces, 'the camera is in front of the car in this fixture').not.toBe(false);
+    if (u.faces) {
+      expect(u.faces, 'and when it could not be read, it says why (Q-1097)').toMatch(/\S/);
+    } else {
+      expect(s.faces).toBe(true);
+      const v = playtestVerdict(run, DRIVING);
+      expect(v.score!.cameraFacesVehicle).toBe(true);
+      expect(v.message).toContain(CAMERA_FACES_VEHICLE_FIX);
+    }
   }, 200_000);
 
   it('🔒 mirrored steering is read from the scene, and named', async () => {
+    // 🔴 THIS IS THE ASSERTION THAT FAILED (2026-10-16, Q-1097): `{faces:false, mirrored:null}` under load,
+    // with frames to spare. It demanded both axes unconditionally — the same debt the chase test above had
+    // already paid off for itself and nobody carried across to its three siblings.
     const run = await play('/three-mirrored');
-    expect(sceneVerdict(run.scene)).toEqual({ faces: false, mirrored: true });
-    const v = playtestVerdict(run, DRIVING);
-    expect(v.score!.steeringMirrored).toBe(true);
-    expect(v.message).toContain(STEERING_MIRRORED_FIX);
+    const s = sceneVerdict(run.scene), u = sceneUnread(run.scene);
+    expect(s.mirrored, 'this fixture really does steer mirrored').not.toBe(false);
+    expect(s.faces, 'its camera is behind the car').not.toBe(true);
+    if (u.faces || u.mirrored) {
+      for (const why of [u.faces, u.mirrored].filter(Boolean)) expect(why).toMatch(/\S/);
+    } else {
+      expect(s).toEqual({ faces: false, mirrored: true });
+      const v = playtestVerdict(run, DRIVING);
+      expect(v.score!.steeringMirrored).toBe(true);
+      expect(v.message).toContain(STEERING_MIRRORED_FIX);
+    }
   }, 200_000);
 
   it('🔒 precision: a fixed camera over a world that moves (not the car) gives the scene no say, and no verdict', async () => {
     const run = await play('/three-treadmill');
     expect(run.ok).toBe(true);
     expect(sceneVerdict(run.scene)).toEqual({ faces: null, mirrored: null });
+    // 🔒 STRENGTHENED BY Q-1097: a scene with no say must SAY it has none. This fixture moves the world
+    // instead of the car, so the camera does not follow anything — that is a reason, and the report prints
+    // it rather than leaving two bare nulls that read like a game which steers correctly.
+    const u = sceneUnread(run.scene);
+    expect(u.faces, 'the scene must say why it has no say').toMatch(/\S/);
+    expect(u.mirrored).toMatch(/\S/);
     const s = playtestVerdict(run, DRIVING).score!;
     expect([s.cameraFacesVehicle, s.steeringMirrored]).toEqual([undefined, undefined]);
   }, 200_000);

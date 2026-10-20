@@ -135,7 +135,7 @@ describe('the route wiring — the CODE of the build handler, comments stripped'
     expect(end).toBeGreaterThan(at);
     const body = code.slice(at, end);
     expect(body).toContain('const degraded = !stopped && !refused');
-    expect(body).toMatch(/if \(!refused && !stopped(?: && !\w+)*\) \{/);
+    expect(body).toMatch(/if \(!refused && !stopped(?: && !\w+(?:\(\))?)*\) \{/);
   });
 
   it('the Stop BUTTON and UNSEND still reach the run only through the one funnel', () => {

@@ -22,10 +22,10 @@
 // actionable instruction the repair pass can act on, so these defects self-heal before a build ships.
 
 import { splitByProject } from './nestedRepoProbe';
-import { isNonAppPath } from '../lib/nonAppPaths';
+import { isAppAnalysisPath } from './appAnalysisPaths';
 import { openTagsAt, enclosingTag, tagName, hasAttr } from './jsxTags';
 import { stripCommentsForMarkup } from './stripCodeComments';
-import { classAttributeValues } from './CssConsistency';
+import { classAttributeValues, cssImportsOf } from './CssConsistency';
 
 export interface FocusOwner {
   /** The component file that grabs initial focus. */
@@ -37,6 +37,8 @@ export interface FocusOwner {
 export interface DuplicateStylesheet {
   /** The stylesheet import specifier that appears in more than one module (as written). */
   stylesheet: string;
+  /** Resolved identity used by the repair; raw specifiers are relative to their own importers. */
+  resolvedPath: string;
   /** The modules that each side-effect-import it. */
   importers: string[];
 }
@@ -95,25 +97,52 @@ export interface ProjectIntegrityReport {
   ok: boolean;
 }
 
-// isNonAppPath: a tool/assistant scratch directory is not the user's source. Excluded HERE — the one
+// isAppAnalysisPath: a tool/assistant scratch directory or copied build output is not the user's source. Excluded HERE — the one
 // predicate every analyzer below runs through — so a single edit keeps `.local/skills/**` scaffold
 // templates out of ALL of them (duplicate entry points, duplicate stylesheets, focus owners, …), and
 // out of the repairs those findings trigger. Mitrify autopsy 2026-08-04: four such templates were
 // reported as duplicate React roots and then actually EDITED by the integrity repair, in an app they
 // have no part in. See lib/nonAppPaths.ts.
 const isSourceFile = (path: string): boolean =>
-  /\.(t|j)sx?$/.test(path) && !/\.d\.ts$/.test(path) && !isNonAppPath(path);
+  /\.(t|j)sx?$/.test(path) && !/\.d\.ts$/.test(path) && isAppAnalysisPath(path);
 
 /** Strip line and block comments so a commented-out `.focus()` / import never counts. Best-effort. */
 function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 }
 
-/** The last path segment, without a query/hash — so "../styles/global.css" and "./global.css" match. */
-function stylesheetKey(spec: string): string {
+/** A stylesheet's resolved path, never its basename: unrelated index.css files must stay distinct. */
+function stylesheetKey(
+  files: Record<string, string>, importer: string, spec: string, reference: 'module' | 'url' | 'config' = 'module',
+): string | null {
   const clean = spec.split(/[?#]/)[0];
-  const seg = clean.split('/').filter(Boolean).pop() ?? clean;
-  return seg.toLowerCase();
+  if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(clean)) return `external:${clean}`;
+  if (reference === 'url') {
+    // HTML/CSS URLs address the served site, where public/style.css is /style.css. Vite's public
+    // middleware precedes its root-source handling, so a public file wins when both names exist.
+    const servedImporter = importer.replace(/^public\//, '');
+    const slash = servedImporter.lastIndexOf('/');
+    const urlDir = slash < 0 ? '' : servedImporter.slice(0, slash);
+    const urlPath = joinPath(clean.startsWith('/') ? '' : urlDir, clean);
+    if (!urlPath) return null;
+    return typeof files[`public/${urlPath}`] === 'string' ? `public/${urlPath}` : urlPath;
+  }
+  const slash = importer.lastIndexOf('/');
+  const dir = slash < 0 ? '' : importer.slice(0, slash);
+  if (clean.startsWith('.')) return joinPath(dir, clean);
+  if (clean.startsWith('/')) return joinPath('', clean);
+  if (clean.startsWith('@/') || clean.startsWith('~/')) {
+    const rel = clean.slice(2);
+    // Nuxt resolves ~/ from its project root; Vite commonly resolves @/ from src. Prefer an actual
+    // file and keep unknown aliases separate instead of guessing from a matching basename.
+    const candidates = clean.startsWith('~/') ? [rel, `src/${rel}`] : [`src/${rel}`, rel];
+    return candidates.find((path) => typeof files[path] === 'string') ?? `alias:${clean}`;
+  }
+  // Config declarations may be root-relative without a leading ./; package imports
+  // have their own identity and can never hide a local stylesheet with the same name.
+  const local = joinPath(dir, clean);
+  if (reference === 'config' && local && typeof files[local] === 'string') return local;
+  return `package:${clean}`;
 }
 
 /**
@@ -187,7 +216,7 @@ export function findFocusOwners(files: Record<string, string>): FocusOwner[] {
 
 /**
  * Find stylesheets side-effect-imported (`import "x.css"` — no bindings) from MORE THAN ONE module.
- * Keyed by filename so "../styles/global.css" and "./global.css" are recognised as the same sheet.
+ * Keyed by the resolved path so relative spellings of one sheet match without merging unrelated names.
  */
 export function findDuplicateStylesheets(files: Record<string, string>): DuplicateStylesheet[] {
   // key -> { spec (first-seen, as written), importers }
@@ -200,7 +229,8 @@ export function findDuplicateStylesheets(files: Record<string, string>): Duplica
     const seenInThisFile = new Set<string>();
     while ((m = importRe.exec(src)) !== null) {
       const spec = m[1];
-      const key = stylesheetKey(spec);
+      const key = stylesheetKey(files, file, spec);
+      if (!key || /^(package|external|alias):/.test(key)) continue;
       if (seenInThisFile.has(key)) continue; // a file importing the same sheet twice is one importer
       seenInThisFile.add(key);
       const entry = byKey.get(key) ?? { spec, importers: new Set<string>() };
@@ -209,8 +239,8 @@ export function findDuplicateStylesheets(files: Record<string, string>): Duplica
     }
   }
   const dups: DuplicateStylesheet[] = [];
-  for (const { spec, importers } of byKey.values()) {
-    if (importers.size >= 2) dups.push({ stylesheet: spec, importers: [...importers].sort() });
+  for (const [resolvedPath, { spec, importers }] of byKey) {
+    if (importers.size >= 2) dups.push({ stylesheet: spec, resolvedPath, importers: [...importers].sort() });
   }
   return dups.sort((a, b) => a.stylesheet.localeCompare(b.stylesheet));
 }
@@ -223,7 +253,7 @@ export function findDuplicateStylesheets(files: Record<string, string>): Duplica
  * CSS Modules (`*.module.css`) are excluded — an unused module sheet is dead code, not an unstyled app.
  */
 export function findOrphanStylesheets(files: Record<string, string>): OrphanStylesheet[] {
-  const cssFiles = Object.keys(files).filter((p) => /\.css$/i.test(p) && !/\.module\.css$/i.test(p));
+  const cssFiles = Object.keys(files).filter((p) => /\.css$/i.test(p) && !/\.module\.css$/i.test(p) && isAppAnalysisPath(p));
   if (cssFiles.length === 0) return [];
   // Collect every stylesheet reference: JS/TS side-effect imports + HTML <link href>.
   const referencedKeys = new Set<string>();
@@ -233,55 +263,100 @@ export function findOrphanStylesheets(files: Record<string, string>): OrphanStyl
   // an `import` statement, so match every quoted `.css` string literal there — not only imports.
   const anyCssRe = /['"]([^'"]+\.css)['"]/g;
   for (const [file, raw] of Object.entries(files)) {
-    if (typeof raw !== 'string') continue;
+    if (typeof raw !== 'string' || !isAppAnalysisPath(file)) continue;
     if (isConfigFile(file)) {
       const src = stripComments(raw);
       let m: RegExpExecArray | null;
       anyCssRe.lastIndex = 0;
-      while ((m = anyCssRe.exec(src)) !== null) referencedKeys.add(stylesheetKey(m[1]));
+      while ((m = anyCssRe.exec(src)) !== null) {
+        const key = stylesheetKey(files, file, m[1], 'config');
+        if (key) referencedKeys.add(key);
+      }
     } else if (isSourceFile(file)) {
       const src = stripComments(raw);
       let m: RegExpExecArray | null;
       importRe.lastIndex = 0;
-      while ((m = importRe.exec(src)) !== null) referencedKeys.add(stylesheetKey(m[1]));
+      while ((m = importRe.exec(src)) !== null) {
+        const key = stylesheetKey(files, file, m[1]);
+        if (key) referencedKeys.add(key);
+      }
+    } else if (/\.css$/i.test(file)) {
+      for (const path of cssImportsOf(file, stripComments(raw))) referencedKeys.add(path);
+      if (file.startsWith('public/')) {
+        const imports = /@import\s+(?:url\(\s*)?['"]([^'"]+\.css)['"]/g;
+        for (const m of stripComments(raw).matchAll(imports)) {
+          const key = stylesheetKey(files, file, m[1], 'url');
+          if (key) referencedKeys.add(key);
+        }
+      }
     } else if (/\.html?$/i.test(file)) {
       let m: RegExpExecArray | null;
       linkRe.lastIndex = 0;
-      while ((m = linkRe.exec(raw)) !== null) referencedKeys.add(stylesheetKey(m[1]));
+      while ((m = linkRe.exec(raw)) !== null) {
+        const key = stylesheetKey(files, file, m[1], 'url');
+        if (key) referencedKeys.add(key);
+      }
     }
   }
   return cssFiles
-    .filter((p) => !referencedKeys.has(stylesheetKey(p)))
+    .filter((p) => !referencedKeys.has(p))
     .sort()
     .map((stylesheet) => ({ stylesheet }));
 }
 
+/** Add a module import without changing an existing client/server directive prologue. */
+function insertAfterDirectives(source: string, statement: string): string {
+  // Read whole string-literal statements, including a directive without a semicolon. An import before
+  // 'use client'/'use server' would turn the directive into an ordinary expression in a Next layout.
+  const skipTrivia = (from: number): number => {
+    const match = /^(?:\s+|\/\/[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*/.exec(source.slice(from));
+    return from + (match?.[0].length ?? 0);
+  };
+  let cursor = 0;
+  let insertion = 0;
+  while (cursor < source.length) {
+    const start = skipTrivia(cursor);
+    const literal = /^(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*')/.exec(source.slice(start));
+    if (!literal) break;
+    const end = start + literal[0].length;
+    const next = skipTrivia(end);
+    if (source[next] === ';') insertion = cursor = next + 1;
+    else if (next === source.length || (/\r|\n/.test(source.slice(end, next)) && !/[.([`+\-*/%<>=&|^?:]/.test(source[next] ?? ''))) {
+      insertion = end;
+      cursor = next;
+    } else break;
+  }
+  return insertion > 0
+    ? `${source.slice(0, insertion)}\n${statement}\n${source.slice(insertion)}`
+    : `${statement}\n${source}`;
+}
+
 /**
- * DETERMINISTIC FIX for an orphan GLOBAL stylesheet: inject its side-effect import at the top of the
- * app's entry module (src/main.tsx / main.jsx / main.ts / index.tsx …) so the app is actually styled.
- * Returns the updated files plus what was injected (empty = nothing to do / no entry to inject into).
- * Only fires for an APP-WIDE orphan (see `isAppWideStylesheet`) — an unreferenced sheet beside one
- * component stays a report finding for the LLM repair pass, because its importer is that component.
- * Pure.
+ * Wire an orphan app-wide stylesheet into the app entry or Next root layout. Feature-level and public
+ * sheets stay findings for their own importer/link repair. Pure; returns the files and exact injections.
  */
 export function injectGlobalStylesheetImport(
   files: Record<string, string>,
 ): { files: Record<string, string>; injected: Array<{ stylesheet: string; entry: string }> } {
   const orphans = findOrphanStylesheets(files);
   if (orphans.length === 0) return { files, injected: [] };
-  const entry = ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'src/index.jsx', 'main.tsx']
+  const entry = [
+    'src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'src/index.jsx', 'main.tsx',
+    // Report 5cf3f986: Next app-router projects have a root layout rather than a Vite/CRA entry.
+    'src/app/layout.tsx', 'app/layout.tsx', 'src/app/layout.jsx', 'app/layout.jsx', 'src/app/layout.js', 'app/layout.js',
+  ]
     .find((p) => typeof files[p] === 'string');
   if (!entry) return { files, injected: [] };
-  const entryDir = entry.slice(0, entry.lastIndexOf('/') + 1); // '' when the entry sits at the root
   const out = { ...files };
   const injected: Array<{ stylesheet: string; entry: string }> = [];
   for (const { stylesheet } of orphans) {
     if (!isAppWideStylesheet(stylesheet)) continue; // feature-level sheet — leave to the repair pass
-    // Import specifier relative to the entry: same dir → './x.css'; otherwise from the project root.
-    const spec = stylesheet.startsWith(entryDir) && entryDir
-      ? `./${stylesheet.slice(entryDir.length)}`
-      : `/${stylesheet}`.replace('//', '/');
-    out[entry] = `import '${spec}';\n${out[entry]}`;
+    // Public files are served by URL, not imported as source modules. Leave an unwired public sheet
+    // for an HTML-link repair rather than creating a module import Vite explicitly rejects.
+    if (stylesheet.startsWith('public/')) continue;
+    // A relative import works for Next layouts too; a Vite-style /src/... URL does not.
+    const spec = relativeSpecifier(entry, stylesheet);
+    out[entry] = insertAfterDirectives(out[entry], `import '${spec}';`);
     injected.push({ stylesheet, entry });
   }
   return { files: out, injected };
@@ -329,11 +404,11 @@ export function dedupeStylesheetImports(
   const removed: Array<{ stylesheet: string; from: string }> = [];
   for (const d of dups) {
     if (!d.importers.includes(entry)) continue;
-    const key = stylesheetKey(d.stylesheet);
+    const key = d.resolvedPath;
     for (const file of d.importers) {
       if (file === entry) continue;
       const before = out[file];
-      const after = before.replace(/^[ \t]*import\s+['"]([^'"]+\.css)['"];?[ \t]*\r?\n?/gm, (line, spec: string) => (stylesheetKey(spec) === key ? '' : line));
+      const after = before.replace(/^[ \t]*import\s+['"]([^'"]+\.css)['"];?[ \t]*\r?\n?/gm, (line, spec: string) => (stylesheetKey(files, file, spec) === key ? '' : line));
       if (after !== before) { out[file] = after; removed.push({ stylesheet: d.stylesheet, from: file }); }
     }
   }

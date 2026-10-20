@@ -128,7 +128,8 @@ describe('🔴 door 2 — a money statement is made once, after the money is fin
       // Counts the builder's writes, never our game kit alone (build 46e2d74b, `builderWroteCount`).
       'if (expectsArtifacts && builderWroteCount() === 0) {',
       'if (zeroBillForUnrenderedPreview(expectsArtifacts, previewVerifiedFailed)) {',
-      '} else if (zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0) {',
+      "} else if (stopSettlement.kind === 'failed-free') {",
+      "} else if (stopSettlement.kind === 'late-stop-free') {",
     ]) {
       const at = route.indexOf(zeroer);
       expect(at, `missing zeroing rule: ${zeroer}`).toBeGreaterThan(-1);

@@ -3,7 +3,8 @@
 // Two capabilities, both operating on the platform's OWN user data (not generated apps):
 //   1. deleteUserData(uid) — the right-to-be-forgotten cascade: delete every user-scoped record for a
 //      single user across all collections in the VERIFIED registry below. Exact-match only (doc-id == uid
-//      or a verified `userId` field == uid) — it NEVER runs a broad/prefix query that could over-delete.
+//      or the registered owner field == uid), subject to each store's attribution policy. Stores with unproven shared-key ownership
+//      remain inventoried and explicitly retained; a parent userId alone cannot authorize its children.
 //   2. purgeExpired(now) — TTL retention: delete records in RETENTION_POLICIES older than their cutoff.
 //
 // The Firestore surface is injected (RetentionFirestore) so this is unit-testable without Firebase and
@@ -71,6 +72,10 @@ export type KeyStrategy = 'docId' | { field: string };
 export interface UserScopedCollection {
   collection: string;
   key: KeyStrategy;
+  /** Preserve known-but-unattributed stores before querying; their keys/children remain inventoried. */
+  erasePolicy?: 'ownership-unverified';
+  /** Bounded public explanation for a known ownership refusal; never includes record keys or contents. */
+  eraseRefusalReason?: string;
   /**
    * Subcollections under EACH MATCHED document, page-deleted before the document itself.
    *
@@ -111,6 +116,9 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'user_token_wallets', key: 'docId' },
   { collection: 'user_costs', key: { field: 'userId' } },
   { collection: 'user_build_history', key: { field: 'userId' } },
+  // Minimal request replay tombstones: remove with the verified owner, never on a timer that could
+  // admit the same old UUID again. No prompt, source, secret or provider response is stored.
+  { collection: 'agentv3_build_requests', key: { field: 'ownerId' } },
   { collection: 'chat_sessions', key: { field: 'userId' } },
   { collection: 'user_vault_pin', key: 'docId' },
   { collection: 'agentv3_mcp_library', key: 'docId' },
@@ -214,17 +222,28 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'conversation_memory_v1', key: { field: 'userId' } },
   /** What a professional assistant remembers about the person (`ClientProfileStore.ts`, ProfileDoc.userId). */
   { collection: 'professional_user_memory', key: { field: 'userId' } },
-  /** The person's voice-chat turns (`VoiceMemoryStore.ts`, MemoryDoc.userId). */
-  { collection: 'sonic_voice_memory', key: { field: 'userId' } },
+  /**
+   * Voice memory keys concatenate uid/professional/conversation with `__`. Valid inputs can collide;
+   * append retains prior turns and the original userId, so that field does not own the full array.
+   */
+  {
+    collection: 'sonic_voice_memory', key: { field: 'userId' }, erasePolicy: 'ownership-unverified',
+    eraseRefusalReason: 'Legacy voice conversation ownership cannot be confirmed; records are retained.',
+  },
   /**
    * Every build conversation (`FirestoreConversationStore.ts:291` lists by `userId`) — AND the messages
    * themselves, which live one level down in `turns` and `timeline` (`:142`, `:146`).
    *
-   * 🔴 Without `subs` this entry would have been a FALSE FIX: deleting the conversation header and
-   * orphaning every message in it, while the page promises "every build conversation you had with the
-   * builder". That is Q-134's defect in a new place, so the cascade now deletes the children first.
+   * Legacy workspace-derived conversation IDs can collide across owner/session pairs. Existing
+   * upsertConversationTurn appends to a present conversation without verifying that turn's owner,
+   * so the parent userId cannot establish ownership of every turn/timeline child. Keep the full
+   * cascade inventory, but retain the parent AND its children until independent ownership is proven.
    */
-  { collection: 'agentv3_conversations', key: { field: 'userId' }, subs: ['turns', 'timeline'] },
+  {
+    collection: 'agentv3_conversations', key: { field: 'userId' }, subs: ['turns', 'timeline'],
+    erasePolicy: 'ownership-unverified',
+    eraseRefusalReason: 'Legacy conversation ownership cannot be confirmed; conversation records and children are retained.',
+  },
   /** The person's own diagnostics report (`DiagnosticsStore.ts:472` — doc id IS the uid). */
   { collection: 'user_diagnostics_v3', key: 'docId' },
   /** Which admin notices they have read (`AdminNotificationStore.ts:159/194` — doc id IS the uid). */
@@ -292,31 +311,29 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   /**
    * ── THE COMPOSITE-ID THREE (Q-762, Q-765 — 2026-10-09) ───────────────────────────────────────────
    *
-   * These were `blocked` in the census, not forgotten: each has a document id that NOTHING could
-   * search by, so registering them was impossible until the writers stored a field.
+   * Keep the key inventory, but a last-writer userId does not prove the ownership of prior state.
    *
-   *  · `adrDecisions` / `techDebt` — doc id `${userId}__${projectId}`, and the body carried no uid at
-   *    all. Both writers now store `userId` (`adrMemory.ts`, `TechnicalDebtTracker.ts`). A doc-id
-   *    prefix range was considered and REFUSED: `workspaceDataErase.ts` documents why — a uid
-   *    containing the separator makes `a__b` ambiguous with `a` + `b__…`, and getting that wrong
-   *    deletes a different person's data.
-   *  · `app_ai_apps` — doc id is the APP id, so the workspace eraser's `agentv3-{uid}-` range can
-   *    never reach it; the body has always carried `userId` (`AppAiRegistryStore.ts:91`).
+   *  · `adrDecisions` / `techDebt` use `${userId}__${projectId}`. Valid owner/project pairs can
+   *    construct the same key, including the live builder's workspace IDs. Both writers retain
+   *    prior arrays and replace userId on a later write, so even a row with userId can mix owners.
+   *  · `app_ai_apps` hashes a legacy workspace ID into its app ID. Colliding workspaces share it;
+   *    mint() preserves the prior nonce while replacing userId. The latest field is not owner proof.
    *
-   * ⚠️ WHAT THESE ENTRIES DO NOT REACH, stated rather than implied. A row written BEFORE this change
-   * has no `userId`, so this query does not find it. It is not a permanent hole for a live project:
-   * both writers rewrite the SAME document on the next build (`adrDecisions` with `merge: false`,
-   * `techDebt` with `merge: true`), so an active project's row gains the field the next time it is
-   * touched. Only an abandoned project's row stays unreachable, and that residue is recorded in
-   * `PROGRESS.md` rather than called fixed.
-   *
-   * And `app_ai_apps` mints `userId: userId || ''` (`DeploymentStore.ts:626`), so a publish with no
-   * signed-in owner stores an empty string. Those rows hold no person either: such an app's
-   * workspace is `agentv3-anon-…`, the shared anon bucket `deriveWorkspaceId` falls back to.
+   * Neither field stamping nor prefix queries can safely attribute these legacy bytes. Retain all
+   * three stores before querying, with an explicit refusal, until independent owner proof exists.
    */
-  { collection: 'adrDecisions', key: { field: 'userId' } },
-  { collection: 'techDebt', key: { field: 'userId' } },
-  { collection: 'app_ai_apps', key: { field: 'userId' } },
+  {
+    collection: 'adrDecisions', key: { field: 'userId' }, erasePolicy: 'ownership-unverified',
+    eraseRefusalReason: 'Legacy engineering record ownership cannot be confirmed; records are retained.',
+  },
+  {
+    collection: 'techDebt', key: { field: 'userId' }, erasePolicy: 'ownership-unverified',
+    eraseRefusalReason: 'Legacy engineering record ownership cannot be confirmed; records are retained.',
+  },
+  {
+    collection: 'app_ai_apps', key: { field: 'userId' }, erasePolicy: 'ownership-unverified',
+    eraseRefusalReason: 'Legacy app identity ownership cannot be confirmed; app identity records are retained.',
+  },
   /**
    * Which screens and actions a person used (`AnalyticsPipeline.recordAnalyticsEvent`): one document
    * per event with their real `userId`, the event name and the funnel stage. Q-767 came to it for the
@@ -528,6 +545,7 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
   { collection: 'metrics_snapshots', ttlDays: 400, timestampField: 'updatedAt', timestampKind: 'epochMs' },
   // `savedAt: Date.now()` — ProBuildSession. A finished build's transient session result.
   { collection: 'build_sessions', ttlDays: 90, timestampField: 'savedAt', timestampKind: 'epochMs' },
+  { collection: 'build_sessions_v2', ttlDays: 90, timestampField: 'savedAt', timestampKind: 'epochMs' },
   // `updatedAt: new Date().toISOString()` — ErrorPatternStore. Per-session hints, regenerated freely.
   { collection: 'session_error_hints', ttlDays: 30, timestampField: 'updatedAt', timestampKind: 'iso' },
   // The "why do builds fail?" ledger — ONE document per calendar day, so a long window is cheap and
@@ -772,6 +790,8 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
   { collection: 'app_engineering_memory_v1', reason: "the app's requirement ledger, open issues and change log — bounded per app, erased with the workspace" },
   { collection: 'app_builds', reason: "the user's own build record" },
   { collection: 'user_build_history', reason: "the user's own history; removed with their account, not with age" },
+  { collection: 'build_history_v2', reason: "the user's owner-scoped restore points; bounded per app and removed with their account, not with age" },
+  { collection: 'agentv3_build_requests', reason: 'request replay tombstones kept while the account exists; deleting one on age would permit its old UUID to execute again. Erased by verified ownerId on account deletion' },
   { collection: 'user_costs', reason: 'money. A billing record deleted on a timer cannot be reconciled or disputed' },
   /**
    * Money. Privacy §9's FIRST stated exception to erasure, and Indian tax and accounting law requires
@@ -982,12 +1002,18 @@ export function isExpired(docTimestampMs: number, cutoffMs: number): boolean {
 }
 
 // ── Right-to-be-forgotten cascade ──────────────────────────────────────────────────────────────────
-export interface CollectionResult { collection: string; deleted: number; error?: string; }
+export interface CollectionResult {
+  collection: string;
+  deleted: number;
+  error?: string;
+  refusal?: 'ownership-unverified';
+}
 export interface DeletionReport { uid: string; collections: CollectionResult[]; totalDeleted: number; }
 
 /**
- * Delete EVERY user-scoped record for `uid` across the verified registry. Exact-match only. Best-effort
- * per collection: a failure on one collection is recorded and the cascade continues (so a single flaky
+ * Delete user records permitted by their registered attribution policy. Exact-match only.
+ * Unproven stores are explicitly retained before any query; a matching parent field is insufficient.
+ * Best-effort per collection: a failure on one collection is recorded and the cascade continues (so a single flaky
  * collection can't leave the rest of the user's data behind). Throws only on an empty uid — deleting
  * with an empty key would be catastrophic, so it is refused outright.
  */
@@ -997,6 +1023,15 @@ export async function deleteUserData(db: RetentionFirestore, uid: string): Promi
   }
   const collections: CollectionResult[] = [];
   for (const entry of USER_SCOPED_COLLECTIONS) {
+    if (entry.erasePolicy === 'ownership-unverified') {
+      collections.push({
+        collection: entry.collection,
+        deleted: 0,
+        refusal: 'ownership-unverified',
+        error: entry.eraseRefusalReason ?? 'Record ownership cannot be confirmed; records are retained.',
+      });
+      continue;
+    }
     let deleted = 0;
     try {
       if (entry.key === 'docId') {

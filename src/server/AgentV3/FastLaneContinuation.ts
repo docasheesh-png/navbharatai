@@ -235,3 +235,92 @@ export function unterminatedTailPath(text: string): string | null {
   const path = m[1].trim().replace(/^["'`]|["'`]$/g, '');
   return path || null;
 }
+
+export interface FastLaneReply {
+  text: string;
+  stopReason: string | null;
+}
+
+interface RejectedFile<T> { path: string; reply: T; contributors: T[] }
+
+/**
+ * Run the bounded continuation loop and return only the file text it can safely keep. Keeping the
+ * loop here makes a thrown/empty continuation exercise the same cleanup as an exhausted ceiling.
+ * `attempts` includes failed calls; `continued` counts only replies actually joined to the output.
+ */
+export async function continueFastLaneGeneration<T extends FastLaneReply>(
+  first: T,
+  deps: {
+    generate: (prompt: string) => Promise<T>;
+    onAttempt?: (attempt: number) => void;
+    onRejoined?: (path: string) => void;
+  },
+): Promise<{
+  text: string;
+  stopReason: string | null;
+  attempts: number;
+  continued: number;
+  failure: { error: unknown } | null;
+  abandoned: Array<RejectedFile<T>>;
+  dropped: RejectedFile<T> | null;
+  discardedReplies: T[];
+}> {
+  let text = first.text;
+  let last = first;
+  let attempts = 0;
+  let continued = 0;
+  let failure: { error: unknown } | null = null;
+  const abandoned: Array<RejectedFile<T>> = [];
+  let tailContributors = unterminatedTailPath(text) ? [first] : [];
+  while (shouldContinue(last.stopReason, attempts, text)) {
+    attempts++;
+    deps.onAttempt?.(attempts);
+    let next: T;
+    try {
+      next = await deps.generate(continuationPrompt(text));
+      // A normal stop with no answer did not finish the partial file. Do not let that stop reason
+      // replace the known truncation, or charge/discard the empty reply instead of the partial one.
+      if (!next.text.trim()) throw new Error('The continuation returned no text; the previous output is still truncated.');
+    } catch (error) {
+      failure = { error };
+      break;
+    }
+    const rejoined = resumedFilePath(text, next.text);
+    if (rejoined) deps.onRejoined?.(rejoined);
+    // A model can skip the interrupted file and start a different one. The parser deliberately
+    // accepts missing end markers, so that would hide the known partial behind a complete final
+    // block. Remove it at the boundary where we still know which reply left it unfinished.
+    const openPath = unterminatedTailPath(text);
+    const nextHeader = /<<<FILE\s+(.+?)>>>/.exec(next.text);
+    let replacesTail = false;
+    if (openPath && nextHeader && !hasEndFileMarker(next.text.slice(0, nextHeader.index))) {
+      const nextPath = nextHeader[1].trim().replace(/^["'`]|["'`]$/g, '');
+      replacesTail = nextPath === openPath && !rejoined;
+      if (nextPath !== openPath) {
+        abandoned.push({ path: openPath, reply: last, contributors: tailContributors });
+        text = text.slice(0, text.lastIndexOf('<<<FILE'));
+      }
+    }
+    text = joinContinuation(text, next.text);
+    const newOpenPath = unterminatedTailPath(text);
+    tailContributors = newOpenPath
+      ? newOpenPath === openPath && !replacesTail ? [...tailContributors, next] : [next]
+      : [];
+    last = next;
+    continued++;
+  }
+  // A later normal stop is not evidence that the interrupted file was finished: a refusal or prose
+  // response can end normally too. Once truncated, its file blocks must explicitly close. A normal
+  // first reply keeps the parser's existing tolerance for a merely omitted end marker.
+  const path = isTruncatedStop(first.stopReason) ? unterminatedTailPath(text) : null;
+  if (path) {
+    // Zero is the usual one-file response, not "no header". `cut > 0` used to announce this file
+    // was discarded while returning it intact for parseFileBlocks to accept and write.
+    text = text.slice(0, text.lastIndexOf('<<<FILE'));
+  }
+  const dropped = path ? { path, reply: last, contributors: tailContributors } : null;
+  // The file head and several resumed fragments may all have been discarded. Refunding only the
+  // final reply (which can be an unrelated refusal) leaves the original truncated output charged.
+  const discardedReplies = [...new Set([...abandoned, ...(dropped ? [dropped] : [])].flatMap((file) => file.contributors))];
+  return { text, stopReason: last.stopReason, attempts, continued, failure, abandoned, dropped, discardedReplies };
+}

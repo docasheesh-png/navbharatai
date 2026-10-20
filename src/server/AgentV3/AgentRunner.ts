@@ -21,12 +21,14 @@ import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTrigger
 import { PARALLEL_WRITER_ROLES } from './parallelBuild';
 import { writerTaskSiblings, SIBLING_TASKS_INPUT_KEY } from './parallelSiblings';
 import { toolNameCouldProduceWork } from './toolWork';
-import { isTodoOnlyTurn, TODO_ONLY_TURN_STEER } from './todoOnlyTurn';
+import { TASK_NOT_OFFERED } from './soloBuild';
+import { isTodoOnlyTurn, TODO_ONLY_TURN_STEER, nextTodoWithdrawal, toolsThisTurn, runCanWrite, type TodoWithdrawal } from './todoOnlyTurn';
+import { initialExplorationProgress, advanceExplorationProgress } from './explorationProgress';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
 import { lostTruncatedOutput, truncationRecoverySteer, truncationRecoveryNarration, truncationSteeredPaths } from './TruncationRecovery';
-import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRepeatProbeSteer, noteMutations, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
+import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRepeatProbeSteer, noteMutations, noteToolEffect, isNoEffectToolCall, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { serviceRecommendationEvent } from '../analyzer/serviceRecommendation';
 import { missingFeatureNotice } from './missingFeatureNotice';
@@ -39,6 +41,7 @@ import { decideBuildNudge, standDownNote } from './nudgeToBuild';
 import { decideUnfinishedResume, unfinishedResumeStandDownNote, unfinishedResumeNote } from './unfinishedResume';
 import { decideStyleResume, doneStyleNote, styleResumeEnabled, styleResumeNote } from './stylePolishResume';
 import { handBackNotice } from './handBackNotice';
+import { stylePassCapHit } from './stylePassCap';
 import { asPlatformRequest } from './platformRequest';
 import { repairClaimWithoutChange, repairClaimNote, NO_CHANGE_LINE, handBackIgnoredNote } from './repairClaim';
 import { streamThinkingToChat } from './thinkingStream';
@@ -85,6 +88,11 @@ export interface AgentRunnerOptions {
    * (autopsy db07e0af: 45 s + 11 s spent waiting on a reasoning engine, for nothing). Absent ⇒ walk the chain.
    */
   stopAtReasoningRung?: boolean;
+  /**
+   * A small new app built by ONE agent (soloBuild.ts, autopsy ca99778e): the run is not offered `task`, and a `task`
+   * call it invents anyway is refused here instead of spawning a sub-agent.
+   */
+  soloBuild?: boolean;
   maxTokensPerTurn?: number;
   /** AP-4 (flag-gated, default off): allow frontend/backend WRITER sub-agents to run in parallel. Safe
    *  only when the actuator is wrapped with the per-path write lock (lockedActuator) — the caller pairs
@@ -198,6 +206,11 @@ export interface AgentRunnerOptions {
    * (autopsy 303e8a6f). Never changes ok/false or what is persisted — only the sentence.
    */
   seedState?: () => SeedState | null;
+  /**
+   * Did the build's own record say OUR ENGINE took its time (`engineTimeDominated`)? Asked once, at the ending, so an
+   * aborted build does not tell the person to rephrase a request that was never the problem (autopsy 67a2b0a2).
+   */
+  providerFaultNow?: () => boolean;
   /**
    * True when this turn is editing a project that ALREADY EXISTS (the route's `isEditMode`).
    *
@@ -615,6 +628,9 @@ export class AgentRunner {
     // Turns whose only tool calls were update_todo (todoOnlyTurn.ts, autopsy 9c612cdb): every one is reported
     // through `onTodoOnlyTurn`, and the first is handed back with the rule (once per run).
     let todoOnlySteered = false;
+    // …and after one, the plan tool is withdrawn until real work is done (autopsy ca99778e — see `toolsThisTurn`).
+    let todoWithdrawal: TodoWithdrawal = 'offered';
+    let plannedOnlyBefore = false;
     // ONE place answering "is there something to resume from", so the four abort/timeout/step-cap
     // exits below can never drift into disagreeing with each other (or with the route's own
     // `writtenFiles`-based billing decision — see `hasExistingFiles`'s doc comment for the report
@@ -627,9 +643,11 @@ export class AgentRunner {
     const builtSomethingNow = (): boolean =>
       producingToolUses > 0 || this.opts.hasExistingFiles?.() === true;
     // The third state every ending can be in (autopsy 303e8a6f): nothing of ours, but the platform's seed is there.
-    const endingContext = (): { builtSomething: boolean; seed: SeedState | null } => {
+    const endingContext = (): { builtSomething: boolean; seed: SeedState | null; providerFault: boolean } => {
       const builtSomething = builtSomethingNow();
-      return { builtSomething, seed: builtSomething ? null : this.opts.seedState?.() ?? null };
+      let providerFault = false;
+      try { providerFault = this.opts.providerFaultNow?.() === true; } catch { /* a verdict we cannot read is not an outage */ }
+      return { builtSomething, seed: builtSomething ? null : this.opts.seedState?.() ?? null, providerFault };
     };
     // How many times we've nudged a build that only NARRATED (described its plan / said it would
     // "assign the frontend expert") without calling a single tool. The model often plans out loud
@@ -646,6 +664,10 @@ export class AgentRunner {
      * ("Done — I added all the missing CSS rules to src/index.css …") and replaced it as the build's summary.
      */
     let summaryBeforeStyleResume: string | null = null;
+    /** When OUR style hand-back started its pass, and the READY health it started from (stylePassCap.ts). */
+    let styleResumeStartedAt: number | null = null;
+    let styleResumeHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string; unassessed?: boolean } | undefined;
+    const previewLiveNow = (): boolean => { try { return typeof (dispatcher as any).hasPublishedPreview === 'function' && (dispatcher as any).hasPublishedPreview() === true; } catch { return false; } };
     const MAX_BUILD_NUDGES = 2;
 
     const messages: unknown[] = [{ role: 'user', content: this.opts.platformRequest ? asPlatformRequest(userPrompt) : userPrompt }];
@@ -654,6 +676,8 @@ export class AgentRunner {
     if (typeof dispatcher.beginConversation === 'function') dispatcher.beginConversation();
     /** Changes the dispatcher had made before this run — so a repair pass can ask about ITSELF (repairClaim.ts). */
     const changesAtRunStart = typeof dispatcher.changeCount === 'function' ? dispatcher.changeCount() : 0;
+    let explorationProgress = initialExplorationProgress(changesAtRunStart);
+    let explorationNarrated = false;
     /**
      * The dispatcher's change count when OUR last end-of-turn hand-back (style / unfinished) was pushed, and which
      * one it was — so its reply can be checked against what it really did (autopsy db07e0af, repairClaim.ts).
@@ -945,6 +969,18 @@ export class AgentRunner {
           return { ok: builtSomething, summary, steps, usage, billedUsd: billed(), timedOut: true };
         }
 
+        // OUR STYLE PASS HAS A CAP OF ITS OWN (stylePassCap.ts, r6–r10 autopsy). It only ever starts on a build
+        // the gate already judged READY, so on expiry the build ends as that READY build, with the model's own
+        // summary of the app — not a step-limit or timeout message about polish nobody asked for.
+        if (stylePassCapHit(styleResumeStartedAt, Date.now())) {
+          const passMs = Date.now() - (styleResumeStartedAt as number);
+          try { this.opts.onNote?.({ code: 'STYLE_PASS_CAPPED', message: `style pass ended by its time cap after ${Math.round(passMs / 1000)}s` }); } catch { /* a note never fails a build */ }
+          const summary = summaryBeforeStyleResume ?? 'Build complete.';
+          await persist('complete');
+          events.emit({ type: 'done', ok: true, summary, ts: Date.now(), ...(styleResumeHealth ? { readiness: styleResumeHealth } : {}) });
+          return { ok: true, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
+        }
+
         // Full Team mid-build steering (Fix 60): drain the messages the user sent while the team was
         // working and inject each as a REAL user turn, so this very model call acts on them. The
         // narration ack is the honest "picked up" signal (the route already acked "queued" instantly).
@@ -1016,7 +1052,7 @@ export class AgentRunner {
             model,
             system,
             messages: modelMessages,
-            tools,
+            tools: toolsThisTurn(tools, todoWithdrawal),
             maxTokens: maxTokensPerTurn,
             thinking,
             effort,
@@ -1330,7 +1366,9 @@ export class AgentRunner {
                   summaryBeforeStyleResume = turn.text.trim() || null;
                   // Keep main's hand-back narration (#3470); spacing is no longer handed back at all
                   // (autopsy 536c8189 — it is snapped deterministically in `spacingSnap.ts`).
-                  const styleNotice = handBackNotice('style', turn.text);
+                  styleResumeStartedAt = Date.now();
+                  styleResumeHealth = buildHealth;
+                  const styleNotice = handBackNotice('style', turn.text, { previewLive: previewLiveNow() });
                   if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
                   try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, style.orphans?.length ?? 0, style.a11y?.length ?? 0, style.noTokens?.colours ?? 0), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.orphans ?? []).map((o) => `${o}:unimported`), ...(style.noTokens ? [`${style.noTokens.colours}-colours:no-tokens`] : [])].join(' ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(decision.message);
@@ -1408,7 +1446,8 @@ export class AgentRunner {
                 styleResumes++;
                 summaryBeforeStyleResume = turn.text.trim() || null;
                 // A specialist's text is forwarded to the chat too (SubAgent re-emits narration).
-                const styleNotice = handBackNotice('style', turn.text);
+                styleResumeStartedAt = Date.now();
+                const styleNotice = handBackNotice('style', turn.text, { previewLive: previewLiveNow() });
                 if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
                 try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: `${agentRole}:${styleResumeNote(style.missing.length, style.pages.length, 0, style.a11y?.length ?? 0)}`, detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
                 pushPlatformTurn(decision.message);
@@ -1483,6 +1522,8 @@ export class AgentRunner {
         // 📋 A TURN SPENT ONLY ON THE PLAN (autopsy 9c612cdb, Q-987: five of 22 turns, 20 s of model time).
         // Measured here, while `llmStartedAt` still times only the model call; handed back below, once.
         const todoOnlyTurn = isTodoOnlyTurn(turn.toolUses.map((tu) => tu.name), tools.map((t) => t.name));
+        todoWithdrawal = nextTodoWithdrawal(todoWithdrawal, { todoOnly: todoOnlyTurn, didOtherWork: turn.toolUses.some((tu) => tu.name !== 'update_todo'), plannedOnlyBefore });
+        if (todoOnlyTurn) plannedOnlyBefore = true;
         if (todoOnlyTurn) {
           try { this.opts.onTodoOnlyTurn?.({ latencyMs: Date.now() - llmStartedAt, firstInRun: !todoOnlySteered }); } catch { /* a measurement must never fail a build */ }
         }
@@ -1547,6 +1588,9 @@ export class AgentRunner {
           // it makes is then the model's by evidence, so a platform step that named no pass can no longer be
           // reported as "the build loop". A repair the platform started is marked as that, not as the build.
           const asModel = <T>(fn: () => Promise<T>): Promise<T> => runAsModelToolCall(fn, { platformRequest: this.opts.platformRequest === true });
+          // A sub-agent is spawned only by a run that was OFFERED the task tool (soloBuild.ts, autopsy ca99778e): a small
+          // app's solo architect that invents a `task` call is told to write the files itself — nothing is spawned.
+          if (tu.name === 'task' && this.opts.soloBuild === true && !offeredToolNames.has('task')) return { tool_use_id: tu.id, content: TASK_NOT_OFFERED, is_error: true };
           if (toolTimeoutMs <= 0 || tu.name === 'task') return asModel(() => dispatcher.dispatch(tu, agentRole));
           try {
             return await withDeadline((signal) => asModel(() => dispatcher.dispatch(tu, agentRole, { signal })), toolTimeoutMs, `tool ${tu.name}`);
@@ -1563,11 +1607,23 @@ export class AgentRunner {
             };
           }
         };
+        const dispatchObserved = async (tu: ToolUse): Promise<ToolResult> => {
+          // A no-change/help receipt is not fresh work (Q-1899). Observe the real dispatcher; a
+          // necessary publish/heal, actual worker advice or recipe execution keeps its effect semantics.
+          const changes = (): number | null => {
+            if (typeof dispatcher.changeCount !== 'function') return null;
+            try { return dispatcher.changeCount(); } catch { return null; }
+          };
+          const before = changes();
+          const result = await dispatchWithBudget(tu);
+          if (loopGuardOn) noteToolEffect(repeatProbe, tu, result, before, changes());
+          return result;
+        };
         const serialIdx: number[] = [];
         const parallelIdx: number[] = [];
         turn.toolUses.forEach((tu, i) => (isParallelSafeToolUse(tu, { parallelBuild: this.opts.parallelBuild }) ? parallelIdx : serialIdx).push(i));
         for (const i of serialIdx) {
-          resultBlocks[i] = toBlock(await dispatchWithBudget(turn.toolUses[i]));
+          resultBlocks[i] = toBlock(await dispatchObserved(turn.toolUses[i]));
         }
         if (parallelIdx.length > 0) {
           const dupes = duplicateReadsInTurn(turn.toolUses, parallelIdx);
@@ -1577,7 +1633,7 @@ export class AgentRunner {
           await mapWithConcurrency(parallelIdx.filter((i) => !dupes.has(i)), toolConcurrency, async (i) => {
             const sib = siblings.get(i);
             const tu = sib ? { ...turn.toolUses[i], input: { ...turn.toolUses[i].input, [SIBLING_TASKS_INPUT_KEY]: sib } } : turn.toolUses[i];
-            resultBlocks[i] = toBlock(await dispatchWithBudget(tu));
+            resultBlocks[i] = toBlock(await dispatchObserved(tu));
           });
           for (const [i, first] of dupes) {
             resultBlocks[i] = toBlock({
@@ -1639,7 +1695,13 @@ export class AgentRunner {
         // already excludes `tsc` for. Noting this turn's writes BEFORE counting its probes is what lets
         // the same call in a LATER turn start over, while the original six-identical-greps loop — which
         // mutated nothing — is still caught.
+        const mutationEpochBefore = repeatProbe.mutations;
         if (loopGuardOn) { try { noteMutations(repeatProbe, turn.toolUses); } catch { /* never break a build */ } }
+        if (repeatProbe.mutations > mutationEpochBefore) {
+          // A real edit or useful preview starts a new progress epoch; an old FINAL cannot end it.
+          finalLoopSteerSent = false;
+          noOpTurnsAfterFinal = 0;
+        }
         const loopSteer = loopGuardOn ? collectRepeatProbeSteer(repeatProbe, turn.toolUses, loopThreshold) : null;
         if (loopSteer) {
           // Honest narration per severity: the FINAL steer means the model ignored an earlier nudge and
@@ -1658,11 +1720,11 @@ export class AgentRunner {
         // 🔒 A RUN THAT ONLY DOES NOTHING ENDS (Q-738). After the FINAL steer, every further turn made only of
         // no-op calls (an empty command, a refused probe) counts; the third ends the run with an honest summary
         // instead of paying for more turns that cannot change anything.
-        if (finalLoopSteerSent && loopGuardOn && isNoOpTurn(turn.toolUses, (n, i) => isProbeBanned(repeatProbe, n, i))) {
+        if (finalLoopSteerSent && loopGuardOn && isNoOpTurn(turn.toolUses, (n, i) => isProbeBanned(repeatProbe, n, i), (tu) => isNoEffectToolCall(repeatProbe, tu))) {
           noOpTurnsAfterFinal += 1;
           if (noOpTurnsAfterFinal >= MAX_NO_OP_TURNS_AFTER_FINAL) {
             const summary = 'Stopped this run: after being told twice to stop, the model kept sending steps that do '
-              + `nothing (${noOpTurnsAfterFinal} more turns of empty or refused calls). Nothing further would have changed.`;
+              + `nothing (${noOpTurnsAfterFinal} more turns of empty, refused or proven unchanged calls). Nothing further would have changed.`;
             events.emit({ type: 'narration', agent: agentRole, text: `⚠️ ${summary}`, ts: Date.now() });
             return { ok: false, summary, steps, usage, billedUsd: billed() };
           }
@@ -1748,7 +1810,23 @@ export class AgentRunner {
             }
           } catch { /* quality escalation is best-effort — it must never break a build */ }
         }
-        const steer = [truncationSteer, loopSteer, budgetText, doneText].filter(Boolean).concat(handoffText ? [handoffText] : []).join('\n\n') || null;
+        // Varied reads never trip an identical-call guard. Give a writer its observed no-change
+        // streak before it spends the whole futility window surveying the platform's own game kit.
+        const exploration = advanceExplorationProgress(explorationProgress, {
+          writingRun: expectsArtifacts && !this.opts.signal?.aborted && runCanWrite(tools.map((t) => t.name)),
+          changes: typeof dispatcher.changeCount === 'function' ? dispatcher.changeCount() : null,
+          toolNames: turn.toolUses.filter((_, idx) => resultBlocks[idx]?.is_error === false).map((tu) => tu.name),
+          editingExistingApp: this.opts.editingExistingApp === true,
+        });
+        explorationProgress = exploration.state;
+        if (exploration.steer) {
+          try { this.opts.onNote?.({ code: 'EXPLORATION_WITHOUT_CHANGE', message: exploration.steer.observation, detail: `hand-back ${exploration.steer.stage}; all reads remain available` }); } catch { /* diagnostics never block a build */ }
+          if (!explorationNarrated) {
+            events.emit({ type: 'narration', agent: agentRole, ts: Date.now(), text: 'The builder has been inspecting files without changing the project. I’ve asked it to make a concrete requested change or identify what is blocking it.' });
+            explorationNarrated = true;
+          }
+        }
+        const steer = [truncationSteer, loopSteer, budgetText, doneText, exploration.steer?.message].filter(Boolean).concat(handoffText ? [handoffText] : []).join('\n\n') || null;
         messages.push({ role: 'user', content: steer ? [...resultBlocks, { type: 'text', text: steer }] : resultBlocks });
         messageTs.push(Date.now());
         if (steer) platformMsgIdx.add(messages.length - 1);

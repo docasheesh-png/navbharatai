@@ -88,10 +88,19 @@ export function buildHealthReport(s: HealthSignals): HealthReport {
 }
 
 /** Render a self-contained (no external CDN → CSP-safe) status page that live-polls /api/health. */
-export function renderStatusPageHtml(): string {
+export const STATUS_PAGE_DESCRIPTION =
+  'Live status of NavBharatAI: whether the service is operational right now and the health of each of its components, refreshed every 15 seconds.';
+
+/**
+ * `origin` (the site's https origin) adds the page's canonical — /status is in the sitemap, and a
+ * sitemap URL without a canonical or a description is a weak entry (SEO verification 2026-10-18, P2-2).
+ */
+export function renderStatusPageHtml(origin?: string): string {
+  const canonical = origin && /^https:\/\/[a-z0-9.-]+$/i.test(origin) ? `\n<link rel="canonical" href="${origin}/status">` : '';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NavBharatAI — Status</title>
+<meta name="description" content="${STATUS_PAGE_DESCRIPTION}">${canonical}
 <style>
 :root{color-scheme:dark}*{box-sizing:border-box}
 body{margin:0;font:15px/1.55 system-ui,-apple-system,sans-serif;background:#0d1117;color:#c9d1d9}

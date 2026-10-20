@@ -94,7 +94,7 @@ const realDeps: SweepDeps = {
     // keep a container running on our bill. Throws unless all of it is gone, so nothing is marked on a half-pause.
     await takeAppOffline(workspaceId, 'plan_paused', {
       deleteChannel: (id) => new FirebaseHostingDeployer().deleteChannel(id),
-      get: (id) => deploymentStore.get(id),
+      get: (id) => deploymentStore.getStrict(id),
       setStatus: (id, status) => deploymentStore.setStatus(id, status),
     });
   },

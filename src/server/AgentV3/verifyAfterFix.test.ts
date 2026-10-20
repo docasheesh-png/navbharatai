@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import ts from 'typescript';
+import { codeOnly, sectionUntil } from '../../../tests/helpers/sourceSlice';
+import { applySnapshotRestore, snapshotRestoreComplete } from './snapshotRestore';
 import {
   verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote,
 } from './verifyAfterFix';
@@ -79,6 +82,28 @@ describe('honest handling of what we cannot prove', () => {
     }, []));
     expect(r).toEqual({ kept: false, reverted: false, unverified: false });
   });
+
+  it('an actual partial restore cannot become a successful reverted verdict', async () => {
+    const live: Record<string, string> = { a: 'broken-a', b: 'broken-b' };
+    const saved: Record<string, string> = {};
+    const r = await verifyAfterFix({
+      snapshot: async () => ({ write: { a: 'green-a', b: 'green-b' }, remove: [] }),
+      apply: async () => {}, reverify: async () => false,
+      revert: async (plan) => {
+        const outcome = await applySnapshotRestore(plan, {
+          stopped: () => false,
+          write: async (path, content) => { if (path === 'b') throw new Error('file unavailable'); live[path] = content; },
+          remove: async () => ({ exitCode: 0 }),
+          persist: async (files) => { Object.assign(saved, files); return true; },
+        });
+        if (!snapshotRestoreComplete(plan, outcome)) throw new Error('restore incomplete');
+      },
+    });
+    expect(live).toEqual({ a: 'green-a', b: 'broken-b' });
+    expect(saved).toEqual({ a: 'green-a' });
+    expect(r).toEqual({ kept: false, reverted: false, unverified: false });
+    expect(verifyAfterFixNote('repair', r)).toMatchObject({ code: 'FIX_REVERT_FAILED', autoResolved: false });
+  });
 });
 
 describe('the report lines', () => {
@@ -131,13 +156,34 @@ describe('it is wired around the allowed post-green passes', () => {
     // Since 2026-09-23 every site shares ONE revert (`revertToGreenSnapshot`), so the invariant is
     // checked on that function AND on every call site — a site with its own inline revert would
     // bypass the captured-writes reconciliation that function carries.
-    const sites = [...routes.matchAll(/verifyAfterFix<Record<string, string>>\(\{/g)].map((m) => m.index!);
-    expect(sites.length).toBeGreaterThanOrEqual(2);
-    for (const at of sites) {
-      expect(routes.slice(at, at + 4000)).toContain('revert: revertToGreenSnapshot,');
+    const source = ts.createSourceFile('agentv3.ts', routes, ts.ScriptTarget.Latest, true);
+    let directSites = 0;
+    let explorerSites = 0;
+    function visit(node: ts.Node) {
+      if (ts.isCallExpression(node) && ['verifyAfterFix', 'runExplorerRepair'].includes(node.expression.getText(source))) {
+        const explorer = node.expression.getText(source) === 'runExplorerRepair';
+        if (explorer) explorerSites++; else directSites++;
+        const hooks = node.arguments[explorer ? 2 : 0];
+        expect(hooks && ts.isObjectLiteralExpression(hooks)).toBe(true);
+        if (hooks && ts.isObjectLiteralExpression(hooks)) {
+          const revert = hooks.properties.find((property) => ts.isPropertyAssignment(property) && property.name.getText(source) === 'revert');
+          expect(revert && ts.isPropertyAssignment(revert) && revert.initializer.getText(source)).toBe('revertToGreenSnapshot');
+        }
+      }
+      ts.forEachChild(node, visit);
     }
-    const def = routes.indexOf('const revertToGreenSnapshot');
-    expect(def).toBeGreaterThan(-1);
-    expect(routes.slice(def, def + 1200)).toContain("runInPass('green-guard-restore'");
+    visit(source);
+    expect(directSites).toBe(4);
+    expect(explorerSites).toBe(1);
+    const explorer = codeOnly(readFileSync(join(__dirname, 'explorerRepair.ts'), 'utf8'));
+    expect(explorer).toContain('await verifyAfterFix<Record<string, string>>({');
+    expect(explorer).toContain('revert: deps.revert,');
+    const revert = codeOnly(sectionUntil(routes, 'const revertToGreenSnapshot =', 'let snapshotTaken:'));
+    expect(revert).toContain('await applyGreenSnapshotRestore(plan)');
+    expect(revert).toContain('if (!snapshotRestoreComplete(plan, outcome)) throw');
+    const door = codeOnly(sectionUntil(routes, 'const applyGreenSnapshotRestore =', 'const revertToGreenSnapshot ='));
+    expect(door).toContain("pass = 'green-guard-restore'");
+    expect(door).toContain('runInPass(pass, () => applySnapshotRestore(plan,');
+    expect(door).toContain('reconcileCapturedWrites(writtenFiles, { ...applied, unchanged: 0 })');
   });
 });

@@ -25,7 +25,7 @@
 
 import { isCheapFlashRung, withoutCheapFlashLead, type LadderRung } from './tierLadder';
 import { signalsCouldNotRead, signalsMatchedNothing } from './RequestAnalyser';
-import { BIG_SOFTWARE_NOUN, countEnumeratedFeatures, MIN_RUN_ITEMS } from './enumeratedFeatures';
+import { BIG_SOFTWARE_NOUN, countEnumeratedFeatures, MIN_RUN_ITEMS, MAX_ITEM_WORDS } from './enumeratedFeatures';
 import type { BuildIntent } from './IntentClassifier';
 import { withEnglishReading } from '../lib/devanagariTechTerms';
 
@@ -176,11 +176,30 @@ export function statesAScope(prompt: string): boolean {
  * named none. What the code measures is narrower: a LIST it can count (`countEnumeratedFeatures`) or a
  * big-software noun. A request with one comma, or a single bullet, also scores 0 and also reached this
  * line, so "no comma, bullet or list" would have been false too. The sentence now says what was counted.
+ *
+ * 🔴 AND IT STILL OVER-STATED WHAT COUNTS (Q-1023, found reviewing Q-992). The doc above claims the sentence is
+ * "generated from the two constants the counter really uses, so the sentence cannot drift from the code" — but
+ * only its NUMBERS were. The RULES were hand-written prose, and they had drifted. Measured against
+ * `countEnumeratedFeatures` itself, "each bullet or numbered line counts one" is false four ways:
+ *
+ *     - name / - email / - phone number           → 0   (RECORD_ATTRIBUTE: field names are not features)
+ *     - modern / - clean / - fast                 → 0   (STYLE_ADJECTIVE)
+ *     - login / - login / - login                 → 1   (repeats collapse)
+ *     three bullets of 10+ words each             → 0   (MAX_ITEM_WORDS — a LONG bullet counts nothing)
+ *
+ * The last one is the one the row never mentioned and the one a user is most likely to hit: write DETAILED
+ * bullets and the sizer reads no scope at all. The sentence now names every dropper, from the module's own
+ * constants, and `tests/theSentenceMatchesTheCounter.test.ts` holds each measured case against it.
+ *
+ * ⚠️ The COUNTER is not changed here. Whether a careful 10-word bullet should really count zero is a product
+ * question that moves routing for real builds — it is Q-1128, not a silent edit inside a wording fix.
  */
 export const NO_READABLE_SCOPE =
-  `it states no scope the sizer can read: fewer than ${MIN_STATED_FEATURES} listed features `
-  + `(each bullet or numbered line counts one; inline items count only in a run of ${MIN_RUN_ITEMS} or more short `
-  + `items; features described in a sentence are not counted) and no big-software noun`;
+  `it states no scope the sizer can read: fewer than ${MIN_STATED_FEATURES} countable features `
+  + `(a bullet or numbered line counts one only if it is at most ${MAX_ITEM_WORDS} words and names a feature — `
+  + `a field name, a style adjective, a repeat of an earlier item, or a longer phrase is not counted; inline items `
+  + `count only in a run of ${MIN_RUN_ITEMS} or more short items; a feature described in a sentence is not counted) `
+  + `and no big-software noun`;
 
 /**
  * PURE. Read a one-word answer from the classifier.

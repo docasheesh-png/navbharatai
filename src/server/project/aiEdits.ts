@@ -9,6 +9,7 @@
  * bare array or an object with an `edits` array, and drops malformed ops rather
  * than throwing (a partial-but-valid edit set is better than a hard failure).
  */
+import { placePlatformContext } from '../lib/platformContext';
 import type { FileEdit } from './EditEngine';
 import type { VirtualFileSystem } from './ProjectModel';
 import type { ProjectIssue } from './ProjectVerifier';
@@ -288,6 +289,12 @@ async function generateBatched(callModel: ModelCall, prompt: string, plan: Plann
  */
 export function makeAiEditGenerator(callModel: ModelCall, memory?: BuildMemory) {
   const mem = memoryBlock(memory);
+  // Project memory is the PLATFORM's context, so it goes to the system prompt through the one door
+  // (lib/platformContext.ts) rather than in front of the request in the user turn (admin 2026-10-17).
+  const callWithMemory = (sys: string, user: string) => {
+    const placed = placePlatformContext({ system: sys, user, blocks: [{ label: 'Project memory (earlier work in this session)', body: mem }] });
+    return callModel(placed.system, placed.user);
+  };
   const generate = async (prompt: string, vfs: VirtualFileSystem): Promise<FileEdit[]> => {
     const fresh = isScaffoldState(vfs);
 
@@ -299,8 +306,8 @@ export function makeAiEditGenerator(callModel: ModelCall, memory?: BuildMemory) 
       const contract = manifestContract(selectArchitecture(prompt)) + '\n\n';
       const checklist = featureChecklist(prompt);
       const sys = `You are a world-class full-stack engineer building a real, multi-file web application that must actually build and run.\n\n${contract}${checklist ? checklist + '\n\n' : ''}${ENGINEERING_RULES}\n\n${DESIGN_RULES}\n\n${EDIT_FORMAT}`;
-      const user = `${mem}Build this application from scratch as a complete, runnable multi-file project.\n\nUser request:\n${prompt}\n\nReturn the full set of files needed to run it — implement EVERY requested feature in separate component/page files, not just a shell. Make the UI genuinely beautiful per the VISUAL DESIGN rules.`;
-      const edits = parseFileEdits(await callModel(sys, user));
+      const user = `Build this application from scratch as a complete, runnable multi-file project.\n\nUser request:\n${prompt}\n\nReturn the full set of files needed to run it — implement EVERY requested feature in separate component/page files, not just a shell. Make the UI genuinely beautiful per the VISUAL DESIGN rules.`;
+      const edits = parseFileEdits(await callWithMemory(sys, user));
       if (edits.length >= 2) return edits;
 
       // Single shot under-delivered → plan→batch fallback (more calls, slower).
@@ -316,9 +323,9 @@ export function makeAiEditGenerator(callModel: ModelCall, memory?: BuildMemory) 
 
     // Edit path (existing project) — single surgical-edit call.
     const sys = `You are a world-class full-stack engineer editing a real, multi-file web application.\n\n${ENGINEERING_RULES}\n\n${DESIGN_RULES}\n\n${EDIT_FORMAT}`;
-    const user = `${mem}Current project files (most relevant first, with FULL contents below):\n\n${fileContext(vfs, prompt)}\n\nUser request:\n${prompt}\n\n`
+    const user = `Current project files (most relevant first, with FULL contents below):\n\n${fileContext(vfs, prompt)}\n\nUser request:\n${prompt}\n\n`
       + `Apply the correct set of edits and keep all existing references valid. CRITICAL for reliability: a "patch" find string MUST be copied EXACTLY (character-for-character) from the file content shown above — if you are unsure it matches exactly, or the target file was truncated, use a full "write" of that file instead. Preserve everything you are not changing.`;
-    return parseFileEdits(await callModel(sys, user));
+    return parseFileEdits(await callWithMemory(sys, user));
   };
   const fix = async (issues: ProjectIssue[], vfs: VirtualFileSystem): Promise<FileEdit[]> => {
     if (issues.length === 0) return [];
@@ -332,10 +339,10 @@ export function makeAiEditGenerator(callModel: ModelCall, memory?: BuildMemory) 
     if (!missing.length) return [];
     const contract = manifestContract(selectArchitecture(prompt));
     const sys = `You are a world-class engineer ADDING missing features to an existing app — keep the SAME architecture, never mix frameworks.\n\n${contract}\n\n${ENGINEERING_RULES}\n\n${DESIGN_RULES}\n\n${EDIT_FORMAT}`;
-    const user = `${mem}Current project files (with contents):\n\n${fileContext(vfs, prompt + ' ' + missing.join(' '))}\n\nApp request:\n${prompt}\n\n`
+    const user = `Current project files (with contents):\n\n${fileContext(vfs, prompt + ' ' + missing.join(' '))}\n\nApp request:\n${prompt}\n\n`
       + `These requested features are MISSING — implement them with real, working code, wiring them into the existing app (routes/components/state as needed):\n`
       + missing.map((m) => `- ${m}`).join('\n');
-    return parseFileEdits(await callModel(sys, user));
+    return parseFileEdits(await callWithMemory(sys, user));
   };
   return { generate, fix, completeFeatures };
 }

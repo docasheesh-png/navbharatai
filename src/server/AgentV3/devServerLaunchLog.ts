@@ -15,7 +15,7 @@
 // once the launch is proven. A missing entry (another instance, a restart) therefore yields NO recipe
 // rather than a guessed one, which is the whole point: buildRecipe() refuses a partial recipe.
 
-import { isLongRunningCommand, isOneShotSegment } from './sandbox/EngineerAI/actuators/devServerHost';
+import { isLongRunningCommand, isOneShotSegment, shellCommandSegments, withoutHeredocBodies } from './sandbox/EngineerAI/actuators/devServerHost';
 import { BoundedCache } from '../lib/boundedCache';
 
 export interface DevServerLaunch {
@@ -54,7 +54,8 @@ export function serverLaunchCommand(command: string): string {
   if (!cmd) return '';
   // Newlines and a lone `&` separate commands too: a model backgrounds the server with `… &` and
   // then runs a port probe on the next line (build 75ea6136 stored both as one recipe).
-  const segments = cmd.split(/\s*(?:&&|;|\n|(?<![&>|])&(?!&))\s*/).map((x) => x.trim()).filter(Boolean);
+  const segments = shellCommandSegments(withoutHeredocBodies(cmd), { or: false, newlines: true, background: true })
+    .map((x) => x.trim()).filter(Boolean);
   // A one-shot segment is never the server, whatever words it carries — `(git commit -q -m "edit
   // vite.config.ts" || true)` names Vite in its MESSAGE (autopsy 2b1f845e). Same predicate the
   // launcher uses, so the two cannot disagree about which segment started the app.

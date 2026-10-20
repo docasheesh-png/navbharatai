@@ -42,7 +42,7 @@ const BEST_EFFORT: Record<string, Record<string, string>> = {
 
 interface Discarded { file: string; line: number; url: string }
 
-/** Statement-level `await fetch(` with a writing method, whose result is not assigned or returned. */
+/** Statement-level `await fetch(` or authenticated `await previewRequest(` with a writing method, whose result is not assigned or returned. */
 function discardedWrites(): Discarded[] {
   const files = globSync('src/**/*.{ts,tsx}', { cwd: root })
     .filter((f) => !f.startsWith('src/server/') && !/\.test\.tsx?$/.test(f));
@@ -50,7 +50,7 @@ function discardedWrites(): Discarded[] {
   for (const file of files) {
     const s = readFileSync(join(root, file), 'utf8');
     // The URL is read as the call's own text, so a computed one (`claimPath.replace(…)`) is seen too.
-    const re = /(^|[;{}]|\n)[ \t]*(?:try\s*\{\s*)?await fetch\(/g;
+    const re = /(^|[;{}]|\n)[ \t]*(?:try\s*\{\s*)?await (?:fetch|previewRequest)\(/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(s))) {
       const after = s.slice(m.index, m.index + 500);

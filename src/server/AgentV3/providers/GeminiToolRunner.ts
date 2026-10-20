@@ -1,3 +1,4 @@
+import { assertAiAvailable } from '../../lib/aiMaintenance';
 // AgentV3 — Gemini/Vertex tool-use TurnRunner (multi-provider cost routing, phase 1).
 //
 // Implements the TurnRunner contract over the Google GenAI (`@google/genai`) function-
@@ -68,6 +69,7 @@ export class GeminiToolRunner implements TurnRunner {
   ) {}
 
   async runTurn(params: RunTurnParams): Promise<TurnResult> {
+    await assertAiAvailable();
     const { systemInstruction, contents } = transcriptToGemini(params.messages, params.system);
     const tools = toolDefsToGemini(params.tools);
 

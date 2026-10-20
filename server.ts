@@ -12,7 +12,7 @@ import { denyServerOnlyArtifacts } from './src/server/lib/serverOnlyArtifacts';
 import './src/server/lib/axiosCredentialRedaction';
 import { registerPwaRoutes, type PwaStore, type PwaEntry } from './src/server/routes/pwa';
 import { BoundedCache } from './src/server/lib/boundedCache';
-import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
+import { spaFallbackShouldDefer, isMissingStaticFilePath } from './src/server/lib/spaFallback';
 import { noteWebsiteVisit } from './src/server/lib/ownAudience';
 // The rate-limit keys (forensic audit 2026-10-04): an address string, or a verified uid — never a request.
 import { identityRateKey, addressRateKey } from './src/server/lib/clientAddress';
@@ -33,6 +33,9 @@ import { registerPushRoutes } from './src/server/routes/push';
 import { registerSbomRoutes } from './src/server/routes/sbom';
 import { registerLegalRoutes } from './src/server/routes/legal';
 import { registerSiteIndexRoutes } from './src/server/routes/siteIndex';
+import { registerMarketingRoutes } from './src/server/routes/marketing';
+import { spaHeadFor, readSpaShell } from './src/server/lib/spaHead';
+import { siteOrigin } from './src/server/lib/siteIndex';
 import { registerCheckoutHandoffRoute } from './src/server/routes/checkoutHandoff';
 import { registerBuildAnalyticsRoutes } from './src/server/routes/buildAnalytics';
 import { registerSupabaseIntegrationRoutes } from './src/server/routes/supabaseIntegration';
@@ -114,7 +117,9 @@ import { sanitizeProxyRequestHeaders, sanitizeUpgradeResponseHeaders } from './s
 import { handleSonicUpgrade } from './src/server/sonic/sonicWs';
 import { registerSonicRoutes } from './src/server/sonic/sonicRoute';
 import { serverStats } from './src/server/lib/serverStats';
+import { aiMaintenanceGuard } from './src/server/lib/aiMaintenanceGuard';
 import { registerAdminRoutes } from './src/server/routes/admin';
+import { registerFailedReportRoutes } from './src/server/routes/failedReports';
 import { attachMetricsTimeline } from './src/server/lib/metricsTimeline';
 import { serverLoad } from './src/server/lib/serverLoad';
 import { registerSyncRoutes } from './src/server/routes/sync';
@@ -126,7 +131,7 @@ import { registerKnowledgeDocsRoutes } from './src/server/lib/KnowledgeDocs';
 import { registerApiKeyRoutes } from './src/server/routes/apiKeys';
 import { registerDeveloperApiRoutes } from './src/server/routes/developerApi';
 import { apiVersionMiddleware } from './src/server/routes/apiVersion';
-import { jsonBodyParser } from './src/server/lib/requestBodyLimits';
+import { formBodyParser, jsonBodyParser, type TooLargeEvent } from './src/server/lib/requestBodyLimits';
 import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
 import { registerObservabilityRoutes } from './src/server/routes/observability';
 import { registerReleaseNotesRoutes } from './src/server/routes/releaseNotes';
@@ -311,6 +316,8 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   serverLoad.start();
   app.use(serverLoad.middleware);
   app.use(corsMiddleware());
+  // Refuse before body parsing, quota reservation, billing or any model call.
+  app.use(aiMaintenanceGuard());
 
   // ── Rate Limiters (4.3) ──────────────────────────────────────────────────
   // 🔴 FORENSIC AUDIT 2026-10-04 — until this change NONE of these limited anything. Each was keyed
@@ -418,12 +425,13 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
     // projects, and the raw bytes (`req.rawBody`) only where a signature is checked over them or the
     // preview proxy forwards them verbatim (Q-627). Both lists, and the census that keeps them complete,
     // live in requestBodyLimits.ts — a new big-body route is added THERE, never by raising this.
-    app.use(jsonBodyParser({
-      onTooLarge: (event, err) => {
-        console.warn(`[BODY_TOO_LARGE] ${event.method} ${event.path} over ${event.limit}${event.length ? ` (${event.length} bytes)` : ''}`);
-        errorTracker.capture(err, { source: 'middleware', httpMethod: event.method, httpUrl: event.path, httpStatus: 413 });
-      },
-    }));
+    const onTooLarge = (event: TooLargeEvent, err: unknown): void => {
+      console.warn(`[BODY_TOO_LARGE] ${event.method} ${event.path} over ${event.limit}${event.length ? ` (${event.length} bytes)` : ''}`);
+      errorTracker.capture(err, { source: 'middleware', httpMethod: event.method, httpUrl: event.path, httpStatus: 413 });
+    };
+    app.use(jsonBodyParser({ onTooLarge }));
+    // Form bodies only where a standard demands them (OAuth token/revoke), with each route's own limits.
+    app.use(formBodyParser({ onTooLarge }));
 
     // EXPRESS 5 restores nothing that Express 4 gave for free: `req.body` is now left UNDEFINED when
     // no parser matched, where it used to be `{}`. 419 places in this repo read it, all typed `any`,
@@ -443,6 +451,12 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   // internally rewritten to the existing `/api/...` handlers (canonical), while
   // bare `/api/...` keeps working as a deprecated shim (Deprecation + Link headers).
   app.use(apiVersionMiddleware);
+  // The private report screen serves only a sign-in shell before its authenticated API reads.
+  app.use('/failedbr', (_req, res, next) => {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+    res.setHeader('Cache-Control', 'private, no-store');
+    next();
+  });
 
   // Cashfree Configuration
   if (process.env.CASHFREE_APP_ID) (Cashfree as any).XClientId = process.env.CASHFREE_APP_ID;
@@ -577,6 +591,13 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
         if (spaFallbackShouldDefer(req.path)) {
           return next();
         }
+        // A FILE that express.static (above) did not find gets an honest 404, never the app shell with
+        // a 200 — see isMissingStaticFilePath in lib/spaFallback.ts for the three things that broke.
+        if (isMissingStaticFilePath(req.path)) {
+          res.setHeader('Cache-Control', 'no-cache');
+          res.status(404).type('text/plain').send('Not found');
+          return;
+        }
         // ONE VISIT TO NAVBHARATAI'S OWN WEBSITE. Counted HERE because this is the single line every
         // real page view passes through, and because the request already carries the IP and user-agent
         // to us — counting it collects nothing new and cannot be blocked by an ad-blocker, which would
@@ -589,12 +610,24 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
           nowMs: Date.now(),
         });
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.sendFile(path.join(distPath, 'index.html'));
+        // PER-ROUTE HEAD (SEO audit 2026-10-18): every SPA path used to carry the homepage's
+        // canonical, so App Mart (/store) told search engines it WAS the homepage, and every unknown
+        // path was a 200 duplicate of it. spaHeadFor() gives /store its own canonical and title, and
+        // marks paths that are not public pages `noindex`. The shell's BODY is untouched, so the app
+        // boots exactly as before; if the file cannot be read the old sendFile path runs unchanged.
+        const shell = readSpaShell(distPath);
+        if (shell) {
+          res.type('html').send(spaHeadFor(req.path, shell, siteOrigin()));
+        } else {
+          res.sendFile(path.join(distPath, 'index.html'));
+        }
       });
     }
     
    }
   
+  // MCP discovery must return JSON before Vite/the SPA fallback can answer with index.html.
+  registerFailedReportRoutes(app);
   await initializeServer();
 
   // Auth routes (OTP gateway) — extracted to src/server/routes/auth.ts (Phase 1).
@@ -745,6 +778,9 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   // both are checked by tools that may not run JS. Both paths are declared in spaFallback.ts, so the
   // SPA catch-all defers to these handlers instead of returning index.html.
   registerLegalRoutes(app);
+  // PUBLIC product pages (/about, /pricing, /ai-app-builder, /indian-ai-assistant, /hindi-ai-assistant)
+  // — server-rendered like the legal pages, declared in spaFallback.ts via MARKETING_PATHS.
+  registerMarketingRoutes(app);
   // robots.txt + sitemap.xml, derived from the same legal-page list (declared in spaFallback.ts too).
   registerSiteIndexRoutes(app);
   // PUBLIC checkout hand-off (/pay) — the ONE origin the payment gateway has approved. The native
@@ -951,8 +987,17 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
                       // HELD, not taken down: reversible by the admin, because a machine acting on a
                       // third party's list should never give the irreversible verdict.
                       hold: async (workspaceId, note) => {
-                        // The sweep lists ACTIVE apps only, so a held one is still serving (Q-703).
-                        await deploymentStore.setStatus(workspaceId, 'held', { heldFrom: 'active' });
+                        const [{ takeAppOffline }, { FirebaseHostingDeployer }] = await Promise.all([
+                          import('./src/server/AgentV3/hostedAppLifecycle'), import('./src/server/AgentV3/Deployment'),
+                        ]);
+                        // This scan flagged the CURRENTLY SERVING app, unlike a refused new version.
+                        // Remove every serving path first. Restore then requires an explicit republish.
+                        const held = await takeAppOffline(workspaceId, 'held', {
+                          deleteChannel: (id) => new FirebaseHostingDeployer().deleteChannel(id),
+                          get: (id) => deploymentStore.getStrict(id),
+                          setStatus: (id, status) => deploymentStore.setStatus(id, status, { heldFrom: 'unpublished' }),
+                        });
+                        if (!held) throw new Error('The app was removed but its review hold could not be recorded.');
                         await deploymentStore.setOutboundVerdict(workspaceId, { outboundNote: note, flagged: true });
                       },
                     });
@@ -1241,3 +1286,4 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
     process.exit(1);
   }
 })();
+

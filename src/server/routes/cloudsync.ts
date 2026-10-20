@@ -1,6 +1,7 @@
 import path from 'path';
 import axios from 'axios';
 import type { Express, Request, Response } from 'express';
+import { sendGithubApiError } from '../lib/githubApiError';
 
 /**
  * Cloud-sync provider routes (GitHub repo import, Firebase/Vercel project lists)
@@ -43,7 +44,7 @@ export function registerCloudsyncRoutes(app: Express): void {
       }
       res.json({ status: 'success', files, tree });
     } catch (err: any) {
-      res.status(err.response?.status || 500).json({ error: err.response?.data?.message || err.message });
+      sendGithubApiError(res, err, 'import', 'cloudsync github import');
     }
   });
 

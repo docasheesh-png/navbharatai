@@ -21,8 +21,9 @@ import {
 beforeEach(() => { _resetRestorePointMemory(); });
 
 describe('the key the Time Machine actually reads', () => {
-  it('strips the workspace prefix, exactly as /api/versioning/apps does', () => {
-    expect(restorePointKey('agentv3-uid123-sess-abc', 'uid123')).toBe('sess-abc');
+  it('retains the owner prefix so accounts with the same session cannot share history', () => {
+    expect(restorePointKey('agentv3-uid123-sess-abc', 'uid123')).toBe('agentv3-uid123-sess-abc');
+    expect(restorePointKey('agentv3-other-sess-abc', 'other')).not.toBe(restorePointKey('agentv3-uid123-sess-abc', 'uid123'));
   });
 
   it('leaves an id that does not carry this owner’s prefix alone', () => {
@@ -65,7 +66,7 @@ describe('which builds leave one', () => {
     await saveRestorePoint({ ...args });
     await saveRestorePoint({ ...args });
     expect(saved).toHaveLength(1);
-    expect(saved[0].key).toBe('s');
+    expect(saved[0].key).toBe('agentv3-u-s');
   });
 
   it('a DIFFERENT build still leaves its own', async () => {
@@ -73,7 +74,7 @@ describe('which builds leave one', () => {
     const io = { loadFiles: async () => ({ 'a.ts': 'a' }), save: async (k: string) => { saved.push(k); return true; } };
     await saveRestorePoint({ ok: true, workspaceId: 'agentv3-u-s1', uid: 'u', buildKey: 'b1', io });
     await saveRestorePoint({ ok: true, workspaceId: 'agentv3-u-s2', uid: 'u', buildKey: 'b2', io });
-    expect(saved).toEqual(['s1', 's2']);
+    expect(saved).toEqual(['agentv3-u-s1', 'agentv3-u-s2']);
   });
 });
 

@@ -27,6 +27,7 @@ import { withEnglishReading } from '../lib/devanagariTechTerms';
 import { withoutMachineText } from '../lib/machineText';
 import { STARTER_ENTRY_PATHS } from './stillTheStarterApp';
 import { CONTRACT_FIXED_VALUES_RULE } from './contractEnums';
+import { withRequestNotesBounded } from './requestNotes';
 
 export type ModuleStatus = 'pending' | 'in_progress' | 'done' | 'failed';
 
@@ -78,9 +79,13 @@ export const MAX_MODULES = 60;
 export const MAX_FILES_PER_MODULE = 150;
 export const MAX_CONTRACT_CHARS = 12_000;
 export const MAX_DESCRIPTION_CHARS = 1_200;
-// 6,000, not 4,000: a stack note (unsupportedStack.ts, ~1,100 chars) now leads the goal, and a 2,900-char
-// spec plus that note was cutting the user's own closing requirements off the end (autopsy 042e472f).
-const MAX_GOAL_CHARS = 6_000;
+// 🔴 THIS CAP IS THE REQUEST'S ALONE (Q-1017, 2026-10-16). It was raised from 4,000 to 6,000 after autopsy
+// 042e472f, where a ~1,100-char stack note led the goal and cut a 2,900-char spec's closing requirements off
+// the end. Raising it only moved the cliff: the cap was applied to the JOINED text (our notes, then the
+// user's words), so every note still spent the user's budget and a longer spec walked off the new edge the
+// same way. `createProjectPlan` now takes the notes apart from the request and bounds the REQUEST only
+// (`withRequestNotesBounded`) — the notes are kept whole and can never shorten the spec.
+export const MAX_GOAL_CHARS = 6_000;
 
 /** Same unsafe-path rules as the file manifest: no absolute, no traversal, no heavy dirs. */
 const UNSAFE_PATH_RE = /^(node_modules|\.git|dist|build)\//;
@@ -640,11 +645,24 @@ export function parsePlannedModules(text: string): ProjectModule[] {
   return out;
 }
 
-/** Assemble a fresh plan. `now` is injected so tests are deterministic. PURE. */
-export function createProjectPlan(goal: string, framework: string, modules: ProjectModule[], now: number): ProjectPlan {
+/**
+ * Assemble a fresh plan. `now` is injected so tests are deterministic.
+ *
+ * 🔴 `request` is the USER'S WORDS and `notesText` is OURS, and they arrive apart on purpose (Q-1017): the
+ * cap belongs to the request, so the same spec keeps the same characters whatever notes ride with it. Pass
+ * the joined text here and the old defect is back — the join happens inside, once, where the bound is.
+ * PURE.
+ */
+export function createProjectPlan(
+  request: string,
+  framework: string,
+  modules: ProjectModule[],
+  now: number,
+  notesText: string = '',
+): ProjectPlan {
   return {
     version: 1,
-    goal: (goal || '').slice(0, MAX_GOAL_CHARS),
+    goal: withRequestNotesBounded(request, notesText, MAX_GOAL_CHARS).text,
     framework: framework || 'vite-react',
     createdAt: now,
     modules,
@@ -694,7 +712,11 @@ export function nextBuildableModule(plan: ProjectPlan): ProjectModule | null {
   const done = new Set(plan.modules.filter((m) => m.status === 'done').map((m) => m.id));
   const inProgress = plan.modules.find((m) => m.status === 'in_progress');
   if (inProgress) return inProgress;
-  return plan.modules.find((m) => m.status === 'pending' && m.dependsOn.every((d) => done.has(d))) ?? null;
+  const ready = plan.modules.filter((m) => m.status === 'pending' && m.dependsOn.every((d) => done.has(d)));
+  // A types-only module that is also ready must not go first when a screen is ready too. The shell
+  // that owns src/App.tsx stays last in the PLAN (it imports the others); this only picks among
+  // modules the dependency graph already allows.
+  return ready.find((m) => m.files.some((f) => f.endsWith('.tsx'))) ?? ready[0] ?? null;
 }
 
 /** True when every module is done. PURE. */
@@ -1213,6 +1235,7 @@ export function projectPlanSystemPrompt(framework: string): string {
     '  comment. The whole answer must fit in one reply — a plan cut off mid-list cannot be used at all.',
     '- files: relative paths from the project root; each file belongs to exactly ONE module.',
     '- Exactly ONE module — the app shell, last — lists the app entry (src/App.tsx) in its files. Earlier modules never list it: until the shell is built the app is not assembled, and that is expected.',
+    '- The FIRST module must depend on nothing and must own at least one .tsx screen the user can see. Do not make the first module types-only.',
     '- Do NOT list node_modules, lockfiles, or build output.',
     `- SIZE BUDGET — HARD LIMITS, because the whole answer must fit in one reply: at most ${PLANNER_BUDGET.modules} modules`,
     `  (merge related features into one module rather than adding a 15th), at most ${PLANNER_BUDGET.filesPerModule} files per module,`,

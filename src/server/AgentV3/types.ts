@@ -259,6 +259,8 @@ export type AgentEvent =
   // renders per-item "fix" buttons; a plain client already has the same offer in the done summary.
   | { type: 'suggest'; kind: 'review_suggestions'; count: number; items: Array<{ title: string; detail: string; functional: boolean }>; ts: number }
   | { type: 'error'; message: string; ts: number }
+  /** Clarity gate: tappable answers to the ONE question asked before a vague new build (clarityGate.ts). */
+  | { type: 'quick_replies'; chips: Array<{ label: string; send: string }>; ts: number }
   | { type: 'security_warning'; filePath: string; safe: boolean; findings: Array<{ severity: string; rule: string; description: string; line: number }>; report: string; ts: number };
 
 /** R2 §4.6 — the objective readiness verdict surfaced to the user as a build-health card. */

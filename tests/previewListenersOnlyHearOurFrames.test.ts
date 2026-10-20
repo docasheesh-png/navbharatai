@@ -19,10 +19,10 @@ describe('preview listeners only hear our frames', () => {
   });
 
   it('the preview-error POST is authenticated and still keepalive', () => {
-    const at = src.indexOf("fetch('/api/agentv3/preview-error'");
+    const at = src.indexOf("previewRequest('/api/agentv3/preview-error'");
     expect(at).toBeGreaterThan(-1);
     const call = src.slice(at, at + 450);
-    expect(call).toContain('headers: await authJsonHeaders()');
+    expect(src).toContain("import { previewRequest } from './previewRequest'");
     expect(call).toContain('keepalive: true');
     expect(call).not.toContain("headers: { 'Content-Type': 'application/json' }");
   });

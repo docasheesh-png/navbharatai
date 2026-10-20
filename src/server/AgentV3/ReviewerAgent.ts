@@ -48,7 +48,20 @@ export interface ReviewResult {
  * severity tag + markdown is stripped, a bare section label is never a finding — skip it.
  */
 const SECTION_LABEL_RE =
-  /^(critical\s+|major\s+|minor\s+|high\s+|low\s+|potential\s+|other\s+)?(issues?|findings?|problems?|warnings?|suggestions?|concerns?|observations?|summary|assessment|overview|conclusion|review|code review( report)?|report)\s*:?\s*$/i;
+  /^(critical\s+|major\s+|minor\s+|high\s+|low\s+|potential\s+|other\s+)?(issues?|findings?|problems?|warnings?|suggestions?|concerns?|observations?|summary|assessment|overview|conclusion|review|code review( report)?|report)(?:\s+(?:found|identified|detected))?\s*:?\s*$/i;
+
+/**
+ * A topic-qualified section title is the same shape, not another issue: retained reports 7ec82d80,
+ * d52982a4 and 8d46a974 counted "Issues Found", "Security Issues" and "Privacy/Compliance Issues".
+ * Only a marked heading with title-cased topic words qualifies; a sentence such as "Login crashes
+ * when fetching security issues" keeps its finding. No topic vocabulary is needed.
+ */
+const TOPIC_SECTION_LABEL_RE = /^(?:[A-Z][A-Za-z-]*(?:\/[A-Z][A-Za-z-]*)?\s+){1,4}(?:[Ii]ssues?|[Ff]indings?|[Pp]roblems?|[Ww]arnings?|[Ss]uggestions?|[Cc]oncerns?|[Oo]bservations?)(?:\s+(?:[Ff]ound|[Ii]dentified|[Dd]etected))?\s*:?\s*$/;
+
+function isSectionLabel(message: string, line: string): boolean {
+  return SECTION_LABEL_RE.test(message)
+    || (/(?:^|\s)#{1,6}\s/.test(line) && TOPIC_SECTION_LABEL_RE.test(message));
+}
 
 /**
  * SELF-DISMISSAL inside a single finding: the reviewer tagged the line [CRITICAL] (often only
@@ -93,6 +106,15 @@ const NO_FINDINGS_RE =
 
 const SELF_DISMISSED_RE =
   /\bfalse[\s-]?positive\b|\bnot (a |an )?(real|actual|genuine|true|valid) (issue|problem|bug|concern|error|violation|vulnerability)\b/i;
+
+/** A negated dismissal confirms the defect; it must not erase a real repair target. */
+function isSelfDismissed(line: string): boolean {
+  const affirmed = line.replace(
+    /\b(?:not|never|no longer|isn['’]t|wasn['’]t|aren['’]t|weren['’]t)\s+(?:(?:a|an|just|merely|simply|necessarily|really)\s+){0,3}false[\s-]?positive\b/gi,
+    '',
+  );
+  return SELF_DISMISSED_RE.test(affirmed);
+}
 
 /**
  * EXPLICIT LOW CONFIDENCE on a finding (M4-S4.1): the reviewer is instructed to tag each [CRITICAL] with
@@ -397,8 +419,8 @@ export function parseReviewOutput(text: string): ReviewIssue[] {
     if (!severity) {
       // An untagged finding that labels itself (see LABELLED_FINDING_RE) — read, never invented.
       const labelled = readLabelledFinding(line);
-      if (labelled && !NO_FINDINGS_RE.test(labelled.message) && !SECTION_LABEL_RE.test(labelled.message)) {
-        const dismissed = SELF_DISMISSED_RE.test(line);
+      if (labelled && !NO_FINDINGS_RE.test(labelled.message) && !isSectionLabel(labelled.message, line)) {
+        const dismissed = isSelfDismissed(line);
         issues.push({
           severity: dismissed ? 'suggestion' : 'warning',
           ...(currentFile ? { file: currentFile } : {}),
@@ -429,13 +451,13 @@ export function parseReviewOutput(text: string): ReviewIssue[] {
       // read as one it would FAIL a working build (the phantom-critical class this file already guards).
       if (BARE_NONE_RE.test(message)) continue;
       // A markdown SECTION HEADER ("### [CRITICAL] Issues", "🚨 ### Issues") is not a finding — never count it.
-      if (SECTION_LABEL_RE.test(message)) continue;
+      if (isSectionLabel(message, line)) continue;
       // Nor is a clean bill of health. See NO_FINDINGS_RE — this is what put "No  or  issues were
       // found" in front of a user as something to fix.
       if (NO_FINDINGS_RE.test(message)) continue;
       // The reviewer discharged its own finding as a false positive → demote so it can't fail the build.
       let effective: ReviewIssue['severity'] =
-        severity !== 'suggestion' && SELF_DISMISSED_RE.test(line) ? 'suggestion' : severity;
+        severity !== 'suggestion' && isSelfDismissed(line) ? 'suggestion' : severity;
       // CONFIDENCE GATE (M4-S4.1): an EXPLICITLY low/medium-confidence critical is a reviewer guess —
       // downgrade it to a warning so it is surfaced but never fails a working build. Un-tagged criticals
       // stay critical (backward-safe). Never UPGRADES anything.

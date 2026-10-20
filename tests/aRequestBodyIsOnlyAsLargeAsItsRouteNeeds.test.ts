@@ -17,6 +17,7 @@ import { join } from 'path';
 import {
   DEFAULT_JSON_LIMIT, LARGE_BODY_ROUTES, LARGE_JSON_LIMIT, RAW_BODY_ROUTES, SMALL_BODY_ROUTES,
   compileRoutePath, smallBodyLimit, isLargeBodyRoute, jsonBodyParser, needsRawBody, routingPath,
+  formBodyLimits, formBodyParser,
 } from '../src/server/lib/requestBodyLimits';
 
 const ROOT = process.cwd();
@@ -28,6 +29,10 @@ const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
  * is on neither list.
  */
 const REVIEWED_SMALL: Record<string, string> = {
+  '/api/failedbr/oauth/register': 'OAuth metadata only: at most five 512-character redirect URLs, 60-character name; 16 KB JSON limit',
+  '/api/failedbr/oauth/token': 'OAuth code/verifier or refresh token and client authentication; 16 KB JSON/form limits',
+  '/api/failedbr/oauth/revoke': 'one token plus client authentication; 16 KB JSON/form limits',
+  '/api/failedbr/mcp': 'read-only JSON-RPC method and arguments: cursor capped at 2048 characters, ids at 400; accepts no report, file or image payload; default small body limit applies',
   '/api/admin/mfa/verify': '`code` is a 6-digit TOTP code',
   '/api/gallery/admin/:id/review': '`decision` is one of three words; `note` is cut to 500 characters by readReviewReason (storeReviewReason.ts, Q-681); `reasonContract` is a number',
   '/api/nav-store/admin/review': 'ids, `decision` (three words) and a `note` cut to 500 characters by readReviewReason (Q-681)',
@@ -455,5 +460,70 @@ describe('🔒 Q-674: a route-specific limit lives in the one parser that runs',
     }
     expect(smallBodyLimit('/api/v1/app-ai/ask')).toBe('16kb');
     expect(smallBodyLimit('/api/profile/budget')).toBeNull();
+  });
+});
+
+describe('🔒 formBodyParser: form bodies only where a standard requires them', () => {
+  let server: Server;
+  let base = '';
+  const tooLarge: string[] = [];
+
+  beforeAll(async () => {
+    const app = express();
+    const onTooLarge = (e: { method: string; path: string }) => { tooLarge.push(`${e.method} ${e.path}`); };
+    app.use(jsonBodyParser({ onTooLarge }));
+    app.use(formBodyParser({ onTooLarge }));
+    const echo = (req: express.Request, res: express.Response) => { res.json({ body: req.body ?? null }); };
+    app.post('/api/failedbr/oauth/token', echo);
+    app.post('/api/v1/failedbr/oauth/revoke', echo);
+    app.post('/api/failedbr/oauth/register', echo);
+    app.post('/api/profile/budget', echo);
+    await new Promise<void>((resolve) => { server = app.listen(0, '127.0.0.1', () => resolve()); });
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => { await new Promise<void>((resolve) => server.close(() => resolve())); });
+
+  const form = (path: string, body: string) => fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+
+  it('only the OAuth token and revocation endpoints are form routes, at their own limits', () => {
+    expect(SMALL_BODY_ROUTES.filter((r) => r.form).map((r) => r.path).sort()).toEqual(['/api/failedbr/oauth/revoke', '/api/failedbr/oauth/token']);
+    expect(formBodyLimits('/api/v1/failedbr/oauth/token')).toEqual({ limit: '16kb', parameterLimit: 20 });
+    expect(formBodyLimits('/api/failedbr/oauth/register')).toBeNull();
+    expect(formBodyLimits('/api/profile/budget')).toBeNull();
+  });
+
+  it('parses a form body on a form route, versioned or not', async () => {
+    const a = await form('/api/failedbr/oauth/token', 'grant_type=refresh_token&client_id=c1');
+    expect(a.status).toBe(200);
+    expect((await a.json()).body).toEqual({ grant_type: 'refresh_token', client_id: 'c1' });
+    const b = await form('/api/v1/failedbr/oauth/revoke', 'token=t1');
+    expect((await b.json()).body).toEqual({ token: 't1' });
+  });
+
+  it('leaves a form body unparsed on every other route', async () => {
+    for (const p of ['/api/failedbr/oauth/register', '/api/profile/budget']) {
+      const res = await form(p, 'a=1');
+      expect(res.status, p).toBe(200);
+      expect((await res.json()).body, p).not.toEqual({ a: '1' });
+    }
+  });
+
+  it('refuses a form over 16 KB or over 20 fields with a 413 sentence', async () => {
+    const big = await form('/api/failedbr/oauth/token', 'refresh_token=' + 'x'.repeat(20 * 1024));
+    expect(big.status).toBe(413);
+    expect((await big.json()).code).toBe('BODY_TOO_LARGE');
+    expect(tooLarge).toContain('POST /api/failedbr/oauth/token');
+    const many = await form('/api/failedbr/oauth/token', Array.from({ length: 25 }, (_, i) => `f${i}=1`).join('&'));
+    expect(many.status).toBe(413);
+    expect((await many.json()).code).toBe('BODY_TOO_MANY_FIELDS');
+  });
+
+  it('server.ts mounts formBodyParser after jsonBodyParser and before the body default', () => {
+    const code = read('server.ts');
+    const json = code.indexOf('app.use(jsonBodyParser(');
+    const formAt = code.indexOf('app.use(formBodyParser(');
+    expect(formAt).toBeGreaterThan(json);
+    expect(code.indexOf('app.use(normalizeMissingBody)')).toBeGreaterThan(formAt);
   });
 });

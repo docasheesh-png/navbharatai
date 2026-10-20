@@ -1,8 +1,8 @@
 // Resell routes — a server or a database from NavBharatAI, charged only after it is real.
 //
 // The Billing "Add" button cannot sell these. This is the only door. The database that starts is
-// the small one: a namespace on the Firestore we already run, plus the data API on this server.
-// A private Supabase project stays a second door, and only when that org is configured. An extra
+// configured one: a dedicated Supabase project when the managed default is enabled, otherwise
+// the legacy shared data API. Existing shared databases keep their removal controls. An extra
 // Cloud Run server stays the door it already was. Own hosting and the user's own Supabase stay ₹0.
 
 import type { Express, Request, Response } from 'express';
@@ -21,6 +21,7 @@ import {
 import { addonAgreementTerms, addonById } from '../../lib/hostingAddons';
 import { loadWorkspaceFiles, mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { createPlatformDatabase, platformSupabaseConfig } from '../lib/platformDatabase';
+import { platformSupabaseDefault, approvedProjectLimit, organizationProjectCount, acquirePlatformAdmission, platformAppLabel } from '../lib/platformSupabaseAdmission';
 import { deleteProject } from '../lib/supabaseProvision';
 import { saveUserSecrets } from '../lib/supabaseProvisionFlow';
 import { executeDatabaseResell, executeServerResell, type ChargeResult } from '../lib/resellExecute';
@@ -41,10 +42,13 @@ import { isDeliveredRow } from '../lib/resellLifecycle';
  * null (= old behaviour) — the guard only ever prevents a create, it never blocks a refund.
  */
 async function lapsedDedicatedRef(uid: string, workspaceId: string, nowMs: number): Promise<string | null> {
-  if (!resellDuplicateGuardEnabled()) return null;
+  if (!resellDuplicateGuardEnabled() && !platformSupabaseDefault()) return null;
   try {
     const db = getServerDb();
-    if (!db) return null;
+    if (!db) {
+      if (platformSupabaseDefault()) throw new Error('Database ledger unavailable.');
+      return null;
+    }
     const snap = await getDoc(doc(db as any, 'user_token_wallets', uid));
     const rows = snap.exists() ? (snap.data() as any)?.hostingAddons : null;
     if (!Array.isArray(rows)) return null;
@@ -55,6 +59,7 @@ async function lapsedDedicatedRef(uid: string, workspaceId: string, nowMs: numbe
       && !(r as any).deletedAt);
     return hit ? hit.ref : null;
   } catch {
+    if (platformSupabaseDefault()) throw new Error('Database ledger unavailable.');
     return null;
   }
 }
@@ -135,18 +140,21 @@ export function registerResellHostingRoutes(app: Express, deps: ResellRouteDeps)
       active: serverPay.active,
       canPay: serverPay.canPay,
     });
+    const platformPurchasesReady = !platformSupabaseDefault() || approvedProjectLimit() !== null;
+    const useDefaultSupabase = platformSupabaseDefault() && sharedPay.active !== null && !sharedPay.active.some((row) => String(row.proof || '').startsWith(`db:${workspaceId}:`));
     const database = quoteDatabaseResell({
-      product: 'shared',
+      product: useDefaultSupabase ? 'dedicated' : 'shared',
       plansOn,
-      configured: getServerDb() !== null,
+      configured: useDefaultSupabase ? platformSupabaseConfig() !== null && platformPurchasesReady : getServerDb() !== null,
       workspaceId,
-      active: sharedPay.active,
-      canPay: sharedPay.canPay,
+      active: useDefaultSupabase ? dedicatedPay.active : sharedPay.active,
+      canPay: useDefaultSupabase ? dedicatedPay.canPay : sharedPay.canPay,
+      lapsedRef: useDefaultSupabase ? await lapsedDedicatedRef(who.uid, workspaceId, now) : null,
     });
     const dedicated = quoteDatabaseResell({
       product: 'dedicated',
       plansOn,
-      configured: platformSupabaseConfig() !== null,
+      configured: platformSupabaseConfig() !== null && platformPurchasesReady,
       workspaceId,
       active: dedicatedPay.active,
       canPay: dedicatedPay.canPay,
@@ -173,8 +181,8 @@ export function registerResellHostingRoutes(app: Express, deps: ResellRouteDeps)
       charged: false,
       autoRenewAvailable: renewOn,
       server: { ...server, terms: termsFor(serverSpec), autoRenew: renewInfo(server.stopRef) },
-      database: { ...database, terms: termsFor(sharedSpec), autoRenew: renewInfo(database.stopRef) },
-      dedicated: { ...dedicated, terms: termsFor(dbSpec), autoRenew: renewInfo(dedicated.stopRef) },
+      database: { ...database, purchasePath: useDefaultSupabase ? '/api/agentv3/resell/database/dedicated' : '/api/agentv3/resell/database', terms: termsFor(useDefaultSupabase ? dbSpec : sharedSpec), autoRenew: renewInfo(database.stopRef) },
+      dedicated: useDefaultSupabase ? undefined : { ...dedicated, terms: termsFor(dbSpec), autoRenew: renewInfo(dedicated.stopRef) },
       own: {
         hosting: 'Hosting it yourself stays free from us.',
         database: 'Connecting your own Supabase stays free from us.',
@@ -313,6 +321,8 @@ function dataOrigin(req: Request): string {
 }
 
   app.post('/api/agentv3/resell/database', async (req: Request, res: Response) => {
+    // Old tabs accepted the shared-product price. Never silently substitute a paid Supabase order.
+    if (platformSupabaseDefault()) return noCharge(res, 409, 'The default database has changed. Refresh Publish and review the current terms. Nothing was charged.');
     const who = await caller(req);
     if (!who) return noCharge(res, 401, 'Please sign in. Nothing was charged.');
     const blocked = await appLockBlocks(req, who.uid, 'hosting-addon-purchase');
@@ -394,46 +404,72 @@ function dataOrigin(req: Request): string {
       return noCharge(res, 403, 'This app is not on your account. No database was created and nothing was charged.');
     }
     const cfg = platformSupabaseConfig();
-    const now = Date.now();
-    const pay = await previewDeliveredCharge(getServerDb(), who.uid, 'dedicated_db', stableResellRef('database', workspaceId, now));
-    const outcome = await executeDatabaseResell({
-      agreedToTerms: req.body?.agreedToTerms === true,
-      workspaceId,
-    }, {
-      nowMs: now,
-      quoteInput: {
-        product: 'dedicated',
-        plansOn: hostingPlansEnabled(),
-        configured: cfg !== null,
+    const managedDefault = platformSupabaseDefault();
+    if (managedDefault && (!cfg || !getServerDb() || approvedProjectLimit() === null)) return noCharge(res, 503, 'Database setup is awaiting production activation. Nothing was charged.');
+    const admission = managedDefault && cfg ? await acquirePlatformAdmission(getServerDb(), { orgId: cfg.orgId, workspaceId }) : null;
+    if (managedDefault && !admission) return noCharge(res, 409, 'Database provisioning is busy or awaiting reconciliation. Nothing new was started.');
+    let settled = true; // No provider create has started yet.
+    let providerStarted = false;
+    try {
+      const now = Date.now();
+      const pay = await previewDeliveredCharge(getServerDb(), who.uid, 'dedicated_db', stableResellRef('database', workspaceId, now));
+      const outcome = await executeDatabaseResell({
+        agreedToTerms: req.body?.agreedToTerms === true,
         workspaceId,
-        active: pay.active,
-        canPay: pay.canPay,
-        lapsedRef: await lapsedDedicatedRef(who.uid, workspaceId, now),
-      },
-      create: async () => {
-        if (!cfg) return { ok: false, message: 'A database from NavBharatAI is not switched on yet.', cleaned: true };
-        return createPlatformDatabase({
-          token: cfg.token,
-          orgId: cfg.orgId,
-          region: cfg.region,
-          appLabel: typeof req.body?.appName === 'string' ? req.body.appName : null,
-        });
-      },
-      save: (env) => saveUserSecrets(who.uid, env, workspaceId),
-      charge: (clientRef, proof) => asCharge(who.uid, 'dedicated_db', clientRef, proof, req.body?.autoRenew !== false),
-      destroy: async (projectRef) => {
-        if (!cfg) return { ok: false };
-        const gone = await deleteProject(cfg.token, projectRef);
-        return { ok: gone.ok === true };
-      },
-      refund: async (clientRef) => {
-        const removed = await removeHostingAddon(getServerDb(), who.uid, clientRef, 0, 0);
-        return { ok: removed.ok };
-      },
-    });
-    const body = { ...outcome.body };
-    delete (body as { env?: unknown }).env;
-    return res.status(outcome.status).json(body);
+      }, {
+        nowMs: now,
+        quoteInput: {
+          product: 'dedicated',
+          plansOn: hostingPlansEnabled(),
+          configured: cfg !== null,
+          workspaceId,
+          active: pay.active,
+          canPay: pay.canPay,
+          lapsedRef: await lapsedDedicatedRef(who.uid, workspaceId, now),
+        },
+        create: async () => {
+          if (!cfg) return { ok: false, message: 'A database from NavBharatAI is not switched on yet.', cleaned: true };
+          if (managedDefault) {
+            const limit = approvedProjectLimit();
+            if (limit === null || await organizationProjectCount(cfg.token, cfg.orgId) >= limit) {
+              return { ok: false, cleaned: true, message: 'Database capacity needs an administrator review. Nothing was charged.' };
+            }
+          }
+          settled = false;
+          providerStarted = true;
+          const made = await createPlatformDatabase({
+            token: cfg.token,
+            orgId: cfg.orgId,
+            region: cfg.region,
+            appLabel: platformAppLabel(workspaceId, typeof req.body?.appName === 'string' ? req.body.appName : ''),
+            onCreated: admission ? (ref) => admission.noteProject(ref) : undefined,
+          });
+          if (!made.ok) settled = made.cleaned;
+          return made;
+        },
+        save: (env) => saveUserSecrets(who.uid, env, workspaceId),
+        charge: (clientRef, proof) => asCharge(who.uid, 'dedicated_db', clientRef, proof, req.body?.autoRenew !== false),
+        destroy: async (projectRef) => {
+          if (!cfg) return { ok: false };
+          const gone = await deleteProject(cfg.token, projectRef);
+          settled = gone.ok === true;
+          return { ok: gone.ok === true };
+        },
+        refund: async (clientRef) => {
+          const removed = await removeHostingAddon(getServerDb(), who.uid, clientRef, 0, 0);
+          return { ok: removed.ok };
+        },
+      });
+      if (outcome.body.ok === true) settled = true;
+      const body = { ...outcome.body };
+      delete (body as { env?: unknown }).env;
+      return res.status(outcome.status).json(body);
+    } catch {
+      return res.status(503).json({ ok: false, charged: providerStarted ? null : false, paymentStatus: providerStarted ? 'unknown' : 'not-started', error: 'Database provisioning could not be confirmed. Review Publish before retrying; reconciliation may be needed.' });
+    } finally {
+      // A failed release safely leaves a hold. No timeout can turn an uncertain paid create into another.
+      if (settled) await admission?.release().catch(() => undefined);
+    }
   });
 
   app.post('/api/agentv3/resell/database/stop', async (req: Request, res: Response) => {

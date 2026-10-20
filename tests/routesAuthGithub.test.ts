@@ -94,27 +94,5 @@ describe('GitHub routes — /api/github/* auth check', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('POST /api/github/file returns 401 when Authorization header is missing', async () => {
-    const register = await importGithubRoutes();
-    const routes = captureRoutes(register);
-    const handler = routes.get('POST /api/github/file');
-    expect(handler).toBeDefined();
 
-    const req = mockReq({ body: { owner: 'acme', repo: 'test', path: 'README.md' } });
-    const res = mockRes();
-    await handler!(req, res);
-    expect(res.statusCode).toBe(401);
-  });
-
-  it('POST /api/github/branches returns 401 when Authorization header is missing', async () => {
-    const register = await importGithubRoutes();
-    const routes = captureRoutes(register);
-    const handler = routes.get('POST /api/github/branches');
-    expect(handler).toBeDefined();
-
-    const req = mockReq({ body: { owner: 'acme', repo: 'test' } });
-    const res = mockRes();
-    await handler!(req, res);
-    expect(res.statusCode).toBe(401);
-  });
 });

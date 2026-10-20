@@ -360,7 +360,10 @@ describe('6 · CENSUS — a door that renames forwards the renames to every read
 
   it('🔒 the fast lane: renames → the contract file\'s header → the result the hand-off reads', () => {
     expect(SIMPLE).toContain('contractRenames = prepared.renamed;');
-    expect(SIMPLE).toContain('const mod = contractModule(contract, contractRenames);');
+    // 🔁 REPOINTED (Q-1027): the call now also carries `contractEnumsAsConst`, so the contract FILE names a
+    // rewritten enum the way it already named a rename. The rename forwarding this test guards is intact and
+    // still asserted — one more fact travels the same road.
+    expect(SIMPLE).toContain('const mod = contractModule(contract, contractRenames, contractEnumsAsConst);');
     // Both hand-offs that carry files (timeout salvage and verify failure) carry the renames.
     expect(SIMPLE.match(/\.\.\.\(contractRenames\.length \? \{ contractRenames \} : \{\}\)/g)).toHaveLength(2);
   });
@@ -368,7 +371,8 @@ describe('6 · CENSUS — a door that renames forwards the renames to every read
   it('🔒 every prepareSharedContract call in a lane forwards `.renamed` to what it writes', () => {
     const sites = [...SIMPLE.matchAll(/=\s*prepareSharedContract\(/g), ...ROUTE.matchAll(/=\s*prepareSharedContract\(/g)];
     expect(sites).toHaveLength(2);
-    expect(ROUTE).toContain('blueprintAdvisoryBlock(manifest, prepared.contract, prepared.renamed)');
+    // 🔁 REPOINTED (Q-1027) — a fourth argument, same reason as above.
+    expect(ROUTE).toContain('blueprintAdvisoryBlock(manifest, prepared.contract, prepared.renamed, prepared.enumsAsConst)');
   });
 
   it('🔒 the dispatcher heals before it quotes, and the note reads the contract the heal put in hand', () => {

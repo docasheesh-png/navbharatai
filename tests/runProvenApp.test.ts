@@ -88,6 +88,27 @@ describe('the vetoes — every one of them is RUNTIME evidence the app is broken
     expect(runProvenApp(null).proven).toBe(false);
     expect(runProvenApp({}).proven).toBe(false);
     expect(runProvenApp({ browserRendered: 'yes' as unknown as boolean }).proven).toBe(false);
+    expect(runProvenApp({ browserRendered: true }).proven).toBe(false);
+  });
+
+  it.each([
+    'stopped', 'deliveryRefused', 'previewFailed', 'pagesFailed', 'journeyFailed', 'runtimeCrashBlocker',
+  ] as const)('a proven render cannot stand in for missing or malformed %s evidence', (key) => {
+    const incomplete: Partial<RunEvidence> = { ...SCHOOL_ERP };
+    delete incomplete[key];
+    expect(runProvenApp(incomplete)).toMatchObject({ proven: false });
+    expect(runProvenApp(incomplete).reason).toContain(key);
+    for (const value of [null, 'false', 0]) {
+      const invalid = { ...SCHOOL_ERP, [key]: value } as unknown as RunEvidence;
+      expect(runProvenApp(invalid).proven).toBe(false);
+      expect(runProvenApp(invalid).reason).toContain(key);
+    }
+  });
+
+  it.each([undefined, null, '', false, 'passed'])('a proven render requires an explicit production-build outcome (%s)', (prodBuild) => {
+    const invalid = { ...SCHOOL_ERP, prodBuild } as unknown as RunEvidence;
+    expect(runProvenApp(invalid).proven).toBe(false);
+    expect(runProvenApp(invalid).reason).toContain('prodBuild');
   });
 });
 

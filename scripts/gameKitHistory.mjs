@@ -42,7 +42,10 @@ async function filesOf(entry, rev) {
         name: 'at-rev',
         setup(b) {
           b.onResolve({ filter: /^\.\.?\// }, (a) => {
-            const from = a.importer && a.importer !== '<stdin>' ? posix.dirname(a.importer) : posix.dirname(entry);
+            const importer = a.importer && a.importer !== '<stdin>' ? a.importer : entry;
+            // esbuild reports an absolute sourcefile for stdin on current versions. read() takes
+            // repository-relative paths in BOTH working-tree and historical-revision mode.
+            const from = posix.dirname(posix.isAbsolute(importer) ? posix.relative(ROOT, importer) : importer);
             const base = posix.normalize(posix.join(from, a.path));
             for (const ext of ['', '.ts', '.tsx', '/index.ts']) {
               const p = base + ext;

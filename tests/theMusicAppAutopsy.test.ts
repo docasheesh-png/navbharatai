@@ -42,8 +42,8 @@ describe('a question to the user is read from the model\'s words, not ours', () 
 
   it('the runner keeps the model\'s words when nothing was built, and both route readers use them', () => {
     expect(runner).toContain('let modelAnswer: string | undefined = builtNothing && !starvedTurn && turn.text.trim() ? turn.text.trim() : undefined;');
-    expect(route).toContain('const firstAttempt = readTurnAnswer(modelsOwnWords(result), prompt);');
-    expect(route).toContain('const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt);');
+    expect(route).toContain('const firstAttempt = readTurnAnswer(modelsOwnWords(result), prompt, adAnswerFacts);');
+    expect(route).toContain('const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt, adAnswerFacts);');
     expect(route).not.toContain('readTurnAnswer(result.summary, prompt)');
   });
 

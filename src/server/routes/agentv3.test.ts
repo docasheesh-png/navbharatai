@@ -2509,6 +2509,17 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      `!isImportTurn`. It rewrites ONLY padding/margin/gap px values, ONLY in files this build wrote,
     //      ONLY above the `DESIGN_CONSISTENCY` finding's own threshold, and never on a file whose spacing
     //      is coherently on another rhythm. Considered ✓.
+    //   1× the POST-GREEN FINISHING ROLLBACK (owner item 2, finishingRecheck.ts) — runs only when this build
+    //      was proven green AND the finishing passes wrote files; those passes are gated on `result.ok &&
+    //      expectsArtifacts` (false on every import/survey turn), so it never writes on a read-only turn. It
+    //      writes back only the last green snapshot's own content for those files. Considered ✓.
+    //   1× the E2E BUILD EXCLUSION PREREQUISITE (cfd01074 sibling) — before create-only scaffold files,
+    //      `decision.scaffold` already refuses imports and `mayModify: !isImportTurn` independently
+    //      preserves the read-only turn. The callback records tsconfig only after a guarded write lands;
+    //      deferring the remaining scaffold can therefore never leave test TS breaking the app's build.
+    // Two unconditional restore writers moved to the shared applied-outcome restore door (Q-1891).
+    // It reconciles captured writes only after a sandbox operation succeeds; no new survey writer.
+    expect(code).toContain('reconcileCapturedWrites(writtenFiles, { ...applied, unchanged: 0 })');
     expect(count).toBe(33);
   });
 
@@ -2555,7 +2566,9 @@ describe('zeroBillForFailedBuild — a failed build is never charged, import tur
 
   it('is wired into the billing path (not merely defined)', () => {
     const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
-    expect(SRC).toContain('zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0');
+    // Round 4: the rule feeds the ONE Stop/failure decision both billing points share.
+    expect(SRC).toContain('failed: zeroBillForFailedBuild(result.ok),');
+    expect(SRC).toContain("} else if (stopSettlement.kind === 'failed-free') {");
     expect(SRC).not.toContain('expectsArtifacts && !result.ok && effectiveBilledUsd > 0');
   });
 });

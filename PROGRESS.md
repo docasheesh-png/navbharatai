@@ -95984,6 +95984,50 @@ to Node 22 is its own change (run the suite on 22 first, then flip `ci.yml`).
 - Q-1064 premise corrected (honesty): batching already exists (`write_files_batch`, 24 uses). The cost is token throughput on the KIMI rung; the options changed, so the "han" cannot be applied to it — three options are in the queue.
 - Q-1066 fixed (lag list read by both detectors) · Q-1068 diagnostics shipped, verdict waits for a report · Q-1069 fixed per the approved rule.
 
+## 2026-10-14 — "mode change is slow" (admin, website/desktop, Free → Doctor AI → Teacher AI)
+**Evidence, not guesses:** production build in headless Chromium (4× CPU, 150 ms RTT, 1.5 Mbps). Switching is synchronous state only in code; measured steady-state 60–110 ms. The first switch to each AI is 6–8× slower (490 / 590 ms): the screen's lazy chunk is fetched on the pick.
+**Fix:** `src/lib/warmModeChunks.ts` — idle, one-at-a-time warm-up of the four screens (490→357 ms, 590→409 ms). **A bug the measurement caught:** my first version asked `window.Capacitor`, which exists in every browser, and fetched nothing; the same mistake was live in `main.tsx` (every website launch labelled `app` in cold-start telemetry) and is fixed with a census.
+**Honest limit:** not reproduced signed-in; what is left is evaluation + first render (~350 ms at 4× CPU). Q-1071 stays 🟡 until the admin says whether the SECOND switch is also slow.
+### 2026-10-15 — Q-1018 + Q-1019 (+ Q-1096 found while fixing them): the ads we can remove, and the ones we cannot
+
+Q-990 built `thirdPartyLimits.ts` so the platform would stop claiming a property only another service
+controls. Its honest sentence has two halves, and **only the first was ever measured**:
+
+- *"ads inside YouTube's own player may still play …"* — measured (`projectAdServingPlayers`)
+- *"The app adds no ads of its own"* — **asserted, on every build, unchecked**
+
+**Q-1018.** That second half is not a safe assumption, and the proof is inside NavBharatAI: our OWN
+Monetization wizard generates an AdSense block (`generateAdsense`, `src/lib/paymentSetup.ts`). A user who
+added ads through our own feature and then asked about ads was told, by us, that their app adds none.
+`projectOwnAdSdks` now measures nine networks — each by its loader, publisher id or SDK package, never by a
+product name, so prose, a `.adsbygoogle{display:none}` style and our own test files can never match. The end
+line, the "ad-free" correction and the **builder note** all read it, and when the app really does carry its
+own ads the note tells the builder to REMOVE them: those ARE ours to remove and the user just asked
+(the 50/50 law's prevent half). One project load serves both ad questions (`editTurnAdFacts`).
+
+**Q-1019, the same fact read again.** An edit turn whose whole ask is "remove the ads" on an app that plays
+videos in YouTube's own player has one correct outcome: say those ads are not the app's to switch off, and
+change nothing. The platform filed that as a **failed build** — "the build produced no files, please try
+again" over the honest answer, an empty-build retry to produce the same answer on a stronger rung, and on
+the free tier an upsell. Fixed on the `pointed` precedent (autopsy 0c2a987a): `TurnAnswer.notOurs`, decided
+from measured facts, never from reading the model's prose. Six conditions, all required — and two of them
+are what keep it honest: the app must have **no ads of its own** (if it does, the removal IS ours to make,
+so the zero-file turn really failed), and the ad removal must be the turn's **only** ask (conservative — in
+doubt it answers false and today's behaviour stands, so "remove the ads and add dark mode" is still a real
+empty build whose retry may deliver the dark mode). `TURN_ANSWERED_NOT_OURS` is registered PROCESS-ONLY,
+because an unregistered code costs the user 6 app-health points (the Q-1043 class).
+
+**Q-1096 — found while writing Q-1019's test, and it was bigger than either row.** `adRemovalRequested`
+matched only verb-then-noun removals ("remove the ads"). Hindi is subject-object-VERB, so the form an Indian
+user types FIRST — *"ads hata do"*, *"ads nikal do"*, *"ads band karo"*, *"विज्ञापन हटाओ"* — matched nothing,
+and with that predicate false **all three of Q-990's layers stood down**: the builder was never told, the user
+got no start line, and the honest end line never appeared. Q-990 was written from one English report; this is
+the same module's blind spot in the language its own user base writes in. The ad word must sit directly beside
+the removal verb, so every negative Q-990 pinned still does not match.
+
+Locked by `tests/theAdsWeCanRemoveAndTheOnesWeCannot.test.ts` (24 tests) — including a census that every
+reader of `pointed` in the route also reads `notOurs`, because the defect was one grouping lacking a term.
+Nine reversions, each with an anchor assertion, each failed and was restored.
 ### 2026-10-15 — Q-1030: a measurement whose error is unknown (TODO_ONLY_TURNS)
 
 **Root cause, two halves of one class** — *a count kept at one of N call sites is not kept*:
@@ -96015,6 +96059,71 @@ and a rise is the fix working, not a regression.
 - **No new server route.** Copy / Download in the panel are the dashboard's own functions, because they also write the "taken" mark (one report, one session).
 - Locked by `tests/theAppsPageHoldsEveryBuildReport.test.ts` and `WorkspaceBuildReports.render.test.tsx`; three reversions each failed the right test. Two existing pins moved with the card (`theAdminMenuHasNineTabs`, `adminAllBuilds`, `adminBuildFilters`), each with the reason beside it.
 
+## 2026-10-15 — Autopsy 67a2b0a2 (data-analyst portfolio, Weak/KIMI; 10.1 min, 0 files, RED, not charged)
+**Ledger:** ✅ self-healed 3 (GLM silent 15 s, KIMI and GLM-5.3 150 s reasoning-only timeouts — each a fallback that cost clock) · 🔀 workaround 3 (fast lane → full builder; KIMI → GLM-5.3; one-shot lane skipped) · ⏭️ skipped: typecheck, page checks, journey (no app existed) · ❌ shipped: nothing produced, RED · 🥵 struggle: 4 read-only turns (17–69 s each), 3 provider calls that answered nothing (315 s, 52%), futility breaker at minute 10.
+**Fixed here:** Q-1123 the summary no longer blames the request when the engine took the clock · Q-1124 a history countdown is withdrawn when this build has written nothing. Each has a reverted-and-failed test.
+**Missing subsystem named:** the fast lane has no path for "my first rung is silent" other than the reasoning engines (Q-1120 — the admin's routing decision, with a recommendation).
+**Not fixed, with state:** Q-1120 / Q-1121 / Q-1122 🟡 BLOCKED. The silent first rung has now hit two reports in two days; Q-962's "keep" answer predates that.
+### 2026-10-15 — Q-1020: the request-notes census reads the sinks, not the names (and it corrected Q-1016)
+
+The census that keeps every request note reaching every builder lane was kept honest by a guard matching
+route imports named `…BuilderNote` / `…BuildRule`. It could not see a producer called anything else, and
+`requestScopeVerdict` — already on the list — was itself the proof: it had to be added by hand because no
+name rule caught it.
+
+**Widening the name rule was measured and rejected.** `/(?:Note|Rule|Verdict)$/` matches **73** of the
+route's imports for these **6** real producers, so the net would have needed a 67-name allowlist nobody
+would read, which dilutes a guard into decoration. The census now works from the **sinks**: each of the
+six lane prompts is pinned to the exact expression that must supply the notes, plus a **ratchet** over
+every `…UserPrompt(prompt, …)` call, so a seventh builder prompt reading the bare request fails the test.
+No name rule, no allowlist.
+
+**🔴 And on its first run it corrected Q-1016.** That row says the blueprint lane plans the manifest and
+contract blind. Measured, **six** builder prompts read the bare request:
+
+| sink | what it plans |
+|---|---|
+| `manifestUserPrompt(prompt, scaffold)` | the blueprint lane's whole file list — as the row said |
+| `contractUserPrompt(prompt, manifest)` | and its shared contract — as the row said |
+| `megaRoadmapUserPrompt(prompt, …)` ×2 | **the mega-app roadmap planner, which the row never mentioned** |
+| `repairUserPrompt(prompt, …)` ×2 | a repair pass — it rewrites real files, so "no sign-in" still constrains it; a judgement, recorded rather than assumed |
+
+None of the six is a wiring oversight: every one runs *above* the line where the first note input is
+computed (blueprint ~16750, first input ~16978), so there is nothing to pass yet. Closing them means
+lifting the note computation into one pure function called before the blueprint lane and read in both
+places — the Q-1026/Q-1033 "one computation, one copy" shape — not one more threaded argument. Q-1016's
+row now carries that scope and that plan, and the ratchet may only shrink.
+
+Three reversions: a seventh bare-prompt lane added (1 fail), the architect stops reading the list
+(2 fail), the sub-agents stop reading it (2 fail).
+### 2026-10-15 — Q-1021: our instrumentation is never the user's app
+
+`journeyDerivation.appOwnFiles` is the one place every *"does this app do X?"* question in that module is
+asked of — and it stripped **one of the three things NavBharatAI injects** into a built app.
+`withoutAppSignature` removes the "made by NavBharatAI" badge. It does not touch the red **honesty
+banner** (the NO-FAKE-FEATURE rule's demo warning) or the **preview bridge** — roughly 300 lines of our
+own script, which registers `addEventListener('input', …)`, a `click` handler and a `mouseover` handler.
+So on an app whose author wrote no script at all, those questions were partly being answered about our
+own instrumentation.
+
+**The class, and why the fix is one call rather than three patterns copied in.** Autopsy 9c612cdb had
+already met this exact bug in the design lint (our badge's `gap:6px` counted as the user's eighth
+off-grid value) and fixed it with `ourMarkupRanges`: ONE list of what we inject, owned by the three
+modules that write it. This reader was left on its private, partial strip. Pointing it at the shared one
+closes today's gap **and** makes a fourth injection safe by construction instead of by somebody
+remembering to add it in two places. It blanks rather than deletes, which this reader needs too —
+`dataEntryEvidence` reports *where* it found a sign, and blanking keeps every other offset valid.
+
+Locked by `tests/ourMarkupIsNeverTheUsersApp.test.ts` (12 tests), whose fixtures are built from the real
+badge, banner and bridge rather than a paraphrase, with a **census** that fails on any reader of the
+app's own files rolling its own strip. A real `<form>` and a real React form component are proven still
+found — the strip must never hide the app's own input. Three reversions: the import reverted (the module
+throws on load), the stripper handed a non-HTML path (3 fail), the shared list reduced to the badge
+alone (2 fail).
+
+⚠️ **My own history comment tripped my own census.** The first version of the source guard failed on the
+Q-1021 note that explains the fix, because that note names the helper it removed. Comments are stripped
+now — the same trap Q-1081's census fell into, closed the same way.
 ### 2026-10-15 — Q-1015: design feedback reaches every framework, and an indented stylesheet survives it
 
 **The regression.** The `evaluate` tool used to design-lint `.vue`, `.svelte`, `.less` and `.sass` with a
@@ -96138,3 +96247,2421 @@ published app's password (`/api/nav-store/web/app/:id/open` and `/remix`) had no
 `tests/privateAppPasswordIsThrottled.test.ts` (each proven by reversion). NOT changed: the in-memory limiter stays as the fast first gate;
 chat/preview/payment limiters are cost limits keyed by account identity, not credential gates (left as they are).
 
+## 2026-10-16 — Admin-approved stage 1 of the forensic-audit plan: P0-1 (a RED gate is told to the user) + P1-1 (benchmark evidence)
+**P0-1 — `gateRedNotice.ts`.** Reproduced with the real gate: preview/page/journey `failed` + no ERROR finding → gate RED, `result.ok` true, ordinary success summary (a failed page render or journey is recorded at WARNING, the verdict flip needs an ERROR, and `AGENTV3_RUNTIME_RED_FLIP` is off by default — "D-1 unanswered"). UNKNOWN already had its own line; RED had none. Now the user's summary names what a real browser saw fail and says it was NOT confirmed to work. **Billing semantics are untouched by construction:** only `summary` changes (`ok`, the bill, the wallet debit are returned exactly), it is a no-op when the flip already set `ok:false`, and a RED built only from static findings is never told it failed to run. Admin report gains `RELEASE_GATE_RED_TOLD` (info). 16 tests; three reversions failed the right tests (call removed · notice flips `ok` · …); the fourth reversion (drop the runtime-proven guard) is correctly NOT caught because the evidence-parts check is a second guard on the same property.
+**P1-1 — `reliability/benchEvidence.ts`.** The benchmark now reads from each build's own report: model calls (failed ones counted), input / **cached-input** / output tokens as each provider reported them, build and model seconds, real provider cost, preview evidence (`rendered` / `failed` / `not-proven`, from the platform's observation) and the release-gate state. A missing figure is `null`, never 0. `buildSucceeded` is deliberately unchanged; `verifiedOutcome` (proven / contradicted / unproven) and `falsePositive` sit beside it, so `ok:true` + RED gate is counted as a false positive. Runner prints it per build and in a summary; `bench:compare` prints a per-metric delta table. Fixtures are slices of the REAL reports 398db9f3 and 67a2b0a2. Dry run verified (no build, no spend). 22 tests, four reversions each failed.
+**Not done, by instruction:** no flag enabled, no push, no merge. Stage 2 (the paid A/B, hard cap US$5) and stage 3 (Q-963 template, option A) wait for the admin's go after this report.
+## 2026-10-16 — Q-1097: a null scene reading is never silent, and the vehicle is identified once (#3763)
+
+`tests/aThreeGameIsReadFromItsScene.test.ts` failed twice in one day under a loaded machine, on two different
+fixtures, with the same shape: `{ faces: false, mirrored: null }` where a concrete steering verdict was demanded.
+Both runs had **180 frames** — so `probeStarved`, the predicate the test branched on, was false, Q-1038's starved
+branch never ran, and the test fell through to an assertion no machine can promise.
+
+Three causes underneath, and the row only named the first:
+
+1. **The reason was not computed from the evidence.** `probeStarved` counts frames; the verdict's floors are
+   geometric (the vehicle seen to move, the camera following it, the turn big enough to call). New `sceneUnread`
+   answers from the same read `sceneVerdict` decides on, and the reason is computed ONLY where the verdict is
+   null — so *exactly one of the two is non-null, per axis* holds by construction. Q-1022's class one level down.
+   My own first draft got this wrong (it returned the starvation note for both axes on a low frame count, which
+   claimed the camera "could not be read" on a read that had just answered it); the invariant test caught it.
+2. **The vehicle was identified twice.** The steering probe re-picked it from its own 400 ms sample. The racer
+   fixture's traffic car moves 0.5 per frame whatever the player presses and never turns, so a second pick under
+   load can land on it — the camera question answered about the car, the steering question about something else.
+3. **A long look can LIE, not merely fail.** `turn` is a chord angle — half the swept angle — and three seconds
+   of holding LEFT is a 310° sweep at 60 fps on that fixture. One frame-rate step up passes 360°, where the chord
+   points backwards and `turn < 0` **accuses a correctly-steering game of mirrored steering**. A wrong verdict is
+   worse than no verdict. The reading is now taken over a 400 ms window, the long one used only as a fallback and
+   only below `TURN_WRAP_SAFE_DEG`; the arithmetic moved OUT of the probe script — which no unit test can reach —
+   into pure `chordTurn` / `pickTurn` / `readTurn`, with the script recording only the raw vectors (`SceneRead.aim`).
+
+And a contradiction inside Q-1038's own fix fell out: a starved page whose turn DID read used to print
+"Steering was not read" in the same report that scored `steeringMirrored` from that very reading.
+
+**Report honesty (rule 5):** four of the five reasons a reading can be missing used to print nothing, so a game
+whose steering the scene never read appeared as a game that steers correctly. All five print now — only where the
+scene was actually consulted (a driving game, not stalled, with a three.js scene), because without a scene the
+pixel flow is the designed path, not a failure.
+
+Locked by `tests/aNullSceneReadingIsNeverSilent.test.ts` (44 tests) plus the four live tests rewritten to the
+honest contract — never a wrong claim, the exact verdict when read, a stated reason when not — which only the
+first of them had. Four reversions all bite. Proven under 6 CPU hogs on 4 cores; `aRacingGameIsStartedAndDriven`
+re-run because the turn hold grew by 400 ms (140 sibling tests green).
+
+⚠️ **This entry first said #3761, which is another session's PR.** A PR number cannot be known until the PR
+exists, so a row written before that is a guess — and while this container was asleep another session opened,
+and merged, its own #3761 (Q-1017). Mine is **#3763**. The sixth rule's point exactly: a row whose owner is
+wrong is a row nobody can check.
+
+⚠️ **One thing to know before editing that file again:** lines ~238–835 are a template literal — the Playwright
+script, run as a subprocess. A backtick in a comment there ends the string, and the parse error points at the
+comment, not at the cause. The existing in-script comments escape theirs; the Q-1097 note says so in place.
+### 2026-10-16 — Q-1017: the goal's cap was spent on our own notes, and raising it in October was not the fix
+
+**The defect.** `createProjectPlan` stored `goal` as `(joined).slice(0, MAX_GOAL_CHARS)`, and the route handed it
+`withRequestNotes(prompt, requestNotesText)` — our request notes FIRST, the user's words after. `plan.goal` is read
+back as `PROJECT GOAL:` by EVERY module turn of a project build (`moduleBuildContext`), so on a long spec the
+closing requirements were missing from every turn of the build, silently. Worse than a fixed ceiling: the notes'
+length decided how much of the spec survived, so the same request kept different characters depending on which
+notes fired.
+
+**Why this is the fourth rule's forbidden shape, twice over.** Autopsy 042e472f (2026-10-01) met this exact
+failure — "a 2,900-char spec plus that note was cutting the user's own closing requirements off the end" — and the
+fix was to raise the cap from 4,000 to 6,000. That moved the cliff and left the CLASS: **one scalar bound applied
+AFTER a join of two different things, so one part's size silently spends the other's budget.** A longer spec walks
+off the new edge the same way. Recording it here plainly, as the fifth rule's 2026-09-30 section requires: that
+earlier fix was incomplete, and this is what it missed.
+
+**The sibling, found by hunting the class (rule 3).** `manifestUserPrompt(prompt, scaffoldPaths, sizeFrom = prompt)`
+grew its third argument for exactly this reason under autopsy 9c612cdb ("a note's commas and 'and's are not features
+of the app"). The route's blueprint lane called it with TWO arguments, so `sizeFrom` defaulted to the joined text and
+the file budget the MODEL is told to build within was derived from notes+request — while the overrun recorded five
+lines below correctly read the bare prompt. One question, two answers, and the model was given the wrong one.
+`SimpleBuilder.ts:2120`, the other call site, had always passed it.
+
+**The fix — the bound goes BEFORE the join, where the join already lives.** `withRequestNotesBounded(prompt,
+notesText, maxRequestChars)` in `requestNotes.ts` caps the REQUEST alone and keeps the notes whole (they are ours,
+few and short), so the surviving prefix of a given request is identical whatever notes ride with it.
+`createProjectPlan(request, framework, modules, now, notesText)` now takes the two apart and joins them itself —
+passing the joined text is no longer possible to do by accident. `MAX_GOAL_CHARS` is exported so the test asserts
+against the real bound rather than a copy of the number.
+
+**Honesty (rule 5).** A request that genuinely exceeds the cap now ends with `REQUEST_TRUNCATION_MARKER` instead of
+stopping mid-sentence, so a model — and the next autopsy — can see the spec was cut rather than believing it ended
+there. And `withRequestNotes` no longer writes a bare `---` when either side is empty; that dangling separator was
+found by this change's own test, not by a reader.
+
+**The lock.** `tests/aRequestCapIsNeverSpentOnOurOwnNotes.test.ts`, both halves:
+- BEHAVIOUR — the surviving request prefix is byte-identical with and without a 1,100-char stack note; the 042e472f
+  spec keeps its closing requirement; an over-cap request says so; a short request is stored byte-for-byte.
+- SOURCE CENSUS — no production caller may hand a notes+request join to `createProjectPlan`, and every
+  `manifestUserPrompt` call whose prompt carries notes must pass its own `sizeFrom`. A NEW sibling at either site
+  fails this test instead of shipping.
+- Proven by reversion: with either bug put back, 5 of the 7 fail (both behavioural and census halves).
+`tests/theNotesExistBeforeAnyLanePlans.test.ts`'s file-budget pin was widened from the telemetry budget to BOTH
+budgets, so the property it already claimed is now actually checked where the model reads it.
+
+## 2026-10-16 — Q-1029: a mistyped import is not a designed wait (#3765)
+
+The row was about a sentence; the sentence was the smaller half. `remedyFileFor` returned the resolved target
+for **any** `Cannot find module './x'`, so a typo and a designed entry-first wait were indistinguishable — and
+the note that follows tells the model *"Do NOT rewrite `<file>` for them; write or update `./x` next"*. For a
+typo that instruction is actively wrong: it sends the model to **create a file at the misspelled path** instead
+of changing one import line, and tells it not to touch the file that is actually broken.
+
+**The class: "the remedy is elsewhere" claimed without evidence that the elsewhere is real.** The same
+function already demands that evidence for *has no exported member* — `exportedElsewhere`, from candy report
+7da1cdca, where the identical wrong claim had a model edit a recipe library four times — and demanded none at
+all one branch along, for the missing-module case.
+
+Fixed in two tiers, because a false *"your import is mistyped"* is the opposite defect:
+
+- **Certain** → `mistypedImport` claims a typo only on evidence that cannot be anything else: a held file
+  differing **only in capitalisation** (two such files cannot coexist in one build, and the import resolves on
+  a case-insensitive disk and then fails in the Docker image), or a **spelled-out extension** the resolver
+  never takes. The remedy moves to the importer and the note names the exact correction.
+- **Possible** → `nearlyHeldImport` offers a one-character match as a *possibility* without deciding.
+  `Card.tsx` planned while `Cart.tsx` exists is a real wait, and two equally close names are no evidence at
+  all — so nothing is claimed, but the reader is no longer told there is nothing to check.
+
+The summary now says the next writes **may** add (never "expected") and counts a proven-wrong path on its own
+line. Q-989's pin on the word "expected" was **repointed with the reason written in**, not deleted.
+
+Locked by `tests/aMistypedImportIsNotADesignedWait.test.ts` (15 tests, tsc's real TS2307 text as the fixture),
+with 722 sibling tests across 39 files green.
+
+⚠️ **A fourth reversion turned out to be a no-op, and that is worth writing down.** The ambiguity guard is
+doubly defended — an in-loop early return *and* the final `hits.length === 1` — so removing either half alone
+still rejects, and the test looked like it had no teeth. It bites when both go. A reversion that silently
+changes nothing produces a meaningless green, which is the same trap as an un-asserted `replace`.
+**Q-1017 closed 2026-10-16:** #3761 merged to `main` as `15d2997`. The row is deleted from
+`BUILD_REPORT_QUEUE.md`'s open table and its ID appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the
+same commit, with the queue edited on a fresh `main` (#3543's lesson, 2026-10-06). Its ledger is the entry above.
+## 2026-10-16 — Q-1028: the advice fits the position it is about (#3764)
+
+**The row's own plan was wrong, and measuring it is what showed that.** Q-1028 said to add `FC`,
+`FunctionComponent` and `ComponentType` to `COMPONENT_TAKING_TYPES` — the set that switches the rename heal
+OFF. Measured against the installed `@types/react` and a real `tsc` run of all five shapes a model writes:
+
+| position | the renamed data type | `typeof Component` |
+|---|---|---|
+| `FC<…>`, `FunctionComponent<…>`, `ComponentType<…>` | ✅ compiles | ✅ compiles — and means "props are a function" |
+| `ComponentProps<…>` | ❌ TS2344 | ✅ the right fix |
+| a plain annotation | ✅ compiles | only if you mean the component |
+
+`FunctionComponent<P>` is `(props: P) => ReactNode`, so **P is the props**. Excluding those three would have
+switched off a heal that produces correct code, and `ComponentProps` — the one already excluded — is the only
+React position where `typeof` is right. The row had it backwards, so it is NOT implemented as written.
+
+**The real defect is worse than the row's.** At a props position `typeof X` *also compiles*, silently
+declaring the component's props to be the component's own function type. A wrong fix the compiler accepts
+costs more than one it rejects — and the advice offered it. Measured, one sentence named lines 2, 3, 4, 5, 6
+together and gave both options for all of them, although at line 5 the data name is a compile error and at
+lines 2–4 `typeof` is the nonsense. Advice right for one of those is wrong for the other.
+
+**The class:** the heal knew the position from the AST; the advice knew nothing and guessed. One classifier
+(`typeUsePosition` → `plain` / `props-arg` / `component-arg` / `not-a-type-use`) is now read by both, so they
+cannot disagree — Q-1022's shape (a predicate and its evidence from two different inputs) and Q-1026/Q-1033's
+(one computation, one copy). Without sources the advice stays conditional, which is the honest answer rather
+than a guess. The hand-off note names the three props positions too, and its ticket id came out of the
+model-facing prompt — a model has no use for our queue numbers.
+
+Heal behaviour is unchanged, because measurement said it was already right. Locked by
+`tests/theAdviceFitsThePosition.test.ts` (18 tests, the real tsc message as the fixture, a census that each
+set has exactly one reader), with 101 sibling tests green. Three reversions bite — including **the row's own
+plan**, which fails 5 tests, one of them named for exactly why.
+
+## 2026-10-16 — Q-1031: the append saves the anchor, not the look (#3768)
+
+The contradiction is inside **one function**, which is why the row said "on an edit build". `editModePrefix`
+carries rule 2 — *"use read_file on every file you intend to change before touching it. Never assume you know
+a file's current content from memory"* — and, a few hundred characters later, the append sentence ending
+*"no anchor and no read are needed"*.
+
+A model reading both resolves it by guessing, **and the half that is wrong is the dangerous one.** No read is
+needed to *construct* an anchor-free append; plenty is needed to know whether what you are appending is
+already there. On a fresh build the file is one we just wrote. On an edit build it is the user's app, and a
+blind append duplicates a rule, a function, or a whole section of it.
+
+**The class: a true statement about an operation's mechanics, read as permission to skip the judgement the
+operation still needs.** The sentence now separates them — *it saves you the ANCHOR, not the LOOK*.
+
+**The row's "edit-mode form of the append sentence" is declined, with reason.** A second string for one rule
+is the exact drift this module exists to end: the class came back five times, each fix teaching one more
+branch of one more failure message. One sentence correct in both modes cannot disagree with itself, and there
+is one place to change when it must change.
+
+⚠️ **My own first wording was wrong in a way worth recording.** It said *"read it first anyway"* — which would
+have cost a **500-line read of the design kit on every CSS append**, the very thing the prompt avoids by
+*listing* the kit's classes instead. It now says *"know what is in it — read it, or use the listing this
+prompt already gives you"*: supplied knowledge and a read answer the same question, and demanding the read
+would have fixed a contradiction by creating a cost. The test holds that distinction shut.
+
+⚠️ **This entry first said #3767 — and #3767 is another session's games PR, already merged.** That is the
+SECOND number collision today: Q-1097's row first said #3761, which was also another session's. A PR number
+cannot be known until the PR exists, so writing one before that is a guess, and a row whose owner is wrong is
+a row nobody can check (the sixth rule's whole point). The habit that avoids it: create the PR FIRST, then
+write its number into the row. Mine is **#3768**.
+
+Locked by `tests/theAppendSavesTheAnchorNotTheLook.test.ts` (9 tests), including that both sentences really
+are in one function and near each other, and a census that the module exports exactly **one** such string and
+that no reader spells its words out. Two existing proximity pins were **widened with the reason written in**,
+not deleted — the sentence grew. Three reversions bite: the contradiction restored (6 fail), an unconditional
+read (1), and **the row's own second string** (1).
+## 2026-10-16 — Q-1060: one declared runtime, and every place that names one agrees (#3766)
+
+`ci.yml` ran the whole 38,000-test suite on **Node 20** while the Dockerfile (`node:22`, `node:22-slim`), the
+`.aab` and `.ipa` workflows and `@capacitor/cli` 8 (`engines: >=22`) all run **Node 22**. A gate that
+exercises a different runtime from the one it guards proves less than it appears to — and any test needing
+the Capacitor CLI could not run there at all (*"The Capacitor CLI requires NodeJS >=22.0.0"*).
+
+**The row's prerequisite was already met, with evidence.** It asked to run the full suite on Node 22 first,
+fix what moves, then flip. Measured: this repo's container runs **Node 22.22.0**, and the full suite was run
+on it repeatedly today — **2705 files, 38,974 passed, 0 failed**. Nothing had to move.
+
+**Two things the row missed:**
+
+1. **`dast.yml` was on 20 as well.** It named `ci.yml` alone; a per-instance fix would have left the sibling.
+2. **`package.json` had no `engines` field at all** — the real cause. Nothing declared the project's runtime,
+   so six workflows and a Dockerfile each carried their own literal, two of them drifted, and a seventh could
+   drift tomorrow with nothing to catch it. `ci.yml`'s `'20'` was not a deliberate pin either: it came in with
+   the file's creation (#3538).
+
+So the class is fixed rather than the instance. The requirement is declared **once** — `engines.node: ">=22"`
+— and `tests/oneDeclaredRuntime.test.ts` checks every declaration against it: each workflow's `node-version`,
+both `FROM node:` lines, and `@capacitor/cli`'s own `engines` read from the installed package. The census pins
+its own size, so renaming the key cannot make the guard go blind. The reason is written beside the version in
+both workflows so nobody lowers it back.
+
+Three reversions bite: the gate back to 20 (3 fail), the declaration removed (8), the declaration disagreeing
+with the image (10).
+
+⚠️ **What to watch:** this PR's own CI run is the **first on Node 22**. That run is the real test of the flip,
+and it is the whole point of the change.
+
+### 2026-10-16 — Q-1129: the workaround outlived the defect (the half #3766 left behind)
+
+**Context, said plainly: this session built Q-1060 and LOST THE RACE.** Another session shipped it as #3766
+while this one was measuring, and the two had reached the same conclusions independently — `ci.yml` and
+`dast.yml` to Node 22 (the same un-named sibling), `engines.node` as the single source of truth, and a census
+test. That work is theirs and is on `main`; this session's duplicate of it was discarded rather than pushed as
+a competing PR, including its own census (`tests/oneDeclaredRuntime.test.ts` already does that job, and a
+second census would be two answers to one question — the class Q-1017 closed).
+
+**What #3766 left, and this is the 50/50 law's own half.** The Node divergence had already been paid for once,
+as a workaround: `aSeedScriptIsNotABrowser` asserted the sandbox's Node-22 globals, was "green on every
+developer machine, red on every CI run", and was gated behind `it.runIf(nodeMajor >= 22)` — so it SKIPPED in
+the one place it mattered. #3766 removed the gate's REASON (CI now runs 22) but not the gate. Two things were
+therefore still true on `main`: a vestigial condition, and — worse — a comment telling the next reader that
+"CI (`.github/workflows/ci.yml`) runs node 20". A false comment is not cosmetic; it is how a future session
+re-derives a constraint that no longer exists and writes the workaround again.
+
+**The fix.** The condition is gone, so the assertion runs unconditionally and is COUNTED rather than skipped.
+Its comment now records why the gate existed, that #3766 removed its reason, and the measurement behind the
+flip (node 20: 38,958 passed / 2 skipped; node 22: 38,959 passed / 1 skipped; zero failures either side —
+this was the one test that differed). `MOBILE_PUBLISHING.md`'s "Node 20+" was corrected to the one declared
+version. The trailing `nodeMajor >= 20` floor in the last test is kept on purpose: it records what was
+measured, not today's pin, which `oneDeclaredRuntime.test.ts` is the single place that asserts.
+
+**Proof is the test itself.** Before: skipped on a Node-20 runner and counted as a skip. After: it runs and
+passes, and the suite's skip count drops accordingly. No new test was added, deliberately — see above.
+
+### 2026-10-16 — Q-1128: the write-time scan that cost 12 seconds a write, found by our own CI
+
+**This one came from nowhere but the gate.** #3769 (Q-1129 above) touches one test file and two docs. Its CI
+went red anyway: `AgentRunner.test.ts > recovers from an oversized turn via aggressive compaction` timed out
+at 20 s (run 38967985876). `main` was green on every run that day, so the easy reading was "a flake on a busy
+runner" — and the test would have passed on a re-run. It was not a flake.
+
+**Everything in that test is in-memory and fake** — a scripted client, a `Map`-backed actuator — so the
+12 seconds were real work on a 50,000-character `write_file`. Timed stage by stage through the write door:
+`guardedWrite` 22 ms, `removeShadowTwins` 0 ms, and `writeSteeringNotes` **12,044 ms**, of which
+`vehicleShapeHalves` was **11,884 ms**. Every other note stage on the same input was ≤ 5 ms.
+
+**Root cause.** `handWrittenVehicleScan.ts` reads a hand-written vehicle by code shape, and all six of its
+patterns begin with an unbounded greedy word-character prefix (`OBJ`, `\w*cam\w*`, `\w*(?:speed|Speed)`). On
+a run of word characters the engine matches the whole run at every start position and backtracks out of it:
+O(run²), six times, over the raw file. It runs from `writeSteeringNotes`, i.e. on the agent's critical path,
+at EVERY write — and `_vehicleShapeNoted` is only set when a finding EXISTS, so on an app with no vehicle it
+never stops running.
+
+**Length was never the trigger, and that is the whole point.** Measured on one machine: 40,000 characters of
+ordinary code → 3 ms; a 40,000-character MINIFIED line → 5 ms (both break into short tokens); an unbroken
+word run → 577 ms at 10,000, 7,293 ms at 40,000, 11,884 ms at 50,000. A bound on file size or line length
+would have missed the defect entirely while looking like a fix.
+
+**The fix is the condition, not the instance.** A scan of HAND-WRITTEN code was handed whatever the model
+wrote, with nothing saying what hand-written code looks like. The bound is on the RUN (`MAX_WORD_RUN = 512`):
+a file carrying a longer one — an inlined base64 asset, a generated token table, a long data literal — is not
+a hand-written vehicle, and joins `node_modules` and the kit's own library as a file this scan does not read,
+with the same `empty` and the same precision-first reason the module was written on. Nothing is left
+unchecked, only unguessed: the playtest still plays the game and reads both facts from its pixels. The guard
+is one quantified character class — a single forward pass, no backtracking — so it cannot carry the cost it
+removes. The pattern dates to the module's birth (#3708); #3767 widened it.
+
+**Locked by `tests/aWriteTimeScanIsBoundedByHandWrittenCode.test.ts` (5 tests), and the last one is a census.**
+It budgets one real `write_file` through `ToolDispatcher` rather than this scan alone, so a NEW write-time
+scanner with the same defect fails it without ever being named — that is the class, not the instance. The
+others pin what the bound must NOT cost: a real camera-ahead game just under the bound still yields its
+finding, and 60,000 characters of ordinary code — longer than the input that timed out — is still read in
+full. Proven by reversion: with the guard line deleted, 3 of 5 fail (11,832 ms and 12,846 ms against their
+ceilings).
+
+**On the honesty of the original failure (fifth rule, step 5).** The timeout said "test timed out in 20000ms"
+and nothing else. The test was not wrong and its 50,000-character write was not artificial — it is the only
+place in the suite that writes a file big enough to make the cost visible, and it had been sitting at 12 s
+against a 20 s limit since #3708, passing on an idle runner and failing on a loaded one. A re-run would have
+turned it green and buried a 12-second-per-write defect in the real builder.
+### 2026-10-16 — #3768's CI failure, diagnosed rather than re-run (Q-1127)
+
+`AgentRunner.test.ts > recovers from an oversized turn via aggressive compaction` failed CI with
+*"Test timed out in 20000ms"* on a PR whose diff was a prompt string and two test pins — nothing that test
+can reach. It would have been easy to call it a flake and press re-run. Measured instead:
+
+- **12.0 s** on an idle container, against the global `testTimeout: 20_000` — a **1.65× margin**, which a
+  runner with 2,709 other test files in flight eats. In that whole 52-test file it is the **only** test over
+  2 s, so this is one outlier, not a sweep.
+- **The product path was ruled out first:** `compactMessagesForPersist` on that exact oversized turn runs
+  **50 calls in 1 ms**. There is no slow compaction behind it, so nothing a real build pays for that reason.
+
+So the bound — which was never chosen for this test, only inherited — is now an explicit 60 s with the
+measurement written beside it. The assertions are untouched.
+
+⚠️ **And the half that is NOT explained is recorded, not waved past:** why the test's agent-loop scaffolding
+costs 12 s when the compaction is instant. That is **Q-1127**, with the first suspect named (the fake store's
+per-append `JSON.stringify` of a 50 KB payload — test code, so it must be confirmed before the product is
+blamed). Raising a bound explains the timeout; it does not explain the 12 s.
+## 2026-10-16 — the in-flight sweep: the queue says what is true again
+
+`BUILD_REPORT_QUEUE.md` had **166 rows, of which 61 claimed an open pull request — while ZERO pull requests
+were open.** Under the sixth absolute rule the queue IS the contract, so a row that says work is in flight
+when nothing is makes the whole file unreadable and "is everything fixed?" unanswerable.
+
+**Every owner was resolved to a MERGED pull request before its row was touched** — 26 numbered PRs, the merged
+`claude/new-session-gx9294` branch, #3681 for Q-866 (its title names the row), #3683 for Q-880, #3755 for
+Q-1124. 64 rows closed in all; 166 → 103.
+
+**What a bulk delete would have destroyed, and why I scanned first.** Four of the 61 bodies mentioned something
+unfinished. Three were fine — Q-866's was a historical note, Q-991's remainder is Q-1016 (since fixed), and
+Q-1041's is Q-1042 (a blocked decision). **Q-1011's was not:** it named *"the ROUTE's own direct `runTurn` aux
+calls (plan / blueprint / judge) are also absent from `llmCalls` … a separate change"* with no row of its own.
+It is carried out as **Q-1125** rather than deleted with the row.
+
+**Four rows had stopped in states that do not exist** — `🔵 IN PROGRESS (fixed in this PR; ✅ after the first
+observed pipeline check)` (Q-141), `OPEN (decided — to build after Q-706 verifies)` (Q-820), a state column
+holding `—` while the state text sat in the problem column (Q-1012), and two parked at `✅ RESOLVED …` inside
+the table (Q-1088, Q-1082). Q-141 and Q-820 became 🟡 BLOCKED with all four fields; Q-1012's columns were put
+back; the two ✅ rows were closed. Every row now rests at OPEN or 🟡 BLOCKED — 97 blocked, 6 open.
+
+⚠️ **My own census had a blind spot, and it skipped a resolved row.** Q-1089's problem text contains **escaped
+pipes** (`\|`, from `npm install … 2>&1 \| tail -20`), so a naive `split('|')` read shell text as its state
+column and the first pass missed it — a resolved row that would have said "IN PROGRESS" for ever. Markdown's
+rule is that a cell boundary is a `|` not preceded by a backslash; the guard now encodes that, with the
+incident beside it.
+
+🔴 **And the honest part I did NOT fix: 52 of the 97 blocked rows are missing at least one of the four fields
+the rule requires** (14 lack only *Needs*, 12 lack all four, 7 lack *What* and *Why*, …). Filling them means
+understanding 52 separate blockers, and writing a plausible-sounding *Needs:* for a blocker nobody
+investigated would **invent a fact** — the defect this queue exists to prevent. It is recorded as **Q-1126**
+with its real numbers and pinned as a **ratchet**: `tests/theQueueSaysWhatIsTrue.test.ts` holds it at 52, it
+may only go down, and a new incomplete blocked row cannot push it up.
+
+Also corrected one of my own assertions: the guard first banned ✅ anywhere in a state, which **Q-1086**
+disproved — its state is an honest compound ("🟡 BLOCKED — REQUIRES A DECISION … · the meter half is ✅ RESOLVED
+as NOT-A-DEFECT"), and the strict rule would have forced someone to delete that information. It checks the
+leading token instead. Four reversions bite.
+
+## 2026-10-16 — Q-1023: the sentence matches the counter (#3772)
+
+`NO_READABLE_SCOPE` is what a user is told when the sizer finds no readable scope, and its own doc comment
+claimed it was *"generated from the two constants the counter really uses, so the sentence cannot drift from
+the code."* The constants were interpolated. **The rules were hand-written prose, and they had drifted.**
+
+Measured against `countEnumeratedFeatures`, "each bullet or numbered line counts one" is false four ways:
+
+| input | real count |
+|---|---|
+| `- name` / `- email` / `- phone number` | **0** — field names are not features |
+| `- modern` / `- clean` / `- fast` | **0** — style adjectives |
+| `- login` / `- login` / `- login` | **1** — repeats collapse |
+| three bullets of 10+ words each | **0** — `MAX_ITEM_WORDS` |
+
+The row named the first three. **The fourth is the one a careful user hits:** write detailed bullets and the
+sizer reads no scope at all, while the sentence tells them each bullet counted one.
+
+**The class: prose that describes a rule, living apart from the rule.** Editing the prose once would only let
+it drift again, so the sentence is built from the module's constants and
+`tests/theSentenceMatchesTheCounter.test.ts` holds each **measured** case against it — if a count changes,
+the test pinning it fails and the sentence must be re-checked.
+
+⚠️ **The counter is deliberately unchanged.** Whether a careful 10-word bullet should count zero moves
+routing for real builds and what they are charged — a behaviour change with a blast radius, not a wording
+fix. It is recorded as **Q-1128** with the measurement, the rule's real rationale, and three options. Q-1023
+only promised the sentence would stop over-stating, and now it does; the user is at least told.
+## 2026-10-16 — Q-1027: the enum normaliser is not silent (#3771)
+
+The row said the normalisation was "silent in the report". Measured, it was worse: `prepareSharedContract`
+computed `enumsAsConst` — the enums it had just rewritten as `as const` objects — returned it, and **nothing
+in the repo read it.** Declared, assigned, returned, and that was all.
+
+**The class: a measurement computed and returned with no reader is indistinguishable from one never
+computed.** The same shape as Q-1011, where `endgameBatchRepair` left no `llmCalls` row and the one place a
+reader would look was empty. The rewrite worked correctly and no autopsy could see it fire.
+
+**An "info line" alone would not have been enough**, which is why the fix is wider than the row asked.
+`contractEnums.ts` names a residual it cannot reach: a consumer that writes a member as a TYPE —
+`interface AddAction { type: ActionType.Add }` — gets **TS2702** against an `as const` object, because the
+name no longer refers to a type. Nothing told the model that. So the fact now travels the same four roads a
+rename travels (Q-985's pattern): the contract file's header (one `// as-const:` line per enum, naming the
+`typeof X.Member` form), the user-facing log beside the `🏷️ Renamed` one, the hand-off clause to the full
+builder that never saw the contract call, and the blueprint block.
+
+**The sibling the row never mentioned:** `blueprintAdvisoryBlock` already named a rename and said nothing
+about a normalised enum — while showing the architect a contract that had already been rewritten.
+
+⚠️ **Three of my own mistakes, kept in the test file because each is a trap worth seeing again:**
+
+1. My first draft inlined `contractEnumsSentence(...)` **twice** in the route's concatenation — once to test
+   it, once to use it. That is the duplication Q-1026/Q-1033 exist to stop, so it became one clause helper,
+   and a census now pins the call count at one.
+2. A **reversion caught two blueprint assertions passing for the wrong reason:** I checked for `'as const'`
+   and `'VideoSource'`, and both appear in the contract source the block embeds — so they held even with the
+   sentence deleted. A test that cannot fail proves nothing; the whole sentence is asserted now.
+3. `stripCodeComments` **ate the sentence** in one assertion, because `contractEnumHeaderLine` returns a
+   string that *begins with* `//` — the stripper read a string literal as a comment and the assertion failed
+   on its own subject. That one reads the file raw, which is the right question anyway: a copy of the wording
+   is a copy whether it sits in code or in a comment.
+⚠️ **Renumbered after the fact: these two were written as Q-1125 / Q-1126 and are Q-1127 / Q-1128 — and Q-1127 moved again to Q-1129 when main took it (merge resolution).** #3770
+merged while #3769 was in CI and took both IDs for its own rows (the `llmCalls` aux-call gap, and the 52
+blocked rows missing a required field). Their rows are on `main`, so the IDs are theirs; mine moved. The ID
+rule — above every ID in the file AND in open PRs' diffs of it — cannot see a row that is in neither yet,
+which is what a concurrent merge is. Nothing else about either change moved.
+
+### 2026-10-17 — Q-1127 is ANSWERED, and its workaround goes with it (close-out of #3769)
+
+**Two sessions hit the same wall on the same day and only one of them went through it.** On 2026-10-16
+`AgentRunner.test.ts > recovers from an oversized turn via aggressive compaction` timed out at the global
+20 s twice — first on #3768, then on #3769 — on two diffs that could not reach it. #3768 did the honest
+thing with what it had: it gave the test an explicit 60 s, ruled out `compactMessagesForPersist` (50 calls
+in 1 ms on that exact turn), and recorded the remainder as **Q-1127 — OPEN**, in its own words *"why that
+scaffolding costs 12 s when the compaction is instant… if the cost is in the runner rather than the
+fixture, a user's oversized turn pays it too."* Its named next step was to profile `buildRunner`, with the
+fake store's per-append `JSON.stringify` as first suspect.
+
+**The suspect was wrong, and the instinct behind the row was right.** The cost was not in the fixture. It
+was in the product, on the agent's critical path: timed through the real write door, `guardedWrite` 22 ms,
+`writeSteeringNotes` **12,044 ms**, of which `vehicleShapeHalves` alone was **11,884 ms** — the
+hand-written-vehicle scan, whose patterns all begin with an unbounded greedy word-character prefix and go
+O(run²) on a long word run. Every real build paid it, at every write. That is Q-1128 (#3769, merged), and
+with the run bounded this test went from **12,174 ms to 22 ms**.
+
+**So Q-1127 closes as RESOLVED, not as a duplicate** — the question it asked was answered with a
+measurement and a merged fix, and the answer contradicts its own first suspect, which is worth keeping.
+
+**And the 60 s bound goes, because its defect is fixed.** A margin of 1.65× was the reason for it; the
+margin is now about 900×, so the explicit clock is a workaround outliving what it worked around — the
+exact class Q-1129 closed one row earlier, met again within a day. Its comment is rewritten to record the
+whole arc rather than deleted, so the next reader finds the answer where the question was.
+
+**Three rows close here** — Q-1127, Q-1128 and Q-1129 — with their ids appended to the closed file in the
+same commit, on a fresh `main`.
+
+---
+
+## 2026-10-17 — Q-1125 RESOLVED: a text-only call the build route makes is now on the record, and there is one door it has to go through
+
+**The row's own census contradicted the row.** Q-1125 was carried out of Q-1011 and said the route's
+*"plan / blueprint / judge"* aux calls record no `llmCalls` row. Two of the three — the roadmap planner
+and the project planner — **already record both outcomes**, and have for a while. The row was written
+from the SHAPE of Q-1011 rather than from a count, which is exactly how an item gets fixed where it
+isn't broken and left alone where it is. Saying so is the fifth rule's step 5 (fix the system's honesty)
+applied to our own queue.
+
+**What the census actually found — five live gaps, four of them worse than the row claimed:**
+
+| Site | What it recorded |
+|---|---|
+| roadmap planner · project planner · fast lane's `fastGenerateOnce` | success AND failure ✅ (three hand-written copies) |
+| BLUEPRINT step | **success only** — its 30 s bound and every error left no row at all |
+| typecheck · missing-files · syntax · missing-export repair gates | **nothing**, success or failure — raw `makeFastTextRunner().runTurn(...)` |
+
+The four repair gates are the expensive silence: a repair pass spends an 8000-token answer on a build
+that is already in trouble, which is the first call an autopsy opens the report to find, and `llmCalls`
+had no row for it. The blueprint's asymmetry is Q-1011's own defect one level down — the same "recorded
+nothing at all, success or failure" with the happy path carved out.
+
+**THE CLASS, and why the fix is a door and not four more copies (fourth rule, step 2).** The defect is
+not "four gates forgot". It is that **a recording block lives beside each call site instead of at the
+call**, so every new aux site is free to be written without one — and a fix made at one site never
+reaches the others. This repo already paid for that twice: `answeringModel.ts` exists because five
+copied sites each named a VENDOR where a model belongs (autopsy f152c1ab), and `fastLaneCallIdentity`
+exists because a copied default pinned an unmade call on a named third party (autopsy dcce5d26).
+Copying the block a fifth time would have fixed today's four and guaranteed the sixth.
+
+So `src/server/AgentV3/recordedTextCall.ts` is now the one door: it runs the turn, records on **both**
+outcomes, rethrows, and invents nothing — `answerMs` / `fallbackMs` / `openMs` / `firstOutputMs` come
+from the turn the chain measured and are simply ABSENT on a failure, because on a failure nothing
+measured them. All five sites go through it.
+
+**THE 50/50 HALF — the bound moved inside the door.** The blueprint hand-rolled `Promise.race([call,
+timeout])` and the losing call was abandoned with nothing written down. `timeoutMs` now belongs to the
+door, so a bounded call ALWAYS leaves a row saying it was abandoned and how long it was given. A bound
+whose expiry is invisible is a bound nobody can size — and the hand-rolled race is no longer a branch
+a new caller can write.
+
+**A fix must not trade one problem for another.** `bpProvider` feeds `captureTurnUsage` below the
+blueprint call, and routing the runner through the door would have left it empty and silently broken
+the vendor attribution. The chain's report is forwarded to both; the census test asserts it, so a later
+edit cannot quietly drop it again.
+
+**Locked, and proven by reversion:**
+- `tests/aCallOutsideTheLoopIsStillOnTheRecord.test.ts` grows the CENSUS: no raw `.runTurn(` on either
+  text-runner factory survives anywhere in the route, and the five remaining `runTurn` sites are each
+  named and accounted for — including the two deliberate allowances (the judge chain's runner
+  *definition*, and the admin-only `/api/agentv3/diag?test=1` probe, which is not a build and has no
+  `buildDiag` to record to). A SIXTH site fails the count without being named.
+- `tests/anAuxModelCallLeavesARowWhateverHappens.test.ts` exercises the door itself: a row on success
+  with the model that ANSWERED, a row on failure with the error (and the throw still propagating), a
+  row when the bound expires, `unknown` rather than a guessed default when no rung reported, no
+  invented measurement on a failure, and a sink that throws never breaking a build.
+- **Reversion proof.** One gate put back on the raw runner → 3 census tests fail. The door put back to
+  success-only → 5 tests fail across both files. Restored → 21 pass.
+
+**Q-1125 closes here**, with its id appended to the closed file in the same commit.
+
+**🔴 AND THE GATE CAUGHT ME MAKING THE EXACT MISTAKE THIS REPO HAS CENSUSES FOR.** The first version of
+this change routed the BLUEPRINT's row through `fastLaneCallIdentity` — "the repo's one blessed identity
+helper" — and that reasoning was wrong, because that helper's Claude default is `fastBuildModel()`, the
+**BUILD** ladder's rung. The blueprint is a **PLANNER**; it runs on the plan ladder and pins its Claude
+rung through `claudeRungModelId`. Four existing censuses failed at once and said so:
+`aBuildIsNamedByItsLadderNotByClaude` §4 (all three aux planners pin through `claudeRungModelId`, never
+`fastBuildModel()`) and §6(a)/(b) (a record writer may not read a pre-ladder Claude helper, and every
+remaining helper call must have a classified role), and `theSignBridgeAutopsy` (the exact capture form
+the three planners share).
+
+The fix was at the root, not at the test: the blueprint keeps its OWN naming expression and its own
+`bpProvider` capture, and only its FAILURE row is new. The repair door binds `fbModel` — the name
+§6(b)'s `roleOf` classifies as the request parameter — instead of calling the helper inline.
+
+**A fifth census taught the door something too.** `aChainsClockIsNotItsAnswerersClock` scans for
+`recordLlmCall({…})` with an object LITERAL, so a door that renamed its sink or handed it a prepared
+variable would have made every call routed through it INVISIBLE to the one test proving a success row
+carries the answerer's own time. The sink is therefore named `recordLlmCall` and takes the literal: a
+shared door must be MORE visible to a census than the copies it replaces, never less.
+
+That is what safeguard #5 is for, and why the gate runs LAST on the final state — the change was
+plausible, typechecked clean, and was wrong in a way only the repo's own accumulated rules could see.
+
+---
+
+## 2026-10-17 — Q-1126 batch 2: 48 → 40, and the first thing it audited was batch 1's own measuring stick
+
+**Written after #3781 (batch 1) merged, and deliberately NOT a redo of it.** Two sessions took Q-1126
+within the same hour: #3781 was opened while this one was running its gate, and it merged first, so its
+six completed rows stand and nothing of theirs is reinstated or rewritten here (Q-107, Q-108 and Q-109
+were filled on both branches; theirs is what remains). What this batch adds is the part #3781 did not
+touch — **the detector those six rows were measured with.**
+
+**It was lying in both directions.** `gapsOf` had been written from the four field names as the TEST
+spells them, not as CLAUDE.md spells them. The sixth rule's own wording is *"what is **required** to
+unblock it"*. So:
+
+- It **FLAGGED six rows that were complete all along**, whose only sin was writing `**Required:**` — the
+  rule's own word — instead of `**Needs:**`: Q-111, Q-126, Q-133, Q-706, Q-819, Q-1012. Each was opened
+  and verified by eye to carry all four. Q-111 is the clearest: *What · Why blocked · Required · Already
+  tried*, every one present, counted as a gap.
+- It **PASSED one row with a real gap**: a bare `/because/` anywhere in the prose counted as a `Why`
+  FIELD, so **Q-1086** — which never wrote its reason down — read as complete.
+- And `/\*\*What/` also matched `**What is required:**`, so **one field could satisfy two**.
+
+So it was manufacturing work in one place while hiding it in another. That is the fifth rule's own
+lying-analyzer category, and it is the reason batch 1's "48" was never the real number.
+
+**Corrected to labelled fields only**, with the synonyms the rows actually use (`Required` / `To unblock`
+for needs; `Blocked` / `Blocker` / `Waiting on` for what; `Cause` / `Reason` for why; `Measured` /
+`Investigated` / `Checked` / `Evidence` for tried), and `What is required` excluded from `what` by a
+negative lookahead. Re-measured on batch 1's own unchanged file the honest count was **42 — lower than
+48** — so the more truthful detector moved the ratchet in the only direction it is allowed to move. Had
+it come out higher the number would have gone up with that reason stated, not been hidden; it did not
+have to.
+
+**Two further fills then took it to 40**, each from the row's own evidence rather than plausible prose:
+
+| Row | What the evidence said |
+|---|---|
+| **Q-008** | The admin already gave the decision RULE (2026-10-11) and the trial window has passed. It is not waiting on a decision and not on more time — it waits on somebody READING `byStrictCohort`, which lives in production telemetry no session can reach. |
+| **Q-1086** | Its reason written down as a field: a routing decision reserved to the admin, because it changes behaviour on real builds. The row already had What, Needs and Tried; only the reason was missing, and it was missing precisely where the old detector could not see it. |
+
+**Locked as a CLASS, not a count.** The count assertion alone would go green again under the old regexes
+once enough rows were filled, so three fixtures pin the detector's behaviour directly: a row written with
+`**Required:**` is complete; a reason buried in prose is NOT a `Why` field; and `**What is required:**`
+satisfies `needs` but never `what`.
+
+**Reversion proof.** Old detector restored → 4 tests fail (the count plus all three fixtures). Q-1086's
+reason removed again → the count fails at 41 > 40. Restored → 14 pass.
+
+**Q-1126 stays OPEN with 40 to go.** And one process note worth keeping, because it cost a full gate run:
+the open-PR check that safeguard #6 requires was done at the start of this work and returned only #3779.
+#3781 was opened after that and merged before this branch pushed. Checking once per session is not enough
+on this repo — it has to be immediately before the work, and even then a PR opened mid-gate is invisible.
+The cheap defence that actually worked was comparing the two branches afterwards and keeping only the
+non-overlapping half.
+
+## 2026-10-17 — Q-1138 + Q-1139: "backend connect ko simple banao" — and the live bug the measurement found
+
+Admin: *"website connect, databse connect, backend connect ko simple banao."* The three flows were
+counted in the user's own steps before anything was designed, because "simple" is a measurement and
+not an opinion:
+
+| | steps today | the real friction |
+|---|---|---|
+| database connect | **1 tap** (Connect Supabase → Create database) | none — already the simplest of the three, and it was left alone |
+| website connect | domain → 3 DNS records → Check → wait | its dead end was Q-1137, fixed in #3789 |
+| backend connect | **press Publish → be REFUSED → card appears → connect GitHub → push repo → save key → Deploy** | **it began with a failure** |
+
+### Q-1139 — the condition, not the symptom
+
+`backendDeployOffer`'s only input was `publishRefusalCode`, and that code exists only after a 422. The
+app's own files had always said it had a server half; we simply did not say so until the user had
+pressed the wrong button. `/api/agentv3/publish-state` now carries the fact, and the card is there
+when the Publish sheet opens. The fifth rule's 50/50 half: not kinder words on the refusal — the
+refusal is no longer how anyone finds out.
+
+🔴 **The obvious implementation would have spent the user's money, and the code said so in advance.**
+Seeding the client's `publishRefusalCode` from a status read fires `shouldAutoDeployBackend`, whose
+docblock exists for exactly this: *"Reacting to the code merely BEING set would deploy on reopening a
+panel — an action nobody asked for, in someone's own hosting account."* So the fact travels as its own
+field. The FACT shows the card; a FRESH REFUSAL drives the auto-deploy; three pins keep them apart
+(the effect's dependency list, the panel not merging them, and the fact not being an input of that
+function at all). This is the "a fix must never trade one problem for another" rule doing real work —
+the blast radius was traced through all three readers of `backendOffer` before a line was changed.
+
+### Q-1138 — and the measurement found Q-707 ALIVE AGAIN, in main
+
+Measuring the staged read turned up a live defect nobody reported:
+
+```
+planDeployment({'package.json': '{"scripts":{"start":"node server.js"}}'})
+   → shape 'unknown', staticHostingSufficient TRUE     ⇒ the real files were never read
+planDeployment({...the real files})
+   → shape 'node-server', staticHostingSufficient FALSE ⇒ the truth, never reached
+```
+
+Both staged readers — the publish route and the domain status route — ran stage 2 only
+`if (!plan.staticHostingSufficient)`, i.e. only when the four manifests ALREADY suspected a server. So
+an app whose server only its SOURCE reveals (plain `node:http`; a Python server whose manifests do not
+name the framework) was **published as a static site with its API dead and the user told it worked** —
+Q-707's exact words, reopened by Q-707-era code's own cost optimisation. **Q-707's test proves the
+detector on full files; nothing proved the publish path ever supplies any.** A green regression test
+over a fix that could not fire.
+
+**The class: a cost gate that decides whether to LOOK, written as if "no evidence yet" meant "no
+server".** `stageTwoNeeded` now ends the read only on a POSITIVE classification (`spa`, `static`);
+`unknown` is not a conclusion. The planner's safe default is untouched — an unclassifiable app is
+still published as files — what changed is that we look before defaulting.
+
+**Siblings, all in this change:** three definitions of "needs a server" became one
+(`serverHalfFromPlan`), both staged readers became one (`readServerHalf`), and a census fails when a
+fourth appears. **Two pins repointed that had encoded the bug as a requirement** —
+`publishSeedWiring`'s *"the load is inside the refusal branch"* and `domainPublishBlock`'s *"the
+whole-workspace read happens ONLY for an app already judged non-static"*. That is the third time this
+week a test asserted the defect; the cost guarantee both protected is real and is now asserted on real
+inputs, where a well-placed guard cannot satisfy it.
+
+**Watch on the next real build:** an `unknown`-shape app now pays one full-source read at publish and
+on the domain status poll. An `spa` or `static` app pays exactly what it paid before.
+
+### 🔴 A correction inside this same change: my "three became one" was false when I wrote it
+
+The commit claimed three definitions of "needs a server" had become one. They had not — the third,
+`!!planDeployment(appFiles).backend` at the build-completion row, was untouched, **and the census I had
+just written could not see it, because it allowlisted `routes/agentv3.ts` as a whole file.** An exempt
+file is exempt everywhere inside it, which is exactly the shape of hole this repo keeps paying for.
+
+Caught by re-reading my own claim against the code rather than by a test — which is the uncomfortable
+part, and the reason the census is now a **per-file ratchet**: counts with comments stripped, a new
+occurrence fails even inside a file allowed to have some, and the number may only go down. Reversion 5
+restores precisely that miss inside the allowed file; the ratchet and an explicit pin both catch it.
+
+`planDeployment(...).backend?.runtime` at `agentv3.ts:5460` stays, counted and allowed: "which runtime"
+is a different question from "is there a server", and collapsing the two would be a fourth definition
+wearing the shared one's name.
+## 2026-10-17 — Q-1137: a named action is reachable on EVERY host of the domain screen (admin report, mitrify.com)
+
+The admin sent two screenshots and four words: *"dns connect hone ke bad bhi live nahi huyi website. dekho"*.
+Two defects, same report, same class — **a check or a screen that can see one part of a task speaking for the
+whole of it.**
+
+**Q-1136 (#3788)** was the sentence: the DNS all-clear said *"Nothing is left for you to do — we are now
+waiting for the hosting service"*, in a GREEN box, printed directly beneath the correct amber headline
+*"Connected — but this app needs its server part deployed first"*. `summarize()` measures exactly one thing —
+are the records correct — and cannot know whether an app was ever published. Scoped to the records now, and the
+pin repointed rather than deleted: the old assertion WAS the defect written down as a requirement.
+
+**Q-1137 (this change)** is the sibling found hunting that class, and it is the half the user needed. The
+amber headline named a real action, `'deploy-backend'`, and rendered its button only `&& onDeployBackend` — an
+OPTIONAL prop. `HostingChooser` passes it. `ConnectMyWebsitePanel` — the ONE real "Connect my website" entry
+point, reached from Settings → App Settings → Domain and from Home → Other AI → Publish & Deploy → "Custom
+Domain" — cannot and does not. So on the surface most users arrive through, the screen said *"Deploy the server
+part first"* and offered nothing at all: an outcome described, with no path to it.
+
+The props doc said so out loud — *"Absent ⇒ the sentence stands alone, as before"*. That is the defect written
+down as a design, and it is why this survived the 2026-09-07 fix that introduced the button.
+
+**The screen owns its completeness now:** a host that can navigate gets the button; a host that cannot gets the
+exact route in words, plus the one line such a user has no other way to know — *your domain stays connected
+while you do it, nothing here needs redoing*. Without that, the safe-looking move is to start the domain over,
+which is the loop this whole screen exists to end. It is the same correction `ConnectMyWebsitePanel` already
+records for `publishResult` (*"it is an input of the screen now, so the button and the answer to pressing it can
+never again live on different surfaces"*), applied in the other direction.
+
+**Locked as a class, not an instance.** `tests/aNamedActionIsReachableOnEveryHost.test.ts` derives every
+optional callback prop from the props interface and fails if ANY `stage.action` branch is gated on one — so a
+future `onRollback`-shaped regression is caught by the same test. Comments are stripped first: the screen's own
+comments quote the old shape, and a check that reads its own documentation is the trap hit three times this
+week. A host census fails when a third host appears and proves both branches are live code.
+
+**What this does NOT fix, said plainly to the admin:** mitrify.com is still not live. The domain is wired
+correctly and nothing was ever deployed to the Firebase site it points at; Publish will not help an app with a
+server half. Both PRs fix what the SCREEN told them — the next user is sent somewhere real instead of being
+told, in green, that they are done.
+---
+
+## 2026-10-17 — Q-1130 MEASURED: long bullets are not features, and the measurement argues against the change
+
+Q-1130 asked a product question and, to its credit, refused to answer it from intuition: *"measure how
+often real prompts lose features this way (the build reports carry the prompts), then either raise the
+limit, or count a long bullet as one feature when the LINE is a bullet, or leave it and keep the honest
+sentence."* That measurement is now done, against **all 13 real prompt fixtures** in
+`tests/fixtures/*prompt*.txt`, using `countEnumeratedFeatures` itself.
+
+**The headline number first, because it is the one that decides the question.** The corpus holds about
+**104 marker lines over the 5-word limit**, and the overwhelming majority are **not features at all**.
+They are build instructions (*"Do NOT create src/main.tsx, package.json, or multiple files"*, *"Everything
+must be inside one index.html"*), styling notes (*"Keep the background elegant and non-distracting"*,
+*"Use subtle blueberry shapes/blobs and glowing particles"*), writing instructions, and pasted assistant
+advice. The 5-word limit is not accidentally dropping features; it is mostly doing its job.
+
+**Two candidate rules were measured, not supposed.**
+
+*(A) Blanket — any long bullet counts one.* Three fixtures cross `SPEC_FEATURE_COUNT` (14), and two of
+them are `autopsy8e124182` (7 → **33**) and `report0311186f` (9 → **20**) — the exact autopsies that exist
+BECAUSE of over-counting. 8e124182 is the one where sixteen counted parts split a six-screen stock app
+into fourteen modules; 0311186f is the one where a pasted assistant reply counted eighteen features and a
+one-screen trading app was split into eight. The blanket rule reverses both shipped fixes. Rejected.
+
+*(B) Head-before-a-gloss — the name before a `:` / em-dash / parenthetical counts one.* Much cleaner, and
+it ignores the instruction and styling lines for a principled reason rather than by luck: those lines are
+sentences and carry no gloss separator. It recovers genuine module names — `autopsy241215d1` 1 → **8**
+(*"Core Simulation Engine (the ledger, transaction math, and accounting rules)"*), `autopsyA2b9c802`
+6 → 8, `autopsy8e124182` 7 → 9, all under the spec line. But it still pushes `report0311186f` 9 → **18**,
+back over the line, and the parenthetical branch produced a false positive (`"getDownloadURL()"`).
+Restricting it to colon/em-dash only is safe on every fixture and then barely helps at all
+(`autopsy241215d1` recovers only 1 → 3), which is the whole case it was meant to fix.
+
+**So the honest finding is that the harm Q-1130 names is real but narrow — 1 of 13 fixtures — and every
+rule measured so far buys that one case by re-creating an over-count somewhere else.** `autopsy241215d1`
+is a genuinely detailed finance-simulator spec that currently reads as one feature, i.e. no scope at all,
+and that is a real user served badly. It is not enough on its own to reverse two autopsies for.
+
+**Why this does not become a session's own decision.** `countEnumeratedFeatures` feeds `statesAScope` →
+complexity routing → which lane a build takes and what the user is charged. The sixth rule reserves a
+money-and-behaviour change to the admin, so Q-1130 moves from OPEN to **🟡 BLOCKED on an admin decision**,
+with all four fields, the three options and a recommendation (**C — leave the counter alone**; Q-1023's
+sentence already tells the user that a long bullet does not count). A blocked row with its reason written
+down is the sixth rule's requirement; "measured and left silent" is the failure mode it was written against.
+
+**The measuring script was deliberately not committed.** It is scratch, not a gate: it asserts nothing and
+would rot the moment the fixtures change. The repo keeps the fixtures and the counter, which is everything
+needed to reproduce the numbers above.
+
+**Not a fix, and not claimed as one.** Nothing in the counter changed. `tests/theQueueSaysWhatIsTrue.test.ts`
+still passes 14/14 with the baseline unchanged at 40 — the new BLOCKED row carries all four fields, so it
+adds nothing to the gap count.
+
+## 2026-10-18 — Q-1141: my own Q-1132 fix was half-done — the honest signal was wired to nobody
+
+The racing probe went red inside the full suite for the **third** time (Q-1038, Q-1132, this). Diagnosed
+by measurement, not assumption: it failed inside the 2,731-file run, **passed 26/26 on its own**, and
+the commit under test was two markdown files.
+
+**Measured on `main`: `flowStarved(` appears exactly twice in all of `src`** — its own definition, and a
+call inside `flowStarvedNote`. One orphan was the other's consumer; nothing else read either. Q-1132
+(#3779) added both so a starved pixel read could be told apart from one that measured and disagreed —
+and **wired them to nobody.**
+
+The class is already written down in this repo, and was paid for again: *"a server that returns an
+honest field has not communicated anything until a caller reads it"* (`backendDeployWiring.ts`, after
+the deploy route's `domainPointed` / `domainNote` / `envNote` were parsed and thrown away). **Our own
+instruments are not exempt.**
+
+### Two real consequences
+
+1. **The report stayed silent.** `sceneUnread` can only speak when the app HAS a three.js scene, so a
+   2-D canvas game's camera verdict comes from the pixel flow. A starved flow withheld the verdict
+   (right) and said nothing (wrong) — *a game whose camera was never measured read exactly like a game
+   whose camera is fine*, the very defect Q-1038 and Q-1097 exist to prevent, surviving in the branch
+   they never covered.
+2. **The test could not tell either**, so it demanded a direction the probe cannot guarantee under load
+   and failed as though the GAME were broken.
+
+### Both halves fixed
+
+The verdict now prints `flowStarvedNote` when the flow read was the one consulted (driving · not
+stalled · the scene said nothing for that axis), appended to the **head** and never to the score —
+Q-1038's division, so our instrument failing costs the app no points and no money. And the four
+live-browser assertions go through **one** helper that states the guarantee the product actually makes,
+which is load-independent: **either the read answered and the direction is right, or it was starved and
+the platform says so. Silence is the only outcome ruled out.**
+
+### The census was wrong twice before it was right — recorded, because a guard that cries wolf gets switched off
+
+- **Too loose:** it accepted a sibling as a consumer, so it would have **passed on the exact state it
+  was written for**.
+- **Too strict:** it demanded a call inside `playtestVerdict` and flagged `probeStarved` /
+  `probeStarvedNote`, which do reach it — via `sceneUnread`, measured at `gamePlaytest.ts:1210`.
+- **Right:** the unit is the **pair**, and a sibling never vouches for its own signal.
+
+**Not claimed as a starvation fix.** The probe can still be starved on a loaded machine; what ends is
+the lie about whose fault that is. A sampler that cannot be starved stays Q-1132's open prescription.
+
+**ID note — the third collision shape in one day.** This row first came out Q-1140, because the
+derivation took `max(open ∪ closed)` on this branch and **Q-1140 is already claimed by #3797**, which
+is unmerged and therefore in neither file here. Earlier the same day the same derivation took the open
+table alone and landed on a closed id. A new id must clear the open table, the closed register **and
+the ids claimed by open PRs** — the last of which no file on a branch can see.
+## 2026-10-18 — Q-979 measured for the first time, and the row named the wrong function
+
+Q-979 has been open since 2026-10-13 saying *"the `/build` route handler in routes/agentv3.ts"* sits at
+TypeScript's control-flow limit. **There is no `/build` route.** Measured across every `app.get` /
+`app.post` in that file:
+
+```
+/api/agentv3/chat               17,595 raw lines   (2,501 with comments stripped)
+/api/agentv3/publish               444
+/api/agentv3/preview-diagnose      381
+```
+
+The nine modules that carry a comment about this limit — `FastLaneBudget`, `thirdPartyLimits`,
+`gateRedNotice`, `handoffRule`, `finishingPassesAtCap`, `leftoverComponents`, `ProjectPlan` and others
+— all say **"the CHAT handler"**. The row was the odd one out, and a row that misnames its own subject
+sends the next session hunting a function that does not exist. Corrected by adding the measurement to
+the row, not by erasing what it said.
+
+**First real measurement of the margin: 549 branch tokens** (if 147 · && 171 · || 42 · ?? 37 ·
+ternary 152), comments stripped. Nobody had measured it in the five days the row was open.
+
+### The pain is not the size — it is the surprise
+
+TS2563 counts the flow joins for **one reference**, so it trips in whichever PR happens to add the last
+few branches, and lands as a red CI **naming a file that PR never touched**. That happened twice in one
+day (Q-978, then Q-975 on top of #3692). The size is a slow problem; the ambush is the sharp one.
+
+`tests/theChatHandlerHasHeadroom.test.ts` now fails **first**, and its message is the instruction:
+*put the new condition in a module function and call it* — the pattern every TS2563-aware module in
+`src/server/AgentV3` already follows. The budget is a **ratchet**: it may only go down (lower it when a
+block moves out, never raise it to make a PR pass), and it is labelled honestly as a **proxy** — it
+counts branch tokens in the whole handler, not the compiler's own per-reference threshold, and the two
+numbers are not comparable.
+
+Reversion proven: one harmless branch added inside the handler → two tests fail, with the instruction.
+
+**Q-979 stays OPEN.** Its own prescription still stands — headroom, not a mass rewrite, moving
+self-contained blocks out one PR at a time. This change buys none of that headroom; it only makes the
+wall visible before someone walks into it.
+
+### And the shape of Q-979's problem, measured — plus why the refactor was NOT started tonight
+
+The handler is not 17,595 lines of evenly-spread logic. It is **~3,600 lines of setup plus ONE `try`
+block (raw 13860) that holds 13,933 of them**; of its 55 depth-1 blocks the next biggest is 76
+branches / 225 lines. Every candidate the row names lives inside that one try. Its 217 children, ranked:
+
+| # | branches | lines | raw line | what it is |
+|---|---|---|---|---|
+| 1 | 178 | 967 | 20372 | the third-party-limits / ad-serving pass |
+| 2 | 149 | 732 | 18631 | `if (fastLaneWouldRun …)` — the row's own "fast-lane setup" |
+| 3 | 136 | 573 | 24977 | the reviewer / bug-hunt finishing pass |
+| 4 | 126 | 768 | 15051 | the own-repo working-branch (GitHub) storage pass |
+| 5 | 35 | 156 | 26501 | the ₹0-bill rule for a build that wrote nothing |
+
+Take them in that order, one PR each, and **(5) last or never** — it is a money rule, and the first
+absolute rule outranks tidiness. Each PR proves itself by **lowering `BRANCH_BUDGET`** with the full
+suite green, which is the first time this work has had a measurable finish line.
+
+**Not started tonight, on purpose.** Extracting a block from the build engine's main handler is a
+judgement about what that block really touches, and a wrong judgement breaks the core product — while
+CI has been failing in 3–4 seconds all day (Q-1131), so only a local gate could verify it. Safeguard #3
+and the 60-second rule's *"safe ambitious path, never a reckless one"* both say wait for the real
+pipeline. The measurement is the part that costs nothing and makes the refactor fast and safe when it
+does start.
+## 2026-10-17 — nine rows closed: every owner PR verified in `main`, none of them merged by this session
+
+`#3773 · #3779 · #3782 · #3784 · #3785 · #3788 · #3789 · #3791` — all nine confirmed present in
+`origin/main` by their merge commits rather than by a PR page, then their rows moved out of the open
+table and their IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` **in the same commit**
+(the #3543 lesson: a queue edited from a stale copy silently reopens closed rows).
+
+Closed: **Q-887** (no upstream body reaches the browser) · **Q-889** (one encoded redirect value, Host
+shape-checked) · **Q-890** (the paid-vs-recorded check cannot be skipped) · **Q-1023** (the
+parenthetical says what actually counts) · **Q-1132** (the flow read waits for the frames its verdict
+needs) · **Q-1136** (the DNS check says only what it checked) · **Q-1137** (a named action is reachable
+on every host) · **Q-1138 + Q-1139** (backend connect without failing first; Q-707 reopened by its own
+cost gate; and the third definition my own census could not see).
+
+**Stated plainly because it matters for the audit trail: this session merged none of them.** CI has been
+failing in 3–4 seconds all day — every run, `main` included, with log download answering HTTP 404 (the
+Q-1082/Q-1131 symptom) — so the standing rule "CI green before any merge" meant holding. The merges were
+made elsewhere. The nine changes were each gated locally on the full CI-equivalent suite first, and the
+last of them on the merged state after `main` moved mid-change.
+
+Open root cause unchanged: **Q-1131 needs the admin** — GitHub Actions is failing at the platform level,
+not in this repo's workflow (ruled out by measurement: 8 runs, 4 branches, 3–4 s each, no logs, and
+`ci.yml` had 8 passing runs after its last change).
+
+## 2026-10-17 — Q-1140: one route to the deploy control, named by all three surfaces that name it
+
+The last piece of the admin's *"backend connect ko simple banao"*, and the one surface that had been
+missed: the build's closing **"what this app still needs"** notice — the only place that reaches the
+user without them opening any screen. All three of its branches described the situation and stopped.
+`included` read *"publish it when you are ready"*, and for a bare-server app **Publish refuses**;
+`buy` and `none` read *"host it yourself"* — true, and unactionable for a non-technical owner.
+
+Same class as Q-1136 and Q-1137 earlier the same day: **naming an action without a path to it.** Every
+branch now appends the route, and the plans offer is untouched where it was already right — `buy`
+keeps its Billing button; `included` and `none` still offer none, because selling a plan they already
+hold, or one we could not read, is what that row's own docblock forbids.
+
+**And the route now has ONE home.** `DEPLOY_BACKEND_ROUTE` sits in `src/lib` beside
+`DEPLOY_BACKEND_LABEL`, which is shared for exactly this reason. Three surfaces name it — the domain
+screen (Q-1137), this notice, the Publish panel (Q-1139) — and three copies agree only until one is
+edited. A route that is subtly wrong in *one* place is worse than no route: the user follows it, finds
+nothing, and stops believing the next instruction too. A repo-wide census fails on any second literal
+copy.
+
+It stays **English** inside the localised notices, exactly as `Plans` / `Database` / `Publish` already
+do there: it names buttons whose own labels are English on the screen it sends them to, and a
+translated route would send someone hunting for a button that is not there.
+
+### What was measured and deliberately NOT built
+
+A separate **domain row** ("your domain is connected and waiting"). `connectActions.ts` has recorded
+since 2026-09-20 that such a row needed a verified domain status, and **that fact now exists** — so it
+was buildable. It was dropped anyway: its case (domain linked · not serving · app needs a server) is a
+strict **subset** of the server row's own trigger, so it would have been a second line about one
+problem, paid for with a live DNS/HTTP probe on every build. Recorded in the row and in the module, so
+the next session reads the reason rather than rediscovering the idea.
+
+### A process note, because it cost a red test
+
+This row was first numbered **Q-1136** — I took the max id from the OPEN table alone, minutes after
+closing Q-1136–Q-1139 *out* of it. `aClosedQueueRowStaysClosed` failed immediately, which is the guard
+doing precisely its job. A new id is `max(open ∪ closed) + 1`, never the open table alone.
+---
+
+## 2026-10-17 — Q-1133 RESOLVED: a GitHub failure is answered in our own words, and the hunt found a fifth site
+
+**The defect, as four routes shipped it:**
+
+```ts
+res.status(err.response?.status || 500).json({ error: err.response?.data?.message || err.message });
+```
+
+GitHub's own wording became the **whole** error the user read — *"Not Found"*, *"Bad credentials"*,
+*"Git Repository is empty."* Each is literally true and each tells a non-technical person nothing
+about what to do next. `github.ts` carried three (`fetch`, `file`, `branches`); `cloudsync.ts` the
+fourth.
+
+**THE HUNT FOUND A FIFTH THE ROW NEVER NAMED.** `github.ts`'s push-enhanced catch already had a
+fallback sentence of ours — which is exactly why it looked fixed — but GitHub's message still came
+first, so it read like the other four whenever GitHub supplied one. The row said *"github.ts (×3) and
+cloudsync.ts"*; grepping the SHAPE across the repo said five. The shape was right. This is the third
+absolute rule's point about searching by shape rather than by the row's own count.
+
+**The class is not "four routes forgot a sentence" — it is that writing the sentence was each route's
+own job.** `mobileShip.ts:731` already had the considered form (a curated hint per status, the upstream
+message kept as a secondary `detail`) and it stayed one route's private good habit, because nothing
+required it of anyone else. `src/server/lib/githubApiError.ts` now owns the mapping: a pure
+`githubApiErrorAnswer(err, action)` that names what the user was trying to do and what to do about it,
+plus `sendGithubApiError` which goes through the existing `sendSafeError` door so the raw error is still
+logged server-side and the redactor still runs over everything the client reads.
+
+**One additive change to the shared door.** `sendSafeError` gained an optional `publicDetail`, redacted
+on the same path, sent in production too. It exists for the one case where extra wording genuinely helps:
+a message from a service the USER connected (their own GitHub), which tells them which branch or
+repository was wrong. Without it, `detail` stays exactly what it was — a dev-only echo. 56 existing
+callers are untouched.
+
+**Why GitHub may be named, when the white-label law forbids naming a vendor.** GitHub is not one of OUR
+providers running hidden behind the product; it is a service the user connected with their own account,
+and "reconnect GitHub" is an action they perform on it by name. `httpError.ts`'s redactor lists the model
+vendors that must never surface, and GitHub is deliberately not among them.
+
+**A GitHub outage is no longer reported as the user's bad request.** A 5xx from GitHub, and a call that
+never reached GitHub at all, both answer 502 with wording that says so.
+
+**TWO ROUTES DELETED IN THE SAME CHANGE, under CLAUDE.md's undecided-route rule.** Touching `github.ts`
+meant deciding the `undecided` rows it carried: `POST /api/github/file` and `POST /api/github/branches`.
+Decided by evidence, not by sweep — no client file references either path today, and `git log -S` over
+`src/` excluding `src/server` finds **no commit that ever added one**, so unlike a route an old bundled
+phone app might still carry, these never had a caller to bundle. The repo had already taken this exact
+decision one route below, for the same reason. The baseline shrank 75 → 73 and the two 401 tests for
+them went with them.
+
+**Locked as a class.** `tests/aGithubFailureIsAnsweredInOurWords.test.ts` (8 tests) fails when a NEW
+server file hands the upstream message over as the error a user reads — the sibling that does not exist
+yet — while still allowing it as `detail`, which is the deliberate, useful use. Reversion proof: the raw
+shape restored at one site → 2 fail; the GitHub-outage remap removed → 1 fail; restored → 8 pass.
+
+
+## 2026-10-19 — game direction and autopsy 2e06d8bd / 1b38d662
+
+Branch `fix/game-direction-autopsy`, upstream source snapshot 789f318bb5c06456133c52a04fa58685abbf8acd. No other session's uncommitted work was copied. Six engine changes cover Q-1200…Q-1205: rendered-camera-relative yaw, chase front-hemisphere guard, world -Z recipe examples, geometry-stable Start Game pulse, trusted cancellation provenance, and extracted vehicle/road contracts. Detailed evidence, 23 finding rows and explicit blockers are in `docs/game-engine/autopsy-2026-10-19.md` and `BUILD_REPORT_QUEUE.md`. Original generated app source and production account/latency evidence are unavailable; existing games and historical debit are NOT claimed repaired. Open PR #3824 owns billing settlement work and is preserved.
+
+Reversion probes for yaw, chase, invented stop and pulse failed as required. Targeted initial run: 200 passed, 1 skipped. Final CI-equivalent gate and PR results are recorded in the PR; no deployment is claimed by this source entry.
+
+Follow-up in the same branch: Q-1223 fixes the kit-history command's absolute-importer resolution, found while recording the new camera hash. Isolated real-command test and history census: 21 passed. Initial broad coverage did not establish a gate: it ran Node 24/CEST and was then rejected by automatic approval review over possible external payment-service egress. Final verification is Node 22/UTC with a credential-free, proxy-free environment and outbound networking denied; no denied operation is treated as passing.
+
+Q-1224: the bundle-permission script test now uses Node's tsx loader instead of the CLI's unrelated Unix IPC. Real bad/clean zip assertions and starter-version census pass (25 tests). Seven current platform starter CSS hashes added without deleting historical versions. Verification-only fixes: queue field labels, API contract indentation assertion, theme-only snapshot scope, and a real local dependency directory. Final autopsy ledger has 25 findings: 8 implemented fixes, 17 explicit blockers.
+
+Q-1225 fixes the false no-call manifest claim by describing the completed-response ledger accurately, rather than denying a cancelled attempted call. Record/Calendar tests: 44 passed. No ladder, tier or billing policy changed. Q-1218 keeps the distinct attribution-trace blocker. Final ledger now has 26 findings, 9 implemented fixes and 17 explicit blockers.
+
+Final Q-1225 sibling sweep also removes the false no-attempt statement from the stopped-build upsell note, preserving suppression behavior. Related regression suites: 55 passed. Reversion checks caught the record-label, history resolver, missing API handoff and missing forward rotation; earlier probes caught yaw, chase, invented stop and button geometry. Safe offline environment checks: 192 passed across the previously affected dispatcher, migration and iOS-template suites; no unhandled errors. Non-root-equivalent tar extraction and asynchronous denied socket errors are verification-only settings, not product policy changes.
+
+The resolving PR retires Q-1200…Q-1205 and Q-1223…Q-1225 atomically when it merges: those nine IDs are in the closed register, with the root-cause ledger retained in the game autopsy. The 17 evidence/account/access blockers remain in the open queue. This proposed resolution is conditional on the immutable final gate and merge; no deployment or old-game repair is claimed.
+## 2026-10-18 — Private failed build reports (/failedbr), requested by owner
+
+- Added a dedicated web admin screen using the existing password/MFA admin session. API data is never public; ordinary user auth, forged admin headers and URL credentials are rejected.
+- Reads existing retained per-build diagnostics history, including failures followed by successful builds and legacy latest-only failures. No generation, routing, billing or diagnostic-write path changed. Bounded name-order traversal needs no extra Firestore index; follow every cursor, including empty batches. Deleted/never-saved history cannot be reconstructed.
+- Added report-only, SHA-256-stored, 30-day bearer credentials with admin-only creation/revocation, reasons and audit events. Each request checks current server-side state; the credential cannot manage access or use other admin APIs. Reports are scrubbed again at export and explicitly treated as untrusted evidence.
+- Added stateless authenticated Streamable HTTP MCP with two read tools and versioned REST reads. Compatible clients must configure an Authorization header. OAuth-only clients require an adapter; creating a credential does not connect an account or invoke paid AI analysis.
+- Regression coverage: history/cursor exhaustion, later successful builds, storage-unavailable honesty, legacy deduplication, secret scrubbing, expiration/revocation, admin/delegate separation, MCP reads/errors/origin rejection, and the private page route/loading contract. Full gate results recorded after validation; no deployment claim before verified merge.
+
+- Integration checks classified the transaction-capped (100 entries) platform credential registry and declared the small JSON-RPC request shape; no guards were disabled. Local CI-equivalent execution uses Node 22 / npm 11.18.0 and UTC (matching the hosted runner), with two test workers to fit this workspace.
+
+- 2026-10-19 integration checkpoint: incorporated main `649663d6` (including the independently merged SEO/stop-billing work) with three-way merges in server registration, site indexing and the knowledge base. The earlier two-worker test run was cancelled because main advanced; the final full gate is rerun with four bounded workers, Node 22, npm 11.18.0 and UTC. External network is disabled for tests/boot; the unexpected Stripe request previously blocked by automatic approval is not retried.
+
+- Final-gate findings (2026-10-19): the second client-route census also needed the shared supported-version normalization; its regression now covers v1 aliases, explicit v1 handlers, missing paths and rejection of v2. The ownership census now recognizes the existing `adminRequestOk` HMAC gate (real HTTP admin/delegate/public separation remains tested). Replaced the new page's relative Admin link with the canonical HTTPS admin URL to respect the native-link guard. No guard was removed or waived.
+- Local runner corrections, not production changes: npm/npx now use their real CLI symlinks so subprocesses and `--env-file` discovery match CI; tar uses `--no-same-owner` because this root sandbox cannot restore archive uid 501 (the non-root hosted runner does not restore it either). The offline socket guard now reports an asynchronous unreachable socket, matching Node's connection lifecycle; its earlier synchronous throw caused two PostgreSQL cleanup errors in fake-actuator tests. The Stripe probe was traced to synthetic `sk_live_realvalue` fixtures in ToolDispatcher.test.ts; no real request is retried. Full-suite rerun required after these integration fixes.
+- Reversion proof: restoring each of the three integration defects made its corresponding census fail; after restoring the fixes, all 3 files / 37 tests passed. Focused real script/env checks also passed (22 tests). This sandbox cannot create tsx CLI's optional Unix IPC socket, so the local npx adapter runs the same TypeScript script through Node's supported `--import tsx` loader; hosted CI keeps its ordinary npx command. This changes no shipped code and skips no assertion.
+- Count correction to the preceding line: the restored reversion run passed 3 files / **31** tests (not 37); the separate runtime run passed 2 files / 22 tests.
+
+
+## 2026-10-19 — Admin AI Maintenance and automatic account-quota protection
+
+Owner request: one-click Maintenance in the admin console to stop runaway platform AI spending, and automatic activation after repeated Kimi account token exhaustion. Added authenticated GET/POST `/api/admin/ai-maintenance`, a Monitor-home control, and durable transactional `platform_settings/ai_maintenance` state. Auto-on defaults enabled; three account quota/balance failures in 120 seconds latch Maintenance until an admin resumes. Temporary rate limits, context/input errors and other providers do not trigger it. Shared snapshot updates plus a 2-second read cache coordinate instances; unreadable storage refuses new API work rather than authorising spend. Failed admin writes are reported as failures.
+
+The global pre-body-parser gate covers both API versions and future API tools by default, before model calls, guest quotas or wallet reservation; admin, auth, health, wallet, payment settlement and the internal scheduler stay reachable. Model turn/fallback/retry boundaries re-check Maintenance; Kimi refusal observation lives at OpenAiToolRunner so streamed and direct runs count once. Voice start is guarded and active voice sessions close on a setting update. Free Chat, Professionals and Doctor show the requested Maintenance message without generic-error substitution. Already submitted calls can still incur their real cost; this is stated on the control. No production setting was turned on during implementation.
+
+Validation at implementation checkpoint: 106 existing provider/router tests; 69 maintenance/wiring/route-census tests; 10 dedicated maintenance/auto-trip/card tests passed. Frontend/server typechecks, unused-import gate and production build passed. Full hosted CI must pass before merge.
+
+## 2026-10-20 — Owner-authorized six-phase quality roadmap, Phase 1 underway
+
+The owner asked to retain the six phases, implement them in order and merge this roadmap's PRs after CI is green. The durable plan and evidence gates are in `docs/QUALITY_ROADMAP_2026-10-20.md`. Completing code changes does not establish a permanent 100/100 score: benchmark and production outcomes remain separate evidence.
+
+Phase 1 root-cause work: preview diagnose/health/error routes still accepted claimed uid fallback on real workspaces; use verified ownership and recover cached tokens on the client instead. A sibling audit found database provisioning could load another workspace's schema using a caller-selected workspace id; enforce ownership at the shared flow boundary before vault/provider/source effects. Dependency fixes target compatible patched branches and preserve explicit no-upstream-fix/unreachable-path exceptions, documented in `docs/PHASE1_DEPENDENCY_SECURITY.md`. Regression verification and required CI are pending; no merge or deployed outcome is claimed in this entry. Phases 2–6 have not started.
+
+### Phase 1 final local verification — 2026-10-20
+
+Source-confirmed findings and tested fixes now include preview token fallback, Supabase schema-source ownership, global history session collisions, workspace-shaped legacy snapshot poisoning, and canonical history erasure/reporting. Fresh `build_history_v2` / `build_sessions_v2` storage preserves API URL compatibility and refuses unowned legacy fallback. The Load board inventory/retention registration was corrected after the first coverage preflight caught its missing new transient collection; the first run is not counted green (39,828 passed, 1 failed, 67 skipped).
+
+Final exact-source Node 22.23.3/UTC `npm test`: 2,790 files passed; 39,829 tests passed, 67 skipped, zero failures. Frontend/server typechecks, production build, production boot smoke, 51-package production dependency gate, bundle budget, native guard, unused-import check, 10 OAuth protocol checks, license gate and dependency audit gate passed. Dependency findings: 25 package entries (4 reviewed high, 21 moderate, 0 critical), with exact exceptions/review dates in the dependency evidence doc. Reversion proofs: original preview code fails 12 new cases, fixed handler passes 38/38; original provisioning flow fails 7/10, fixed flow passes 10/10.
+
+Required GitHub coverage CI and merge remain pending at this checkpoint. Legacy snapshot ownership attribution/recovery and actual deployed/staging verification remain explicit limitations, not completed migration or a 100/100 claim. No paid provider build, store binary or production data mutation was performed by the local checks.
+
+## 2026-10-20 — Q-1135: the un-reconciled credit is on the order — and measuring it found a live money defect (Q-1226)
+
+**Q-1135, the half the row asked for, is built.** When the paid-vs-recorded check cannot run, the order
+itself now says so: `unreconciledCredit` / `unreconciledReason` / `unreconciledProviderInr` /
+`unreconciledRecordedSeen` / `unreconciledAt`, named once in a new pure `paymentReconciliation.ts`
+(`REVERSAL_FIELDS`' pattern, for the same reason — a writer and its readers must not drift apart) and
+merged into the SAME `tx.update` that flips PENDING→SUCCESS. Never a second write: Q-613 exists to keep
+that one transaction whole, and a mark written separately could land while the credit rolled back.
+
+**Both SUCCESS flips carry it, not just the obvious one.** Wallet top-ups claim inside the credit
+transaction; PASS and GIFT products claim in a separate `tx.update` further down the same function. Both
+read `amountPaid` from the same stored record, so both can be un-reconcilable — and a source census now
+fails if any `tx.update` that flips SUCCESS does not carry the patch (the census asserts it FOUND the
+sites first; a census that matches nothing passes vacuously, which cost this session a wrong green once).
+
+**It is read, not just written.** `purchaseLedger.ts` — the one reading of `payment_transactions` —
+carries `PurchaseRow.unreconciled` and `PurchaseSummary.unreconciledRows`, and the admin Revenue table
+marks those rows **Not reconciled** with a count line above the pager.
+
+**Firestore-safe by construction, which is the part that could have stranded a payment.** The recorded
+value is rendered with `String()`, never `JSON.stringify` — whose result for `undefined` IS `undefined`,
+the one value Firestore rejects, and a rejected update inside that transaction rolls the credit back with
+it. The in-memory harness in the test enforces that rule, so the proof is real rather than asserted. The
+provider amount is omitted when unreadable rather than written as a `0` that would read as "the provider
+charged nothing" — a lie about money, in the record that exists because a money fact was unreadable.
+
+Locked by `tests/anUnreconciledCreditIsOnTheOrder.test.ts` — 15 tests against the real
+`verifyPaymentInternal`. **Six reversions bite:** the wallet flip loses the patch → 4 fail · the gift flip
+loses it → 2 · `JSON.stringify` instead of `String` → 4 · a `0` provider amount → 1 · the ledger stops
+carrying it → 2 · the old log sentence returns → 1.
+
+### 🔴 AND THE MEASUREMENT FOUND SOMETHING NOBODY REPORTED — Q-1226, a live money defect
+
+Q-890's log line said *"Crediting the server-recorded amount"*. It does not. Measured on the real
+function, gateway reporting ₹100 PAID, `amountPaid: 'legacy'`:
+
+```
+response  {success:true, balanceAdded:100, currentBalance:100, tokenBalance:0}
+wallet    tokenBalance: 0 · remaining_balance: 100 · total_balance: 100
+ledger    "Wallet recharge: ₹0 (0 tokens added)"
+healthy row on the same path: tokenBalance: 10000
+```
+
+So the payer is told ₹100 arrived, and holds ₹100 in one view of the wallet and nothing in the other.
+
+**The root cause is not the unreadable value.** `computeCreditedWallet` sets `tokenBalance` from
+`orderCreditedTokens(amountPaid − fee)` and `remaining_balance` from `balanceAdded` — two independent
+reads of two different stored fields. They are equal for every healthy row, and the file explains why for
+each rail, but **the equality is assumed and never enforced**, so the moment one field is junk the two
+views separate. **The class is a wallet writer that is not mirrored.** `walletMirror.ts` exists for
+exactly this and says so in its first line — *"ONE RULE FOR EVERY WALLET CREDIT: MOVE BOTH VIEWS, BY THE
+SAME MONEY"*, taking the delta once so *"there is no way to call it and move one view without the
+other"*. CLAUDE.md requires every new wallet writer to go through it; the oldest and largest writer —
+real money — never did.
+
+**And the sibling was root-caused once already and never hunted.** The pending-promo branch deleted in
+the 2026-10-04 forensic audit (P0) was this same divergence from a different input, and that file's own
+comment names the cost: *"the spending gate reads the larger while the overdraft floor reads the smaller —
+free usage"*. So it loses money in both directions — the payer's credit, and spending against a ₹ balance
+no token view backs.
+
+**What shipped here, and what deliberately did not.** The system's honesty is fixed now (fifth rule, step
+5): the log says the token credit is ZERO and needs a hand-check, and the order carries the mark so these
+rows are findable. The credit itself is **not** changed — every option alters how much money reaches a
+wallet, and migrating the main credit path onto the mirror also shifts `total_balance` and gift-clamp
+semantics on every paid credit by a rounding amount. That is the money path CLAUDE.md reserves to the
+admin, so Q-1226 is 🟡 BLOCKED — REQUIRES A DECISION with three options and a recommendation (credit the
+provider's verified `order_amount`, which is the better-verified figure, not a weaker one).
+## 2026-10-20 — the CI outage ended, and three rows reached a final state (Q-1140, Q-1141, Q-1131)
+
+**Q-1131 is over, and it is closed with its measurement rather than with a code fix** — the same way Q-1082
+was, because the fault was never in this repo. The 3-4 second / no-logs signature ran from run **11577**
+(2026-10-17 07:41:36 UTC) through run **11711** (2026-10-19 11:20:07 UTC): about **51.6 hours, ~135 runs**,
+each dying before a single step executed, each with `get_job_logs` returning HTTP 404. It cleared at run
+**11712** (2026-10-19 12:37:07 UTC, 1518 s, success). The 80 runs since all reach a real verdict, and the
+proof that the signature is gone is in the FAILURES, not the successes: 11721-11723, 11753-11765, 11777 and
+11782 each ran 900-1600 s, i.e. they are ordinary test failures with logs — the opposite of this row.
+
+**What the two occurrences cost, stated plainly, because it is the part worth keeping.** Nothing was merged
+by this session across both outages. That was correct — CLAUDE.md's gate is CI green BEFORE merge, and a
+local full gate is evidence for a session, never an authorisation — but it is worth being honest about the
+shape of the price: work that was finished, gated green locally and pushed sat for two days, and in that
+window other sessions moved `main` far enough that every branch needed a merge and a re-gate before it could
+go anywhere. The lesson recorded on 2026-10-18 held up exactly: a full local gate takes about as long as the
+gap between other sessions' merges, so the re-gate is done immediately BEFORE the merge, not chased after
+every move of `main`.
+
+**Q-1140** (one route to the deploy control, finishing the admin's *"website connect, databse connect, backend
+connect ko simple banao"*) — **#3797**, verified present in `origin/main` by its merge commit `505211709`,
+not by a PR page. It carried nine further row closures with it.
+
+**Q-1141** (a starved flow read says so, and the signal my own half-done Q-1132 fix added is finally read) —
+**#3800**, merge commit `4a1bb4a7f`.
+
+**Each id is appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit as its removal from
+the open table, and the table was edited on a FRESH `main`** — `#3543` rebuilt it from a stale copy and
+silently reopened closed rows, which is the one mistake that pair of files exists to prevent.
+
+**Next, and it is now unblocked by the above:** Q-1135. Its only stated blocker was *"CI cannot verify a
+money-path change (Q-1131), and this is the class of code where a local gate is not enough."* That blocker
+has lifted, so the row is actionable again: the un-reconcilable-credit fact goes onto the order itself, in
+the SAME `runTransaction` `tx.update` that flips PENDING->SUCCESS, never as a second write (Q-613 exists to
+protect that one transaction).
+### Phase 1 merged; Phase 2 coordination checkpoint — 2026-10-20
+
+Phase 1 later passed exact-head GitHub coverage CI (`https://github.com/docasheesh-png/navbharatai/actions/runs/39370215420`) and PR #3847 merged as `885ba41023c2f7327be956aadc71f79ee2840821`. The pending statement above is the earlier local checkpoint.
+
+Phase 2's queue/retry sub-PR replaces stale queue-cache admission, running-to-failed deserialization and false in-memory acknowledgements with authoritative database operations. Queue execution binds item/claim/server-attempt identities and settles only that binding; legacy completion is a reconciliation hint, never permission to guess a newer row. Explicit stale recovery requires confirmed non-live ownership and pauses for review. Six queue routes require the verified workspace owner. Input-digest request receipts give identified builder retries the same existing wallet operation reference; missing wallet references are rejected. Receipt owner erasure, account-lifetime replay retention and admin inventory are registered together. Mounted-client unknown retries retain their identity, queue acknowledgements are validated, and captured workspace generations prevent delayed A callbacks from applying to B.
+
+The shared runtime is preserved. Safe lease hardening refuses unavailable/unverified admission and same-owner live-token replacement, checks transaction deadlines and never revives an expired lease. Stop continues heartbeating while a captured build is ended but has not exited; source/runtime work may still be draining. The queue/request helper extraction keeps the handler branch ratchet, reducing 546 to 543 rather than increasing its budget. Real demo Firestore multiprocess checks passed 14/14 in the scoped branch, including TCP cuts, explicit crash recovery, wallet/receipt races and labelled committed-ACK-loss injections. No paid provider/E2B/store build or production data mutation was used. Required final-source full local gates and exact-head CI remain release gates; the PR records their actual outcomes and merge state.
+
+**Phase 2 is not complete.** The rejected per-attempt runtime prototype remains locally on `codex/phase-2-build-safety` at `7c0642f`, not eligible to merge: fresh sandboxes change iframe origin and strand supported IndexedDB/localStorage/cookies/OAuth state, sandbox PostgreSQL/SQLite/uploads and generated session/JWT secrets. Passing source-file/container fault drills does not preserve those data. A stable isolated preview origin and verified state-preserving supervisor/drain or migration are required. Existing in-flight command and canonical-source fencing, external publishing/late-upload reconciliation, and automatic queued-step continuation across resumable windows remain open. The scoped sub-PR deliberately preserves runtime/source/snapshot behavior while these are designed. Details and evidence limits: `docs/PHASE2_QUEUE_RETRY.md`.
+
+Phases 3–6 remain unstarted in the owner's requested order. Configured staging, test account, stable preview proxy/domain reference and a spend limit have been requested for the remaining integration/benchmark work. A failure-only feed cannot establish an all-build success denominator. No permanent 100/100 score is asserted.
+
+
+### 2026-10-20 — Phase 2 checkpoint: ZIP admission and long-import lease sibling
+
+Full-suite preflight on the scoped queue/retry branch exposed the ZIP importer
+relying on fail-open admission. ZIP now claims verified ownership before actuator
+construction/ensureWorkspace, reports unavailable or disabled coordination as
+retryable503 and busy as409, and holds its exact token until actual finally.
+A response disconnect does not release it. Observed uncertainty/Stop/expiry/loss
+refuses new calls and durable merge; an already-running provider call is not fenced.
+The registered route and heartbeat helper pass55 focused tests, including180s
+virtual wall-clock imports; this is not180s production provider evidence.
+Two source-census tests now follow the extracted heartbeat and reused workspace
+identity, preserving Stop billing and clear-before-write checks. The worktree
+node_modules symlink was replaced with a real copied install, without changing
+package versions or weakening its directory guard. Final-source full checks and
+exact-head remote coverage/real-database drills are still required before push
+and merge. Phase2 remains IN PROGRESS; phases3–6 have not started.
+
+
+### 2026-10-20 — Phase 2 final-source census correction
+
+The post-ZIP full-suite preflight found one stale exact-assignment assertion in
+the server Firestore SDK census: verified admission now conditionally supplies
+null when coordination is disabled. The test now requires the real admin import,
+admin handle initializer and passing that store to claimWorkspaceBuild, while
+retaining both whole-server client-SDK and shared-client-handle prohibitions.
+Nine relevant files pass116/116 underNode22/UTC; no production code changed.
+The known-failing preflight was stopped and all final-source local checks must
+run again before push. No full-suite or remoteCI pass is claimed by this entry.
+
+## 2026-10-20 — Q-1126 batch 2: the four-field ratchet 40 → 24, and the batch caught its own bad measurement
+
+**Fifteen rows cleared, and HOW they cleared is the finding.** Batch 1 had already corrected this row's
+premise — it assumed 52 rows were missing INFORMATION, where the dominant cause is VOCABULARY. Batch 2
+confirms it a second time, with numbers:
+
+**Eleven were label-only.** The information was already written down, under a heading the census does not
+recognise. Q-121 is the cleanest proof: `**Re-checked 2026-10-04:**` fails the detector purely on its
+`Re-` prefix, so it was RENAMED rather than padded with new prose. The others (Q-626, Q-810, Q-813, Q-817,
+Q-895, Q-980, Q-1014, Q-1042, Q-1071, Q-1226) each got a label introducing text the row already supported
+— not one invented `Needs:`, because a plausible-sounding `Needs:` for a blocker nobody investigated is
+the exact defect this row exists to prevent. Q-1226 is mine, from #3850, fixed here rather than left for
+the next session to trip over.
+
+**Four left the blocked set because their STATE was wrong, which matters more than a label.** Q-886 and
+Q-888 read *"awaiting approval of the audit plan"* while carrying a fix that needs no admin decision — and
+a known fix nobody has done is OPEN, not blocked, as this row's own correction says.
+
+### Re-verifying before trusting a row is the lesson, and it paid twice
+
+This row's own note said Q-887's raw provider error body still reaches the browser at `payment.ts:350`.
+**It does not** — that code answers through `sendSafeError` now, and Q-887 has left the open table. A row's
+claim about live code is a hint with a date on it, never evidence. So both corrected rows were confirmed
+against today's code first:
+
+- **Q-886 is live.** `routes/payment.ts:331` logs `Name: … Email: … Phone: …` on EVERY Cashfree order, and
+  `:530` logs the whole `req.body` when a webhook carries no order id. Customer PII in the logs, on the
+  normal path.
+- **Q-888 is half live.** Classification (`classifyCashfreeWebhook`, `:562`) and the end of never-ending
+  PENDING orders (`cashfreeOrderClosedUnpaid` → EXPIRED, DB-5) have landed. What remains: `:589` answers
+  **400** to a payment webhook we have definitively settled, so Cashfree re-sends it indefinitely.
+
+### 🔴 AND THE BATCH'S OWN FIRST MEASUREMENT WAS WRONG — the ratchet nearly shipped one notch loose
+
+The first count said **25** and named Q-699 as deficient. It came from a python re-implementation of the
+census that split on `" | "` and read only the FIRST body cell — so Q-699, whose body contains a pipe,
+looked truncated and was miscounted. Run through the census's OWN parser (which splits on unescaped pipes
+and joins every trailing cell) the count is **24**, and Q-699 is complete, so batch 1's record of it stands
+and there was nothing to re-derive.
+
+**The reversion proof is what caught it.** With the baseline at 25, undoing one label fill took the true
+count to 25 and the ratchet still passed — a guard accepting the very regression it exists to refuse. At 24
+both reversions bite: undoing Q-626's fill fails at `expected 25 to be less than or equal to 24`, and
+putting Q-886 back to BLOCKED fails the same way. **A ratchet is only as honest as the measurement behind
+it, so the number must come from the detector itself — never from a second implementation of it, however
+careful.** This is the sibling of the source-check trap already recorded in this file (a census that reads
+its own documentation): here it is a census re-written instead of re-used.
+
+**Next:** the 24 that remain, of which the payment-audit cluster (Q-881–Q-885, Q-891–Q-894) is the largest
+group; Q-891 and Q-894 genuinely need the admin (revenue columns, coupon policy) and stay blocked. Then
+Q-886 and Q-888 as their own rows of work, one at a time.
+
+## 2026-10-20 — Q-886: a customer's own details never go into a log line whole (and Q-1227, found hunting it)
+
+**The defect was on the NORMAL path, not an error branch.** Three live sites printed a real person's
+details into the container log: `routes/payment.ts` logged `Name: … Email: … Phone: …` on EVERY Cashfree
+order; the same file logged the WHOLE webhook body whenever an event carried no order id — firing exactly
+when something was already wrong, so the worst payloads were the likeliest to print; and `routes/auth.ts`
+logged a full phone number on every successful OTP gate check. Nothing was wrong with wanting those lines:
+an order that fails is diagnosed from them. What was wrong is that the diagnosis needs an IDENTIFIER and
+the code printed an IDENTITY.
+
+**The sibling the hunt found is why this is a module and not three careful edits.** `phoneForLog` already
+existed and was already used — at `auth.ts:167`, eleven lines above `:229`, which printed the next phone
+in full. A rule that must be remembered at every log statement is a rule that will eventually be
+forgotten, and the forgetting is SILENT: a log line that says too much looks exactly like one that says
+enough. So `src/server/lib/piiForLog.ts` is one home (`emailForLog`, `nameForLog`, `webhookShapeForLog`,
+plus `phoneForLog` re-exported), every helper total — junk gives a safe string, never a throw, because a
+logging helper that can throw turns a diagnostic line into an outage.
+
+**The census is shape-based, and two drafts of it were wrong in instructive ways.** Banning the words
+"email"/"phone" near `console.log` flags `[CIRCUIT] ${p.name}` and misses `${cleanPhone}` — wrong in both
+directions, so the census matches the INTERPOLATION of a value whose identifier is a person's own detail.
+Then the first such draft forbade `customer[A-Z]…` wholesale and flagged `${customerIdClean}` **on the
+very line it was meant to bless**, which would have pushed the fix toward a log nobody can trace. An
+account id is OUR handle for "who"; name, email, phone and mobile are the person's. Both reasonings now
+sit beside the pattern rather than only in a commit message. The second draft flagged the fix's own
+`webhookShapeForLog(req.body)`, so the wrapped form is excluded explicitly.
+
+Locked by `tests/aCustomerIsNotIdentifiedInALog.test.ts` (11 tests). **Three reversions bite, one per
+original site:** the payment line back to Name/Email/Phone in full → 2 fail; the whole-body log back →
+2 fail; `auth.ts` back to a raw phone → 2 fail.
+
+### Q-1227 — two drifted `maskPhone` copies, recorded rather than bundled
+
+`src/lib/phoneNumber.ts` keeps the last FOUR digits; `src/server/lib/vaultPin.ts` the last TWO. Same name,
+different behaviour — the fourth rule's duplicated-code class in its worst shape, because a reader who
+checks one and trusts the other is wrong with no way to notice. No call site imports both, which is
+exactly why the drift stayed invisible.
+
+**It is NOT folded into Q-886 on purpose.** The `vaultPin` copy renders a string the USER reads — the
+fresh-sign-in destination hint — so unifying them is not a refactor; it changes what a person sees while
+verifying their identity, and if the last-two copy were the one kept, every OTP destination hint in the
+app would get less informative. Quietly changing a user-facing string while fixing log lines is the trade
+the first absolute rule forbids. 🟡 BLOCKED on the admin's choice of which masking the user should see,
+with last-4 recommended (it is what the rest of the product shows, and what `phoneForLog` already uses).
+
+**Q-888 is next** — the other row batch 2 moved from BLOCKED to OPEN: `routes/payment.ts:589` answers 400
+to a payment webhook we have definitively settled, so Cashfree re-sends it indefinitely.
+## 2026-10-20 — Candidate Weak scope/routing policy (Codex)
+
+Admin requested a lower-cost working-app policy, comparison with current routing, a small complexity call, and a Weak refusal/Strong-selector direction for oversized games. Implemented opt-in `AGENTV3_WEAK_SCOPE_POLICY=on` so current policy can be compared and restored. One strict three-label FlashX preflight before sandbox setup; unavailable/malformed classification does not start coding; exact tested templates skip it. Candidate default coding chain is FlashX/Kimi only; complex planning starts on Kimi. Added a shared text-repair allowance and disabled candidate Weak empty-build regeneration. Candidate measured ceiling defaults to $1 (configurable); accepted classifier usage joins the real ledger. Existing delivery proof remains authoritative. Added regression coverage and comparison in `docs/weak-tier-policy-comparison.md`.
+
+Open limits: not a universal one-pass repair budget across every agentic finishing gate; between-turn ledger checks can overshoot on a live call and do not account for unknown provider usage; imported repository scope requires file inspection, not this prompt-only gate. No paid-provider benchmark or live deployment claimed. No model success/savings percentages claimed. Verification results to be appended after the final gate.
+
+Verification checkpoint: 151 targeted tests passed; frontend/server typechecks passed; production build, bundle budget, boot smoke, unused-import, native-shell, and production-dependency checks passed. Framework eligibility moved unchanged to its module to keep the chat control-flow ratchet below the existing limit (543 → 542). Full-suite verification is NOT complete: automatic approval review rejected further interaction with the full run because a test was attempting a live Anthropic API request (credential/external-spend risk). No full-suite pass, CI-green PR, merge, deployment, or paid benchmark claimed. Candidate stays disabled by default pending complete verification.
+
+## 2026-10-20 — Weak candidate verification completed after admin test authorization
+
+Admin explicitly authorized the live-API-capable suite. Stable final run: **2,803 test files passed; 39,994 tests passed; 67 intentionally skipped; zero failures**. Both typechecks, production build, bundle budget, boot smoke, unused-import, OAuth protocol checks, native-shell and production dependency gates passed. Updated wiring assertions to follow the new runner parameters while retaining their stop/deadline/dead-rung guarantees. Test archive extraction now uses `--no-same-owner` in both sibling extractors, avoiding unrelated host ownership failures without changing archive contents. Invalid ladder overrides now fall back to the candidate's two-model policy rather than accidentally restoring the legacy chain. Classifier request is additionally locked by SDK mocks: one call, 8 output tokens, 5-second timeout, thinking disabled, no SDK retries, and measured usage forwarded. Candidate remains opt-in; no merge, deployment, paired app-generation benchmark, or first-attempt guarantee is claimed.
+
+## 2026-10-20 — Admin authorized PR #3853 merge and Weak policy activation
+
+Rechecked the exact PR head and green GitHub CI, then merged #3853 with an expected-head lease (merge commit 68528197949135513d2df97e3b4dee667036059a). Admin explicitly said to merge and turn on the policy. Activation is a separate additive Cloud Build configuration change: `_WEAK_SCOPE_POLICY=on`, `_WEAK_BUILD_COST_CEILING_USD=1`; trigger-level rollback remains available with `off`. Provider keys, explicit ladder overrides, and Normal/Strong routing are not changed. Deployment and runtime confirmation are pending; do not infer live activation merely from the merge.
+
+
+### 2026-10-20 — Phase 2 recovery identity and completed asset erasure checkpoint
+
+PR #3848 subsequently passed both exact-head CI jobs at
+`7241043914134488c4f54b005988fc76cc62ef9d` and merged as
+`06f8065629debbd846c1f836241c5be9a5a8337e`. Remote coverage suite:
+39,947 passed /73 skipped /0 failed; downloaded real database evidence:
+14 distinct drills passed /0 failed. This supersedes only the earlier pending
+release status, not the open runtime/state-preservation boundaries.
+
+The next scoped checkpoint stops unknown identity reads and nonterminal
+reconnect errors from creating replacement sandboxes. Strict tri-state lookup,
+nominal retryable recovery error and public/nested retry propagation retain
+explicit-ID behavior and typed static-connect not-found source restoration.
+Actual SDK classification is exercised over loopback HTTP, and actual actuator
+lifecycle tests include timeout/late resolution and subsequent retry. Initial
+builder setup refuses before execution; registered preview JSON/stream routes
+report retry honestly without a false missing-package diagnosis. Only definite
+pre-builder refusal settles failed with a zero-step result; later failures retain
+unknown outcome. Extracted crash publishing preserves client redaction and raw
+admin diagnostics; the handler's down-only branch budget remains543.
+
+Account deletion now erases completed private asset spill bytes by a verified
+safe owner prefix, independent of lost Firestore metadata. Writer, reader and
+eraser share the bucket/object path definition. The planner also refuses the
+unowned anonymous namespace. The additive response reports unconfigured/partial
+storage removal separately and honestly. Actual spill→registeredDELETE tests
+preserve foreign/shared/APK objects and cover retry and authorization. Reverting
+the erasure to a success-shaped no-op reproduces retained owner bytes.
+
+Focused component checks pass; complete final-source local gates and exact-head
+CI are still required before this checkpoint can ship. Fresh-create ambiguity,
+first-allocation races, physical command/source fencing, best-effort restore
+sinks, complete local/browser state preservation, late uploads, historical
+buckets and ZIP chunk reconciliation remain OPEN. A separate review found queue
+bindings settle too early on resumable results; the next Phase2 slice will
+address that lifecycle. Phases3–6 remain unstarted. Detail and evidence limits:
+`docs/PHASE2_STATE_PRESERVATION.md`.
+### 2026-10-20 — Phase2 deadline body-exit hold added to PR #3852
+
+The recovery/asset checkpoint's original head `e379b88` passed the full local
+gate: 2,805 files /40,032 tests passed /67 skipped /0 failed, plus both
+typechecks, build/boot, imports/native/OAuth/bundle/server-dependency, audit,
+license and SBOM gates. PR #3852 opened, but main advanced with unrelated
+documentation PR #3851 during verification; both append-only progress histories
+were preserved by a clean main merge. The final combined state must be gated
+again before push. No remoteCI or merge success is claimed yet.
+
+The next sibling was the deadline finalizer marking a build exited and releasing
+ownership while an unabortable body or the finalizer's own awaited persistence
+could still run. Deadline response closure now differs from actual exit: install
+a captured nonreclaimable hold synchronously, share/join the finalizer, cancel
+future timers before cleanup awaits, guarantee stream closure on rejection, and
+keep the exact receipt/lease until real cleanup. Queue publication has its own
+barrier. Stopped-build and reaper paths cannot time-reclaim the deadline-held
+body. A failed deadline reports still stopping and disables automatic resume
+while exit is unconfirmed; changed files are not represented as confirmed saved.
+
+Focused tests exercise independently blocked body/finalizer completion,
+publication versus receipt settlement, heartbeat continuation across eight
+virtual stale windows, failed finalization, newer-map preservation and timer
+cleanup. Independent review caught and corrected early-timer/cleanup and
+lost-renewal release siblings. Full final-source local and exact-head remote
+coverage/database checks remain required.
+
+Still OPEN: physical provider command/source fences, ordinary Stop's older
+time-based local reclaim, fresh allocation ambiguity, complete state/origin
+preservation, queued resumable handoff and late external writes. Normal and
+deadline pricing/terminal paths can still interleave within the same attempt;
+stable operation refs dedupe debits but do not compare requested amounts or
+return prior debit amounts. No pricing policy changed. This bounded authority
+fix does not complete Phase2; phases3–6 remain unstarted.
+
+### 2026-10-20 — Phase2 deadline lease census corrected before push
+
+The combined full-suite preflight found one older wiring assertion demanding
+lease release from the deadline finalizer, the unsafe behavior this checkpoint
+removes. The run was stopped, not recorded as passing. The guard now retains
+owner-bound real-finally release and requires the deadline's captured hold,
+publication barrier and stream close while prohibiting premature lock/lease
+release or false exit marking. Existing behavioral deadline/lease tests exercise
+that invariant through actual lifecycle and transactional implementations. All
+final-source local gates must run again after this correction; remoteCI remains
+pending and PR #3852 is unmerged.
+
+### 2026-10-20 — Phase2 deadline message remains a single reachable module
+
+The subsequent preflight found the replaced deadline wording module unreachable.
+The deadline lifecycle now re-exports the established DeadlinePause helper,
+whose text matches the new body-exit hold: observed files changed, still stopping,
+retry after exit. Its original unit tests now prohibit saved/automatic-continuation
+promises and retain the no-fake-progress/near-success protections. The whole-source
+dead-code guard is unchanged; no exemption was added. That failed preflight was
+stopped and is not passing evidence. Focused and complete final-source checks
+must pass again before the updated PR head is pushed.
+
+### 2026-10-20 — Phase2 asset owner collision caught before updated PR push
+
+The combined deadline/recovery head `f29da58` passed the full Node22/UTC suite:
+2,807 files /40,051 tests passed /67 skipped /0 failed, plus both typechecks,
+production build/boot and imports/native/OAuth/bundle/server-dependency checks.
+That proof predates the following ownership correction and is not the final gate
+for its new source. PR #3852 remains unmerged and its original remote head has
+not yet received these local changes.
+
+Independent review reproduced a dangerous inverse prefix collision in the
+proposed asset eraser: deleting for uid `abc` also selected legacy objects for
+`abc-d`. Refusing only hyphenated deleting UIDs did not protect the shorter
+neighbor. New spills now receive only the server-verified owner separately and
+use an encoded, slash-delimited `workspace-assets-v2` owner component. Erasure
+selects only that exact namespace. Legacy opaque pointers remain readable;
+legacy objects are never deleted by guessing a workspace/session owner. Overall
+`removed` remains false with a legacy ownership limitation, while a separate
+`verifiedOwnerObjectsRemoved` confirms only completed verified-owner objects.
+The registered profile fallback preserves that honest outcome on unexpected
+errors without exposing internal storage details.
+
+The focused asset cohort passed 104 tests and both typechecks. Mutating the
+delete selector back to the unsafe prefix deletes the foreign neighbor and
+fails the stateful regression; replacing deletion with a no-op fails on retained
+verified-owner bytes. These were restored before commit `fa9c876`. Root profile
+limitation checks also pass. Complete final-source local and exact-head remote
+checks remain required after all ownership corrections are frozen.
+
+The sibling audit also confirmed that legacy full workspace IDs themselves
+collide (`abc` + `d-session1` equals `abc-d` + `session1`). Verified tokens and
+fresh history/session collections using that same full key do not disambiguate
+ownership. Existing workspace documents have no trustworthy historical owner
+stamp. A bounded refusal of legacy prefix-only erasure is in progress; a safe
+prospective owner boundary and verified legacy migration are still OPEN for
+private reads/writes. The roadmap now explicitly qualifies Phase1 security
+readiness. No unconditional security/100-percent claim is justified.
+
+### 2026-10-20 — Phase2 unverified deletion siblings and honest user outcomes
+
+The inverse UID collision also reaches legacy Firestore workspace ranges,
+derived histories/build events and hosted snapshots. Their shared planner now
+refuses prefix-only attribution for every valid UID, not only a hyphenated
+requester, and reports `ownership-unverified` before destructive selection.
+A deliberate planner-only reversion of the registered profile test deletes the
+foreign `workspace_files_v3/agentv3-abc-d-session1` document and fails on its
+missing actual bytes. The safe source was restored.
+
+The sibling audit found distinct composite-key cases: sync's `abc__c0` can be
+another account's manifest or `abc`'s chunk, and legacy conversation turns can
+belong to a colliding workspace while the parent retains a different userId.
+A parent owner field does not prove the ownership of mixed historical payloads.
+The sync eraser now refuses attribution without reads/deletes; its actual-body
+reversion loses foreign manifest/chunk data in both directions and fails.
+Known mixed-owner platform stores retain their registry/child inventory while
+returning explicit zero-deletion refusal, rather than being hidden from the
+census. ADR/debt and app-identity composite stores are being checked under this
+same policy; final scope and gates are recorded after their source freezes.
+
+The in-app confirmation screen and public deletion instructions now disclose
+retained ownership-unverified workspace/conversation/sync/snapshot/asset data.
+An account-removal acknowledgment never proves all data was wiped. A missing or
+failed response never proves nothing changed; sign-out follows confirmed account
+removal. The 25 focused product/profile checks passed before the final combined
+freeze. Full local and exact-head remote checks are still required. Private
+read/write ownership, verified legacy migration and late-write fencing remain
+OPEN; these destructive-action mitigations do not complete either Phase2 or
+unconditional security readiness.
+
+### 2026-10-20 — Phase2 destructive ownership scope frozen for final gate
+
+The completed bounded sibling audit now covers five proven mixed-owner platform
+stores through one pre-query refusal policy: agentv3_conversations,
+sonic_voice_memory, adrDecisions, techDebt and app_ai_apps. Their inventory and
+children remain declared. Actual production writers reproduce shared physical
+keys and mixed turns/arrays/previous nonces; selective policy reversions delete
+foreign persisted bytes and fail the regressions. Whole-eraser no-op controls
+also fail because independently attributable platform records must still erase.
+The real registered profile regression invokes retention, derived, workspace,
+snapshot and sync erasers together; ambiguous data survives while exact-owner
+platform/bot paths remain exercised.
+
+Final combined focused ownership/product cohort: 17 files /172 tests passed,
+zero failed/skipped, Node22/UTC. Asset namespace, sync, platform retention and
+legacy planner changes are committed locally as fa9c876, 96c5a1f, 958dd8e and
+dbe7fe7. No updated head is pushed yet. The bounded additional registry review
+found no further reachable mixed-owner collision in its selected current caller
+domains; that is not proof of historical attribution or deployed Firestore rules.
+The independent prospective ownership design is retained in the execution
+artifact at /tmp/navbharatai-phase2-staging/verified-workspace-owner-design.md.
+
+The queue normal-module handoff is a separate isolated checkpoint, local
+37e667e, with 261 focused tests, 21/21 real Firestore multiprocess drills and
+both typechecks passed. It still needs the final combined-source gate and CI.
+Phase2 remains IN PROGRESS. Legacy private access/migration, physical SDK/source
+fencing, full state/origin preservation and production-provider evidence remain
+OPEN. Phases3–6 have not started. Merge authorization remains conditional on
+green exact-head CI; no 100/100 or phase completion is inferred from these fixes.
+
+### 2026-10-20 — Phase2 final preflight preserves the handler branch ratchet
+
+The full final4 preflight at `9ca0ddd` found 544 branch tokens against the
+unchanged 543 chat-handler budget. It was stopped (exit130), not counted as a
+passing full suite. The verified-owner asset caller had added a redundant null
+coalescing fallback although its owner parameter already accepts undefined;
+removing only that fallback keeps the same verified-only identity and unverified
+legacy policy with one fewer branch. No budget, threshold or guard was raised.
+The headroom/real-asset/authenticated-preview cohort then passed 3 files /80 tests.
+All final-source typechecks, build/checks and full suite must pass again before
+push; PR #3852 remains unmerged and no remote CI success is claimed.
+
+### 2026-10-20 — Phase2 old canonical-history erasure contract corrected
+
+Final5 at `24a502e` completed with 2,810 files /40,076 tests passing /67 skipped
+and one failing test, `historyErasureOwnerIsolation`. All quick gates passed, but
+the full suite did not: that older Phase1 test still treated a full-key history
+parent as sufficient ownership proof and expected deletion after source removal.
+The focused ownership sweep had missed this sibling.
+
+The existing stateful test now retains full-key, bare, anonymous and neighboring
+histories, including the identical physical key made by alice/x-shared123 and
+alice-x/shared123. It asserts actual bytes remain and no collection selection or
+delete occurs, followed by the explicit ownership-unverified outcome. Restoring
+only the old prefix planner deletes the foreign history/version and fails the
+byte assertion; the safe production file was restored unchanged. The restored
+history/profile/conversation/headroom cohort passes 4 files /12 tests. No
+production code, inventory, threshold or skip changed for this correction. The
+complete final-source suite and local checks must pass again before push/merge.
+## 2026-10-20 — failed-build audit scope correction and persistent queue (PR #3846)
+
+**NOT COMPLETE under the fifth and sixth absolute rules.** The source milestone `f713e64` and its
+551 individualized terminal-cause reviews did not include the mandatory exhaustive per-warning,
+heal, workaround, skip, false-finding and struggle ledger, nor persistent queue/progress updates.
+This entry corrects that scope; it does not erase earlier records or turn partial work into completion.
+
+Persistent safe evidence index: `docs/failed-build-audit-2026-10-20.csv` (551 report rows), explained in
+`docs/failed-build-audit-2026-10-20.md`. All 94 retained-history cursor pages were exhausted and all
+551 full reports retrieved. Detailed reports, prompts and raw telemetry remain outside the repository.
+No historical generated app was rerun or independently verified.
+
+**Count corrected:** 26 legacy `fixed-this-turn` labels divide into **4 demonstrated new terminal
+platform class fixes, 7 contributor fixes with terminal outcome unresolved, 10 exploration mitigations,
+3 reporting/diagnosis changes, and 2 classes already covered before this PR**. They are not 26 repaired
+reports. Whole reports newly RESOLVED under rule six: **0**. The CSV preserves both the old label and
+the independently audited meaning. The four class mappings are listed in the companion document.
+
+**Queue:** 268 new rows, owner **#3846**, preserving all existing rows/owners and the closed
+register. **Q-1300 IN PROGRESS** owns full all-item/five-bucket enumeration for all 551 reports, including
+earlier findings in user-stop runs. Stable per-report IDs are Q-(1301 + index), with intentional holes;
+only genuine information/external gaps carry four-field BLOCKED rows. The 220 needs-investigation
+assessments remain actionable, not blanket blocked by missing app snapshots. Existing 67a2b0a2 work
+reuses Q-1120–Q-1122; external balance restoration remains related to Q-1210. Existing E2E image action
+remains Q-107. **Q-1890/Q-1891/Q-1892 IN PROGRESS** record live Stop during finishing restore, unchecked
+rollback/removal outcomes across route siblings, and the pre-open SDK abort/deadline gap. These were
+discovered while checking this PR; their owners are implementing/proving them, not claiming them resolved.
+
+**Exact next work:** continue Q-1300 itemization and the per-report primary investigations. For every
+item, name its origin/class, hunt siblings and prior fixes, prevent first-pass recurrence, prove the
+behavioral reversion, then record final merged-state validation or all four genuine blocked fields.
+Do not call the 551-row index an exhaustive item autopsy; five-bucket totals are still uncomputed.
+The prioritized proactive lever is bounded final saved/served delivery evidence using existing contracts
+and validators; do not prescribe source repair from a generic count or a recovered provider warning.
+
+Prior source-milestone verification: 2,780 test files / 39,717 tests passed, 67 skipped, zero failed;
+frontend/server typechecks and production build passed. Final docs and newly discovered source gaps
+require a fresh final gate before push. PR #3846 is not claimed merged or deployed by this entry.
+
+The four counted terminal platform classes also passed an isolated behavior-reversion audit:
+the same eight selected existing assertions passed on f713e64 and all eight failed when the four
+corresponding source modules were replaced by their baseline versions. The class/report/test matrix
+is in the companion document. Missing-module failures did not count; this still proves no historical
+application rebuild and no exhaustive all-item report closure. Queue census checks on this append:
+3 files / 22 tests passed (closed rows stay closed, unique IDs, valid states and four-field blockers).
+
+### 2026-10-20 — Q-1893: the fatal-account retirement hunt found the judge re-review sibling
+
+The builder-chain correction was not the whole class: a judge candidate chain could encounter a
+fatal account failure and call that same account again on a later review. **Q-1893 IN PROGRESS,
+owner #3846**, records the missed sibling rather than hiding it behind the first fix. The provider
+owner is applying the shared fatal-error predicate per candidate chain and disabling SDK automatic
+retry where the chain itself controls retry. Independent credentials, transient rate limits and a
+fresh chain stay eligible; no tier/order/pricing policy is changed. Focused behavior and reversion
+proof and the final gate are required before merge; this entry does not mark the item RESOLVED.
+
+This adds one row to the preceding append: **269 pending audit rows in total** (248 IN PROGRESS,
+21 four-field BLOCKED). The independently audited count stays **4 demonstrated terminal platform
+classes**, not 26 repaired reports; historical application reruns and sixth-rule whole-report
+closure remain **0**. Q-1300's exhaustive all-item/five-bucket work remains NOT COMPLETE.
+
+Q-1893 focused checkpoint: shared predicate in `providerErrorClass.ts`, preserved builder-runner
+consumer API, per-candidate retirement in `judgeChain.ts`, and `maxRetries: 0` only where the judge
+chain owns fallback. `tests/aPermanentJudgeFailureIsNotRetried.test.ts` adds 11 checks. Seven focused
+files / 139 tests passed. Isolated baseline restoration produced 7 failures / 4 passes (6 behavior
+assertions plus 1 source census); independent credentials, transient failures and fresh chains remain
+eligible. Final shared-state typechecks/CI and merge remain required; the row stays IN PROGRESS.
+
+### 2026-10-20 — ownership correction before the final gate
+
+The preceding 248-IN-PROGRESS count overstated what PR #3846 actually implements. Those pending
+historical primary investigations are not made active implementation work merely by assigning the
+current PR. The 269 new audit rows now correctly contain **240 OPEN / owner —**, **8 IN PROGRESS**,
+and **21 genuine four-field BLOCKED** rows. Q-1300 is OPEN: exhaustive all-warning/five-bucket
+enumeration has not started. Only Q-1383/Q-1635/Q-1670/Q-1804 (four audited terminal source classes)
+and Q-1890–Q-1893 (implemented source siblings pending final gate/merge) remain IN PROGRESS under #3846.
+Known contributor/mitigation/reporting changes are credited to this PR in notes without pretending
+their unresolved terminal investigations are implemented. No old pre-audit queue row or owner changed.
+The companion CSV now records current queue state/owner independently of the legacy code-coverage label.
+This is an honest work-state correction, not abandonment or closure: all-item work remains NOT COMPLETE,
+historical app reruns remain zero, and no report is newly RESOLVED under the sixth rule.
+
+### 2026-10-20 — Q-1894 remains an OPEN cache/restore investigation; final focused judge proof
+
+**Q-1894 OPEN / owner —** records a separate warm-cache risk found by broad source census:
+confirmed removals through shell commands may leave warm-only `_fileCache` keys that later flow
+through `mergeRestoreSources` during sandbox recreation. References:
+`src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts` (cache/restore path) and
+`src/server/AgentV3/sandboxRestore.ts`. The next step is origin-to-end reproduction through live
+cache invalidation and recreation, not a speculative restore-policy change; warm source may hold
+unpersisted work. The applied-result restoration fix does not claim cache invalidation, and this
+risk is not a proven historical terminal cause. No BLOCKED or RESOLVED status is invented.
+
+New audit queue totals are now **270 rows: 241 OPEN, 8 IN PROGRESS, 21 four-field BLOCKED**. Existing
+pre-audit rows are unchanged; Q-1300 is OPEN and exhaustive all-item/five-bucket enumeration has not
+started. The four counted terminal platform classes and zero historical-app/whole-report closure
+counts are unchanged. Q-1893's final focused validation passed 10 files / 163 tests and the server
+typecheck, with 12 cases now in its new regression file; its initial behavior-reversion proof remains
+7 failures / 4 passes (six behavior assertions and one source census). The final shared-state gate
+and merge remain required for all eight IN-PROGRESS source items.
+
+### 2026-10-20 — merged original source coverage; follow-up ownership and remaining siblings
+
+Another session merged PR #3846 at 03:33 UTC, after its hosted CI run 39359912519 succeeded.
+This session did not perform that merge. The follow-up now starts from main
+`adc53ee215beb5b7f7c5042245b2817c16a2deca` on `codex/failed-build-claude-audit-20261020`.
+Both this file and BUILD_REPORT_QUEUE.md preserve the complete fresh-main contents as their
+unchanged prefix, including the other session's appended progress. Earlier stanzas above describe
+their checkpoints; they do not assign the newly implemented follow-up fixes to merged #3846.
+
+**Queue ownership corrected after merge:** Q-1383/Q-1635/Q-1670/Q-1804 credit the four merged
+terminal source-class corrections but are OPEN / owner — for their remaining all-item review and
+unverified historical delivery. Only **Q-1890–Q-1893 remain IN PROGRESS**, owned by the follow-up
+branch until its PR exists; these fixes were not included in #3846. The 21 genuine four-field
+BLOCKED rows retain their requirements with owner —, not a merged partial PR. No pre-audit row,
+owner or closed-register entry changed. The CSV's 551 primary queue states/owners match the queue.
+
+**Q-1890/Q-1891 implemented scope:** live Stop after awaited finishing reads, then checked applied
+restore outcomes across eight automatic undo producers: finishing recheck, shared five-consumer
+verification callback, final GreenGuard, design-heal undo, deadSalvage, unusedDepPrune,
+mobileShipRealBuild with its repair/commit consumer, and EndgameRepair with the real removal port.
+`src/server/AgentV3/snapshotRestore.ts` admits each new mutation and reconciles only landed results;
+failed removals cannot erase bookkeeping or produce complete-rollback claims. Already dispatched
+work may finish and its actual outcome is retained. Pre-edit behavior failures covered finishing,
+prune, mobile and Endgame; targeted nonzero-rm, Stop and route-wiring reversions also failed.
+Final combined verification passed **18 files / 875 tests** and server typecheck. References:
+`tests/anAutomaticRestoreReportsOnlyWhatItApplied.test.ts` and
+`tests/anEndgameRollbackClaimsOnlyWhatLanded.test.ts`. This is the finite automatic undo class,
+not a claim about all forward writes or cache invalidation; final gate and follow-up merge remain.
+
+**Q-1892 implemented scope:** OpenAiToolRunner passes caller cancellation/deadlines into streamed
+and direct SDK opening before a response exists. All five cases in
+`tests/aStoppedOpenAiRequestIsCancelled.test.ts` passed and failed on baseline restoration.
+Q-1893's final provider combination passed **10 files / 163 tests** and server typecheck, including
+the SDK-opening and judge-chain siblings. Its 12-case judge regression preserves independent
+credentials, transient recovery, fresh chains and honest planned/served attribution. These are
+follow-up source-class proofs, not historical generated-app replays or routing/pricing changes.
+
+**Three further findings remain OPEN / owner —**, outside the eight corrected automatic undo
+producers; they have not been silently included in the fixed count:
+
+- **Q-1895:** restoreKitRules/snapSpacing in `src/server/routes/agentv3.ts` guard sandbox writes but
+  have no fresh Stop check before the subsequent durable merge. Reproduce the deferred boundary
+  and trace final-save preservation policy before changing it; already landed work must remain honest.
+- **Q-1896:** FileGuardian forward reseeding in the same route ignores writeWorkspaceFiles
+  written/skipped results before publishing/narrating the planned restored count. Reproduce partial
+  or refused writes and fix the forward-recovery result/consumer boundary separately.
+- **Q-1897:** a full continuation restart of the same truncated file can replace the partial via
+  LAST-wins parsing while discardedReplies remains empty. Local reproduction demonstrates the edge;
+  the existing per-contributor billing policy still needs tracing through discardTurnOutput, because
+  the first reply may also contain retained complete files. No billing source change or universal
+  full-reply refund is claimed. This is actionable OPEN, not an invented information blocker.
+
+Q-1894's warm-cache removal/recreation risk also remains OPEN, without a live reproduction.
+The append now contains **273 pending rows: 248 OPEN, 4 IN PROGRESS, 21 four-field BLOCKED**.
+Exact resume: finish the follow-up gate for Q-1890–Q-1893, then the Q-1300 full-item inventory and
+remaining primary/adjacent investigations. The 551 terminal-cause reviews still are **NOT COMPLETE**
+all-item/five-bucket autopsies. The audited original count remains **4 demonstrated terminal platform
+classes**, historical application reruns **0**, and sixth-rule whole reports newly RESOLVED **0**.
+
+Final documentation verification after these corrections: all **3 queue suites / 22 tests passed**;
+the 273-row state census matched 248 OPEN / 4 IN PROGRESS / 21 four-field BLOCKED. The 551 unique
+CSV report rows match the queue, every referenced source/test path exists, and every all-item,
+whole-report-resolved and historical-rerun flag remains false. Fresh-main prefixes and whitespace
+validation passed. The follow-up's full shared-state source gate, PR and merge remain root-owned.
+
+### 2026-10-20 — Q-1898: first follow-up final gate failed; integration proof required
+
+The first follow-up full-suite gate is **FAILED: 11 safety-wiring assertions across eight test
+files**, with 39,775 tests passed and 67 skipped. All ten non-suite checks passed; those results do
+not override the failed suite. **Q-1898 IN PROGRESS**, owner
+`codex/failed-build-claude-audit-20261020`, records the CI-autopsy integration work. Three agents
+are updating the existing guards to trace the new shared automatic-restore door and applied-state
+save, preserving the behavior/census guarantees; no skipped assertion or production change is
+planned. The relevant boundary reversions and a fresh complete final gate are required before
+claiming this integration resolved.
+
+The audit append now has **274 pending rows: 248 OPEN, 5 IN PROGRESS, 21 four-field BLOCKED**.
+Exact resume starts with Q-1898 proof and the follow-up final gate for Q-1890–Q-1893, then Q-1300
+and the remaining primary/adjacent investigations. This new CI item does not change the original
+**4 demonstrated terminal platform classes / 0 historical app reruns / 0 sixth-rule report closures**.
+The ongoing next report item-autopsy is scratch-only; no new historical repair is claimed.
+
+### 2026-10-20 — Q-1898 targeted integration repaired; Q-1899 preview contributor and first item ledger
+
+The Q-1898 assertion repairs are implemented: targeted validation batches passed **3 files / 62
+tests, 3 files / 70 tests, and 4 files / 57 tests**. They trace the shared restoration door and
+applied-state save, and deliberate removal of the relevant safety boundaries still fails. No
+assertion was skipped or production behavior changed for this integration repair. The earlier
+full-suite failure remains the last full-gate result until a complete rerun passes; Q-1898 stays
+IN PROGRESS rather than being called resolved from targeted tests.
+
+The next Q-1300 report review exposed **Q-1899 IN PROGRESS**, owner
+`codex/failed-build-claude-audit-20261020`: 26 successful unchanged update_preview requests counted
+as mutations and reset their own repeat evidence. RepeatProbeGuard and the narrow AgentRunner
+dispatch/loop region now require the actual unchanged acknowledgement plus unchanged dispatcher
+changeCount before calling an invocation no effect. Real edits, actual preview rebuild/heal, new
+ports, failed calls and same-turn useful progress remain allowed; update_preview is not blanket-
+banned. The report-shaped real-dispatcher replay now ends honestly after 8 unchanged calls.
+`tests/anUnchangedPreviewCannotResetItsLoopGuard.test.ts` adds **15 regressions**; combined focused
+verification passed **7 files / 250 tests**, both typechecks and unused-import validation. Isolated
+restoration of both original source files fails the selected 26-same-port behavior assertion;
+current source passes that identical selection. Full final gate and follow-up merge remain.
+This is a contributor correction, not proof the historical terminal cap or app delivery is fixed.
+
+**Q-1300 has started, not finished.** Its first retained-surface item ledger is persisted at
+`docs/failed-build-autopsy-618b1c30-2026-10-20.md`: **61 distinct rows, 47 OPEN / 14 genuine four-field
+BLOCKED**. Buckets: **30 observed recoveries, 2 workarounds, 16 skips/evidence gaps, 2 still-broken
+conditions, 11 struggles**. Every retained entry was inspected: 500 issue slots (516 expanded
+occurrences), 5 problem-view mirrors, 127 model calls and 40 commands. Repeated diagnostic
+locations and unchanged preview events are deduplicated transparently with occurrence counts;
+all 40 missing command exits, clipped previews, missing generated source/DOM and unfinished final
+feature proof remain explicit. No report command, raw prompt, model output or credential is
+executed or published. The late 40-call feature-presence heal remains a separate convergence
+investigation; neither true missing controls nor their final absence are invented from a capture.
+
+The remaining **550 reports have no exhaustive item ledger yet**. The 551-row index now links the
+first ledger separately from its still-false original all-item/whole-report/rerun completion flags.
+The pending primary/source queue append totals **275 rows: 248 OPEN / 6 IN PROGRESS / 21 four-field
+BLOCKED**; those totals are a separate projection from the first report's local item rows. No old
+pre-audit row or closed-register entry changed. Original audited counts remain **4 demonstrated
+terminal platform classes / 0 historical app reruns / 0 sixth-rule whole-report resolutions**.
+Exact resume: launch the complete frozen follow-up gate, then continue the next non-user-stop
+report `cfd01074-7c40-4514-8f26-36ae07fdb1ae` read-only in scratch; no further batch source/doc scope
+changes are authorized before that gate.
+
+### 2026-10-20 — individual queue rows required; Q-1899 complete sibling proof before final gate
+
+The separate 61-row document was not enough for rule six's persistent queue requirement.
+Every retained item now also has its own BUILD_REPORT_QUEUE.md row: **Q-1900–Q-1960 map exactly
+to I001–I061**. The preview contributor **I029 → Q-1928** is IN PROGRESS under the follow-up
+branch/Q-1899; the other **46 OPEN / 14 four-field BLOCKED** rows have owner —. Their 61-row
+ledger preserves each bucket, counted repetitions, causal certainty, source/sibling/test
+references and next action. No row is deleted or newly RESOLVED. The original primary rows
+remain, and Q-1300/Q-1302 plus the 551-report CSV link the item range explicitly.
+
+The Q-1899 class hunt also proved planning-only task and pure recipe-help siblings: baseline
+real-runner repetitions made 15 calls, zero writes/commands/spawn and zero changeCount delta,
+yet reset their epochs 15 times with no steer. They now have their own **Q-1961/Q-1962 IN
+PROGRESS** rows under the same follow-up branch. Exact invocation/result plus unchanged actual
+work counters are required to count these receipts as no effect; real delegation, executing
+recipes, source edits and preview rebuild/heal remain allowed. No tool is blanket-banned, and
+no routing, pricing or time-cap policy changed.
+
+Final scoped proof: **31 new regressions (15 preview + 16 siblings)** and **8 focused files /
+266 tests passed**, with both typechecks and unused-import validation green. Restoring both
+original production source files in isolation fails **all 8 selected behavior cases** (1 preview,
+3 planning-only roles, 4 recipe-help paths); final generic source passes the identical eight,
+with 14 unrelated tests unselected. No missing-module/export error was counted as RED. Tests:
+`tests/anUnchangedPreviewCannotResetItsLoopGuard.test.ts` and
+`tests/aPureToolReceiptCannotResetItsLoopGuard.test.ts`. The full frozen-state gate and merge
+remain pending; Q-1899/Q-1928/Q-1961/Q-1962 remain IN PROGRESS.
+
+Current audit queue append: **338 rows = 294 OPEN / 9 IN PROGRESS / 35 genuine four-field
+BLOCKED**. This is the earlier 275 primary/source rows plus 61 individual historical items and
+2 discovered sibling items, not 338 distinct repaired classes. Main's original queue/progress
+prefixes and closed register are preserved. The first retained report ledger remains incomplete
+at the root-fix/final-verification level; 550 other reports still await exhaustive itemization.
+The four demonstrated historical terminal-source classes, zero historical app reruns and zero
+sixth-rule whole-report resolutions are unchanged. Next cfd01074 autopsy remains scratch-only
+while the final gate runs; no further source/doc scope expansion in this batch.
+
+
+### 2026-10-20 — second retained item ledger; conservative orphan authority and failed-gate privacy siblings
+
+The complete retained surface of the next non-user-stop report, cfd01074, is now recorded in
+`docs/failed-build-autopsy-cfd01074-2026-10-20.md`: **58 items**, each with its own **Q-1963–Q-2020**
+row. Buckets: **33 observed recoveries, 4 workarounds, 9 skips, 2 still-broken conditions and
+10 struggles**. States: **47 OPEN / 3 IN PROGRESS / 8 genuine four-field BLOCKED**. All 326 issue
+slots / 348 expanded occurrences, 17 problem mirrors, 63 model calls and 16 commands were inspected.
+Repetition/deduplication, clipped/null-exit payloads and overlapping latency remain explicit.
+The terminal cause is the explicit 1500-second platform cap; earlier recovered provider failures
+are not substituted for it. There was no historical saved-app/runtime replay or complete journey proof.
+
+**Q-2021 IN PROGRESS**, owner `codex/failed-build-claude-audit-20261020`, corrects a proven upstream
+contributor: relative-only orphan evidence ignored three retained alias imports and could delete
+live screens before spending model calls recreating them. I020–I022/Q-1982–Q-1984 retain those
+three individual effects and supported historical linkage; the full original graph is unavailable.
+`ArchitectureAnalysis.ts` shares local import candidates; `journeyDerivation.ts` uses AST module
+edges and conservative configuration/package authority; `ToolDispatcher.ts` reads that metadata
+on the actual cleanup path. Static/lazy/re-export/require, alias/root ambiguity, dynamic or unknown
+loading, unreadable/malformed metadata and shared journey/data-entry consumers are covered.
+Unknown authority cannot justify deletion, while ordinary packages and genuine unused components
+remain controlled. `tests/anImportedScreenIsNeverALeftover.test.ts` (41) and
+`tests/anUnknownImportIsNotOrphanEvidence.test.ts` (18) add **59 passing tests**. The focused sweep
+passes **11 files / 244 tests**, with **1 existing skipped test**; both typechecks and unused-import
+validation pass. Isolated original-three-source reversion yields **53 behavioral failures / 5
+passing controls**; final source passes **58 selected behaviors**, excluding one authority census.
+This is implemented class prevention pending the integrated final gate and merge, not a fifth
+demonstrated historical terminal class or proof of final app functionality.
+
+The second complete follow-up suite remained **RED: 39,822 PASS / 67 SKIP / 1 asynchronous
+Crashlytics privacy test FAIL**. All eleven prior wiring failures were gone; all eleven non-suite
+checks passed. **Q-2022 IN PROGRESS** separately records callback-based waiting in
+`tests/crashReportsCarryNoSecrets.test.ts`; a controlled 50 ms digest delay fails the original
+fixed wait and passes the repair. That investigation exposed **Q-2023** stale-authentication
+hash/clear ordering and **Q-2024** an old SDK load crossing module reset, both IN PROGRESS under
+the same follow-up owner. `src/lib/observability/index.ts` now uses auth revisions, reset generation
+and a shared SDK promise without the redundant cached-sink fast path. It preserves pending clears
+through failed/new hashes and SDK-ready ordering; native calls already dispatched are not cancelled.
+Final native/privacy proof: **71/71 passed**, both typechecks and unused-import validation green.
+Original-module reversion had seven behavior failures and five boundary passes; final source passes
+the selected twelve. The later cached-order case fails on the superseded checkpoint and passes
+current source. Reset is exercised through controlled test dependencies; no historical build-report
+or production telemetry incident is claimed. Earlier 70-test/checkpoint evidence was superseded.
+
+The primary checkpoint was rebased on fresh main `885ba41023c2f7327be956aadc71f79ee2840821`;
+the isolated source integration now starts from `27f25e050082d470849d6e99c21f1789e71592a1`.
+The earlier 43-file checkpoint was local and RED, not a published green PR. Only the combined,
+fully verified follow-up is planned for publication. Existing main queue/progress content is
+preserved byte-for-byte as a prefix; this progress update is append-only.
+
+Current audit append: **400 pending rows = 341 OPEN / 16 IN PROGRESS / 43 genuine four-field
+BLOCKED**. This is 338 earlier rows plus 58 historical item rows and Q-2021–Q-2024; it is not a
+count of fixed reports. The two retained ledgers have **119 items across only 2 reports**:
+**63 observed recoveries / 6 workarounds / 25 skips / 4 still-broken conditions / 21 struggles**.
+The remaining **549 reports still await exhaustive itemization**. Only six reports have a
+structured `generatedFiles` payload; other reports can retain partial source inside clipped
+tool previews. No claim of zero recoverable source characters in all other reports is made.
+The CSV links both ledgers while all original all-item-complete, historical-rerun and whole-report-
+resolved flags remain false. Audited original counts stay **4 demonstrated terminal platform
+classes / 0 historical application reruns / 0 sixth-rule whole-report resolutions**.
+
+Exact resume: run the combined frozen full gate for the follow-up, including Q-2021–Q-2024, then
+publish once green; merge only after the admin explicitly names this PR. Keep all implemented
+source/CI rows IN PROGRESS until merge.
+Remaining item-level prevention and Q-1894–Q-1897 stay open. Third-report expansion is paused;
+resume one-by-one Q-1300 work after this batch, without rewriting prior checkpoint history.
+
+### 2026-10-20 — fresh-main rebase after connector interruption; new final gate pending
+
+The connector upload/catalog interruption ran from approximately 05:37 to 11:06 UTC. During it,
+main advanced from `885ba410` to `68528197949135513d2df97e3b4dee667036059a` through other sessions'
+PRs #3848–#3853. All five local checkpoints rebased cleanly; the pre-documentation HEAD is
+`459601558`. Existing fresh-main content and all previous progress remain unchanged as a prefix.
+
+The prior exact tree `3efec7ea` completed its local full gate: **2,798 files / 39,996 tests passed,
+67 skipped**, with **all 14 non-suite checks passed**. This proves that earlier tree only. The
+complete gate on the newly rebased fresh-main tree is **PENDING**; no follow-up PR was created.
+Resume with that complete gate, then publish once green; merge only after the admin explicitly
+names that PR. Do not treat the connector interruption or rebase as a new source repair.
+
+Persisted scope is unchanged: **2 ledgers / 119 items / 549 reports awaiting itemization**;
+the audit queue remains **400 pending rows = 341 OPEN / 16 IN PROGRESS / 43 four-field BLOCKED**.
+The third report's 51-item ledger is ready in scratch for the next batch and is not published or
+counted here. Original counts remain **4 terminal source classes / 0 historical app reruns /
+0 whole-report resolutions**. No queue, CSV, source or third-ledger publication change is included.
+
+
+### 2026-10-20 - published audit PR3856: integrate the next main policy activation
+
+PR3856 published commit `5db7cc763` / tree `2f38c4d2` after the final local gate:
+2,811 files / 40,161 tests passed / 67 skipped, all 14 additional CI checks, and
+14 real Firestore/multiprocess drills passed. Remote commit/tree matched exactly.
+Its hosted database job passed; hosted coverage was still running when main advanced.
+
+Main `3974c34d` adds the authorized deployment-policy activation from PR3855: five
+configuration/documentation/test files, no application source or dependency changes.
+Integrate that commit while preserving its exact files, main's queue/progress history
+and all prior local audit entries. The earlier green results remain scoped to their
+old trees. The merged-state final gate is pending at this checkpoint; do not claim
+hosted green or merge this PR without the admin explicitly naming it. Counts remain
+4 demonstrated historical terminal classes / 0 app reruns / 0 whole-report closures;
+two repository item ledgers / 119 items / 549 remaining repository ledgers.
+
+
+### 2026-10-20 - PR3856 hosted census timeout and final-state verification restart
+
+Old published head5db7cc763 hosted run39414984247 completed with40,154 tests passed,
+one restore-census test timing out at20seconds and73 skipped. The authority scan
+AST-parsed all2,453 non-test source files before checking relevant helper names.
+Q-2163 is IN PROGRESS under this PR for conservative prefiltering with escaped-name
+coverage, full AST traversal, unchanged exact policy checks and behavioral proof.
+The timeout is not raised and no census boundary or test is skipped. Frozen proof
+preserves all2,453 input files and the exact18 policies; AST parsing falls2,453→684.
+All18 focused tests pass; one-CPU V8 census9.015s is below the unchanged20s cap.
+Missing-live-gate, new-unclassified-restore and naive raw-prefilter negatives fail
+correctly. The merged-state full and hosted gates remain pending at this checkpoint. The superseded
+local25a run was stopped intentionally; it is not recorded as a green result.
+
+Audit append now401 rows =341 OPEN /17 IN PROGRESS /43 four-field BLOCKED. This adds
+one CI integration row to the earlier400; historical terminal class/app replay/whole
+report closure counts stay4/0/0. The separate next-batch worktree owns three newly
+prepared item ledgers and the typed-launch investigation; it is outside PR3856.
+
+
+### 2026-10-20 - preserve concurrent PR3856 integration and restart exact-tree verification
+
+Remote PR3856 advanced independently to5456d186c, adding main17a4c45ae
+(customer-log privacy PR3854) and the phase-two deadline/recovery/verified-owner
+erasure branch from PR3852. This local merge preserves those authored changes,
+all queue rows and both progress histories; they are not credited as new failed-
+report repairs by this audit. The sole restore-census conflict keeps the proven
+escape-aware scanner and its unchanged20-second timeout instead of the concurrent
+raw-only filter/60-second allowance. Corpus equivalence is checked again on the
+combined source; all final gates are pending for this tree.
+
+The fca616bb6 checkpoint passed all14 additional checks and14 real database
+drills, but its full coverage suite never ran: the superseded runner left a lock
+owned by a zombie PID. The next run uses its own coverage report directory; no
+active process lock is removed. This is a verification restart, not a green
+coverage claim. Audit append remains401 rows /119 individually enumerated items
+in2 reports,4 demonstrated terminal classes,0 historical app reruns and0 whole-
+report closures. No merge is authorized or performed.
+### 2026-10-20 — LOCAL next batch: three retained ledgers, not yet published or final-gated
+
+The isolated branch `codex/failed-build-next-ledgers-20261020` starts at
+`25a0c781528520619f8eac948fa620638d2211d8`, incorporating fresh main
+`3974c34d95db3f2c4384d1477317ba9cf275eacd`. Existing main/previous progress is preserved
+as an exact byte prefix; the closed register and all 400 earlier audit row states/owners stay intact.
+Only Q-1300 and primary notes Q-1304/Q-1307/Q-1309 are updated for the new retained itemization.
+
+Three fully cross-channel-reviewed retained ledgers are now recorded locally, each item with its
+own queue row: 6af23429 has 51 (Q-2025–Q-2075), b6283d2d has 42 (Q-2076–Q-2117), and
+12514b7f has 44 (Q-2118–Q-2161). Their 137 items are 129 OPEN / 8 genuine four-field BLOCKED;
+their five buckets are 15 observed recoveries / 11 workarounds / 51 skips / 17 still-broken /
+43 struggles. Missing command payloads, clipped previews and overlapping/mirrored observations
+are retained as explicit limits, not silently reconstructed. The fourth report's post-endedAt
+billing telemetry is excluded from terminal causality; the fifth report's local repair cancellation
+is distinct from its actual global cap and is not reported as a provider outage.
+
+Q-2162 is the active plain-TypeScript-server managed-launch class, IN PROGRESS on this next branch.
+The third report proves a 300.003-second foreground deadline; an inert helper counterexample
+proves current classifier discrepancy, while the exact deployed historical path/listener ownership
+is not replayed. Its individual historical item I015/Q-2039 remains OPEN pending scoped source
+proof. This contributor is not a fifth demonstrated historical terminal-root class.
+
+LOCAL next-batch scope: 5 ledgers / 256 individually queued retained items / 546 other reports
+awaiting repository item ledgers. Five-report-only buckets: 78 recoveries / 17 workarounds /
+76 skips / 21 still-broken / 64 struggles. Audit queue: 538 pending rows = 470 OPEN /
+17 IN PROGRESS / 51 four-field BLOCKED. The CSV changes only the three newly itemized rows;
+all original all-item-resolved, historical-rerun and whole-report-closure flags remain false.
+Six reports have structured generatedFiles payloads; other partial source can survive in tool previews.
+
+PR #3856 remains separate: 2 ledgers / 119 items / 549 remaining. Its old hosted suite failed
+one source-census 20-second timeout (40,154 passed / 1 failed / 73 skipped). The 25a integrated
+run was superseded and stopped while root repairs test performance under separately reserved
+Q-2163, without weakening assertions or raising timeouts. That primary row/correction and its
+later integration are outside this 538-row LOCAL draft. A new final primary gate is required;
+this next batch does not edit that PR or claim hosted green/merge.
+Original audited counts remain 4 demonstrated terminal platform classes / 0 historical app reruns /
+0 sixth-rule whole-report resolutions. Resume Q-2162 and recorded item-level prevention in this
+next branch; no sixth report is started. Publish this next batch only after its final gate passes;
+merge only after the admin explicitly names that PR. No source, test, commit, push or PR operation
+is part of this documentation checkpoint.
+
+
+### 2026-10-20 — next-batch rebase, approved platform-only closures and seven retained ledgers
+
+Fixed integration HEAD1 bf 8b 22a 03d 551 fb 27f 0 bb 622006 dff 18672c 2 ad/treeb 5e 3c 753 combines merged
+main 72c 3252d 0 faf 33 fd 51987 fbc 2b 9d 991f 7742953c and the later local census delta. Prior main and
+all earlier progress bytes remain intact. The old five-ledger/538-row draft above is superseded
+by this checkpoint, not rewritten. PR3856 was externally merged at 12:26:44 UTC. Its exact head
+5456d186caab683f5bec17f3aa5e0fb1506b6476 and main 72 share tree 813484 db 9c 1349164824 bf 025227175f 52b 3b 4f 0;
+required CI39418902451 had both build-and-test and queue-retry jobsSUCCESS on that exact tree.
+The older 5 dbfailed census run is a different head; the separate d 68 local gate passed 2,822 files / 40,289 tests / 67 skipped, all 14 additional
+checks and 14 database drills. This proves d 68 only; the new combined tree needs its own gate. No new PR has been created; root will integrate the later payments
+main change before final verification. Source/tests stayed frozen during this documentation work.
+
+Root approved closing twelve shared platform/source/CI rows only: Q1890–1893,Q1898–1899,
+Q1961–1962,Q2021–2024. Each has behavior reversion/sibling proof and exact merged source/CI
+evidence in docs/failed-build-audit-2026-10-20.md; IDs append to the closed register. This is
+not twelve historical applications or whole reports repaired. Four historical item rowsQ1928/
+Q1982–1984 becomeOPENowner — for remaining exact saved/served behavior evidence. Their source
+prevention credit remains, but no app replay or historical delivery equivalence is invented.
+
+Seven retained ledgers now enumerate 281 individually queued items:618b 61,cfd 58,6 af 51,b 62842,
+12514b44,78e 23,4 cf 2. The seven have 248 OPEN/0 IN PROGRESS/33 genuinefour-field BLOCKED, with 544 other
+reports awaiting repository item ledgers. Seven-report-only buckets:78 observedrecoveries/
+20 workarounds/84 skips/29 still-broken/70 struggles. PR3856's merged scope was 2 ledgers 119 items;
+this new branch adds 5 ledgers 162 items and 4 class/CIrows=166 new audit rows, then removes 12 merged
+platform rows: net+154 from mergedmain 400 →554 pending =497 OPEN/3 IN PROGRESS/54 four-field BLOCKED.
+The only active audit rowsQ2162,Q2163,Q2200 belong to codex/failed-build-next-ledgers-20261020.
+No future PR is claimed to add 554 new rows. Original all-item-closed/rerun/whole-report CSVflags
+remainfalse; userStop 4 cf remains authoritative and is not restarted or counted as an engine failure.
+
+Q-2162 directtyped-server lifecycle/shared literal revival:17 files 624 PASS/0 skip; isolatedbaseline
+37 behaviorFAIL/51 PASS, revivalconsumer 5 FAIL/83 PASS, final 88 PASS. HistoricalQ2039 remainsOPEN:
+the 300.003s/EADDRINUSE process sequence is not replayed. Q-2200 canonical 8 abort ETAclass:
+15 baselinebehaviorFAIL/3 healthycontrolsPASS→18 PASS;5 files 99 PASS/bothTSgreen. HistoricalQ2177
+remainsOPEN; no saved historical score or game is claimed repaired. Q-2163 stronger escape-aware
+census 18 PASS/oneCPU-V8 time 9.015s keeps unchanged 20 scap,2453 inputs and 18 policyentries; its
+final new-tree/hosted verification remains pending. Q-2201 isOPENowner — for advisory-cap delivery
+inference: current-source route transitions need behavioral reproduction; it is not the historic
+78 terminal cause or a fixed class. Futility timing/live narration/provider funding remain separate.
+
+Original audited counts remain 4 demonstrated terminal platform classes/0 historical app reruns/
+0 whole-report resolutions. This next branch is local/unpublished/not final-gated. Resume the new
+full gate after root's final-main integration and preserve every remaining item/class row.
+Publish once green; merge only after admin explicitly names the new PR. No commit/push/merge
+was performed by the documentation coordinator.
+Rechecked the exact PR head and green GitHub CI, then merged #3853 with an expected-head lease (merge commit 68528197949135513d2df97e3b4dee667036059a). Admin explicitly said to merge and turn on the policy. Activation is a separate additive Cloud Build configuration change: `_WEAK_SCOPE_POLICY=on`, `_WEAK_BUILD_COST_CEILING_USD=1`; trigger-level rollback remains available with `off`. Provider keys, explicit ladder overrides, and Normal/Strong routing are not changed. Deployment and runtime confirmation are pending; do not infer live activation merely from the merge.
+
+## 2026-10-20 — Q-888: a settled webhook is acknowledged, a failed attempt is news, an outage is retried
+
+**The defect.** The signed-webhook route answered **400** to every `success: false` from
+`verifyPaymentInternal`, and Cashfree re-delivers a non-2xx. The retry was not a symptom of anything being
+wrong — it was us refusing to acknowledge an answer we had already given.
+
+### 🔴 And the row's own account of WHY was wrong — measurement caught it
+
+Q-888 says a `PAYMENT_FAILED` / `USER_DROPPED` order is "settled as EXPIRED" by
+`cashfreeOrderClosedUnpaid`. It is not: that predicate recognises only `EXPIRED` and `TERMINATED`, which
+are **ORDER** statuses, while `USER_DROPPED` and `FAILED` are **PAYMENT** statuses that never reach it.
+Those events fell through to *"Order not paid or invalid status"* and were re-sent for ever — the symptom
+reported, by a different path than the report described.
+
+**A first version of my own test repeated the row's model** (`order_status: 'USER_DROPPED'`, which is not a
+thing) and would have *proved* a fix that never touched the reported case. That is the second time today a
+row's claim about live code turned out stale (the first was Q-887's, in Q-1126 batch 2), and it is the same
+lesson: a row's claim is a hint with a date on it, never evidence.
+
+### Three outcomes, not two
+
+| Outcome | Answer | Why |
+|---|---|---|
+| A **decision** — amount mismatch · an order this server never created · EXPIRED/TERMINATED | **200** | `settled: true` on the verifier's own result; a redelivery reaches the same conclusion |
+| A **failed attempt** on an order still open at the gateway | **200 `ATTEMPT_FAILED`** | news, not work: re-delivering reports the same failure for ever, and a later success arrives as its own event. The order is left PENDING so it can still be paid, and the gateway is still ASKED first, so a truly PAID order is credited even when a stale failure event woke us |
+| **Anything else** | **502** | acknowledging an event we could not complete LOSES it, and a lost payment event costs a customer their credit. 502 not 400: a retryable failure is OURS — no database, missing keys, an unreadable payload — never a malformed request |
+
+**The class:** the route could not tell a decision from an outage **because the function did not say** —
+both arrive as `{ success: false, error }`, and no care at the call site can separate them. So the verifier
+says it, and an **unflagged failure is retryable**, which makes the dangerous direction an explicit choice.
+A census requires the field on every failure return, and **it found two my own first enumeration missed**
+(my `awk` range was too narrow): *"Order not paid or invalid status"* and the catch-all.
+
+Locked by `tests/aSettledWebhookIsNotRejected.test.ts` (13 tests, real route + real verifier). **Four
+reversions bite:** 400 for every failure → 9 fail · the failure-event branch removed → 2 · the EXPIRED case
+loses `settled` → 2 · the predicate stops reading the payment object → 1.
+
+⚠️ **The source assertion is scoped to the webhook handler on purpose.**
+`/api/payment/verify-payment` answers the BROWSER, where a 400 is correct, and a first draft of the
+assertion flagged that correct line — which is how a guard teaches the next person to make the wrong edit.
+
+✅ **All three of the row's clauses are accounted for, checked rather than assumed.** Classification landed
+with Q-614; PENDING expiry with DB-5; and the sweep ordering is already newest-first at
+`routes/payment.ts:466` (`listEqNewestFirst`), whose own comment names this row's exact case. No follow-up
+row is opened.
+
+**A process note worth keeping:** the first gate for this change was stopped mid-suite on purpose. #3854
+merged while it ran, so main moved and the queue row still had to go on — a gate finishing on a state I was
+about to change would have produced a green I could honestly report and honestly believe about the wrong
+tree. One gate on the final state is both cheaper and the only one that means anything.
+## 2026-10-20 — Hosting, database, storage and App Mart audit hardening (Codex)
+
+User requested implementation of the infrastructure audit recommendations. Based on main `3974c34`
+(#3855); separate branch `codex/hosting-data-security-audit`. Existing open #3852/#3856 are separate
+recovery/account-erasure work and have not been overwritten. No production flags, IAM, customer data,
+provider accounts or billing settings have been changed by this branch.
+
+| Audit item / class | Change and regression evidence | State / actual limit |
+|---|---|---|
+| Private App Mart NavData accepted app-id-only access | Password-authorized, one-hour, app-scoped HMAC capability. Issued per open response outside the compiled cache; both data routes verify it, CORS supports its header, responses are no-store. Password rotation revokes prior capabilities. Actual iframe runtime surfaces refusals instead of fake empty rows. | CODE FIXED; `navDataPrivateAccess.test.ts` drives registered routes, cache/password rotation and iframe code. Rows remain app-shared, not per-user private records. Reopen after expiry. |
+| Private bucket read policy authorized every signed-in user | Read requires the caller's uid folder, matching writes. | CODE FIXED; `generatedUploadSecurity.test.ts` runs PostgreSQL RLS with separate roles. Existing customer buckets require applying the corrected generated SQL in their own project. |
+| Bucket migration was invalid SQL; long policy names collided after PostgreSQL truncation | SQL identifiers use double quotes and bounded hashed names. Remove known legacy names before replacing policies, including the old permissive read policy. | CODE FIXED; actual PostgreSQL execution, not string-only validation. |
+| Generated Cloudinary route imported builder-internal source; BYO signing routes lacked authorization and quotas | Both generators emit their complete authentication module and quota migration. Verify the app's own database session before parsing bytes. Bound actual file bytes/type, four active uploads per instance, and transactional daily per-user + per-app reservations. No reusable upload grant is given to clients. | CODE FIXED; `StorageGenerator.test.ts`, `generatedUploadSecurity.test.ts`. BYO files now traverse the app server. Requires app auth config and quota migration; missing services fail closed. Public provider URLs are public assets; sensitive files need private storage and authorized downloads. |
+| Deploy coordination and registry errors allowed new paid work / ban bypass | Durable claim must succeed. Missing/ambiguous transactions return retryable 503 before cloud work. Server-publish registry lookup is strict and bounded; allowance exceptions refuse. | CODE FIXED; `deployCoordinationOutage.test.ts`, `aServerAppHasOneLifecycle.test.ts`. Existing hosted apps remain running. |
+| Public hosting could use shared credential-bearing builds | Both availability and orchestration refuse public-mode builds unless credential-less mode is enabled. Admin-only probe path remains available. | MITIGATED, NOT live isolation proof. Run `verifyHostingIsolation.sh` AND `verifyCredentiallessBuild.sh` on the actual project before enabling public hosting. No GCP credentials/gcloud here. |
+| Rescan hold changed only registry state | Current live unsafe content goes through the common offline lifecycle, then records a held/offline status. Restoring requires republish. A refused NEW version continues to preserve the prior working version. | CODE FIXED; moderation wiring + lifecycle tests. |
+| Static takedown swallowed bucket failures and could lose the mirror pointer | Refuse bucket-only deletion failure. Resolve and remove the mirror before deleting the channel; retain the channel on uncertainty. Strict lifecycle reads refuse false offline claims. | CODE FIXED prospectively; `publishRemovalConfirmation.test.ts`. Legacy orphan mirrors whose channels were already deleted still need live inventory/reconciliation. |
+| Server rollback/history picker only used static Hosting releases | Existing owner-checked history picker reads retained ready Cloud Run revisions. Eligible revisions must use current runtime identity; foreign/current/legacy-privileged targets refuse. Rollback shares the deploy lease, uses etag, confirms actual traffic and records its operation. Uncertain cloud mutations retain the lease. New publish resets traffic to latest. | CODE IMPLEMENTED; `serverRollback.test.ts`. Real Cloud Run smoke test pending; it does not restore database or files. Failed-attempt timeline UI is still OPEN. |
+| Frontend metering / overage status could not be established | Existing edge meter/billing implementation retained; no duplicate meter or unverified billing activation. | OPEN LIVE VERIFICATION: deploy/configure serving-path Worker, compare real bytes/provider bills, then decide billing activation. Browser beacons remain unsuitable billing evidence. |
+| Database/files backup and recovery guarantee | No provider plan or backup policy was guessed; customer data remains in their account. | OPEN INFRA: authorized per-project backup/export + separate object backup, retention/budget, and a real restore drill. Code tests cannot prove recoverability. |
+| Unrestricted outbound network traffic | Resource caps and isolation/public gates retained. | OPEN INFRA/DESIGN: forced VPC egress + firewall/proxy enforcement with an app-specific approved destinations policy. An in-app allowlist cannot constrain hostile user code and was not presented as a fix. |
+
+Verification is recorded in the PR after the final-state gate. No production-readiness score or
+claim of live isolation, backup recovery, metering deployment or historical incident resolution.
+
+### Audit preflight corrections on frozen source
+
+The first credential-free/offline Node22 full run completed: 2,819 files, 40,138 passing tests,
+three failing assertions/tests, 68 skipped and two unhandled errors. This is NOT a passing gate.
+The two rescan assertions still required the old live-on-hold behavior and used fixed character
+windows that truncated the new removal sequence. They now inspect the whole registered sweep,
+require the common offline lifecycle and its reversible held/offline state, and retain the catch guard.
+The remaining shell test lacked npm in the isolated PATH; that verification environment is corrected.
+The two pg cleanup errors were caused by the verification-only network guard throwing synchronously
+before pg attached socket listeners; blocked connections now fail asynchronously without opening a
+socket. No production SQL/network code was weakened to accommodate the guard.
+
+The sibling guidance audit also found the tool catalogue, connected-storage hint and Settings entry
+still promising direct signed uploads. They now describe the same authenticated, byte-validated,
+quota-bound generated recipe and its actual configuration. A context regression checks that contract.
+Full final-source checks and hosted CI must pass again before this branch leaves the machine.
+
+### Static moderation sibling closure
+
+Final review found the static publish wrapper still used a fail-open registry lookup and only
+blocked takedowns. A held app could republish and overwrite its review status. Static and server
+publishing now share a bounded strict lookup and the same pure held/takedown refusal. The shared
+rule has no runtime store dependency. Unknown registry state refuses before provider work; missing
+records, owner-unpublished and plan-paused apps can still publish. Provider errors are redacted and
+deadline timers are cleared. Behavior tests exercise both moderation states, missing/known records,
+provider failure and a hung lookup; quota/content scan tests explicitly supply a readable registry.
+
+
+### 2026-10-20 - final next-batch main integration and verification freeze
+
+Committed the seven-ledger/source checkpoint as3d10a06a3, then integrated main
+6cdc155fa (PR3857 payment-webhook classification) without conflicts. All six
+Q2162/Q2200 source/test hashes remain exactly equal to their reviewed freezes;
+the integrated focused selection passes142 tests. The overview now records the
+current base and exact report/commit identifiers. The d68f6dfb4 complete gate
+passed2,822 files /40,289 tests /67 skipped,14 additional checks and14 database
+drills on unchanged treeb5e3c7530. It proves that checkpoint, not this new tree.
+
+Final next-tree full coverage/type/build/boot/security and real database gates
+are pending. Published ledger scope remains7/281/544, with554 pending audit rows
+(497 OPEN/3 IN PROGRESS/54 four-field BLOCKED) and12 already-merged platform/CI
+rows recorded closed. Future scratch autopsies are outside this publication.
+No new PR or hosted success is claimed yet, and this session has not merged a PR.
+## 2026-10-20 — Q-1126 batch 3: the four-field gap reaches ZERO, and the ratchet becomes an invariant
+
+**154 blocked rows, 0 deficient**, measured with the census's own parser. The guard's baseline is now `0`,
+which changes what it is: from here a new 🟡 BLOCKED row that omits a field **fails CI outright**, because
+there is no slack left to absorb it. That is the 50/50 law's other half — not just fix the instances, make
+the wrong branch impossible.
+
+**How the last 24 went, and it is the same story batch 1 found and batch 2 confirmed.** Fifteen were
+label-only: the information was already written, under a heading the census does not recognise. In several,
+the missing `Why` was sitting in the row's **own STATE column** — *"(admin console)"*, *"(admin, money)"*,
+*"a decision that is the admin's: what Doctor AI shows"* — so the row knew the answer and the detector could
+not see it, because it reads only the body. Those fills move the fact into the body; they do not invent it.
+
+**One more was not deficient but MIS-FILED, and it is the third such case.** Q-881 read 🟡 BLOCKED
+*"awaiting the admin's approval of the audit plan"* while carrying a fix that needs no decision — exactly
+like Q-886 and Q-888, both now fixed. **Verified live at `src/server/lib/UsdInrRate.ts:50-62`:** the whole
+validation on the rate that multiplies every bill is `Number.isFinite(rate) && rate > 0`, so any positive
+number `open.er-api.com` returns becomes the multiplier until the next hourly refresh. Its stated fix is
+**strictly safer than today**, so the row is OPEN. ⚠️ Its third clause — *"record the rate on every
+debit"* — is deliberately left out: that touches the billing WRITE path, and bundling is how a safe fix
+inherits a risky one's blocker (the same reasoning that kept Q-1227 out of Q-886).
+
+**The last eight are the payment audit** (Q-882–Q-885, Q-891–Q-894), where fields were genuinely absent and
+are now written from the evidence each row already carried. 🔒 **And where nothing had actually been tried,
+the field says so:** Q-892 and Q-894 read *"nothing yet"* with the reason. An invented `Needs:` for a
+blocker nobody investigated is the precise defect this row exists to prevent, and a row that admits a gap is
+worth more than one that hides it.
+
+**3 reversions bite:** one label fill removed → 1 fail · Q-881 back to BLOCKED → 1 · a brand-new fieldless
+blocked row → 1.
+
+### 🔒 And the guard caught me editing its own anchor wrongly
+
+I set Q-1126's row to IN PROGRESS, and `theQueueSaysWhatIsTrue` failed: it pins the measured gap to a
+**resting** row (`OPEN` / 🟡 BLOCKED), because that row is where the number lives and a transient state
+would leave the baseline unanchored. The row stays OPEN with its PR named until the merge closes it the
+normal way. The guard was right and my edit was wrong — which is exactly why a number gets pinned to a row
+instead of living only in a test file.
+
+**Next:** Q-881's band — the strongest remaining piece of work that needs no decision from the admin.
+## 2026-10-20 — User hosting/database/storage audit remediation (admin requested fixes, CI then merge)
+
+Branch `codex/hosting-data-storage-hardening`, based on fresh main `17a4c45`; open PRs #3852 and #3856 inspected and their recovery/agent lanes left alone. Admin explicitly authorized fixes, full CI and merge only after green.
+
+Root-cause/class ledger:
+- F1: SQL policy names used string literals; corrected identifier quoting and bounded names (long buckets previously collided at PostgreSQL’s identifier limit). Executed the real generated migration twice in PGlite and enforced two-user RLS. Invalid MIME restrictions now reject rather than silently widen.
+- F2: publishable app key acted as user authorization; API now requires a separately verified Firebase token, store enforces createdBy/scope, and legacy unowned records remain owner-only. Client has an explicit token adapter; it supports the platform trusted Firebase project, not arbitrary issuers. Existing published apps need adapter integration and republish; records/credentials are preserved. This is a security migration, not a claim to provide a universal app-auth service.
+- F3: quota checked after queries; durable admission reserves before records, migrates old shard totals once and refunds unused list reservation. Negative cache reduces repeated exhausted calls. Authentication/meta/counter overhead still costs money; no claim of a zero-cost refusal or hard invoice cap.
+- F4: upload recipes signed anonymous/unbounded uploads; real auth and durable byte-quota hooks are required (otherwise 503). S3 signs exact size/content type. Cloudinary uses authenticated, bounded raw-body upload, two buffers per worker and provider format restrictions; no client signing capability. Actual app callbacks still must be connected; existing saved apps are not silently rewritten.
+- F5: private-read policy lacked owner predicate; now selects only caller uid folder. F6: Cloudinary copied a platform relative import; removed, with all-recipe import-closure guard.
+- F7: public flag bypassed unfinished isolation work; non-admin hosting additionally requires credentialless mode and explicit real-build/egress verification attestations. OPEN: actual cloud probe and network policy require cloud access, not another boolean pretending to create isolation.
+- F8 OPEN: live backup config was absent; managed backup/PITR inventory and staging restore proof require authenticated GCP and customer DB access. Do not manufacture backup success or enable a billable resource blindly.
+- F9 OPEN: registry storage and real invoice reconciliation remain incomplete; preserve explicit unmeasured fields. A plan fee or instance cap is not proof of profit.
+- F10: list had no continuation; stable document-id cursor pages across owned/scoped rows. F11: generic refusal erased actual charge state; responses preserve debit/refund/delivery/cleanup, and ambiguous charge exceptions retain resources with paymentStatus unknown. Both database and server sibling paths handled.
+
+Reversion proof: nine bug classes reintroduced individually; each corresponding test failed; every source restored before verification. Final complete local and CI results pending.
+
+### Verification findings — source-census race and test engine lifetime
+
+The final offline suite exposed an existing parallel-test race: `aStarvedReadSaysSoAndIsRead` statted `tests/.tmp-key-before-button-<pid>` after its owning test removed it. The assertions passed standalone. Root class: a source census treating another worker’s generated artifacts as shipped source. Siblings: the dependency census traversed the same test tree; the case-collision census also counted these artifacts. All three now use the shared fixture boundary in `tests/helpers/sourceCensus.ts`. The new filesystem test skips a dangling `.tmp-` fixture and still throws for a missing real source, so no genuine read error is silenced. Producers retain their existing module resolution; no broad assertion is removed.
+
+The same run reported a SIGKILL of the real PGlite shim test worker. Its fixture created a separate real engine for each test without closing it (the production browser shim intentionally keeps its workspace engine open). Track the actual constructors and close every engine after each test; assert clean fixture ownership before the next. The shipped browser shim is unchanged. The six affected stability files pass 79 tests. Reintroducing each of these two fixture defects makes its guard fail. Local full-suite concurrency is bounded to three workers; no test is skipped to make it green.
+
+Integrated latest main (6cdc155fa, including #3852, #3856 and #3857) before the final gates; only PROGRESS.md overlapped, and both append histories were retained. The candidate branch is now `codex/hosting-data-storage-hardening-integrated`.
+
+
+### 2026-10-20 — seven-ledger batch integrates latest hosting/data boundary main
+
+The prior exact 0d8ef9f5b source tree passed 2,826 files /40,408 tests /67 skipped, all14 additional checks and14 real database drills. Its first attempt had only a worktree dependency symlink invariant failure; npm ci installed a real directory, then the full second attempt passed with the source unchanged. Those logs are archived against that exact tree. Concurrent PR #3858 then merged to main5474b0d0e; this branch integrates all26 upstream files, preserving every main and own PROGRESS line and all seven-ledger queue/source freezes. Its hosting/data migration is upstream work, not claimed as a new failed-report fix here. A new full final-source gate and exact-head database receipt are required before this new branch is pushed. Counts remain7ledgers/281items/544otherreports and554pending audit rows;12 earlier merged platform rows are closed, with0 historical app reruns/whole-report closures. No merge performed by this session.
+### Integration with the concurrent data-boundary remediation
+
+Integrated main `5474b0d0e` (#3858), preserving its supported-token user ownership, legacy-owner
+recovery, pagination, pre-query data-operation reservations and resell receipt fixes. Retained its
+stable short/hashed-long storage policy names and stricter input validation; also remove pre-fix
+legacy policy identifiers so permissive old reads cannot survive migration. The upload recipe has
+one complete implementation: the app's real Supabase session + transactional migration + actual
+byte validation + server-mediated S3/Cloudinary upload. The executable emitted-router tests now
+exercise that implementation through HTTP, including signed-out/forged identity, unavailable auth,
+oversized/mismatched actual content and exhausted/unavailable quotas before any provider upload.
+Preserved all-provider import/no-unused compilation coverage. Operator build/network attestations
+now guard the actual public hosting actuator as well as availability, including public-mode admin
+calls; admin-only probe bring-up remains possible. The full suite on the pre-integration source is
+obsolete; the final-state gate is repeated on the combined, committed tree before publication.
+
+### 2026-10-20 — Selected Supabase organization default (prepared, not activated)
+
+User explicitly chose the connected organization for apps built on NavBharatAI and selected a paid
+production estimate. Prepared a dedicated project per app default in Publish, correct product terms
+and price, stale shared-price request refusal, preservation of existing shared controls, and server-only
+org admission across quote/create/wallet/vault delivery. Capacity reads count existing org projects;
+missing approval/limit/credentials or malformed provider responses create nothing. An uncertain paid
+create/charge or interrupted process retains a durable operator-reconciled hold rather than expiring
+into another paid resource. Fixed ambiguous Supabase creation being falsely reported cleaned.
+
+Selected org hkfoligpzrmcasgtzeoe; restored existing project mtbdjypjlnjghapdtedj and verified healthy,
+with no public tables or Storage buckets. No plan upgrade, paid project creation, migration, default
+runtime activation or customer data move occurred. Prepared a dry-run Cloud Run configuration installer
+that references an existing pinned Secret Manager version and requires explicit organization/cost
+acknowledgement for application. Runtime management credentials and GCP deployment access are separate
+from the ChatGPT Supabase connection. See docs/DEFAULT_SUPABASE.md for live prerequisites and scope.
+## 2026-10-20 — Q-881: the number that multiplies every bill gets a bound (and the two siblings the row never named)
+
+**The defect.** The whole validation on the live USD→INR rate was `Number.isFinite(rate) && rate > 0`, so
+any positive number the free FX source returned became the multiplier on every bill on that instance until
+the next refresh — `0.5`, `5000`, a glitched payload, a compromised response. `usdInrRate()` is read at ~24
+billing sites, so "every bill" is literal.
+
+### 🔴 The obvious fix would have re-created a bug this module already had
+
+The revenue audit of **2026-09-10** found `refreshUsdInrRate` was never wired anywhere outside its own
+test, so the rate sat **frozen at the 85 fallback** while the real rate was 87–88, and every build was
+under-billed ~3% — silently, with nothing failing to reveal it. A plain *"refuse anything more than 5% from
+the last good value"* band freezes the rate again the first time the rupee really moves 6%: the same bug
+with a safety badge on. That is the trade the first absolute rule forbids, and it would have looked like a
+safety improvement in review.
+
+So the fix protects **both** halves — bounded, and unable to freeze on a real move:
+
+| Mechanism | Why it is shaped that way |
+|---|---|
+| absolute band `[30, 300]`, refuse outright | deliberately WIDE — a 2.5x move from ~85 still lands. It catches a broken payload, not a market event. A test asserts the band spans **more than 5x**, so a future narrowing cannot quietly turn it into an FX forecast |
+| a jump beyond 5% is **held**, not refused | it lands when a second **independent** fetch agrees — itself a small move, not an exact match, because the true rate drifts between observations. One glitch never bills anybody; a genuine move is late by one cycle, never permanent |
+| every refusal is LOUD with a running count, plus `usdInrRateHealth()` | the 2026-09 bug hid for months because a frozen rate looks identical to a working one from outside. This is the handle that makes the difference visible |
+
+### 🔑 Two siblings the row does not name
+
+The class is *"a number that multiplies every bill, wherever it enters"* — and the row names only the fetch
+path. Hunting it found two more entry points with the identical weak check:
+
+- **`setUsdInrRate`** (the ops override): a hand-typed `8500` was as acceptable as a glitched payload.
+  Banded now — but deliberately **not** jump-limited: an override is a human act, and making someone
+  confirm their own keystroke twice just teaches them to call it twice.
+- **the env fallback**: a typo of `850` for `85` would have multiplied every bill by ten. CLAUDE.md's own
+  warning is that an env value always beats a code default, so this one is exactly the class it describes.
+
+Locked by `tests/theRateThatMultipliesEveryBillIsBounded.test.ts` (11 tests) plus the module's existing 5,
+unchanged. **Four reversions bite:** the any-positive check returns → 4 fail · a big jump refused outright,
+i.e. the frozen-rate bug re-created → 2 · the ops override loses its band → 1 · the refusal goes quiet
+after the first → 1.
+
+**A correction to my own test:** it assumed `refusalsInARow` started at 0, but that is module state only an
+ACCEPTANCE clears — which is the honest definition, since a manual override does not make the FX source
+healthy again. The test now establishes its state with a good refresh first, which proves the reset too.
+
+⚠️ **The row stays OPEN after this, deliberately.** Its third clause — *"record the rate on every debit"* —
+touches the billing WRITE path and is a separate, larger change. Bundling is how a safe fix inherits a risky
+one's blocker, which is the same reasoning that kept Q-1227 out of Q-886.
+
+## 2026-10-20 — paying the bookkeeping debt: four resolved rows leave the open table
+
+**Q-886, Q-888, Q-1135 and Q-1126 were resolved earlier today and their rows were left behind** — three
+reading IN PROGRESS, Q-1126 OPEN with its PR named — while #3854, #3857, #3850 and #3861 were all merged.
+Each is verified closed here by its PR's **merge commit being an ancestor of `origin/main`**, not by a PR
+page saying "merged", and each id is appended to the closed register **in the same commit** as its removal.
+
+Worth recording plainly: I did this correctly for Q-1140/Q-1141/Q-1131 this morning and then stopped
+keeping it up through six more merges. That is exactly how a queue starts lying about what is done — the
+rows that are wrong are always the ones nobody re-reads.
+
+### 🔒 And closing Q-1126 turned its own guard red, which was the guard being right
+
+`theQueueSaysWhatIsTrue` pinned the measured gap to a row **in the open table**, so that a real
+non-compliance is schedulable rather than buried in a test file. Removing Q-1126 removed the anchor.
+
+**At a baseline of zero that assertion inverts.** There is no gap left to schedule, and the sixth rule says
+a resolved row leaves the table — so the old pin would have forced Q-1126 to sit OPEN for ever with no work
+in it, which is the queue lying in the other direction. The property was always *"recorded, not silent"*,
+not *"has an open row"*: while the gap is real it must be schedulable; once it is closed it must be
+**visibly** closed, never simply gone. The pin now checks both regimes, so it asserts strictly more than
+before — and deleting `Q-1126` from the closed register fails it with *"must be visibly CLOSED, never just
+absent"*.
+
+The test was right that something had to change. It was wrong about which thing, and the difference matters:
+loosening a guard to let my own edit through would have been the easy version of this.
+
+### Q-2202 — 109 test files still hand-roll the source walk (renumbered to preserve the retained-item Q-2025)
+
+Raised, not swept. `tests/helpers/sourceCensus.ts` arrived hours ago in **#3858, from another session**,
+which migrated three files; 130 test files reference `readdirSync` and **109** self-recurse with
+`statSync(...).isDirectory()`. The fragility is real, not theoretical: with a `.tmp-*` dangling symlink
+under `src/server` a hand-rolled walk throws `ENOENT` while the migrated census passes all 11 of its tests.
+
+It is 🟡 BLOCKED on purpose. A 109-file sweep of another session's in-flight centralisation is the race the
+concurrency rules forbid, and the change is less mechanical than the count suggests — every one of those
+files carries its own filter and ignore list, so a careless sweep silently widens or narrows what each
+census sees, which is worse than the fragility it fixes. #3865 migrates exactly one file: the census this
+session wrote.
+
+### The queue's shape changed today
+
+Another session added **375 new OPEN rows** (Q-1300–Q-2024). This morning the open table held a few dozen
+actionable rows; it now holds 517. Those rows are not touched here — a row somebody created an hour ago is
+theirs — but anyone reading "complete the remaining queue" needs to know the denominator moved.
+
+## 2026-10-20 — Q-1226 closed on another session's fix; Q-979 re-measured, and the first measurement was wrong
+
+### Q-1226 ✅ RESOLVED — by PR #3863 (`5315e95f8`), verified here before the row was closed
+
+**Problem:** the paid-recharge path read two independent stored fields — `tokenBalance` from
+`orderCreditedTokens(amountPaid)` and `remaining_balance` from `balanceAdded` — so an order whose recorded
+`amountPaid` was unreadable credited **0 tokens while adding the full ₹ amount** to the other view. Measured
+on the real `verifyPaymentInternal`: gateway ₹100 PAID, `amountPaid: 'legacy'` → `tokenBalance: 0`,
+`remaining_balance: 100`.
+
+**Root cause / class:** two reads of two different fields whose equality was *assumed* for every healthy row
+and enforced nowhere, so one junk field separated the views.
+
+**The fix (not mine):** `reconcileGatewayPaidAmount` normalises the gateway's verified `order_amount`;
+`settledGatewayOrder` writes it back as `amountPaid` and **re-derives** `balanceAdded = orderNetPaidInr(paid)`
+inside the same credit transaction; `computeCreditedWallet` reads that instead of the stored `balanceAdded`.
+The second independent input is gone — both views descend from one field. This is option **(a)**, the one the
+row recommended.
+
+**Why I verified rather than took it on trust, and the one thing I was looking for:** the amount-mismatch
+refusal moved from an inline `return { settled: true }` to a thrown `PaymentAmountMismatchError`. Had that
+throw landed in the generic catch it would have become `settled: false` → a 502 → Cashfree redelivering a
+*deterministic* mismatch forever, silently regressing Q-888. `payments.ts:536` catches it explicitly and
+returns `settled: true`; the ownership-changed throw correctly stays retryable. Contract intact.
+
+**Locked by:** `tests/aVerifiedPaymentCreditsOneAmount.test.ts` — the exact measured value (`'legacy'`) is in
+its hostile-input table at `:86`, alongside the 1-paisa tolerance, the refund basis and gift-field
+preservation at `:213`.
+
+**Stated plainly rather than quietly closed:** the row's class sentence was *"a wallet writer that is not
+mirrored"*, and this path still does not call `walletMirror.ts`. #3863 declines that in code — *"Do not route
+this through a gift-clamping writer: a paid top-up preserves existing gift tracking"* — and tests the gift
+preservation. The divergence the row measured is now structurally impossible; the literal centralisation is
+declined for a stated, tested reason. Recorded here so nobody reopens it as "walletMirror was never done"
+without reading why.
+
+### Q-979 — re-measured, and my own first measurement was wrong in a way worth recording
+
+**The claim I nearly wrote into the row:** that the chat handler's branches are spread evenly (34–67 per
+250-line window) with no hot region, so headroom would need many PRs.
+
+**What the right measurement says.** Branch tokens cluster hard inside *statement blocks*: the top two carry
+**105** and **90**, the top ten carry **306 = 56.5%** of the 542 budget, and the single best extraction is
+`landImportedProject` (`routes/agentv3.ts:11726`) at **131 branch tokens = 24.2% in one PR**. It is also the
+safest candidate — it already has an explicit parameter contract with the diagnostics callbacks injected, and
+its closure set measured with the TypeScript AST is 26 free identifiers of which 11 are globals, leaving ~13
+real handler-scope dependencies. One hazard: the body **assigns** to `framework` and `planningAttachmentText`,
+so the extraction must return those corrections or take setters.
+
+**Why the first number was wrong:** a window average smears a dense block across the sparse lines beside it.
+**Extraction acts on blocks, so the measurement has to be per block.** That is the third wrong number in one
+day from the same family — a re-implemented census (Q-1126 batch 3), a silently-failed comment strip (3,172
+vs 542, a 5.8x overcount), and now a window proxy. One lesson: *measure the unit you are going to act on,
+with the guard's own parser.*
+
+**Why no extraction was started:** PRs **#3859** and **#3862** both change `src/server/routes/agentv3.ts`. A
+689-line move there is the largest possible collision with live sessions, which the concurrency rules forbid.
+The measurement is the deliverable; the move waits for a fresh `main` and a re-measurement.
+
+### An operational fact, because it cost real time today
+
+**#3862 and #3860 were merged by a session other than this one** while this session was gating them — both
+recorded as `docasheesh-png`, which every session acts as, so the actor cannot be distinguished from the
+admin. The standing order this session works to states there is no second merger. There is. The cost is
+measurable: #3859 was gated **three times** (40,606 → 40,664 → 40,776 tests, all green) because `main` moved
+under each run, and a gate run takes about as long as the interval between merges. The queue's integrity
+survived it — `main`'s closed register and open table hold 668 ids each with **zero** overlap and zero
+duplicates, so the #3543 reopening did not recur — but that was checked, not assumed.

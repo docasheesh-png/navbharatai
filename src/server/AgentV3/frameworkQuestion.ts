@@ -63,3 +63,14 @@ export function frameworkAnswerNote(answer: string): string {
     + `build setup names. Their answer: "${String(answer ?? '').trim().slice(0, 300)}". Reconcile package.json, `
     + 'the build config and the source files to that ONE framework first, verify the dev server starts, then do the request above.]';
 }
+
+/** Keep the chat route below its control-flow limit without changing the framework question's scope. */
+export function shouldCheckFrameworkQuestion(input: {
+  intent: string; answered: boolean; userAppExists: boolean; paths: unknown;
+  setting: string | undefined; zipCount: number; importUrl: unknown; prompt: string;
+}): boolean {
+  return input.intent !== 'chat' && !input.answered && input.userAppExists && Array.isArray(input.paths)
+    && input.setting !== 'off' && input.zipCount === 0
+    && !(typeof input.importUrl === 'string' && input.importUrl.trim() !== '')
+    && !messageNamesAFramework(input.prompt);
+}

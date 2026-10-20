@@ -43,6 +43,12 @@ export interface RunningBuild {
    *  drains this between turns and injects each as a REAL user turn, so the very next model call
    *  acts on it — the Claude-Code-style "talk to the team while it builds" experience. */
   steerQueue?: string[];
+  /** When the latest mid-build user message arrived — the request time of a stop the model makes from it. */
+  lastSteerAt?: number;
+  /** Trusted text retained after the delivery queue is consumed; verifies a model's stop quote. */
+  lastSteerMessage?: string;
+  /** The language platform lines are shown in (platformVoice.ts) — from the prompt, switched by a mid-build ask. */
+  voice?: 'en' | 'hinglish' | 'hindi';
   /** The build's resolved power level — gates mid-build steering to the Full Team ('max') tier. */
   powerLevel?: string;
   /** The channel key (userId) — used to mirror events to the cross-device LiveChannel. Stays the
@@ -62,6 +68,8 @@ export interface RunningBuild {
   lastEventTs?: number;
   /** True once the build handler's own code has finished (its `finally` ran) — see stoppingBuild.ts. */
   exited?: boolean;
+  /** Deadline response has closed; time alone cannot retire this still-running body. */
+  requiresBodyExit?: boolean;
   /** When the user pressed Stop on it. */
   stoppedAt?: number;
   /** Woken when the build exits. */

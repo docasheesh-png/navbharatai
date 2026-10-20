@@ -3,7 +3,7 @@
 // `assertWorkspaceOwner` accepts the CLAIMED body/query userId when no token is sent, so a token-less
 // request naming `agentv3-<victimUid>-<sid>` with `userId: <victimUid>` returned the victim's whole source
 // tree (workspace-files) or deployed it with the victim's own keys (deploy-backend). Every surface that
-// touches a user's source now takes the VERIFIED owner. The non-strict gate is a ratcheted allowlist.
+// touches a user's source now takes the VERIFIED owner. Preview polling and repair use the same verified-owner rule.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -33,21 +33,14 @@ describe('a token-less request claiming the victim\'s uid gets nothing', () => {
   }
 });
 
-/** The automatic build-loop surfaces that may keep the claimed fallback — and nothing else. */
-const NON_STRICT_ALLOWED = new Set([
-  '/api/agentv3/preview-error', '/api/agentv3/preview-diagnose', '/api/agentv3/preview-health',
-  '/api/agentv3/queue/enqueue', '/api/agentv3/queue', '/api/agentv3/queue/cancel', '/api/agentv3/queue/next', '/api/agentv3/queue/complete',
-]);
-
-describe('census: the non-strict owner gate is a closed list', () => {
-  it('no route outside the build-loop allowlist uses assertWorkspaceOwner', () => {
+// There are no HTTP routes entitled to act on a claimed workspace owner, including watchdogs.
+describe('census: every workspace route uses verified ownership', () => {
+  it('no registered route uses the claimed-uid owner guard', () => {
     const src = readFileSync('src/server/routes/agentv3.ts', 'utf8');
     const starts = [...src.matchAll(/\n\s*app\.(?:get|post|put|patch|delete|all)\(\s*'([^']+)'/g)].map((m) => ({ at: m.index ?? 0, path: m[1] }));
-    const offenders: string[] = [];
-    starts.forEach((s, i) => {
-      const block = src.slice(s.at, i + 1 < starts.length ? starts[i + 1].at : src.length);
-      if (/assertWorkspaceOwner\(/.test(block) && !NON_STRICT_ALLOWED.has(s.path)) offenders.push(s.path);
-    });
+    const offenders = starts.filter((s, i) => /assertWorkspaceOwner\(/.test(
+      src.slice(s.at, i + 1 < starts.length ? starts[i + 1].at : src.length),
+    )).map((s) => s.path);
     expect(offenders).toEqual([]);
   });
 });

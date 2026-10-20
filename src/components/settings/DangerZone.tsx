@@ -33,12 +33,12 @@ export interface DeleteAccountResult {
  */
 export function deletionOutcomeMessage(result: DeleteAccountResult | null): string {
   if (!result || result.ok !== true) {
-    return 'We could not complete the deletion. Nothing has been changed — please try again, or email info@navbharatai.com.';
+    return 'We could not confirm the deletion outcome. Some changes may already have completed. Please check your account before retrying, or email info@navbharatai.com.';
   }
-  if (result.message) return result.message;
-  return result.accountDeleted
-    ? 'Your account and all of its data have been permanently deleted.'
-    : 'Your data has been erased, but your sign-in could not be removed automatically. Please email info@navbharatai.com so we can finish it.';
+  if (typeof result.message === 'string' && result.message) return result.message;
+  return result.accountDeleted === true
+    ? 'Your account has been deleted. Data removal is not fully confirmed; records with unverified ownership need review. Please email info@navbharatai.com.'
+    : 'Your sign-in removal and data erasure are not fully confirmed. Please email info@navbharatai.com so we can finish it.';
 }
 
 export function DangerZone({ signedIn, onLog }: { signedIn: boolean; onLog?: (m: string, t?: string) => void }) {
@@ -63,9 +63,10 @@ export function DangerZone({ signedIn, onLog }: { signedIn: boolean; onLog?: (m:
       });
       const body = (await res.json().catch(() => null)) as DeleteAccountResult | null;
       const result = res.ok ? body : null;
+      const accountConfirmed = res.ok && result?.ok === true && result.accountDeleted === true;
       setDone(deletionOutcomeMessage(result));
-      onLog?.(deletionOutcomeMessage(result), res.ok ? 'success' : 'error');
-      if (res.ok) {
+      onLog?.(deletionOutcomeMessage(result), accountConfirmed ? 'success' : 'error');
+      if (accountConfirmed) {
         // The session must not outlive the account. Sign out, then reload to a clean app — staying on
         // a screen backed by data that no longer exists would show errors that look like new bugs.
         try { await signOutEverywhere(); } catch { /* the account is gone either way */ }
@@ -73,7 +74,7 @@ export function DangerZone({ signedIn, onLog }: { signedIn: boolean; onLog?: (m:
       }
     } catch {
       setDone(deletionOutcomeMessage(null));
-      onLog?.('Account deletion failed — nothing was changed.', 'error');
+      onLog?.(deletionOutcomeMessage(null), 'error');
     } finally {
       setBusy(false);
     }
@@ -90,8 +91,11 @@ export function DangerZone({ signedIn, onLog }: { signedIn: boolean; onLog?: (m:
         <div>
           <p className="text-xs font-bold text-ink">Delete your account</p>
           <p className="text-[11px] text-muted leading-relaxed mt-1">
-            This permanently removes your profile, chats, projects and built apps, wallet and token
-            balance, saved keys and sessions. <span className="text-danger font-semibold">It cannot be undone,
+            This removes your account and attributable data, including your profile, wallet and token
+            balance, saved keys and sessions. Older records whose ownership cannot be verified are
+            retained for review, including workspaces, chat and voice conversations, synced copies,
+            snapshots, engineering notes, app connections and uploaded assets.
+            Email info@navbharatai.com for help with that review. <span className="text-danger font-semibold">It cannot be undone,
             and your unused token balance is not refundable.</span> Payment and tax records are kept as
             the law requires.
           </p>

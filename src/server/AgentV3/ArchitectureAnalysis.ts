@@ -66,6 +66,11 @@ function isFrontendFile(file: string): boolean {
  *  so EVERY such component was falsely reported as an "orphan the app will never render". An unknown
  *  bare specifier (an npm package) is still null. */
 export function resolveLocalImport(fromFile: string, spec: string, files: Set<string>): string | null {
+  return localImportCandidates(fromFile, spec, files)[0] ?? null;
+}
+
+/** All matching nodes, in the advisory resolver's original order. Destructive callers must prove uniqueness. */
+export function localImportCandidates(fromFile: string, spec: string, files: Set<string>): string[] {
   const bases: string[] = [];
   if (spec.startsWith('.')) {
     const baseDir = path.posix.dirname(fromFile);
@@ -95,7 +100,7 @@ export function resolveLocalImport(fromFile: string, spec: string, files: Set<st
     const alias = /^(?:@|~)\/(.+)$/.exec(spec);
     // A bare specifier's own path is the candidate: `stores/useStore` → `src/stores/useStore`.
     const rest = alias ? alias[1] : spec;
-    if (!alias && (spec.startsWith('node:') || !/^[a-zA-Z_][\w.-]*(\/|$)/.test(spec))) return null;
+    if (!alias && (spec.startsWith('node:') || !/^[a-zA-Z_][\w.-]*(\/|$)/.test(spec))) return [];
     // Derive the alias root from the IMPORTING file, so `@/` maps to the app's REAL source dir. A
     // FULLSTACK app keeps its frontend under `client/src/` (or `frontend/src/`, `apps/web/src/`, …), and
     // Vite/Next alias `@/` to THAT dir — not a top-level `src/`. Resolving only against `src/`/bare made
@@ -108,6 +113,7 @@ export function resolveLocalImport(fromFile: string, spec: string, files: Set<st
     // `src/components/X` or `components/X`.
     bases.push(path.posix.normalize('src/' + rest), path.posix.normalize(rest));
   }
+  const matches = new Set<string>();
   for (const base of bases) {
     const candidates = [
       base,
@@ -126,9 +132,9 @@ export function resolveLocalImport(fromFile: string, spec: string, files: Set<st
       const tsExts = TS_SOURCE_FOR_JS[jsExt[1].toLowerCase()] ?? [];
       candidates.push(...tsExts.map((e) => stem + e), ...CODE_EXTS.map((e) => stem + e));
     }
-    for (const c of candidates) if (files.has(c)) return c;
+    for (const c of candidates) if (files.has(c)) matches.add(c);
   }
-  return null;
+  return [...matches];
 }
 
 /** The TypeScript SOURCE extensions a given JS OUTPUT extension resolves to under NodeNext/ESM. */

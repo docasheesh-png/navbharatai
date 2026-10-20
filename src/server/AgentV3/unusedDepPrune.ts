@@ -22,6 +22,8 @@
 //
 // Kill switch: AGENTV3_PRUNE_UNUSED_DEPS=off (the warning stays, nothing is removed). PURE apart from the env read.
 
+import { snapshotRestoreStopped } from './snapshotRestore';
+
 export function pruneUnusedDepsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_PRUNE_UNUSED_DEPS ?? '').trim().toLowerCase() !== 'off';
 }
@@ -155,12 +157,14 @@ export interface PruneRun {
   run: (command: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** Reads a project file from the sandbox (null when absent). */
   read: (path: string) => Promise<string | null>;
+  signal?: AbortSignal;
 }
 
 export type PruneOutcome =
   | { status: 'removed'; removed: string[]; keptForPeers: string[]; packageJson: string; lock: string | null }
   | { status: 'skipped'; reason: string; keptForPeers: string[] }
-  | { status: 'reverted'; reason: string; tried: string[]; keptForPeers: string[] };
+  | { status: 'reverted'; reason: string; tried: string[]; keptForPeers: string[] }
+  | { status: 'restore-failed' | 'interrupted'; reason: string; tried: string[]; keptForPeers: string[] };
 
 const BACKUP_PKG = '/tmp/nbai-prune-package.json';
 const BACKUP_LOCK = '/tmp/nbai-prune-package-lock.json';
@@ -177,22 +181,27 @@ export function hasBuildScript(pkgRaw: string | null | undefined): boolean {
 
 /**
  * Removes the candidates, proves the app's own production build still passes, and puts everything back if it
- * does not. A candidate another installed package needs is kept first. Never throws: a failure anywhere is
- * `reverted` or `skipped`, with the project as it was.
+ * does not. A candidate another installed package needs is kept first. Never throws: `reverted` requires
+ * the recovery command and manifest checks to pass; interrupted or failed recovery is reported separately.
  */
 export async function pruneBuildAddedDeps(candidates: readonly string[], packageJsonNow: string, io: PruneRun): Promise<PruneOutcome> {
   const safe = candidates.filter(isSafePackageName);
   if (safe.length === 0) return { status: 'skipped', reason: 'no candidates', keptForPeers: [] };
   if (!hasBuildScript(packageJsonNow)) return { status: 'skipped', reason: 'no build script to verify the removal with', keptForPeers: [] };
+  const endedBeforeRemoval = (): PruneOutcome => ({ status: 'skipped', reason: 'the build ended before packages could be removed', keptForPeers });
   let keptForPeers: string[] = [];
+  if (io.signal?.aborted) return endedBeforeRemoval();
   try {
-    const needed = parseNeeded((await io.run(peerCheckScript(safe))).stdout);
+    const check = await io.run(peerCheckScript(safe));
+    if (check.exitCode !== 0) return { status: 'skipped', reason: 'could not check which packages other packages need', keptForPeers: [] };
+    const needed = parseNeeded(check.stdout);
     keptForPeers = safe.filter((n) => needed.has(n));
   } catch {
     return { status: 'skipped', reason: 'could not check which packages other packages need', keptForPeers: [] };
   }
   const remove = safe.filter((n) => !keptForPeers.includes(n));
   if (remove.length === 0) return { status: 'skipped', reason: 'every candidate is needed by another package', keptForPeers };
+  if (io.signal?.aborted) return endedBeforeRemoval();
 
   try {
     const backup = await io.run(`cp package.json ${BACKUP_PKG} && rm -f ${BACKUP_LOCK} && (test ! -f package-lock.json || cp package-lock.json ${BACKUP_LOCK})`);
@@ -200,24 +209,58 @@ export async function pruneBuildAddedDeps(candidates: readonly string[], package
   } catch {
     return { status: 'skipped', reason: 'could not back up package.json', keptForPeers };
   }
-  const restore = async (): Promise<void> => {
+  if (io.signal?.aborted) return endedBeforeRemoval();
+  const restore = async (reason: string): Promise<PruneOutcome> => {
+    if (snapshotRestoreStopped(io.signal)) return {
+      status: 'interrupted', reason: `${reason}; the build stopped before the package restore could run`, tried: remove, keptForPeers,
+    };
     try {
-      await io.run(`cp ${BACKUP_PKG} package.json && (test ! -f ${BACKUP_LOCK} || cp ${BACKUP_LOCK} package-lock.json) && timeout 180 npm install --no-audit --no-fund`);
-    } catch { /* the backup files stay in /tmp; nothing else to do here */ }
+      // Success requires the command AND the original manifests, not merely a resolved promise. When
+      // there was no lock, do not leave one created by the attempted uninstall behind as the old state.
+      const restored = await io.run(`cp ${BACKUP_PKG} package.json && if test -f ${BACKUP_LOCK}; then cp ${BACKUP_LOCK} package-lock.json && timeout 180 npm install --no-audit --no-fund && cmp -s ${BACKUP_PKG} package.json && cmp -s ${BACKUP_LOCK} package-lock.json; else rm -f package-lock.json && timeout 180 npm install --no-audit --no-fund --package-lock=false && cmp -s ${BACKUP_PKG} package.json && test ! -f package-lock.json; fi`);
+      if (restored.exitCode === 0) return { status: 'reverted', reason, tried: remove, keptForPeers };
+    } catch { /* the backup stays available; report that recovery did not complete */ }
+    return { status: 'restore-failed', reason: `${reason}; the original packages and manifests could not be restored completely`, tried: remove, keptForPeers };
   };
+  const interrupted = (): PruneOutcome => ({ status: 'interrupted', reason: 'the build ended before the verified removal could be recorded', tried: remove, keptForPeers });
   try {
     const un = await io.run(`timeout 120 npm uninstall --no-audit --no-fund ${remove.join(' ')}`);
-    if (un.exitCode !== 0) { await restore(); return { status: 'reverted', reason: 'npm uninstall failed', tried: remove, keptForPeers }; }
+    if (un.exitCode !== 0) return await restore('npm uninstall failed');
+    if (io.signal?.aborted) return await restore('the build ended before the removal could be verified');
     const build = await io.run('timeout 240 npm run build');
-    if (build.exitCode !== 0) { await restore(); return { status: 'reverted', reason: 'the app did not build without them', tried: remove, keptForPeers }; }
+    if (build.exitCode !== 0) return await restore('the app did not build without them');
+    if (io.signal?.aborted) return interrupted();
     const packageJson = await io.read('package.json');
-    if (!packageJson) { await restore(); return { status: 'reverted', reason: 'package.json could not be read back', tried: remove, keptForPeers }; }
+    if (!packageJson) return await restore('package.json could not be read back');
+    if (io.signal?.aborted) return interrupted();
     const lock = await io.read('package-lock.json');
+    if (io.signal?.aborted) return interrupted();
     return { status: 'removed', removed: remove, keptForPeers, packageJson, lock };
   } catch {
-    await restore();
-    return { status: 'reverted', reason: 'the removal could not be completed', tried: remove, keptForPeers };
+    return await restore('the removal could not be completed');
   }
+}
+
+/** A package whose restore failed was not kept. */
+export function packagePruneNote(outcome: PruneOutcome, candidates: readonly string[], stopped = false): {
+  severity: 'info' | 'warning'; code: string; autoResolved: boolean; message: string; detail?: string;
+} {
+  if (stopped && outcome.status === 'removed') return {
+    severity: 'warning', code: 'UNUSED_DEPS_RESTORE_INCOMPLETE', autoResolved: false,
+    message: 'The unused-package cleanup finished in the sandbox as the build stopped; this pass did not update the saved project.',
+  };
+  if (outcome.status === 'restore-failed' || outcome.status === 'interrupted') return {
+    severity: 'warning', code: 'UNUSED_DEPS_RESTORE_INCOMPLETE', autoResolved: false,
+    message: `The unused-package cleanup could not restore the original project (${outcome.tried.join(', ')}): ${outcome.reason}.`,
+  };
+  return {
+    severity: 'info', autoResolved: true,
+    code: outcome.status === 'removed' ? 'UNUSED_DEPS_REMOVED' : 'UNUSED_DEPS_KEPT',
+    message: outcome.status === 'removed'
+      ? `Removed ${outcome.removed.length} package(s) this build added and never used: ${outcome.removed.join(', ')}. The production build passed without them.`
+      : `Kept the unused package(s) this build added (${candidates.join(', ')}): ${outcome.reason}.`,
+    detail: outcome.keptForPeers.length ? `kept because another installed package needs it: ${outcome.keptForPeers.join(', ')}` : undefined,
+  };
 }
 
 /**

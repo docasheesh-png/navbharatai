@@ -14,6 +14,7 @@ import { startBandLabel } from './RequestAnalyser';
 import { todoOnlyTurnsLine } from './todoOnlyTurn';
 import { isBuildStoppedError } from './stopSignal';
 import { stoppedCallCauseWords, type AbortCause } from './buildAbortCause';
+import { ABORT_OUTCOME_CODES } from './abortOutcome';
 import { toolCallDetail } from './toolCallTarget';
 import { isPlatformFixRequest, looksLikeMachineError, PLATFORM_COMPOSED_PREFIXES } from '../../lib/platformFixRequest';
 import { isProjectSummaryNarration } from './ProjectSummary';
@@ -27,7 +28,7 @@ import { isDeadSandboxSignal, detectSilentDbFailure } from './sandbox/EngineerAI
 import { sandboxCost, describeSandboxCost } from './sandboxCost';
 import { redactProvidersText } from '../lib/providerRedaction';
 import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
-import { isModelUnavailableError } from './providerErrorClass';
+import { isModelUnavailableError, isProviderBalanceError } from './providerErrorClass';
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError, isReasoningRungHandoff, providerNeverAnswered, isSlowStreamAbandon } from './turnDeadline';
@@ -103,8 +104,14 @@ export const PROCESS_ONLY_CODES = new Set([
   'GREEN_GUARD_UNVERIFIED',   // "could not be opened to check this turn" — the class of PREVIEW_UNVERIFIED
   // A restore point OUR save did not keep (GT-6). The app rendered; the miss is the store, not the app.
   'IN_BUILD_GREEN_SKIPPED_PARTIAL_SCAN', 'IN_BUILD_GREEN_NOT_SAVED', 'GREEN_SNAPSHOT_NOT_SAVED',
+  'POST_GREEN_RECHECK_OK', 'POST_GREEN_RECHECK_INCONCLUSIVE', 'POST_GREEN_ROLLBACK', 'POST_GREEN_ROLLBACK_SKIPPED',
+  // Our rollback did not complete. This is evidence about the platform's mutation, never app proof.
+  'POST_GREEN_ROLLBACK_INCOMPLETE', 'GREEN_GUARD_RESTORE_INCOMPLETE',
+  'UNUSED_DEPS_RESTORE_INCOMPLETE', 'DEAD_SALVAGE_RESTORE_INCOMPLETE',
+  'DESIGN_HEAL_RESTORE_INCOMPLETE',
   'HEAL_NOT_DURABLE',         // our repair wrote twice to one file; the user never sees repair passes
   'IMPORT_NOT_DURABLE',       // our store did not confirm saving an import (autopsy d0b2fcd6, Q-735) — their app is unchanged
+  'IMPORT_DURABLE_PENDING',   // our background save of an import was still running when the turn ended (build d62bf22d) — their app is unchanged
   // ── Q-381 batch two (2026-10-11): each of these says, at its own recording site, that it is about OUR run.
   // All WARNING/INFO, so the error count a RED gate reads cannot change and no bill moves.
   'FASTLANE_CONTINUATION_FAILED',    // our generation's continuation call failed; the complete files were kept
@@ -181,6 +188,10 @@ export const PROCESS_ONLY_CODES = new Set([
   'FREE_BUILD_TIME_CAP', 'FREE_BUILD_CHAIN_PAUSED',
   // OUR end-of-turn steer that handed the model its undefined classes (stylePolishResume.ts, autopsy 1be16985).
   'STYLE_RULES_RESUMED',
+  // OUR style pass ended by its own time cap (stylePassCap.ts) — a policy of ours, never the app.
+  'STYLE_PASS_CAPPED',
+  // OUR red-team pass's own timing line (FuzzProbe.redTeamRunNote) — a measurement of ours, never the app.
+  'REDTEAM_RAN',
   // OUR repair pass's closing claim withheld because the pass changed nothing (repairClaim.ts, autopsy 6cd698cc).
   'REPAIR_CLAIM_WITHHELD',
   // OUR end-of-turn hand-back answered with no change (repairClaim.ts, autopsy db07e0af): a struggle of the engine.
@@ -202,6 +213,11 @@ export const PROCESS_ONLY_CODES = new Set([
   'TURN_ANSWERED_A_QUESTION',
   // …and its sibling (2026-09-26): the model DECLINED, and its refusal was left standing as the answer.
   'TURN_DECLINED',
+  // …and its third sibling (Q-1019, 2026-10-15): the turn's whole ask was to remove ads that live inside
+  // another service's player, which the app cannot reach into. The model said so and changed nothing — our
+  // retry policy correctly left that answer standing. An unregistered code costs the USER 6 app-health
+  // points (`isAppFinding`), and this is a fact about our engine, not a flaw in their app.
+  'TURN_ANSWERED_NOT_OURS',
   // The REQUEST asked for a device power a web app does not have (autopsy 6bae5835) — a fact about what
   // the platform can deliver, told to the user in the summary, never a defect in the app that was built.
   'DEVICE_CAPABILITIES_TOLD',
@@ -291,7 +307,7 @@ export const PROCESS_ONLY_CODES = new Set([
   // nothing about the app's code, and counting one as a "build-breaking blocker" on the user's health
   // card is the provider-error-as-app-blocker class (autopsy 4efab9d7) through a new door.
   'OUTCOME_USER_STOPPED', 'OUTCOME_COST_CEILING', 'OUTCOME_FUTILE', 'OUTCOME_DEPLOY_DRAIN',
-  'OUTCOME_SUPERSEDED', 'OUTCOME_REAPED',
+  'OUTCOME_SUPERSEDED', 'OUTCOME_REAPED', 'OUTCOME_AUTHORITY_UNAVAILABLE',
   // …and the two the deadline finalizer already wrote, for the same reason (the siblings, rule 3): the
   // wall-clock cap and an abort with no recorded cause end the RUN; neither is evidence about the app.
   // The release gate is RED on `buildOk:false` regardless, so this changes no verdict — only the
@@ -674,6 +690,12 @@ export interface BuildBillingRecord {
   billedInr?: number;
   /** Wallet tokens actually debited (absent when billing is off / nothing was charged). */
   walletTokensDebited?: number;
+  /** ₹ that actually left the wallet (after the overdraft floor). See lib/chargeRecord.ts. */
+  walletDebitedInr?: number;
+  /** ₹ the overdraft floor made the platform absorb on this charge. */
+  absorbedInr?: number;
+  /** True when the floor capped the debit below the bill. */
+  partialDebit?: true;
   /**
    * What the PROVIDERS really cost NavBharatAI for this build (USD, tokens only, at settle time's
    * rate card) — recorded on success AND failure, because a failed build still cost us. ADMIN-ONLY:
@@ -2140,8 +2162,20 @@ export class BuildDiagnostics {
     // If the build ended NOT-ok with tool calls still in-flight, those are EXACTLY what it hung on
     // — name them so a timeout report points at the real culprit instead of a blank gap.
     if (!ok) {
+      // 🔴 A TOOL THE USER'S STOP CUT OFF DID NOT HANG (autopsy 53ee45b9, 2026-10-18). The platform's own
+      // update_preview was 17 s in flight when the user pressed Stop at 21 s; it was filed as an unresolved
+      // ERROR on a build that had nothing wrong with it. On a user-stopped build the in-flight tool is
+      // recorded as info, resolved, and says what really ended it. Every other not-ok end is unchanged.
+      // `AGENTV3_STUCK_TOOL_STOP_INFO=off` restores the old record.
+      const cutByUser = (process.env['AGENTV3_STUCK_TOOL_STOP_INFO'] ?? '').trim().toLowerCase() !== 'off'
+        && stoppedByUser(this.issues);
       for (const { tool, ts } of this.pending.values()) {
-        this.record({ phase: 'tool', severity: 'error', code: 'STUCK_TOOL', message: `Stuck on '${tool}' — in-flight ${Math.round((this.endedAt - ts) / 1000)}s, never completed.`, autoResolved: false });
+        const secs = Math.round((this.endedAt - ts) / 1000);
+        if (cutByUser) {
+          this.record({ phase: 'tool', severity: 'info', code: 'STUCK_TOOL', message: `'${tool}' was still running (${secs}s) when the user stopped the build — cut off by the Stop, not stuck.`, autoResolved: true });
+        } else {
+          this.record({ phase: 'tool', severity: 'error', code: 'STUCK_TOOL', message: `Stuck on '${tool}' — in-flight ${secs}s, never completed.`, autoResolved: false });
+        }
       }
     }
     this.pending.clear();
@@ -2945,6 +2979,7 @@ export class BuildDiagnostics {
       problems: capProblems(this.issues.filter((i) => i.severity !== 'info')),
       rootCause: deriveRootCause({
         issues: this.issues, errors: this.errors, review: this.reviewText, ok: this.ok, commands: this.commands,
+        endedAt: this.endedAt,
         // The serializer is the ONLY caller that can distinguish "this build never reported an
         // ending" from "the caller did not pass ok" — see the field's own comment.
         // …and, since 2026-09-13, "it has not ended YET" from "it ended without saying so".
@@ -3304,6 +3339,8 @@ export function classifyProviderFailure(reason: unknown): string {
   // for a cap on the reply, and `other:` is where this class hid for two nights across two vendors.
   // Checked here, above the generic tests, so a future reword of the marker cannot fall through them.
   if (isStarvedBudgetError(text)) return 'output-budget';
+  // Some providers report an unfunded account as 429. It cannot recover through throttle retries.
+  if (isProviderBalanceError(text)) return 'billing';
   if (/\b429\b|rate.?limit|too many requests|quota/.test(t)) return 'rate-limit';
   // OUR walk-away from a provider, before the generic "timed out" test the marker also matches — the same order
   // `wasteKindFor` uses, so the two classifiers of one error agree (autopsy 303e8a6f: this one said 'timeout',
@@ -3345,9 +3382,10 @@ const DEGRADED_BUCKETS = new Set(['timeout', 'silent', 'crawl', 'rate-limit', 's
  * outage case this file already fixed, not better: an outage at least might have passed on a retry.
  *
  * `auth` is here for the same reason and had the identical hole; `model-unavailable` had an ADMIN line
- * and still reached the upsell. One predicate now covers all three.
+ * and still reached the upsell. Explicit account funding failures belong here too: a 429 with no
+ * balance is a billing condition, not a passing throttle.
  */
-const OUR_CONFIGURATION_BUCKETS = new Set(['model-unavailable', 'auth', 'bad-request']);
+const OUR_CONFIGURATION_BUCKETS = new Set(['model-unavailable', 'auth', 'bad-request', 'billing']);
 
 /**
  * Did this build fail because of OUR configuration rather than the engine's ability or the app's
@@ -3355,7 +3393,8 @@ const OUR_CONFIGURATION_BUCKETS = new Set(['model-unavailable', 'auth', 'bad-req
  *
  * ⚠️ Requires a REPEAT (≥ `minCount`), deliberately. A single 400 can be one odd prompt hitting one
  * rung's schema, and suppressing an honest outcome on one stray failure would be its own dishonesty.
- * A bucket that repeats is a rung that cannot work — which is the thing worth being loud about. PURE.
+ * A bucket that repeats is a rung that cannot work — which is the thing worth being loud about.
+ * Explicit billing failures need no repeat: they name the account condition directly. PURE.
  */
 export function providerFailuresLookMisconfigured(
   reasons: Record<string, string> | null | undefined,
@@ -3370,7 +3409,9 @@ export function providerFailuresLookMisconfigured(
       const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(part);
       if (!m) return false;
       const n = Number(m[1]);
-      return Number.isFinite(n) && n >= minCount && OUR_CONFIGURATION_BUCKETS.has(m[2]);
+      // An explicit lack of funds is conclusive on the first occurrence. Retirement deliberately
+      // prevents repeats, so requiring three would hide the account problem after fixing retries.
+      return Number.isFinite(n) && n > 0 && (m[2] === 'billing' || n >= minCount) && OUR_CONFIGURATION_BUCKETS.has(m[2]);
     }));
 }
 
@@ -3683,8 +3724,8 @@ export interface EtaAccuracy {
   evidenced: boolean;
   line: string;
   /**
-   * True when the build was CUT SHORT (stopped by the user, a deploy, the reaper…) before the band ended:
-   * then it never ran long enough to test the estimate, and its ratio must not be counted as a miss.
+   * True when a non-delivery stop occurs at or before the band's upper bound. Its elapsed time cannot
+   * certify completion inside the band, and its ratio must not be counted as an accurate delivery.
    */
   untested?: boolean;
   /** The promise's slice and source (see EtaPromise) — absent on reports written before 2026-10-12. */
@@ -3693,14 +3734,11 @@ export interface EtaAccuracy {
 }
 
 /**
- * Outcomes that END a build from outside its own work. A build cut short before the band's top did not
- * test the estimate (autopsy 19641ab5: a build stopped by the user at 1.8 min was scored "0.2× the
- * midpoint and UNDER the band" — as if the estimate had been wrong about it).
+ * Canonical non-delivery stops. Keep the abort producer's class rather than a second list: omitting
+ * FUTILE credited report 78e7e226's empty ten-minute run as an accurate delivery. Advisory-cap and
+ * unknown-code measurement policy is unchanged. Past the upper bound, elapsed time still proves a miss.
  */
-export const ETA_UNTESTED_OUTCOMES: ReadonlySet<string> = new Set([
-  'OUTCOME_USER_STOPPED', 'OUTCOME_STOPPED', 'OUTCOME_DEPLOY_DRAIN', 'OUTCOME_SUPERSEDED',
-  'OUTCOME_REAPED', 'OUTCOME_ABORTED_UNKNOWN', 'OUTCOME_COST_CEILING',
-]);
+export const ETA_UNTESTED_OUTCOMES: ReadonlySet<string> = new Set(Object.values(ABORT_OUTCOME_CODES));
 
 /**
  * MEASURE THE PROMISE AGAINST THE CLOCK — the half that was missing (open root cause #6, 2026-09-17).
@@ -3773,15 +3811,18 @@ function judgeEtaPromise(
       // Admin 2026-09-26: an unevidenced estimate is SHOWN, labelled a guess (etaEvidence.ts).
       ? `The user was shown a ROUGH ESTIMATE, labelled a guess (unevidenced): ${band} (midpoint ${mins(promisedMs)})`
       : `No figure was shown to the user (unevidenced — they saw the PHASE). The estimator's own midpoint was ${mins(promisedMs)}, band ${band}`;
-  // Cut short from outside before the band ended: the clock measured the interruption, not the build.
-  // A build stopped AFTER the band's top still proves the estimate was too low, so that one is judged.
-  if (ETA_UNTESTED_OUTCOMES.has(outcomeCode) && actualMs < highMs && !withinBand) {
+  // A stop anywhere inside the inclusive band measured interruption, never completed delivery.
+  // AFTER the upper bound, the elapsed lower bound still proves the completion estimate was too low.
+  const cutShort = ETA_UNTESTED_OUTCOMES.has(outcomeCode);
+  if (cutShort && actualMs <= highMs) {
     return {
       promisedMs, lowMs, highMs, actualMs, ratio, withinBand, evidenced, untested: true,
-      line: `${head}; the build was cut short (${outcomeCode}) at ${mins(actualMs)}${waitNote}, before the band ended, so it does not test the estimate.`,
+      line: `${head}; the build was cut short (${outcomeCode}) at ${mins(actualMs)}${waitNote}, without completing, so it does not test completion time.`,
     };
   }
-  const verdict = withinBand
+  const verdict = cutShort
+    ? `the build was cut short (${outcomeCode}) at ${mins(actualMs)} — already OVER the band before completion (${ratio.toFixed(1)}× the midpoint)`
+    : withinBand
     ? 'the build landed INSIDE that band'
     : `the build took ${mins(actualMs)} — ${ratio.toFixed(1)}× the midpoint and ${actualMs > highMs ? 'OVER' : 'UNDER'} the band`;
   return { promisedMs, lowMs, highMs, actualMs, ratio, withinBand, evidenced, line: `${head}; ${verdict}${waitNote}.` };
@@ -3961,6 +4002,8 @@ export function ineligibleUnresolvedNote(
 
 export function deriveRootCause(input: {
   issues: readonly BuildIssue[];
+  /** Provider callbacks arriving after the recorded ending remain telemetry, not a cause of that ending. */
+  endedAt?: number;
   errors?: readonly CapturedError[];
   review?: string;
   ok?: boolean;
@@ -3978,7 +4021,14 @@ export function deriveRootCause(input: {
    */
   stillRunning?: boolean;
 }): string | undefined {
-  const { issues, errors, review, ok } = input;
+  const { errors, review, ok } = input;
+  // Reports 16cabab2/958c1b5d retained provider callbacks over an hour after their endedAt. Preserve
+  // those calls and their cost in the report, but they cannot explain an earlier ending. Limit this
+  // filter to provider events: terminal/stop backfills and billing bookkeeping may legitimately be
+  // recorded after finish, and a live report has no end boundary at all.
+  const endedAt = typeof input.endedAt === 'number' && Number.isFinite(input.endedAt) ? input.endedAt : undefined;
+  const issues = endedAt === undefined ? input.issues
+    : input.issues.filter((i) => !(i.phase === 'provider' && Number.isFinite(i.ts) && i.ts > endedAt));
   /**
    * 🔴 THE ADVISORY CAP IS NOT AN OUTCOME FOR THE APP (report af3a3f7f, 2026-09-17).
    *
@@ -4347,7 +4397,10 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
       const inr = typeof r.billing.billedInr === 'number' ? `₹${r.billing.billedInr.toFixed(2)} ` : '';
       const wallet = typeof r.billing.walletTokensDebited === 'number' && r.billing.walletTokensDebited > 0
         ? ` · ${r.billing.walletTokensDebited.toLocaleString()} wallet tokens debited` : '';
-      lines.push(`Charged to user: ${inr}($${r.billing.billedUsd.toFixed(4)})${r.billing.billedUsd === 0 ? ' — FREE build' : ''}${wallet}`);
+      // A capped debit says so: the bill above is NOT what the wallet paid (lib/chargeRecord.ts).
+      const capped = r.billing.partialDebit && typeof r.billing.walletDebitedInr === 'number'
+        ? ` · PARTIAL DEBIT: wallet paid ₹${r.billing.walletDebitedInr.toFixed(2)}, ₹${(r.billing.absorbedInr ?? 0).toFixed(2)} absorbed by the overdraft floor` : '';
+      lines.push(`Charged to user: ${inr}($${r.billing.billedUsd.toFixed(4)})${r.billing.billedUsd === 0 ? ' — FREE build' : ''}${wallet}${capped}`);
     } else if (typeof r.billing.walletTokensDebited === 'number' && r.billing.walletTokensDebited > 0) {
       lines.push(`Charged to user: ${r.billing.walletTokensDebited.toLocaleString()} wallet tokens debited`);
     }

@@ -1,3 +1,4 @@
+import { assertAiAvailable, aiMaintenanceStore } from '../../lib/aiMaintenance';
 // AgentV3 — OpenAI-compatible tool-use TurnRunner (multi-provider cost routing, phase 2).
 //
 // Implements the same TurnRunner contract as ClaudeClient, but speaks the OpenAI Chat
@@ -33,7 +34,7 @@ import {
   streamHardCapMs,
   streamIdleMs,
   streamIsCrawling,
-  streamThroughputGraceMs,
+  streamFirstByteGraceMs,
   type OpenAiStreamChunkLike,
   type StreamStopCause,
 } from './openAiStream';
@@ -61,7 +62,7 @@ export interface OpenAiChatClient {
         stream?: true;
         /** Ask the provider to put token usage on the final chunk — a stream carries none otherwise. */
         stream_options?: { include_usage: true };
-      }): Promise<OpenAiCompletionLike | OpenAiChatStream>;
+      }, options?: { signal?: AbortSignal }): Promise<OpenAiCompletionLike | OpenAiChatStream>;
     };
   };
 }
@@ -130,6 +131,8 @@ async function readStream(
      * judged crawling — never on every poll.
      */
     canAbandon?: () => boolean;
+    /** The zero-byte grace this rung earned (firstByteGraceFor); absent ⇒ the configured grace. */
+    firstByteGraceMs?: number;
     /**
      * The build's stop signal. A stop CLOSES the stream — the provider stops generating and stops
      * billing — and throws `BuildStoppedError`, never a timeout the chain would bench a vendor for.
@@ -201,7 +204,7 @@ async function readStream(
         const answerOver = opts.answerBy !== undefined && !acc.hasAnswer() && opts.answerBy - now() <= 0;
         if (answerOver && !idleOver && !ceilingOver) { disarm(); abort(); return 'no-answer'; }
         if (!idleOver && !ceilingOver) {
-          if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt }) && opts.canAbandon?.()) {
+          if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt, firstByteGraceMs: opts.firstByteGraceMs }) && opts.canAbandon?.()) {
             disarm();
             abort();
             return 'slow';
@@ -243,7 +246,7 @@ async function readStream(
       }
       // …and the THIRD state: answering, but so slowly that waiting costs more than moving on. Judged
       // only when the caller says another rung is available — see `canAbandon`.
-      if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt }) && opts.canAbandon?.()) {
+      if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt, firstByteGraceMs: opts.firstByteGraceMs }) && opts.canAbandon?.()) {
         abort();
         return 'slow';
       }
@@ -357,6 +360,18 @@ export class OpenAiToolRunner implements TurnRunner {
   ) {}
 
   async runTurn(params: RunTurnParams): Promise<TurnResult> {
+    await assertAiAvailable();
+    try { return await this.runAvailableTurn(params); }
+    catch (error) {
+      if (!process.env.VITEST && process.env.NODE_ENV !== 'test') {
+        await aiMaintenanceStore.recordFailure(this.opts.model || params.model, error);
+        await assertAiAvailable();
+      }
+      throw error;
+    }
+  }
+
+  private async runAvailableTurn(params: RunTurnParams): Promise<TurnResult> {
     const tools = toolDefsToOpenAI(params.tools);
     // P4c (AGENTV3_REASONING_PASSBACK, default OFF) — hand Kimi/GLM their own earlier reasoning back.
     const passbackModel = this.opts.model || params.model;
@@ -457,14 +472,26 @@ export class OpenAiToolRunner implements TurnRunner {
     // one optional field and nothing else: re-sending a genuinely bad request unchanged would be a
     // retry loop around a deterministic failure, which the fourth absolute rule forbids by name. And
     // the retry happens only when we actually SENT the field — never on a call that had no opinion.
+    // Cancel the HTTP request as well as our wait, including while the provider has not opened a
+    // stream yet. A stream controller is available only after headers arrive. This asks the SDK to
+    // stop transport work; actual provider usage remains whatever the provider reports.
+    const requestAbort = new AbortController();
+    const requestOptions = { signal: requestAbort.signal };
+    let waitingForResponse = true;
     const call = async (): Promise<OpenAiCompletionLike | OpenAiChatStream> => {
       try {
-        return await this.client.chat.completions.create(request);
+        return await this.client.chat.completions.create(request, requestOptions);
       } catch (err) {
         if (!('thinking' in request) || !isThinkingParamRejection(err)) throw err;
         rememberThinkingParamRejected(thinkingModel);
+        // The original request can reject AFTER our timeout or Stop has ended the turn. Dropping a
+        // rejected option is useful only while somebody still wants the answer; a late retry would
+        // start fresh provider work after the build had already moved on.
+        throwIfStopped(params.signal);
+        if (!waitingForResponse) throw err;
+        if (turnDeadline(configuredMs, params.deadlineAt).expired) throw new Error(BUDGET_EXHAUSTED_MESSAGE);
         const { thinking: _dropped, ...withoutThinking } = request;
-        return this.client.chat.completions.create(withoutThinking);
+        return this.client.chat.completions.create(withoutThinking, requestOptions);
       }
     };
 
@@ -521,7 +548,7 @@ export class OpenAiToolRunner implements TurnRunner {
     // a crawling stream is (autopsy 1389f0d5: a silent first rung held the build for 60 s before the next
     // rung was tried). Same message, so the ladder's crawl accounting — not the timeout bench — decides.
     const silentBoundMs = streaming && params.canAbandonSlowStream?.({ peek: true })
-      ? Math.min(firstAnswerMs, streamThroughputGraceMs())
+      ? Math.min(firstAnswerMs, params.firstByteGraceMs ?? streamFirstByteGraceMs()) // zero bytes = queued: the grace this rung EARNED (owner, 2026-10-18)
       : null;
     const initialBoundMs = silentBoundMs ?? firstAnswerMs;
     const providerWentSilent = streaming && firstAnswerMs < timeoutMs;
@@ -532,6 +559,8 @@ export class OpenAiToolRunner implements TurnRunner {
     let openedAt: number | null = null;
     const opened = Promise.resolve(call()).then((v) => { openedAt = Date.now(); return v; });
     const closeIfLate = (e: unknown) => {
+      waitingForResponse = false;
+      requestAbort.abort();
       opened.then((late) => { if (isChatStream(late)) { try { late.controller?.abort(); } catch { /* best-effort */ } } }, () => { /* already failed */ });
       throw e;
     };
@@ -557,11 +586,11 @@ export class OpenAiToolRunner implements TurnRunner {
           return withTimeout(opened, Math.max(1, firstAnswerMs - silentBoundMs), ordinaryBoundMessage); // ≥1 ms: 0 would disable the bound
         }
         throw e;
-      }).catch(closeIfLate),
+      }),
       params.signal,
       // A stream that opens AFTER the stop is closed on arrival, so it never generates for nobody.
       (late) => { if (isChatStream(late)) { try { late.controller?.abort(); } catch { /* best-effort */ } } },
-    );
+    ).catch(closeIfLate);
 
     let completion: OpenAiCompletionLike;
     let streamedText = false;
@@ -579,6 +608,7 @@ export class OpenAiToolRunner implements TurnRunner {
         onReasoning: params.onThinking,
         // Only the ladder knows whether there is somewhere else to go; absent ⇒ never abandon.
         canAbandon: params.canAbandonSlowStream,
+        firstByteGraceMs: params.firstByteGraceMs,
         signal: params.signal,
         answerBy,
       });

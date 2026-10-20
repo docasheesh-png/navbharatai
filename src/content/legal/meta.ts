@@ -59,7 +59,7 @@ export const LEGAL_META: LegalMeta[] = [
     id: 'legal_refund',
     title: 'Refund & Cancellation Policy',
     subtitle: 'When you can cancel, what comes back, and how long the money takes',
-    updated: '20 September 2026',
+    updated: '18 October 2026',
     settingsTile: false,
   },
   {

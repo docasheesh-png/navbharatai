@@ -487,16 +487,16 @@ broken `main`. Concurrency is a reason to hold those tighter, never looser.
    `npm run typecheck` · `node scripts/noUnusedImports.mjs` ·
    `npm run native:guard` · `npm run typecheck:server` ·
    `npm run typecheck:benchmark` · `npm run build` · `npm run test:bundle` ·
-   `npm run boot:check` · `npm run deps:server-gate` (and `npm run audit:gate` /
-   `license:gate` when dependencies changed). They take about two minutes
+   `npm run boot:check` · `npm run deps:server-gate` · `npm run audit:gate` ·
+   `npm run license:gate`. They take about two minutes
    together — far less than a red CI round trip, and they catch what the
    two-command gate cannot.
    **Re-read the workflow rather than trusting this list**: CI gains steps, and
    a list in a doc goes stale exactly the way this one did.
 
-   🔴 **AND IT WENT STALE AGAIN, TWICE, BY 2026-10-20 — WHICH IS WHY THE LINE
-   ABOVE IS AN INSTRUCTION AND NOT A DISCLAIMER.** Two gaps were found the same
-   day, both by reading `ci.yml` instead of this list:
+   🔴 **AND IT WENT STALE AGAIN, THREE TIMES OVER, BY 2026-10-20 — WHICH IS WHY
+   THE LINE ABOVE IS AN INSTRUCTION AND NOT A DISCLAIMER.** Three gaps were found
+   in one day, every one by reading `ci.yml` instead of this list:
    · **CI's test step is `npm run test:coverage`, NOT `npx vitest run`.** Every
      "run vitest" instruction in this file names the wrong command. Coverage
      instrumentation changes module evaluation and timing, so a plain `vitest
@@ -505,6 +505,13 @@ broken `main`. Concurrency is a reason to hold those tighter, never looser.
      (including under `--coverage` alone) failed once in CI.
    · **`typecheck:benchmark` was added to `ci.yml` by #3867 mid-session**, so a
      gate list assembled an hour earlier was already a step short.
+   · **`audit:gate` and `license:gate` are NOT conditional on a dependency
+     change** — `ci.yml` runs both on EVERY run, before the tests. So a brand-new
+     advisory published against a package we never touched turns every PR, and
+     `main` itself, red in about 90 seconds at a step that never reaches the
+     suite. That happened on 2026-10-20 (`follow-redirects` 1.16.0,
+     GHSA-q3jh-wrc6-jgq8 + GHSA-8r9p-f939-6h3c): a red run on a branch whose diff
+     had nothing to do with it. Read the step as repo-wide before blaming a branch.
    Run `grep -nE '^ +run:' .github/workflows/ci.yml` and gate on what it
    prints. A list is a hint; the workflow is the gate.
 

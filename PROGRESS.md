@@ -98720,3 +98720,26 @@ awaits `joined`. Only this one awaits a REQUEST whose cleanup is registered to r
 right fix, if it ever reproduces, is to make the handler's cleanup part of what the request promise awaits, so
 "response sent" and "timers cleared" cannot be observed out of order. The row says plainly that widening the
 assertion or quarantining the test is forbidden: it protects a real property.
+
+### The same day, a third gate-list gap — and a redundant fix that proves the concurrency cost
+
+**`audit:gate` and `license:gate` are not conditional on a dependency change.** `CLAUDE.md` said to run them
+"when dependencies changed"; `ci.yml` runs both on EVERY run, before the tests. Two advisories published
+against `follow-redirects@1.16.0` (GHSA-q3jh-wrc6-jgq8, GHSA-8r9p-f939-6h3c) therefore turned every PR and
+`main` itself red in about 90 seconds, at a step that never reaches the suite — including #3859's second run,
+whose diff had nothing to do with it. The lesson is in the file now: read a red audit step as repo-wide before
+blaming a branch.
+
+**And the fix this session prepared was redundant, which is worth recording rather than hiding.** While its
+twelve-step gate ran (green, 40,641 tests), another session landed the same bump via #3869/#3870 — *with*
+`tests/redirectCredentialsStayAtTheirOrigin.test.ts`, a regression test for the exact advisory. Their version
+is strictly better: a bump without a test is a fix on borrowed time, which is what the fourth absolute rule
+says about precisely this. No PR was opened. About twelve minutes of gate time was spent, and it was
+unavoidable — the advisory appeared mid-session and two sessions raced the same public database. Safeguard #6
+cannot prevent this class: there was nothing in `main` or in any open PR's diff to find, because the trigger
+was external.
+
+**A smaller operational fact:** branch deletion is not available to this session. `git push --delete` fails at
+the proxy and `DELETE /git/refs/...` returns *"Write access to this GitHub API path is not permitted through
+this proxy"*, so `claude/a-new-advisory-must-not-redden-every-pr` remains on the remote with no PR against it
+until someone with write access removes it.

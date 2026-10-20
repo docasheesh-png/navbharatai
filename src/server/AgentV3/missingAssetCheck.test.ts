@@ -140,6 +140,8 @@ describe('the check is wired into the ship (locked)', () => {
 describe('the big-asset spill-over (locked)', () => {
   const store = require('node:fs').readFileSync(
     require('node:path').resolve(__dirname, 'WorkspaceAssetStore.ts'), 'utf8');
+  const storagePolicy = require('node:fs').readFileSync(
+    require('node:path').resolve(__dirname, '../lib/workspaceAssetStorage.ts'), 'utf8');
 
   it('an asset too big for Firestore goes to the BUCKET, not the bin', () => {
     // The reported failure was a phone screenshot past Firestore's 1MB-per-document limit being
@@ -159,8 +161,11 @@ describe('the big-asset spill-over (locked)', () => {
   it('uses the PRIVATE bucket, and says why that differs from published apps', () => {
     // Workspace assets are the user's unpublished files. bucketPublish refuses this same fallback
     // because a published app must be public — the difference is access, not size.
-    expect(store).toContain('WORKSPACE_ASSETS_BUCKET');
-    expect(store).toContain('NAV_STORE_BUCKET');
+    expect(store).toContain("from '../lib/workspaceAssetStorage'");
+    expect((store.match(/workspaceAssetBucketName\(\)/g) || []).length).toBe(2); // spill and read
+    expect(storagePolicy).toContain('WORKSPACE_ASSETS_BUCKET');
+    expect(storagePolicy).toContain('NAV_STORE_BUCKET');
+    expect(storagePolicy).not.toContain('PUBLISHED_APPS_BUCKET');
     expect(store).toContain("cacheControl: 'private, max-age=0'");
   });
 

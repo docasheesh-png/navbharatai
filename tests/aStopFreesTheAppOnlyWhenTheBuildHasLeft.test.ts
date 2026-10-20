@@ -210,12 +210,42 @@ describe('5 · a stopped build holds the app until it has left', () => {
     const afterClaim = ROUTE.slice(ROUTE.indexOf('activeBuildOwner.set(buildKey, buildLockToken);'));
     expect(afterClaim).not.toMatch(/^\s*activeBuilds\.delete\(buildKey\);/m);
     expect((ROUTE.match(/releaseBuildLock\(buildKey, buildLockToken\);/g) ?? []).length).toBeGreaterThanOrEqual(8);
-    expect((ROUTE.match(/markBuildExited\(rb\);/g) ?? []).length).toBe(2);
+    expect((ROUTE.match(/markBuildExited\(rb\);/g) ?? []).length).toBe(1);
   });
   it('SOURCE: the cross-instance lease is kept while a stopped build is still leaving', () => {
     const coordination = readFileSync('src/server/AgentV3/BuildRequestCoordination.ts', 'utf8');
     expect(ROUTE).toContain('buildLeaseTimer = startBuildLeaseHeartbeat(');
     expect(coordination).toContain('if (build.exited || (holder !== undefined && holder !== build)) { await opts.release(); return; }');
+  });
+  it('SOURCE: deadline stream closure retains authority and cannot claim that the body exited', () => {
+    const start = ROUTE.indexOf('deadlineFinalization = createBuildDeadlineFinalization({');
+    const finish = ROUTE.indexOf('const finalizeOnDeadline = deadlineFinalization.run;', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(finish).toBeGreaterThan(start);
+    const deadline = ROUTE.slice(start, finish);
+    expect(deadline).toContain('begin: () => retainBuildUntilBodyExit(buildKey, rb, stoppingBuilds)');
+    expect(deadline).toContain('close: () => closeDeadlineBuildStream(buildKey, rb, runningBuilds, endBuild)');
+    expect(deadline).toContain('await coordination.flushPublication();');
+    for (const release of ['releaseBuildLock(', 'releaseBuildLease(', 'markBuildExited(', 'clearGreenLatch(', 'stoppingBuilds.delete(']) {
+      expect(deadline).not.toContain(release);
+    }
+    expect(deadline).toContain("ok: false, resumable: false, code: BUILD_STILL_STOPPING_CODE");
+  });
+  it('SOURCE: every actual cleanup cancels the timer and joins it before touching held resources', () => {
+    const timerDeclaration = ROUTE.indexOf('let deadlineTimer: ReturnType<typeof setTimeout> | undefined;');
+    const fallback = ROUTE.indexOf('registerCleanup(async () => {');
+    expect(timerDeclaration).toBeGreaterThan(-1);
+    expect(timerDeclaration).toBeLessThan(fallback); // early-return cleanup cannot hit a TDZ
+    const fallbackBody = ROUTE.slice(fallback, ROUTE.indexOf('const invalidRequest', fallback));
+    expect(fallbackBody.indexOf('clearTimeout(deadlineTimer);')).toBeLessThan(fallbackBody.indexOf('await joinBuildDeadlineFinalization(deadlineFinalization);'));
+    expect(fallbackBody.indexOf('await joinBuildDeadlineFinalization(deadlineFinalization);')).toBeLessThan(fallbackBody.indexOf('releaseBuildLock('));
+    const actualJoin = ROUTE.lastIndexOf('await joinBuildDeadlineFinalization(deadlineFinalization);');
+    const actual = ROUTE.lastIndexOf('} finally {', actualJoin);
+    expect(actual).toBeGreaterThan(-1);
+    const actualBody = ROUTE.slice(actual);
+    expect(actualBody.indexOf('clearTimeout(deadlineTimer);')).toBeLessThan(actualBody.indexOf('await joinBuildDeadlineFinalization(deadlineFinalization);'));
+    expect(actualBody.indexOf('await joinBuildDeadlineFinalization(deadlineFinalization);')).toBeLessThan(actualBody.indexOf('clearGreenLatch('));
+    expect(actualBody.indexOf('await joinBuildDeadlineFinalization(deadlineFinalization);')).toBeLessThan(actualBody.indexOf('releaseBuildLease('));
   });
 });
 

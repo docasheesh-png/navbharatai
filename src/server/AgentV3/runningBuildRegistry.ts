@@ -68,6 +68,8 @@ export interface RunningBuild {
   lastEventTs?: number;
   /** True once the build handler's own code has finished (its `finally` ran) — see stoppingBuild.ts. */
   exited?: boolean;
+  /** Deadline response has closed; time alone cannot retire this still-running body. */
+  requiresBodyExit?: boolean;
   /** When the user pressed Stop on it. */
   stoppedAt?: number;
   /** Woken when the build exits. */

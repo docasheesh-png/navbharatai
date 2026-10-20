@@ -5,9 +5,13 @@
 // is the pure core of a proactive sweeper: given the whole running-build registry, return the keys that are
 // DEFINITIVELY dead and safe to reap.
 
+import { hasBuildBodyExitHold } from './stoppingBuild';
+
 export interface ReapableBuild {
   ended: boolean;
   startedTs: number;
+  exited?: boolean;
+  requiresBodyExit?: boolean;
 }
 
 /**
@@ -29,6 +33,7 @@ export function selectZombieBuilds<T extends ReapableBuild>(
   const out: string[] = [];
   for (const [key, b] of entries) {
     if (!b) { out.push(key); continue; }
+    if (hasBuildBodyExitHold(b)) continue;
     if (b.ended) { out.push(key); continue; }
     if (hardMaxMs > 0 && now - b.startedTs > hardMaxMs) out.push(key);
   }

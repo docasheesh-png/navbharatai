@@ -75,7 +75,8 @@ const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; wh
     file: 'src/server/lib/syncWorkspaceErase.ts',
     calledAs: 'eraseSyncedWorkspace\\(',
     why: 'the document whose id is the uid is only a MANIFEST; the payload is in `{uid}__c{i}` chunks, '
-      + 'so a `docId` entry would have deleted the index and kept the data (Q-763)',
+      + 'so a `docId` entry would strand bytes; the dedicated module now refuses legacy owner/chunk '
+      + 'key collisions and retains them pending verified migration (Q-763)',
   },
   /**
    * 🔴 THE THIRD REACHABILITY SHAPE (2026-10-09). Four `blocked` rows here — Q-761, Q-762 (twice) and
@@ -102,8 +103,8 @@ const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; wh
     file: DERIVED_ERASER,
     calledAs: DERIVED_CALL,
     why: 'appended with `.add()`, so the id is random; the only link to a person is the `workspaceId` '
-      + 'field, swept by a RANGE over that FIELD (`planWorkspaceFieldErase`) with each matched document '
-      + "verified by the workspace eraser's own ownership predicate (Q-784)",
+      + 'field; the registered `planWorkspaceFieldErase` path currently refuses all legacy prefix-only '
+      + 'attribution, retaining these records pending independently verified ownership (Q-784)',
   },
 };
 
@@ -201,8 +202,8 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   webhooks:                { kind: 'user', why: 'the outbound URLs we POST build events to (Q-760) — doc id IS the uid' },
   conversation_memory_v1:  { kind: 'user', why: "the semantic memory of the person's chats — a `userId` field (ConversationMemoryStore.ts:70)" },
   professional_user_memory: { kind: 'user', why: 'what a professional assistant remembered about the person — a `userId` field' },
-  sonic_voice_memory:      { kind: 'user', why: "the person's voice-chat turns — a `userId` field" },
-  agentv3_conversations:   { kind: 'user', why: 'every build conversation — a `userId` field, AND its `turns`/`timeline` children, declared as `subs` because Firestore does not cascade' },
+  sonic_voice_memory:      { kind: 'user', why: 'voice-chat turns at ambiguous composite keys can mix owners while retaining the original parent userId; the registered eraser refuses historical attribution and retains these rows' },
+  agentv3_conversations:   { kind: 'user', why: 'build conversations with `turns`/`timeline` children; legacy workspace-keyed rows may hold mixed-owner turns, so the registered eraser retains them with an ownership refusal' },
   user_diagnostics_v3:     { kind: 'user', why: "the person's own latest diagnostics report — doc id IS the uid" },
   user_notification_reads: { kind: 'user', why: 'which admin notices they had read — doc id IS the uid' },
   userPrefs:               { kind: 'user', why: 'their builder preferences — doc id IS the uid' },
@@ -301,19 +302,19 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   nav_store_remix_origins: { kind: 'workspace', why: "which store app a workspace was born as a remix of (`navStoreWeb.ts:722`) — the doc id IS the workspaceId, so the eraser's id range reaches it the moment it is registered, which until Q-784 it was not" },
   nav_store_web_apps: { kind: 'de-identified', why: "THE purchasable store (`priceInr`). Never deleted by an account erase: a buyer's purchase must survive the seller (Terms §4), and `unlisted` still serves while `removed` 404s — so it is de-identified (`uid` to a tombstone, `workspaceId` cleared because it contains the uid) and moved out of the catalogue, with the remix purchase path refusing to credit a tombstone (Q-766)" },
   /** ✅ Q-762, 2026-10-09: `adrMemory.ts` now stores `userId`, so the field query reaches it. */
-  adrDecisions: { kind: 'user', why: "the person's own architecture decisions — doc id is `${userId}__${projectId}`, reached by the `userId` the writer now stores" },
+  adrDecisions: { kind: 'user', why: "architecture decisions at `${userId}__${projectId}`; actual writers can merge multiple owners at a collided key, so the registered eraser retains legacy records pending ownership proof" },
   /** ✅ Q-762, 2026-10-09: `TechnicalDebtTracker.ts` now stores `userId` too. */
-  techDebt:     { kind: 'user', why: "the person's own tech-debt list — the same composite-id shape, reached by the `userId` the writer now stores" },
+  techDebt:     { kind: 'user', why: "tech-debt arrays at the same ambiguous composite key; retained by explicit ownership-unverified policy because latest userId cannot attribute earlier merged findings" },
   /**
    * ✅ Q-763, 2026-10-09. The document whose id is the uid is only a MANIFEST; the payload is in
    * `{uid}__c{i}`. It is erased by `syncWorkspaceErase.ts` — chunks first, manifest last — and NOT by
    * the registry, which is exact-match only and would have deleted the index and kept the data.
    */
-  user_workspaces: { kind: 'user', why: "the person's cross-device workspace: a manifest plus `{uid}__c{i}` chunks, erased by `syncWorkspaceErase.ts`" },
+  user_workspaces: { kind: 'user', why: "the person's cross-device workspace: a manifest plus `{uid}__c{i}` chunks; `syncWorkspaceErase.ts` reports ownership-unverified and retains legacy collisions pending migration" },
   build_history: { kind: 'blocked', why: 'Q-764 legacy ownership attribution remains OPEN: old globally keyed rows have no trusted owner; retain them until independently proven, never erase by a matching session suffix or workspace-shaped id' },
   build_history_v2: { kind: 'workspace', why: 'owner+session keys in a fresh namespace, discoverable parent markers and versions erased before parents; old ambiguous namespace is never touched' },
   /** ✅ Q-765, 2026-10-09: registered by its `userId` field, which it has always carried. */
-  app_ai_apps:   { kind: 'user', why: "which app may call NavBharatAI's AI and as whom — doc id is the APP id, so the workspace range cannot reach it; reached by its `userId` field" },
+  app_ai_apps:   { kind: 'user', why: "app AI identity keyed by a workspace hash; colliding legacy workspace owners can retain earlier nonce generations, so the registry reports ownership-unverified and retains these rows" },
   analytics_daily:  { kind: 'retained', why: 'one doc per UTC day of product-analytics counts and the activation funnel — no person in it; purged at 400 days, and `getFunnel` never asks for more than 365 (Q-767)' },
   analytics_events: { kind: 'user', why: "which screens and actions one person used — a real `userId` per event, so it is erased with the account AND purged at 30 days, the `server_logs` window for a raw stream beside a durable rollup (Q-767). Nothing read it, and since 2026-10-11 nothing writes it (Q-783, option B); the window and erasure stay for the rows already written" },
   build_events:     { kind: 'user', why: "the build event bus's durable trail, one doc per published event with a trimmed payload and the `workspaceId` it belongs to — which contains the uid. Purged at 90 days (Q-767, the technical-log ceiling Privacy §9 publishes) AND erased with the account by `derivedIdErase.ts`, because 90 days is longer than the 30 §9 promises after a deletion (Q-784)" },

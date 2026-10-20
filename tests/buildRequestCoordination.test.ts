@@ -81,4 +81,25 @@ describe('lease heartbeat lifecycle uses the captured accepted build', () => {
     expect(f.docs.get(`${WORKSPACE_BUILD_LEASE_COLLECTION}/workspace`)).toEqual(before);
     clearInterval(timer);
   });
+  it('a deadline-held body losing its durable token cannot retire its receipt through the release callback', async () => {
+    vi.useFakeTimers(); const f = leaseFixture(); const now = Date.now();
+    await claimWorkspaceBuild(f.db, { workspaceId: 'workspace', token: 'attempt-A', owner: 'worker-A', nowMs: now - LEASE_STALE_MS - 1 });
+    await claimWorkspaceBuild(f.db, { workspaceId: 'workspace', token: 'attempt-B', owner: 'worker-B', nowMs: now });
+    const successor = { ...f.build, abort: new AbortController() } as RunningBuild;
+    const before = structuredClone(f.docs.get(`${WORKSPACE_BUILD_LEASE_COLLECTION}/workspace`));
+    f.build.requiresBodyExit = true;
+    const timer = startBuildLeaseHeartbeat({ store: f.db, workspaceId: 'workspace', token: 'attempt-A', admittedAt: now,
+      build: () => f.build, current: () => successor, active: () => true, release: f.released, lost: f.lost });
+    await vi.advanceTimersByTimeAsync(LEASE_HEARTBEAT_MS);
+    expect(f.build.abort.signal.aborted).toBe(true);
+    expect(successor.abort.signal.aborted).toBe(false);
+    expect(f.lost).toHaveBeenCalledTimes(1);
+    expect(f.released).not.toHaveBeenCalled();
+    expect(f.docs.get(`${WORKSPACE_BUILD_LEASE_COLLECTION}/workspace`)).toEqual(before);
+    f.build.exited = true;
+    await vi.advanceTimersByTimeAsync(LEASE_HEARTBEAT_MS);
+    expect(f.released).toHaveBeenCalledTimes(1);
+    expect(f.docs.get(`${WORKSPACE_BUILD_LEASE_COLLECTION}/workspace`)).toEqual(before);
+    clearInterval(timer);
+  });
 });

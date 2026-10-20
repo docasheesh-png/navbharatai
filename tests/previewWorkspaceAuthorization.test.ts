@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
+import { SandboxRecoveryUnavailableError } from '../src/server/AgentV3/SandboxRecoveryError';
 
 const deps = vi.hoisted(() => ({
   verify: vi.fn(async (token: string) => {
@@ -55,6 +56,42 @@ beforeEach(() => {
   vi.stubEnv('DOCKER_ENABLED', 'false');
   vi.stubEnv('AGENTV3_PREVIEW_SNAPSHOT', 'off');
   vi.clearAllMocks();
+  deps.actuator.mockImplementation(() => ({}));
+});
+
+describe('preview diagnosis preserves a workspace when reconnect is uncertain', () => {
+  it.each([false, true])('reports an actionable refusal before structure checks or repair (stream=%s)', async (stream) => {
+    vi.stubEnv('E2B_API_KEY', 'test-not-a-provider-credential');
+    const ensureWorkspace = vi.fn(async () => { throw new SandboxRecoveryUnavailableError(); });
+    const readFile = vi.fn();
+    const runCommand = vi.fn();
+    const setBuildActive = vi.fn();
+    deps.actuator.mockReturnValue({ ensureWorkspace, readFile, runCommand, setBuildActive });
+    const res: any = mockRes();
+    const events: any[] = [];
+    res.flushHeaders = () => { res.headersSent = true; };
+    res.write = (line: string) => { events.push(JSON.parse(line)); return true; };
+    await routes.get('POST /api/agentv3/preview-diagnose')!(mockReq({
+      body: { workspaceId, userId: 'victimUid123', framework: 'vite-react', stream },
+      headers: { authorization: 'Bearer owner-token' },
+    }), res);
+    const result = stream ? events.find((event) => event.type === 'result') : res.body;
+    expect(result).toMatchObject({ ok: false, portListening: false, code: 'SANDBOX_RECOVERY_UNAVAILABLE', retryable: true });
+    expect(result.reason).toContain('safely reconnected');
+    expect(result.reason).not.toContain('package.json');
+    if (stream) {
+      expect(res.statusCode).toBe(200); // The stream already sent its HTTP headers.
+      expect(res.ended).toBe(true);
+      expect(events.filter((event) => event.type === 'result')).toHaveLength(1);
+    } else {
+      expect(res.statusCode).toBe(503);
+      expect(res.headers['retry-after']).toBe('2');
+    }
+    expect(ensureWorkspace).toHaveBeenCalledTimes(1);
+    expect(readFile).not.toHaveBeenCalled();
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(setBuildActive.mock.calls).toEqual([[workspaceId, true], [workspaceId, false]]);
+  });
 });
 afterEach(() => vi.unstubAllEnvs());
 

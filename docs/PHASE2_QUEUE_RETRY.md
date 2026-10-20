@@ -65,8 +65,14 @@ source-store fence.
 
 ## Verification
 
-Required final-source local checks, the exact reviewed CI head and merge evidence
-will be recorded before this checkpoint is called merged.
+This checkpoint merged as PR #3848 at `06f8065629debbd846c1f836241c5be9a5a8337e`
+after final-source local checks and exact-head CI passed. Reviewed head:
+`7241043914134488c4f54b005988fc76cc62ef9d`; CI:
+https://github.com/docasheesh-png/navbharatai/actions/runs/39378125233.
+Both build/coverage and queue-retry-drills succeeded. Remote results were
+39,947 passed, 73 skipped, zero failed; coverage: statements 72.19%, branches
+67.04%, functions 75.05%, lines 73.85%. The downloaded drill artifact confirms
+14 distinct checks passed with zero failures. Phase 2 remains in progress.
 
 `scripts/phase2-firestore-drills.mjs` uses real Firebase Admin transactions, a
 loopback **demo-navbharatai-phase2** Firestore emulator and separate OS processes,

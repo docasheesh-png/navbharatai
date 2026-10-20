@@ -144,6 +144,8 @@ export interface SmallBodyRoute extends BodyRoute {
   readonly form?: { readonly parameterLimit: number };
 }
 export const SMALL_BODY_ROUTES: readonly SmallBodyRoute[] = [
+  { path: '/api/failedbr/mcp', limit: '64kb', why: 'bounded JSON-RPC arguments and optional evidence-linked autopsy metadata; never full reports or files' },
+  { path: '/api/failedbr/reports/:workspaceId/:historyId/autopsy', limit: '64kb', why: 'bounded separate review metadata, counts and evidence links; never the saved report' },
   { path: '/api/failedbr/oauth/register', limit: '16kb', why: 'bounded OAuth client name and at most five redirect URLs' },
   { path: '/api/failedbr/oauth/token', limit: '16kb', why: 'OAuth code/verifier or refresh token, no report data', form: { parameterLimit: 20 } },
   { path: '/api/failedbr/oauth/revoke', limit: '16kb', why: 'one OAuth token and client authentication', form: { parameterLimit: 20 } },

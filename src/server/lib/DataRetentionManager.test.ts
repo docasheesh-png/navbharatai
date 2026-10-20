@@ -4,6 +4,7 @@ import {
   USER_SCOPED_COLLECTIONS, RETENTION_POLICIES, RETAINED_INDEFINITELY,
   retentionBound, isRetainedIndefinitely, collectionsNeedingRetention, DEFAULT_MAX_PER_RUN,
   USER_SCOPED_SUBCOLLECTIONS, purgeExpiredSubcollections, SUBCOLLECTION_RETENTION_POLICIES,
+  OWNERSHIP_UNVERIFIED_COLLECTIONS,
   type RetentionFirestore, type RetentionPolicy, type SubcollectionSource,
 } from './DataRetentionManager';
 
@@ -164,12 +165,33 @@ describe('deleteUserData — right-to-be-forgotten cascade', () => {
   it('reports 0 for a user with no data, retaining the explicit unverified-store limitation', async () => {
     const report = await deleteUserData(new MockFirestore(), 'ghost');
     expect(report.totalDeleted).toBe(0);
-    const retained = ['sonic_voice_memory', 'agentv3_conversations', 'adrDecisions', 'techDebt', 'app_ai_apps'];
+    const retained = ['admin_failed_report_autopsies', 'sonic_voice_memory', 'agentv3_conversations', 'adrDecisions', 'techDebt', 'app_ai_apps'];
     expect(report.collections.filter(c => !retained.includes(c.collection)).every(c => c.deleted === 0 && !c.error)).toBe(true);
     expect(report.collections.filter(c => c.refusal === 'ownership-unverified').map(c => c.collection)).toEqual(retained);
     expect(report.collections.find(c => c.collection === 'agentv3_conversations')).toEqual({
       collection: 'agentv3_conversations', deleted: 0, refusal: 'ownership-unverified',
       error: 'Legacy conversation ownership cannot be confirmed; conversation records and children are retained.',
+    });
+  });
+
+  it('reports unverified report-review ownership without querying a guessed uid or document id', async () => {
+    const seen: string[] = [];
+    const original = db.collection.bind(db);
+    db.collection = name => {
+      seen.push(name);
+      if (name === 'admin_failed_report_autopsies') throw new Error('Unverified store must never be queried');
+      return original(name);
+    };
+    const report = await deleteUserData(db, 'u1');
+    expect(OWNERSHIP_UNVERIFIED_COLLECTIONS).toEqual([{
+      collection: 'admin_failed_report_autopsies', subs: ['revisions', 'mutations'],
+      reason: expect.stringContaining('may remain'),
+    }]);
+    expect(OWNERSHIP_UNVERIFIED_COLLECTIONS[0]).not.toHaveProperty('key');
+    expect(seen).not.toContain('admin_failed_report_autopsies');
+    expect(report.collections.find(entry => entry.collection === 'admin_failed_report_autopsies')).toEqual({
+      collection: 'admin_failed_report_autopsies', deleted: 0, refusal: 'ownership-unverified',
+      retainedSubcollections: ['revisions', 'mutations'], error: OWNERSHIP_UNVERIFIED_COLLECTIONS[0].reason,
     });
   });
 

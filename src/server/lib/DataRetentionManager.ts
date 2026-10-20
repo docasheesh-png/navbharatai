@@ -16,7 +16,9 @@
 // delete the wrong user's data (catastrophic), so nothing is added on a guess.
 
 import * as admin from 'firebase-admin';
+import { randomUUID } from 'node:crypto';
 import { getServerDb } from './serverDb';
+import { RETENTION_PURGE_TOKEN, hasRetentionFence, isRetentionPurgeToken } from './retentionFence';
 
 // ── Injected Firestore surface (satisfied by admin.firestore.Firestore and by the test mock) ──────
 export interface RetentionDocRef {
@@ -64,6 +66,13 @@ export interface RetentionCollection {
 }
 export interface RetentionFirestore {
   collection(name: string): RetentionCollection;
+  /** Required only by opt-in fenced policies; an older handle must fail closed, never fall back. */
+  runTransaction?<T>(operation: (tx: RetentionFenceTransaction) => Promise<T>): Promise<T>;
+}
+export interface RetentionFenceTransaction {
+  get(ref: { delete(): Promise<unknown> }): Promise<{ exists: boolean; data(): Record<string, unknown> | undefined }>;
+  update(ref: RetentionQueryDoc['ref'], fields: Record<string, unknown>): unknown;
+  delete(ref: { delete(): Promise<unknown> }): unknown;
 }
 
 // ── The verified registry of user-scoped collections ─────────────────────────────────────────────
@@ -90,6 +99,19 @@ export interface UserScopedCollection {
    */
   subs?: readonly string[];
 }
+
+/**
+ * Known personal-data stores with NO independently verified owner selector. Do not invent a uid
+ * field or doc-id strategy just to put them in USER_SCOPED_COLLECTIONS. Account erasure reports the
+ * limitation without querying these stores; their separate operational retention still applies.
+ */
+export const OWNERSHIP_UNVERIFIED_COLLECTIONS: readonly {
+  collection: string; subs: readonly string[]; reason: string;
+}[] = [{
+  collection: 'admin_failed_report_autopsies',
+  subs: ['revisions', 'mutations'],
+  reason: 'Report-review ownership cannot be independently confirmed from legacy workspace references. Review metadata and its revisions and receipts may remain until scheduled retention cleanup or verified ownership review.',
+}];
 
 /**
  * Every collection here was verified against its read/write path:
@@ -470,6 +492,12 @@ export interface RetentionPolicy {
    * ordering that can ever be correct, because Firestore does not cascade.
    */
   subs?: readonly string[];
+  /**
+   * Cooperating writers refuse a transactionally claimed parent. Each child batch and the final
+   * parent deletion revalidate that generation's token. Only numeric timestamps are supported.
+   * maxPerRun counts CHILDREN AND PARENTS, so a partial sweep leaves its fence for the next run.
+   */
+  fenced?: true;
 }
 
 /**
@@ -760,6 +788,13 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
    * a verdict about a report nobody can open any more.
    */
   { collection: 'admin_build_triage', ttlDays: 180, timestampField: 'updatedAt', timestampKind: 'epochMs' },
+  /**
+   * Admin-authored report review, not platform configuration or a raw diagnostic. Follow the existing
+   * triage window from last review activity; this does not claim simultaneous source-report expiry.
+   * A plain subs purge races a new revision. The writer and all readers honor this opt-in fence.
+   */
+  { collection: 'admin_failed_report_autopsies', ttlDays: 180, timestampField: 'updatedAt', timestampKind: 'epochMs',
+    subs: ['revisions', 'mutations'], fenced: true },
 ];
 
 /**
@@ -1007,6 +1042,8 @@ export interface CollectionResult {
   deleted: number;
   error?: string;
   refusal?: 'ownership-unverified';
+  /** Inventory, not a claim that this account has any records in these children. */
+  retainedSubcollections?: readonly string[];
 }
 export interface DeletionReport { uid: string; collections: CollectionResult[]; totalDeleted: number; }
 
@@ -1021,7 +1058,10 @@ export async function deleteUserData(db: RetentionFirestore, uid: string): Promi
   if (!uid || typeof uid !== 'string') {
     throw new Error('deleteUserData: a non-empty uid is required (refusing to delete with an empty key).');
   }
-  const collections: CollectionResult[] = [];
+  const collections: CollectionResult[] = OWNERSHIP_UNVERIFIED_COLLECTIONS.map(entry => ({
+    collection: entry.collection, deleted: 0, refusal: 'ownership-unverified',
+    retainedSubcollections: entry.subs, error: entry.reason,
+  }));
   for (const entry of USER_SCOPED_COLLECTIONS) {
     if (entry.erasePolicy === 'ownership-unverified') {
       collections.push({
@@ -1164,6 +1204,94 @@ export interface PurgeResult {
 }
 export interface PurgeReport { collections: PurgeResult[]; totalDeleted: number; }
 
+// Do not reuse the ordinary 300-document delete page inside a transaction: three permitted
+// 4,000-character Unicode notes already make 300 revisions exceed Firestore's 10 MiB request limit,
+// before index deletion bytes. Sixteen leaves substantial headroom for this bounded review schema.
+const FENCED_ERASE_PAGE = 16;
+
+/**
+ * Expiry selection is only a nomination, not authority to delete. A concurrent fresh update wins
+ * unless the transaction has already fenced the parent; cooperating writers then refuse the fence.
+ *
+ * Tokens are checked in EVERY deletion transaction, not just once. A duplicate/stalled cleaner must
+ * not erase a recreated generation after another cleaner finishes. Child snapshots are reread in the
+ * transaction so concurrent cleaners also cannot double-count already deleted documents.
+ */
+async function purgeFencedExpired(db: RetentionFirestore, policy: RetentionPolicy, cutoffMs: number): Promise<PurgeResult> {
+  let deleted = 0;
+  let capped = false;
+  const result = (): PurgeResult => ({ collection: policy.collection, cutoffMs, deleted, ...(capped ? { capped: true } : {}) });
+  try {
+    if (!db.runTransaction) throw new Error(`${policy.collection}: fenced retention requires transactions`);
+    if (policy.timestampKind !== 'epochMs') throw new Error(`${policy.collection}: fenced retention requires an epochMs clock`);
+    const transaction = db.runTransaction.bind(db);
+    const cap = Math.max(1, Math.floor(policy.maxPerRun ?? DEFAULT_MAX_PER_RUN));
+    let query = db.collection(policy.collection).where(policy.timestampField, '<', cutoffMs);
+    if (typeof query.limit !== 'function') throw new Error(`${policy.collection}: fenced retention requires a bounded query`);
+    query = query.limit(cap);
+    const candidates = await query.get();
+    parents: for (const candidate of candidates.docs.slice(0, cap)) {
+      if (deleted >= cap) { capped = true; break; }
+      const parent = candidate.ref;
+      if ((policy.subs?.length ?? 0) > 0 && typeof parent.collection !== 'function') {
+        throw new Error(`${policy.collection}: fenced retention cannot reach its subcollections`);
+      }
+      const proposedToken = randomUUID();
+      const token = await transaction(async tx => {
+        const snapshot = await tx.get(parent);
+        const data = snapshot.data();
+        if (!snapshot.exists || !data || typeof data[policy.timestampField] !== 'number' ||
+          !isExpired(data[policy.timestampField] as number, cutoffMs)) return null;
+        if (hasRetentionFence(data)) {
+          const existing = data[RETENTION_PURGE_TOKEN];
+          if (!isRetentionPurgeToken(existing)) throw new Error('Invalid retention fence; no deletion attempted.');
+          return existing;
+        }
+        // Do not refresh updatedAt: an interrupted cleanup must remain findable by the next run.
+        tx.update(parent, { [RETENTION_PURGE_TOKEN]: proposedToken });
+        return proposedToken;
+      });
+      if (!token) continue;
+      for (const sub of policy.subs ?? []) {
+        let drained = false;
+        for (let page = 0; page < MAX_ERASE_PAGES; page++) {
+          if (deleted >= cap) { capped = true; break parents; }
+          const size = Math.min(FENCED_ERASE_PAGE, cap - deleted);
+          const kids = await parent.collection!(sub).limit(size).get();
+          if (kids.docs.length === 0) { drained = true; break; }
+          const removed = await transaction(async tx => {
+            const snapshot = await tx.get(parent);
+            if (!snapshot.exists || snapshot.data()?.[RETENTION_PURGE_TOKEN] !== token) return null;
+            // All reads precede writes. Missing child docs were removed by another worker.
+            const snapshots = await Promise.all(kids.docs.slice(0, size).map(kid => tx.get(kid.ref)));
+            let count = 0;
+            snapshots.forEach((child, index) => {
+              if (child.exists) { tx.delete(kids.docs[index].ref); count++; }
+            });
+            return count;
+          });
+          if (removed === null) continue parents;
+          deleted += removed;
+          if (kids.docs.length < size) { drained = true; break; }
+        }
+        // A guard limit is NOT proof that all children are gone.
+        if (!drained) { capped = true; break parents; }
+      }
+      if (deleted >= cap) { capped = true; break; }
+      deleted += await transaction(async tx => {
+        const snapshot = await tx.get(parent);
+        if (!snapshot.exists || snapshot.data()?.[RETENTION_PURGE_TOKEN] !== token) return 0;
+        tx.delete(parent);
+        return 1;
+      });
+    }
+    if (deleted >= cap) capped = true;
+    return result();
+  } catch (error) {
+    return { ...result(), error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 /**
  * Delete records older than each policy's TTL. Uses a `< cutoff` bound so it can only ever remove OLD
  * data (never recent). Best-effort per policy. `policies` is injectable for tests.
@@ -1176,6 +1304,10 @@ export async function purgeExpired(
   const collections: PurgeResult[] = [];
   for (const policy of policies) {
     const cutoffMs = retentionCutoffMs(nowMs, policy.ttlDays);
+    if (policy.fenced) {
+      collections.push(await purgeFencedExpired(db, policy, cutoffMs));
+      continue;
+    }
     let deleted = 0;
     try {
       // The bound is built in the type the field is STORED in — see TimestampKind. A Date bound against
@@ -1218,6 +1350,15 @@ export async function purgeExpired(
  */
 export function cappedCollections(report: PurgeReport): string[] {
   return report.collections.filter((c) => c.capped).map((c) => c.collection);
+}
+
+/** Safe scheduled-job warning: bounded policy names/counts only, never raw SDK errors or row data. */
+export function purgeFailureSummary(...reports: PurgeReport[]): { count: number; collections: string[]; omitted: number } {
+  const failed = reports.flatMap(report => report.collections.filter(result => result.error !== undefined));
+  const names = [...new Set(failed.map(result =>
+    /^[A-Za-z0-9_]+(?:\/\*\/[A-Za-z0-9_]+)?$/.test(result.collection) && result.collection.length <= 160
+      ? result.collection : 'unknown_collection'))].sort();
+  return { count: failed.length, collections: names.slice(0, 20), omitted: Math.max(0, names.length - 20) };
 }
 
 // ── Production admin Firestore accessor (VITEST-skip, mirrors UserProfileStore) ──────────────────────

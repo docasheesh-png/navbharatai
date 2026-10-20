@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { reportOAuthService, validReportRedirect, REPORT_RESOURCE, REPORT_SCOPE } from '../src/server/lib/failedReportOAuth.ts';
+import { reportOAuthService, validReportRedirect, normalizeReportScope, hasReportScope, REPORT_RESOURCE, REPORT_SCOPE, REPORT_AUTOPSY_SCOPE } from '../src/server/lib/failedReportOAuth.ts';
 
 // Serial, copy-on-write transactions mimic Firestore's atomic commit/rollback, including reads
 // before writes. No production database, client credentials or network access are used.
@@ -40,15 +40,16 @@ function fixture() {
 const verifier = 'a'.repeat(64);
 const redirect = 'https://client.example/callback?existing=yes';
 const challenge = createHash('sha256').update(verifier).digest('base64url');
-async function start(f, method = 'none') {
-  const client = await f.service.register({ redirect_uris: [redirect], client_name: 'Test AI', token_endpoint_auth_method: method });
-  const auth = { client_id: client.client_id, redirect_uri: redirect, response_type: 'code', scope: REPORT_SCOPE, code_challenge: challenge, code_challenge_method: 'S256', state: 'state-&=value', resource: REPORT_RESOURCE };
+const dualScope = `${REPORT_SCOPE} ${REPORT_AUTOPSY_SCOPE}`;
+async function start(f, method = 'none', scope = REPORT_SCOPE) {
+  const client = await f.service.register({ redirect_uris: [redirect], client_name: 'Test AI', token_endpoint_auth_method: method, scope });
+  const auth = { client_id: client.client_id, redirect_uri: redirect, response_type: 'code', scope, code_challenge: challenge, code_challenge_method: 'S256', state: 'state-&=value', resource: REPORT_RESOURCE };
   const url = await f.service.authorize(auth);
   const id = new URL(url).searchParams.get('oauth_request');
   return { client, auth, id };
 }
-async function approved(f, method = 'none') {
-  const s = await start(f, method); const uri = new URL(await f.service.decide(s.id, true));
+async function approved(f, method = 'none', scope = REPORT_SCOPE) {
+  const s = await start(f, method, scope); const uri = new URL(await f.service.decide(s.id, true, scope));
   assert.equal(uri.searchParams.get('state'), 'state-&=value'); assert.equal(uri.searchParams.get('existing'), 'yes');
   return { ...s, body: { grant_type: 'authorization_code', client_id: s.client.client_id, redirect_uri: redirect, code_verifier: verifier, code: uri.searchParams.get('code'), resource: REPORT_RESOURCE } };
 }
@@ -59,6 +60,8 @@ test('registered client → admin consent → code exchange → read-only token 
   const t = await f.service.token(s.body);
   assert.equal(t.scope, REPORT_SCOPE); assert.equal(t.expires_in, 3600);
   assert.equal(await f.service.tokenOk(`Bearer ${t.access_token}`), true);
+  assert.equal(await f.service.tokenOk(`Bearer ${t.access_token}`, REPORT_AUTOPSY_SCOPE), false);
+  assert.equal(await f.service.tokenPrincipal(`Bearer ${t.access_token}`, REPORT_AUTOPSY_SCOPE), null);
   await rejects(f.service.token(s.body), 'invalid_grant');
   const fresh = await f.service.token({ grant_type: 'refresh_token', client_id: s.client.client_id, refresh_token: t.refresh_token });
   assert.equal(await f.service.tokenOk(`Bearer ${t.access_token}`), false);
@@ -153,4 +156,159 @@ test('database failure is an error and never grants access', async () => {
   const s = reportOAuthService(() => null, () => 'owner');
   await assert.rejects(s.register({ redirect_uris: [redirect] }), /unavailable/);
   await assert.rejects(s.tokenOk(`Bearer nbfo_${'a'.repeat(64)}.${'b'.repeat(43)}`), /unavailable/);
+});
+
+test('autopsy writes require registered capability, explicit authorization scope, and matching displayed consent', async () => {
+  const f = fixture(); const read = await start(f);
+  await rejects(f.service.authorize({ ...read.auth, scope: dualScope }), 'invalid_scope');
+  const s = await start(f, 'none', dualScope);
+  assert.equal(s.client.scope, dualScope);
+  assert.equal((await f.service.pending(s.id)).scope, dualScope);
+  for (const displayed of [undefined, REPORT_SCOPE, REPORT_AUTOPSY_SCOPE, 'admin']) {
+    await rejects(f.service.decide(s.id, true, displayed), 'invalid_scope');
+    assert.equal((await f.service.pending(s.id)).scope, dualScope);
+  }
+  const uri = new URL(await f.service.decide(s.id, true, dualScope));
+  const t = await f.service.token({ grant_type: 'authorization_code', client_id: s.client.client_id, redirect_uri: redirect, code_verifier: verifier, code: uri.searchParams.get('code') });
+  assert.equal(t.scope, dualScope);
+  assert.equal(await f.service.tokenOk(`Bearer ${t.access_token}`), true);
+  assert.equal(await f.service.tokenOk(`Bearer ${t.access_token}`, REPORT_AUTOPSY_SCOPE), true);
+  const principal = await f.service.tokenPrincipal(`Bearer ${t.access_token}`, REPORT_AUTOPSY_SCOPE);
+  assert.deepEqual(principal, { grantId: t.access_token.slice(5).split('.')[0], owner: 'owner', clientId: s.client.client_id, scope: dualScope });
+  assert.equal(await f.service.tokenPrincipal(`Bearer ${t.access_token}`, 'admin'), null);
+
+  // Registration is only a ceiling, never implicit approval or an implicit authorization scope.
+  const defaultUrl = await f.service.authorize({ ...s.auth, scope: undefined });
+  const defaultId = new URL(defaultUrl).searchParams.get('oauth_request');
+  assert.equal((await f.service.pending(defaultId)).scope, REPORT_SCOPE);
+  const defaultCode = new URL(await f.service.decide(defaultId, true)).searchParams.get('code');
+  const readToken = await f.service.token({ grant_type: 'authorization_code', client_id: s.client.client_id, redirect_uri: redirect, code_verifier: verifier, code: defaultCode });
+  assert.equal(readToken.scope, REPORT_SCOPE);
+  assert.equal(await f.service.tokenOk(`Bearer ${readToken.access_token}`, REPORT_AUTOPSY_SCOPE), false);
+});
+
+test('new dynamic registration may omit capability scope, but no authorization scope still means read-only', async () => {
+  const f = fixture();
+  const c = await f.service.register({ redirect_uris: [redirect], token_endpoint_auth_method: 'none' });
+  assert.equal(c.scope, dualScope, 'server-provisioned client metadata must be returned honestly');
+  assert.equal(f.rows().get(`admin_failed_report_oauth_clients/${c.client_id}`).scope, dualScope);
+  assert.equal([...f.rows().keys()].some(key => key.startsWith('admin_failed_report_access/')), false, 'registration is not a resource-owner grant');
+  const auth = { client_id: c.client_id, redirect_uri: redirect, response_type: 'code', code_challenge: challenge, code_challenge_method: 'S256' };
+  const readId = new URL(await f.service.authorize(auth)).searchParams.get('oauth_request');
+  assert.equal((await f.service.pending(readId)).scope, REPORT_SCOPE);
+  const readCode = new URL(await f.service.decide(readId, true)).searchParams.get('code');
+  const body = { grant_type: 'authorization_code', client_id: c.client_id, redirect_uri: redirect, code_verifier: verifier, code: readCode };
+  const readToken = await f.service.token(body);
+  assert.equal(readToken.scope, REPORT_SCOPE);
+  assert.equal(await f.service.tokenOk(`Bearer ${readToken.access_token}`, REPORT_AUTOPSY_SCOPE), false);
+  await rejects(f.service.token({ grant_type: 'refresh_token', client_id: c.client_id, refresh_token: readToken.refresh_token, scope: dualScope }), 'invalid_scope');
+
+  // The same client can explicitly request a separate consent, without rewriting its old grant.
+  const writeId = new URL(await f.service.authorize({ ...auth, scope: dualScope })).searchParams.get('oauth_request');
+  assert.equal((await f.service.pending(writeId)).scope, dualScope);
+  await rejects(f.service.decide(writeId, true), 'invalid_scope');
+  const writeCode = new URL(await f.service.decide(writeId, true, dualScope)).searchParams.get('code');
+  const writeToken = await f.service.token({ ...body, code: writeCode });
+  assert.equal(writeToken.scope, dualScope);
+  assert.equal(await f.service.tokenOk(`Bearer ${writeToken.access_token}`, REPORT_AUTOPSY_SCOPE), true);
+  assert.equal(await f.service.tokenOk(`Bearer ${readToken.access_token}`, REPORT_AUTOPSY_SCOPE), false);
+  const stillRead = await f.service.token({ grant_type: 'refresh_token', client_id: c.client_id, refresh_token: readToken.refresh_token });
+  assert.equal(stillRead.scope, REPORT_SCOPE);
+  assert.equal(await f.service.tokenOk(`Bearer ${stillRead.access_token}`, REPORT_AUTOPSY_SCOPE), false);
+});
+
+test('historical clients and pending/approved requests with no stored scope remain read-only', async () => {
+  for (const historicalStatus of ['pending', 'approved']) {
+    const f = fixture(); const s = await start(f);
+    delete f.rows().get(`admin_failed_report_oauth_clients/${s.client.client_id}`).scope;
+    await rejects(f.service.authorize({ ...s.auth, scope: dualScope }), 'invalid_scope');
+    const url = await f.service.authorize({ ...s.auth, scope: undefined });
+    const id = new URL(url).searchParams.get('oauth_request');
+    delete f.rows().get(`admin_failed_report_oauth_requests/${id}`).scope;
+    assert.equal((await f.service.pending(id)).scope, REPORT_SCOPE);
+    const code = new URL(await f.service.decide(id, true)).searchParams.get('code');
+    if (historicalStatus === 'approved') delete f.rows().get(`admin_failed_report_oauth_requests/${id}`).scope;
+    const body = { grant_type: 'authorization_code', client_id: s.client.client_id, redirect_uri: redirect, code_verifier: verifier, code };
+    await rejects(f.service.token({ ...body, scope: dualScope }), 'invalid_scope');
+    const t = await f.service.token(body);
+    assert.equal(t.scope, REPORT_SCOPE);
+    assert.equal(await f.service.tokenOk(`Bearer ${t.access_token}`), true);
+    assert.equal(await f.service.tokenOk(`Bearer ${t.access_token}`, REPORT_AUTOPSY_SCOPE), false);
+    await rejects(f.service.token({ grant_type: 'refresh_token', client_id: s.client.client_id, refresh_token: t.refresh_token, scope: dualScope }), 'invalid_scope');
+    const fresh = await f.service.token({ grant_type: 'refresh_token', client_id: s.client.client_id, refresh_token: t.refresh_token });
+    assert.equal(fresh.scope, REPORT_SCOPE);
+    assert.equal(await f.service.tokenOk(`Bearer ${fresh.access_token}`, REPORT_AUTOPSY_SCOPE), false);
+  }
+});
+
+test('refresh preserves the exact grant, permanently narrows on request, and never re-escalates', async () => {
+  const f = fixture(); const s = await approved(f, 'none', dualScope); const t = await f.service.token(s.body);
+  const refresh = raw => ({ grant_type: 'refresh_token', client_id: s.client.client_id, refresh_token: raw });
+  const preserved = await f.service.token(refresh(t.refresh_token));
+  assert.equal(preserved.scope, dualScope);
+  assert.equal(await f.service.tokenOk(`Bearer ${preserved.access_token}`, REPORT_AUTOPSY_SCOPE), true);
+  const narrow = await f.service.token({ ...refresh(preserved.refresh_token), scope: REPORT_SCOPE });
+  assert.equal(narrow.scope, REPORT_SCOPE);
+  assert.equal(await f.service.tokenOk(`Bearer ${preserved.access_token}`, REPORT_AUTOPSY_SCOPE), false);
+  assert.equal(await f.service.tokenOk(`Bearer ${narrow.access_token}`), true);
+  assert.equal(await f.service.tokenOk(`Bearer ${narrow.access_token}`, REPORT_AUTOPSY_SCOPE), false);
+  assert.equal(f.rows().get(`admin_failed_report_access/${narrow.access_token.slice(5).split('.')[0]}`).scope, REPORT_SCOPE);
+  await rejects(f.service.token({ ...refresh(narrow.refresh_token), scope: dualScope }), 'invalid_scope');
+  const again = await f.service.token(refresh(narrow.refresh_token));
+  assert.equal(again.scope, REPORT_SCOPE);
+  assert.equal(await f.service.tokenOk(`Bearer ${again.access_token}`, REPORT_AUTOPSY_SCOPE), false);
+});
+
+test('unknown, malformed and autopsy-only scopes fail closed across every scope entry point', async () => {
+  const f = fixture(); const s = await approved(f, 'none', dualScope); const t = await f.service.token(s.body);
+  const malformed = ['', null, 1, [], [REPORT_SCOPE], {}, 'admin', REPORT_AUTOPSY_SCOPE, `${REPORT_SCOPE} admin`, ` ${REPORT_SCOPE}`, `${REPORT_SCOPE} `, `${REPORT_SCOPE}\t${REPORT_AUTOPSY_SCOPE}`, `${REPORT_SCOPE}\n${REPORT_AUTOPSY_SCOPE}`, `${REPORT_SCOPE}  ${REPORT_AUTOPSY_SCOPE}`, `${REPORT_SCOPE} ${REPORT_SCOPE}`, `${dualScope} ${REPORT_AUTOPSY_SCOPE}`];
+  for (const scope of malformed) {
+    assert.throws(() => normalizeReportScope(scope), e => e.error === 'invalid_scope');
+    assert.equal(hasReportScope(scope), false);
+    assert.equal(hasReportScope(scope, REPORT_AUTOPSY_SCOPE), false);
+    await rejects(f.service.register({ redirect_uris: [redirect], scope }), 'invalid_scope');
+    await rejects(f.service.authorize({ ...s.auth, scope }), 'invalid_scope');
+    await rejects(f.service.token({ grant_type: 'refresh_token', client_id: s.client.client_id, refresh_token: t.refresh_token, scope }), 'invalid_scope');
+  }
+  assert.equal(normalizeReportScope(undefined), REPORT_SCOPE);
+  assert.equal(hasReportScope(undefined), false, 'missing persisted grant scope is not an authorization');
+  assert.equal(normalizeReportScope(`${REPORT_AUTOPSY_SCOPE} ${REPORT_SCOPE}`), dualScope);
+  assert.equal(await f.service.tokenOk(`Bearer ${t.access_token}`, REPORT_AUTOPSY_SCOPE), true, 'failed escalation must not rotate or destroy the valid grant');
+});
+
+test('code exchange cannot widen read consent, and refresh cannot widen any read grant', async () => {
+  const f = fixture(); const s = await approved(f);
+  await rejects(f.service.token({ ...s.body, scope: dualScope }), 'invalid_scope');
+  const t = await f.service.token(s.body);
+  for (const scope of [dualScope, REPORT_AUTOPSY_SCOPE, 'admin']) {
+    await rejects(f.service.token({ grant_type: 'refresh_token', client_id: s.client.client_id, refresh_token: t.refresh_token, scope }), 'invalid_scope');
+  }
+  assert.equal(await f.service.tokenOk(`Bearer ${t.access_token}`), true);
+  assert.equal(await f.service.tokenOk(`Bearer ${t.access_token}`, REPORT_AUTOPSY_SCOPE), false);
+});
+
+test('dual-scope grants preserve revocation, owner, resource, expiry, client and token-hash boundaries', async () => {
+  for (const action of ['revoke', 'owner', 'resource', 'expired', 'accessExpired', 'client', 'scope', 'missingScope', 'hash', 'nonfiniteExpiry']) {
+    const f = fixture(); const s = await approved(f, 'none', dualScope); const t = await f.service.token(s.body);
+    const id = t.access_token.slice(5).split('.')[0]; const grant = f.rows().get(`admin_failed_report_access/${id}`);
+    if (action === 'revoke') await f.service.revoke({ client_id: s.client.client_id, token: t.access_token });
+    if (action === 'owner') f.changeOwner();
+    if (action === 'resource') grant.resource = 'https://other.example/mcp';
+    if (action === 'expired') f.advance(30 * 86_400_000);
+    if (action === 'accessExpired') f.advance(3_600_000);
+    if (action === 'client') grant.clientId = null;
+    if (action === 'scope') grant.scope = 'admin';
+    if (action === 'missingScope') delete grant.scope;
+    if (action === 'hash') { grant.accessHash = 'bad'; grant.refreshHash = 'bad'; }
+    if (action === 'nonfiniteExpiry') grant.expiresAt = Infinity;
+    for (const scope of [REPORT_SCOPE, REPORT_AUTOPSY_SCOPE]) {
+      assert.equal(await f.service.tokenOk(`Bearer ${t.access_token}`, scope), false, `${action}: ${scope}`);
+      assert.equal(await f.service.tokenPrincipal(`Bearer ${t.access_token}`, scope), null, `${action}: principal`);
+    }
+    const refresh = { grant_type: 'refresh_token', client_id: s.client.client_id, refresh_token: t.refresh_token };
+    if (action === 'accessExpired') {
+      const fresh = await f.service.token(refresh);
+      assert.equal(await f.service.tokenOk(`Bearer ${fresh.access_token}`, REPORT_AUTOPSY_SCOPE), true);
+    } else await assert.rejects(f.service.token(refresh));
+  }
 });

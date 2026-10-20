@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { startImportDurableSave, settleImportDurableSave, importNotDurableNarration, type ImportDurableRecord } from '../src/server/AgentV3/importDurableSave';
 import { withIndexQueue } from '../src/server/AgentV3/WorkspaceFileStore';
 import { createBuildSourcePublication } from '../src/server/AgentV3/BuildSourcePublication';
+import { WorkspaceMemory, type MemorySnapshot } from '../src/server/AgentV3/WorkspaceMemory';
 
 const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
 
@@ -103,6 +104,48 @@ describe('the import save runs beside the turn and reports honestly', () => {
     } finally {
       releaseSave();
       await Promise.allSettled(importDurableSaves);
+      await retirement;
+    }
+  });
+
+  it.each(['saved', 'skipped-unconfirmed'] as const)('the actual import-memory block keeps first-call liveness and joins its %s job', async (status) => {
+    const start = route.indexOf('      try {', route.indexOf('// Project memory: the import is a durable fact'));
+    const block = route.slice(start, route.indexOf('      // The AI turn must work WITH the landed app', start));
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    const launch = new AsyncFunction('workspaceId', 'getWorkspaceMemory', 'opts', 'written', 'framework', 'importedFiles', 'saveWorkspaceMemoryFor', 'sourcePublication', block);
+    const mem = new WorkspaceMemory(); mem.markHydrated(); mem.markHydrationConfirmed();
+    const sourcePublication = createBuildSourcePublication();
+    let releaseMemory!: () => void;
+    const held = new Promise<void>((resolve) => { releaseMemory = resolve; });
+    let stored: MemorySnapshot | undefined; let calls = 0; let callerReturned = false; let retired = false;
+    let memoryJob: Promise<typeof status> | undefined; let retirement: Promise<boolean> | undefined;
+    const saveMemory = (workspaceId: string, liveMemory: WorkspaceMemory) => {
+      expect(workspaceId).toBe('import-memory'); expect(liveMemory).toBe(mem); calls++;
+      const snapshot = structuredClone(liveMemory.snapshot());
+      memoryJob = held.then(() => { if (status === 'saved') stored = snapshot; return status; });
+      return memoryJob;
+    };
+    const landed = launch('import-memory', () => mem, { source: 'fixture.zip' }, ['src/App.tsx'], 'vite-react',
+      { 'src/App.tsx': 'export default function Imported() { return "Imported"; }' }, saveMemory, sourcePublication)
+      .then(() => { callerReturned = true; });
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(calls).toBe(1);
+      expect(callerReturned).toBe(true); // Even a previously hydrated memory can have a held durable write.
+      expect(mem.graph().files).toEqual(['src/App.tsx']);
+      expect(mem.snapshot().episodes).toContainEqual(expect.objectContaining({ kind: 'note', text: 'Imported an existing app from fixture.zip: 1 files, framework vite-react.' }));
+      expect(stored).toBeUndefined();
+      retirement = sourcePublication.join(1_000).then((ready) => { retired = true; return ready; });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(retired).toBe(false);
+      releaseMemory();
+      expect(await retirement).toBe(status === 'saved');
+      if (status === 'saved') expect(stored?.graph.files).toEqual(['src/App.tsx']);
+      else expect(stored).toBeUndefined();
+    } finally {
+      releaseMemory();
+      await landed;
+      await memoryJob;
       await retirement;
     }
   });

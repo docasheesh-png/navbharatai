@@ -38,6 +38,10 @@ the underlying work later returns. A joined best-effort asset save establishes
 only that the captured application call settled; its void return does not prove
 that every asset byte was durably stored.
 
+Import memory notes and file indexing remain synchronous context for the first
+model call. Their durable save runs beside the turn and joins normal retirement;
+a slow memory store does not add an unbounded wait before that first call.
+
 ## User intent and clients
 
 Stop pauses the queue, invalidates handoffs and flags the current lease in one

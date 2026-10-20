@@ -11,6 +11,7 @@ describe('normal queued retirement joins owned source/plan publications', () => 
       .toBeLessThan(route.indexOf('const landImportedProject ='));
     expect(route).toContain('sourcePublication.track(saveWorkspaceAssets(workspaceId, assets, verified?.uid))');
     expect(route).toContain('importDurableSaves.push(sourcePublication.track(startImportDurableSave({');
+    expect(route).toContain('void sourcePublication.track(saveWorkspaceMemoryFor(workspaceId, mem)).catch(() => {})');
     expect(route).toContain('const assetsOutcome = await sourcePublication.track(withTimeout(');
     expect(route).toContain('sourcePublication.track(persistBuildAssets(');
     expect(route).toContain('save: (assetWorkspaceId, assets) => saveWorkspaceAssets(assetWorkspaceId, assets, verified?.uid)');

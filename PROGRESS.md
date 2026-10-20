@@ -97962,3 +97962,32 @@ gates remain required before this queue checkpoint can be pushed or merged.
 ## 2026-10-20 — Admin authorized PR #3853 merge and Weak policy activation
 
 Rechecked the exact PR head and green GitHub CI, then merged #3853 with an expected-head lease (merge commit 68528197949135513d2df97e3b4dee667036059a). Admin explicitly said to merge and turn on the policy. Activation is a separate additive Cloud Build configuration change: `_WEAK_SCOPE_POLICY=on`, `_WEAK_BUILD_COST_CEILING_USD=1`; trigger-level rollback remains available with `off`. Provider keys, explicit ladder overrides, and Normal/Strong routing are not changed. Deployment and runtime confirmation are pending; do not infer live activation merely from the merge.
+
+
+### 2026-10-20 12:04 UTC — Phase2 import memory stays beside the first call
+
+The queue full run at `9c2efa6` was stopped with exit130 as superseded after a
+review found a real latency regression in the new barrier. Import landing had
+changed its memory persistence from fire-and-forget to an unbounded await.
+An earlier successful intent hydration does not bound the subsequent durable
+replacement write. The actual extracted import-memory block and production
+memory helpers, with a locally held database-shaped write, confirm that the
+await keeps the caller pending while the previous void form returns. No live
+service was used. This stopped full run is NOT passing evidence.
+
+The import now tracks that raw memory job without awaiting it. Synchronous note
+and file indexing remain available to the first model call, while normal-module
+retirement still joins the save and rejects skipped-unconfirmed outcomes. The
+memory helper, hydration safeguards and persistence semantics are unchanged.
+Actual-block tests hold saved and unconfirmed jobs: the caller returns, the
+in-memory context is intact, and retirement waits before honoring the status.
+The four-file cohort passes 53 tests. Reverting to await fails on caller latency;
+dropping only tracking fails on premature retirement, in both cases. Exact safe
+source was restored. No other newly introduced first-call memory await was found;
+the remaining new awaits are explicit Stop/Unsend or retirement cleanup.
+
+Before this correction, the bounded changed-caller/PII cohort passed 24 files /
+420 tests and ten further source-writer sibling files passed 128 tests. Those
+results and prior quick checks do not replace renewed final-source checks.
+Both final-source local gates and exact-head CI remain required. Phase2 and
+final queued/manual/SDK source fencing, allocation and legacy ownership remain OPEN.

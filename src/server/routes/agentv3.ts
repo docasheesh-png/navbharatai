@@ -11953,7 +11953,7 @@ async function noteBuildOutcome(
         const mem = getWorkspaceMemory(workspaceId);
         mem.recordNote(`Imported an existing app from ${opts.source}: ${written.length} files, framework ${framework}.`);
         for (const [p, c] of Object.entries(importedFiles).slice(0, 300)) mem.indexFile(p, c);
-        await saveWorkspaceMemoryFor(workspaceId, mem).catch(() => {});
+        void sourcePublication.track(saveWorkspaceMemoryFor(workspaceId, mem)).catch(() => {});
       } catch { /* memory is best-effort */ }
       // The AI turn must work WITH the landed app — never scaffold over it, and answer a plain
       // "read/analyze my app" ask with an honest survey of the real files.

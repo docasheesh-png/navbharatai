@@ -97741,3 +97741,15 @@ a positively confirmed idempotent Stop. Strict ordered scenarios, original
 fourteen checks, count21 and all production deadlines remain unchanged. Two
 explicit post-commit ACK-loss interleavings exercise that handling. The complete
 21/21 rerun passed. Full final-source suite and exact-head CI are still pending.
+
+### 2026-10-20 — Phase2 final preflight preserves the handler branch ratchet
+
+The full final4 preflight at `9ca0ddd` found 544 branch tokens against the
+unchanged 543 chat-handler budget. It was stopped (exit130), not counted as a
+passing full suite. The verified-owner asset caller had added a redundant null
+coalescing fallback although its owner parameter already accepts undefined;
+removing only that fallback keeps the same verified-only identity and unverified
+legacy policy with one fewer branch. No budget, threshold or guard was raised.
+The headroom/real-asset/authenticated-preview cohort then passed 3 files /80 tests.
+All final-source typechecks, build/checks and full suite must pass again before
+push; PR #3852 remains unmerged and no remote CI success is claimed.

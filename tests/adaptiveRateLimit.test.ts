@@ -58,6 +58,12 @@ describe('adaptiveRateLimit — isBurst', () => {
 });
 
 describe('adaptiveRateLimit — isGuardedPath', () => {
+  it('keeps exact automated probes reachable while protecting deep health and lookalikes', () => {
+    for (const prefix of ['/api', '/api/v1']) {
+      for (const probe of ['/live', '/ready', '/live/', '/ready/']) expect(isGuardedPath(prefix + probe)).toBe(false);
+      for (const route of ['/health', '/admin/backup/firestore', '/live-data', '/ready/settings', '/liveness']) expect(isGuardedPath(prefix + route)).toBe(true);
+    }
+  });
   it('leaves machine-facing failed-report APIs to their own limiters without exempting admin or lookalikes', () => {
     for (const prefix of ['/api', '/api/v1']) {
       for (const route of ['/failedbr/mcp', '/failedbr/reports', '/failedbr/reports/workspace/history', '/failedbr/oauth/token', '/failedbr/oauth/register']) expect(isGuardedPath(prefix + route)).toBe(false);

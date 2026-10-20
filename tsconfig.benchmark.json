@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.server.json",
+  "compilerOptions": {
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": [
+    "scripts/agentv3-reliability-bench.ts",
+    "scripts/agentv3-reliability-compare.ts",
+    "scripts/lib/reliabilityRequest.ts"
+  ]
+}

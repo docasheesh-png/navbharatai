@@ -13,6 +13,21 @@ permanent 100/100 rating or leadership over other products.
 
 ## Progress
 
+### Reliability hardening checkpoint (2026-10-20)
+
+See [the evidence-backed release scorecard](RELEASE_QUALITY_SCORECARD_2026-10-20.md)
+and its machine-readable evidence for this candidate. Starting from `8e43c4039`,
+it adds cooperative stopping on uncertain running-build renewal, truthful
+infrastructure-interruption attribution, authenticated/checkpointed benchmark
+requests, result-priority and cohort-comparability fixes, strict benchmark CI,
+accurate setup docs and a measured liveness/readiness probe-throttling fix.
+PR #3852 is present in this base as merge `0e47ab8ab`; the older pending status
+below is historical. Neither that merge nor this checkpoint resolves legacy
+ownership or the full distributed runtime/write fence. Phase 3 has tooling
+preparation, but no live baseline; Phases 4–6 have not met their acceptance gates.
+No phase is promoted to complete merely because a unit test, dry run or local
+probe load check passed.
+
 | Phase | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
 | 1 | Security and authorization | MERGED / CI VERIFIED; OWNERSHIP FOLLOW-UP OPEN | [PR #3847](https://github.com/docasheesh-png/navbharatai/pull/3847), [successful exact-head CI](https://github.com/docasheesh-png/navbharatai/actions/runs/39370215420), merged as `885ba41023c2f7327be956aadc71f79ee2840821`. Phase2 review found that full legacy workspace IDs still collide for valid custom UID/session pairs; private access needs independent verified ownership, not a prefix. Legacy recovery and dependency exceptions remain documented. |

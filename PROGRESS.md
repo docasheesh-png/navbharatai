@@ -98463,3 +98463,161 @@ The corrected combined source-writer/incoming-main cohort then passed **66 files
 72.83s). Final source is now frozen for the new complete suite and all quick
 checks; exact-head CI remains separate. No broader safety claim follows from
 these focused results.
+## 2026-10-20 — Q-1126 batch 3: the four-field gap reaches ZERO, and the ratchet becomes an invariant
+
+**154 blocked rows, 0 deficient**, measured with the census's own parser. The guard's baseline is now `0`,
+which changes what it is: from here a new 🟡 BLOCKED row that omits a field **fails CI outright**, because
+there is no slack left to absorb it. That is the 50/50 law's other half — not just fix the instances, make
+the wrong branch impossible.
+
+**How the last 24 went, and it is the same story batch 1 found and batch 2 confirmed.** Fifteen were
+label-only: the information was already written, under a heading the census does not recognise. In several,
+the missing `Why` was sitting in the row's **own STATE column** — *"(admin console)"*, *"(admin, money)"*,
+*"a decision that is the admin's: what Doctor AI shows"* — so the row knew the answer and the detector could
+not see it, because it reads only the body. Those fills move the fact into the body; they do not invent it.
+
+**One more was not deficient but MIS-FILED, and it is the third such case.** Q-881 read 🟡 BLOCKED
+*"awaiting the admin's approval of the audit plan"* while carrying a fix that needs no decision — exactly
+like Q-886 and Q-888, both now fixed. **Verified live at `src/server/lib/UsdInrRate.ts:50-62`:** the whole
+validation on the rate that multiplies every bill is `Number.isFinite(rate) && rate > 0`, so any positive
+number `open.er-api.com` returns becomes the multiplier until the next hourly refresh. Its stated fix is
+**strictly safer than today**, so the row is OPEN. ⚠️ Its third clause — *"record the rate on every
+debit"* — is deliberately left out: that touches the billing WRITE path, and bundling is how a safe fix
+inherits a risky one's blocker (the same reasoning that kept Q-1227 out of Q-886).
+
+**The last eight are the payment audit** (Q-882–Q-885, Q-891–Q-894), where fields were genuinely absent and
+are now written from the evidence each row already carried. 🔒 **And where nothing had actually been tried,
+the field says so:** Q-892 and Q-894 read *"nothing yet"* with the reason. An invented `Needs:` for a
+blocker nobody investigated is the precise defect this row exists to prevent, and a row that admits a gap is
+worth more than one that hides it.
+
+**3 reversions bite:** one label fill removed → 1 fail · Q-881 back to BLOCKED → 1 · a brand-new fieldless
+blocked row → 1.
+
+### 🔒 And the guard caught me editing its own anchor wrongly
+
+I set Q-1126's row to IN PROGRESS, and `theQueueSaysWhatIsTrue` failed: it pins the measured gap to a
+**resting** row (`OPEN` / 🟡 BLOCKED), because that row is where the number lives and a transient state
+would leave the baseline unanchored. The row stays OPEN with its PR named until the merge closes it the
+normal way. The guard was right and my edit was wrong — which is exactly why a number gets pinned to a row
+instead of living only in a test file.
+
+**Next:** Q-881's band — the strongest remaining piece of work that needs no decision from the admin.
+## 2026-10-20 — User hosting/database/storage audit remediation (admin requested fixes, CI then merge)
+
+Branch `codex/hosting-data-storage-hardening`, based on fresh main `17a4c45`; open PRs #3852 and #3856 inspected and their recovery/agent lanes left alone. Admin explicitly authorized fixes, full CI and merge only after green.
+
+Root-cause/class ledger:
+- F1: SQL policy names used string literals; corrected identifier quoting and bounded names (long buckets previously collided at PostgreSQL’s identifier limit). Executed the real generated migration twice in PGlite and enforced two-user RLS. Invalid MIME restrictions now reject rather than silently widen.
+- F2: publishable app key acted as user authorization; API now requires a separately verified Firebase token, store enforces createdBy/scope, and legacy unowned records remain owner-only. Client has an explicit token adapter; it supports the platform trusted Firebase project, not arbitrary issuers. Existing published apps need adapter integration and republish; records/credentials are preserved. This is a security migration, not a claim to provide a universal app-auth service.
+- F3: quota checked after queries; durable admission reserves before records, migrates old shard totals once and refunds unused list reservation. Negative cache reduces repeated exhausted calls. Authentication/meta/counter overhead still costs money; no claim of a zero-cost refusal or hard invoice cap.
+- F4: upload recipes signed anonymous/unbounded uploads; real auth and durable byte-quota hooks are required (otherwise 503). S3 signs exact size/content type. Cloudinary uses authenticated, bounded raw-body upload, two buffers per worker and provider format restrictions; no client signing capability. Actual app callbacks still must be connected; existing saved apps are not silently rewritten.
+- F5: private-read policy lacked owner predicate; now selects only caller uid folder. F6: Cloudinary copied a platform relative import; removed, with all-recipe import-closure guard.
+- F7: public flag bypassed unfinished isolation work; non-admin hosting additionally requires credentialless mode and explicit real-build/egress verification attestations. OPEN: actual cloud probe and network policy require cloud access, not another boolean pretending to create isolation.
+- F8 OPEN: live backup config was absent; managed backup/PITR inventory and staging restore proof require authenticated GCP and customer DB access. Do not manufacture backup success or enable a billable resource blindly.
+- F9 OPEN: registry storage and real invoice reconciliation remain incomplete; preserve explicit unmeasured fields. A plan fee or instance cap is not proof of profit.
+- F10: list had no continuation; stable document-id cursor pages across owned/scoped rows. F11: generic refusal erased actual charge state; responses preserve debit/refund/delivery/cleanup, and ambiguous charge exceptions retain resources with paymentStatus unknown. Both database and server sibling paths handled.
+
+Reversion proof: nine bug classes reintroduced individually; each corresponding test failed; every source restored before verification. Final complete local and CI results pending.
+
+### Verification findings — source-census race and test engine lifetime
+
+The final offline suite exposed an existing parallel-test race: `aStarvedReadSaysSoAndIsRead` statted `tests/.tmp-key-before-button-<pid>` after its owning test removed it. The assertions passed standalone. Root class: a source census treating another worker’s generated artifacts as shipped source. Siblings: the dependency census traversed the same test tree; the case-collision census also counted these artifacts. All three now use the shared fixture boundary in `tests/helpers/sourceCensus.ts`. The new filesystem test skips a dangling `.tmp-` fixture and still throws for a missing real source, so no genuine read error is silenced. Producers retain their existing module resolution; no broad assertion is removed.
+
+The same run reported a SIGKILL of the real PGlite shim test worker. Its fixture created a separate real engine for each test without closing it (the production browser shim intentionally keeps its workspace engine open). Track the actual constructors and close every engine after each test; assert clean fixture ownership before the next. The shipped browser shim is unchanged. The six affected stability files pass 79 tests. Reintroducing each of these two fixture defects makes its guard fail. Local full-suite concurrency is bounded to three workers; no test is skipped to make it green.
+
+Integrated latest main (6cdc155fa, including #3852, #3856 and #3857) before the final gates; only PROGRESS.md overlapped, and both append histories were retained. The candidate branch is now `codex/hosting-data-storage-hardening-integrated`.
+
+## 2026-10-20 — Q-881: the number that multiplies every bill gets a bound (and the two siblings the row never named)
+
+**The defect.** The whole validation on the live USD→INR rate was `Number.isFinite(rate) && rate > 0`, so
+any positive number the free FX source returned became the multiplier on every bill on that instance until
+the next refresh — `0.5`, `5000`, a glitched payload, a compromised response. `usdInrRate()` is read at ~24
+billing sites, so "every bill" is literal.
+
+### 🔴 The obvious fix would have re-created a bug this module already had
+
+The revenue audit of **2026-09-10** found `refreshUsdInrRate` was never wired anywhere outside its own
+test, so the rate sat **frozen at the 85 fallback** while the real rate was 87–88, and every build was
+under-billed ~3% — silently, with nothing failing to reveal it. A plain *"refuse anything more than 5% from
+the last good value"* band freezes the rate again the first time the rupee really moves 6%: the same bug
+with a safety badge on. That is the trade the first absolute rule forbids, and it would have looked like a
+safety improvement in review.
+
+So the fix protects **both** halves — bounded, and unable to freeze on a real move:
+
+| Mechanism | Why it is shaped that way |
+|---|---|
+| absolute band `[30, 300]`, refuse outright | deliberately WIDE — a 2.5x move from ~85 still lands. It catches a broken payload, not a market event. A test asserts the band spans **more than 5x**, so a future narrowing cannot quietly turn it into an FX forecast |
+| a jump beyond 5% is **held**, not refused | it lands when a second **independent** fetch agrees — itself a small move, not an exact match, because the true rate drifts between observations. One glitch never bills anybody; a genuine move is late by one cycle, never permanent |
+| every refusal is LOUD with a running count, plus `usdInrRateHealth()` | the 2026-09 bug hid for months because a frozen rate looks identical to a working one from outside. This is the handle that makes the difference visible |
+
+### 🔑 Two siblings the row does not name
+
+The class is *"a number that multiplies every bill, wherever it enters"* — and the row names only the fetch
+path. Hunting it found two more entry points with the identical weak check:
+
+- **`setUsdInrRate`** (the ops override): a hand-typed `8500` was as acceptable as a glitched payload.
+  Banded now — but deliberately **not** jump-limited: an override is a human act, and making someone
+  confirm their own keystroke twice just teaches them to call it twice.
+- **the env fallback**: a typo of `850` for `85` would have multiplied every bill by ten. CLAUDE.md's own
+  warning is that an env value always beats a code default, so this one is exactly the class it describes.
+
+Locked by `tests/theRateThatMultipliesEveryBillIsBounded.test.ts` (11 tests) plus the module's existing 5,
+unchanged. **Four reversions bite:** the any-positive check returns → 4 fail · a big jump refused outright,
+i.e. the frozen-rate bug re-created → 2 · the ops override loses its band → 1 · the refusal goes quiet
+after the first → 1.
+
+**A correction to my own test:** it assumed `refusalsInARow` started at 0, but that is module state only an
+ACCEPTANCE clears — which is the honest definition, since a manual override does not make the FX source
+healthy again. The test now establishes its state with a good refresh first, which proves the reset too.
+
+⚠️ **The row stays OPEN after this, deliberately.** Its third clause — *"record the rate on every debit"* —
+touches the billing WRITE path and is a separate, larger change. Bundling is how a safe fix inherits a risky
+one's blocker, which is the same reasoning that kept Q-1227 out of Q-886.
+
+## 2026-10-20 — paying the bookkeeping debt: four resolved rows leave the open table
+
+**Q-886, Q-888, Q-1135 and Q-1126 were resolved earlier today and their rows were left behind** — three
+reading IN PROGRESS, Q-1126 OPEN with its PR named — while #3854, #3857, #3850 and #3861 were all merged.
+Each is verified closed here by its PR's **merge commit being an ancestor of `origin/main`**, not by a PR
+page saying "merged", and each id is appended to the closed register **in the same commit** as its removal.
+
+Worth recording plainly: I did this correctly for Q-1140/Q-1141/Q-1131 this morning and then stopped
+keeping it up through six more merges. That is exactly how a queue starts lying about what is done — the
+rows that are wrong are always the ones nobody re-reads.
+
+### 🔒 And closing Q-1126 turned its own guard red, which was the guard being right
+
+`theQueueSaysWhatIsTrue` pinned the measured gap to a row **in the open table**, so that a real
+non-compliance is schedulable rather than buried in a test file. Removing Q-1126 removed the anchor.
+
+**At a baseline of zero that assertion inverts.** There is no gap left to schedule, and the sixth rule says
+a resolved row leaves the table — so the old pin would have forced Q-1126 to sit OPEN for ever with no work
+in it, which is the queue lying in the other direction. The property was always *"recorded, not silent"*,
+not *"has an open row"*: while the gap is real it must be schedulable; once it is closed it must be
+**visibly** closed, never simply gone. The pin now checks both regimes, so it asserts strictly more than
+before — and deleting `Q-1126` from the closed register fails it with *"must be visibly CLOSED, never just
+absent"*.
+
+The test was right that something had to change. It was wrong about which thing, and the difference matters:
+loosening a guard to let my own edit through would have been the easy version of this.
+
+### Q-2025 — 109 test files still hand-roll the source walk
+
+Raised, not swept. `tests/helpers/sourceCensus.ts` arrived hours ago in **#3858, from another session**,
+which migrated three files; 130 test files reference `readdirSync` and **109** self-recurse with
+`statSync(...).isDirectory()`. The fragility is real, not theoretical: with a `.tmp-*` dangling symlink
+under `src/server` a hand-rolled walk throws `ENOENT` while the migrated census passes all 11 of its tests.
+
+It is 🟡 BLOCKED on purpose. A 109-file sweep of another session's in-flight centralisation is the race the
+concurrency rules forbid, and the change is less mechanical than the count suggests — every one of those
+files carries its own filter and ignore list, so a careless sweep silently widens or narrows what each
+census sees, which is worse than the fragility it fixes. #3865 migrates exactly one file: the census this
+session wrote.
+
+### The queue's shape changed today
+
+Another session added **375 new OPEN rows** (Q-1300–Q-2024). This morning the open table held a few dozen
+actionable rows; it now holds 517. Those rows are not touched here — a row somebody created an hour ago is
+theirs — but anyone reading "complete the remaining queue" needs to know the denominator moved.

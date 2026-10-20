@@ -23,6 +23,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { readdirSync, statSync } from 'fs';
+import { isCensusFixture } from './helpers/sourceCensus';
 import { join, relative } from 'path';
 
 const ROOT = join(__dirname, '..');
@@ -34,7 +35,7 @@ function walk(dir: string, out: string[] = []): string[] {
   let entries: string[];
   try { entries = readdirSync(dir); } catch { return out; }
   for (const name of entries) {
-    if (SKIP_DIR.has(name)) continue;
+    if (SKIP_DIR.has(name) || isCensusFixture(name)) continue;
     const full = join(dir, name);
     let st: ReturnType<typeof statSync>;
     try { st = statSync(full); } catch { continue; }

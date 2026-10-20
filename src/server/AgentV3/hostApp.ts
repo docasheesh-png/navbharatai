@@ -86,6 +86,11 @@ export function hostingAvailability(
       message: 'Apps that need a server run on a hosting plan. Open Billing → Plans to start one — your app and its code are kept exactly as they are until then.',
     };
   }
+  if (!opts.isAdmin && (parseEnvFlag(env.NAVBHARAT_APPS_CREDENTIALLESS_BUILD) !== true
+    || parseEnvFlag(env.NAVBHARAT_APPS_BUILD_ISOLATION_VERIFIED) !== true
+    || parseEnvFlag(env.NAVBHARAT_APPS_EGRESS_VERIFIED) !== true)) {
+    return { available: false, message: 'Server hosting is waiting for its isolation and network safety checks. Your app and data are kept.' };
+  }
   const project = appsProject(env);
   if (!project.projectId) return { available: false, message: project.message };
   // 🔒 FAILS CLOSED, the admin included: no user code runs until it has its own role-less identity and its

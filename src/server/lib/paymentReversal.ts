@@ -84,6 +84,39 @@ export function classifyCashfreeWebhook(body: unknown): CashfreeWebhookKind {
 }
 
 /**
+ * Is this payment event telling us an ATTEMPT FAILED, rather than that money arrived? (Q-888)
+ *
+ * 🔑 WHY THE DISTINCTION IS NEEDED AT ALL, and it is not the one `classifyCashfreeWebhook` makes.
+ * Cashfree sends one event per payment ATTEMPT. `PAYMENT_FAILED_WEBHOOK` and
+ * `PAYMENT_USER_DROPPED_WEBHOOK` say "this attempt did not complete" — while the ORDER usually stays
+ * `ACTIVE`, because the payer may try again. So the verifier correctly cannot fulfil it, the route
+ * correctly cannot credit anything, and re-delivering the event achieves NOTHING: the same attempt will
+ * have failed every time. A later successful attempt arrives as its own `PAYMENT_SUCCESS_WEBHOOK`.
+ *
+ * 🔴 THIS CORRECTS A BELIEF THIS REPO HELD IN WRITING. Q-888's row, and a first version of the fix, said
+ * these events were "settled as EXPIRED" by `cashfreeOrderClosedUnpaid`. Measured: that predicate
+ * recognises only `EXPIRED` and `TERMINATED`, which are ORDER statuses — `USER_DROPPED` and `FAILED` are
+ * PAYMENT statuses and never reach it. The failed-attempt events were therefore answered non-2xx and
+ * re-sent for ever, which is exactly what the row reported, by a different route than the row described.
+ *
+ * Matching is by SUBSTRING on the event name, with the payment object's own status as a fallback, for the
+ * same reason `classifyCashfreeWebhook` matches that way: a renamed or newly-added failure event must
+ * still be recognised as a failure rather than silently becoming an unacknowledged retry storm.
+ *
+ * PURE. A body is untrusted JSON.
+ */
+export function cashfreePaymentEventIsFailure(body: unknown): boolean {
+  const b = (body && typeof body === 'object' ? body : {}) as Record<string, any>;
+  const type = String(b.type ?? b.event ?? '').toUpperCase();
+  const failing = (s: string) => s.includes('FAILED') || s.includes('USER_DROPPED') || s.includes('CANCELLED') || s.includes('DROPPED');
+  if (type && failing(type)) return true;
+  const data = (b.data && typeof b.data === 'object' ? b.data : {}) as Record<string, any>;
+  const payment = (data.payment && typeof data.payment === 'object' ? data.payment : {}) as Record<string, any>;
+  // The same vocabulary `purchaseLedger.normalisePurchaseStatus` already treats as a failed row.
+  return failing(String(payment.payment_status ?? '').toUpperCase());
+}
+
+/**
  * The order id a Cashfree webhook names.
  *
  * ASSUMPTION: payment events carry `data.order.order_id`; refund events `data.refund.order_id`; dispute

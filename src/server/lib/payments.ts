@@ -273,9 +273,16 @@ async function fulfilGiftOrder(db: any, txRef: any, orderId: string, txData: any
  * 🔑 `settled` SAYS WHETHER A FAILURE IS FINAL, AND IT EXISTS FOR THE WEBHOOK (Q-888).
  *
  * The signed-webhook route used to answer **400** to every `success: false`, so Cashfree re-sent an
- * event we had already decided about — a PAYMENT_FAILED or USER_DROPPED order was settled as EXPIRED,
- * answered 400, and delivered again, forever. The route could not tell a decision from an outage,
- * because this function did not say.
+ * event we had already decided about — an amount mismatch, an order this server never created, an
+ * EXPIRED or TERMINATED order — and delivered it again, forever. The route could not tell a decision
+ * from an outage, because this function did not say.
+ *
+ * ⚠️ A FAILED or USER_DROPPED ATTEMPT IS NOT ONE OF THESE, and Q-888's row said it was. Those are
+ * PAYMENT statuses; `cashfreeOrderClosedUnpaid` recognises only the ORDER statuses EXPIRED and
+ * TERMINATED, so such an event lands on "Order not paid or invalid status" with the order still open.
+ * It is retryable HERE (the order may yet be paid) and acknowledged by the ROUTE (re-sending a failed
+ * attempt reports the same failure for ever) — `cashfreePaymentEventIsFailure` makes that call, because
+ * only the route can see which event woke it.
  *
  * `settled: true` means THIS ORDER WILL NEVER BE FULFILLED AND THAT IS THE ANSWER — the gateway says it
  * closed unpaid, the amounts disagree, it is not an order this server created, or a pass payment was
@@ -561,9 +568,13 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
       // orders returned in their branches.
     }
 
-    return { success: false, error: 'Order not paid or invalid status' };
+    // retryable: the gateway still has this order OPEN (not paid, not closed-unpaid), so the payer may
+    // yet complete it and a later delivery of this same event can fulfil it. Acknowledging now would
+    // throw away the one notification that becomes useful the moment the money arrives.
+    return { success: false, error: 'Order not paid or invalid status', settled: false };
   } catch (err: any) {
     console.error('[CASHFREE] Internal verification failed:', err.message);
-    return { success: false, error: err.message };
+    // retryable: an unexpected exception is an outage by definition, never a verdict on this order.
+    return { success: false, error: err.message, settled: false };
   }
 }

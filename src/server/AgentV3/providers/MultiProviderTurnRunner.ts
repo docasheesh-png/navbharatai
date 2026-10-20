@@ -526,9 +526,11 @@ export function circuitBreakerConfig(env: NodeJS.ProcessEnv = process.env): Circ
   };
 }
 
-/** Cooldown length (ms). Env-tunable; `0`/`off` disables the shared cooldown (per-instance bench remains). */
-function rateLimitCooldownMs(): number {
-  const raw = (process.env.AGENTV3_RATE_LIMIT_COOLDOWN_MS ?? '').trim().toLowerCase();
+/** Cooldown length (ms). Missing/blank uses 60s; only explicit `0`/`off` disables it. */
+export function rateLimitCooldownMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = (env.AGENTV3_RATE_LIMIT_COOLDOWN_MS ?? '').trim().toLowerCase();
+  // Number('') is zero, but absence is not an administrator's decision to disable protection.
+  if (!raw) return 60_000;
   if (raw === 'off') return 0;
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? n : 60_000;

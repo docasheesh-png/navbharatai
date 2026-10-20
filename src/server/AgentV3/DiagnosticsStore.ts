@@ -14,7 +14,7 @@ import { audit, truncateForAudit } from '../lib/audit';
 import { capProblems, outcomeCodeOf, severityOfOutcome, appWasSeenRunning, stoppedByUser, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import { trimChannel, dropChannel, mergeTruncation } from './reportTruncation';
 import { compactPromptPreviews } from './promptPreviewShape';
-import { redactSecrets } from './SecretRedactor';
+import { redactSecrets } from './SourceSecretRedactor';
 import { summarizeModelPerformance, type ModelPerformanceSummary } from './modelPerformance';
 import { summarizeHealCodes, type HealCodeTally } from './healBreakdown';
 import { workaroundCountOf } from '../../lib/healIssue';

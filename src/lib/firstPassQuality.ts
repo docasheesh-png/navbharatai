@@ -68,6 +68,13 @@ export interface FirstPassStats {
   /** Which repairs fire most, worst first — the ACTIONABLE half: each one is an upstream bug to prevent
    *  so the heal becomes dead code (50/50 law), not a heal to celebrate. */
   topHealCodes: Array<{ code: string; count: number }>;
+  /**
+   * Delivered builds the engine actually repaired (`autoResolved` > 0). A subset of `healed`.
+   * The rest of `healed` is `warningOnly` — a warning was left, nothing was repaired.
+   */
+  repaired: number;
+  /** Delivered, not clean, and the engine repaired nothing. A subset of `healed`. */
+  warningOnly: number;
 }
 
 /** How many heal codes to surface. Enough to act on, few enough to read at a glance. */
@@ -82,11 +89,16 @@ const TOP_HEAL_CODES = 8;
  */
 export function firstPassStats(reports: Array<FirstPassInput | null | undefined>): FirstPassStats {
   const list = (reports ?? []).filter(Boolean) as FirstPassInput[];
-  let clean = 0, healed = 0, failed = 0;
+  let clean = 0, healed = 0, failed = 0, repaired = 0, warningOnly = 0;
   const healCodes = new Map<string, number>();
   for (const r of list) {
     const v = classifyFirstPass(r);
-    if (v === 'clean') clean++; else if (v === 'healed') healed++; else failed++;
+    if (v === 'clean') clean++;
+    else if (v === 'healed') {
+      healed++;
+      if ((r.counts?.autoResolved ?? 0) > 0) repaired++;
+      else warningOnly++;
+    } else failed++;
     for (const i of r.issues ?? []) {
       // ONE definition of a heal (`healIssue.ts`, 2026-09-25): this loop had its own — the flag plus
       // the observation clause — and would have ranked TOOL_CALL as the top repair on any real report.
@@ -103,6 +115,8 @@ export function firstPassStats(reports: Array<FirstPassInput | null | undefined>
     failed,
     cleanRate: total > 0 ? clean / total : null,
     deliveredRate: total > 0 ? (clean + healed) / total : null,
+    repaired,
+    warningOnly,
     topHealCodes: [...healCodes.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .slice(0, TOP_HEAL_CODES)
@@ -120,12 +134,16 @@ export interface FirstPassMeta {
   unresolvedCount?: number;
   /** Findings left open (see `classifyFirstPass`). Absent on older rows, whose healCount includes them. */
   leftOpenCount?: number;
+  /** The user ended this build. Not a failure. Absent means "not known", and those still count as failed. */
+  userStopped?: boolean | null;
 }
 
 export interface FirstPassMetaStats extends FirstPassStats {
   /** Rows excluded because they predate the counts field — reported so the rate is never quoted as if
    *  it covered them. Counting a legacy row as clean would inflate the exact number we judge ourselves by. */
   skippedLegacy: number;
+  /** Builds the user stopped. Left out of `failed` and out of the denominator. */
+  userStopped: number;
 }
 
 /**
@@ -135,13 +153,18 @@ export interface FirstPassMetaStats extends FirstPassStats {
 export function firstPassStatsFromMeta(metas: Array<FirstPassMeta | null | undefined>): FirstPassMetaStats {
   const usable: FirstPassInput[] = [];
   let skippedLegacy = 0;
+  let userStopped = 0;
   for (const m of metas ?? []) {
     if (!m) continue;
-    if (m.ok === false) { usable.push({ ok: false }); continue; }
+    if (m.ok === false) {
+      if (m.userStopped === true) { userStopped++; continue; }
+      usable.push({ ok: false });
+      continue;
+    }
     if (typeof m.healCount !== 'number' || typeof m.unresolvedCount !== 'number') { skippedLegacy++; continue; }
     usable.push({ ok: m.ok === true, counts: { autoResolved: m.healCount, unresolved: m.unresolvedCount, leftOpen: m.leftOpenCount } });
   }
-  return { ...firstPassStats(usable), skippedLegacy };
+  return { ...firstPassStats(usable), skippedLegacy, userStopped };
 }
 
 /** The admin-facing target from ROADMAP #1: "#1" is not claimable below this clean rate. */

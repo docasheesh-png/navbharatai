@@ -14,9 +14,10 @@
  * that autopsy did not hunt. A starvation is a fact about the MODEL at this ask, never about the key
  * that carried it — so it is now keyed on the provider FAMILY + model, like the throughput bench.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   makeMultiProviderTurnRunner,
+  createRateLimitCooldowns,
   sharedRateLimitCooldowns,
   type NamedRunner,
 } from '../src/server/AgentV3/providers/MultiProviderTurnRunner';
@@ -24,6 +25,7 @@ import { starvedBudgetError, STARVED_BUDGET_MESSAGE } from '../src/server/AgentV
 import type { RunTurnParams, TurnResult, TurnRunner } from '../src/server/AgentV3/ClaudeClient';
 
 beforeEach(() => sharedRateLimitCooldowns.reset());
+afterEach(() => sharedRateLimitCooldowns.reset());
 
 const PARAMS: RunTurnParams = { model: 'm', messages: [{ role: 'user', content: 'fix the build' }] };
 
@@ -79,7 +81,11 @@ describe('🔴 the report\'s ladder: a 51-key glm-5.3 pool that starves reaches 
     const glm53 = pool('GLM', 'glm-5.3', 6, starvingRunner);
     glm53[0] = { ...glm53[0], runner: { runTurn: vi.fn().mockRejectedValue(new Error('OpenAI-compatible call (GLM/Kimi) timed out after 60000ms')) } };
     const haiku = okRunner('haiku');
-    const runner = makeMultiProviderTurnRunner([...glm53, { name: 'CLAUDE_HAIKU', runner: haiku }], { deadRungs: build });
+    // Isolate the starvation key: an enabled first-timeout cooldown correctly skips the whole pool
+    // before key 2 can starve. The separate cooldown suite locks that production protection.
+    const runner = makeMultiProviderTurnRunner([...glm53, { name: 'CLAUDE_HAIKU', runner: haiku }], {
+      deadRungs: build, cooldowns: createRateLimitCooldowns(0),
+    });
     expect((await runner.runTurn(PARAMS)).text).toBe('haiku');
     expect(glm53.map(calls)).toEqual([1, 1, 0, 0, 0, 0]);
     expect([...build.keys()]).toEqual(['GLM::glm-5.3']); // the family, not 'GLM#2'

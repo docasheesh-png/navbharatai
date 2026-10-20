@@ -26,7 +26,7 @@ import {
 import { appendChange, chgId, describeChange, type ChangeRecord, type ChangeStatus, type EngineeringMemory } from './changeLog';
 import { loadEngineeringMemory, updateEngineeringMemory } from './engineeringMemoryStore';
 import { fenceUntrusted } from '../UntrustedContent';
-import { redactSecrets, redactPII } from '../SecretRedactor';
+import { redactSecrets, redactPII } from '../SourceSecretRedactor';
 import { redactProvidersText } from '../../lib/providerRedaction';
 import type { BuildIssue } from '../BuildDiagnostics';
 import type { ProjectGraph } from '../WorkspaceMemory';

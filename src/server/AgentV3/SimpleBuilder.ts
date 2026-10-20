@@ -2416,10 +2416,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           return null;
         }
         try {
-          // Fix 69 — feed consumers the producers' EXPORT SURFACE (exact names/shapes/signatures,
-          // full-file scan so no export is truncation-hidden) instead of full bodies: same contract
-          // information at a fraction of the input tokens. AGENTV3_SIGNATURE_CONTEXT=off restores
-          // the old full-body dump verbatim.
+          // Feed real declared signatures and required local types to consumers. Inferred shapes
+          // retain bounded actual source instead of guessed contracts; any budget omission is
+          // explicit. AGENTV3_SIGNATURE_CONTEXT=off restores the old full-body dump verbatim.
           const depBlock = !produced.length
             ? ''
             : isStylesheetPath(spec.path) && !/\.module\./i.test(spec.path) && stylesheetClassContext(produced, deps.framework)

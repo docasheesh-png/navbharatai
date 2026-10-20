@@ -28,7 +28,7 @@
 import { createHash } from 'crypto';
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
-import { redactSecrets, redactPII } from './SecretRedactor';
+import { redactSecrets, redactPII } from './SourceSecretRedactor';
 import {
   mistakeKey,
   formatKnownMistakes,

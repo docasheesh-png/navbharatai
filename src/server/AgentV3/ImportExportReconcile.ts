@@ -17,6 +17,7 @@
 // prove safe (namespace imports, wildcard re-exports, parse failures, aliased/anonymous cases).
 
 import { analyzeImportExports, resolveLocalTarget } from './ImportExportAnalysis';
+import { createExportCapabilities, emittedModuleSpecifier, EXPORT_CODE_FILE } from './exportCapabilities';
 
 export type ReconcileKind = 'named-to-default' | 'default-to-named';
 
@@ -37,7 +38,7 @@ export interface ReconcileResult {
   fixes: ReconcileFix[];
 }
 
-const CODE_FILE = /\.(t|j)sx?$/;
+const CODE_FILE = EXPORT_CODE_FILE;
 
 let TsMorph: any;
 async function loadTsMorph(): Promise<any | null> {
@@ -84,6 +85,7 @@ export async function reconcileImportExports(files: Record<string, string>): Pro
     try { sources.set(path, project.createSourceFile(path, content, { overwrite: true })); } catch { /* skip */ }
   }
   if (sources.size === 0) return unchanged;
+  const capabilities = createExportCapabilities(files);
 
   const shapeCache = new Map<string, ExportShape>();
   const shapeOf = (path: string): ExportShape => {
@@ -129,7 +131,7 @@ export async function reconcileImportExports(files: Record<string, string>): Pro
       const target = resolveLocalTarget(path, spec, fileSet);
       if (!target) continue;
       const shape = shapeOf(target);
-      if (shape.parseFailed || shape.hasWildcard) continue; // never act on uncertainty
+      if (shape.parseFailed || shape.hasWildcard || capabilities.exportsOf(target).uncertain) continue; // never act on uncertainty
 
       // A namespace import cannot be reconciled to a named/default binding — skip the whole statement.
       let hasNamespace = false;
@@ -145,28 +147,34 @@ export async function reconcileImportExports(files: Record<string, string>): Pro
       // reusing the original module-specifier node text and the isTypeOnly flag.
       let defName = '';
       try { defName = imp.getDefaultImport?.()?.getText?.() ?? ''; } catch { defName = ''; }
-      const named: Array<{ name: string; alias?: string }> = [];
+      const named: Array<{ name: string; alias?: string; isTypeOnly: boolean }> = [];
       try {
         for (const ni of imp.getNamedImports?.() ?? []) {
           const n = ni.getName?.() ?? '';
           const a = ni.getAliasNode?.()?.getText?.();
-          if (n) named.push(a ? { name: n, alias: a } : { name: n });
+          if (n) named.push({ name: n, alias: a, isTypeOnly: !!ni.isTypeOnly?.() });
         }
       } catch { /* ignore — treated as no named imports */ }
       const specText = (() => { try { return imp.getModuleSpecifier?.()?.getText?.() || `'${spec}'`; } catch { return `'${spec}'`; } })();
       const typeKw = (() => { try { return imp.isTypeOnly?.() ? 'import type ' : 'import '; } catch { return 'import '; } })();
-      const renderNamed = (list: Array<{ name: string; alias?: string }>) =>
-        `{ ${list.map((x) => (x.alias ? `${x.name} as ${x.alias}` : x.name)).join(', ')} }`;
+      const renderNamed = (list: Array<{ name: string; alias?: string; isTypeOnly?: boolean }>) =>
+        `{ ${list.map((x) => `${x.isTypeOnly ? 'type ' : ''}${x.name}${x.alias ? ` as ${x.alias}` : ''}`).join(', ')} }`;
+      const canSupply = (imported: string, local: string) => {
+        const cap = capabilities.exportsOf(target).exports.get(imported);
+        const binding = capabilities.importsOf(path).find(b => b.from === spec && b.local === local);
+        return !!cap && (!binding?.readsValue || cap.runtime === 'value');
+      };
 
       // CASE A — a NAMED import whose name is actually the DEFAULT export.
       // import { App } from './App' where App is not a named export but IS the default (named App),
       // and the statement has no default import yet. Move that one name to the default position; the
       // name-match (default's own identifier === imported name) proves it is the same binding.
       const moveToDefault = !defName && named.find((x) =>
-        !x.alias && !shape.named.has(x.name) && shape.hasDefault && shape.defaultName === x.name);
+        !x.alias && !shape.named.has(x.name) && shape.hasDefault && shape.defaultName === x.name &&
+        canSupply('default', x.name) && (!x.isTypeOnly || named.length === 1));
       if (moveToDefault) {
         const remaining = named.filter((x) => x.name !== moveToDefault.name);
-        const newText = `${typeKw}${moveToDefault.name}${remaining.length ? `, ${renderNamed(remaining)}` : ''} from ${specText};`;
+        const newText = `${moveToDefault.isTypeOnly ? 'import type ' : typeKw}${moveToDefault.name}${remaining.length ? `, ${renderNamed(remaining)}` : ''} from ${specText};`;
         try {
           imp.replaceWithText(newText);
           touched.add(path);
@@ -177,7 +185,7 @@ export async function reconcileImportExports(files: Record<string, string>): Pro
 
       // CASE B — a DEFAULT import whose name is actually a NAMED export (and there is no default export).
       // import App from './App' where App has no default but IS a named export -> make it a named import.
-      if (defName && !shape.hasDefault && shape.named.has(defName)) {
+      if (defName && !shape.hasDefault && shape.named.has(defName) && canSupply(defName, defName)) {
         const newText = `${typeKw}${renderNamed([...named, { name: defName }])} from ${specText};`;
         try {
           imp.replaceWithText(newText);
@@ -205,7 +213,9 @@ export async function reconcileImportExports(files: Record<string, string>): Pro
       const target = resolveLocalTarget(path, spec, fileSet);
       if (!target) return m;
       const shape = shapeOf(target);
-      if (shape.parseFailed || shape.hasWildcard || shape.named.has(name) || !shape.hasDefault || shape.defaultName !== name) return m;
+      if (shape.parseFailed || shape.hasWildcard || capabilities.exportsOf(target).uncertain ||
+          shape.named.has(name) || !shape.hasDefault || shape.defaultName !== name ||
+          capabilities.exportsOf(target).exports.get('default')?.runtime !== 'value') return m;
       const after = `import(${q}${spec}${q})`;
       fixes.push({ file: path, line: text.slice(0, offset).split('\n').length, name, from: spec, kind: 'named-to-default', before: m, after });
       changed = true;
@@ -239,10 +249,10 @@ export interface AddMissingResult {
   added: AddedImport[];
 }
 
-/** Relative import specifier from `importer` to `target` (both project-root file paths), ext-stripped. */
+/** Relative import specifier from `importer` to `target`, preserving explicit output module formats. */
 function relImportSpecifier(importer: string, target: string): string {
   const impDir = importer.includes('/') ? importer.slice(0, importer.lastIndexOf('/')) : '';
-  const noExt = target.replace(/\.(t|j)sx?$/, '');
+  const noExt = emittedModuleSpecifier(target);
   const impParts = impDir ? impDir.split('/') : [];
   const tgtParts = noExt.split('/');
   let i = 0;
@@ -296,15 +306,17 @@ export async function addMissingProjectImports(files: Record<string, string>, op
     try { sources.set(path, project.createSourceFile(path, content, { overwrite: true })); } catch { /* skip */ }
   }
   if (sources.size === 0) return unchanged;
+  const capabilities = createExportCapabilities(files);
 
   // Build the export index: name -> the set of project modules that export it as a NAMED export.
   // A name exported by 2+ modules is ambiguous → never auto-imported.
   const exportIndex = new Map<string, Set<string>>();
-  for (const [path, sf] of sources) {
+  for (const path of sources.keys()) {
     try {
-      const decls: Map<string, any[]> = sf.getExportedDeclarations?.() ?? new Map();
-      for (const name of decls.keys()) {
-        if (name === 'default') continue;
+      const surface = capabilities.exportsOf(path);
+      if (surface.uncertain) continue;
+      for (const [name, cap] of surface.exports) {
+        if (name === 'default' || cap.runtime !== 'value') continue;
         if (!exportIndex.has(name)) exportIndex.set(name, new Set());
         exportIndex.get(name)!.add(path);
       }
@@ -529,7 +541,7 @@ export async function addMissingProjectImports(files: Record<string, string>, op
           break;
         }
       } catch { usedAsValue = false; }
-      if (!usedAsValue) continue;
+      if (!usedAsValue || !capabilities.hasValueRead(path, name)) continue;
 
       const spec = cand.isPackage ? owner : relImportSpecifier(path, owner);
       try {
@@ -568,13 +580,12 @@ export interface TypeOnlyValueFix {
  * `import { InputAction, type PlayerInputState }`), so nothing that is only a type starts being emitted.
  *
  * Precision: a project module only (never a package — its exports are not in the file set), the target's
- * declaration must be a value kind, and the name must appear outside type positions. Pure; never throws.
+ * export must emit a value, and the bound import must be read outside erased type positions. Pure; never throws.
  */
 export async function fixTypeOnlyValueImports(files: Record<string, string>): Promise<{ files: Record<string, string>; fixes: TypeOnlyValueFix[] }> {
   const unchanged = { files, fixes: [] as TypeOnlyValueFix[] };
   const mod = await loadTsMorph();
   if (!mod) return unchanged;
-  const { SyntaxKind } = mod;
   let project: any;
   try {
     project = new mod.Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true, compilerOptions: { allowJs: true, jsx: 2 } });
@@ -587,32 +598,7 @@ export async function fixTypeOnlyValueImports(files: Record<string, string>): Pr
     try { sources.set(path, project.createSourceFile(path, content, { overwrite: true })); } catch { /* skip */ }
   }
   if (sources.size === 0) return unchanged;
-
-  const VALUE_KINDS = new Set([SyntaxKind.EnumDeclaration, SyntaxKind.VariableDeclaration, SyntaxKind.FunctionDeclaration, SyntaxKind.ClassDeclaration]);
-  const exportsValue = (target: string, name: string): boolean => {
-    try {
-      const decls: any[] = sources.get(target)?.getExportedDeclarations?.()?.get(name) ?? [];
-      // A value of this name EXISTS — not "every declaration is a value". The enum-as-data pair
-      // `export const X = {…} as const` + `export type X = …` declares BOTH under one name, and the shared
-      // contract writes every enum that way since build 9c612cdb (contractEnums.ts); `every` made this heal
-      // fire for an enum and never for the pair. `readsAsValue` below still requires a value READ.
-      return decls.some((d) => VALUE_KINDS.has(d?.getKind?.()));
-    } catch { return false; }
-  };
-  const TYPE_POSITIONS = new Set([SyntaxKind.TypeReference, SyntaxKind.QualifiedName, SyntaxKind.TypeQuery, SyntaxKind.ExpressionWithTypeArguments]);
-  const readsAsValue = (sf: any, name: string): boolean => {
-    try {
-      for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
-        if (id.getText() !== name) continue;
-        if (id.getFirstAncestorByKind?.(SyntaxKind.ImportDeclaration)) continue;
-        const parent = id.getParent?.();
-        if (TYPE_POSITIONS.has(parent?.getKind?.())) continue;
-        if (parent?.getKind?.() !== SyntaxKind.ShorthandPropertyAssignment && parent?.getNameNode?.() === id) continue;
-        return true;
-      }
-    } catch { /* fall through */ }
-    return false;
-  };
+  const capabilities = createExportCapabilities(files);
 
   const fixes: TypeOnlyValueFix[] = [];
   const touched = new Set<string>();
@@ -628,16 +614,18 @@ export async function fixTypeOnlyValueImports(files: Record<string, string>): Pr
       try { declTypeOnly = !!imp.isTypeOnly?.(); } catch { continue; }
       let named: any[] = [];
       try { named = imp.getNamedImports?.() ?? []; } catch { continue; }
-      // Only an aliasless name is a fact we can check against the target's export of the same name.
+      // Source export name and local alias are separate facts; the shared binder follows both.
       const needs = named.filter((ni) => {
         try {
-          if (ni.getAliasNode?.()) return false;
           const typeOnly = declTypeOnly || !!ni.isTypeOnly?.();
           const n = ni.getName?.() ?? '';
-          return typeOnly && !!n && exportsValue(target, n) && readsAsValue(sf, n);
+          const local = ni.getAliasNode?.()?.getText() ?? n;
+          return typeOnly && !!n && !capabilities.exportsOf(target).uncertain &&
+            capabilities.exportsOf(target).exports.get(n)?.runtime === 'value' &&
+            capabilities.importsOf(path).some(b => b.from === spec && b.local === local && b.readsValue);
         } catch { return false; }
       });
-      if (needs.length === 0) continue;
+      if (needs.length === 0 || (declTypeOnly && imp.getDefaultImport?.())) continue;
       try {
         if (declTypeOnly) {
           // `import type { A, B }` → `import { A, type B }`: the statement loses `type`, every name that
@@ -645,7 +633,6 @@ export async function fixTypeOnlyValueImports(files: Record<string, string>): Pr
           const keep = new Set(needs.map((ni) => ni.getName()));
           imp.setIsTypeOnly(false);
           for (const ni of imp.getNamedImports()) if (!keep.has(ni.getName())) ni.setIsTypeOnly(true);
-          if (imp.getDefaultImport?.()) { /* a default in a type-only import would change meaning — leave it */ }
         } else {
           for (const ni of needs) ni.setIsTypeOnly(false);
         }
@@ -688,8 +675,8 @@ export interface WrongSourceResult {
  *
  * Paranoid-safe: acts ONLY when the name is exported by EXACTLY ONE module (ambiguous → never guess), only
  * on NAMED specifiers of a LOCAL import whose current target genuinely lacks the export, never on default/
- * namespace imports, never when the target has a wildcard re-export (`export *` — the name COULD be there),
- * and it preserves any local alias. It can only turn a build-breaking import into a resolvable one. Pure;
+ * namespace imports, never when an unresolved re-export makes the target uncertain,
+ * and it preserves both the local alias and whole/per-specifier type modifiers. It can only turn a build-breaking import into a resolvable one. Pure;
  * never throws — any parse/mutation problem returns the input unchanged.
  */
 export async function fixWrongSourceImports(files: Record<string, string>): Promise<WrongSourceResult> {
@@ -710,22 +697,18 @@ export async function fixWrongSourceImports(files: Record<string, string>): Prom
     try { sources.set(path, project.createSourceFile(path, content, { overwrite: true })); } catch { /* skip */ }
   }
   if (sources.size === 0) return unchanged;
+  const capabilities = createExportCapabilities(files);
 
-  // name -> set of modules that export it as a NAMED export. 2+ owners is ambiguous → never acted on.
+  // Keep capabilities until the consumer's use is known. A type owner cannot satisfy a value read.
   const exportIndex = new Map<string, Set<string>>();
-  const wildcardModules = new Set<string>(); // modules with `export *` — their named surface is unknowable
-  for (const [path, sf] of sources) {
-    try {
-      for (const ed of sf.getExportDeclarations?.() ?? []) {
-        if (ed.isNamespaceExport?.()) wildcardModules.add(path);
-      }
-      const decls: Map<string, any[]> = sf.getExportedDeclarations?.() ?? new Map();
-      for (const name of decls.keys()) {
-        if (name === 'default') continue;
-        if (!exportIndex.has(name)) exportIndex.set(name, new Set());
-        exportIndex.get(name)!.add(path);
-      }
-    } catch { /* skip a file we can't read exports from */ }
+  for (const path of sources.keys()) {
+    const surface = capabilities.exportsOf(path);
+    if (surface.uncertain) continue;
+    for (const name of surface.exports.keys()) {
+      if (name === 'default') continue;
+      if (!exportIndex.has(name)) exportIndex.set(name, new Set());
+      exportIndex.get(name)!.add(path);
+    }
   }
   if (exportIndex.size === 0) return unchanged;
 
@@ -737,40 +720,42 @@ export async function fixWrongSourceImports(files: Record<string, string>): Prom
     try { imports = sf.getImportDeclarations(); } catch { continue; }
     // Group every wrong specifier in this file by the CORRECT owner module, so we emit one tidy import
     // per owner. Each entry keeps the export name and any local alias.
-    const moveToOwner = new Map<string, Array<{ name: string; alias?: string }>>();
+    const moveToOwner = new Map<string, Array<{ name: string; alias?: string; isTypeOnly: boolean }>>();
+    const emptiedImports = new Set<any>();
     for (const imp of imports) {
       let spec = '';
       try { spec = imp.getModuleSpecifierValue?.() ?? ''; } catch { continue; }
       const target = resolveLocalTarget(path, spec, fileSet);
       if (!target) continue;                                   // bare package / unresolved — not our job here
-      // Never touch a namespace import; and if the target re-exports with `export *`, the name might be
-      // present transitively — stay out of it.
+      // Never touch namespace imports or unresolved transitive export surfaces.
       let hasNamespace = false;
       try { hasNamespace = !!imp.getNamespaceImport?.(); } catch { /* ignore */ }
-      if (hasNamespace || wildcardModules.has(target)) continue;
+      if (hasNamespace || capabilities.exportsOf(target).uncertain) continue;
 
-      let targetExports: Set<string>;
-      try {
-        const decls: Map<string, any[]> = sources.get(target)?.getExportedDeclarations?.() ?? new Map();
-        targetExports = new Set([...decls.keys()].filter((k) => k !== 'default'));
-      } catch { continue; }
+      const targetExports = capabilities.exportsOf(target).exports;
 
       let named: any[];
       try { named = imp.getNamedImports?.() ?? []; } catch { continue; }
       for (const ni of named) {
         let name = '';
         try { name = ni.getName?.() ?? ''; } catch { continue; }
-        if (!name || targetExports.has(name)) continue;         // correct source already — leave it
+        if (!name) continue;
+        const local = ni.getAliasNode?.()?.getText() ?? name;
+        const binding = capabilities.importsOf(path).find(b => b.from === spec && b.local === local);
+        const current = targetExports.get(name);
+        if (current && (!binding?.readsValue || current.runtime !== 'erased')) continue;
         const owners = exportIndex.get(name);
         if (!owners) continue;                                   // exported nowhere → genuinely missing (LLM's job)
-        const candidates = [...owners].filter((o) => o !== target && o !== path);
+        const candidates = [...owners].filter((o) => o !== target && o !== path &&
+          (!binding?.readsValue || capabilities.exportsOf(o).exports.get(name)?.runtime === 'value'));
         if (candidates.length !== 1) continue;                   // ambiguous or self → never guess
         const owner = candidates[0];
         let alias: string | undefined;
         try { alias = ni.getAliasNode?.()?.getText?.() || undefined; } catch { alias = undefined; }
-        try { ni.remove(); } catch { continue; }                 // drop the wrong specifier
+        const isTypeOnly = !!imp.isTypeOnly?.() || !!ni.isTypeOnly?.();
+        try { ni.remove(); emptiedImports.add(imp); } catch { continue; }                 // drop the wrong specifier
         if (!moveToOwner.has(owner)) moveToOwner.set(owner, []);
-        moveToOwner.get(owner)!.push({ name, alias });
+        moveToOwner.get(owner)!.push({ name, alias, isTypeOnly });
         fixes.push({ file: path, name, alias, from: spec, to: relImportSpecifier(path, owner) });
         touched.add(path);
       }
@@ -782,7 +767,7 @@ export async function fixWrongSourceImports(files: Record<string, string>): Prom
         const hasNamed = (imp.getNamedImports?.() ?? []).length > 0;
         const hasDefault = !!imp.getDefaultImport?.();
         const hasNs = !!imp.getNamespaceImport?.();
-        if (!hasNamed && !hasDefault && !hasNs) imp.remove();
+        if (!hasNamed && !hasDefault && !hasNs && emptiedImports.has(imp)) imp.remove();
       }
     } catch { /* leave the empty import if cleanup fails — harmless */ }
     // Add one grouped import per correct owner.
@@ -790,7 +775,8 @@ export async function fixWrongSourceImports(files: Record<string, string>): Prom
       try {
         sf.addImportDeclaration({
           moduleSpecifier: relImportSpecifier(path, owner),
-          namedImports: names.map((n) => (n.alias ? { name: n.name, alias: n.alias } : { name: n.name })),
+          isTypeOnly: names.every(n => n.isTypeOnly),
+          namedImports: names.map(n => ({ name: n.name, alias: n.alias, isTypeOnly: !names.every(x => x.isTypeOnly) && n.isTypeOnly })),
         });
       } catch { /* if we can't add it, the removed specifier is lost — but tsc/readiness will re-flag it honestly */ }
     }

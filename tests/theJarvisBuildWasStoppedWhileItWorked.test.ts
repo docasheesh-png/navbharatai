@@ -44,7 +44,7 @@ describe('the futility window opens when the BUILD starts, not when the request 
 
   it('a malformed snapshot arms at zero rather than throwing', () => {
     expect(armedFutilityState({ filesWritten: NaN, commandsRun: -1, stepsDone: 2.9 } as never).last)
-      .toEqual({ filesWritten: 0, commandsRun: 0, stepsDone: 2 });
+      .toEqual({ filesWritten: 0, commandsRun: 0, stepsDone: 2, pathsRead: 0 });
     expect(initialFutilityState().quietTicks).toBe(0);
   });
 

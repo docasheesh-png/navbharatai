@@ -37,7 +37,7 @@ describe('the range that decides whose apps get erased', () => {
   });
 
   it('REFUSES an unusable uid — an empty key would range over everybody', () => {
-    for (const bad of ['', null, undefined, 'has space', 'a'.repeat(65), '../x']) {
+    for (const bad of ['', null, undefined, 'anon', 'has space', 'a'.repeat(65), '../x']) {
       const plan = planWorkspaceErase(bad as never);
       expect(plan.range, String(bad)).toBeNull();
       expect(plan.refusal, String(bad)).toBe('unusable-uid');

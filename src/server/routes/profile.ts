@@ -16,6 +16,7 @@ import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
 import { deleteUserDerivedIdData, LEGACY_HISTORY_ERASURE_LIMITATION } from '../lib/derivedIdErase';
 import { deleteUserWorkspaceData } from '../lib/workspaceDataErase';
 import { eraseUserSnapshots, liveSnapshotEraseDeps } from '../lib/snapshotErase';
+import { eraseUserWorkspaceAssetObjects } from '../lib/workspaceAssetErase';
 import { eraseSyncedWorkspace, type SyncEraseFirestore } from '../lib/syncWorkspaceErase';
 import { deIdentifyPublishedListings, getListingDb } from '../lib/publishedListingErase';
 import { sendSafeError } from '../lib/httpError';
@@ -282,6 +283,11 @@ export function registerProfileRoutes(app: Express): void {
       // nothing and report success. Best-effort like the rest: reported, never thrown.
       const snapshots = await eraseUserSnapshots(identity.uid, liveSnapshotEraseDeps())
         .catch((e) => ({ uid: identity.uid, workspaces: 0, bucketRemoved: 0, channelsRemoved: 0, failures: [e instanceof Error ? e.message : String(e)] }));
+      // Large private assets spill outside Firestore. Removing their pointer documents alone leaves
+      // the actual bytes behind. This exact-owner prefix works even if earlier erasure lost metadata.
+      // It cannot revoke an upload already in flight; that reconciliation remains a separate boundary.
+      const workspaceAssetObjects = await eraseUserWorkspaceAssetObjects(identity.uid)
+        .catch(() => ({ attempted: false, removed: false, failures: ['Workspace asset storage could not confirm removal.'] }));
       // DATA FIRST, THEN THE CREDENTIAL. Erasing the sign-in first would strand any data whose
       // deletion then failed, with the owner unable to sign in and retry.
       const report = await deleteUserData(db, identity.uid);
@@ -353,6 +359,8 @@ export function registerProfileRoutes(app: Express): void {
         // Its own line (Q-795): the copies of their apps on our HOSTING, which no Firestore count covers.
         // `failures` names every location that could not be confirmed removed — never counted as done.
         snapshots,
+        // A separate storage outcome, never folded into Firestore's document deletion count.
+        workspaceAssetObjects,
         /**
          * Its own line, and the one line here that is NOT a deletion count. `totalDeIdentified` is how
          * many published listings were kept and stripped of their author; `totalDeleted`, how many were

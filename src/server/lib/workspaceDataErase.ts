@@ -19,7 +19,7 @@
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
-import { workspacePrefixFor, ownedByVerifiedUid } from './workspaceIdentity';
+import { workspacePrefixFor, ownedByVerifiedUid, ANON_WORKSPACE_PREFIX } from './workspaceIdentity';
 
 /** A collection whose DOCUMENT ID is a workspace id, plus the subcollection holding its payload. */
 export interface WorkspaceScopedCollection {
@@ -174,7 +174,8 @@ const RANGE_END_CHAR = String.fromCharCode(0xf8ff);
  */
 export function planWorkspaceErase(uid: string | null | undefined): ErasePlan {
   const prefix = workspacePrefixFor(uid);
-  if (!prefix) return { range: null, refusal: 'unusable-uid' };
+  // The shared anonymous capability namespace has no account owner to erase by uid.
+  if (!prefix || prefix === ANON_WORKSPACE_PREFIX) return { range: null, refusal: 'unusable-uid' };
   if (String(uid).includes('-')) return { range: null, refusal: 'ambiguous-uid' };
   return { range: { startAt: prefix, endAt: `${prefix}${RANGE_END_CHAR}` } };
 }

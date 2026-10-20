@@ -17,6 +17,7 @@
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
+import { workspaceAssetBucketName, workspaceAssetObjectKey } from '../lib/workspaceAssetStorage';
 import { pool } from './WorkspaceFiles';
 
 /**
@@ -76,10 +77,6 @@ function metaOversized(meta: admin.firestore.DocumentSnapshot): string[] {
  * of a published app's. `bucketPublish.publishedAppsBucket` deliberately refuses this same fallback for
  * that reason — the two are not interchangeable, and the difference is access, not size.
  */
-function assetBucketName(env: NodeJS.ProcessEnv = process.env): string {
-  return String(env.WORKSPACE_ASSETS_BUCKET || env.NAV_STORE_BUCKET || env.FIREBASE_STORAGE_BUCKET || '').trim();
-}
-
 /**
  * The ceiling that remains after the spill-over. Not a storage limit — a memory one: every asset is
  * handled as a base64 string, and a caller that loads a whole workspace holds all of them at once. A
@@ -91,12 +88,12 @@ const MAX_SPILLED_ASSET_BYTES = Math.max(
 );
 
 function assetObjectPath(workspaceId: string, path: string): string {
-  return `workspace-assets/${workspaceId}/${assetDocId(path)}`;
+  return workspaceAssetObjectKey(workspaceId, assetDocId(path));
 }
 
 /** Write one oversized asset's bytes to the bucket. Returns the object path, or null on any doubt. */
 async function spillAssetToBucket(workspaceId: string, path: string, dataUri: string): Promise<string | null> {
-  const bucket = assetBucketName();
+  const bucket = workspaceAssetBucketName();
   if (!bucket) return null;
   try {
     const parsed = parseDataUri(dataUri);
@@ -119,7 +116,7 @@ async function spillAssetToBucket(workspaceId: string, path: string, dataUri: st
 
 /** Read one spilled asset back as a data URI. Returns null when it cannot be read. */
 async function readSpilledAsset(object: string, mime: string): Promise<string | null> {
-  const bucket = assetBucketName();
+  const bucket = workspaceAssetBucketName();
   if (!bucket || !object) return null;
   try {
     const [buf] = await admin.storage().bucket(bucket).file(object).download();

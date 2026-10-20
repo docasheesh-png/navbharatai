@@ -28,6 +28,9 @@ vi.mock('../src/server/lib/snapshotErase', () => ({
   eraseUserSnapshots: async () => ({ workspaces: 0, bucketRemoved: 0, channelsRemoved: 0, failures: [] }),
   liveSnapshotEraseDeps: () => ({}),
 }));
+vi.mock('../src/server/lib/workspaceAssetErase', () => ({
+  eraseUserWorkspaceAssetObjects: async () => ({ attempted: true, removed: true, failures: [] }),
+}));
 vi.mock('../src/server/lib/syncWorkspaceErase', () => ({
   eraseSyncedWorkspace: async () => ({ chunks: 0, manifestDeleted: false, probed: 0 }),
 }));

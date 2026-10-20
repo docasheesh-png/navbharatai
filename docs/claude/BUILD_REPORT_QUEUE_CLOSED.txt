@@ -729,3 +729,18 @@ Q-2021
 Q-2022
 Q-2023
 Q-2024
+# Four rows closed 2026-10-20, each verified by its PR's merge commit being an ancestor of origin/main —
+# not by a PR page saying "merged". This is bookkeeping debt being paid: all four were resolved earlier the
+# same day and their rows were left sitting in the open table, three reading IN PROGRESS and Q-1126 OPEN
+# with its PR named. The sixth rule is that a row leaves the open table when its PR merges, with its id
+# appended here in the SAME commit; doing it for Q-1140/1141/1131 that morning and then not keeping it up
+# is exactly how a queue starts lying about what is done.
+#
+# Q-886  — a customer's own details never go into a log line whole (#3854, merge commit 17a4c45ae).
+# Q-888  — a settled webhook is acknowledged, a failed attempt is news, an outage is retried (#3857, 6cdc155fa).
+# Q-1135 — an un-reconciled credit is recorded on the order, not only in a log line (#3850, 32aa60d84).
+# Q-1126 — the four-field gap reaches ZERO and the ratchet becomes an invariant (#3861, bb96e3ab6).
+Q-886
+Q-888
+Q-1135
+Q-1126

@@ -580,7 +580,7 @@ a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transfor
 .nb-stagger > :nth-child(7) { animation-delay: 240ms; }
 .nb-stagger > :nth-child(n + 8) { animation-delay: 280ms; }
 
-@keyframes nb-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@keyframes nb-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.9; } }
 @keyframes nb-blink { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
 @keyframes nb-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 

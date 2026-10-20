@@ -96,6 +96,8 @@ const CONTRACT: readonly ContractEntry[] = [
   { file: 'src/game/Game.ts', names: ['GameContext', 'GameOptions'] },
   // What `touchControls: { buttons: [...] }` takes. The reported build passed strings.
   { file: 'src/game/ui/touchControls.ts', names: ['TouchButton', 'TouchLayout', 'TouchControlsOptions'] },
+  // 1b38d662: livery/color were guessed and Motorcycle was passed as an Object3D instead of .root.
+  { file: 'src/game/three/objects.ts', names: ['RoadOptions', 'MotorcycleOptions', 'Motorcycle', 'VehicleTuning', 'VehicleState'] },
 ];
 
 /** Every name the contract covers, for the census that keeps this honest. */

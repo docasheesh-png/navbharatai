@@ -136,11 +136,17 @@ export const LARGE_BODY_ROUTES: readonly BodyRoute[] = [
  */
 export interface SmallBodyRoute extends BodyRoute {
   readonly limit: string;
+  /**
+   * Set only where a standard requires `application/x-www-form-urlencoded` (OAuth 2.0 token and
+   * revocation requests, RFC 6749 §4.1.3 / RFC 7009 §2.1). Such a body is parsed by `formBodyParser`
+   * with the SAME byte limit plus a cap on the number of fields. No other route gets a form parser.
+   */
+  readonly form?: { readonly parameterLimit: number };
 }
 export const SMALL_BODY_ROUTES: readonly SmallBodyRoute[] = [
   { path: '/api/failedbr/oauth/register', limit: '16kb', why: 'bounded OAuth client name and at most five redirect URLs' },
-  { path: '/api/failedbr/oauth/token', limit: '16kb', why: 'OAuth code/verifier or refresh token, no report data' },
-  { path: '/api/failedbr/oauth/revoke', limit: '16kb', why: 'one OAuth token and client authentication' },
+  { path: '/api/failedbr/oauth/token', limit: '16kb', why: 'OAuth code/verifier or refresh token, no report data', form: { parameterLimit: 20 } },
+  { path: '/api/failedbr/oauth/revoke', limit: '16kb', why: 'one OAuth token and client authentication', form: { parameterLimit: 20 } },
   { path: '/api/app-ai/ask', limit: '16kb', why: 'public gateway for published apps: one question and a short history (appAi.ts)' },
   { path: '/api/app-ai/image', limit: '16kb', why: 'public gateway for published apps: one picture prompt (appAi.ts)' },
   { path: '/api/app-ai/preview-ask', limit: '16kb', why: 'the owner\'s preview of the same gateway (appAiOwner.ts)' },
@@ -181,6 +187,7 @@ export function compileRoutePath(path: string): RegExp {
 const LARGE_MATCHERS = LARGE_BODY_ROUTES.map((r) => compileRoutePath(r.path));
 const RAW_MATCHERS = RAW_BODY_ROUTES.map((r) => compileRoutePath(r.path));
 const SMALL_MATCHERS = SMALL_BODY_ROUTES.map((r) => ({ re: compileRoutePath(r.path), limit: r.limit }));
+const FORM_MATCHERS = SMALL_BODY_ROUTES.flatMap((r) => (r.form ? [{ re: compileRoutePath(r.path), limit: r.limit, parameterLimit: r.form.parameterLimit }] : []));
 
 /**
  * The path a route will be matched on. The body parser runs BEFORE apiVersionMiddleware rewrites
@@ -203,34 +210,11 @@ export function smallBodyLimit(path: string): string | null {
   return SMALL_MATCHERS.find((m) => m.re.test(p))?.limit ?? null;
 }
 
-/**
- * Form-encoded bodies (`application/x-www-form-urlencoded`). No global form parser exists: only the routes
- * listed here get one, at their own small limit, mounted once in server.ts beside `jsonBodyParser` — a route
- * never registers its own parser (Q-674). The OAuth token/revoke endpoints must accept forms (RFC 6749 §4.1.3).
- */
-export const URLENCODED_BODY_ROUTES: readonly { path: string; limit: string; parameterLimit: number; why: string }[] = [
-  { path: '/api/failedbr/oauth/:rest', limit: '16kb', parameterLimit: 20, why: 'OAuth token/revoke/register forms for the failed-report MCP connection (failedReportOAuth.ts)' },
-];
-const URLENCODED_MATCHERS = URLENCODED_BODY_ROUTES.map((r) => ({
-  re: compileRoutePath(r.path),
-  parser: express.urlencoded({ extended: false, limit: r.limit, parameterLimit: r.parameterLimit }),
-}));
-
-/** The form parser for a listed route, or null (no form parsing anywhere else). */
-export function urlencodedLimitFor(path: string): string | null {
+/** The form-body limits of a route that must accept `application/x-www-form-urlencoded`, else null. */
+export function formBodyLimits(path: string): { limit: string; parameterLimit: number } | null {
   const p = routingPath(path);
-  const i = URLENCODED_MATCHERS.findIndex((m) => m.re.test(p));
-  return i >= 0 ? URLENCODED_BODY_ROUTES[i].limit : null;
-}
-
-/** Mount once in server.ts. Parses forms only on URLENCODED_BODY_ROUTES. */
-export function urlencodedBodyParser(): RequestHandler {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const p = routingPath(req.path);
-    const m = URLENCODED_MATCHERS.find((x) => x.re.test(p));
-    if (!m) { next(); return; }
-    m.parser(req, res, next);
-  };
+  const m = FORM_MATCHERS.find((x) => x.re.test(p));
+  return m ? { limit: m.limit, parameterLimit: m.parameterLimit } : null;
 }
 
 export function needsRawBody(path: string): boolean {
@@ -302,3 +286,40 @@ export function jsonBodyParser(opts: JsonBodyParserOptions = {}): RequestHandler
   };
 }
 
+/**
+ * The one form-body parser, mounted beside `jsonBodyParser`. It parses `application/x-www-form-urlencoded`
+ * ONLY on the routes in SMALL_BODY_ROUTES marked `form`, with that route's byte and field limits; every
+ * other request passes through untouched. Routes never mount their own `express.urlencoded`
+ * (tests/aRequestBodyIsOnlyAsLargeAsItsRouteNeeds.test.ts), so a limit cannot be written where it does
+ * not run, and a form body cannot reach a route that never expected one.
+ */
+export function formBodyParser(opts: JsonBodyParserOptions = {}): RequestHandler {
+  const parsers = new Map(
+    FORM_MATCHERS.map((m) => [`${m.limit}|${m.parameterLimit}`, express.urlencoded({ extended: false, limit: m.limit, parameterLimit: m.parameterLimit })] as const),
+  );
+  return (req: Request, res: Response, next: NextFunction) => {
+    const limits = formBodyLimits(req.path);
+    if (!limits) { next(); return; }
+    const parser = parsers.get(`${limits.limit}|${limits.parameterLimit}`)!;
+    parser(req, res, (err?: unknown) => {
+      const e = err as { type?: string; length?: number } | undefined;
+      if (e && e.type === 'entity.too.large') {
+        try {
+          opts.onTooLarge?.({ method: req.method, path: routingPath(req.path), limit: limits.limit, length: typeof e.length === 'number' ? e.length : undefined }, err);
+        } catch { /* reporting must never change the answer */ }
+        if (!res.headersSent) {
+          res.status(413).json({
+            error: `This request is too large (the limit here is ${limits.limit.toUpperCase()}). Please send less at once.`,
+            code: 'BODY_TOO_LARGE',
+          });
+        }
+        return;
+      }
+      if (e && e.type === 'parameters.too.many') {
+        if (!res.headersSent) res.status(413).json({ error: `This form has too many fields (at most ${limits.parameterLimit}).`, code: 'BODY_TOO_MANY_FIELDS' });
+        return;
+      }
+      next(err as Error | undefined);
+    });
+  };
+}

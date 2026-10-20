@@ -51,6 +51,18 @@ const EMPTY: BuildEvidence = {
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
 const rec = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
 
+/** A partial ledger is not a total. Preserve unknowns so comparisons cannot reward missing telemetry. */
+function completeSum(rows: unknown[], field: string): number | null {
+  let sum = 0;
+  for (const row of rows) {
+    const value = num(rec(row)?.[field]);
+    if (value === null) return null;
+    sum += value;
+    if (!Number.isFinite(sum)) return null;
+  }
+  return sum;
+}
+
 /** Codes that mean the app was seen NOT rendering (the preview heal gave up, or the page never painted). */
 const PREVIEW_FAILED_CODES = new Set(['OUTCOME_PREVIEW_FAILED', 'PREVIEW_NOT_RENDERED']);
 /** Codes the platform records only after a real browser rendered the app. */
@@ -90,26 +102,26 @@ export function evidenceFromResult(result: Record<string, unknown> | null | unde
     if (calls) {
       out.llmCalls = calls.length;
       out.llmCallsFailed = calls.filter((c) => c.ok === false).length;
-      out.modelMs = calls.reduce((s, c) => s + (num(c.latencyMs) ?? 0), 0);
+      out.modelMs = completeSum(diag.llmCalls as unknown[], 'latencyMs');
     }
     // The settled per-provider ledger is the better token source (it is what the bill is built from); the per-call
     // ledger is the fallback, and it carries no cache figure.
     const pt = rec(diag.providerTokens);
     if (pt && Object.keys(pt).length > 0) {
-      let input = 0; let output = 0; let cached = 0; let sawCache = false;
+      let cached = 0; let sawCache = false;
       for (const [family, v] of Object.entries(pt)) {
         const r = rec(v);
         if (!r) continue;
         out.providers.push(family);
-        input += num(r.inputTokens) ?? 0;
-        output += num(r.outputTokens) ?? 0;
         const c = num(r.cacheReadInputTokens);
         if (c !== null) { cached += c; sawCache = true; }
       }
-      out.inputTokens = input; out.outputTokens = output; out.cachedInputTokens = sawCache ? cached : null;
+      out.inputTokens = completeSum(Object.values(pt), 'inputTokens');
+      out.outputTokens = completeSum(Object.values(pt), 'outputTokens');
+      out.cachedInputTokens = sawCache && Number.isFinite(cached) ? cached : null;
     } else if (calls && calls.length > 0) {
-      out.inputTokens = calls.reduce((s, c) => s + (num(c.inputTokens) ?? 0), 0);
-      out.outputTokens = calls.reduce((s, c) => s + (num(c.outputTokens) ?? 0), 0);
+      out.inputTokens = completeSum(diag.llmCalls as unknown[], 'inputTokens');
+      out.outputTokens = completeSum(diag.llmCalls as unknown[], 'outputTokens');
       const top = num(diag.cacheReadInputTokens);
       out.cachedInputTokens = top;
     }
@@ -122,3 +134,4 @@ export function evidenceFromResult(result: Record<string, unknown> | null | unde
   out.previewEvidence = previewEvidenceFrom(result, issues);
   return out;
 }
+

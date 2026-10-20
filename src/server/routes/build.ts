@@ -62,10 +62,20 @@ export function registerBuildRoutes(app: Express): void {
 
   // G1.2 — Refresh-safe build recovery. Client calls this on mount to restore
   // the last completed build for a sessionId without re-running the build.
+  //
+  // 🔒 THE SAME HOLE AS Q-780, ON THE ROUTE Q-780 MISSED (production-hardening pass, 2026-10-19). This
+  // returns the app's whole `files` map — the user's source code — and it had NO authentication: the
+  // session id was treated as a capability, but `App.tsx` mints it as `pro-${Date.now()}`, a guessable
+  // millisecond timestamp. The three build-history routes below were closed with mayTouchBuildHistory;
+  // this read now passes the same rule, with the same refusals (which do not reveal whether a session
+  // exists). The store has had no writer since the legacy engine was retired, so what it still holds
+  // is old builds — exactly the data nobody is watching.
   app.get('/api/build-session/:sessionId', async (req: Request, res: Response) => {
     try {
       const { sessionId } = routeParams(req.params);
       if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ error: 'sessionId required' });
+      const access = await mayTouchBuildHistory(await verifyFirebaseToken(req), sessionId, countWorkspaceFiles);
+      if (!access.allowed) return res.status(refusalStatus(access.reason)).json({ error: refusalMessage(access.reason) });
       const session = await proBuildSessionStore.load(sessionId);
       if (!session) return res.status(404).json({ error: 'not found' });
       return res.json(session);

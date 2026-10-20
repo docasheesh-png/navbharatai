@@ -32,8 +32,8 @@ export function registerFailedReportOAuthRoutes(app: Express): void {
   for (const path of ['/.well-known/oauth-authorization-server/api/v1/failedbr/oauth', '/.well-known/oauth-authorization-server', '/api/failedbr/oauth/.well-known/oauth-authorization-server', '/api/failedbr/oauth/.well-known/openid-configuration']) app.get(path, serverMetadata);
   const publicLimit = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false });
   const registrationLimit = rateLimit({ windowMs: 3_600_000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false });
-  // OAuth form parsing (16 KB, 20 params) is the shared server-level parser for these paths only
-  // (requestBodyLimits.ts URLENCODED_BODY_ROUTES, Q-674); the rate limit stays here.
+  // The OAuth form bodies (token, revoke) are parsed by the shared formBodyParser with their own
+  // 16 KB / 20-field limits — see SMALL_BODY_ROUTES in src/server/lib/requestBodyLimits.ts.
   app.use('/api/failedbr/oauth', publicLimit);
   app.post('/api/failedbr/oauth/register', registrationLimit, wrap(async (req, res) => {
     if (!req.is('application/json')) { res.status(415).json({ error: 'invalid_request' }); return; }

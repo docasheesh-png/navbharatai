@@ -45,6 +45,8 @@ export interface RunningBuild {
   steerQueue?: string[];
   /** When the latest mid-build user message arrived — the request time of a stop the model makes from it. */
   lastSteerAt?: number;
+  /** Trusted text retained after the delivery queue is consumed; verifies a model's stop quote. */
+  lastSteerMessage?: string;
   /** The language platform lines are shown in (platformVoice.ts) — from the prompt, switched by a mid-build ask. */
   voice?: 'en' | 'hinglish' | 'hindi';
   /** The build's resolved power level — gates mid-build steering to the Full Team ('max') tier. */

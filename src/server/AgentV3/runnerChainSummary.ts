@@ -170,8 +170,8 @@ export function plannedModelOf(chain: readonly ChainRung[]): string | undefined 
 /** What a chain with no runnable rung plans to call: nothing, and it says so rather than naming a model. */
 export const NO_ENGINE_CONFIGURED = 'none (no engine configured)';
 
-/** What a build record says when no model call completed. The words the signed manifest has used since 120eb52f. */
-export const NO_MODEL_CALL_MADE = 'none (no model call was made)';
+/** The ledger records completed responses, not every attempted or cancelled call (2e06d8bd). */
+export const NO_MODEL_CALL_MADE = 'none (no completed model response recorded)';
 
 /**
  * THE ONE MODEL NAME a build-level record carries (prompt audit, signed manifest, decision trace, debug
@@ -180,7 +180,8 @@ export const NO_MODEL_CALL_MADE = 'none (no model call was made)';
  * Order, most specific truth first:
  *   1. `delivered`        — the model id that delivered most of the build (the ledger's answer);
  *   2. `deliveredFamily`  — the provider that delivered, when no entry carried a model id;
- *   3. no call completed  — `NO_MODEL_CALL_MADE`. A build no model touched does not name one, not even
+ *   3. no response recorded — `NO_MODEL_CALL_MADE`. An attempted/cancelled call is not a delivery, and
+ *                           an empty completion ledger must not claim that no call was attempted. It does not name
  *                           the one it planned (autopsy 120eb52f: a 9-second stopped build read Haiku);
  *   4. `planned`          — the chain's own first rung (`TurnRunner.plannedModel`);
  *   5. `'unknown'`        — never an invented id.

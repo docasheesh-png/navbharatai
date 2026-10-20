@@ -128,9 +128,12 @@ describe('the client never calls an endpoint the server does not have', () => {
       if (NOT_OUR_SERVER.has(path)) continue;
       // A path containing `${…}` is checked both ways: the placeholder may stand where a route has a
       // `:param`, or a route's `:param` may stand where the client interpolates.
-      const concrete = path.split(SEGMENT).join('x');
+      // `/api/v1/...` is the canonical versioned API: server.ts's apiVersionMiddleware rewrites it to the
+      // `/api/...` route before matching, so the call is checked against what the server really routes.
+      const routed = rewriteVersionedPath(path) ?? path;
+      const concrete = routed.split(SEGMENT).join('x');
       const served = routes.some(
-        (r) => routeMatcher(r).test(concrete) || new RegExp(`^${path.split(SEGMENT).map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')}$`).test(r.replace(/:[A-Za-z0-9_]+/g, 'y')),
+        (r) => routeMatcher(r).test(concrete) || new RegExp(`^${routed.split(SEGMENT).map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')}$`).test(r.replace(/:[A-Za-z0-9_]+/g, 'y')),
       );
       if (!served) {
         const label = path.split(SEGMENT).join('${…}');

@@ -594,6 +594,41 @@ describe('🔒 a game that reads Attack / Jump / Use / Run keeps them on a phone
 
 // ── K-5: on-foot movement is camera-relative at EVERY yaw, not only at 0 and π ────────────────────────
 describe('🔴 on foot, W walks AWAY from the camera and D walks screen-RIGHT, however the camera is turned', () => {
+  it('stays camera-relative DURING an orbit half-turn, including the first displayed frame', () => {
+    const rig = new CAM.CameraRig({ kind: 'third-person' });
+    const target = new THREE.Vector3();
+    for (let i = 0; i < 120; i++) rig.update(target, 1 / 60);
+    for (const yaw of [Math.PI, -Math.PI / 2, Math.PI / 2]) {
+      rig.look(-yaw / 0.0025, 0);
+      for (let frame = 0; frame < 60; frame++) {
+        const fwd = rig.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+        const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0));
+        for (const [x, z, expected] of [[0, -1, fwd], [1, 0, right], [0, 1, fwd.clone().negate()], [-1, 0, right.clone().negate()]] as const) {
+          const move = MOTOR.cameraRelative(x, z, rig.yaw);
+          expect(new THREE.Vector3(move.x, 0, move.z).dot(expected), `frame ${frame}`).toBeGreaterThan(0.999);
+        }
+        rig.update(target, 1 / 60);
+      }
+    }
+  });
+
+  it('a chase target never shows its front during a respawn or a half-turn', () => {
+    for (const make of ['createCar', 'createMotorcycle', 'createBicycle']) {
+      const made = O[make]();
+      const vehicle = made.root ?? made;
+      const rig = new CAM.CameraRig({ kind: 'chase' });
+      for (const heading of [0, Math.PI, -Math.PI / 2, Math.PI / 2]) {
+        vehicle.rotation.y = heading;
+        vehicle.position.set(20, 0, -40);
+        for (let frame = 0; frame < 30; frame++) {
+          rig.follow(vehicle, 1 / 60);
+          const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(vehicle.quaternion);
+          expect(rig.camera.position.clone().sub(vehicle.position).dot(forward), `${make}, heading ${heading}, frame ${frame}`).toBeLessThan(0);
+        }
+      }
+    }
+  });
+
   for (const yaw of [0, Math.PI / 2, -Math.PI / 2, -0.6, Math.PI]) {
     it(`camera yaw ${yaw.toFixed(3)}`, () => {
       const rig = new CAM.CameraRig({ kind: 'third-person' });

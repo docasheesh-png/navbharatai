@@ -65,6 +65,13 @@ describe('STATIC CHECK: no template, scaffold or kit file teaches the inverted p
 });
 
 describe('the FORWARD DIRECTION rule reaches every builder', () => {
+  it('car and bike recipe examples turn the nose into world -Z before capturing the driving heading', () => {
+    for (const text of [generateGame3D().instructions, generateGameShell().instructions]) {
+      expect(text).toMatch(/car = createCar[\s\S]*?car\.rotation\.y = Math\.PI;[\s\S]*?createVehicleState\(car\)/);
+    }
+    expect(generateGame3D().instructions).toMatch(/bike = createMotorcycle[\s\S]*?bike\.root\.rotation\.y = Math\.PI;[\s\S]*?createVehicleState\(bike\.root\)/);
+  });
+
   it('architect prompt and the writing sub-agents carry it', () => {
     const head = FORWARD_DIRECTION_RULE_LINES[0];
     expect(architectSystemPrompt('react')).toContain(head);

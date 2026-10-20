@@ -14,9 +14,9 @@ Remote CI, production rollout and live-provider outcomes are separate gates.
 | --- | --- | --- |
 | 1 — Security | Registered preview/queue routes exercise missing, invalid, expired, cross-account and valid-owner tokens; dependency gate passes with 0 critical / 4 triaged high package entries | Independent verified workspace ownership: legacy custom UID/session pairs collide. Historical ownership cannot be inferred from a prefix or a last-written owner field. A verified migration/recovery plan remains a release blocker. Review dependency exceptions by 2026-11-03. |
 | 2 — Build safety | New admission fails closed; 14 real emulator/multiprocess coordination drills pass. Running builds now stop cooperatively on uncertain renewal, retain the local body-exit hold and keep attempting renewal while draining. Uncertain ownership has its own cause/outcome, never a fabricated claim of replacement or user cancellation. | Cooperative abort is not distributed source/command fencing. A prolonged partition, stalled event loop, in-flight remote command or expired lease can still cross an automatic takeover. Need state-preserving execution ownership, remote-command drain/fencing, resumable handoff and late-write reconciliation. |
-| 3 — Benchmark | Existing 15/50 prompt harness dry-runs. Runner now authenticates, uses replay-safe request IDs, checkpoints partial results, records source/fixture provenance and latency/cost p50/p95. Scripted local HTTP tests verify protocol only. | Configured staging account/provider/sandbox and approved spend ceiling; actual baseline; 100–200 representative tasks with held-out, edit/import cohorts and independently observed critical journeys. First-attempt success and edit preservation are currently unknown. |
+| 3 — Benchmark | Existing 15/50 prompt harness dry-runs. Runner now authenticates, uses replay-safe request IDs, checkpoints IDs before submission and outcomes after completion, records source/fixture provenance and latency/cost p50/p95. Scripted local HTTP tests verify protocol only. | Configured staging account/provider/sandbox and approved spend ceiling; actual baseline; 100–200 representative tasks with held-out, edit/import cohorts and independently observed critical journeys. First-attempt success and edit preservation are currently unknown. |
 | 4 — Generated apps | Outcome reduction cannot turn `result.ok=false` into success from a later `done.ok=true`. Existing gate/render evidence remains distinct from critical-flow proof. | Run real generated-app browser/backend journeys, build requirement-to-test traceability and repair measured failure cohorts with bounded loops. No generated-app success percentage was measured here. |
-| 5 — Maintainability | Benchmark tools have a strict TypeScript configuration and CI check; setup docs explain the actual server environment loading and builder prerequisites. | Cohesive route/UI extraction, gradual frontend strict migration and complete exact-head CI. The builder route remains a monolith; a small strict-tooling cohort does not complete the phase. |
+| 5 — Maintainability | Benchmark tools have a strict TypeScript configuration and CI check; setup docs explain the actual server environment loading and builder prerequisites. | Cohesive route/UI extraction, gradual frontend strict migration (850 diagnostics measured under strict/null/implicit-any checks) and complete exact-head CI. The builder route remains a monolith; a small strict-tooling cohort does not complete the phase. |
 | 6 — Operations | Production build/boot and bundle budgets pass. Local load testing exposed probe throttling; exact liveness/readiness paths now bypass the behavioral bot guard while deep health/admin/lookalikes remain guarded. | Representative authenticated builder capacity, real-device profiling, actual production-like rollback and backup-restore drills. Local liveness throughput is not build capacity. |
 
 ## Changes and regression boundaries
@@ -29,7 +29,7 @@ Remote CI, production rollout and live-provider outcomes are separate gates.
   for user-cancellation billing or an engine-capability upsell.
 - Paid benchmarks require `BENCH_AUTH_TOKEN`. Remote targets require HTTPS,
   redirect forwarding is refused, and tokens/server error bodies are absent from
-  result artifacts. Authentication failure stops the batch. Transport failures
+  result artifacts. Request/session IDs are written before sending the HTTP request, so a mid-build runner crash leaves reconciliation identity. Unique artifact names isolate concurrent runs. Authentication failure stops the batch. Transport failures
   carry unknown remote cost/outcome and stable reconciliation IDs, with no automatic
   retry. Partial files retain `running`/`blocked` status.
 - Comparison verdicts refuse gains for mismatched cohorts, incomplete batches,
@@ -59,10 +59,16 @@ request replay and real loopback TCP outages. ACK/deadline injections and clock
 advancement are explicitly identified in the artifact. No paid model, E2B or
 Cloud Run calls are represented by those results.
 
-An earlier full-suite run was interrupted while source/test changes were still
-in progress. Its mixed-source result is not release evidence. A final full-suite
-run is required on the frozen candidate; remote CI must still verify its reviewed
-head. No checks were bypassed and no production deployment was performed.
+Final local product suite: **2,831 files and 40,404 tests passed; 67 skipped;
+zero failures** (462.27 seconds). Runtime source matches `ef54d679a`. A later
+benchmark CLI-only checkpoint follow-up passed 33 focused tests and strict
+typechecking. An earlier run used the outdated probe-test fixture and is not a
+green gate; its correction also passed all 23 cache tests separately.
+
+Exact-head remote CI is published under [PR #3867 checks](https://github.com/docasheesh-png/navbharatai/pull/3867/checks).
+Those checks are the authority for the reviewed head; a cached earlier green
+result never establishes a later head. The JSON artifact links to the checks
+rather than claiming CI success before completion. No checks were bypassed and no production deployment was performed.
 
 The probe retest completed 13,941 requests with 0 errors (20 concurrent callers,
 10 seconds); p50 10 ms, p95 35 ms. Before the fix the same local test returned

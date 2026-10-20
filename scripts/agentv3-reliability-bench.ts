@@ -22,7 +22,7 @@
  *      BENCH_OUTPUT_DIR (optional artifact directory), BENCH_CONFIRM=yes (actually run).
  */
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
   const runs: BenchRun[] = [];
   const dir = env.BENCH_OUTPUT_DIR || join(HERE, 'bench-results');
   mkdirSync(dir, { recursive: true });
-  const file = join(dir, `${LABEL}-${SET}-${Date.now()}.json`);
+  const file = join(dir, `${LABEL}-${SET}-${Date.now()}-${randomUUID()}.json`);
   const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: join(HERE, '..'), encoding: 'utf8' }).trim();
   const sourceDirty = execFileSync('git', ['status', '--porcelain'], { cwd: join(HERE, '..'), encoding: 'utf8' }).trim().length > 0;
   const out: BenchResultFile = {
@@ -86,13 +86,19 @@ async function main(): Promise<void> {
       fixtureSha256: createHash('sha256').update(fixtureBytes).digest('hex'),
       promptIds: prompts.map((p) => p.id), repetitions: RUNS, nodeVersion: process.version },
   };
-  // Checkpoint after each build; interruption must leave a reviewable partial result, not lose all spend.
+  // Checkpoint before submission AND after completion: a crash during fetch must retain the IDs
+  // needed to reconcile a possibly-running paid build. Distinct filenames isolate concurrent runs.
   const save = () => { writeFileSync(`${file}.tmp`, JSON.stringify(out, null, 2)); renameSync(`${file}.tmp`, file); };
   save();
   for (const p of prompts) {
     for (let attempt = 1; attempt <= RUNS; attempt++) {
       const t0 = Date.now();
       const request = benchmarkRequest(p.prompt, token, env.BENCH_USER_ID, env.BENCH_EMAIL);
+      const row = runs.length;
+      runs.push({ id: p.id, lang: p.lang, complexity: p.complexity, attempt, seconds: 0,
+        metrics: FAILED, success: false, requestId: request.requestId, sessionId: request.sessionId,
+        failure: 'request-in-progress' });
+      save();
       let metrics: BuildMetrics;
       let failure: BenchRun['failure'];
       try { metrics = await runOneBuild(request, endpoint); } catch (err) {
@@ -104,7 +110,7 @@ async function main(): Promise<void> {
       }
       const run: BenchRun = { id: p.id, lang: p.lang, complexity: p.complexity, attempt, seconds: (Date.now() - t0) / 1000, metrics, success: buildSucceeded(metrics),
         requestId: request.requestId, sessionId: request.sessionId, ...(failure ? { failure } : {}) };
-      runs.push(run);
+      runs[row] = run;
       save();
       if (failure === 'HTTP 401' || failure === 'HTTP 403') {
         out.execution!.status = 'blocked';

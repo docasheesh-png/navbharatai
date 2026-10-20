@@ -32,11 +32,30 @@
       "failed": 0
     },
     "fullRegression": {
-      "status": "running",
-      "command": "npm test -- --maxWorkers=4"
+      "status": "passed",
+      "filesPassed": 2831,
+      "testsPassed": 40404,
+      "testsSkipped": 67,
+      "failed": 0,
+      "durationSeconds": 462.27,
+      "command": "npm test -- --maxWorkers=4",
+      "startedAtCommit": "ef54d679ad5c3c4de1e23d926b72917c35eaf31d",
+      "scope": "Full product suite; runtime source unchanged after this commit. Benchmark CLI-only pre-submission-checkpoint follow-up additionally validated by focused tests and strict typecheck.",
+      "previousRun": {
+        "passed": 40403,
+        "failed": 1,
+        "skipped": 67,
+        "fixtureCorrection": "Probe bypass made the cache guard fixture invalid; changed the test path to guarded /api/pro-chat. All 23 cache tests pass separately. Previous full run is not a green gate."
+      }
     },
     "remoteCI": {
-      "status": "not-run"
+      "status": "consult-required-checks",
+      "url": "https://github.com/docasheesh-png/navbharatai/pull/3867/checks",
+      "requiredJobs": [
+        "queue-retry-drills",
+        "build-and-test"
+      ],
+      "note": "CI evaluates the exact PR head, including its merge with current main. This artifact does not cache a green result for a newer head."
     },
     "audit": {
       "status": "passed-with-reviewed-exceptions",
@@ -54,13 +73,88 @@
       "verifiedSuccessRate": null,
       "firstAttemptSuccessRate": null,
       "editPreservationRate": null
+    },
+    "frontendStrictMigrationBaseline": {
+      "status": "not-enabled-backlog-measured",
+      "diagnostics": 850,
+      "byCode": {
+        "TS2322": 49,
+        "TS18047": 118,
+        "TS2345": 34,
+        "TS2769": 2,
+        "TS7006": 599,
+        "TS2721": 8,
+        "TS7016": 28,
+        "TS18046": 6,
+        "TS18048": 2,
+        "TS2339": 1,
+        "TS7031": 2,
+        "TS2349": 1
+      },
+      "command": "npx tsc --noEmit --strict --noImplicitAny --strictNullChecks",
+      "expectedExitCode": 2,
+      "highestDiagnosticCounts": [
+        {
+          "file": "src/components/agentv3/AgentV3Panel.tsx",
+          "diagnostics": 74
+        },
+        {
+          "file": "src/components/AdminDashboard.tsx",
+          "diagnostics": 45
+        },
+        {
+          "file": "src/components/ide/GitPanel.tsx",
+          "diagnostics": 42
+        },
+        {
+          "file": "src/App.tsx",
+          "diagnostics": 34
+        },
+        {
+          "file": "src/components/agentv3/PreviewSurface.tsx",
+          "diagnostics": 27
+        },
+        {
+          "file": "src/hooks/useAgentV3Build.ts",
+          "diagnostics": 27
+        },
+        {
+          "file": "src/components/ide/BotBuilder.tsx",
+          "diagnostics": 26
+        },
+        {
+          "file": "src/components/ide/Editor.tsx",
+          "diagnostics": 17
+        },
+        {
+          "file": "src/components/ide/LiveCollaboration.tsx",
+          "diagnostics": 17
+        },
+        {
+          "file": "src/components/ide/MultiPageBuilder.tsx",
+          "diagnostics": 14
+        }
+      ]
+    },
+    "cacheRegression": {
+      "files": 1,
+      "testsPassed": 23,
+      "failed": 0
+    },
+    "checkpointFollowup": {
+      "status": "passed",
+      "files": 4,
+      "testsPassed": 33,
+      "failed": 0,
+      "strictTypecheck": "passed",
+      "evidence": "Local HTTP server reads the pending request/session IDs from disk while the request is still in flight; final artifact replaces the pending row and excludes bearer tokens."
     }
   },
   "bundleGzipKb": {
     "firstPaint": 499.9,
     "firstPaintBudget": 560,
     "largestChunk": 260.6,
-    "totalJavaScript": 1551.6,
+    "totalJavaScript": 1551.7,
     "css": 43.3
   },
   "probeLoad": {

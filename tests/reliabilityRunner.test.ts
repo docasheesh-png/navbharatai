@@ -11,11 +11,15 @@ const execute = promisify(execFile);
 describe('live benchmark protocol against a local scripted server (no provider calls)', () => {
   it.each([200, 401])('authenticates, checkpoints and records the truthful outcome for HTTP %s', async (status) => {
     const output = await mkdtemp(join(tmpdir(), 'reliability-runner-'));
-    const requests: Array<{ authorization: string | undefined; body: any }> = [];
+    const requests: Array<{ authorization: string | undefined; body: any; pending: any }> = [];
     const server = createServer(async (req, res) => {
       const chunks: Buffer[] = [];
       for await (const chunk of req) chunks.push(Buffer.from(chunk));
-      requests.push({ authorization: req.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString()) });
+      // Read while the HTTP request is still in flight: post-response checkpointing is too late
+      // to reconcile a runner killed during a paid build.
+      const checkpointFiles = await readdir(output);
+      const checkpoint = JSON.parse(await readFile(join(output, checkpointFiles[0]), 'utf8'));
+      requests.push({ authorization: req.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString()), pending: checkpoint.runs[0] });
       res.writeHead(status, { 'Content-Type': 'text/plain' });
       res.end(status === 200 ? [
         { type: 'file_changed', change: { path: 'src/App.tsx' } },
@@ -38,6 +42,9 @@ describe('live benchmark protocol against a local scripted server (no provider c
       expect(failed).toBe(status === 401);
       expect(requests).toHaveLength(1); // Authentication refusal must stop a batch, not poison every row.
       expect(requests[0].authorization).toBe('Bearer test-only-token');
+      expect(requests[0].pending).toMatchObject({ requestId: requests[0].body.requestId,
+        sessionId: requests[0].body.sessionId, failure: 'request-in-progress', success: false });
+      expect(requests[0].pending.metrics.billedUsd).toBeNull();
       const files = await readdir(output);
       expect(files).toHaveLength(1); // Atomic checkpoint leaves no pending temp file.
       const bytes = await readFile(join(output, files[0]), 'utf8');

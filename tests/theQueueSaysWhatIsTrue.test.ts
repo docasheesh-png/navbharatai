@@ -200,11 +200,32 @@ describe('🔒 RATCHET: the four fields a 🟡 BLOCKED row owes, and they may on
     expect(gapsOf('**What is required:** z. **Why:** y. **Already tried:** w.')).toEqual(['what']);
   });
 
-  it('🔴 the gap is RECORDED, not silent — Q-1126 names it with its real number', () => {
+  it('🔴 the gap is RECORDED, not silent — in BOTH regimes', () => {
+    /**
+     * This pin exists so a measured non-compliance is schedulable rather than buried in a test file. It
+     * was written while the gap was non-zero, and it asserted Q-1126 sat in the OPEN table naming the
+     * number.
+     *
+     * 🔑 AT ZERO THAT ASSERTION INVERTS, and keeping it would make the queue lie. There is no gap left to
+     * schedule, so the sixth rule says the row LEAVES the open table when its PR merges — and the pin
+     * would have forced it to sit OPEN for ever with no work in it. Which is why the property is written
+     * as "recorded, not silent" rather than "has an open row": while the gap is real it must be
+     * schedulable; once it is closed it must be visibly closed, never simply gone.
+     *
+     * Found the honest way: closing Q-1126 after #3861 merged turned this test red, and the test was
+     * right that something had to change — just not that the row should stay open.
+     */
     const row = rows.find((r) => r.id === 'Q-1126');
-    expect(row, 'the measured non-compliance has its own row, so it is schedulable').toBeDefined();
-    expect(row!.body).toContain(String(MISSING_FIELDS_BASELINE));
-    expect(row!.state).toMatch(RESTING);
+    if (MISSING_FIELDS_BASELINE > 0) {
+      expect(row, 'a real gap must be schedulable, so it owes an open row naming its number').toBeDefined();
+      expect(row!.body).toContain(String(MISSING_FIELDS_BASELINE));
+      expect(row!.state).toMatch(RESTING);
+      return;
+    }
+    expect(row, 'at zero there is no gap to schedule, so the row belongs in the closed register').toBeUndefined();
+    const closed = readFileSync(join(root, 'docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt'), 'utf8')
+      .split('\n').map((l) => l.trim());
+    expect(closed, 'and it must be visibly CLOSED, never just absent').toContain('Q-1126');
   });
 });
 

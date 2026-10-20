@@ -98270,3 +98270,49 @@ healthy again. The test now establishes its state with a good refresh first, whi
 ⚠️ **The row stays OPEN after this, deliberately.** Its third clause — *"record the rate on every debit"* —
 touches the billing WRITE path and is a separate, larger change. Bundling is how a safe fix inherits a risky
 one's blocker, which is the same reasoning that kept Q-1227 out of Q-886.
+
+## 2026-10-20 — paying the bookkeeping debt: four resolved rows leave the open table
+
+**Q-886, Q-888, Q-1135 and Q-1126 were resolved earlier today and their rows were left behind** — three
+reading IN PROGRESS, Q-1126 OPEN with its PR named — while #3854, #3857, #3850 and #3861 were all merged.
+Each is verified closed here by its PR's **merge commit being an ancestor of `origin/main`**, not by a PR
+page saying "merged", and each id is appended to the closed register **in the same commit** as its removal.
+
+Worth recording plainly: I did this correctly for Q-1140/Q-1141/Q-1131 this morning and then stopped
+keeping it up through six more merges. That is exactly how a queue starts lying about what is done — the
+rows that are wrong are always the ones nobody re-reads.
+
+### 🔒 And closing Q-1126 turned its own guard red, which was the guard being right
+
+`theQueueSaysWhatIsTrue` pinned the measured gap to a row **in the open table**, so that a real
+non-compliance is schedulable rather than buried in a test file. Removing Q-1126 removed the anchor.
+
+**At a baseline of zero that assertion inverts.** There is no gap left to schedule, and the sixth rule says
+a resolved row leaves the table — so the old pin would have forced Q-1126 to sit OPEN for ever with no work
+in it, which is the queue lying in the other direction. The property was always *"recorded, not silent"*,
+not *"has an open row"*: while the gap is real it must be schedulable; once it is closed it must be
+**visibly** closed, never simply gone. The pin now checks both regimes, so it asserts strictly more than
+before — and deleting `Q-1126` from the closed register fails it with *"must be visibly CLOSED, never just
+absent"*.
+
+The test was right that something had to change. It was wrong about which thing, and the difference matters:
+loosening a guard to let my own edit through would have been the easy version of this.
+
+### Q-2025 — 109 test files still hand-roll the source walk
+
+Raised, not swept. `tests/helpers/sourceCensus.ts` arrived hours ago in **#3858, from another session**,
+which migrated three files; 130 test files reference `readdirSync` and **109** self-recurse with
+`statSync(...).isDirectory()`. The fragility is real, not theoretical: with a `.tmp-*` dangling symlink
+under `src/server` a hand-rolled walk throws `ENOENT` while the migrated census passes all 11 of its tests.
+
+It is 🟡 BLOCKED on purpose. A 109-file sweep of another session's in-flight centralisation is the race the
+concurrency rules forbid, and the change is less mechanical than the count suggests — every one of those
+files carries its own filter and ignore list, so a careless sweep silently widens or narrows what each
+census sees, which is worse than the fragility it fixes. #3865 migrates exactly one file: the census this
+session wrote.
+
+### The queue's shape changed today
+
+Another session added **375 new OPEN rows** (Q-1300–Q-2024). This morning the open table held a few dozen
+actionable rows; it now holds 517. Those rows are not touched here — a row somebody created an hour ago is
+theirs — but anyone reading "complete the remaining queue" needs to know the denominator moved.

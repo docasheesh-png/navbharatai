@@ -98222,3 +98222,51 @@ The final offline suite exposed an existing parallel-test race: `aStarvedReadSay
 The same run reported a SIGKILL of the real PGlite shim test worker. Its fixture created a separate real engine for each test without closing it (the production browser shim intentionally keeps its workspace engine open). Track the actual constructors and close every engine after each test; assert clean fixture ownership before the next. The shipped browser shim is unchanged. The six affected stability files pass 79 tests. Reintroducing each of these two fixture defects makes its guard fail. Local full-suite concurrency is bounded to three workers; no test is skipped to make it green.
 
 Integrated latest main (6cdc155fa, including #3852, #3856 and #3857) before the final gates; only PROGRESS.md overlapped, and both append histories were retained. The candidate branch is now `codex/hosting-data-storage-hardening-integrated`.
+
+## 2026-10-20 — Q-881: the number that multiplies every bill gets a bound (and the two siblings the row never named)
+
+**The defect.** The whole validation on the live USD→INR rate was `Number.isFinite(rate) && rate > 0`, so
+any positive number the free FX source returned became the multiplier on every bill on that instance until
+the next refresh — `0.5`, `5000`, a glitched payload, a compromised response. `usdInrRate()` is read at ~24
+billing sites, so "every bill" is literal.
+
+### 🔴 The obvious fix would have re-created a bug this module already had
+
+The revenue audit of **2026-09-10** found `refreshUsdInrRate` was never wired anywhere outside its own
+test, so the rate sat **frozen at the 85 fallback** while the real rate was 87–88, and every build was
+under-billed ~3% — silently, with nothing failing to reveal it. A plain *"refuse anything more than 5% from
+the last good value"* band freezes the rate again the first time the rupee really moves 6%: the same bug
+with a safety badge on. That is the trade the first absolute rule forbids, and it would have looked like a
+safety improvement in review.
+
+So the fix protects **both** halves — bounded, and unable to freeze on a real move:
+
+| Mechanism | Why it is shaped that way |
+|---|---|
+| absolute band `[30, 300]`, refuse outright | deliberately WIDE — a 2.5x move from ~85 still lands. It catches a broken payload, not a market event. A test asserts the band spans **more than 5x**, so a future narrowing cannot quietly turn it into an FX forecast |
+| a jump beyond 5% is **held**, not refused | it lands when a second **independent** fetch agrees — itself a small move, not an exact match, because the true rate drifts between observations. One glitch never bills anybody; a genuine move is late by one cycle, never permanent |
+| every refusal is LOUD with a running count, plus `usdInrRateHealth()` | the 2026-09 bug hid for months because a frozen rate looks identical to a working one from outside. This is the handle that makes the difference visible |
+
+### 🔑 Two siblings the row does not name
+
+The class is *"a number that multiplies every bill, wherever it enters"* — and the row names only the fetch
+path. Hunting it found two more entry points with the identical weak check:
+
+- **`setUsdInrRate`** (the ops override): a hand-typed `8500` was as acceptable as a glitched payload.
+  Banded now — but deliberately **not** jump-limited: an override is a human act, and making someone
+  confirm their own keystroke twice just teaches them to call it twice.
+- **the env fallback**: a typo of `850` for `85` would have multiplied every bill by ten. CLAUDE.md's own
+  warning is that an env value always beats a code default, so this one is exactly the class it describes.
+
+Locked by `tests/theRateThatMultipliesEveryBillIsBounded.test.ts` (11 tests) plus the module's existing 5,
+unchanged. **Four reversions bite:** the any-positive check returns → 4 fail · a big jump refused outright,
+i.e. the frozen-rate bug re-created → 2 · the ops override loses its band → 1 · the refusal goes quiet
+after the first → 1.
+
+**A correction to my own test:** it assumed `refusalsInARow` started at 0, but that is module state only an
+ACCEPTANCE clears — which is the honest definition, since a manual override does not make the FX source
+healthy again. The test now establishes its state with a good refresh first, which proves the reset too.
+
+⚠️ **The row stays OPEN after this, deliberately.** Its third clause — *"record the rate on every debit"* —
+touches the billing WRITE path and is a separate, larger change. Bundling is how a safe fix inherits a risky
+one's blocker, which is the same reasoning that kept Q-1227 out of Q-886.

@@ -97889,3 +97889,26 @@ two-worker suite must run again on the newly frozen queue tree. Remote CI for
 `7fb7f52` is separate evidence and remains pending here; neither checkpoint is
 authorized to merge until its required exact-head jobs pass. Phase2, final
 queued-step source fencing and legacy ownership/allocation protocols remain OPEN.
+
+### 2026-10-20 11:48 UTC — Phase2 tracked import preserves first-call liveness
+
+The queue full run at `6f65357` was stopped with exit130 after the existing
+import-save census still expected an untracked launch expression. That run is
+NOT passing evidence. The production launch remains non-awaited and now registers
+the same background save with the intermediate handoff's source barrier.
+The census keeps its launch/settle ordering checks, asserts exactly one bounded
+settlement before billing and the final report, and recognizes the tracked call.
+
+A new behavioral proof executes that exact production statement with the real
+import-save and publication helpers. The caller returns while durable text bytes
+are still held, and retirement waits until those bytes are actually stored. The
+five-file focused cohort passes 107 tests. Removing only the tracking wrapper
+makes retirement finish while the save is held, failing the new proof; the exact
+safe production bytes were restored. No production correction, test removal,
+threshold change or paid provider call was required.
+
+The separately authorized main `3974c34` activates the Weak candidate through
+Cloud Build configuration and adds its shell-escaping regression. That incoming
+configuration must be preserved on integration; earlier default-OFF notes above
+are historical checkpoints. A bounded changed-caller census and all final-source
+gates remain required before this queue checkpoint can be pushed or merged.

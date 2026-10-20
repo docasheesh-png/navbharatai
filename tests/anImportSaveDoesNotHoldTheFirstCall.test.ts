@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { startImportDurableSave, settleImportDurableSave, importNotDurableNarration, type ImportDurableRecord } from '../src/server/AgentV3/importDurableSave';
 import { withIndexQueue } from '../src/server/AgentV3/WorkspaceFileStore';
+import { createBuildSourcePublication } from '../src/server/AgentV3/BuildSourcePublication';
 
 const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
 
@@ -56,9 +57,53 @@ describe('the import save runs beside the turn and reports honestly', () => {
   });
 
   it('the route starts the save without awaiting it, and settles it once before the bill and the report', () => {
-    expect(route).toContain('importDurableSaves.push(startImportDurableSave({');
+    expect(route).toContain('importDurableSaves.push(sourcePublication.track(startImportDurableSave({');
     const settle = route.indexOf('await settleImportDurableSave(importDurableSaves, IMPORT_DURABLE_SETTLE_MS');
     expect(settle).toBeGreaterThan(route.indexOf('importDurableSaves.push('));
+    expect(route.match(/await settleImportDurableSave\(importDurableSaves,/g)).toHaveLength(1);
     expect(settle).toBeLessThan(route.indexOf('const appSeenRunningForBill ='));
+    expect(settle).toBeLessThan(route.indexOf('buildDiag.finish(result.ok, result.summary)'));
+  });
+
+  it('the actual route start lets the turn continue while retirement waits for saved import bytes', async () => {
+    const start = route.indexOf('importDurableSaves.push(');
+    const statement = route.slice(start, route.indexOf('framework = validation.framework;', start)).trim();
+    const launch = new Function('importDurableSaves', 'sourcePublication', 'startImportDurableSave', 'saveImport', 'importedFiles', 'opts', 'emit', statement);
+    const importDurableSaves: Promise<unknown>[] = [];
+    const sourcePublication = createBuildSourcePublication();
+    const importedFiles = { 'src/App.tsx': 'export default function App() { return "Imported"; }', 'README.md': 'Imported project' };
+    const stored = new Map<string, string>();
+    const records: ImportDurableRecord[] = []; const said: unknown[] = [];
+    let releaseSave!: () => void; let saveCalls = 0; let retired = false;
+    const held = new Promise<void>((resolve) => { releaseSave = resolve; });
+    const saveImport = async () => {
+      saveCalls++;
+      await held;
+      for (const [path, content] of Object.entries(importedFiles)) stored.set(path, content);
+      return { status: 'saved' as const, indexed: stored.size, unconfirmed: [] };
+    };
+    let retirement: Promise<boolean> | undefined;
+    try {
+      // Execute the production statement, including its real tracker and reporting callbacks.
+      expect(launch(importDurableSaves, sourcePublication, startImportDurableSave, saveImport, importedFiles,
+        { diag: { record: (record: ImportDurableRecord) => records.push(record) } }, (event: unknown) => said.push(event))).toBeUndefined();
+      expect(saveCalls).toBe(1);
+      expect(importDurableSaves).toHaveLength(1);
+      expect(stored.size).toBe(0); // The caller returned before this held durable save finished.
+      expect(records).toEqual([]);
+      retirement = sourcePublication.join(1_000).then((ready) => { retired = true; return ready; });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(retired).toBe(false);
+      releaseSave();
+      expect(await settleImportDurableSave(importDurableSaves, 1_000)).toBe('settled');
+      expect(await retirement).toBe(true);
+      expect(Object.fromEntries(stored)).toEqual(importedFiles);
+      expect(records.map((record) => record.code)).toEqual(['IMPORT_DURABLE_SAVED']);
+      expect(said).toEqual([]);
+    } finally {
+      releaseSave();
+      await Promise.allSettled(importDurableSaves);
+      await retirement;
+    }
   });
 });

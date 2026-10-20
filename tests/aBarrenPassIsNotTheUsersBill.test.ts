@@ -277,6 +277,6 @@ describe('REVERSION GUARDS — the wiring lives in a 20k-line route no unit test
   it('the verdict set is declared ABOVE the deadline finalizer that closes over it', () => {
     // Correct by placement rather than by timing: a `const` referenced from a function defined
     // earlier is only safe while nobody calls that function synchronously first.
-    expect(route.indexOf('const barrenPhases = new Set<string>()')).toBeLessThan(route.indexOf('const finalizeOnDeadline'));
+    expect(route.indexOf('const barrenPhases = new Set<string>()')).toBeLessThan(route.indexOf('deadlineFinalization = createBuildDeadlineFinalization('));
   });
 });

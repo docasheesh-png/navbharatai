@@ -80,10 +80,21 @@ export interface SandboxRecord {
   declaredPort?: number;
 }
 
-class SandboxStore {
+export type SandboxRecoveryIdentity =
+  | { state: 'found'; sandboxId: string }
+  | { state: 'missing' }
+  | { state: 'unavailable' };
+
+export class SandboxStore {
   private db: admin.firestore.Firestore | null = null;
 
+  /** An explicit provider lets non-production callers exercise the same read decisions. */
+  constructor(private readonly dbProvider?: () => admin.firestore.Firestore | null) {}
+
   private getDb(): admin.firestore.Firestore | null {
+    if (this.dbProvider) {
+      try { return this.dbProvider(); } catch { return null; }
+    }
     if (process.env.VITEST || process.env.NODE_ENV === 'test') return null;
     try {
       if (!this.db) {
@@ -165,6 +176,29 @@ class SandboxStore {
       return typeof rec?.sandboxId === 'string' && rec.sandboxId ? rec.sandboxId : null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Creation must distinguish a successful read with no recorded id from an unknown read. A missing
+   * id is only absence from this record, not proof that no machine exists. Metadata-only records are
+   * valid because snapshot/port/session writers merge independently of the id writer.
+   */
+  async lookupRecoveryIdentity(workspaceId: string): Promise<SandboxRecoveryIdentity> {
+    const db = this.getDb();
+    if (!db || !workspaceId) return { state: 'unavailable' };
+    try {
+      const snap = await db.collection('agentv3_sandboxes').doc(workspaceId).get();
+      if (!snap.exists) return { state: 'missing' };
+      const rec = snap.data();
+      if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return { state: 'unavailable' };
+      const id: unknown = rec.sandboxId;
+      if (id === undefined || id === null) return { state: 'missing' };
+      if (typeof id !== 'string') return { state: 'unavailable' };
+      const sandboxId = id.trim();
+      return sandboxId ? { state: 'found', sandboxId } : { state: 'missing' };
+    } catch {
+      return { state: 'unavailable' };
     }
   }
 

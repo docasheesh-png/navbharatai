@@ -116,9 +116,9 @@ describe('the wiring (source guards)', () => {
     expect(route).toContain('if (freeTierBuildActive) void noteFreeBuildStartDurable(workspaceId, prompt, firestoreFreeChainStore()).catch(() => {});');
   });
 
-  it('the watchdog pause is resumable only while the chain allows it, and only a free unfinished build is asked', () => {
+  it('the watchdog still counts the free chain but cannot auto-continue while its body is held', () => {
     expect(route).toContain('const freePause = !ok && freeTierBuildActive ? await decideFreePauseDurable(workspaceId, deadlineMs, firestoreFreeChainStore()) : null;');
-    expect(route).toContain("emit({ type: 'result', ok: false, resumable: pauseResumable,");
+    expect(route).toContain("emit({ type: 'result', ok: false, resumable: false, code: BUILD_STILL_STOPPING_CODE,");
     expect(route).not.toContain("emit({ type: 'result', ok: false, resumable: true, summary: pauseMsg.summary");
   });
 });

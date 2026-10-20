@@ -17,6 +17,7 @@
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
+import { workspaceAssetBucketName, workspaceAssetObjectKey, workspaceAssetVerifiedOwnerObjectKey } from '../lib/workspaceAssetStorage';
 import { pool } from './WorkspaceFiles';
 
 /**
@@ -76,10 +77,6 @@ function metaOversized(meta: admin.firestore.DocumentSnapshot): string[] {
  * of a published app's. `bucketPublish.publishedAppsBucket` deliberately refuses this same fallback for
  * that reason — the two are not interchangeable, and the difference is access, not size.
  */
-function assetBucketName(env: NodeJS.ProcessEnv = process.env): string {
-  return String(env.WORKSPACE_ASSETS_BUCKET || env.NAV_STORE_BUCKET || env.FIREBASE_STORAGE_BUCKET || '').trim();
-}
-
 /**
  * The ceiling that remains after the spill-over. Not a storage limit — a memory one: every asset is
  * handled as a base64 string, and a caller that loads a whole workspace holds all of them at once. A
@@ -90,19 +87,26 @@ const MAX_SPILLED_ASSET_BYTES = Math.max(
   Number(process.env.WORKSPACE_ASSET_MAX_BYTES) || 12 * 1024 * 1024,
 );
 
-function assetObjectPath(workspaceId: string, path: string): string {
-  return `workspace-assets/${workspaceId}/${assetDocId(path)}`;
+function assetObjectPath(workspaceId: string, path: string, verifiedOwnerUid?: string | null): string {
+  const id = assetDocId(path);
+  return workspaceAssetVerifiedOwnerObjectKey(verifiedOwnerUid, workspaceId, id)
+    ?? workspaceAssetObjectKey(workspaceId, id);
 }
 
 /** Write one oversized asset's bytes to the bucket. Returns the object path, or null on any doubt. */
-async function spillAssetToBucket(workspaceId: string, path: string, dataUri: string): Promise<string | null> {
-  const bucket = assetBucketName();
+async function spillAssetToBucket(
+  workspaceId: string,
+  path: string,
+  dataUri: string,
+  verifiedOwnerUid?: string | null,
+): Promise<string | null> {
+  const bucket = workspaceAssetBucketName();
   if (!bucket) return null;
   try {
     const parsed = parseDataUri(dataUri);
     if (!parsed) return null;
     const bytes = Buffer.from(parsed.base64, 'base64');
-    const object = assetObjectPath(workspaceId, path);
+    const object = assetObjectPath(workspaceId, path, verifiedOwnerUid);
     await admin.storage().bucket(bucket).file(object).save(bytes, {
       resumable: false,
       contentType: parsed.mime || 'application/octet-stream',
@@ -119,7 +123,7 @@ async function spillAssetToBucket(workspaceId: string, path: string, dataUri: st
 
 /** Read one spilled asset back as a data URI. Returns null when it cannot be read. */
 async function readSpilledAsset(object: string, mime: string): Promise<string | null> {
-  const bucket = assetBucketName();
+  const bucket = workspaceAssetBucketName();
   if (!bucket || !object) return null;
   try {
     const [buf] = await admin.storage().bucket(bucket).file(object).download();
@@ -139,8 +143,14 @@ function assetDocId(path: string): string {
  * MERGE (upsert + UNION) a set of assets into the durable workspace asset store. Never drops an
  * existing asset — assets are only ever removed explicitly (a file the user deleted flows through
  * the text-file delete path, not here). Best-effort — never throws.
+ * Pass an owner only from server-verified identity, never a claimed uid or a parsed workspace id.
+ * Legacy/unverified spills keep their existing namespace and cannot be safely attributed for erasure.
  */
-export async function saveWorkspaceAssets(workspaceId: string, assets: Record<string, string>): Promise<void> {
+export async function saveWorkspaceAssets(
+  workspaceId: string,
+  assets: Record<string, string>,
+  verifiedOwnerUid?: string | null,
+): Promise<void> {
   const db = getDb();
   if (!db) return;
   const all = Object.entries(assets || {}).filter(([, c]) => typeof c === 'string');
@@ -179,7 +189,7 @@ export async function saveWorkspaceAssets(workspaceId: string, assets: Record<st
     const oversized: string[] = [];
     for (const [path, dataUri] of tooBig) {
       if (Buffer.byteLength(dataUri, 'utf8') > MAX_SPILLED_ASSET_BYTES) { oversized.push(path); continue; }
-      const object = await spillAssetToBucket(workspaceId, path, dataUri);
+      const object = await spillAssetToBucket(workspaceId, path, dataUri, verifiedOwnerUid);
       if (!object) { oversized.push(path); continue; }
       const mime = parseDataUri(dataUri)?.mime || 'application/octet-stream';
       await assetsCol.doc(assetDocId(path)).set({ path, storageObject: object, mime });

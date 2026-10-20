@@ -744,3 +744,9 @@ Q-886
 Q-888
 Q-1135
 Q-1126
+
+# 2026-10-20: Q-1226 was resolved by ANOTHER session's PR #3863 (5315e95f8), not by the session that
+# raised it. Verified independently before closing: the measured 'legacy' amountPaid case is in that
+# PR's own test table, and Q-888's settled/retryable webhook contract survived the refusal moving from
+# an inline return to a thrown PaymentAmountMismatchError (payments.ts catches it and keeps settled:true).
+Q-1226

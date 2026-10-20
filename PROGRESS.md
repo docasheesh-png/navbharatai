@@ -97546,3 +97546,15 @@ deadline pricing/terminal paths can still interleave within the same attempt;
 stable operation refs dedupe debits but do not compare requested amounts or
 return prior debit amounts. No pricing policy changed. This bounded authority
 fix does not complete Phase2; phases3–6 remain unstarted.
+
+### 2026-10-20 — Phase2 deadline lease census corrected before push
+
+The combined full-suite preflight found one older wiring assertion demanding
+lease release from the deadline finalizer, the unsafe behavior this checkpoint
+removes. The run was stopped, not recorded as passing. The guard now retains
+owner-bound real-finally release and requires the deadline's captured hold,
+publication barrier and stream close while prohibiting premature lock/lease
+release or false exit marking. Existing behavioral deadline/lease tests exercise
+that invariant through actual lifecycle and transactional implementations. All
+final-source local gates must run again after this correction; remoteCI remains
+pending and PR #3852 is unmerged.

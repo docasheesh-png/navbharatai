@@ -97766,3 +97766,20 @@ one intermediate sibling: a durable deletion chained after finalSave behind its
 own 15s wrapper. Both its raw deletion and wrapper now use the existing tracker;
 its actual-coordinator regression holds the delete and proves READY waits for
 the deletion to return. No final-step protocol or pricing behavior is added.
+### 2026-10-20 — Phase2 old canonical-history erasure contract corrected
+
+Final5 at `24a502e` completed with 2,810 files /40,076 tests passing /67 skipped
+and one failing test, `historyErasureOwnerIsolation`. All quick gates passed, but
+the full suite did not: that older Phase1 test still treated a full-key history
+parent as sufficient ownership proof and expected deletion after source removal.
+The focused ownership sweep had missed this sibling.
+
+The existing stateful test now retains full-key, bare, anonymous and neighboring
+histories, including the identical physical key made by alice/x-shared123 and
+alice-x/shared123. It asserts actual bytes remain and no collection selection or
+delete occurs, followed by the explicit ownership-unverified outcome. Restoring
+only the old prefix planner deletes the foreign history/version and fails the
+byte assertion; the safe production file was restored unchanged. The restored
+history/profile/conversation/headroom cohort passes 4 files /12 tests. No
+production code, inventory, threshold or skip changed for this correction. The
+complete final-source suite and local checks must pass again before push/merge.

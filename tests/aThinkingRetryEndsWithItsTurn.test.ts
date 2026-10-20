@@ -13,12 +13,14 @@ const response = {
 
 function delayedRejection() {
   let rejectFirst!: (error: Error) => void;
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
   const create = vi.fn()
-    .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectFirst = reject; }))
+    .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectFirst = reject; markStarted(); }))
     .mockResolvedValue(response);
   const client = { chat: { completions: { create } } } as OpenAiChatClient;
   const runner = new OpenAiToolRunner(client, { model: 'glm-5.3-flash', thinkingControl: true, timeoutMs: 1_000 });
-  return { runner, create, rejectFirst: (error: Error) => rejectFirst(error) };
+  return { runner, create, started, rejectFirst: (error: Error) => rejectFirst(error) };
 }
 
 const params = { model: 'glm-5.3-flash', messages: [], tools: [], thinking: false };
@@ -37,9 +39,10 @@ describe('a thinking-parameter retry belongs to the turn that requested it', () 
   });
 
   it('never starts another provider request after Stop ended the waiting turn', async () => {
-    const { runner, create, rejectFirst } = delayedRejection();
+    const { runner, create, started, rejectFirst } = delayedRejection();
     const stop = new AbortController();
     const ended = runner.runTurn({ ...params, signal: stop.signal }).catch((error) => error);
+    await started;
     stop.abort();
     expect(isBuildStoppedError(await ended)).toBe(true);
     rejectFirst(rejection());
@@ -48,8 +51,9 @@ describe('a thinking-parameter retry belongs to the turn that requested it', () 
   });
 
   it('never starts another request after the provider wait timed out', async () => {
-    const { runner, create, rejectFirst } = delayedRejection();
+    const { runner, create, started, rejectFirst } = delayedRejection();
     const ended = runner.runTurn(params).catch((error) => error);
+    await started;
     await vi.advanceTimersByTimeAsync(1_000);
     expect((await ended).message).toMatch(/timed out/);
     rejectFirst(rejection());
@@ -58,8 +62,9 @@ describe('a thinking-parameter retry belongs to the turn that requested it', () 
   });
 
   it('rechecks whether the caller still has enough budget before retrying', async () => {
-    const { runner, create, rejectFirst } = delayedRejection();
+    const { runner, create, started, rejectFirst } = delayedRejection();
     const ended = runner.runTurn({ ...params, deadlineAt: Date.now() + 1_000 }).catch((error) => error);
+    await started;
     // The first request returned a 400 with too little time left for a useful second call.
     vi.setSystemTime(10_900);
     rejectFirst(rejection());
@@ -68,8 +73,9 @@ describe('a thinking-parameter retry belongs to the turn that requested it', () 
   });
 
   it('still drops the rejected field and retries once while the turn is live', async () => {
-    const { runner, create, rejectFirst } = delayedRejection();
+    const { runner, create, started, rejectFirst } = delayedRejection();
     const done = runner.runTurn(params);
+    await started;
     rejectFirst(rejection());
     expect((await done).text).toBe('done');
     expect(create).toHaveBeenCalledTimes(2);

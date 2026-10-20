@@ -161,10 +161,16 @@ describe('deleteUserData — right-to-be-forgotten cascade', () => {
     expect(db.has('user_costs', 'u2_2026-07')).toBe(true);
   });
 
-  it('reports 0 for a user with no data, and never throws', async () => {
+  it('reports 0 for a user with no data, retaining the explicit unverified-store limitation', async () => {
     const report = await deleteUserData(new MockFirestore(), 'ghost');
     expect(report.totalDeleted).toBe(0);
-    expect(report.collections.every(c => c.deleted === 0 && !c.error)).toBe(true);
+    const retained = ['sonic_voice_memory', 'agentv3_conversations', 'adrDecisions', 'techDebt', 'app_ai_apps'];
+    expect(report.collections.filter(c => !retained.includes(c.collection)).every(c => c.deleted === 0 && !c.error)).toBe(true);
+    expect(report.collections.filter(c => c.refusal === 'ownership-unverified').map(c => c.collection)).toEqual(retained);
+    expect(report.collections.find(c => c.collection === 'agentv3_conversations')).toEqual({
+      collection: 'agentv3_conversations', deleted: 0, refusal: 'ownership-unverified',
+      error: 'Legacy conversation ownership cannot be confirmed; conversation records and children are retained.',
+    });
   });
 
   it('refuses to run with an empty uid (would be catastrophic)', async () => {

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ db: null as any }));
 vi.mock('../src/server/lib/serverDb', () => ({ getServerDb: () => state.db }));
-import { readFailedBuildPage, readFailedBuild, redactFailedReport, settledFailure } from '../src/server/lib/failedBuildReports';
+import { readFailedBuildPage, readFailedBuild, readFailedBuildWithDigest, failedReportDigest, redactFailedReport, settledFailure } from '../src/server/lib/failedBuildReports';
 
 const fail = (startedAt: number) => ({ startedAt, endedAt: startedAt + 1, ok: false, prompt: 'A booking app', rootCause: 'Compile failed' });
 function database(workspaces: Record<string, { report?: unknown; history: Record<string, unknown> }>) {
@@ -51,6 +51,19 @@ describe('private retained failed history', () => {
     }
     expect(ids).toEqual(['a/latest', 'b/200', 'b/300']);
     expect(await readFailedBuild('a', 'latest')).toMatchObject({ startedAt: 100 });
+  });
+  it('binds list and detail digests to the same once-scrubbed snapshot', async () => {
+    const source = 'const config = { password: syntheticCredential }; interface User { password: string; }';
+    const retained = { ...fail(100), source, nested: { b: 2, a: 1 } };
+    state.db = database({ app: { history: { '100': retained } } });
+    const page = await readFailedBuildPage();
+    const detail = await readFailedBuildWithDigest('app', '100');
+    expect(detail?.reportDigest).toBe(page.reports[0].reportDigest);
+    expect(detail?.reportDigest).toBe(failedReportDigest(retained));
+    expect(detail?.report).toEqual(await readFailedBuild('app', '100'));
+    expect(JSON.stringify(detail?.report)).not.toContain('syntheticCredential');
+    expect((detail?.report as any).source).toContain('password: string;');
+    expect(retained.source).toBe(source);
   });
   it('never reports unknown or still-running outcomes as failed', () => {
     for (const r of [{ ok: false }, { startedAt: 1, ok: false }, { ...fail(1), endedAt: NaN }, { ...fail(1), endedAt: 0 }, { ...fail(1), ok: true }, { ...fail(1), ok: undefined }]) expect(settledFailure(r)).toBe(false);

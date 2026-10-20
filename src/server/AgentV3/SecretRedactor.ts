@@ -71,7 +71,12 @@ const URL_CRED_RE = /\b([a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s/:@]+):([^\s/@]+)@/g;
  * secret. Masks the value only. Quotes (if present) are preserved around the placeholder.
  * The value must be non-trivial (>= 6 chars) to skip empty/placeholder assignments.
  */
-const SECRET_KEY_NAME = /(?:secret|password|passwd|pwd|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|auth[_-]?token|client[_-]?secret|credential|conn(?:ection)?[_-]?string)/i;
+export const SECRET_KEY_NAME = /(?:secret|password|passwd|pwd|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|auth[_-]?token|client[_-]?secret|credential|conn(?:ection)?[_-]?string)/i;
+/** Known numeric usage counters are evidence, not authentication tokens. No bare token exemption. */
+export function isNumericTokenCounter(key: string, value: unknown): boolean {
+  return /^(?:(?:input|output|total|cached|cachecreationinput|cachereadinput)tokens?|tokens?count)$/.test(key.replace(/[_-]/g, '').toLowerCase())
+    && (typeof value === 'string' || typeof value === 'number') && /^\d+$/.test(String(value));
+}
 /**
  * MARKDOWN IS THE FORMAT THIS NOW MOSTLY GUARDS, AND IT DEFEATED THE ORIGINAL PATTERN.
  *
@@ -107,6 +112,15 @@ const ASSIGNMENT_RE = new RegExp(
   `\\b([A-Za-z0-9_.-]*${SECRET_KEY_NAME.source}[A-Za-z0-9_.-]*)${MD_EMPHASIS}[ \\t]*([=:])${MD_EMPHASIS}(\\s*)(['"\`]?)((?=[^\\s'"\`]*[A-Za-z0-9])[^\\s'"\`]{6,})(\\4)`,
   'gi',
 );
+// A serialized JSON/JS object is still text at many report boundaries. Its quoted key
+// cannot match ASSIGNMENT_RE's key-to-colon boundary. Consume the complete quoted value
+// (including escaped quotes/whitespace), never just a prefix before the first space.
+// An actual quoted secret field is stronger evidence than a prose label, so short values
+// are protected too. Unquoted primitive type annotations do not match this expression.
+const QUOTED_ASSIGNMENT_RE = new RegExp(
+  String.raw`(["'])((?:\\u[0-9a-f]{4}|[A-Za-z0-9_.-]){1,256})\1(\s*:\s*)(["'])((?:\\[\s\S]|(?!\4)[^\\\r\n])*)\4`,
+  'gi',
+);
 
 /**
  * Mask secrets in a block of text. High-precision: only well-known secret shapes and
@@ -133,7 +147,21 @@ export function redactSecrets(input: unknown): string {
     // 3. Credentials inside URLs (mask the password segment only).
     out = out.replace(URL_CRED_RE, (_m, prefix: string) => `${prefix}:${mask('credential')}@`);
 
-    // 4. Secret-named assignments (KEY=value / KEY: value) — preserve original spacing/quotes.
+    // 4. Quoted object keys in serialized JSON/source text. redactDeep walks string leaves;
+    // it is not key-aware. The failed-report export has its own stricter object-key boundary.
+    out = out.replace(QUOTED_ASSIGNMENT_RE, (matched, keyQuote: string, key: string, sep: string, valueQuote: string, value: string) => {
+      // Decode only the bounded key's valid JSON Unicode escapes, never arbitrary source.
+      // Preserve the original spelling/delimiters in the output.
+      const decodedKey = key.replace(/\\u([0-9a-f]{4})/gi, (_escape, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+      if (!SECRET_KEY_NAME.test(decodedKey) || isNumericTokenCounter(decodedKey, value)) return matched;
+      // Earlier high-precision passes may already have classified the entire value. Preserve
+      // their diagnostic kind and idempotency, but never spare surrounding unmasked material.
+      const masked = /^(?:\s|\\+[nrt])*\[REDACTED:(?:private-key|jwt|api-key|google-key|aws-key|github-token|slack-token|stripe-key|google-oauth|sendgrid-key|credential|secret)\](?:\s|\\+[nrt])*$/.test(value)
+        ? value : mask('secret');
+      return `${keyQuote}${key}${keyQuote}${sep}${valueQuote}${masked}${valueQuote}`;
+    });
+
+    // 5. Secret-named assignments (KEY=value / KEY: value) — preserve original spacing/quotes.
     // The emphasis groups are non-capturing, so the callback's arguments are unchanged: the key, the
     // separator, the whitespace gap and the quote. Anything the pattern skipped over (the `**` of a
     // bold label) is deliberately NOT reconstructed — dropping it leaves "**Password:*** [secret]",
@@ -233,15 +261,15 @@ export function containsPII(input: unknown): boolean {
  * Non-string leaves pass through unchanged. Never throws; returns the input as-is on error.
  * Bounded depth guards against pathological/cyclic structures.
  */
-export function redactDeep(value: unknown, depth = 0): unknown {
+export function redactDeep(value: unknown, depth = 0, redactText: (input: unknown) => string = redactSecrets): unknown {
   if (depth > 8) return value;
   try {
-    if (typeof value === 'string') return redactSecrets(value);
-    if (Array.isArray(value)) return value.map((v) => redactDeep(v, depth + 1));
+    if (typeof value === 'string') return redactText(value);
+    if (Array.isArray(value)) return value.map((v) => redactDeep(v, depth + 1, redactText));
     if (value && typeof value === 'object') {
       const out: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        out[k] = redactDeep(v, depth + 1);
+        out[k] = redactDeep(v, depth + 1, redactText);
       }
       return out;
     }
@@ -267,7 +295,7 @@ export function redactDeep(value: unknown, depth = 0): unknown {
  * is not an object comes back untouched, and both maskers return their input unchanged when there is
  * nothing to mask, which is the overwhelming majority of events.
  */
-export function redactEventForUser<T>(event: T): T {
+export function redactEventForUser<T>(event: T, redactText: (input: unknown) => string = redactSecrets): T {
   if (!event || typeof event !== 'object') return event;
   try {
     const e = event as Record<string, unknown>;
@@ -276,7 +304,7 @@ export function redactEventForUser<T>(event: T): T {
     for (const field of ['text', 'summary'] as const) {
       const v = e[field];
       if (typeof v !== 'string' || !v) continue;
-      const masked = redactPreviewUrls(redactSecrets(v));
+      const masked = redactPreviewUrls(redactText(v));
       if (masked !== v) { out[field] = masked; changed = true; }
     }
     return (changed ? out : event) as T;

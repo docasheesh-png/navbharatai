@@ -2,7 +2,7 @@
 import { FieldPath } from 'firebase-admin/firestore';
 import { createHash } from 'node:crypto';
 import { getServerDb } from './serverDb';
-import { redactSecrets } from '../AgentV3/SecretRedactor';
+import { redactSecrets } from '../AgentV3/SourceSecretRedactor';
 import type { FailedBuildPage, FailedBuildRow } from '../../lib/failedBuildReports';
 
 const COLLECTION = 'workspace_diagnostics_v3';
@@ -46,11 +46,15 @@ export function redactFailedReport(value: unknown): unknown {
   };
   return walk(value, 0);
 }
-/** Canonical scrubbed evidence digest: object key order cannot create a false revision. */
-export function failedReportDigest(value: unknown): string {
+/** Hash exactly the exported snapshot; never apply a second policy pass here. */
+function scrubbedReportDigest(value: unknown): string {
   const canonical = (v: unknown): unknown => Array.isArray(v) ? v.map(canonical) :
     v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, x]) => [k, canonical(x)])) : v;
-  return createHash('sha256').update(JSON.stringify(canonical(redactFailedReport(value)))).digest('hex');
+  return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
+}
+/** Canonical scrubbed evidence digest: object key order cannot create a false revision. */
+export function failedReportDigest(value: unknown): string {
+  return scrubbedReportDigest(redactFailedReport(value));
 }
 function row(workspaceId: string, historyId: string, r: Record<string, unknown> & { startedAt: number; endedAt: number }): FailedBuildRow {
   return redactFailedReport({ workspaceId, historyId, reportDigest: failedReportDigest(r), buildId: typeof r.buildId === 'string' ? r.buildId : null,
@@ -104,12 +108,20 @@ export async function readFailedBuildPage(rawCursor?: unknown, rawLimit?: unknow
   }
   return { reports, nextCursor: encodeCursor(c), scanned };
 }
-export async function readFailedBuild(workspaceId: string, historyId: string): Promise<unknown | null> {
+/** One stored read and one redaction pass bind the digest to the exact returned evidence. */
+export async function readFailedBuildWithDigest(workspaceId: string, historyId: string): Promise<{ report: unknown; reportDigest: string } | null> {
   if (!validReportId(workspaceId) || !(historyId === 'latest' || /^\d{1,20}$/.test(historyId))) throw new FailedReportsInputError('Invalid report reference.');
   const db = getServerDb();
   if (!db) throw new Error('Report storage unavailable.');
   const root = db.collection(COLLECTION).doc(workspaceId);
   const doc = await (historyId === 'latest' ? root : root.collection('history').doc(historyId)).get();
   const report = doc.data()?.report;
-  return settledFailure(report) ? redactFailedReport(report) : null;
+  if (!settledFailure(report)) return null;
+  const scrubbed = redactFailedReport(report);
+  return { report: scrubbed, reportDigest: scrubbedReportDigest(scrubbed) };
+}
+
+/** Compatibility for internal callers that only need the already-scrubbed report. */
+export async function readFailedBuild(workspaceId: string, historyId: string): Promise<unknown | null> {
+  return (await readFailedBuildWithDigest(workspaceId, historyId))?.report ?? null;
 }

@@ -3,7 +3,7 @@ import type { Express, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import { adminRequestOk, adminUsername, requireAdmin } from '../lib/adminAuth';
 import { createReportAccess, listReportAccess, reportTokenOk, revokeReportAccess } from '../lib/failedReportAccess';
-import { FailedReportsInputError, failedReportDigest, readFailedBuild, readFailedBuildPage } from '../lib/failedBuildReports';
+import { FailedReportsInputError, readFailedBuildWithDigest, readFailedBuildPage } from '../lib/failedBuildReports';
 import { readAdminReason } from '../../lib/adminActionReason';
 import { audit } from '../lib/audit';
 import { routeParam } from '../lib/expressCompat';
@@ -107,9 +107,9 @@ export function registerFailedReportRoutes(app: Express): void {
   });
   app.get('/api/failedbr/reports/:workspaceId/:historyId', readGate, async (req, res) => {
     try {
-      const report = await readFailedBuild(routeParam(req.params.workspaceId), routeParam(req.params.historyId));
-      if (!report) { res.status(404).json({ error: 'No retained failed report at this reference.' }); return; }
-      res.json({ report, reportDigest: failedReportDigest(report) });
+      const evidence = await readFailedBuildWithDigest(routeParam(req.params.workspaceId), routeParam(req.params.historyId));
+      if (!evidence) { res.status(404).json({ error: 'No retained failed report at this reference.' }); return; }
+      res.json(evidence);
     } catch (err) { failure(res, err); }
   });
   app.get('/api/admin/failedbr/access', requireAdmin, async (_req, res) => {
@@ -165,9 +165,9 @@ export function registerFailedReportRoutes(app: Express): void {
         let data: unknown;
         if (body.params?.name === 'list_failed_builds') data = await withFailedReportAutopsies(await readFailedBuildPage(args.cursor, args.limit));
         else if (body.params?.name === 'get_failed_build') {
-          data = await readFailedBuild(args.workspaceId, args.historyId);
-          if (!data) { result = { isError: true, content: [{ type: 'text', text: 'Failed report not found in retained storage.' }] }; }
-          else data = { ...data as Record<string, unknown>, reportDigest: failedReportDigest(data) };
+          const evidence = await readFailedBuildWithDigest(args.workspaceId, args.historyId);
+          if (!evidence) { result = { isError: true, content: [{ type: 'text', text: 'Failed report not found in retained storage.' }] }; }
+          else data = { ...evidence.report as Record<string, unknown>, reportDigest: evidence.reportDigest };
         } else if (body.params?.name === 'get_failed_build_autopsy') {
           data = await readFailedReportAutopsy(args.workspaceId, args.historyId);
           if (!data) result = { isError: true, content: [{ type: 'text', text: 'Failed report not found in retained storage.' }] };

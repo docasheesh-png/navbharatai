@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ db: null as any }));
 vi.mock('../src/server/lib/serverDb', () => ({ getServerDb: () => state.db }));
+import express from 'express';
+import type { Server } from 'node:http';
+import { createHash } from 'node:crypto';
+import { registerFailedReportRoutes } from '../src/server/routes/failedReports';
+import { mintAdminToken } from '../src/server/lib/adminAuth';
+import { redactSecrets as legacyRedact } from '../src/server/AgentV3/SecretRedactor';
+import { redactSecrets as sourceRedact } from '../src/server/AgentV3/SourceSecretRedactor';
 import { failedReportDigest } from '../src/server/lib/failedBuildReports';
 import { parseFailedReportAutopsy, readFailedReportAutopsy, updateFailedReportAutopsy, withFailedReportAutopsies } from '../src/server/lib/failedReportAutopsy';
 
@@ -17,11 +24,22 @@ const proof = { scope: 'source_and_tests', commitSha: 'a'.repeat(40), pullReques
   ciRunUrl: `${repo}/actions/runs/456`, testSummary: 'Exact regression fails on reversion and passes on the merged source. No historical app rerun.' };
 const done = () => input({ status: 'done', ledgerUrl: `${repo}/blob/${'a'.repeat(40)}/docs/autopsy.md`,
   counts: { total: 2, resolved: 2, blocked: 0 }, verification: proof });
+function expandingSource(): string {
+  const prefix = 'interface User { password: string; }\nconst password="syntheticA"; ' +
+    (String.raw`const config = { pass\u{77}ord: "tiny" };` + ' ').repeat(500) + '// ';
+  return prefix + 'x'.repeat(196_000 - prefix.length);
+}
+function exactExportHash(value: unknown): string {
+  const canonical = (v: unknown): unknown => Array.isArray(v) ? v.map(canonical) :
+    v && typeof v === 'object' ? Object.fromEntries(Object.entries(v)
+      .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, x]) => [k, canonical(x)])) : v;
+  return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
+}
 function database() {
   const data = new Map<string, any>([['workspace_diagnostics_v3/app/history/100', { report }]]);
   const writes: string[] = [];
   let serial = Promise.resolve();
-  const ref = (path: string): any => ({ path, collection: (name: string) => ({ doc: (id: string) => ref(`${path}/${name}/${id}`) }) });
+  const ref = (path: string): any => ({ path, get: async () => snapshot({ path }), collection: (name: string) => ({ doc: (id: string) => ref(`${path}/${name}/${id}`) }) });
   const snapshot = (r: any) => ({ exists: data.has(r.path), data: () => structuredClone(data.get(r.path)) });
   const db = {
     collection: (name: string) => ({ doc: (id: string) => ref(`${name}/${id}`) }),
@@ -54,6 +72,95 @@ describe('bounded evidence-bound autopsy metadata', () => {
     expect(d.writes.every(path => path.startsWith('admin_failed_report_autopsies/'))).toBe(true);
     expect(d.data.get('workspace_diagnostics_v3/app/history/100')).toEqual({ report });
     expect(await readFailedReportAutopsy('app', '100')).toEqual(result);
+  });
+  it.each([
+    { name: 'ordinary source', source: () => 'const config = { password: syntheticCredential }; interface User { password: string; }',
+      preservesType: true, repeatedChanges: false, genericFallback: false },
+    { name: 'mask expansion beyond the original size cap', source: expandingSource,
+      preservesType: true, repeatedChanges: true, genericFallback: false },
+    { name: 'already-redacted oversized stored source', source: () => sourceRedact(expandingSource()),
+      preservesType: false, repeatedChanges: false, genericFallback: true },
+    { name: 'ambiguous credential proof-budget fallback', source: () =>
+      'interface User { password: string; }\n' + 'PASSWORD=syntheticA;syntheticB '.repeat(1_000),
+      preservesType: false, repeatedChanges: true, genericFallback: true },
+  ])('binds real REST/MCP reads and done CAS to one stored snapshot: $name', async (fixture) => {
+    const d = database(); state.db = d.db;
+    const source = fixture.source();
+    const retained = { ...report, source };
+    const retainedPath = 'workspace_diagnostics_v3/app/history/100';
+    d.data.set(retainedPath, { report: retained });
+    vi.stubEnv('ADMIN_USERNAME', 'digest-test-owner'); vi.stubEnv('ADMIN_PASSWORD', 'synthetic-admin-password');
+    const token = mintAdminToken('synthetic-admin-password', 'digest-test-owner', Date.now());
+    const app = express(); app.use(express.json()); registerFailedReportRoutes(app);
+    const server = await new Promise<Server>(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
+    const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const headers = { 'x-admin-token': token, 'Content-Type': 'application/json' };
+    const detailPath = '/api/failedbr/reports/app/100';
+    try {
+      const rest = await fetch(origin + detailPath, { headers });
+      expect(rest.status).toBe(200);
+      const detail = await rest.json() as any;
+      const mcp = await fetch(origin + '/api/failedbr/mcp', { method: 'POST', headers,
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_failed_build', arguments: { workspaceId: 'app', historyId: '100' } } }) });
+      expect(mcp.status).toBe(200);
+      const tool = JSON.parse((await mcp.json() as any).result.content[0].text);
+      expect(tool).toEqual({ ...detail.report, reportDigest: detail.reportDigest });
+      expect(detail.reportDigest).toBe(failedReportDigest(retained));
+      // Independently hash the exact bytes represented by this exported object. Applying
+      // another redaction pass here is wrong when mask expansion crosses the size cap.
+      expect(detail.reportDigest).toBe(exactExportHash(detail.report));
+      expect((await readFailedReportAutopsy('app', '100'))?.reportDigest).toBe(detail.reportDigest);
+      expect(JSON.stringify(detail.report)).not.toContain('syntheticCredential');
+      expect(detail.report.source).not.toContain('syntheticA');
+      expect(detail.report.source).not.toContain('syntheticB');
+      expect(detail.report.source).not.toBe(JSON.stringify('[REDACTED:secret]'));
+      if (fixture.genericFallback) expect(detail.report.source).toBe(legacyRedact(source));
+      expect(detail.report.source.includes('password: string;')).toBe(fixture.preservesType);
+      expect(sourceRedact(detail.report.source) !== detail.report.source).toBe(fixture.repeatedChanges);
+      if (fixture.repeatedChanges) {
+        expect(failedReportDigest(detail.report)).not.toBe(detail.reportDigest);
+      }
+      if (fixture.name === 'mask expansion beyond the original size cap') {
+        expect(detail.report.source.length).toBeGreaterThan(200_000);
+      }
+      const saved = await fetch(origin + detailPath + '/autopsy', { method: 'POST', headers,
+        body: JSON.stringify({ ...done(), reportDigest: detail.reportDigest }) });
+      expect(saved.status).toBe(200);
+      expect(await saved.json()).toMatchObject({ state: 'done', revision: 1 });
+      const reread = await fetch(origin + detailPath, { headers });
+      expect(await reread.json()).toEqual(detail);
+      expect((await readFailedReportAutopsy('app', '100'))?.state).toBe('done');
+      expect(d.data.get(retainedPath)).toEqual({ report: retained });
+      const writes = d.writes.length;
+      d.data.set(retainedPath, { report: { ...retained, newWarning: 'A genuine later nonsecret observation' } });
+      const stale = await fetch(origin + detailPath + '/autopsy', { method: 'POST', headers,
+        body: JSON.stringify(input({ reportDigest: detail.reportDigest, expectedRevision: 1, mutationId: '22345678-1234-1234-1234-123456789abc' })) });
+      expect(stale.status).toBe(409);
+      expect((await readFailedReportAutopsy('app', '100'))?.state).toBe('stale');
+      expect((await updateFailedReportAutopsy('app', '100',
+        { ...done(), reportDigest: detail.reportDigest }, 'admin:owner'))?.state).toBe('stale');
+      expect(d.writes).toHaveLength(writes);
+    } finally {
+      await new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); });
+      vi.unstubAllEnvs();
+    }
+  });
+  it('keeps a historical old-redaction digest explicitly stale without migrating the record', async () => {
+    const d = database(); state.db = d.db;
+    const source = 'interface User { password: string; }';
+    const retained = { ...report, source };
+    d.data.set('workspace_diagnostics_v3/app/history/100', { report: retained });
+    const currentDigest = failedReportDigest(retained);
+    await updateFailedReportAutopsy('app', '100', { ...done(), reportDigest: currentDigest }, 'admin:owner');
+    const key = [...d.data.keys()].find(k => k.startsWith('admin_failed_report_autopsies/') && k.split('/').length === 2)!;
+    const oldDigest = failedReportDigest({ ...retained, source: legacyRedact(source) });
+    expect(oldDigest).not.toBe(currentDigest);
+    d.data.set(key, { ...d.data.get(key), reportDigest: oldDigest });
+    const before = structuredClone([...d.data.entries()]);
+    expect((await readFailedReportAutopsy('app', '100'))?.state).toBe('stale');
+    const page = { reports: [{ workspaceId: 'app', historyId: '100', reportDigest: currentDigest, buildId: 'build-1', startedAt: 100, endedAt: 101, appLabel: 'Test', rootCause: null }], nextCursor: null, scanned: 1 };
+    expect((await withFailedReportAutopsies(page)).reports[0].autopsy?.state).toBe('stale');
+    expect([...d.data.entries()]).toEqual(before);
   });
   it('does not confuse a terminal review or blocked ledger with done', () => {
     for (const change of [

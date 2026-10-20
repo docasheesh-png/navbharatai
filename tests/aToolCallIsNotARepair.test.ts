@@ -103,6 +103,8 @@ describe('🔒 the recorder, the breakdown and the first-pass list agree on a RE
       codes: { DESIGN_HEALED: 1, PREVIEW_COMPILE_HEALED: 1 },
       total: 2,
       unattributed: 0,
+      interpretation: { rawAutoResolved: 2, rawHealRule: 3, rawAutoResolvedState: 'numeric', rawHealRuleState: 'numeric', total: 2, compatibilityCount: 2, provenance: 'current-rule',
+        observed: 2, timeline: { status: 'complete', reason: 'coherent-census' } },
     });
     // The check that used to be neutralised: a trimmed timeline is declared again.
     const trimmed = summarizeHealCodes({ ...report, issues: report.issues.slice(0, 20) });

@@ -18,12 +18,11 @@
 // `0 in · 0 out` for an unsettled build, `JOURNEY_PASSED` on a run that launched no browser), and its
 // ruling is the one applied here: **an absent measurement is not a measurement of zero.**
 //
-// So the tally is cross-checked against `counts.autoResolved`, which is the number the scorecard
-// already calls a heal and which the storage cap does not touch. The difference is reported as
-// `unattributed` — heals we KNOW happened and cannot name — never silently dropped, and never
-// presented as if the visible codes were the whole story. That check is stronger than reading
-// `truncation.channels.issues`, because it compares what we can see against the real total directly
-// and still works on a legacy report written before that field existed.
+// A counter is usable only with producer provenance: unversioned historical autoResolved may be a
+// closed-EVENT count, not repairs. interpretRepairCount keeps raw evidence, compatibility arithmetic,
+// the usable total and observed rows separate. Unknown totals never become zero or raw fallbacks.
+// A numeric deficit is unattributed, not proof of storage trimming; timeline completeness is its own
+// evidence field. Zero observed structured rows does not prove that no repair happened in the build.
 //
 // 🔴 CORRECTED 2026-09-25 — THE PARAGRAPH THAT STOOD HERE WAS THE BUG, IN WRITING. It said the
 // module "inherits rather than invents" the recorder's definition of a heal, and then counted
@@ -36,13 +35,7 @@
 // declare was invisible. The definition is now `isSelfHeal` in `src/lib/healIssue.ts`, the ONE
 // predicate the recorder, this breakdown and `firstPassQuality.topHealCodes` all call.
 
-/** A stored report, read structurally — this module never imports the recorder. */
-interface ReportLike {
-  issues?: Array<{ code?: unknown; severity?: unknown; autoResolved?: unknown; observation?: unknown }> | null;
-  counts?: { autoResolved?: unknown; healRule?: unknown } | null;
-}
-
-import { isSelfHeal, isLeftOpen, healCountOf } from '../../lib/healIssue';
+import { isSelfHeal, isLeftOpen, interpretRepairCount, type HealReportLike, type HealCountInterpretation } from '../../lib/healIssue';
 
 /** At most this many distinct codes per build, so one odd build cannot bloat a listing row. */
 export const MAX_CODES_PER_BUILD = 25;
@@ -50,11 +43,13 @@ export const MAX_CODES_PER_BUILD = 25;
 export interface HealCodeTally {
   /** code → heals of that code VISIBLE in the stored timeline. */
   codes: Record<string, number>;
-  /** The build's authoritative heal count, or null when the report never recorded one. */
+  /** Usable repair total, or null when missing or historical semantics are unverified. */
   total: number | null;
+  /** Independent producer, compatibility and timeline evidence. */
+  interpretation?: HealCountInterpretation;
   /**
-   * Heals that happened and could not be named (total − seen), or null when `total` is unknown.
-   * ZERO and NULL are different answers and must stay that way: zero means the list is complete,
+   * Recorded repairs not attributable to visible rows (total − seen), or null when `total` is unknown.
+   * ZERO and NULL are different answers and must stay that way: zero means no numeric attribution deficit,
    * null means nobody can say.
    */
   unattributed: number | null;
@@ -73,11 +68,11 @@ export interface HealCodeTally {
  * PURE. Never throws: a malformed issue is skipped, not fatal, because an observability field may
  * never take down the listing that carries it.
  */
-export function summarizeHealCodes(report: ReportLike | null | undefined): HealCodeTally | null {
+export function summarizeHealCodes(report: HealReportLike | null | undefined): HealCodeTally | null {
   const issues = Array.isArray(report?.issues) ? report!.issues! : null;
-  // The CORRECTED count: an older report's `autoResolved` still includes left-open rows (see healCountOf).
-  const total = healCountOf(report);
-  if (!issues && total === null) return null;
+  const interpretation = interpretRepairCount(report);
+  const total = interpretation.total;
+  if (!issues && interpretation.compatibilityCount === null) return null;
 
   const codes: Record<string, number> = {};
   const open: Record<string, number> = {};
@@ -101,6 +96,7 @@ export function summarizeHealCodes(report: ReportLike | null | undefined): HealC
   return {
     codes,
     total,
+    interpretation,
     // Never negative: a timeline can legitimately carry MORE autoResolved rows than `counts` recorded
     // (a count written before a late pass appended to the timeline), and a negative shortfall would
     // subtract from another build's real one in the aggregate.

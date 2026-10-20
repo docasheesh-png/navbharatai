@@ -1,3 +1,5 @@
+import { hasMeasuredRepairProvenance, type HealCountInterpretation, type HealCountProvenance } from './healIssue';
+
 // Builder metrics — the numbers we could not see.
 //
 // WHY THIS EXISTS. An 84-point "Vision 10/10" directive was reviewed against the codebase and almost
@@ -40,6 +42,7 @@ export interface BuildMetricInput {
   billedInr?: number | null;
   /** How many defects the build FIXED ITSELF. See healPressure — this is a red flag, not a credit. */
   healCount?: number | null;
+  healCountProvenance?: HealCountProvenance;
   /**
    * How many times the build ROUTED AROUND a problem instead of fixing it (a fallback to another
    * provider or another lane). Already on every report as `counts.workarounds`, and shown on no
@@ -51,7 +54,7 @@ export interface BuildMetricInput {
    * WHICH repairs this build ran, with its own completeness. `undefined` ⇒ never measured, and the
    * breakdown EXCLUDES it rather than scoring it as a build that healed nothing.
    */
-  healCodes?: { codes: Record<string, number>; total: number | null; unattributed: number | null; open?: Record<string, number> } | null;
+  healCodes?: { codes: Record<string, number>; total: number | null; unattributed: number | null; open?: Record<string, number>; interpretation?: HealCountInterpretation } | null;
   /**
    * THE THREE FACTS THAT LET A STUCK PROJECT BE NAMED (admin 2026-09-25: "7 projects currently
    * sitting on a failed build" — and the card could not say which seven). All optional and all
@@ -313,6 +316,10 @@ export function buildSuccess(builds: readonly BuildMetricInput[]): BuildSuccess 
 }
 
 export interface HealPressure {
+  /** Finished builds excluded because their repair total is unknown. */
+  unknownBuilds?: number;
+  /** Numeric compatibility totals using older/future definitions, not exact current-rule counts. */
+  qualifiedBuilds?: number;
   /** Finished builds carrying a heal count — the only ones this can be computed from. */
   builds: number;
   /** Builds that had to fix themselves at least once. */
@@ -344,14 +351,26 @@ export interface HealPressure {
  * PURE.
  */
 export function healPressure(builds: readonly BuildMetricInput[]): HealPressure {
-  const rows = judgeable(builds).filter((b) => typeof b.healCount === 'number' && (b.healCount as number) >= 0);
+  const eligible = judgeable(builds);
+  const rows = eligible.filter((b) => {
+    const provenance = b.healCountProvenance ?? b.healCodes?.interpretation?.provenance;
+    return typeof b.healCount === 'number' && Number.isFinite(b.healCount) && b.healCount >= 0
+      && (provenance === undefined || hasMeasuredRepairProvenance(provenance));
+  });
+  const unknownBuilds = eligible.length - rows.length;
+  const qualifiedBuilds = rows.filter((b) => {
+    const p = b.healCountProvenance ?? b.healCodes?.interpretation?.provenance;
+    return p === 'rule-2-adjusted' || p === 'rule-2-visible-adjustment' || p === 'future-rule';
+  }).length;
+  const coverage = { ...(unknownBuilds ? { unknownBuilds } : {}), ...(qualifiedBuilds ? { qualifiedBuilds } : {}) };
   const n = rows.length;
-  if (n === 0) return { builds: 0, buildsNeedingHeal: 0, rate: 0, perBuild: 0, worst: 0 };
+  if (n === 0) return { builds: 0, buildsNeedingHeal: 0, rate: 0, perBuild: 0, worst: 0, ...coverage };
   const counts = rows.map((b) => Math.floor(b.healCount as number));
   const needing = counts.filter((c) => c > 0).length;
   const total = counts.reduce((a, c) => a + c, 0);
   return {
     builds: n,
+    ...coverage,
     buildsNeedingHeal: needing,
     rate: needing / n,
     perBuild: Math.round((total / n) * 100) / 100,
@@ -416,8 +435,7 @@ export interface HealBreakdown {
   /** Heals this list can name. */
   attributed: number;
   /**
-   * Heals that HAPPENED and could not be named, because the stored timeline was trimmed at 500
-   * entries while `counts` kept the build's real number. Never folded into `attributed`, and never
+   * Recorded repairs not attributed to visible rows. The deficit alone does not identify its cause. Never folded into `attributed`, and never
    * hidden: a work list that quietly omits the biggest build's repairs is the wrong work list.
    */
   unattributed: number;
@@ -477,7 +495,8 @@ export function healBreakdown(builds: readonly BuildMetricInput[]): HealBreakdow
       attributed += n;
     }
     if (typeof tally.unattributed === 'number' && tally.unattributed > 0) unattributed += tally.unattributed;
-    if (tally.unattributed === null || tally.unattributed === undefined) completenessUnknown += 1;
+    if (tally.interpretation ? tally.interpretation.timeline.status !== 'complete' || tally.total === null
+      : tally.unattributed === null || tally.unattributed === undefined) completenessUnknown += 1;
   }
 
   const top = [...heals.entries()]
@@ -583,7 +602,7 @@ export function scorecardHeadline(card: BuilderScorecard): string {
   // This one measures whether it came out working the FIRST time — the only line here that can get
   // worse while all the others look fine, because a heal that fires turns a defect into a green tick.
   if (card.heal.builds === 0) {
-    lines.push('First-pass quality: no build has recorded a heal count yet — unknown.');
+    lines.push('First-pass quality: no usable repair total — unknown.');
   } else {
     const note = card.heal.builds < MIN_SAMPLES_FOR_RATE ? ' (too few builds to read a trend into)' : '';
     lines.push(
@@ -593,6 +612,9 @@ export function scorecardHeadline(card: BuilderScorecard): string {
       + `the target is zero${note}.`,
     );
   }
+
+  if (card.heal.unknownBuilds) lines.push(`${card.heal.unknownBuilds} build(s) have unknown repair totals and are excluded from the repair average; visible zero rows do not prove no repairs occurred.`);
+  if (card.heal.qualifiedBuilds) lines.push(`${card.heal.qualifiedBuilds} measured build(s) use older/future rule totals; these retain producer compatibility, not exact current-rule semantics.`);
 
   // 🔀 THE DEFERRED-DEBT HALF. Stated separately from the heal line, never summed into it: a heal
   // fixed something, a workaround did not, and the fifth rule calls the second one debt. Silent when
@@ -616,11 +638,11 @@ export function scorecardHeadline(card: BuilderScorecard): string {
     // most heals is the likeliest to have had its timeline trimmed, so it is the likeliest to be
     // missing from the very list meant to rank it.
     const missing = card.healCodes.unattributed > 0
-      ? ` ${card.healCodes.unattributed} further repair(s) happened and could not be named — those builds' `
-        + 'timelines were trimmed before storage, so this ranking is incomplete by that much.'
+      ? ` ${card.healCodes.unattributed} recorded repair(s) could not be attributed to visible rows; `
+        + 'the count difference alone does not establish storage trimming.'
       : '';
     const unknown = card.healCodes.completenessUnknown > 0
-      ? ` ${card.healCodes.completenessUnknown} build(s) recorded no total, so their lists cannot be checked for completeness.`
+      ? ` ${card.healCodes.completenessUnknown} build(s) have an unknown repair total or incomplete/unknown timeline; these lists do not establish the whole repair history.`
       : '';
     lines.push(
       `Most-repaired: ${named} — across ${card.healCodes.builds} build(s) carrying a breakdown, `

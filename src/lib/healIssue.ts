@@ -130,8 +130,8 @@ const RULE_3_RECLASSIFIED: ReadonlySet<string> = new Set([
 
 /**
  * The version of the heal rule a report's `counts.autoResolved` was computed with. Reports written
- * before 2026-09-30 carry no `counts.healRule`, and their `autoResolved` still includes the rows
- * NOT_A_REPAIR_CODES now excludes — `healCountOf` corrects for that.
+ * before versioning carry no `counts.healRule`; some counted all closed EVENTS, others used older
+ * repair predicates. Their definitions cannot be inferred from the date or a scalar alone.
  */
 export const HEAL_RULE = 3;
 
@@ -240,26 +240,145 @@ export function workaroundCountOf(report: HealReportLike | null | undefined): nu
 const finiteCount = (v: unknown): number | null =>
   (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null);
 
-/**
- * How many defects this build REALLY repaired. The recorder's own number when it was computed with the
- * current rule; for an older report, that number minus the left-open rows it wrongly included. Null when
- * the report recorded no count ("nobody measured", excluded by every aggregate — never zero).
- *
- * ⚠️ On a legacy report whose timeline was trimmed, left-open rows that were cut cannot be subtracted, so
- * the result can still be slightly HIGH — it is never pushed below the truth.
- */
-export function healCountOf(report: HealReportLike | null | undefined): number | null {
+/** Why a recorded counter may (or may not) be read as a repair measurement. */
+export type HealCountProvenance =
+  | 'current-rule' | 'rule-2-adjusted' | 'rule-2-visible-adjustment' | 'future-rule'
+  | 'legacy-closed-events' | 'legacy-unverified' | 'unrecorded';
+
+/** Whether a provenance tag permits a numeric producer total (possibly explicitly qualified). */
+export function hasMeasuredRepairProvenance(provenance: unknown): boolean {
+  return provenance === 'current-rule' || provenance === 'rule-2-adjusted'
+    || provenance === 'rule-2-visible-adjustment' || provenance === 'future-rule';
+}
+
+export interface HealTimelineEvidence {
+  status: 'complete' | 'incomplete' | 'unknown';
+  reason: 'coherent-census' | 'declared-loss' | 'recorder-cap' | 'short-timeline'
+    | 'missing-timeline' | 'missing-total' | 'invalid-census' | 'invalid-row' | 'inconsistent-channel';
+}
+
+export interface HealCountInterpretation {
+  /** Exact finite numeric evidence only; malformed payloads remain solely in the original report. */
+  rawAutoResolved: number | null;
+  rawHealRule: number | null;
+  rawAutoResolvedState: 'numeric' | 'missing' | 'invalid';
+  rawHealRuleState: 'numeric' | 'missing' | 'invalid';
+  /** Repair total usable by metrics. Null is authoritative unknown, NOT a raw-counter fallback. */
+  total: number | null;
+  /** Historical arithmetic retained for compatibility only; NOT an independent repair measurement. */
+  compatibilityCount: number | null;
+  provenance: HealCountProvenance;
+  /** Current-predicate rows actually visible; null means the timeline is unavailable, not zero. */
+  observed: number | null;
+  timeline: HealTimelineEvidence;
+}
+
+/** Bounded, JSON/Firestore-safe evidence; never copy arbitrary raw payloads into listing metadata. */
+const rawCountEvidence = (value: unknown): { value: number | null; state: 'numeric' | 'missing' | 'invalid' } =>
+  typeof value === 'number' && Number.isFinite(value) ? { value, state: 'numeric' }
+    : { value: null, state: value == null ? 'missing' : 'invalid' };
+
+const censusInteger = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+
+/** A strict evidence check local to repair provenance; does not change other timeline consumers. */
+function repairTimelineEvidence(report: HealReportLike | null | undefined): HealTimelineEvidence {
+  const issues = report?.issues;
+  if (!Array.isArray(issues)) return { status: 'unknown', reason: 'missing-timeline' };
+  if (issues.some((i) => codeOf(i) === 'TIMELINE_TRUNCATED')) return { status: 'incomplete', reason: 'recorder-cap' };
+  const fact = report?.truncation?.channels?.issues;
+  if (fact != null) {
+    if (!censusInteger(fact.kept) || !censusInteger(fact.total) || fact.kept !== issues.length || fact.kept > fact.total) {
+      return { status: 'unknown', reason: 'inconsistent-channel' };
+    }
+    if (fact.kept < fact.total) return { status: 'incomplete', reason: 'declared-loss' };
+  }
+  const total = report?.counts?.total;
+  if (total == null) return { status: 'unknown', reason: 'missing-total' };
+  if (!censusInteger(total) || issues.length > total) return { status: 'unknown', reason: 'invalid-census' };
+  if (issues.length < total) return { status: 'incomplete', reason: 'short-timeline' };
+  if (issues.some((i) => !i || typeof i !== 'object' || Array.isArray(i)
+    || typeof i.code !== 'string' || !i.code.trim()
+    || typeof i.severity !== 'string' || !['info', 'warning', 'error'].includes(i.severity)
+    || typeof i.autoResolved !== 'boolean'
+    || (i.observation !== undefined && typeof i.observation !== 'boolean'))) {
+    return { status: 'unknown', reason: 'invalid-row' };
+  }
+  return { status: 'complete', reason: 'coherent-census' };
+}
+
+/** The existing rule-specific adjustment, kept separate from whether its producer is identifiable. */
+function compatibleHealCount(report: HealReportLike | null | undefined): number | null {
   const recorded = finiteCount(report?.counts?.autoResolved);
   if (recorded === null) return null;
   const rule = finiteCount(report?.counts?.healRule);
   if (rule !== null && rule >= HEAL_RULE) return recorded;
   const issues = Array.isArray(report?.issues) ? report!.issues! : [];
-  // Rows an older rule counted as heals and the current one does not — subtracted once each, by the rule the
-  // report WAS computed with, so a rule-2 report is not charged twice for the left-open rows rule 2 already excluded.
+  // Subtract once: rule 2 already excluded the earlier left-open codes.
   const countedThen = (i: HealIssueLike | null | undefined) => !!i && i.autoResolved === true && i.observation !== true && i.severity !== 'info' && !isNarrationIssue(i);
   const reclassified = issues.filter((i) => countedThen(i) && RULE_3_RECLASSIFIED.has(codeOf(i))).length;
   const leftOpenBeforeRule2 = rule === null || rule < 2
     ? issues.filter((i) => isLeftOpen(i) && !RULE_3_RECLASSIFIED.has(codeOf(i))).length
     : 0;
   return Math.max(0, recorded - reclassified - leftOpenBeforeRule2);
+}
+
+/**
+ * Interpret evidence, never rewrite history. An unversioned counter might count closed EVENTS,
+ * not repairs. Only a coherent complete census with a positive closed-info witness identifies that
+ * specific old producer signature. Sparse/ambiguous legacy data stays unverified, not recovered.
+ * Narrative text and repeated-row multiplicity are deliberately not repair measurements.
+ *
+ * Supported rule 2 retains its visible one-time adjustment even on cropped evidence (qualified, not
+ * exact current-rule truth). Future rules retain producer totals without assuming their definitions.
+ * Existing fractional normalization is retained for versioned numeric compatibility, not used to
+ * manufacture a valid producer tag or a positive historical signature.
+ */
+export function interpretRepairCount(report: HealReportLike | null | undefined): HealCountInterpretation {
+  const rawAutoResolved = report?.counts?.autoResolved;
+  const rawHealRule = report?.counts?.healRule;
+  const compatibilityCount = compatibleHealCount(report);
+  const timeline = repairTimelineEvidence(report);
+  const issues = Array.isArray(report?.issues) ? report!.issues! : null;
+  const observed = issues ? issues.filter(isSelfHeal).length : null;
+  let provenance: HealCountProvenance = 'unrecorded';
+  let total: number | null = null;
+  if (compatibilityCount !== null) {
+    if (censusInteger(rawHealRule) && rawHealRule >= 2) {
+      total = compatibilityCount;
+      provenance = rawHealRule === HEAL_RULE ? 'current-rule'
+        : rawHealRule > HEAL_RULE ? 'future-rule'
+          : timeline.status === 'complete' ? 'rule-2-adjusted' : 'rule-2-visible-adjustment';
+    } else {
+      const closedEvents = issues?.filter((i) => i?.autoResolved === true).length;
+      const closedInfo = issues?.some((i) => i?.autoResolved === true && i.severity === 'info');
+      provenance = rawHealRule == null && timeline.status === 'complete' && censusInteger(rawAutoResolved)
+        && rawAutoResolved === closedEvents && closedInfo ? 'legacy-closed-events' : 'legacy-unverified';
+    }
+  }
+  const rawCount = rawCountEvidence(rawAutoResolved);
+  const rawRule = rawCountEvidence(rawHealRule);
+  return { rawAutoResolved: rawCount.value, rawHealRule: rawRule.value,
+    rawAutoResolvedState: rawCount.state, rawHealRuleState: rawRule.state,
+    total, compatibilityCount, provenance, observed, timeline };
+}
+
+/** Read a listing projection without reviving unknowns or losing a valid older versioned projection. */
+export function repairCountFromProjection(report: HealReportLike & {
+  healCodes?: { total: number | null; interpretation?: HealCountInterpretation } | null;
+}): HealCountInterpretation | null {
+  if (report.healCodes === null) return null; // normalization failed; raw fallback is not evidence
+  const interpreted = report.healCodes?.interpretation ?? interpretRepairCount(report);
+  if (report.healCodes === undefined) return interpreted;
+  return { ...interpreted, total: interpreted.total === null || !hasMeasuredRepairProvenance(interpreted.provenance)
+    ? null : report.healCodes.total };
+}
+
+/**
+ * Compatibility API for historical callers. A proven closed-event counter is never a repair total.
+ * Other legacy arithmetic is retained, but unverified: measurement consumers MUST use
+ * interpretRepairCount().total and carry its provenance instead of promoting this estimate.
+ */
+export function healCountOf(report: HealReportLike | null | undefined): number | null {
+  const interpreted = interpretRepairCount(report);
+  return interpreted.provenance === 'legacy-closed-events' ? null : interpreted.compatibilityCount;
 }

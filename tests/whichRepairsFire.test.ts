@@ -34,17 +34,19 @@ describe('summarizeHealCodes — one build', () => {
         { code: 'TOOL_DONE', severity: 'info', autoResolved: true },
         { code: 'HEARTBEAT', severity: 'info', autoResolved: true },
       ],
-      counts: { autoResolved: 3 },
+      counts: { healRule: 3, autoResolved: 3 },
     })).toEqual({
       codes: { DESIGN_HEALED: 2, RUNTIME_VERIFIED: 1 },
       total: 3,
       unattributed: 0,
+      interpretation: { rawAutoResolved: 3, rawHealRule: 3, rawAutoResolvedState: 'numeric', rawHealRuleState: 'numeric', total: 3, compatibilityCount: 3, provenance: 'current-rule',
+        observed: 3, timeline: { status: 'unknown', reason: 'missing-total' } },
     });
   });
 
-  it('🔴 a TRIMMED timeline is declared, never presented as the whole list', () => {
+  it('🔴 a known attribution deficit is declared without assuming its cause', () => {
     // 86 heals really happened; the stored timeline shows two. That gap is the whole point.
-    const t = summarizeHealCodes({ issues: [heal('A'), heal('B')], counts: { autoResolved: 86 } });
+    const t = summarizeHealCodes({ issues: [heal('A'), heal('B')], counts: { healRule: 3, autoResolved: 86 } });
     expect(t).toMatchObject({ codes: { A: 1, B: 1 }, total: 86, unattributed: 84 });
   });
 
@@ -61,32 +63,33 @@ describe('summarizeHealCodes — one build', () => {
   });
 
   it('a count with no timeline is still a measurement — every heal unattributed', () => {
-    expect(summarizeHealCodes({ counts: { autoResolved: 5 } }))
-      .toEqual({ codes: {}, total: 5, unattributed: 5 });
+    expect(summarizeHealCodes({ counts: { healRule: 3, autoResolved: 5 } }))
+      .toEqual({ codes: {}, total: 5, unattributed: 5, interpretation: { rawAutoResolved: 5, rawHealRule: 3, rawAutoResolvedState: 'numeric', rawHealRuleState: 'numeric', total: 5,
+        compatibilityCount: 5, provenance: 'current-rule', observed: null, timeline: { status: 'unknown', reason: 'missing-timeline' } } });
   });
 
   it('a heal with no code is named UNCODED rather than dropped', () => {
-    expect(summarizeHealCodes({ issues: [{ autoResolved: true }], counts: { autoResolved: 1 } }))
+    expect(summarizeHealCodes({ issues: [{ autoResolved: true }], counts: { healRule: 3, autoResolved: 1 } }))
       .toMatchObject({ codes: { UNCODED: 1 }, unattributed: 0 });
   });
 
   it('never negative: a timeline richer than its count does not lend a shortfall to another build', () => {
-    const t = summarizeHealCodes({ issues: [heal('A'), heal('A'), heal('A')], counts: { autoResolved: 1 } });
+    const t = summarizeHealCodes({ issues: [heal('A'), heal('A'), heal('A')], counts: { healRule: 3, autoResolved: 1 } });
     expect(t?.unattributed).toBe(0);
   });
 
   it('🔒 past the per-build code cap it stops NAMING and keeps COUNTING', () => {
     const many = Array.from({ length: MAX_CODES_PER_BUILD + 8 }, (_, i) => heal(`C${i}`));
-    const t = summarizeHealCodes({ issues: many, counts: { autoResolved: many.length } });
+    const t = summarizeHealCodes({ issues: many, counts: { healRule: 3, autoResolved: many.length } });
     expect(Object.keys(t!.codes)).toHaveLength(MAX_CODES_PER_BUILD);
     // `seen` counted all of them, so the cap does not manufacture a phantom shortfall.
     expect(t!.unattributed).toBe(0);
   });
 
   it('a malformed issue is skipped, never fatal — an observability field cannot break a listing', () => {
-    expect(() => summarizeHealCodes({ issues: [null as any, 7 as any, heal('A')], counts: { autoResolved: 1 } }))
+    expect(() => summarizeHealCodes({ issues: [null as any, 7 as any, heal('A')], counts: { healRule: 3, autoResolved: 1 } }))
       .not.toThrow();
-    expect(summarizeHealCodes({ issues: [null as any, heal('A')], counts: { autoResolved: 1 } })?.codes)
+    expect(summarizeHealCodes({ issues: [null as any, heal('A')], counts: { healRule: 3, autoResolved: 1 } })?.codes)
       .toEqual({ A: 1 });
   });
 });
@@ -160,8 +163,8 @@ describe('the headline says what to fix, and how much of it it cannot see', () =
 
   it('🔴 states the incompleteness IN the sentence, not as a droppable footnote', () => {
     const h = scorecardHeadline(builderScorecard([build({ A: 2 }, 86)]));
-    expect(h).toContain('84 further repair(s) happened and could not be named');
-    expect(h).toContain('this ranking is incomplete by that much');
+    expect(h).toContain('84 recorded repair(s) could not be attributed to visible rows');
+    expect(h).toContain('the count difference alone does not establish storage trimming');
   });
 
   it('a COMPLETE ranking claims no shortfall', () => {

@@ -10,6 +10,7 @@
 // Pattern mirrors DiagnosticsStore: firebase-admin, VITEST-skip, best-effort, never throws.
 
 import * as admin from 'firebase-admin';
+import { interpretRepairCount, type HealCountInterpretation } from '../../lib/healIssue';
 import { applyReportMark, type ReportTriage } from './reportTriage';
 import { getServerDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
@@ -184,7 +185,9 @@ export interface AdminBuildReportMeta {
    * the rate, never counted as a clean build (that would silently inflate the one number we use to
    * judge whether the engine is improving). See firstPassStatsFromMeta.
    */
-  healCount?: number;
+  healCount?: number | null;
+  /** Additive provenance for new metadata; old scalar-only rows remain unverified. */
+  repairCount?: HealCountInterpretation;
   unresolvedCount?: number;
   /** Non-blocking findings left open (`counts.leftOpen`). Absent on older reports. */
   leftOpenCount?: number;
@@ -347,6 +350,8 @@ export function buildAdminReportRecord(
 ): AdminBuildReportRecord {
   // The focused build gets the full call budget, and is guaranteed to fit the document by the same
   // function every other durable copy uses. Before 2026-09-30 it was trimmed with no size check at all.
+  // Interpret the evidence already in memory BEFORE this copy is further trimmed. No historical fetch.
+  const repairCount = interpretRepairCount(report);
   const trimmed = fitReportForStorage(report);
   const id = `${ctx.reportedAt}_${(ctx.workspaceId ?? 'nows').replace(/[^A-Za-z0-9_-]/g, '')}`;
   const userTier = cap(trimmed.billing?.userTier, 80);
@@ -431,9 +436,9 @@ export function buildAdminReportRecord(
       summary: inFlight && !trimmed.summary
         ? `Reported while the build was STILL RUNNING (${Math.floor(runningFor / 60)}m ${runningFor % 60}s in). There is no verdict, cost, duration or post-build check yet — those are written when the build finishes. Everything below is a snapshot of the work in progress.`
         : cap(trimmed.summary, 400),
-      // counts.autoResolved already EXCLUDES observations (advisory notes about the user's own code),
-      // which is what keeps the self-heal tally from inflating itself — see BuildDiagnostics.
-      healCount: typeof trimmed.counts?.autoResolved === 'number' ? trimmed.counts.autoResolved : undefined,
+      // Preserve the raw report; only this additive projection interprets the counter's provenance.
+      healCount: repairCount.total,
+      repairCount,
       unresolvedCount: typeof trimmed.counts?.unresolved === 'number' ? trimmed.counts.unresolved : undefined,
       leftOpenCount: typeof trimmed.counts?.leftOpen === 'number' ? trimmed.counts.leftOpen : undefined,
       // 1 part = just the focused build; more when the whole session came with it. A session that did

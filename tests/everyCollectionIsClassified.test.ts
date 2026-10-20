@@ -108,6 +108,7 @@ const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; wh
 };
 
 const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
+  agentv3_build_requests: { kind: 'user', why: 'bounded digest/status request replay tombstones, no raw inputs; explicit verified ownerId account erasure, account-lifetime retention prevents old UUID replay' },
   admin_failed_report_oauth_clients: { kind: 'platform', why: 'OAuth dynamic client registrations for the owner-only failed-report connector (failedReportOAuth.ts): client name, redirect URLs and a HASHED secret, capped at 100 in a transaction, 30-day expiry, expired rows swept on the next registration — no customer data' },
   admin_failed_report_oauth_requests: { kind: 'platform', why: 'pending owner-consent requests for that connector (failedReportOAuth.ts): client id, redirect URL, PKCE challenge, and after approval a HASHED one-time code; capped at 100, 10-minute expiry (2 minutes once approved), deleted on denial or code exchange, expired rows swept on the next request — no customer data' },
   admin_failed_report_access: { kind: 'platform', why: 'bounded owner-issued report-access configuration (at most 100 hashed credentials, transaction-enforced); not customer-owned data, 30-day authentication expiry, owner revocation removes the record' },

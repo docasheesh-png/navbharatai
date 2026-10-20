@@ -21,11 +21,15 @@ export interface QueueItem {
   createdTs: number;
   /** Set when a step ends: a short honest note (e.g. a failure reason). */
   note?: string;
+  claimToken?: string;
+  claimedAt?: number;
+  boundAttemptId?: string;
 }
 
 export interface CommandQueue {
   workspaceId: string;
   items: QueueItem[];
+  paused?: boolean;
 }
 
 /** Max pending commands a single app's queue may hold (bounds runaway roadmaps + cost). */
@@ -37,7 +41,7 @@ export function emptyQueue(workspaceId: string): CommandQueue {
 
 /** A pure clone so operations never mutate the caller's state (durable store reads stay intact). */
 function clone(q: CommandQueue): CommandQueue {
-  return { workspaceId: q.workspaceId, items: q.items.map((i) => ({ ...i })) };
+  return { ...q, items: q.items.map((i) => ({ ...i })) };
 }
 
 export function pendingItems(q: CommandQueue): QueueItem[] {
@@ -77,12 +81,13 @@ export interface ClaimResult {
  * Claim the next command for execution: the OLDEST pending item becomes 'running'. Refuses (claimed:null)
  * when a command is already running (serial invariant — one writer per app) or nothing is pending. Pure.
  */
-export function claimNext(q: CommandQueue): ClaimResult {
-  if (runningItem(q)) return { queue: q, claimed: null };
+export function claimNext(q: CommandQueue, claim?: { token: string; at: number }): ClaimResult {
+  if (q.paused || runningItem(q)) return { queue: q, claimed: null };
   const idx = q.items.findIndex((i) => i.status === 'pending');
   if (idx === -1) return { queue: q, claimed: null };
   const next = clone(q);
   next.items[idx].status = 'running';
+  if (claim) { next.items[idx].claimToken = claim.token; next.items[idx].claimedAt = claim.at; }
   return { queue: next, claimed: { ...next.items[idx] } };
 }
 
@@ -135,13 +140,13 @@ const STATUSES: QueueItemStatus[] = ['pending', 'running', 'done', 'failed', 'ca
 const SOURCES: QueueItemSource[] = ['user', 'planner', 'advisor'];
 
 export function serializeQueue(q: CommandQueue): string {
-  return JSON.stringify({ workspaceId: q.workspaceId, items: q.items, version: 1 });
+  return JSON.stringify({ workspaceId: q.workspaceId, items: q.items, ...(q.paused ? { paused: true } : {}), version: 1 });
 }
 
 /**
  * Parse a stored queue for `workspaceId`. STRICT: any malformed item is dropped, and unparseable input
- * yields an empty queue — so the executor never runs on garbage. A stale 'running' item (an instance
- * died mid-build) is healed to 'failed' on load, so the serial slot is never permanently stuck.
+ * yields an empty queue. Running items are preserved; explicit lease-backed recovery is separate.
+ * The durable store rejects malformed records rather than admitting work from an uncertain state.
  */
 export function parseStoredQueue(workspaceId: string, raw: unknown): CommandQueue {
   let obj: unknown = raw;
@@ -155,11 +160,13 @@ export function parseStoredQueue(workspaceId: string, raw: unknown): CommandQueu
     if (typeof o?.id !== 'string' || typeof o?.prompt !== 'string' || typeof o?.createdTs !== 'number') continue;
     if (!STATUSES.includes(o.status as QueueItemStatus)) continue;
     if (!SOURCES.includes(o.source as QueueItemSource)) continue;
-    let status = o.status as QueueItemStatus;
-    // A 'running' item from a prior (dead) instance can't still be executing here — heal it so the
-    // single serial slot is free (the caller can re-enqueue). Only ONE running is ever valid anyway.
-    if (status === 'running') { if (sawRunning) continue; sawRunning = true; status = 'failed'; }
-    parsed.push({ id: o.id, prompt: o.prompt, source: o.source as QueueItemSource, status, createdTs: o.createdTs, ...(typeof o.note === 'string' ? { note: o.note } : {}) });
+    const status = o.status as QueueItemStatus;
+    // Reading storage proves nothing about whether another process is still executing.
+    if (status === 'running') { if (sawRunning) continue; sawRunning = true; }
+    parsed.push({ id: o.id, prompt: o.prompt, source: o.source as QueueItemSource, status, createdTs: o.createdTs, ...(typeof o.note === 'string' ? { note: o.note } : {}),
+      ...(typeof o.claimToken === 'string' ? { claimToken: o.claimToken } : {}),
+      ...(typeof o.claimedAt === 'number' && Number.isFinite(o.claimedAt) ? { claimedAt: o.claimedAt } : {}),
+      ...(typeof o.boundAttemptId === 'string' ? { boundAttemptId: o.boundAttemptId } : {}) });
   }
-  return { workspaceId, items: parsed };
+  return { workspaceId, items: parsed, ...((obj as { paused?: unknown })?.paused === true ? { paused: true } : {}) };
 }

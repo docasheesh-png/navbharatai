@@ -111,6 +111,9 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'user_token_wallets', key: 'docId' },
   { collection: 'user_costs', key: { field: 'userId' } },
   { collection: 'user_build_history', key: { field: 'userId' } },
+  // Minimal request replay tombstones: remove with the verified owner, never on a timer that could
+  // admit the same old UUID again. No prompt, source, secret or provider response is stored.
+  { collection: 'agentv3_build_requests', key: { field: 'ownerId' } },
   { collection: 'chat_sessions', key: { field: 'userId' } },
   { collection: 'user_vault_pin', key: 'docId' },
   { collection: 'agentv3_mcp_library', key: 'docId' },
@@ -774,6 +777,7 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
   { collection: 'app_builds', reason: "the user's own build record" },
   { collection: 'user_build_history', reason: "the user's own history; removed with their account, not with age" },
   { collection: 'build_history_v2', reason: "the user's owner-scoped restore points; bounded per app and removed with their account, not with age" },
+  { collection: 'agentv3_build_requests', reason: 'request replay tombstones kept while the account exists; deleting one on age would permit its old UUID to execute again. Erased by verified ownerId on account deletion' },
   { collection: 'user_costs', reason: 'money. A billing record deleted on a timer cannot be reconciled or disputed' },
   /**
    * Money. Privacy §9's FIRST stated exception to erasure, and Indian tax and accounting law requires

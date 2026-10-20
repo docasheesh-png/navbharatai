@@ -97313,3 +97313,44 @@ money-path change (Q-1131), and this is the class of code where a local gate is 
 has lifted, so the row is actionable again: the un-reconcilable-credit fact goes onto the order itself, in
 the SAME `runTransaction` `tx.update` that flips PENDING->SUCCESS, never as a second write (Q-613 exists to
 protect that one transaction).
+### Phase 1 merged; Phase 2 coordination checkpoint — 2026-10-20
+
+Phase 1 later passed exact-head GitHub coverage CI (`https://github.com/docasheesh-png/navbharatai/actions/runs/39370215420`) and PR #3847 merged as `885ba41023c2f7327be956aadc71f79ee2840821`. The pending statement above is the earlier local checkpoint.
+
+Phase 2's queue/retry sub-PR replaces stale queue-cache admission, running-to-failed deserialization and false in-memory acknowledgements with authoritative database operations. Queue execution binds item/claim/server-attempt identities and settles only that binding; legacy completion is a reconciliation hint, never permission to guess a newer row. Explicit stale recovery requires confirmed non-live ownership and pauses for review. Six queue routes require the verified workspace owner. Input-digest request receipts give identified builder retries the same existing wallet operation reference; missing wallet references are rejected. Receipt owner erasure, account-lifetime replay retention and admin inventory are registered together. Mounted-client unknown retries retain their identity, queue acknowledgements are validated, and captured workspace generations prevent delayed A callbacks from applying to B.
+
+The shared runtime is preserved. Safe lease hardening refuses unavailable/unverified admission and same-owner live-token replacement, checks transaction deadlines and never revives an expired lease. Stop continues heartbeating while a captured build is ended but has not exited; source/runtime work may still be draining. The queue/request helper extraction keeps the handler branch ratchet, reducing 546 to 543 rather than increasing its budget. Real demo Firestore multiprocess checks passed 14/14 in the scoped branch, including TCP cuts, explicit crash recovery, wallet/receipt races and labelled committed-ACK-loss injections. No paid provider/E2B/store build or production data mutation was used. Required final-source full local gates and exact-head CI remain release gates; the PR records their actual outcomes and merge state.
+
+**Phase 2 is not complete.** The rejected per-attempt runtime prototype remains locally on `codex/phase-2-build-safety` at `7c0642f`, not eligible to merge: fresh sandboxes change iframe origin and strand supported IndexedDB/localStorage/cookies/OAuth state, sandbox PostgreSQL/SQLite/uploads and generated session/JWT secrets. Passing source-file/container fault drills does not preserve those data. A stable isolated preview origin and verified state-preserving supervisor/drain or migration are required. Existing in-flight command and canonical-source fencing, external publishing/late-upload reconciliation, and automatic queued-step continuation across resumable windows remain open. The scoped sub-PR deliberately preserves runtime/source/snapshot behavior while these are designed. Details and evidence limits: `docs/PHASE2_QUEUE_RETRY.md`.
+
+Phases 3–6 remain unstarted in the owner's requested order. Configured staging, test account, stable preview proxy/domain reference and a spend limit have been requested for the remaining integration/benchmark work. A failure-only feed cannot establish an all-build success denominator. No permanent 100/100 score is asserted.
+
+
+### 2026-10-20 — Phase 2 checkpoint: ZIP admission and long-import lease sibling
+
+Full-suite preflight on the scoped queue/retry branch exposed the ZIP importer
+relying on fail-open admission. ZIP now claims verified ownership before actuator
+construction/ensureWorkspace, reports unavailable or disabled coordination as
+retryable503 and busy as409, and holds its exact token until actual finally.
+A response disconnect does not release it. Observed uncertainty/Stop/expiry/loss
+refuses new calls and durable merge; an already-running provider call is not fenced.
+The registered route and heartbeat helper pass55 focused tests, including180s
+virtual wall-clock imports; this is not180s production provider evidence.
+Two source-census tests now follow the extracted heartbeat and reused workspace
+identity, preserving Stop billing and clear-before-write checks. The worktree
+node_modules symlink was replaced with a real copied install, without changing
+package versions or weakening its directory guard. Final-source full checks and
+exact-head remote coverage/real-database drills are still required before push
+and merge. Phase2 remains IN PROGRESS; phases3–6 have not started.
+
+
+### 2026-10-20 — Phase 2 final-source census correction
+
+The post-ZIP full-suite preflight found one stale exact-assignment assertion in
+the server Firestore SDK census: verified admission now conditionally supplies
+null when coordination is disabled. The test now requires the real admin import,
+admin handle initializer and passing that store to claimWorkspaceBuild, while
+retaining both whole-server client-SDK and shared-client-handle prohibitions.
+Nine relevant files pass116/116 underNode22/UTC; no production code changed.
+The known-failing preflight was stopped and all final-source local checks must
+run again before push. No full-suite or remoteCI pass is claimed by this entry.

@@ -16,7 +16,7 @@ permanent 100/100 rating or leadership over other products.
 | Phase | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
 | 1 | Security and authorization | MERGED / CI VERIFIED; OWNERSHIP FOLLOW-UP OPEN | [PR #3847](https://github.com/docasheesh-png/navbharatai/pull/3847), [successful exact-head CI](https://github.com/docasheesh-png/navbharatai/actions/runs/39370215420), merged as `885ba41023c2f7327be956aadc71f79ee2840821`. Phase2 review found that full legacy workspace IDs still collide for valid custom UID/session pairs; private access needs independent verified ownership, not a prefix. Legacy recovery and dependency exceptions remain documented. |
-| 2 | Concurrent-build safety and recovery | IN PROGRESS | Queue/retry/import-lease [PR #3848](https://github.com/docasheesh-png/navbharatai/pull/3848) merged after [both CI jobs passed](https://github.com/docasheesh-png/navbharatai/actions/runs/39378125233), merge `06f8065629debbd846c1f836241c5be9a5a8337e`. [PR #3852](https://github.com/docasheesh-png/navbharatai/pull/3852) adds uncertain reconnect refusal, deadline body-exit holds and verified-owner asset storage/erasure, pending final verification. See PHASE2_STATE_PRESERVATION.md. Legacy ownership, full runtime/state preservation, queued resumable handoff and late-write reconciliation remain open. |
+| 2 | Concurrent-build safety and recovery | IN PROGRESS | Queue/retry/import-lease [PR #3848](https://github.com/docasheesh-png/navbharatai/pull/3848) merged after [both CI jobs passed](https://github.com/docasheesh-png/navbharatai/actions/runs/39378125233), merge `06f8065629debbd846c1f836241c5be9a5a8337e`. [PR #3852](https://github.com/docasheesh-png/navbharatai/pull/3852) adds uncertain reconnect refusal, deadline body-exit holds and verified-owner asset storage/erasure, pending final verification. See PHASE2_STATE_PRESERVATION.md. The separate normal-module queue handoff checkpoint retains the logical claim through one-use authorized windows; its combined-source gate and CI remain pending. See PHASE2_QUEUE_MODULE_HANDOFF.md. Legacy ownership, full runtime/state preservation, physical command/source fencing and late-write reconciliation remain open. |
 | 3 | Reproducible quality baseline | NOT STARTED | Start after Phase 2; use existing benchmark harness and real outcome evidence. |
 | 4 | Generated-app correctness | NOT STARTED | Start after Phase 3; prioritize measured failure cohorts. |
 | 5 | Maintainability and strict typing | NOT STARTED | Start after Phase 4; preserve behavior while extracting bounded modules. |
@@ -64,6 +64,13 @@ migration. Checking current Auth accounts or parsing the key cannot establish
 historical ownership. This is an OPEN security boundary, not completed Phase1
 readiness, and blocks an unconditional 100/100 claim.
 
+The concrete prospective registry, client continuity, rollout and verified legacy
+migration design is preserved in
+[PHASE2_VERIFIED_WORKSPACE_OWNERSHIP_DESIGN.md](PHASE2_VERIFIED_WORKSPACE_OWNERSHIP_DESIGN.md).
+It is **design only, not implemented**. New authority must precede every private
+read/write and retain existing app identities; erasure refusal does not make
+current private legacy access safe.
+
 ## Phase 2 — concurrent-build safety and recovery
 
 - Inspect the existing queue, workspace lease, write serialization and wallet
@@ -76,6 +83,14 @@ readiness, and blocks an unconditional 100/100 claim.
 Acceptance: meaningful concurrency/fault tests show no overlapping authorized
 writes or duplicate charges in the exercised scenarios. Record any untested
 production infrastructure boundary.
+
+The remaining fresh-allocation gate has a reviewed
+[allocation authority and initialization design](PHASE2_ALLOCATION_AUTHORITY_DESIGN.md).
+It is **design only, not implemented**: a small pending flag or SDK retry change
+does not cover unknown dispatch, initialization, identity publication and stale
+writers. A local SDK fixture observed two allocation POSTs under default retries
+and one with retries disabled; neither result establishes provider cancellation,
+full state restoration or a completed production allocation protocol.
 
 Read-only preparation identified these existing paths to investigate after
 Phase 1 acceptance:

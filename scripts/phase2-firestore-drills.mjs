@@ -478,22 +478,43 @@ async function coordinator() {
 
       await check('Stop and normal retirement serialize both queue readiness and predecessor lease deletion', async () => {
         const observed = [];
-        for (const order of ['stop-first', 'retire-first', 'concurrent']) {
+        for (const order of ['stop-first', 'retire-first', 'concurrent', 'concurrent-retire-ack-loss', 'concurrent-stop-ack-loss']) {
           const f = await moduleFixture(`handoff-stop-retire-${order}`); const handoff = await propose(f);
           let retired;
+          let retirementAck = 'confirmed'; let stopAck = 'confirmed';
           if (order === 'stop-first') { await b.ok('continuation-stop', { workspaceId: f.workspaceId }); retired = await retire(f, handoff); }
           else if (order === 'retire-first') { retired = await retire(f, handoff); await b.ok('continuation-stop', { workspaceId: f.workspaceId }); }
-          else [retired] = await Promise.all([retire(f, handoff), b.ok('continuation-stop', { workspaceId: f.workspaceId })]);
+          else {
+            const [retirement, stopped] = await Promise.all([
+              a.ask('continuation-retire', { workspaceId: f.workspaceId, binding: f.binding, nonce: handoff.nonce,
+                ...(order === 'concurrent-retire-ack-loss' ? { fault: 'ack-loss' } : {}) }),
+              b.ask('continuation-stop', { workspaceId: f.workspaceId,
+                ...(order === 'concurrent-stop-ack-loss' ? { fault: 'ack-loss' } : {}) }),
+            ]);
+            if (order === 'concurrent-retire-ack-loss') assert.equal(retirement.ok, false);
+            if (order === 'concurrent-stop-ack-loss') assert.equal(stopped.ok, false);
+            if (retirement.ok) { assert.equal(typeof retirement.result, 'boolean'); retired = retirement.result; }
+            else { assert.equal(retirement.error.code, 'QUEUE_STORE_UNAVAILABLE'); retirementAck = 'unknown'; }
+            if (!stopped.ok) {
+              assert.equal(stopped.error.code, 'QUEUE_STORE_UNAVAILABLE'); stopAck = 'unknown/reconciled';
+              // Contention can exceed the real production deadline; UNKNOWN is not an operation
+              // result. Confirm the same idempotent Stop before checking the durable invariant.
+              const confirmed = await control.ok('continuation-stop', { workspaceId: f.workspaceId });
+              assert.equal(confirmed.queuePaused, true);
+            }
+          }
           const current = await control.ok('load', { workspaceId: f.workspaceId });
           const lease = await control.ok('durable', { workspaceId: f.workspaceId, collection: 'agentv3_build_leases' });
           assert.equal(current.paused, true); assert.equal(current.items[0].continuation, undefined);
-          if (retired) assert.equal(lease, null, 'READY committed without atomically deleting its predecessor lease.');
-          else { assert.equal(lease.token, f.binding.attemptId); assert.equal(lease.stopRequested, true); }
+          if (retired === true) assert.equal(lease, null, 'READY committed without atomically deleting its predecessor lease.');
+          else if (retired === false || lease !== null) { assert.equal(lease.token, f.binding.attemptId); assert.equal(lease.stopRequested, true); }
           assert.equal(await retire(f, handoff), false, 'Old cleanup recreated a cancelled handoff.');
           assert.equal(await control.ok('claim', { workspaceId: f.workspaceId }), null);
-          observed.push({ order, retired, queuePaused: true, predecessorLease: lease ? 'stop-requested' : 'deleted-in-retirement' });
+          observed.push({ order, retired: retired ?? 'unknown', retirementAck, stopAck, queuePaused: true,
+            predecessorLease: lease ? 'stop-requested' : 'deleted-in-retirement' });
         }
-        return { interleavings: observed, nextStepBlocked: true };
+        return { interleavings: observed, nextStepBlocked: true,
+          injection: 'Two additional concurrent interleavings throw only AFTER an actual retirement or Stop commit; natural deadline outcomes remain explicitly unknown.' };
       });
 
       await check('Stop racing handoff consumption cancels the ticket and flags the current successor lease', async () => {

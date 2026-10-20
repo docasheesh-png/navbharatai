@@ -97667,3 +97667,77 @@ Phase2 remains IN PROGRESS. Legacy private access/migration, physical SDK/source
 fencing, full state/origin preservation and production-provider evidence remain
 OPEN. Phases3–6 have not started. Merge authorization remains conditional on
 green exact-head CI; no 100/100 or phase completion is inferred from these fixes.
+
+### 2026-10-20 — Phase2 normal successful queued-module handoff checkpoint
+
+The isolated checkpoint `37e667e` keeps logical queue step A running across
+normal successful resumable module windows, so B cannot start early. A
+server-authored one-use ticket carries the exact claim and predecessor attempt.
+Only explicit normal retirement can atomically mark it READY and delete A's
+lease; the successor consumes that ticket under its own exact lease/attempt.
+Observed source/memory/proof jobs and captured stream/mirror cleanup are joined
+before READY. Generic heartbeat release cannot authorize continuation, including
+a committed READY whose ACK is delayed. Deadline provenance, Stop, later errors
+or uncertain cleanup pause/review rather than completing unfinished logical A.
+Stop and Unsend cancel queue+current lease durably; client Stop/Edit/Unsend and
+navigation invalidate captured polls. Reopen pauses for review. Same-window
+request retries retain their UUID/body; new authorized windows retain existing
+per-window optional-receipt/billing semantics without a queue-wide debit key.
+
+Pre-merge local evidence: 18 focused files /261 tests, 21/21 real Firestore
+multiprocess drills, sequential frontend/server typechecks and unused-imports/
+locals guard passed. Coordinator, atomic lease deletion, client readiness and
+mirror-join reversions each failed the corresponding real regression and were
+restored. Independent store and broad integration reviews cleared this scope.
+Merge `7c6194c` combines it with frozen state-preservation `9ca0ddd`, preserving
+the separately verified asset-owner argument, deadline helper/census, five
+unverified-erasure guards, disclosures and earlier progress history. Combined
+final-source gates and exact-head CI remain pending; no new head is pushed.
+
+This is normal logical handoff readiness, not physical provider/process drain.
+Timed-out underlying saves, ordinary manual/cross-worker source fencing,
+cross-instance account-mirror generation, mixed-version rollout, historical
+workspace ownership/private access and verified migration remain OPEN. Full
+state/origin preservation and production-provider outcomes are still unproven.
+Phase2 remains IN PROGRESS; phases3–6 have not started. The bounded contract and
+validation details are in `docs/PHASE2_QUEUE_MODULE_HANDOFF.md`.
+
+The reviewed prospective ownership artifact is now permanently retained in
+`docs/PHASE2_VERIFIED_WORKSPACE_OWNERSHIP_DESIGN.md`, rather than relying on the
+temporary execution artifact referenced in the earlier checkpoint. It is
+DESIGN/NOT IMPLEMENTED and preserves the corrected existing verified-conversation
+handler finding: a stale helper/comment is not a reachable production claimed-read
+path. Legacy private access, immutable owner attribution and verified migration
+remain OPEN; the design does not authorize automatic first-access adoption.
+
+Merged-source review also found known asset jobs outside the normal handoff
+barrier: an import can resume an existing plan, and the normal binary-save report
+uses a timeout that does not cancel its underlying write. The shared tracker now
+starts before imports, observes their file/asset jobs and partial/failed outcomes,
+and tracks both normal binary work and its reporting deadline. A wrapper timeout
+requires review even if that work later returns. Both asset writers receive only
+the verified optional owner. Joined void calls establish settlement, not confirmed
+byte durability. Actual asset-helper/queue tests and the updated lease census
+passed in the 5-file/79-test focused merged cohort. The branch ratchet remains
+543; no budget or source guard was weakened. Complete gates remain pending.
+
+The reviewed allocation protocol and its independent review are permanently
+retained in `docs/PHASE2_ALLOCATION_AUTHORITY_DESIGN.md` as DESIGN/NOT IMPLEMENTED.
+The local dummy-credential loopback fixture observed two allocation POSTs with
+SDK defaults and one with retries disabled. A retry option alone cannot provide
+durable dispatch, exact created-ID binding, private initialization ownership,
+complete source/asset receipts or conditional identity writers. UNKNOWN issued
+work must not become a time-reclaimed new create. No allocation runtime feature,
+provider test, old-machine drain or complete restoration guarantee is added.
+
+Final merged focused evidence is 20 files /310 tests, with frontend/server
+types (sequential), imports/locals, native, OAuth, production build, bundle,
+isolated-port boot, production dependencies, audit/license and SBOM all passing.
+An emulator rerun first failed on a real queue deadline during a concurrent
+Stop/retirement race: the drill required an ACK instead of preserving UNKNOWN.
+That failed run remains recorded. The race now reconciles an unconfirmed call
+through authoritative paused/no-ticket/exact-lease reads and, for unknown Stop,
+a positively confirmed idempotent Stop. Strict ordered scenarios, original
+fourteen checks, count21 and all production deadlines remain unchanged. Two
+explicit post-commit ACK-loss interleavings exercise that handling. The complete
+21/21 rerun passed. Full final-source suite and exact-head CI are still pending.

@@ -6,6 +6,8 @@ import { BUILD_REQUEST_COLLECTION, type BuildRequestStore } from '../src/server/
 import { claimWorkspaceBuild, releaseWorkspaceBuild, LEASE_HEARTBEAT_MS, WORKSPACE_BUILD_LEASE_COLLECTION, type BuildLeaseStore } from '../src/server/AgentV3/workspaceBuildLease';
 import type { RunningBuild } from '../src/server/AgentV3/runningBuildRegistry';
 import { createBuildSourcePublication } from '../src/server/AgentV3/BuildSourcePublication';
+import { persistBuildAssets } from '../src/server/AgentV3/buildAssets';
+import { withTimeout } from '../src/server/AgentV3/asyncUtils';
 
 const WS = 'agentv3-owner-session123';
 const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -201,6 +203,42 @@ describe('real queue/request coordination across normal successful module window
     finish(true); expect(await retirement).toBe(false);
     expect(closed).not.toHaveBeenCalled();
     expect((await f.queue.load(WS)).paused).toBe(true);
+  });
+
+  it.each([false, true])('an asset report timeout pauses automatic handoff even if the raw save later finishes (stillPending=%s)', async (stillPending) => {
+    vi.useFakeTimers();
+    const f = await firstWindow();
+    const source = createBuildSourcePublication();
+    let finishSave!: () => void;
+    const saved = new Promise<void>((resolve) => { finishSave = resolve; });
+    const assets = new Map<string, string>();
+    let saveStarted = false;
+    const rawAssets = source.track(persistBuildAssets({
+      listFiles: async () => ['public/logo.png'], readBinaryFile: async () => 'YWJj',
+    }, WS, {
+      heldPaths: async () => [],
+      save: async (_workspace, files) => { saveStarted = true; await saved; assets.set('public/logo.png', files['public/logo.png']); },
+    }));
+    const reported = source.track(withTimeout(rawAssets, 20_000, 'build-assets')).catch(() => 'timed-out');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(await reported).toBe('timed-out');
+    expect(saveStarted).toBe(true);
+    f.publish(moduleResult); await f.request.flushPublication();
+    const closeDelivery = vi.fn(async () => true);
+    expect((await f.queue.load(WS)).items[0].continuation?.phase).toBe('pending');
+    expect(f.docs.has(`${WORKSPACE_BUILD_LEASE_COLLECTION}/${WS}`)).toBe(true);
+    if (!stillPending) { finishSave(); await rawAssets; }
+    const retirement = f.request.retireNormalModule(
+      () => normalQueuedModuleRetirementAllowed(new AbortController().signal, {}, !source.uncertain()),
+      closeDelivery, () => source.join());
+    if (stillPending) await vi.advanceTimersByTimeAsync(15_000);
+    expect(await retirement).toBe(false);
+    expect((await f.queue.load(WS))).toMatchObject({ paused: true, items: [{ status: 'failed' }, { status: 'pending' }] });
+    expect(closeDelivery).not.toHaveBeenCalled();
+    expect(f.docs.has(`${WORKSPACE_BUILD_LEASE_COLLECTION}/${WS}`)).toBe(true);
+    finishSave(); await rawAssets; // A timeout did not physically cancel the old storage call.
+    expect(assets.get('public/logo.png')).toBe('data:image/png;base64,YWJj');
+    expect((await f.queue.load(WS)).items[0].continuation).toBeUndefined();
   });
 
   it('rechecks actual Stop eligibility after delayed delivery cleanup instead of using a captured boolean', async () => {

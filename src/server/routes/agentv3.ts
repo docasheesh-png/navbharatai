@@ -11705,6 +11705,8 @@ async function noteBuildOutcome(
     let isImportTurn = false;
     /** Durable saves an import started this turn — settled once, bounded, before the report (importDurableSave.ts). */
     const importDurableSaves: Array<Promise<unknown>> = [];
+    // Imports can resume an already persisted plan; their raw source/asset jobs share its retirement barrier.
+    const sourcePublication = createBuildSourcePublication();
     // Fix 41: a failed GitHub-URL import (private/no-access/bad-url) recorded here so the architect
     // prompt can acknowledge it instead of re-asking the user for the URL they already gave.
     let failedImport: { url: string; reason: string } | null = null;
@@ -11841,7 +11843,7 @@ async function noteBuildOutcome(
           try { await materializeAssets(actuator, workspaceId, assets); } catch { /* an asset failing never blocks the import */ }
           finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
         }
-        void saveWorkspaceAssets(workspaceId, assets, verified?.uid ?? null).catch(() => {});
+        void sourcePublication.track(saveWorkspaceAssets(workspaceId, assets, verified?.uid)).catch(() => {});
       }
       // SANDBOX-ONLY images (large images the durable store can't hold): materialize them for the LIVE
       // preview so imported apps aren't full of broken pictures — but do NOT persist them (a cold
@@ -11859,12 +11861,12 @@ async function noteBuildOutcome(
        * (`settleImportDurableSave`). A save that did not complete still says so — to the report and the user.
        */
       const saveImport = () => mergeWorkspaceFiles(workspaceId, importedFiles);
-      importDurableSaves.push(startImportDurableSave({
+      importDurableSaves.push(sourcePublication.track(startImportDurableSave({
         save: saveImport,
         total: Object.keys(importedFiles).length,
         record: (r) => { try { opts.diag?.record(r); } catch { /* diagnostics are best-effort */ } },
         narrate: (text) => emit({ type: 'narration', agent: 'architect', ts: Date.now(), text }),
-      }));
+      })));
       framework = validation.framework;
       // TELL THE REPORT (autopsy d6deaaf0): the diagnostics object captured `framework` at build
       // start, before the import existed, so it kept the request default while the manifest recorded
@@ -13280,7 +13282,6 @@ async function noteBuildOutcome(
     // of every file the agent writes (reliable — straight from the write op, not a later listFiles that
     // can come back empty). See the "DURABLE FILE SAVE" block for the normal-completion path.
     const writtenFiles = new Map<string, string>();
-    const sourcePublication = createBuildSourcePublication();
     // Fake login / payment / OTP / email found in the WHOLE project (fakeFeatureScan.ts) — computed once at
     // the production-defaults pass (the red on-screen line), read again by the disclosure and the key ask.
     let fakeFeatures: FakeFeatureFinding[] = [];
@@ -26094,10 +26095,13 @@ async function noteBuildOutcome(
           // own files are what was kept — a restored turn's pictures belong to the attempt, not the app.
           if (persisted === toSave && expectsArtifacts && !isImportTurn) {
             try {
-              const assetsOutcome = await withTimeout(
-                persistBuildAssets(actuator as BuildAssetSource, workspaceId, { heldPaths: listWorkspaceAssetPaths, save: saveWorkspaceAssets }),
+              const assetsOutcome = await sourcePublication.track(withTimeout(
+                sourcePublication.track(persistBuildAssets(actuator as BuildAssetSource, workspaceId, {
+                  heldPaths: listWorkspaceAssetPaths,
+                  save: (assetWorkspaceId, assets) => saveWorkspaceAssets(assetWorkspaceId, assets, verified?.uid),
+                })),
                 20_000, 'build-assets',
-              );
+              ));
               const assetsNote = buildAssetsNote(assetsOutcome);
               if (assetsNote) buildDiag.record({ phase: 'build', severity: 'info', code: 'BUILD_ASSETS_SAVED', message: assetsNote, autoResolved: true });
             } catch { /* best-effort — the text files are saved either way */ }

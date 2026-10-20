@@ -8,7 +8,8 @@ export function createBuildSourcePublication() {
   const track = <T>(work: Promise<T>): Promise<T> => {
     if (closed) uncertain = true; // A newly issued post-close write cannot be covered by an earlier join snapshot.
     const observed = work.then((value) => {
-      if (value === 'failed' || value === 'no-store' || value === 'skipped-unconfirmed') uncertain = true;
+      const status = typeof value === 'string' ? value : (value as { status?: unknown } | null)?.status;
+      if (status === 'failed' || status === 'partial' || status === 'no-store' || status === 'skipped-unconfirmed') uncertain = true;
     }, () => { uncertain = true; });
     pending.add(observed);
     void observed.finally(() => pending.delete(observed));

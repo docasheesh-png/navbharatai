@@ -59,8 +59,13 @@ describe('1 · the kit styles the switch, from one palette', () => {
     const was = parseCssBlocks(KIT_BEFORE).find((b) => /prefers-color-scheme:\s*dark/.test(b.prelude))!;
     expect(media.body).toBe(was.body);
   });
-  it('generated, so it cannot drift: the old kit run through the generator is the new kit', () => {
-    expect(withThemeSwitch(KIT_BEFORE)).toBe(DESIGN_KIT_CSS);
+  it('generated theme-switch blocks cannot drift when unrelated components evolve', () => {
+    // The historical fixture retains its original component CSS. The game button now pulses without
+    // moving; that intentional component change must not turn a palette-generation test into a snapshot.
+    const generated = parseCssBlocks(withThemeSwitch(KIT_BEFORE));
+    for (const selector of [KIT_DARK_SWITCH, KIT_LIGHT_SWITCH]) {
+      expect(generated.find((b) => b.prelude === selector)).toEqual(blockOf(selector));
+    }
   });
   it('the dead-switch detector now sees both hooks as styled in a kit project', () => {
     const project = { 'src/index.css': DESIGN_KIT_CSS };

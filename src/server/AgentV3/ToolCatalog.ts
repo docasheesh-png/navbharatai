@@ -169,7 +169,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         properties: {
           reason: {
             type: 'string',
-            description: "The user's own words, quoted, that asked for the stop. For the build record.",
+            description: "The exact complete latest user message asking for the stop, without quotation marks or paraphrase. Checked against the real user message. Never supply your own plan (including restarting the dev server).",
           },
         },
         required: ['reason'],

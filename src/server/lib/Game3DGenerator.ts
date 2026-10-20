@@ -28,6 +28,8 @@
 //
 // PURE builder → the caller writes the files. The generated code imports three; the generator does not.
 
+import { kitTypeContract } from './kitTypeContract';
+
 export interface Game3DResult {
   files: Record<string, string>;
   dependencies: Array<{ name: string; version: string }>;
@@ -381,7 +383,13 @@ export class CameraRig {
    * the player is looking, not along a fixed world axis. Without it, turning the camera makes the
    * controls feel inverted and unusable.
    */
-  get yaw(): number { return this.yawAngle; }
+  get yaw(): number {
+    // Movement follows the view the player actually sees, not the orbit's eventual destination.
+    // While damping a half-turn those headings can be opposite for several frames.
+    this.camera.getWorldDirection(this.followFwd);
+    return Math.hypot(this.followFwd.x, this.followFwd.z) > 1e-8
+      ? Math.atan2(-this.followFwd.x, -this.followFwd.z) : this.yawAngle;
+  }
 
   /**
    * The world is usually built AFTER the rig exists, so colliders cannot only be a constructor option —
@@ -542,7 +550,11 @@ export class CameraRig {
       if (hit) wanted = focus.clone().add(dir.multiplyScalar(Math.max(0.6, hit.distance - 0.3)));
     }
 
-    this.dampTo(wanted, delta);
+    // A new target, respawn or sharp turn can leave the old camera IN FRONT. Damping from there
+    // would show headlights and mirror steering until it caught up. Never render that hemisphere.
+    const behind = this.camera.position.clone().sub(pos).dot(fwd) < -0.001;
+    if (behind) this.dampTo(wanted, delta);
+    else this.camera.position.copy(wanted);
     const look = pos.clone().addScaledVector(fwd, lookAhead);
     look.y += this.height * 0.35;
     this.camera.lookAt(look);
@@ -4450,6 +4462,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
     // chal rahi hai" — the headlights faced the player and LEFT turned the car RIGHT.
     instructions:
       `Added the 3D layer (${Object.keys(files).length} files under src/game/three). Install: three (+ @types/three).\n` +
+      `${kitTypeContract(files)}\n` +
       '```ts\n' +
       "import * as THREE from 'three';\n" +
       "import { createRenderer } from './game/three/renderer';\n" +
@@ -4482,6 +4495,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '\n' +
       '// DRIVING. Every model faces +Z (MODEL_FORWARD). driveVehicle owns the control signs; the camera stays BEHIND.\n' +
       'const car = createCar({ color: 0xb42b2b });\n' +
+      'car.rotation.y = Math.PI; // local +Z nose faces world -Z, into the screen\n' +
       'car.position.y = ROAD_SURFACE_Y;   // wheels ON the asphalt, which sits 3 cm above the ground\n' +
       'scene.add(car);\n' +
       'let drive = createVehicleState(car);   // starts moving, pointing where the model points\n' +
@@ -4489,6 +4503,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '\n' +
       '// RIDING. A bike is driven the same way; bike.ride() leans it and turns its bars from the SAME axis.\n' +
       "const bike = createMotorcycle({ kind: 'sport', color: 0xc4231f }); scene.add(bike.root);\n" +
+      'bike.root.rotation.y = Math.PI; // turn BEFORE creating its driving state\n' +
       'bike.seat.add(createHumanoid({ height: 1.75 }).root);   // a bike with no rider reads as a showroom prop\n' +
       'let ride = createVehicleState(bike.root);\n' +
       '\n' +

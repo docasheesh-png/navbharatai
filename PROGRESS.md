@@ -97708,3 +97708,23 @@ Verification checkpoint: 151 targeted tests passed; frontend/server typechecks p
 ## 2026-10-20 — Weak candidate verification completed after admin test authorization
 
 Admin explicitly authorized the live-API-capable suite. Stable final run: **2,803 test files passed; 39,994 tests passed; 67 intentionally skipped; zero failures**. Both typechecks, production build, bundle budget, boot smoke, unused-import, OAuth protocol checks, native-shell and production dependency gates passed. Updated wiring assertions to follow the new runner parameters while retaining their stop/deadline/dead-rung guarantees. Test archive extraction now uses `--no-same-owner` in both sibling extractors, avoiding unrelated host ownership failures without changing archive contents. Invalid ladder overrides now fall back to the candidate's two-model policy rather than accidentally restoring the legacy chain. Classifier request is additionally locked by SDK mocks: one call, 8 output tokens, 5-second timeout, thinking disabled, no SDK retries, and measured usage forwarded. Candidate remains opt-in; no merge, deployment, paired app-generation benchmark, or first-attempt guarantee is claimed.
+
+
+### 2026-10-20 — Phase2 verified local checkpoint and newer-main integration
+
+Final6 at `00d3bc844064037c073f2fe6962d00b34f6875e8` passed the complete
+Node22/UTC local gate: 2,811 test files, 40,077 tests passed, 67 skipped and
+zero failures. Frontend/server typechecks, production build/boot, imports,
+native/OAuth, bundle, production dependency, audit/license and SBOM checks passed.
+PR #3852 was updated to that head. Its exact-head CI run `39411761077` passed
+all 14 database/multiprocess drills; the coverage job was still running when
+another session merged PR #3853 into main. That unfinished run is not a complete
+CI pass and cannot authorize this newer combined tree.
+
+Merged main `68528197949135513d2df97e3b4dee667036059a` cleanly, preserving
+both progress histories and the recovery/deadline/privacy changes. The incoming
+Weak policy remains opt-in; this checkpoint does not change its routing or
+pricing. Its framework-question extraction lowers the handler branch budget
+from543 to542; that lower budget stays enforced. All final-source local gates
+and exact-head CI must pass again before this checkpoint merges. Phase2 and
+the legacy ownership follow-up remain OPEN; phases3–6 have not started.

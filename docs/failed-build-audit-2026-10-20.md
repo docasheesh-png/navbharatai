@@ -285,3 +285,10 @@ and passes current source. Reset is reproduced with test dependency injection; n
 build-report or production telemetry incident is asserted. Q-2022–Q-2024 remain IN PROGRESS until
 the combined final gate and merge. The original four-class / zero-rerun / zero-report-closure
 counts are unchanged; no red checkpoint has been published as a green PR.
+
+
+Latest resume checkpoint: PR **#3856** is published. Main advanced to `3974c34d`
+with deployment configuration and one configuration test; no application source or
+dependencies changed. The local merge preserves both histories and awaits its final
+merged-state gate at this freeze. Earlier checkpoint gates apply to their own trees;
+the PR description and hosted run carry the latest verification result.

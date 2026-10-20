@@ -97486,6 +97486,10 @@ Verification checkpoint: 151 targeted tests passed; frontend/server typechecks p
 ## 2026-10-20 — Weak candidate verification completed after admin test authorization
 
 Admin explicitly authorized the live-API-capable suite. Stable final run: **2,803 test files passed; 39,994 tests passed; 67 intentionally skipped; zero failures**. Both typechecks, production build, bundle budget, boot smoke, unused-import, OAuth protocol checks, native-shell and production dependency gates passed. Updated wiring assertions to follow the new runner parameters while retaining their stop/deadline/dead-rung guarantees. Test archive extraction now uses `--no-same-owner` in both sibling extractors, avoiding unrelated host ownership failures without changing archive contents. Invalid ladder overrides now fall back to the candidate's two-model policy rather than accidentally restoring the legacy chain. Classifier request is additionally locked by SDK mocks: one call, 8 output tokens, 5-second timeout, thinking disabled, no SDK retries, and measured usage forwarded. Candidate remains opt-in; no merge, deployment, paired app-generation benchmark, or first-attempt guarantee is claimed.
+
+## 2026-10-20 — Admin authorized PR #3853 merge and Weak policy activation
+
+Rechecked the exact PR head and green GitHub CI, then merged #3853 with an expected-head lease (merge commit 68528197949135513d2df97e3b4dee667036059a). Admin explicitly said to merge and turn on the policy. Activation is a separate additive Cloud Build configuration change: `_WEAK_SCOPE_POLICY=on`, `_WEAK_BUILD_COST_CEILING_USD=1`; trigger-level rollback remains available with `off`. Provider keys, explicit ladder overrides, and Normal/Strong routing are not changed. Deployment and runtime confirmation are pending; do not infer live activation merely from the merge.
 ## 2026-10-20 — failed-build audit scope correction and persistent queue (PR #3846)
 
 **NOT COMPLETE under the fifth and sixth absolute rules.** The source milestone `f713e64` and its
@@ -97833,3 +97837,20 @@ the audit queue remains **400 pending rows = 341 OPEN / 16 IN PROGRESS / 43 four
 The third report's 51-item ledger is ready in scratch for the next batch and is not published or
 counted here. Original counts remain **4 terminal source classes / 0 historical app reruns /
 0 whole-report resolutions**. No queue, CSV, source or third-ledger publication change is included.
+
+
+### 2026-10-20 - published audit PR3856: integrate the next main policy activation
+
+PR3856 published commit `5db7cc763` / tree `2f38c4d2` after the final local gate:
+2,811 files / 40,161 tests passed / 67 skipped, all 14 additional CI checks, and
+14 real Firestore/multiprocess drills passed. Remote commit/tree matched exactly.
+Its hosted database job passed; hosted coverage was still running when main advanced.
+
+Main `3974c34d` adds the authorized deployment-policy activation from PR3855: five
+configuration/documentation/test files, no application source or dependency changes.
+Integrate that commit while preserving its exact files, main's queue/progress history
+and all prior local audit entries. The earlier green results remain scoped to their
+old trees. The merged-state final gate is pending at this checkpoint; do not claim
+hosted green or merge this PR without the admin explicitly naming it. Counts remain
+4 demonstrated historical terminal classes / 0 app reruns / 0 whole-report closures;
+two repository item ledgers / 119 items / 549 remaining repository ledgers.

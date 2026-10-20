@@ -1,6 +1,6 @@
 import { beforeAll, afterEach, afterAll, describe, it, expect, vi } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
-import { __bindBuildQueueDbForTests, BUILD_QUEUE_COLLECTION, type QueueDb } from '../src/server/AgentV3/BuildQueueStore';
+import { __bindBuildQueueDbForTests, BUILD_QUEUE_COLLECTION, createBuildQueueStore, type QueueDb } from '../src/server/AgentV3/BuildQueueStore';
 import { setServerDb } from '../src/server/lib/serverDb';
 import * as leaseApi from '../src/server/AgentV3/workspaceBuildLease';
 import * as actuatorFactory from '../src/server/routes/actuatorFactory';
@@ -8,6 +8,9 @@ import { reserveBuildRequest, completeBuildRequest, BUILD_REQUEST_COLLECTION } f
 import * as intentClassifier from '../src/server/AgentV3/IntentClassifier';
 import { AIRouterManager } from '../src/server/AI/AIRouterManager';
 import { serializeQueue } from '../src/server/AgentV3/BuildQueue';
+import * as weakPreflight from '../src/server/AgentV3/weakBuildPreflight';
+import { weakAdmissionReply } from '../src/server/AgentV3/weakBuildAdmission';
+import * as liveSearch from '../src/server/lib/liveSearchContext';
 
 let routes: Map<string, any>;
 const savedEnv = { ...process.env };
@@ -54,20 +57,87 @@ describe('build admission preserves read-only chat and refuses uncertain mutatio
     process.env.AGENTV3_ENABLED = 'true'; process.env.AGENTV3_ALLOWLIST = ''; process.env.AGENTV3_FREE_LIST = 'queue-route-owner';
     process.env.ANTHROPIC_API_KEY = 'unit-test-not-a-real-credential'; process.env.NODE_ENV = 'test';
     setServerDb(null);
-    vi.spyOn(AIRouterManager, 'getRouter').mockReturnValue({ route: async () => ({ response: { content: 'Hello from the chat fixture.', provider: 'fixture' } }) } as never);
+    const chatReply = 'Hello from the chat fixture.';
+    const modelRoute = vi.fn(async () => ({ response: { content: chatReply, provider: 'fixture' } }));
+    vi.spyOn(AIRouterManager, 'getRouter').mockReturnValue({ route: modelRoute } as never);
+    vi.spyOn(liveSearch, 'liveSearchContext').mockResolvedValue('');
     const req = (body: any) => mockReq({ body: { userId: 'queue-route-owner', email: 'owner@example.test', planFirst: false, ...body }, headers: { 'x-test-verified-uid': 'queue-route-owner', 'x-test-verified-email': 'owner@example.test' } });
     const res: any = mockRes();
     const events: any[] = [];
     res.flushHeaders = () => { res.headersSent = true; };
     res.write = (line: string) => { events.push(JSON.parse(line)); return true; };
-    return { req, res, events };
+    return { req, res, events, modelRoute, chatReply };
   };
-  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllEnvs(); setServerDb(null); });
   it('a legacy greeting works without any build coordination database', async () => {
     const { req, res, events } = configure();
     await routes.get('POST /api/agentv3/chat')(req({ prompt: 'hello', sessionId: 'queue-chat-greeting' }), res);
     expect(res.statusCode).toBe(200);
     expect(events.some((e) => e.type === 'result' && e.ok === true)).toBe(true);
+  });
+  it.each(['strong', null] as const)('a queued Weak scope refusal (%s) fails its own step and keeps the next step paused', async (scope) => {
+    const { req, res, events, modelRoute } = configure();
+    const f = driver(); setServerDb(f.db as never);
+    vi.stubEnv('AGENTV3_WEAK_SCOPE_POLICY', 'on');
+    vi.stubEnv('GLM_API_KEY', 'unit-test-not-a-real-credential');
+    vi.spyOn(intentClassifier, 'classifyIntentSmartDetailed').mockResolvedValue({ intent: 'new_build', readerAnswered: true, readerOutcome: 'answered', unclear: false });
+    vi.spyOn(weakPreflight, 'weakAdmissionForTurn').mockResolvedValue({ scope, source: scope ? 'model' : 'unavailable' });
+    const builder = vi.spyOn(actuatorFactory, 'buildActuator').mockImplementation(() => { throw Error('a scope refusal must not start a builder'); });
+    const body = { prompt: 'Build a React task dashboard application with a search input and drag-and-drop task cards.', sessionId: `weak-queue-${scope ?? 'unknown'}`, requestId: '44444444-4444-4444-8444-444444444444', queueItemId: 'A', queueClaimToken: 'claim-A', powerLevel: 'weak' };
+    const queuedWorkspace = `agentv3-queue-route-owner-${body.sessionId}`;
+    f.docs.set(`${BUILD_QUEUE_COLLECTION}/${queuedWorkspace}`, { queue: serializeQueue({ workspaceId: queuedWorkspace, items: [
+      { id: 'A', prompt: body.prompt, status: 'running', source: 'user', createdTs: Date.now(), claimedAt: Date.now(), claimToken: 'claim-A' },
+      { id: 'B', prompt: 'Build the next roadmap step.', status: 'pending', source: 'user', createdTs: Date.now() + 1 },
+    ] }) });
+
+    await routes.get('POST /api/agentv3/chat')(req(body), res);
+
+    // Read durable bytes first: a successful-looking terminal event must not advance the roadmap.
+    const persisted = JSON.parse(f.docs.get(`${BUILD_QUEUE_COLLECTION}/${queuedWorkspace}`).queue);
+    expect(persisted.items[0]).toMatchObject({ id: 'A', status: 'failed', claimToken: 'claim-A' });
+    expect(persisted).toMatchObject({ paused: true, items: [expect.anything(), expect.objectContaining({ id: 'B', status: 'pending' })] });
+    expect((await createBuildQueueStore(f.db).claim(queuedWorkspace, 'claim-B')).result).toBeNull();
+    expect(f.docs.has(`${leaseApi.WORKSPACE_BUILD_LEASE_COLLECTION}/${queuedWorkspace}`)).toBe(false);
+    const receipts = [...f.docs.entries()].filter(([key]) => key.startsWith(`${BUILD_REQUEST_COLLECTION}/`));
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0][1]).toMatchObject({ state: 'terminal', outcome: 'failed', workspaceId: queuedWorkspace, ownerId: 'queue-route-owner' });
+    const reply = weakAdmissionReply(scope);
+    expect(events.find((e) => e.type === 'narration')).toMatchObject({ text: reply });
+    expect(events.find((e) => e.type === 'done')).toMatchObject({ ok: false, summary: reply });
+    expect(events.find((e) => e.type === 'result')).toMatchObject({ ok: false, summary: reply, steps: 0, billedUsd: 0, billedInr: 0 });
+    expect(builder).not.toHaveBeenCalled();
+    expect(modelRoute).not.toHaveBeenCalled();
+  });
+  it('a normal queued chat completes only its own step, retains its reply and allows the next step', async () => {
+    const { req, res, events, chatReply } = configure();
+    const f = driver(); setServerDb(f.db as never);
+    vi.stubEnv('AGENTV3_WEAK_SCOPE_POLICY', 'on');
+    vi.stubEnv('GLM_API_KEY', 'unit-test-not-a-real-credential');
+    vi.spyOn(intentClassifier, 'classifyIntentSmartDetailed').mockResolvedValue({ intent: 'chat', readerAnswered: true, readerOutcome: 'answered', unclear: false });
+    vi.spyOn(weakPreflight, 'weakAdmissionForTurn').mockResolvedValue(null);
+    const builder = vi.spyOn(actuatorFactory, 'buildActuator').mockImplementation(() => { throw Error('a chat must not start a builder'); });
+    const body = { prompt: 'Hello, tell me a short friendly joke.', sessionId: 'normal-queued-chat', requestId: '55555555-5555-4555-8555-555555555555', queueItemId: 'A', queueClaimToken: 'claim-A', powerLevel: 'weak' };
+    const queuedWorkspace = `agentv3-queue-route-owner-${body.sessionId}`;
+    f.docs.set(`${BUILD_QUEUE_COLLECTION}/${queuedWorkspace}`, { queue: serializeQueue({ workspaceId: queuedWorkspace, items: [
+      { id: 'A', prompt: body.prompt, status: 'running', source: 'user', createdTs: Date.now(), claimedAt: Date.now(), claimToken: 'claim-A' },
+      { id: 'B', prompt: 'Build the next roadmap step.', status: 'pending', source: 'user', createdTs: Date.now() + 1 },
+    ] }) });
+
+    await routes.get('POST /api/agentv3/chat')(req(body), res);
+
+    const persisted = JSON.parse(f.docs.get(`${BUILD_QUEUE_COLLECTION}/${queuedWorkspace}`).queue);
+    expect(persisted.items[0]).toMatchObject({ id: 'A', status: 'done', claimToken: 'claim-A' });
+    expect(persisted.items[1]).toMatchObject({ id: 'B', status: 'pending' });
+    expect(persisted.paused).not.toBe(true);
+    expect(f.docs.has(`${leaseApi.WORKSPACE_BUILD_LEASE_COLLECTION}/${queuedWorkspace}`)).toBe(false);
+    expect((await createBuildQueueStore(f.db).claim(queuedWorkspace, 'claim-B')).result).toMatchObject({ id: 'B', status: 'running', claimToken: 'claim-B' });
+    const receipts = [...f.docs.entries()].filter(([key]) => key.startsWith(`${BUILD_REQUEST_COLLECTION}/`));
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0][1]).toMatchObject({ state: 'terminal', outcome: 'complete', workspaceId: queuedWorkspace });
+    expect(events.find((e) => e.type === 'narration')).toMatchObject({ text: chatReply });
+    expect(events.find((e) => e.type === 'done')).toMatchObject({ ok: true, summary: chatReply });
+    expect(events.find((e) => e.type === 'result')).toMatchObject({ ok: true, summary: chatReply, steps: 0, billedUsd: 0, billedInr: 0 });
+    expect(builder).not.toHaveBeenCalled();
   });
   it('a real build is refused before headers when ownership cannot be confirmed', async () => {
     const { req, res, events } = configure();

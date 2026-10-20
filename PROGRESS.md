@@ -97728,3 +97728,27 @@ pricing. Its framework-question extraction lowers the handler branch budget
 from543 to542; that lower budget stays enforced. All final-source local gates
 and exact-head CI must pass again before this checkpoint merges. Phase2 and
 the legacy ownership follow-up remain OPEN; phases3–6 have not started.
+
+### 2026-10-20 — Phase2 newer-main Weak refusal preserves queued failure
+
+Final7 at `ff7175d` was stopped (exit130) after integration review found a
+terminal-outcome bug in the incoming opt-in Weak policy. That run is NOT a full
+suite pass; the earlier quick gates also do not verify this corrected source.
+A refused or unavailable scope was explained through the plain-chat lane, whose
+hardcoded successful done/result incorrectly marked queued step A done and let
+step B continue. Both terminal flags now use the existing scope-blocked decision:
+a refusal fails A and pauses its queue, while ordinary chat still completes.
+The original reply and zero builder billing remain intact; pricing, model routing
+and the default-OFF policy flag are unchanged.
+
+Actual registered chat-route regressions execute real lease, request-receipt and
+queue coordination against a stateful database fixture. Refusals for Strong scope
+and unknown scope retain their narration, persist failed terminal receipts and keep
+B pending/unclaimable after lease release. Normal queued chat keeps its own reply,
+completes A and allows B's next claim. No builder runs; classifier, chat-provider
+and unrelated live-search boundaries are mocked. Reverting only the two terminal
+flags to true makes both refusal regressions fail on persisted A=done bytes.
+The safe source was restored and the Node22/UTC focused integration cohort passed
+16 files /218 tests, with zero failures or skips. The handler budget remains 542.
+No full-suite, updated exact-head CI, push or merge is claimed for this correction;
+the complete final-source gates must run again. Phase2 remains IN PROGRESS.

@@ -538,6 +538,9 @@ export async function debitWalletForBuild(
 ): Promise<WalletDebitResult> {
   if (!db) return { ok: false, error: 'Database not initialized' };
   if (!userId) return { ok: false, error: 'Missing userId' };
+  // Without an attempt identity neither the durable operation record nor the embedded ledger can
+  // recognize a replay. Refuse before any I/O rather than turning a retry into a second charge.
+  if (typeof tx.buildRef !== 'string' || !tx.buildRef.trim()) return { ok: false, error: 'Missing buildRef' };
   if (!Number.isFinite(tx.billedInr) || tx.billedInr <= 0) {
     return { ok: false, error: `Non-debitable amount: ${tx.billedInr}` };
   }

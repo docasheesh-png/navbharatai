@@ -97460,3 +97460,54 @@ buckets and ZIP chunk reconciliation remain OPEN. A separate review found queue
 bindings settle too early on resumable results; the next Phase2 slice will
 address that lifecycle. Phases3–6 remain unstarted. Detail and evidence limits:
 `docs/PHASE2_STATE_PRESERVATION.md`.
+## 2026-10-20 — Q-1126 batch 2: the four-field ratchet 40 → 24, and the batch caught its own bad measurement
+
+**Fifteen rows cleared, and HOW they cleared is the finding.** Batch 1 had already corrected this row's
+premise — it assumed 52 rows were missing INFORMATION, where the dominant cause is VOCABULARY. Batch 2
+confirms it a second time, with numbers:
+
+**Eleven were label-only.** The information was already written down, under a heading the census does not
+recognise. Q-121 is the cleanest proof: `**Re-checked 2026-10-04:**` fails the detector purely on its
+`Re-` prefix, so it was RENAMED rather than padded with new prose. The others (Q-626, Q-810, Q-813, Q-817,
+Q-895, Q-980, Q-1014, Q-1042, Q-1071, Q-1226) each got a label introducing text the row already supported
+— not one invented `Needs:`, because a plausible-sounding `Needs:` for a blocker nobody investigated is
+the exact defect this row exists to prevent. Q-1226 is mine, from #3850, fixed here rather than left for
+the next session to trip over.
+
+**Four left the blocked set because their STATE was wrong, which matters more than a label.** Q-886 and
+Q-888 read *"awaiting approval of the audit plan"* while carrying a fix that needs no admin decision — and
+a known fix nobody has done is OPEN, not blocked, as this row's own correction says.
+
+### Re-verifying before trusting a row is the lesson, and it paid twice
+
+This row's own note said Q-887's raw provider error body still reaches the browser at `payment.ts:350`.
+**It does not** — that code answers through `sendSafeError` now, and Q-887 has left the open table. A row's
+claim about live code is a hint with a date on it, never evidence. So both corrected rows were confirmed
+against today's code first:
+
+- **Q-886 is live.** `routes/payment.ts:331` logs `Name: … Email: … Phone: …` on EVERY Cashfree order, and
+  `:530` logs the whole `req.body` when a webhook carries no order id. Customer PII in the logs, on the
+  normal path.
+- **Q-888 is half live.** Classification (`classifyCashfreeWebhook`, `:562`) and the end of never-ending
+  PENDING orders (`cashfreeOrderClosedUnpaid` → EXPIRED, DB-5) have landed. What remains: `:589` answers
+  **400** to a payment webhook we have definitively settled, so Cashfree re-sends it indefinitely.
+
+### 🔴 AND THE BATCH'S OWN FIRST MEASUREMENT WAS WRONG — the ratchet nearly shipped one notch loose
+
+The first count said **25** and named Q-699 as deficient. It came from a python re-implementation of the
+census that split on `" | "` and read only the FIRST body cell — so Q-699, whose body contains a pipe,
+looked truncated and was miscounted. Run through the census's OWN parser (which splits on unescaped pipes
+and joins every trailing cell) the count is **24**, and Q-699 is complete, so batch 1's record of it stands
+and there was nothing to re-derive.
+
+**The reversion proof is what caught it.** With the baseline at 25, undoing one label fill took the true
+count to 25 and the ratchet still passed — a guard accepting the very regression it exists to refuse. At 24
+both reversions bite: undoing Q-626's fill fails at `expected 25 to be less than or equal to 24`, and
+putting Q-886 back to BLOCKED fails the same way. **A ratchet is only as honest as the measurement behind
+it, so the number must come from the detector itself — never from a second implementation of it, however
+careful.** This is the sibling of the source-check trap already recorded in this file (a census that reads
+its own documentation): here it is a census re-written instead of re-used.
+
+**Next:** the 24 that remain, of which the payment-audit cluster (Q-881–Q-885, Q-891–Q-894) is the largest
+group; Q-891 and Q-894 genuinely need the admin (revenue columns, coupon policy) and stay blocked. Then
+Q-886 and Q-888 as their own rows of work, one at a time.

@@ -110,7 +110,25 @@ describe('🔒 RATCHET: the four fields a 🟡 BLOCKED row owes, and they may on
   // **42, lower than 48** — so the more truthful detector moved the ratchet in the only direction it may
   // move. Had it come out higher, the number would have gone up with that reason stated, not been hidden.
   // Two further fills (Q-008, Q-1086 — see the Q-1126 row) then took it to 40.
-  const MISSING_FIELDS_BASELINE = 40;
+  //
+  // BATCH 2 (2026-10-20) took it from 40 to 24, and HOW it got there is the part worth keeping: of the 15,
+  // ELEVEN were rows whose information was already written down and whose only fault was the label it was
+  // written under — Q-121's `**Re-checked 2026-10-04:**` fails this detector purely on its `Re-` prefix, so
+  // it was RENAMED rather than padded with new prose. That is batch 1's own correction holding up a second
+  // time: the dominant cause of a "missing" field in this queue is vocabulary, not missing investigation.
+  // The other FOUR left the blocked set entirely because their STATE was wrong, not their fields: Q-886 and
+  // Q-888 read "awaiting approval of the audit plan" while carrying a fix that needs no decision, which
+  // makes them OPEN. Both were re-verified against the live code first — and that mattered, because their
+  // sibling Q-887 carried the same kind of note and had since been fixed.
+  //
+  // 🔒 Set from a re-measurement made with THIS FILE'S OWN PARSER: 111 blocked rows, 24 deficient.
+  // 🔴 AND THE FIRST ATTEMPT SET IT TO 25, ONE NOTCH TOO LOOSE, WHICH IS WORTH THE LINES. The number came
+  // from a python re-implementation of the parse that split on " | " and read ONLY the first body cell, so a
+  // row whose body contains a pipe (Q-699) looked truncated and counted as deficient. The ratchet then
+  // accepted a regression: undoing one label fill took the true count 24 → 25 and still passed. A ratchet is
+  // only as honest as the measurement behind it, so the number must come from the detector above — never from
+  // a second implementation of it, however careful.
+  const MISSING_FIELDS_BASELINE = 24;
 
   const blocked = rows.filter((r) => r.state.startsWith('🟡 BLOCKED'));
   /** A bolded field LABEL, never a word in running prose — that distinction is the whole correction above. */

@@ -97871,3 +97871,21 @@ The safe source was restored and the Node22/UTC focused integration cohort passe
 16 files /218 tests, with zero failures or skips. The handler budget remains 542.
 No full-suite, updated exact-head CI, push or merge is claimed for this correction;
 the complete final-source gates must run again. Phase2 remains IN PROGRESS.
+
+### 2026-10-20 11:25 UTC — Phase2 queue preserves both refusal-fix histories
+
+The parallel state-preservation update at `7fb7f52` has the same two corrected
+Weak-refusal terminal outcomes as local `8286c78`, plus an explanatory comment
+and a source-wiring regression. The queue branch merged that remote history,
+retaining both progress histories and all three registered-route/stateful
+regressions. The only source conflict was the adjacent explanatory comment;
+the merged code keeps that comment and both `ok: !weakScopeBlocked` outcomes.
+The handler budget stays 542; queue handoff, pricing and routing are unchanged.
+
+The previous queue full run at `6b7956e` was stopped with exit130 for this
+integration and is NOT a passing result. Its quick gates passed before the
+remote comment/test arrived. All final-source quick gates and one complete
+two-worker suite must run again on the newly frozen queue tree. Remote CI for
+`7fb7f52` is separate evidence and remains pending here; neither checkpoint is
+authorized to merge until its required exact-head jobs pass. Phase2, final
+queued-step source fencing and legacy ownership/allocation protocols remain OPEN.

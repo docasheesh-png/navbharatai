@@ -81,6 +81,12 @@ describe('rollout and measured cost guard', () => {
     expect(fallback).toContain('return;');
     expect(route).toContain("if (!(weakCandidateActive(powerLevelReqEffective)) && shouldRetryEmptyBuild({");
   });
+  it('does not publish a refused implementation as successful chat completion', () => {
+    const route = readFileSync(new URL('../src/server/routes/agentv3.ts', import.meta.url), 'utf8');
+    const lane = route.slice(route.indexOf('if (isPlainChatTurn) {'), route.indexOf('// SECURITY (audit A2'));
+    expect(lane).toContain("chatEvents.emit({ type: 'done', ok: !weakScopeBlocked");
+    expect(lane).toContain("send({ type: 'result', ok: !weakScopeBlocked");
+  });
 });
 
 import { createWeakTextRepairAllowance, resolveWeakComplexity } from '../src/server/AgentV3/weakBuildPreflight';

@@ -11479,6 +11479,7 @@ async function noteBuildOutcome(
         chatEvents.subscribe((e) => send(e), false);
         chatEvents.emit({ type: 'narration', agent: 'architect', text: reply, ts: Date.now(), ...(sheetFile ? { file: sheetFile } : {}) });
         if (clarifyChips && clarifyChips.length > 0) chatEvents.emit({ type: 'quick_replies', chips: clarifyChips, ts: Date.now() });
+        // A scope refusal is an answer, but cannot complete a queued implementation step.
         chatEvents.emit({ type: 'done', ok: !weakScopeBlocked, summary: reply, ts: Date.now() });
         // billedUsd: 0 — the cheap free router is not billed to the user as a build.
         send({ type: 'result', ok: !weakScopeBlocked, summary: reply, steps: 0, billedUsd: 0, billedInr: 0 });

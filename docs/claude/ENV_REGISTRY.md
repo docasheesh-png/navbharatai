@@ -4402,3 +4402,11 @@ price is not. Recorded as a queue row, not done here.
   non-render rolls back exactly the finishing files to the last green snapshot (files it lacks are removed), then
   re-checks. Records `POST_GREEN_RECHECK_OK` / `_INCONCLUSIVE` / `POST_GREEN_ROLLBACK` / `_SKIPPED`. No billing effect.
   `src/server/AgentV3/finishingRecheck.ts`. Locked in `tests/finishingWritesAfterGreenAreRecheckedAndRolledBack.test.ts`.
+
+### `AGENTV3_WEAK_SCOPE_POLICY` — candidate Weak scope and two-coder policy (2026-10-20)
+
+Explicit `on` enables one bounded preflight, a two-model default ladder, complex Kimi planning, one shared text-repair allowance, and no whole-build empty-result retry. Off/unset preserves existing policy for comparison/rollback. Imports retain their separate inspection pipeline. `AGENTV3_LADDER_WEAK` remains the admin's deliberate experiment override. See `docs/weak-tier-policy-comparison.md` for scope and limitations.
+
+### `AGENTV3_WEAK_BUILD_COST_CEILING_USD`
+
+Candidate-policy Weak measured provider-cost ceiling, default $1; positive finite values capped at $50. A smaller enabled global `AGENTV3_BUILD_COST_CEILING_USD` wins. Applied between measured turns, not a guaranteed hard provider-invoice bound. This does not change user markup or wallet pricing.

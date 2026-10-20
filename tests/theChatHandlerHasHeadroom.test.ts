@@ -70,7 +70,8 @@ function branchTokens(body: string): number {
  * down-only test is what forced it to be noticed at all rather than drifting.
  */
 // Coordination/preflight/heartbeat extracted in Phase2: measured543, preserving the down-only ratchet.
-const BRANCH_BUDGET = 543;
+// Framework-question eligibility extracted without changing its conditions (candidate Weak scope work).
+const BRANCH_BUDGET = 542;
 
 const WHAT_TO_DO = [
   'The chat handler is at or over its branch budget.',

@@ -7,6 +7,7 @@ import {
   type AiRepairModel, type AiRepairLlm, type VerifyFix,
 } from '../src/server/lib/mobileBuildAiRepair';
 import { makeRepairVerifier, sandboxCanJudge, type RealBuildActuator } from '../src/server/lib/mobileShipRealBuild';
+import { abortBuild } from '../src/server/AgentV3/buildAbortCause';
 
 /**
  * "LOOP THEEK KARO, MODEL NAHI" (admin 2026-09-22: make NavBharatAI's GitHub APK/AAB building
@@ -128,6 +129,16 @@ describe('2 · it RUNS THE BUILD before it pushes', () => {
     expect(r.outcome).toBe('unverified-fix');
     expect(r.verified).toBe(false);
     expect(r.fix).toBeDefined();
+  });
+
+  it('an incomplete safety restore blocks a candidate instead of committing it as unverified', async () => {
+    const llm = scripted([fix({ 'src/App.tsx': 'export const App = () => null;' })]);
+    const verify: VerifyFix = async () => ({ ran: false, reason: 'restore-incomplete', blocked: true });
+    const r = await runAiRepairLoop(llm, [RUNG], ctx(), { fetchFiles, verify });
+    expect(r.outcome).toBe('gave-up');
+    expect(r.fix).toBeUndefined();
+    expect(r.reason).toMatch(/workspace|restor/i);
+    expect(r.reason).not.toMatch(/did not compile|none.*compile/i);
   });
 
   it('🔒 once a build has REJECTED a change, a later round that could not be checked is NOT committed blind', async () => {
@@ -302,6 +313,72 @@ describe('the sandbox is the user\'s workspace, borrowed', () => {
     expect(await v({ 'src/App.tsx': 'healed', 'package.json': '{"assembled":true}' })).toEqual({ ran: true, ok: true });
     expect(a.disk['src/App.tsx']).toBe('healed');
     expect(a.disk['package.json']).toBe(ORIGINAL['package.json']);
+  });
+
+  it.each([true, false])('a failed restore after a build result (success %s) is blocked, never certified', async (success) => {
+    const a = fakeSandbox({ ...ORIGINAL }, { result: { success, logs: 'error during build:\nnope' } });
+    a.writeFile = async (_w, path, content) => {
+      if (path === 'package.json' && content === ORIGINAL['package.json']) throw new Error('restore write refused');
+      a.disk[path] = content;
+    };
+    const v = makeRepairVerifier(a, 'ws', WEB, isAppSourcePath)!;
+    expect(await v({ 'src/App.tsx': 'healed', 'package.json': '{"assembled":true}' })).toMatchObject({ ran: false, reason: 'restore-incomplete', blocked: true });
+    expect(a.disk['package.json']).toBe('{"assembled":true}');
+  });
+
+  it('Stop while the original file is awaited prevents the later candidate write', async () => {
+    const controller = new AbortController();
+    const a = fakeSandbox({ ...ORIGINAL });
+    let readStarted!: () => void;
+    let finishRead!: (value: string) => void;
+    const entered = new Promise<void>((resolve) => { readStarted = resolve; });
+    const reading = new Promise<string>((resolve) => { finishRead = resolve; });
+    const readFile = a.readFile;
+    a.readFile = async (workspace, path) => {
+      if (path === 'src/App.tsx') { readStarted(); return reading; }
+      return readFile(workspace, path);
+    };
+    const v = makeRepairVerifier(a, 'ws', { ...WEB, signal: controller.signal }, isAppSourcePath)!;
+    const pending = v({ 'src/App.tsx': 'changed' });
+    await entered;
+    controller.abort();
+    finishRead(ORIGINAL['src/App.tsx']);
+    expect(await pending).toMatchObject({ ran: false, reason: 'interrupted', blocked: true });
+    expect(a.log).toEqual([]);
+    expect(a.builds()).toBe(0);
+  });
+
+  it('Stop while the build is awaited prevents late undo writes', async () => {
+    const controller = new AbortController();
+    const a = fakeSandbox({ ...ORIGINAL });
+    let buildStarted!: () => void;
+    let finishBuild!: (value: { success: boolean; logs: string }) => void;
+    const entered = new Promise<void>((resolve) => { buildStarted = resolve; });
+    const building = new Promise<{ success: boolean; logs: string }>((resolve) => { finishBuild = resolve; });
+    a.build = async () => { buildStarted(); return building; };
+    const v = makeRepairVerifier(a, 'ws', { ...WEB, signal: controller.signal }, isAppSourcePath)!;
+    const pending = v({ 'src/App.tsx': 'changed' });
+    await entered;
+    controller.abort();
+    finishBuild({ success: false, logs: 'build ended after Stop' });
+    expect(await pending).toMatchObject({ ran: false, reason: 'interrupted', blocked: true });
+    expect(a.log).toEqual(['write src/App.tsx']);
+  });
+
+  it('a finite budget ending during a candidate write undoes landed bytes before releasing the workspace', async () => {
+    const controller = new AbortController();
+    const a = fakeSandbox({ ...ORIGINAL });
+    const writes: string[] = [];
+    a.writeFile = async (_workspace, path, content) => {
+      writes.push(`${path}:${content}`);
+      a.disk[path] = content;
+      if (content === '{"assembled":true}') abortBuild(controller, 'repair-budget');
+    };
+    const v = makeRepairVerifier(a, 'ws', { ...WEB, signal: controller.signal }, isAppSourcePath)!;
+    expect(await v({ 'package.json': '{"assembled":true}', 'src/App.tsx': 'candidate' })).toMatchObject({ ran: false, reason: 'interrupted', blocked: true });
+    expect(writes).toEqual(['package.json:{"assembled":true}', `package.json:${ORIGINAL['package.json']}`]);
+    expect(a.disk).toEqual(ORIGINAL);
+    expect(a.builds()).toBe(0);
   });
 
   it('a timeout restores and is "could not tell", never a failure verdict', async () => {

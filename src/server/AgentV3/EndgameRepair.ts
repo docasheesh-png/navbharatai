@@ -24,6 +24,7 @@ import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import { tscNeverRan } from './TscGate';
 import { reactNamespaceValueUse } from './PostEditReviewer';
+import { applySnapshotRestore, snapshotRestoreComplete, snapshotRestoreDetail, type SnapshotRestoreOutcome } from './snapshotRestore';
 
 export interface TscError {
   file: string;
@@ -416,6 +417,8 @@ export interface EndgameVerdict {
   tscUnverified?: boolean;
   /** True when the batch LLM repair INCREASED the error count and was rolled back (CrewHub 59→67). */
   llmReverted?: boolean;
+  /** A safety undo did not fully land; error counts must not be read as a verified final tree. */
+  rollbackIncomplete?: boolean;
   /**
    * Files the batch repair proposed at paths the project does not have and nothing imports — NOT
    * written (autopsy e706e068; see `resolveRepairTarget`). Omitted when there were none.
@@ -534,23 +537,34 @@ async function rollbackTouched(
   io: EndgameIo,
   snapshot: Map<string, string | undefined>,
   files: Record<string, string>,
-): Promise<void> {
-  if (io.signal?.aborted) return;
+): Promise<{ complete: boolean; outcome: SnapshotRestoreOutcome }> {
+  const write: Record<string, string> = {};
+  const remove: string[] = [];
   for (const [p, prev] of snapshot) {
-    if (io.signal?.aborted) return;
-    if (typeof prev === 'string') {
-      try {
-        await io.writeFile(p, prev);
-        files[p] = prev;
-      } catch { /* a failed restore is logged by the caller staying unverified */ }
-    } else if (io.removeFile) {
-      try { await io.removeFile(p); } catch { /* best-effort */ }
-      delete files[p];
-    } else {
-      io.log?.(`cannot remove created file ${p} — removeFile is not available`);
-      delete files[p];
-    }
+    if (typeof prev === 'string') write[p] = prev;
+    else remove.push(p);
   }
+  const plan = { write, remove };
+  const outcome = await applySnapshotRestore(plan, {
+    // Endgame's own deadline owns this writer (BLD-3); an ended lease cannot dispatch another write.
+    stopped: () => io.signal?.aborted === true,
+    write: (path, content) => io.writeFile(path, content),
+    remove: async (path) => {
+      if (!io.removeFile) throw new Error(`cannot remove created file ${path} — removeFile is not available`);
+      await io.removeFile(path);
+      return { exitCode: 0 };
+    },
+    captured: (applied) => {
+      for (const [path, content] of Object.entries(applied.write)) files[path] = content;
+      for (const path of applied.remove) delete files[path];
+    },
+  });
+  return { complete: snapshotRestoreComplete(plan, outcome), outcome };
+}
+
+function incompleteRollbackVerdict(io: EndgameIo, verdict: EndgameVerdict, outcome: SnapshotRestoreOutcome): EndgameVerdict {
+  io.log?.(`The repair rollback is incomplete (${snapshotRestoreDetail(outcome)}); types are NOT verified.`);
+  return { ...verdict, clean: false, tscUnverified: true, rollbackIncomplete: true, ...(outcome.stopped ? { lapsed: true } : {}) };
 }
 
 function unverifiedVerdict(errorsBefore: number, deterministicFixes: string[] = []): EndgameVerdict {
@@ -596,9 +610,11 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
     const detWritten: string[] = [];
     if (io.signal?.aborted) return lapsedVerdict(errors1.length);
     for (const p of det.changedPaths) {
-      if (!preDet.has(p)) preDet.set(p, files[p]);
+      if (io.signal?.aborted) return lapsedVerdict(errors1.length);
+      const previous = files[p];
       try {
         await io.writeFile(p, det.files[p]);
+        if (!preDet.has(p)) preDet.set(p, previous);
         files[p] = det.files[p];
         detWritten.push(p);
       } catch { /* a failed deterministic write is not counted and not rolled forward */ }
@@ -606,13 +622,17 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
     let deterministicFixes = detWritten.length > 0 ? det.fixes : [];
     const checked2 = detWritten.length > 0 ? await tscChecked(io) : { out: out1, ran: true };
     if (!checked2.ran) {
-      await rollbackTouched(io, preDet, files);
+      const rollback = await rollbackTouched(io, preDet, files);
+      if (!rollback.complete) return incompleteRollbackVerdict(io, unverifiedVerdict(errors1.length), rollback.outcome);
       io.log?.('tsc did not complete after the deterministic pass — reverted those writes; types are NOT verified');
       return unverifiedVerdict(errors1.length);
     }
     let errors2 = parseTscErrors(checked2.out);
     if (detWritten.length > 0 && errors2.length > errors1.length) {
-      await rollbackTouched(io, preDet, files);
+      const rollback = await rollbackTouched(io, preDet, files);
+      if (!rollback.complete) return incompleteRollbackVerdict(io, {
+        ...unverifiedVerdict(errors1.length, deterministicFixes), errorsAfterDeterministic: errors2.length, errorsAfter: errors2.length,
+      }, rollback.outcome);
       io.log?.('deterministic fixes made things worse — reverted');
       errors2 = errors1;
       deterministicFixes = [];
@@ -633,6 +653,7 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
       const rejected: string[] = [];
       if (io.signal?.aborted) return lapsedVerdict(errors1.length);
       for (const f of fixed) {
+        if (io.signal?.aborted) return lapsedVerdict(errors1.length);
         if (!f?.path || typeof f.content !== 'string') continue;
         const where = resolveRepairTarget(f.path, files, referenced);
         if (!where.target) { rejected.push(f.path); continue; }
@@ -656,13 +677,20 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
       if (llmFilesWritten > 0) {
         const checkedFinal = await tscChecked(io);
         if (!checkedFinal.ran) {
-          await rollbackTouched(io, preRepair, files);
+          const rollback = await rollbackTouched(io, preRepair, files);
+          if (!rollback.complete) return incompleteRollbackVerdict(io, {
+            ...unverifiedVerdict(errors1.length, deterministicFixes), errorsAfterDeterministic: errors2.length, errorsAfter: errors2.length, llmFilesWritten,
+          }, rollback.outcome);
           io.log?.('tsc did not complete after the batch repair — reverted those writes; types are NOT verified');
           return unverifiedVerdict(errors1.length, deterministicFixes);
         }
         finalErrors = parseTscErrors(checkedFinal.out);
         if (finalErrors.length > errors2.length) {
-          await rollbackTouched(io, preRepair, files);
+          const rollback = await rollbackTouched(io, preRepair, files);
+          if (!rollback.complete) return incompleteRollbackVerdict(io, {
+            ...unverifiedVerdict(errors1.length, deterministicFixes), errorsAfterDeterministic: errors2.length, errorsAfter: finalErrors.length,
+            llmFilesWritten: preRepair.size - rollback.outcome.restored.length - rollback.outcome.removed.length,
+          }, rollback.outcome);
           io.log?.(`↩️ The batch repair increased the error count (${errors2.length} → ${finalErrors.length}) — reverted those files and kept the better state.`);
           finalErrors = errors2;
           llmFilesWritten = 0;

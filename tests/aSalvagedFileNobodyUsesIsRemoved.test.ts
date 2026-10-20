@@ -8,7 +8,8 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { deadSalvagedFiles, referenceName, removeDeadSalvage, MAX_DEAD_SALVAGE } from '../src/server/AgentV3/deadSalvage';
+import { deadSalvagedFiles, referenceName, removeDeadSalvage, deadSalvageNote, MAX_DEAD_SALVAGE } from '../src/server/AgentV3/deadSalvage';
+import { abortBuild } from '../src/server/AgentV3/buildAbortCause';
 
 const project = (): Record<string, string> => ({
   'index.html': '<script type="module" src="/src/main.ts"></script>',
@@ -81,6 +82,77 @@ describe('the removal is verified and undone when the build disagrees', () => {
     expect(written).toEqual({ 'src/MathUtils.ts': files['src/MathUtils.ts'], 'src/types.ts': files['src/types.ts'] });
   });
 
+  it('a refused restore is reported as incomplete and names only the files actually put back', async () => {
+    const sandbox = new Map(Object.entries(files));
+    const out = await removeDeadSalvage(dead, files, true, {
+      run: async (c) => {
+        if (c.startsWith('rm ')) { for (const path of dead) sandbox.delete(path); }
+        return { exitCode: c.includes('npm run build') ? 1 : 0, stdout: '', stderr: '' };
+      },
+      write: async (p, c) => {
+        if (p === 'src/types.ts') throw new Error('write refused');
+        sandbox.set(p, c);
+      },
+    });
+    expect(sandbox.has('src/types.ts')).toBe(false);
+    expect(out).toMatchObject({ status: 'restore-failed', restored: ['src/MathUtils.ts'], failed: ['src/types.ts'] });
+  });
+
+  it.each([0, 1])('Stop while the production build is awaited (exit %i) does not start a later restore', async (exitCode) => {
+    const controller = new AbortController();
+    let finishBuild!: (value: { exitCode: number; stdout: string; stderr: string }) => void;
+    let enteredBuild!: () => void;
+    const entered = new Promise<void>((resolve) => { enteredBuild = resolve; });
+    const build = new Promise<{ exitCode: number; stdout: string; stderr: string }>((resolve) => { finishBuild = resolve; });
+    const written: string[] = [];
+    const pending = removeDeadSalvage(dead, files, true, {
+      signal: controller.signal,
+      run: async (c) => {
+        if (c.includes('npm run build')) { enteredBuild(); return build; }
+        return { exitCode: 0, stdout: '', stderr: '' };
+      },
+      write: async (p) => { written.push(p); },
+    });
+    await entered;
+    controller.abort();
+    finishBuild({ exitCode, stdout: '', stderr: 'finished after Stop' });
+    expect((await pending).status).toBe('interrupted');
+    expect(written).toEqual([]);
+  });
+
+  it('a Stop during one restore write holds the next file and reports the completed one', async () => {
+    const controller = new AbortController();
+    const written: string[] = [];
+    const out = await removeDeadSalvage(dead, files, true, {
+      signal: controller.signal,
+      run: async (c) => ({ exitCode: c.includes('npm run build') ? 1 : 0, stdout: '', stderr: '' }),
+      write: async (path) => { written.push(path); controller.abort(); },
+    });
+    expect(written).toEqual([dead[0]]);
+    expect(out).toMatchObject({ status: 'interrupted', restored: [dead[0]], failed: [dead[1]] });
+  });
+
+  it('a budget ending during failed verification still permits the safety undo', async () => {
+    const controller = new AbortController();
+    const written: string[] = [];
+    const out = await removeDeadSalvage(dead, files, true, {
+      signal: controller.signal,
+      run: async (c) => {
+        if (c.includes('npm run build')) abortBuild(controller, 'watchdog');
+        return { exitCode: c.includes('npm run build') ? 1 : 0, stdout: '', stderr: '' };
+      },
+      write: async (path) => { written.push(path); },
+    });
+    expect(out.status).toBe('reverted');
+    expect(written).toEqual(dead);
+  });
+
+  it('incomplete recovery remains unresolved instead of claiming the files were kept', () => {
+    const note = deadSalvageNote({ status: 'restore-failed', reason: 'write failed', tried: dead, restored: [dead[0]], failed: [dead[1]] }, dead);
+    expect(note).toMatchObject({ severity: 'warning', code: 'DEAD_SALVAGE_RESTORE_INCOMPLETE', autoResolved: false });
+    expect(note.message).not.toMatch(/kept/i);
+  });
+
   it('nothing is touched without a build script to prove it, or for an unsafe path', async () => {
     const io = { run: async () => { throw new Error('must not run'); }, write: async () => {} };
     expect((await removeDeadSalvage(dead, files, false, io)).status).toBe('skipped');
@@ -94,7 +166,8 @@ describe('the wiring', () => {
     expect(route).toContain('salvagedThisBuild.push(...sb.salvagedPaths);');
     expect(route).toMatch(/deadSalvagedFiles\(salvagedThisBuild, integrityFiles\)/);
     expect(route).toMatch(/deletedThisBuild\.push\(\.\.\.outcome\.removed\)/);
-    expect(route).toContain("'DEAD_SALVAGE_REMOVED'");
+    expect(route).toContain('...deadSalvageNote(outcome, dead, abort.signal.aborted)');
+    expect(route).toMatch(/removeDeadSalvage\(dead, integrityFiles, hasBuildScript\(integrityFiles\['package.json'\] \?\? null\), \{\s*signal: abort\.signal,/);
   });
 });
 

@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import ts from 'typescript';
 
 type Verdict =
   | 'landed'       // saves only what landed: `writtenFiles` (set after a write succeeds) or a sandbox scan
@@ -19,13 +20,13 @@ type Verdict =
   | 'user-asked';  // the user's own explicit edit or revert route, not a build pass
 
 const VERDICT: Record<string, [Verdict, number]> = {
-  'mergeWorkspaceFiles | workspaceId, Object.fromEntries(verdict.revert.map((f) => [f, beforeHeal[f]]))': ['landed', 1], // restores the pre-heal originals
+  // Shared automatic restore: applySnapshotRestore passes only successful sandbox writes to persist.
+  'mergeWorkspaceFiles | workspaceId, files': ['landed', 1],
   'mergeWorkspaceFiles | workspaceId, Object.fromEntries(writtenFiles)': ['landed', 3],
   'mergeWorkspaceFiles | workspaceId, files as Record<string, string>': ['user-asked', 1],
   'mergeWorkspaceFiles | workspaceId, foundation.files': ['pre-latch', 1],
   'mergeWorkspaceFiles | workspaceId, importedFiles': ['pre-latch', 1],
   'mergeWorkspaceFiles | workspaceId, seededScaffold': ['pre-latch', 1],
-  'mergeWorkspaceFiles | workspaceId, snap': ['user-asked', 1],
   'mergeWorkspaceFiles | workspaceId, ts.patch': ['pre-latch', 1],
   "mergeWorkspaceFiles | workspaceId, { 'package.json': finalPkg }": ['pre-latch', 1],
   'mergeWorkspaceFiles | workspaceId, { [filePath]: newSource }': ['user-asked', 1],
@@ -44,10 +45,9 @@ const VERDICT: Record<string, [Verdict, number]> = {
   'saveWorkspaceFiles | workspaceId, goldenFiles': ['pre-latch', 1],
   'saveWorkspaceFiles | workspaceId, savedDefaults': ['landed', 1],
   'saveWorkspaceFiles | workspaceId, savedSweep': ['landed', 1],
-  // The post-green finishing rollback (finishingRecheck.ts): only the snapshot files whose write landed.
-  'saveWorkspaceFiles | workspaceId, restoredFiles': ['landed', 1],
-  'saveWorkspaceFiles | workspaceId, snapshot': ['landed', 1],
-  'saveWorkspaceFiles | workspaceId, toSave': ['landed', 3],
+  // Final save starts with toSave and is reconciled to the applied tree after any partial restore.
+  'saveWorkspaceFiles | workspaceId, persisted': ['landed', 1],
+  'saveWorkspaceFiles | workspaceId, toSave': ['landed', 2],
   "saveWorkspaceFiles | workspaceId, { 'index.html': doc }": ['pre-latch', 1],
   "saveWorkspaceFiles | workspaceId, { 'index.html': inlined }": ['after-write', 1],
   'saveWorkspaceFiles | workspaceId, { [cfg.path]: cfg.content }': ['after-write', 1],
@@ -58,14 +58,21 @@ const VERDICT: Record<string, [Verdict, number]> = {
 };
 
 const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
+const source = ts.createSourceFile('agentv3.ts', route, ts.ScriptTarget.Latest, true);
 
 function durableWrites(): Map<string, number> {
   const out = new Map<string, number>();
-  for (const m of route.matchAll(/\b(saveWorkspaceFiles|mergeWorkspaceFiles)\(([^\n]*)/g)) {
-    const arg = m[2].split(/\)\.catch|\);|\)\s*$/)[0].trim();
-    const key = `${m[1]} | ${arg}`;
-    out.set(key, (out.get(key) ?? 0) + 1);
+  function visit(node: ts.Node): void {
+    if (ts.isCallExpression(node) && /^(saveWorkspaceFiles|mergeWorkspaceFiles)$/.test(node.expression.getText(source))) {
+      // Parse arguments, not a line: the shared persist callback reads the save status after await,
+      // and future multiline calls must join this census rather than disappear from it.
+      const args = node.arguments.map((arg) => arg.getText(source).replace(/\s+/g, ' ')).join(', ');
+      const key = `${node.expression.getText(source)} | ${args}`;
+      out.set(key, (out.get(key) ?? 0) + 1);
+    }
+    ts.forEachChild(node, visit);
   }
+  visit(source);
   return out;
 }
 
@@ -88,5 +95,16 @@ describe('Q-132: every direct durable write in the build route has a green-freez
 
   it('the dep prune — the one writer that goes through npm, not writeFile — stands down once green', () => {
     expect(route).toMatch(/pruneUnusedDepsEnabled\(\)[^\n]*!isGreenLatched\(workspaceId\)/);
+  });
+
+  it('the final save follows applied restore outcomes rather than the planned snapshot', () => {
+    const start = route.indexOf("} else if (decision.action === 'restore')");
+    const end = route.indexOf('const finalSave =', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const restore = route.slice(start, end);
+    expect(restore).toContain('const outcome = await applyGreenSnapshotRestore(plan)');
+    expect(restore).toContain('persisted = snapshotRestoredFiles(toSave, plan, outcome)');
+    expect(route.slice(end, route.indexOf('\n', end))).toContain('saveWorkspaceFiles(workspaceId, persisted)');
   });
 });

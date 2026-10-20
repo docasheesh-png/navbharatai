@@ -9,7 +9,7 @@ function deps(over: Partial<FinishingRecheckDeps>, looks: Array<{ rendered: bool
     enabled: true, greenAt: 1, paths: ['public/sw.js', 'index.html'], aborted: () => false,
     look: async () => looks.shift() ?? { rendered: false, conclusive: false },
     loadSnapshot: async () => ({ 'index.html': '<good/>', 'src/App.tsx': 'x' }),
-    restore: async (p) => { restored.push(p); },
+    restore: async (p) => { restored.push(p); return { restored: Object.keys(p.write), removed: p.remove, failed: [], stopped: false }; },
     record: (n) => notes.push(n),
     ...over,
   };
@@ -50,6 +50,39 @@ describe('finishing writes after green are re-checked and rolled back (owner ite
     expect(notes[0].code).toBe('POST_GREEN_ROLLBACK_SKIPPED');
   });
 
+  for (const waitingFor of ['preview', 'snapshot'] as const) {
+    it(`does not restore if Stop arrives while awaiting the ${waitingFor}`, async () => {
+      let stopped = false;
+      let release!: () => void;
+      let entered!: () => void;
+      const started = new Promise<void>((resolve) => { entered = resolve; });
+      const pending = new Promise<void>((resolve) => { release = resolve; });
+      const { d, notes, restored } = deps({
+        aborted: () => stopped,
+        ...(waitingFor === 'preview'
+          ? { look: async () => { entered(); await pending; return { rendered: false, conclusive: true }; } }
+          : { loadSnapshot: async () => { entered(); await pending; return { 'index.html': '<good/>' }; } }),
+      }, [{ rendered: false, conclusive: true }]);
+      const running = recheckAfterFinishingWrites(d);
+      await started;
+      stopped = true;
+      release();
+      expect((await running).action).toBe('skipped');
+      expect(restored).toEqual([]);
+      expect(notes).toEqual([]);
+    });
+  }
+
+  it('does not claim the planned deletion happened when the restore reports a failed remove', async () => {
+    const { d, notes } = deps({
+      restore: async () => ({ restored: ['index.html'], removed: [], failed: ['public/sw.js'], stopped: false }),
+    }, [{ rendered: false, conclusive: true }, { rendered: true, conclusive: true }]);
+    expect((await recheckAfterFinishingWrites(d)).action).toBe('partial');
+    expect(notes[0]).toMatchObject({ code: 'POST_GREEN_ROLLBACK_INCOMPLETE', autoResolved: false });
+    expect(notes[0].detail).toContain('failed: public/sw.js');
+    expect(notes[0].detail).toContain('removed: —');
+  });
+
   it('skips when off, never green, nothing written, or stopped', async () => {
     for (const over of [{ enabled: false }, { greenAt: 0 }, { paths: [] }, { aborted: () => true }]) {
       const { d, notes } = deps(over, [{ rendered: false, conclusive: true }]);
@@ -66,6 +99,9 @@ describe('finishing writes after green are re-checked and rolled back (owner ite
     const recheck = src.indexOf('await recheckAfterFinishingWrites({');
     expect(defaults).toBeGreaterThan(0);
     expect(recheck).toBeGreaterThan(defaults);
-    expect(src.slice(recheck, recheck + 2500)).toContain("runInPass('green-guard-restore'");
+    expect(src.slice(recheck, recheck + 2500)).toContain('restore: (plan) => applyGreenSnapshotRestore(plan, () => abort.signal.aborted, noteFinishingWrite)');
+    const restoreDoor = src.slice(src.indexOf('const applyGreenSnapshotRestore'), src.indexOf('const revertToGreenSnapshot'));
+    expect(restoreDoor).toContain("pass = 'green-guard-restore'");
+    expect(restoreDoor).toContain('runInPass(pass, () => applySnapshotRestore(plan,');
   });
 });

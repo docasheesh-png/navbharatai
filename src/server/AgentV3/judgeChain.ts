@@ -47,6 +47,7 @@
 // `JudgeKind` is imported, never re-declared: it is ONE type in BuildJudge.ts beside the label that
 // must stay exhaustive over it, so a sixth engine cannot be added here and forgotten there.
 import type { JudgeRunTurn, JudgeKind } from './BuildJudge';
+import { isFatalProviderError, isModelUnavailableError } from './providerErrorClass';
 
 export type { JudgeKind };
 
@@ -72,6 +73,8 @@ export interface JudgeAttempt {
   ok: boolean;
   /** Present only when `ok` is false. Bounded, single-line, admin-only. */
   reason?: string;
+  /** No request was sent: this candidate failed permanently in an earlier review of this build. */
+  skipped?: boolean;
 }
 
 /**
@@ -127,11 +130,11 @@ export const EMPTY_REPLY_REASON = 'the engine returned an empty answer (its whol
 export interface JudgeChain {
   /** Hand this to `judgeBuild` exactly as a single runner was handed before. */
   runTurn: JudgeRunTurn;
-  /** Who actually answered. Null until a call has succeeded — never guessed in advance. */
+  /** Most recent successful judge in this build. Null until one succeeds — never guessed in advance. */
   servedBy: () => JudgeKind | null;
-  /** The engine the chain WOULD start on, for a label printed before any call. */
+  /** The next available candidate, excluding permanent failures learned by this chain. */
   plannedKind: () => JudgeKind | null;
-  /** Every attempt of the last call, in order. Admin-only. */
+  /** Attempts and explicitly marked skips of the last call, in order. Admin-only. */
   attempts: () => JudgeAttempt[];
 }
 
@@ -151,11 +154,19 @@ export interface JudgeChain {
 export function composeJudgeChain(candidates: readonly JudgeCandidate[]): JudgeChain {
   let served: JudgeKind | null = null;
   let attempts: JudgeAttempt[] = [];
+  // Owned by this review chain, which the build reuses for re-review. Candidate identity keeps an
+  // independently funded credential of the same vendor/model available; a new chain starts fresh.
+  const retired = new Map<JudgeCandidate, unknown>();
 
   const runTurn: JudgeRunTurn = async (args) => {
     attempts = [];
     let lastError: unknown = new Error('no judge candidate was available');
     for (const c of candidates) {
+      if (retired.has(c)) {
+        lastError = retired.get(c);
+        attempts.push({ kind: c.kind, modelId: c.modelId, ok: false, skipped: true, reason: judgeFailureReason(lastError) });
+        continue;
+      }
       try {
         // The candidate's OWN model id — see the note on `JudgeCandidate.modelId`.
         const r = await c.runTurn({ ...args, model: c.modelId });
@@ -169,6 +180,7 @@ export function composeJudgeChain(candidates: readonly JudgeCandidate[]): JudgeC
         return r;
       } catch (err) {
         attempts.push({ kind: c.kind, modelId: c.modelId, ok: false, reason: judgeFailureReason(err) });
+        if (isFatalProviderError(err) || isModelUnavailableError(err)) retired.set(c, err);
         lastError = err;
       }
     }
@@ -180,7 +192,7 @@ export function composeJudgeChain(candidates: readonly JudgeCandidate[]): JudgeC
   return {
     runTurn,
     servedBy: () => served,
-    plannedKind: () => candidates[0]?.kind ?? null,
+    plannedKind: () => candidates.find((c) => !retired.has(c))?.kind ?? null,
     attempts: () => [...attempts],
   };
 }
@@ -193,7 +205,7 @@ export function describeJudgeAttempts(attempts: readonly JudgeAttempt[], label: 
   const failed = attempts.filter((a) => !a.ok);
   if (failed.length === 0) return '';
   const served = attempts.find((a) => a.ok);
-  const failures = failed.map((a) => `${label(a.kind)} (${a.modelId}) failed: ${a.reason || 'no reason given'}`).join('; ');
+  const failures = failed.map((a) => `${label(a.kind)} (${a.modelId}) ${a.skipped ? 'skipped' : 'failed'}: ${a.reason || 'no reason given'}`).join('; ');
   return served
     ? `${failures} — ${label(served.kind)} answered instead.`
     : `${failures} — no engine answered, so this build was not reviewed.`;

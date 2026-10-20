@@ -2456,10 +2456,9 @@ export class ToolDispatcher {
         const rm = await this.actuator
           .runCommand(this.workspaceId, `rm -f -- '${p}'`)
           .catch(() => ({ exitCode: -1, stdout: '', stderr: '' }));
-        if (rm.exitCode === 0) {
-          try { this.state?.recordFileChange({ path: p, kind: 'delete' }, 'architect'); } catch { /* UI count is best-effort */ }
-          await this.reconcileDeletions([p]);
-        }
+        if (rm.exitCode !== 0) throw new Error(`Could not remove created repair file ${p}.`);
+        try { this.state?.recordFileChange({ path: p, kind: 'delete' }, 'architect'); } catch { /* UI count is best-effort */ }
+        await this.reconcileDeletions([p]);
       },
     };
   }

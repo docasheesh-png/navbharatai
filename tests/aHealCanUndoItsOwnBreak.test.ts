@@ -100,13 +100,13 @@ describe('🔒 the allowlist stays a deliberate, enumerated list', () => {
 
   it('the route still reverts to the PRE-HEAL bytes, for the heal\'s own files only', () => {
     const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
-    const at = route.indexOf("runInPass('design-heal-revert'");
+    const at = route.indexOf("applyGreenSnapshotRestore(revertPlan, undefined, undefined, 'design-heal-revert')");
     expect(at).toBeGreaterThan(0);
-    const around = route.slice(at - 600, at + 300);
+    const around = route.slice(at - 600, at + 650);
     // The content written back is the pre-heal snapshot, not a regenerated file.
-    expect(around).toMatch(/const original = beforeHeal\[path\];/);
-    expect(around).toMatch(/actuator\.writeFile\(workspaceId, path, original\)/);
+    expect(around).toContain('write: Object.fromEntries(verdict.revert.map((path) => [path, beforeHeal[path]]))');
+    expect(around).toContain('snapshotRestoreComplete(revertPlan, outcome)');
     // And only the paths the guard chose — never the whole project.
-    expect(around).toMatch(/for \(const path of verdict\.revert\)/);
+    expect(around).toContain('if (verdict.revert.length)');
   });
 });

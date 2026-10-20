@@ -28,7 +28,7 @@ import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
 import { lostTruncatedOutput, truncationRecoverySteer, truncationRecoveryNarration, truncationSteeredPaths } from './TruncationRecovery';
-import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRepeatProbeSteer, noteMutations, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
+import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRepeatProbeSteer, noteMutations, noteToolEffect, isNoEffectToolCall, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { serviceRecommendationEvent } from '../analyzer/serviceRecommendation';
 import { missingFeatureNotice } from './missingFeatureNotice';
@@ -1607,11 +1607,23 @@ export class AgentRunner {
             };
           }
         };
+        const dispatchObserved = async (tu: ToolUse): Promise<ToolResult> => {
+          // A no-change/help receipt is not fresh work (Q-1899). Observe the real dispatcher; a
+          // necessary publish/heal, actual worker advice or recipe execution keeps its effect semantics.
+          const changes = (): number | null => {
+            if (typeof dispatcher.changeCount !== 'function') return null;
+            try { return dispatcher.changeCount(); } catch { return null; }
+          };
+          const before = changes();
+          const result = await dispatchWithBudget(tu);
+          if (loopGuardOn) noteToolEffect(repeatProbe, tu, result, before, changes());
+          return result;
+        };
         const serialIdx: number[] = [];
         const parallelIdx: number[] = [];
         turn.toolUses.forEach((tu, i) => (isParallelSafeToolUse(tu, { parallelBuild: this.opts.parallelBuild }) ? parallelIdx : serialIdx).push(i));
         for (const i of serialIdx) {
-          resultBlocks[i] = toBlock(await dispatchWithBudget(turn.toolUses[i]));
+          resultBlocks[i] = toBlock(await dispatchObserved(turn.toolUses[i]));
         }
         if (parallelIdx.length > 0) {
           const dupes = duplicateReadsInTurn(turn.toolUses, parallelIdx);
@@ -1621,7 +1633,7 @@ export class AgentRunner {
           await mapWithConcurrency(parallelIdx.filter((i) => !dupes.has(i)), toolConcurrency, async (i) => {
             const sib = siblings.get(i);
             const tu = sib ? { ...turn.toolUses[i], input: { ...turn.toolUses[i].input, [SIBLING_TASKS_INPUT_KEY]: sib } } : turn.toolUses[i];
-            resultBlocks[i] = toBlock(await dispatchWithBudget(tu));
+            resultBlocks[i] = toBlock(await dispatchObserved(tu));
           });
           for (const [i, first] of dupes) {
             resultBlocks[i] = toBlock({
@@ -1683,7 +1695,13 @@ export class AgentRunner {
         // already excludes `tsc` for. Noting this turn's writes BEFORE counting its probes is what lets
         // the same call in a LATER turn start over, while the original six-identical-greps loop — which
         // mutated nothing — is still caught.
+        const mutationEpochBefore = repeatProbe.mutations;
         if (loopGuardOn) { try { noteMutations(repeatProbe, turn.toolUses); } catch { /* never break a build */ } }
+        if (repeatProbe.mutations > mutationEpochBefore) {
+          // A real edit or useful preview starts a new progress epoch; an old FINAL cannot end it.
+          finalLoopSteerSent = false;
+          noOpTurnsAfterFinal = 0;
+        }
         const loopSteer = loopGuardOn ? collectRepeatProbeSteer(repeatProbe, turn.toolUses, loopThreshold) : null;
         if (loopSteer) {
           // Honest narration per severity: the FINAL steer means the model ignored an earlier nudge and
@@ -1702,11 +1720,11 @@ export class AgentRunner {
         // 🔒 A RUN THAT ONLY DOES NOTHING ENDS (Q-738). After the FINAL steer, every further turn made only of
         // no-op calls (an empty command, a refused probe) counts; the third ends the run with an honest summary
         // instead of paying for more turns that cannot change anything.
-        if (finalLoopSteerSent && loopGuardOn && isNoOpTurn(turn.toolUses, (n, i) => isProbeBanned(repeatProbe, n, i))) {
+        if (finalLoopSteerSent && loopGuardOn && isNoOpTurn(turn.toolUses, (n, i) => isProbeBanned(repeatProbe, n, i), (tu) => isNoEffectToolCall(repeatProbe, tu))) {
           noOpTurnsAfterFinal += 1;
           if (noOpTurnsAfterFinal >= MAX_NO_OP_TURNS_AFTER_FINAL) {
             const summary = 'Stopped this run: after being told twice to stop, the model kept sending steps that do '
-              + `nothing (${noOpTurnsAfterFinal} more turns of empty or refused calls). Nothing further would have changed.`;
+              + `nothing (${noOpTurnsAfterFinal} more turns of empty, refused or proven unchanged calls). Nothing further would have changed.`;
             events.emit({ type: 'narration', agent: agentRole, text: `⚠️ ${summary}`, ts: Date.now() });
             return { ok: false, summary, steps, usage, billedUsd: billed() };
           }

@@ -98106,3 +98106,54 @@ counted here. Original counts remain **4 terminal source classes / 0 historical 
 ## 2026-10-20 — Admin authorized PR #3853 merge and Weak policy activation
 
 Rechecked the exact PR head and green GitHub CI, then merged #3853 with an expected-head lease (merge commit 68528197949135513d2df97e3b4dee667036059a). Admin explicitly said to merge and turn on the policy. Activation is a separate additive Cloud Build configuration change: `_WEAK_SCOPE_POLICY=on`, `_WEAK_BUILD_COST_CEILING_USD=1`; trigger-level rollback remains available with `off`. Provider keys, explicit ladder overrides, and Normal/Strong routing are not changed. Deployment and runtime confirmation are pending; do not infer live activation merely from the merge.
+
+## 2026-10-20 — Q-888: a settled webhook is acknowledged, a failed attempt is news, an outage is retried
+
+**The defect.** The signed-webhook route answered **400** to every `success: false` from
+`verifyPaymentInternal`, and Cashfree re-delivers a non-2xx. The retry was not a symptom of anything being
+wrong — it was us refusing to acknowledge an answer we had already given.
+
+### 🔴 And the row's own account of WHY was wrong — measurement caught it
+
+Q-888 says a `PAYMENT_FAILED` / `USER_DROPPED` order is "settled as EXPIRED" by
+`cashfreeOrderClosedUnpaid`. It is not: that predicate recognises only `EXPIRED` and `TERMINATED`, which
+are **ORDER** statuses, while `USER_DROPPED` and `FAILED` are **PAYMENT** statuses that never reach it.
+Those events fell through to *"Order not paid or invalid status"* and were re-sent for ever — the symptom
+reported, by a different path than the report described.
+
+**A first version of my own test repeated the row's model** (`order_status: 'USER_DROPPED'`, which is not a
+thing) and would have *proved* a fix that never touched the reported case. That is the second time today a
+row's claim about live code turned out stale (the first was Q-887's, in Q-1126 batch 2), and it is the same
+lesson: a row's claim is a hint with a date on it, never evidence.
+
+### Three outcomes, not two
+
+| Outcome | Answer | Why |
+|---|---|---|
+| A **decision** — amount mismatch · an order this server never created · EXPIRED/TERMINATED | **200** | `settled: true` on the verifier's own result; a redelivery reaches the same conclusion |
+| A **failed attempt** on an order still open at the gateway | **200 `ATTEMPT_FAILED`** | news, not work: re-delivering reports the same failure for ever, and a later success arrives as its own event. The order is left PENDING so it can still be paid, and the gateway is still ASKED first, so a truly PAID order is credited even when a stale failure event woke us |
+| **Anything else** | **502** | acknowledging an event we could not complete LOSES it, and a lost payment event costs a customer their credit. 502 not 400: a retryable failure is OURS — no database, missing keys, an unreadable payload — never a malformed request |
+
+**The class:** the route could not tell a decision from an outage **because the function did not say** —
+both arrive as `{ success: false, error }`, and no care at the call site can separate them. So the verifier
+says it, and an **unflagged failure is retryable**, which makes the dangerous direction an explicit choice.
+A census requires the field on every failure return, and **it found two my own first enumeration missed**
+(my `awk` range was too narrow): *"Order not paid or invalid status"* and the catch-all.
+
+Locked by `tests/aSettledWebhookIsNotRejected.test.ts` (13 tests, real route + real verifier). **Four
+reversions bite:** 400 for every failure → 9 fail · the failure-event branch removed → 2 · the EXPIRED case
+loses `settled` → 2 · the predicate stops reading the payment object → 1.
+
+⚠️ **The source assertion is scoped to the webhook handler on purpose.**
+`/api/payment/verify-payment` answers the BROWSER, where a 400 is correct, and a first draft of the
+assertion flagged that correct line — which is how a guard teaches the next person to make the wrong edit.
+
+✅ **All three of the row's clauses are accounted for, checked rather than assumed.** Classification landed
+with Q-614; PENDING expiry with DB-5; and the sweep ordering is already newest-first at
+`routes/payment.ts:466` (`listEqNewestFirst`), whose own comment names this row's exact case. No follow-up
+row is opened.
+
+**A process note worth keeping:** the first gate for this change was stopped mid-suite on purpose. #3854
+merged while it ran, so main moved and the queue row still had to go on — a gate finishing on a state I was
+about to change would have produced a green I could honestly report and honestly believe about the wrong
+tree. One gate on the final state is both cheaper and the only one that means anything.

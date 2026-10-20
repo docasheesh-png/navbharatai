@@ -527,10 +527,10 @@ import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince, splitAuthRefusals, splitAssetMisses } from '../AgentV3/renderCheckConsole';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
 import { fillGateFromLedger, renderProvenInLedger } from '../AgentV3/evidenceLedger';
-import { appRenderedRecord } from '../AgentV3/renderProof';
+import { appRenderedRecord, renderSeenThisBuild } from '../AgentV3/renderProof';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
-import { futilityMinutes, initialFutilityState, armedFutilityState, tickFutility, futilityDetail } from '../AgentV3/futilityBreaker';
+import { futilityMinutes, initialFutilityState, armedFutilityState, tickFutility, futilityDetail, futilityStopApplies } from '../AgentV3/futilityBreaker';
 import { waitingForUserLine } from '../AgentV3/userWait';
 import { STOP_DRAIN_WAIT_MS, BUILD_STILL_STOPPING_CODE, BUILD_STILL_STOPPING_MESSAGE, stoppedBuildGate, waitForBuildExit, markBuildExited, hasBuildBodyExitHold } from '../AgentV3/stoppingBuild';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -13510,6 +13510,8 @@ async function noteBuildOutcome(
      * on completion, which is exactly the signal wanted.
      */
     let commandsRun = 0;
+    /** Distinct paths read, asked at the heartbeat. Assigned once the build dispatcher exists. */
+    let pathsReadNow = (): number => 0;
     let futilityState = initialFutilityState();
     let futilityFired = false;
     /**
@@ -13579,11 +13581,12 @@ async function noteBuildOutcome(
           const limit = futilityMinutes();
           const verdict = tickFutility(
             futilityState,
-            { filesWritten: writtenFiles.size, commandsRun, stepsDone: etaStepsDone },
+            { filesWritten: writtenFiles.size, commandsRun, pathsRead: pathsReadNow(), stepsDone: etaStepsDone },
             limit,
           );
           futilityState = verdict.state;
-          if (verdict.stop) {
+          // A rendered app is not "producing nothing". The wall clock still bounds it.
+          if (futilityStopApplies(verdict, { appRendered: renderSeenThisBuild(workspaceId) })) {
             futilityFired = true;
             try {
               buildDiagRef?.record({
@@ -16047,6 +16050,9 @@ async function noteBuildOutcome(
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
+      pathsReadNow = () => {
+        try { return dispatcher.sharedReadLedger().size; } catch { return 0; }
+      };
       /**
        * Every platform write in this build — the fast lanes and the post-build passes — goes through here: the
        * model's write door with every guard, no steering note (unreadWrites.ts), and ONE outcome per file back
@@ -18117,7 +18123,7 @@ async function noteBuildOutcome(
 
       // THE BUILD STARTS HERE, so the futility breaker's quiet window does too (futilityBreaker.ts,
       // `armedFutilityState`): everything above is the platform's own bounded preparation.
-      futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, stepsDone: etaStepsDone });
+      futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, pathsRead: pathsReadNow(), stepsDone: etaStepsDone });
       futilityArmed = true;
 
       // Cost-ladder escalation (P3) — DORMANT unless AGENTV3_ESCALATION=on. When off,
@@ -18349,7 +18355,7 @@ async function noteBuildOutcome(
               // The seed is the platform's preparation, not the build moving. The futility breaker was armed
               // above ("THE BUILD STARTS HERE"), before the platform's seeds; re-armed now, so ~30 kit files and
               // the `three` install do not read as the builder making progress on its first quiet minute.
-              futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, stepsDone: etaStepsDone });
+              futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, pathsRead: pathsReadNow(), stepsDone: etaStepsDone });
             }
           } catch (kitErr) {
             gameKitSeedFailed = true;
@@ -25638,6 +25644,19 @@ async function noteBuildOutcome(
         } catch { /* best-effort */ }
       }
 
+      // A not-ok build with no OUTCOME_* is the panel's "never recorded WHY" / "no cause" hole.
+      // Every named ending above writes its own code; this is only the runs that wrote none.
+      if (result && result.ok === false) {
+        try {
+          if (!outcomeCodeOf(buildDiag.report().issues)) {
+            buildDiag.record({
+              phase: 'build', severity: 'error', code: 'OUTCOME_UNEXPLAINED', autoResolved: false,
+              message: 'Build outcome: NOT OK — the run ended without an outcome code. The engine did not record why; this is not a fact about the app.',
+            });
+          }
+        } catch { /* the record must never be what breaks the build it is describing */ }
+      }
+
       // ── SOFTWARE PROJECT MODE (SPM-2): settle this module's status from the REAL result ──────
       // done only on a genuinely successful turn; failed (with the honest reason) otherwise — a
       // failed module blocks its dependents by design (planBlockedReason reports it). A wall-clock
@@ -27508,6 +27527,16 @@ async function noteBuildOutcome(
       let crashReportForClient: unknown = undefined;
       try {
         buildDiagRef?.record({ phase: crash.phase, severity: 'error', code: crash.code, message: errMsg, autoResolved: false });
+        if (crash.code === 'BUILD_EXCEPTION') {
+          try {
+            if (!outcomeCodeOf(buildDiagRef?.report()?.issues ?? [])) {
+              buildDiagRef?.record({
+                phase: 'build', severity: 'error', code: 'OUTCOME_UNEXPLAINED', autoResolved: false,
+                message: 'Build outcome: NOT OK — the run ended without an outcome code. The engine did not record why; this is not a fact about the app.',
+              });
+            }
+          } catch { /* naming the hole must not replace the crash record */ }
+        }
         // SAME STALE-SUMMARY SIBLING AS THE WATCHDOG PATH (see the comment beside `pauseMsgForReport`
         // above): `ingestEvent`'s `case 'done'` sets `this.summary` unconditionally on every mid-build
         // `done` event, and `finish()` only overwrites it when a summary is actually passed. Calling

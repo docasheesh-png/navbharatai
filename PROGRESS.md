@@ -98743,3 +98743,28 @@ was external.
 the proxy and `DELETE /git/refs/...` returns *"Write access to this GitHub API path is not permitted through
 this proxy"*, so `claude/a-new-advisory-must-not-redden-every-pr` remains on the remote with no PR against it
 until someone with write access removes it.
+
+### Q-2203 CONFIRMED the same evening — second occurrence, and the distribution names the cause
+
+The `vi.getTimerCount()` assertion failed again at the same line with the same value, on a **different commit
+and run**: `c7e827aab` (run11842), then `99e13b200` (run11866). CLAUDE.md's rule is that a second failure is
+real, so the "one unreproduced occurrence" reading is retired.
+
+**The distribution is the diagnosis, and it is sharper than "load-sensitive".** Twice on
+`codex/phase-2-queue-handoff` (#3859); zero times anywhere else. `main` is green on this test throughout
+(run11858, `94c4d7d84`), and seven local runs passed — the file alone 3x, under `--coverage` 2x, the whole
+suite twice, once through CI's own `npm run test:coverage` at 40,802 passed. The failing path is
+`BUILD_AUTHORITY_UNAVAILABLE`, and `BuildRequestCoordination.ts` is one of only two files where #3859 and
+`main` genuinely overlap (measured from the merge base: 94 files on main's side, 36 on the branch's, overlap =
+that file plus `PROGRESS.md`). #3859 also rewrites `runningBuildRegistry.ts` and `LiveChannel.ts` on the same
+refusal path.
+
+So #3859's refusal path appears to leave a timer un-cleared, and a pre-existing `main` test is catching it
+correctly. **#3859 cannot reach green until its author clears that timer** — five merge-and-gate cycles from
+this session cannot fix a defect inside its own diff, and that is worth stating plainly rather than running a
+sixth.
+
+**Deliberately not pushed into their logic.** A larger ask on a PR this session did not open goes to the author
+with a proposal: make the handler's cleanup part of what the request promise awaits, so "response sent" and
+"timers cleared" cannot be observed out of order. That kills the class rather than this one branch, and it is
+the same fix the row already prescribed before the second occurrence arrived.

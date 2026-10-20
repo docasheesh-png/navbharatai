@@ -98209,6 +98209,46 @@ records, owner-unpublished and plan-paused apps can still publish. Provider erro
 deadline timers are cleared. Behavior tests exercise both moderation states, missing/known records,
 provider failure and a hung lookup; quota/content scan tests explicitly supply a readable registry.
 
+## 2026-10-20 — Q-1126 batch 3: the four-field gap reaches ZERO, and the ratchet becomes an invariant
+
+**154 blocked rows, 0 deficient**, measured with the census's own parser. The guard's baseline is now `0`,
+which changes what it is: from here a new 🟡 BLOCKED row that omits a field **fails CI outright**, because
+there is no slack left to absorb it. That is the 50/50 law's other half — not just fix the instances, make
+the wrong branch impossible.
+
+**How the last 24 went, and it is the same story batch 1 found and batch 2 confirmed.** Fifteen were
+label-only: the information was already written, under a heading the census does not recognise. In several,
+the missing `Why` was sitting in the row's **own STATE column** — *"(admin console)"*, *"(admin, money)"*,
+*"a decision that is the admin's: what Doctor AI shows"* — so the row knew the answer and the detector could
+not see it, because it reads only the body. Those fills move the fact into the body; they do not invent it.
+
+**One more was not deficient but MIS-FILED, and it is the third such case.** Q-881 read 🟡 BLOCKED
+*"awaiting the admin's approval of the audit plan"* while carrying a fix that needs no decision — exactly
+like Q-886 and Q-888, both now fixed. **Verified live at `src/server/lib/UsdInrRate.ts:50-62`:** the whole
+validation on the rate that multiplies every bill is `Number.isFinite(rate) && rate > 0`, so any positive
+number `open.er-api.com` returns becomes the multiplier until the next hourly refresh. Its stated fix is
+**strictly safer than today**, so the row is OPEN. ⚠️ Its third clause — *"record the rate on every
+debit"* — is deliberately left out: that touches the billing WRITE path, and bundling is how a safe fix
+inherits a risky one's blocker (the same reasoning that kept Q-1227 out of Q-886).
+
+**The last eight are the payment audit** (Q-882–Q-885, Q-891–Q-894), where fields were genuinely absent and
+are now written from the evidence each row already carried. 🔒 **And where nothing had actually been tried,
+the field says so:** Q-892 and Q-894 read *"nothing yet"* with the reason. An invented `Needs:` for a
+blocker nobody investigated is the precise defect this row exists to prevent, and a row that admits a gap is
+worth more than one that hides it.
+
+**3 reversions bite:** one label fill removed → 1 fail · Q-881 back to BLOCKED → 1 · a brand-new fieldless
+blocked row → 1.
+
+### 🔒 And the guard caught me editing its own anchor wrongly
+
+I set Q-1126's row to IN PROGRESS, and `theQueueSaysWhatIsTrue` failed: it pins the measured gap to a
+**resting** row (`OPEN` / 🟡 BLOCKED), because that row is where the number lives and a transient state
+would leave the baseline unanchored. The row stays OPEN with its PR named until the merge closes it the
+normal way. The guard was right and my edit was wrong — which is exactly why a number gets pinned to a row
+instead of living only in a test file.
+
+**Next:** Q-881's band — the strongest remaining piece of work that needs no decision from the admin.
 ## 2026-10-20 — User hosting/database/storage audit remediation (admin requested fixes, CI then merge)
 
 Branch `codex/hosting-data-storage-hardening`, based on fresh main `17a4c45`; open PRs #3852 and #3856 inspected and their recovery/agent lanes left alone. Admin explicitly authorized fixes, full CI and merge only after green.
@@ -98248,3 +98288,67 @@ Preserved all-provider import/no-unused compilation coverage. Operator build/net
 now guard the actual public hosting actuator as well as availability, including public-mode admin
 calls; admin-only probe bring-up remains possible. The full suite on the pre-integration source is
 obsolete; the final-state gate is repeated on the combined, committed tree before publication.
+
+### 2026-10-20 — Selected Supabase organization default (prepared, not activated)
+
+User explicitly chose the connected organization for apps built on NavBharatAI and selected a paid
+production estimate. Prepared a dedicated project per app default in Publish, correct product terms
+and price, stale shared-price request refusal, preservation of existing shared controls, and server-only
+org admission across quote/create/wallet/vault delivery. Capacity reads count existing org projects;
+missing approval/limit/credentials or malformed provider responses create nothing. An uncertain paid
+create/charge or interrupted process retains a durable operator-reconciled hold rather than expiring
+into another paid resource. Fixed ambiguous Supabase creation being falsely reported cleaned.
+
+Selected org hkfoligpzrmcasgtzeoe; restored existing project mtbdjypjlnjghapdtedj and verified healthy,
+with no public tables or Storage buckets. No plan upgrade, paid project creation, migration, default
+runtime activation or customer data move occurred. Prepared a dry-run Cloud Run configuration installer
+that references an existing pinned Secret Manager version and requires explicit organization/cost
+acknowledgement for application. Runtime management credentials and GCP deployment access are separate
+from the ChatGPT Supabase connection. See docs/DEFAULT_SUPABASE.md for live prerequisites and scope.
+## 2026-10-20 — Q-881: the number that multiplies every bill gets a bound (and the two siblings the row never named)
+
+**The defect.** The whole validation on the live USD→INR rate was `Number.isFinite(rate) && rate > 0`, so
+any positive number the free FX source returned became the multiplier on every bill on that instance until
+the next refresh — `0.5`, `5000`, a glitched payload, a compromised response. `usdInrRate()` is read at ~24
+billing sites, so "every bill" is literal.
+
+### 🔴 The obvious fix would have re-created a bug this module already had
+
+The revenue audit of **2026-09-10** found `refreshUsdInrRate` was never wired anywhere outside its own
+test, so the rate sat **frozen at the 85 fallback** while the real rate was 87–88, and every build was
+under-billed ~3% — silently, with nothing failing to reveal it. A plain *"refuse anything more than 5% from
+the last good value"* band freezes the rate again the first time the rupee really moves 6%: the same bug
+with a safety badge on. That is the trade the first absolute rule forbids, and it would have looked like a
+safety improvement in review.
+
+So the fix protects **both** halves — bounded, and unable to freeze on a real move:
+
+| Mechanism | Why it is shaped that way |
+|---|---|
+| absolute band `[30, 300]`, refuse outright | deliberately WIDE — a 2.5x move from ~85 still lands. It catches a broken payload, not a market event. A test asserts the band spans **more than 5x**, so a future narrowing cannot quietly turn it into an FX forecast |
+| a jump beyond 5% is **held**, not refused | it lands when a second **independent** fetch agrees — itself a small move, not an exact match, because the true rate drifts between observations. One glitch never bills anybody; a genuine move is late by one cycle, never permanent |
+| every refusal is LOUD with a running count, plus `usdInrRateHealth()` | the 2026-09 bug hid for months because a frozen rate looks identical to a working one from outside. This is the handle that makes the difference visible |
+
+### 🔑 Two siblings the row does not name
+
+The class is *"a number that multiplies every bill, wherever it enters"* — and the row names only the fetch
+path. Hunting it found two more entry points with the identical weak check:
+
+- **`setUsdInrRate`** (the ops override): a hand-typed `8500` was as acceptable as a glitched payload.
+  Banded now — but deliberately **not** jump-limited: an override is a human act, and making someone
+  confirm their own keystroke twice just teaches them to call it twice.
+- **the env fallback**: a typo of `850` for `85` would have multiplied every bill by ten. CLAUDE.md's own
+  warning is that an env value always beats a code default, so this one is exactly the class it describes.
+
+Locked by `tests/theRateThatMultipliesEveryBillIsBounded.test.ts` (11 tests) plus the module's existing 5,
+unchanged. **Four reversions bite:** the any-positive check returns → 4 fail · a big jump refused outright,
+i.e. the frozen-rate bug re-created → 2 · the ops override loses its band → 1 · the refusal goes quiet
+after the first → 1.
+
+**A correction to my own test:** it assumed `refusalsInARow` started at 0, but that is module state only an
+ACCEPTANCE clears — which is the honest definition, since a manual override does not make the FX source
+healthy again. The test now establishes its state with a good refresh first, which proves the reset too.
+
+⚠️ **The row stays OPEN after this, deliberately.** Its third clause — *"record the rate on every debit"* —
+touches the billing WRITE path and is a separate, larger change. Bundling is how a safe fix inherits a risky
+one's blocker, which is the same reasoning that kept Q-1227 out of Q-886.

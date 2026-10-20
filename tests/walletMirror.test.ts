@@ -166,8 +166,16 @@ describe('store purchases — one purchase token can only ever credit once', () 
 
   it('the sibling Cashfree path still claims PENDING→SUCCESS atomically — it was already right', () => {
     const payments = readFileSync(join(process.cwd(), 'src/server/lib/payments.ts'), 'utf8');
-    expect(payments).toContain("if (snap.data().paymentStatus === 'SUCCESS') return false;");
-    expect(payments).toContain('if (!claimedNow) {');
+    // Q-1226 returns the transaction-fresh row rather than a boolean so fulfillment uses verified money.
+    const start = payments.indexOf('const claimedNow = await runTransaction');
+    const end = payments.indexOf('const settled = claimedNow.settled;', start);
+    expect(start).toBeGreaterThan(-1); expect(end).toBeGreaterThan(start);
+    const claim = payments.slice(start, end);
+    expect(claim).toContain('await tx.get(txRef)');
+    expect(claim).toContain("if (snap.data().paymentStatus === 'SUCCESS') return { settled: snap.data(), alreadyProcessed: true }");
+    expect(claim.indexOf("snap.data().paymentStatus === 'SUCCESS'")).toBeLessThan(claim.indexOf('tx.update(txRef'));
+    expect(claim).toContain('if (claimedNow.alreadyProcessed)');
+    expect(claim).toContain('success: true, data: { alreadyProcessed: true');
   });
 
   it('🔒 and there is no simulator that could mint balance at all (Q-615 removed it)', () => {

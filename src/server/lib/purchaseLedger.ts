@@ -73,7 +73,7 @@ export interface PurchaseRow {
   /**
    * True when this credit went through WITHOUT the paid-vs-recorded check being able to run (Q-1135) —
    * our own recorded amount was unreadable, so the provider's figure had nothing to be compared against.
-   * The credit itself was the server-recorded amount, which is what made it safe to let through; this
+   * New settlements use the gateway-verified amount, preserving the unreadable original for review; this
    * flag is how a support question or an autopsy can find those rows instead of grepping rolled logs.
    */
   unreconciled: boolean;

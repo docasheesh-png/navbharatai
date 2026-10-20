@@ -1,7 +1,6 @@
 // Q-1135 — WHEN THE PAID-VS-RECORDED CHECK COULD NOT RUN, THE ORDER ITSELF SAYS SO.
 //
-// Q-890 made the un-reconcilable credit LOUD and credited our own recorded figure, which is the right
-// call: refusing would strand a customer who really paid (the asymmetry is held in
+// Q-890 made the un-reconcilable credit LOUD. Q-1226 uses the verified gateway figure: refusing would strand a customer who really paid (the asymmetry is held in
 // `theAmountCheckCannotBeSkipped.test.ts` so nobody "completes" it into a symmetric rule). What it left
 // behind was a fact that lived ONLY in a `console.error`. Logs roll, nobody greps them during a support
 // call, and the admin Revenue page cannot show what it cannot read — so the one credit that was never
@@ -103,12 +102,9 @@ describe('an un-reconciled credit is recorded on the order, not only in a log li
     // 1. the order is settled rather than refused — this fix does not strand a payer
     expect(r.success).toBe(true);
     expect(saved('ord_legacy').paymentStatus).toBe('SUCCESS');
-    // ⚠️ DELIBERATELY NOT ASSERTED HERE: how many tokens that credit put in the wallet.
-    // Measured while writing this test: ZERO, while the ₹ view added `balanceAdded` in full — the
-    // wallet's two halves move apart. That is a real defect with its own row, and pinning either
-    // number here would encode it as a requirement, which is how a fix gets blocked by its own test
-    // (three times in this repo already). This file asserts only what Q-1135 is about: that the fact
-    // is recorded on the order, inside the one transaction that settles it.
+    // Q-1226: gateway verification now supplies both credit views, with the old value kept below.
+    expect(store.get('user_token_wallets/buyer')).toMatchObject({ tokenBalance: 10000, remaining_balance: 100 });
+    expect(saved('ord_legacy').amountPaid).toBe(100);
 
     // 2. and the order now says the check could not run
     expect(saved('ord_legacy')[RECONCILE_FIELDS.unreconciledCredit]).toBe(true);
@@ -232,12 +228,10 @@ describe('THE CLASS: every SUCCESS flip in the payments file carries the mark', 
   });
 
   it('the log no longer claims a credit that does not happen', () => {
-    // It said "Crediting the server-recorded amount". Measured: the token credit is ZERO, because it
-    // derives from the same unreadable `amountPaid`. Fixing the code is a money decision with its own
-    // row; fixing what the system SAYS about itself is the fifth absolute rule's step 5, and is here.
-    expect(CODE, 'the old sentence described a credit the code does not make').not.toContain('Crediting the server-recorded amount');
-    expect(CODE).toContain('token credit of ZERO');
-    expect(CODE).toContain('needs checking by hand');
+    expect(CODE).not.toContain('Crediting the server-recorded amount');
+    expect(CODE).not.toContain('token credit of ZERO');
+    expect(CODE).toContain('Settling from the verified gateway amount and recorded fee');
+    expect(CODE).toContain('retained on the order for review');
   });
 
   it('and it is never written as a second update of its own', () => {

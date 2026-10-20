@@ -47,7 +47,7 @@ describe('firstPassStats — the headline is the CLEAN rate, with the flattering
       build({ counts: { autoResolved: 2, unresolved: 0 } }),
       build({ ok: false }),
     ]);
-    expect(s).toMatchObject({ total: 4, clean: 2, healed: 1, failed: 1 });
+    expect(s).toMatchObject({ total: 4, clean: 2, healed: 1, failed: 1, repaired: 1, warningOnly: 0 });
     expect(s.cleanRate).toBeCloseTo(0.5);
     // deliveredRate is the number that flatters us — it must never be mistaken for the headline.
     expect(s.deliveredRate).toBeCloseTo(0.75);
@@ -152,5 +152,16 @@ describe('firstPassStatsFromMeta — a legacy row is skipped, never counted as c
     expect(s.cleanRate).toBeNull();
     expect(s.skippedLegacy).toBe(2);
     expect(firstPassHeadline(s)).toContain('No builds recorded yet');
+  });
+
+  it('a warning left open is not called a repair, and a user stop is not a failure', () => {
+    const s = firstPassStatsFromMeta([
+      { ok: true, healCount: 0, unresolvedCount: 1 },
+      { ok: true, healCount: 2, unresolvedCount: 0 },
+      { ok: false, userStopped: true },
+      { ok: false },
+    ]);
+    expect(s).toMatchObject({ total: 3, clean: 0, healed: 2, repaired: 1, warningOnly: 1, failed: 1, userStopped: 1 });
+    expect(s.cleanRate).toBe(0);
   });
 });

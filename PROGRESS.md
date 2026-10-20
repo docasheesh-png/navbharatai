@@ -98321,3 +98321,32 @@ are pending. Published ledger scope remains7/281/544, with554 pending audit rows
 (497 OPEN/3 IN PROGRESS/54 four-field BLOCKED) and12 already-merged platform/CI
 rows recorded closed. Future scratch autopsies are outside this publication.
 No new PR or hosted success is claimed yet, and this session has not merged a PR.
+## 2026-10-20 — User hosting/database/storage audit remediation (admin requested fixes, CI then merge)
+
+Branch `codex/hosting-data-storage-hardening`, based on fresh main `17a4c45`; open PRs #3852 and #3856 inspected and their recovery/agent lanes left alone. Admin explicitly authorized fixes, full CI and merge only after green.
+
+Root-cause/class ledger:
+- F1: SQL policy names used string literals; corrected identifier quoting and bounded names (long buckets previously collided at PostgreSQL’s identifier limit). Executed the real generated migration twice in PGlite and enforced two-user RLS. Invalid MIME restrictions now reject rather than silently widen.
+- F2: publishable app key acted as user authorization; API now requires a separately verified Firebase token, store enforces createdBy/scope, and legacy unowned records remain owner-only. Client has an explicit token adapter; it supports the platform trusted Firebase project, not arbitrary issuers. Existing published apps need adapter integration and republish; records/credentials are preserved. This is a security migration, not a claim to provide a universal app-auth service.
+- F3: quota checked after queries; durable admission reserves before records, migrates old shard totals once and refunds unused list reservation. Negative cache reduces repeated exhausted calls. Authentication/meta/counter overhead still costs money; no claim of a zero-cost refusal or hard invoice cap.
+- F4: upload recipes signed anonymous/unbounded uploads; real auth and durable byte-quota hooks are required (otherwise 503). S3 signs exact size/content type. Cloudinary uses authenticated, bounded raw-body upload, two buffers per worker and provider format restrictions; no client signing capability. Actual app callbacks still must be connected; existing saved apps are not silently rewritten.
+- F5: private-read policy lacked owner predicate; now selects only caller uid folder. F6: Cloudinary copied a platform relative import; removed, with all-recipe import-closure guard.
+- F7: public flag bypassed unfinished isolation work; non-admin hosting additionally requires credentialless mode and explicit real-build/egress verification attestations. OPEN: actual cloud probe and network policy require cloud access, not another boolean pretending to create isolation.
+- F8 OPEN: live backup config was absent; managed backup/PITR inventory and staging restore proof require authenticated GCP and customer DB access. Do not manufacture backup success or enable a billable resource blindly.
+- F9 OPEN: registry storage and real invoice reconciliation remain incomplete; preserve explicit unmeasured fields. A plan fee or instance cap is not proof of profit.
+- F10: list had no continuation; stable document-id cursor pages across owned/scoped rows. F11: generic refusal erased actual charge state; responses preserve debit/refund/delivery/cleanup, and ambiguous charge exceptions retain resources with paymentStatus unknown. Both database and server sibling paths handled.
+
+Reversion proof: nine bug classes reintroduced individually; each corresponding test failed; every source restored before verification. Final complete local and CI results pending.
+
+### Verification findings — source-census race and test engine lifetime
+
+The final offline suite exposed an existing parallel-test race: `aStarvedReadSaysSoAndIsRead` statted `tests/.tmp-key-before-button-<pid>` after its owning test removed it. The assertions passed standalone. Root class: a source census treating another worker’s generated artifacts as shipped source. Siblings: the dependency census traversed the same test tree; the case-collision census also counted these artifacts. All three now use the shared fixture boundary in `tests/helpers/sourceCensus.ts`. The new filesystem test skips a dangling `.tmp-` fixture and still throws for a missing real source, so no genuine read error is silenced. Producers retain their existing module resolution; no broad assertion is removed.
+
+The same run reported a SIGKILL of the real PGlite shim test worker. Its fixture created a separate real engine for each test without closing it (the production browser shim intentionally keeps its workspace engine open). Track the actual constructors and close every engine after each test; assert clean fixture ownership before the next. The shipped browser shim is unchanged. The six affected stability files pass 79 tests. Reintroducing each of these two fixture defects makes its guard fail. Local full-suite concurrency is bounded to three workers; no test is skipped to make it green.
+
+Integrated latest main (6cdc155fa, including #3852, #3856 and #3857) before the final gates; only PROGRESS.md overlapped, and both append histories were retained. The candidate branch is now `codex/hosting-data-storage-hardening-integrated`.
+
+
+### 2026-10-20 — seven-ledger batch integrates latest hosting/data boundary main
+
+The prior exact 0d8ef9f5b source tree passed 2,826 files /40,408 tests /67 skipped, all14 additional checks and14 real database drills. Its first attempt had only a worktree dependency symlink invariant failure; npm ci installed a real directory, then the full second attempt passed with the source unchanged. Those logs are archived against that exact tree. Concurrent PR #3858 then merged to main5474b0d0e; this branch integrates all26 upstream files, preserving every main and own PROGRESS line and all seven-ledger queue/source freezes. Its hosting/data migration is upstream work, not claimed as a new failed-report fix here. A new full final-source gate and exact-head database receipt are required before this new branch is pushed. Counts remain7ledgers/281items/544otherreports and554pending audit rows;12 earlier merged platform rows are closed, with0 historical app reruns/whole-report closures. No merge performed by this session.

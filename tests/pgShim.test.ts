@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { pgShimSource, pgliteDataDir, PG_SHIM_PATH, PGLITE_VERSION } from '../src/server/runtime/browserBackend/pgShim';
 
 /**
@@ -14,6 +14,15 @@ import { pgShimSource, pgliteDataDir, PG_SHIM_PATH, PGLITE_VERSION } from '../sr
  * the same misunderstanding as the code would have agreed with it.
  */
 
+// The shipped browser shim deliberately keeps one workspace database open. Each test creates a
+// distinct shim/engine, so the fixture (not Pool.end()) must close every real engine afterwards.
+const engines: Array<{ close(): Promise<void> }> = [];
+beforeEach(() => expect(engines).toHaveLength(0));
+afterEach(async () => {
+  const pending = engines.splice(0);
+  await Promise.all(pending.map(engine => engine.close()));
+});
+
 /** Load the shipped shim source, with the real PGlite standing in for the browser's dynamic import. */
 async function loadPg(dataDir: string | null = null): Promise<{
   Pool: new () => { query: (t: unknown, v?: unknown) => Promise<PgResult>; connect: () => Promise<PgClient>; end: () => Promise<void>; on: (e: string, f: unknown) => unknown };
@@ -23,7 +32,12 @@ async function loadPg(dataDir: string | null = null): Promise<{
   const module = { exports: {} as Record<string, unknown> };
   // The shim reaches for the browser's dynamic import(). In Node the same specifier resolves to the
   // installed package, so the code under test is unmodified.
-  const importer = (spec: string) => import(/* @vite-ignore */ spec);
+  const importer = async (spec: string) => {
+    const real = await import(/* @vite-ignore */ spec);
+    return { ...real, PGlite: class extends real.PGlite {
+      constructor(...args: any[]) { super(...args); engines.push(this as unknown as { close(): Promise<void> }); }
+    } };
+  };
   new Function('module', 'exports', 'console', '__nbaiImport', source.replace(/\bimport\(PGLITE_URL\)/, '__nbaiImport(PGLITE_URL)'))(
     module, module.exports, console, importer,
   );
@@ -40,6 +54,7 @@ describe('it really is Postgres', () => {
     await pool.query('CREATE TABLE items (id serial primary key, name text NOT NULL)');
     await pool.query('INSERT INTO items (name) VALUES ($1)', ['Doodh']);
     const r = await pool.query('SELECT * FROM items');
+    expect(engines).toHaveLength(1);
     expect(r.rows).toEqual([{ id: 1, name: 'Doodh' }]);
   });
 

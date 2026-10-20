@@ -25,8 +25,8 @@ prompts, model responses, command/output excerpts and credentials remain outside
 ## Current branch and publication boundary
 
 This is unpublished work on `codex/failed-build-next-ledgers-20261020`, now integrated with
-main `6cdc155fa3cb03a014a7c671d966aae6016ecb63`, including the payment-webhook correction
-from PR #3857. The escape-aware census refinement remains part of this new branch.
+main `5474b0d0ed85e9192f56e0d70243d1dd1989c071`, preserving the payment-webhook correction
+from PR #3857 and app data/storage boundaries from PR #3858. The escape-aware census refinement remains part of this new branch.
 PR [#3856](https://github.com/docasheesh-png/navbharatai/pull/3856) was externally merged at
 12:26:44 UTC; its scope was 2 ledgers / 119 items / 549 remaining. This batch adds **5 ledgers /
 162 item rows plus 4 class/CI rows = 166 new audit rows**. Twelve merged shared-class rows leave
@@ -41,7 +41,7 @@ Q-1928/Q-1982–Q-1984 remain OPEN / owner —. The closure evidence is exact me
 `5456d186caab683f5bec17f3aa5e0fb1506b6476` and main `72c3252d0faf33fd51987fbc2b9d991f7742953c`,
 both tree `813484db9c1349164824bf025227175f52b3b4f0`. Required hosted [CI 39418902451](https://github.com/docasheesh-png/navbharatai/actions/runs/39418902451)
 passed both build-and-test and database queue-retry jobs. The older `5db7cc763` timeout failure belongs
-to a different head. The separate local `d68f6dfb4` gate passed 2,822 files / 40,289 tests / 67 skipped, all 14 additional checks and 14 database drills; that result proves `d68f6dfb4` only, not this new combined tree.
+to a different head. The separate local `d68f6dfb4` gate passed 2,822 files / 40,289 tests / 67 skipped, all 14 additional checks and 14 database drills; that result proves `d68f6dfb4` only. The later `0d8ef9f5b` gate passed 2,826 files /40,408 tests /67 skipped, all14 additional checks and14 database drills after installing a real dependency directory; this proves that earlier tree only. The current latest-main integration still requires its own final gate.
 
 | Closed queue | Shared class | Behavior/sibling proof |
 |---|---|---|

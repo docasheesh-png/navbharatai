@@ -1,10 +1,11 @@
 // Public data API for one app's shared database.
 //
-// The published app calls this with its key. There is no Firebase user on that call — the key is
-// the credential, and it only opens the workspace it was created for. Firestore rules deny the
-// collection to browsers; this route is the only door, and it stops at the operation cap so one
-// app cannot run the bill. Nothing here charges a wallet.
+// The public key identifies the workspace. A separately verified Firebase ID token is the caller
+// identity; the store enforces row ownership and preserves unowned legacy rows for the app owner.
+// Private app credentials must use the same trusted Firebase project, or a separately connected
+// database/auth provider. Arbitrary claimed user ids and tokens from other projects are refused.
 
+import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { BoundedCache } from '../lib/boundedCache';
 import { addressRateKey } from '../lib/clientAddress';
 import type { Express, Request, Response } from 'express';
@@ -38,7 +39,7 @@ function presentedKey(req: Request): string {
   const header = req.get('authorization') || '';
   const bearer = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : '';
   const alt = req.get('x-nbai-key') || '';
-  const key = bearer || alt.trim();
+  const key = alt.trim() || bearer;
   if (key.length < 8 || key.length > 200) return '';
   return key;
 }
@@ -59,6 +60,11 @@ async function handle(req: Request, res: Response, op: 'list' | 'get' | 'create'
     res.status(401).json({ ok: false, error: 'Send the app key. Nothing was changed.' });
     return;
   }
+  const actorUid = await verifyFirebaseToken(req);
+  if (!actorUid) {
+    res.status(401).json({ ok: false, error: 'Sign in to access your records. The app key alone cannot open this database.' });
+    return;
+  }
   const db = getServerDb();
   if (!db) {
     res.status(503).json({ ok: false, error: 'The database is not switched on. Nothing was changed.' });
@@ -76,6 +82,8 @@ async function handle(req: Request, res: Response, op: 'list' | 'get' | 'create'
   const id = typeof req.params.id === 'string' ? req.params.id : null;
   const result = await runSharedData(db as unknown as SharedDb, workspaceId, {
     op,
+    actorUid,
+    cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined,
     collection: routeParam(req.params.collection),
     id,
     key,

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateStorageIntegration, isStorageProvider } from './StorageGenerator';
+import { posix } from 'node:path';
+import ts from 'typescript';
 
 describe('generateStorageIntegration — S3-compatible', () => {
   const c = generateStorageIntegration('s3');
@@ -29,14 +31,41 @@ describe('generateStorageIntegration — Cloudinary', () => {
   const c = generateStorageIntegration('cloudinary');
 
   it('server issues an upload signature (secret never leaves the server)', () => {
-    expect(c.files['server/routes/upload.ts']).toContain('cloudinary.utils.api_sign_request');
-    expect(c.files['server/routes/upload.ts']).toContain("uploadRouter.post('/sign'");
-    expect(c.files['src/lib/upload.ts']).toContain('api.cloudinary.com');
+    expect(c.files['server/routes/upload.ts']).toContain('cloudinary.uploader.upload_stream');
+    expect(c.files['server/routes/upload.ts']).toContain("uploadRouter.post('/file'");
+    expect(c.files['src/lib/upload.ts']).toContain('/api/upload/file');
     expect(c.dependencies).toEqual([{ name: 'cloudinary', version: '^2' }]);
   });
 });
 
 describe('safety + guards', () => {
+  it('generated modules contain no unused local imports or helpers under strict app typechecks', () => {
+    for (const provider of ['s3', 'cloudinary', 'supabase'] as const) {
+      for (const [path, source] of Object.entries(generateStorageIntegration(provider).files)) {
+        if (!path.endsWith('.ts')) continue;
+        const virtual = '/__generated__/' + path;
+        const options: ts.CompilerOptions = { noEmit: true, noUnusedLocals: true, types: [], skipLibCheck: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler };
+        const host = ts.createCompilerHost(options); const original = host.getSourceFile;
+        host.getSourceFile = (name, ...args) => name === virtual ? ts.createSourceFile(name, source, ts.ScriptTarget.ES2022, true) : original(name, ...args);
+        const program = ts.createProgram([virtual], options, host);
+        const unused = ts.getPreEmitDiagnostics(program).filter(d => d.file?.fileName === virtual && [6133, 6192].includes(d.code));
+        expect(unused.map(d => ts.flattenDiagnosticMessageText(d.messageText, ' ')), `${provider}: ${path}`).toEqual([]);
+      }
+    }
+  });
+  it('every relative import in every recipe resolves to a generated file, including unused imports', () => {
+    for (const provider of ['s3', 'cloudinary', 'supabase'] as const) {
+      const { files } = generateStorageIntegration(provider);
+      for (const [path, source] of Object.entries(files)) {
+        if (!path.endsWith('.ts')) continue;
+        for (const imported of ts.preProcessFile(source).importedFiles) {
+          if (!imported.fileName.startsWith('.')) continue;
+          const resolved = posix.normalize(posix.join(posix.dirname(path), imported.fileName));
+          expect([resolved, resolved + '.ts', resolved + '/index.ts'].some(p => p in files), `${provider}: ${path} -> ${imported.fileName}`).toBe(true);
+        }
+      }
+    }
+  });
   it('blanks secret values in .env.example and has no TODO/stub placeholders', () => {
     for (const p of ['s3', 'cloudinary'] as const) {
       const cfg = generateStorageIntegration(p);

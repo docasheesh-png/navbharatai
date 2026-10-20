@@ -4414,3 +4414,7 @@ Candidate-policy Weak measured provider-cost ceiling, default $1; positive finit
 ### Weak policy production activation (admin-authorized 2026-10-20)
 
 Cloud Build now passes `AGENTV3_WEAK_SCOPE_POLICY=${_WEAK_SCOPE_POLICY}` and `AGENTV3_WEAK_BUILD_COST_CEILING_USD=${_WEAK_BUILD_COST_CEILING_USD}` using additive `--update-env-vars`. Trigger substitution defaults are `on` and `1`; set `_WEAK_SCOPE_POLICY=off` and redeploy for persistent rollback. Direct Cloud Run edits are replaced by the trigger values on the next deployment. No provider key or explicit ladder override is changed.
+
+### User-app hosting isolation gates (2026-10-20)
+
+`NAVBHARAT_APPS_BUILD_ISOLATION_VERIFIED=on` and `NAVBHARAT_APPS_EGRESS_VERIFIED=on` are explicit operator attestations, default unset/false. For a non-admin publish, both AND `NAVBHARAT_APPS_CREDENTIALLESS_BUILD=on` are required in addition to the existing public hosting flag, plan and identities. Set build verification only after the existing real Cloud Build probe succeeds; set egress verification only after actual network policy and cross-tenant tests pass. They are not automatically set by CI or this change. Admin-only probes remain possible. These attestations do not create IAM/network controls; they prevent an unverified public rollout.

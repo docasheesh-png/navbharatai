@@ -24,16 +24,15 @@ prompts, model responses, command/output excerpts and credentials remain outside
 
 ## Current branch and publication boundary
 
-This is unpublished next-batch work on `codex/failed-build-next-ledgers-20261020`, fixed integration base
-`1bf8b22a03d551fb27f0bb622006dff18672c2ad` / tree `b5e3c7530c1cca91194bd8f9ed785869929c1797`.
-It preserves main `72c3252d0faf33fd51987fbc2b9d991f7742953c` and the later local census delta.
-PR [#3856](https://github.com/docasheesh-png/navbharatai/pull/3856) was externally merged at 12:26:44 UTC;
-its scope was 2 ledgers/119 items/549 remaining. This new batch adds **5 ledgers/162 item rows plus
-4 class/CI rows =166 new audit rows**. Twelve merged shared-class rows leave the pending queue,
-so the net change from merged main's 400 audit rows is **+154 →554 pending**. This PR does not
-add 554 new rows. No new PR has been created and its complete final gate remains pending.
-Root will integrate the later payments main change after this checkpoint and gate that final tree.
-Publish once the final gate passes; merge only after the admin explicitly names the new PR.
+This is unpublished work on `codex/failed-build-next-ledgers-20261020`, now integrated with
+main `6cdc155fa3cb03a014a7c671d966aae6016ecb63`, including the payment-webhook correction
+from PR #3857. The escape-aware census refinement remains part of this new branch.
+PR [#3856](https://github.com/docasheesh-png/navbharatai/pull/3856) was externally merged at
+12:26:44 UTC; its scope was 2 ledgers / 119 items / 549 remaining. This batch adds **5 ledgers /
+162 item rows plus 4 class/CI rows = 166 new audit rows**. Twelve merged shared-class rows leave
+the pending queue, giving **net +154 from 400 to 554 pending audit rows**. No new PR has been
+created; the complete final-source gate is pending. Publish after that gate passes, and merge
+only when the admin explicitly names the new PR.
 
 ## Approved shared-platform closures
 
@@ -42,7 +41,7 @@ Q-1928/Q-1982–Q-1984 remain OPEN / owner —. The closure evidence is exact me
 `5456d186caab683f5bec17f3aa5e0fb1506b6476` and main `72c3252d0faf33fd51987fbc2b9d991f7742953c`,
 both tree `813484db9c1349164824bf025227175f52b3b4f0`. Required hosted [CI 39418902451](https://github.com/docasheesh-png/navbharatai/actions/runs/39418902451)
 passed both build-and-test and database queue-retry jobs. The older `5db7cc763` timeout failure belongs
-to a different head. The separate local d 68 gate passed 2,822 files / 40,289 tests / 67 skipped, all 14 additional checks and 14 database drills; that result proves d 68 only, not this new combined tree.
+to a different head. The separate local `d68f6dfb4` gate passed 2,822 files / 40,289 tests / 67 skipped, all 14 additional checks and 14 database drills; that result proves `d68f6dfb4` only, not this new combined tree.
 
 | Closed queue | Shared class | Behavior/sibling proof |
 |---|---|---|
@@ -59,7 +58,7 @@ to a different head. The separate local d 68 gate passed 2,822 files / 40,289 te
 | Q-2023 | auth revision and clear/new-identity ordering | Original-module first 12 case snapshot 7 behaviorFAIL5 boundaryPASS. Final 71 PASS; later 9622 reversion withfinaltests 1 orderFAIL70 PASS→same 71 PASS. Different proof snapshots explicitly distinguished. |
 | Q-2024 | old SDK load cannot own reset module/cache | Controlled stale-loader/reset behavior failed original module in earlier 12 case snapshot; final generation-owned single readiness promise removes resolved-cache split;final 71 PASS with reset/clear/hash/native-inflight boundaries. |
 
-All listed production bytes match merged main and the d 68 source checkpoint. The restore-census
+All listed production bytes match merged main and the `d68f6dfb4` source checkpoint. The restore-census
 test differs at localQ-2163; required hosted CI exercised its own exact merged test bytes.
 Restore proof covers eight reviewed automatic undo producers; forward reseeding/durable merge
 and warm-cache concerns remainOPENQ-1894–Q-1897. Native privacy proof does not cancel native
@@ -77,10 +76,13 @@ Source:[BuildDiagnostics.ts](../src/server/AgentV3/BuildDiagnostics.ts);
 [regression](../tests/aStoppedBuildCannotMeetItsDeliveryEta.test.ts). No universal successful-delivery
 claim is made for advisory outcomes.
 
-**Q-2163 IN PROGRESS:** local escape-aware census preserves 2453 inputs and 18 policy entries;
-18 focused testsPASS and oneCPU/V8 measurement 9.015s under unchanged 20 scap. The final new-tree
-full/hosted gate remains pending. These are the only three IN PROGRESSaudit rows, all owned by
-`codex/failed-build-next-ledgers-20261020`. Q-2039/Q-2177 remainOPENfor historical process/saved-score evidence.
+**Q-2163 IN PROGRESS:** The integrated census checks 2,458 input files and the exact 18-function
+policy set, using 685 AST parses. All 18 focused cases pass. The earlier one-CPU V8 probe on the
+2,453-file pre-integration corpus took 9.015 seconds, within the unchanged 20-second timeout.
+The local `d68f6dfb4` checkpoint's complete gate passed; this new final tree and its hosted CI
+still need their own gate. Q-2162, Q-2163 and Q-2200 are the only three IN PROGRESS audit rows,
+owned by `codex/failed-build-next-ledgers-20261020`. Q-2039/Q-2177 remain OPEN for historical
+process and saved-score evidence.
 
 **Q-2201 OPEN/owner —:** advisory-cap code alone does not prove a completed app. Reproduce the
 truthy build-result reference, later syntax/review ok=false transitions and final critical check
@@ -97,12 +99,12 @@ resolved-report totals:183 user-stop /220 needs-investigation /26 legacyfixed-la
 different counters. Explicit platform actor/cause wins; post-endedAt telemetry is excluded.
 Seven-report-only buckets: **78 observed recoveries /20 workarounds /84 skips /29 still-broken /
 70 struggles =281 items**. They are not buckets for all 551 reports or a fix count. The user-stopped
-4 cf 3 report records two prior inefficiencies without treating Stop as a defect or restarting it.
+`4cf3ec76` report records two prior inefficiencies without treating Stop as a defect or restarting it.
 
 The legacy 26 coverage rows were 4 terminal-source classes /7 contributor fixes /10 mitigations /
 3 diagnostic changes /2 already-covered. Four original demonstrated terminal platform classes
-remain the count:77a 2 ecf 5 Hindi refusal;fd 6 be 05 flive-env security;303836a 7 native-bundle hooks;
-7 ec 82d 80 review headings. Their identical 8 behavior assertions pass current source and fail
+remain the count: `77a2ecf5` Hindi refusal; `fd6be05f` live-env security; `303836a7` native-bundle hooks;
+`7ec82d80` review headings. Their identical 8 behavior assertions pass current source and fail
 corresponding baseline modules. References:tests/aHindiRefusalIsStillAnAnswer.test.ts,
 tests/envSecurityFindings.test.ts,tests/appSourceIntegrity.test.ts and
 src/server/AgentV3/ReviewerFindingSemantics.test.ts. The 12 queue closures above do not turn

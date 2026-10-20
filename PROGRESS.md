@@ -97753,3 +97753,16 @@ legacy policy with one fewer branch. No budget, threshold or guard was raised.
 The headroom/real-asset/authenticated-preview cohort then passed 3 files /80 tests.
 All final-source typechecks, build/checks and full suite must pass again before
 push; PR #3852 remains unmerged and no remote CI success is claimed.
+
+### 2026-10-20 — Phase2 final queued-step drain remains a separate boundary
+
+Final scoped review confirmed that non-resumable final queued A→B transitions
+do not use the intermediate handoff join. A final result settles A before
+ordinary lease release, so an earlier timed-out app-side source/asset job can
+overlap B. This remains explicitly OPEN alongside general admission and
+manual/source fencing, with a separate exact-final-binding drain/pause design
+required. No all-queue source-drain guarantee is claimed. The same review found
+one intermediate sibling: a durable deletion chained after finalSave behind its
+own 15s wrapper. Both its raw deletion and wrapper now use the existing tracker;
+its actual-coordinator regression holds the delete and proves READY waits for
+the deletion to return. No final-step protocol or pricing behavior is added.

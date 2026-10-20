@@ -205,6 +205,36 @@ describe('real queue/request coordination across normal successful module window
     expect((await f.queue.load(WS)).paused).toBe(true);
   });
 
+  it('keeps a chained durable deletion inside normal-module retirement until the actual delete returns', async () => {
+    const f = await firstWindow();
+    const source = createBuildSourcePublication();
+    let finishSave!: () => void; let finishDelete!: () => void;
+    const files = new Map([['obsolete.ts', 'old source']]);
+    const finalSave = source.track(new Promise<void>((resolve) => { finishSave = resolve; }));
+    const rawDelete = source.track(finalSave.then(async () => {
+      await new Promise<void>((resolve) => { finishDelete = resolve; });
+      files.delete('obsolete.ts'); return 1;
+    }));
+    const reported = source.track(withTimeout(rawDelete, 15_000, 'durable-delete'));
+    f.publish(moduleResult); await f.request.flushPublication();
+    const closeDelivery = vi.fn(async () => true);
+    let joining = false;
+    const retirement = f.request.retireNormalModule(true, closeDelivery, () => { joining = true; return source.join(); });
+    for (let i = 0; i < 100 && !joining; i++) await Promise.resolve();
+    expect(joining).toBe(true);
+    finishSave();
+    // Let an incorrectly empty join run through the actual transaction while the delete stays held.
+    for (let i = 0; i < 100; i++) await Promise.resolve();
+    expect(finishDelete).toBeTypeOf('function');
+    expect(files.has('obsolete.ts')).toBe(true);
+    expect((await f.queue.load(WS)).items[0].continuation?.phase).toBe('pending');
+    expect(closeDelivery).not.toHaveBeenCalled();
+    finishDelete(); expect(await reported).toBe(1);
+    expect(await retirement).toBe(true);
+    expect(files.has('obsolete.ts')).toBe(false);
+    expect((await f.queue.load(WS)).items[0].continuation?.phase).toBe('ready');
+  });
+
   it.each([false, true])('an asset report timeout pauses automatic handoff even if the raw save later finishes (stillPending=%s)', async (stillPending) => {
     vi.useFakeTimers();
     const f = await firstWindow();

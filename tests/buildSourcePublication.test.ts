@@ -14,6 +14,8 @@ describe('normal queued retirement joins owned source/plan publications', () => 
     expect(route).toContain('const assetsOutcome = await sourcePublication.track(withTimeout(');
     expect(route).toContain('sourcePublication.track(persistBuildAssets(');
     expect(route).toContain('save: (assetWorkspaceId, assets) => saveWorkspaceAssets(assetWorkspaceId, assets, verified?.uid)');
+    expect(route).toContain('const forgotten = await sourcePublication.track(withTimeout(');
+    expect(route).toContain('sourcePublication.track(finalSave.then(() => removeWorkspaceFiles(workspaceId, forgetDurably)))');
   });
   it('cancels the progress timer and blocks new issue calls after body cleanup closes publication', async () => {
     vi.useFakeTimers();

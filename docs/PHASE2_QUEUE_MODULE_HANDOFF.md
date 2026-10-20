@@ -107,6 +107,16 @@ ordinary manual admission/source fencing remains an open boundary. Captured loca
 mirror cleanup is joined; cross-instance account-wide mirror generation fencing
 is not newly guaranteed. These tests do not establish production provider,
 Cloud Run, browser-origin, database migration or physical process-drain behavior.
+
+Final non-resumable queued steps have a separate OPEN source-overlap boundary.
+Their result currently settles A before the normal-module retirement path, whose
+non-intermediate branch does not run the publication join. After the ordinary
+lease is released, B can be claimed while an earlier timed-out source/asset job
+still runs. This checkpoint protects intermediate automatic handoffs; it does
+not establish drainage for final queued A→B transitions or general admission.
+An exact final-binding drain/pause policy is required as a separate checkpoint,
+preserving window verdicts, pricing, Stop and client claim liveness.
+
 Inherited legacy workspace-key prefix ownership/private-access ambiguity also
 remains open pending trustworthy attribution and migration; this checkpoint does
 not establish correct ownership for every historical workspace or account.

@@ -26048,10 +26048,10 @@ async function noteBuildOutcome(
           const forgetDurably = deletionsToForgetDurably(deletedThisBuild, persisted);
           if (forgetDurably.length > 0) {
             try {
-              const forgotten = await withTimeout(
-                finalSave.then(() => removeWorkspaceFiles(workspaceId, forgetDurably)),
+              const forgotten = await sourcePublication.track(withTimeout(
+                sourcePublication.track(finalSave.then(() => removeWorkspaceFiles(workspaceId, forgetDurably))),
                 15_000, 'durable-delete',
-              );
+              ));
               if (forgotten > 0) {
                 // A positive count means the store's path list was rewritten without every one of these paths
                 // (removeWorkspaceFiles returns 0 on any failure), so all of them are now absent from the app.

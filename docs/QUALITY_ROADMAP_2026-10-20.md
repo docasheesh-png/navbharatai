@@ -92,6 +92,11 @@ writers. A local SDK fixture observed two allocation POSTs under default retries
 and one with retries disabled; neither result establishes provider cancellation,
 full state restoration or a completed production allocation protocol.
 
+Final non-resumable queued A→B transitions also remain an OPEN source-drain
+boundary: their current final settlement precedes the intermediate handoff join.
+The next checkpoint must bind confirmed drain or durable pause to that exact
+final attempt without changing its app verdict or per-window pricing.
+
 Read-only preparation identified these existing paths to investigate after
 Phase 1 acceptance:
 

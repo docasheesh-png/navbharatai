@@ -482,7 +482,7 @@ import { withStopSignal } from '../AgentV3/stopSignal';
 import { withAnswerNotDeliberation } from '../AgentV3/answerNotDeliberate';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
-import { redactPII, redactEventForUser } from '../AgentV3/SecretRedactor';
+import { redactPII, redactEventForUser } from '../AgentV3/SourceSecretRedactor';
 import { audit } from '../lib/audit';
 import { persistenceHealth } from '../lib/persistenceHealth';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';

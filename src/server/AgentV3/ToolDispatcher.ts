@@ -446,7 +446,7 @@ import type { CodemodeFile } from './CodemodeExecutor';
 import { containsSymbol, CODEMOD_SKIP } from './codemodScope';
 import { codemodTruncationNote } from './codemodTruncation';
 import { getEmbeddingStore } from './EmbeddingSearch';
-import { redactSecrets, redactDeep } from './SecretRedactor';
+import { redactSecrets, redactDeep } from './SourceSecretRedactor';
 import { isSecretFilePath, maskSecretFile, SECRET_MASK, secretPlaceholderWriteMessage } from './secretFileView';
 // Where the sandbox browser may go: its own preview, or the real public web — never an internal
 // infrastructure address. Handing a model a browser with an unrestricted address bar is an SSRF

@@ -22,7 +22,7 @@ import { WORKING_LINE_ID } from '../../lib/liveStatusLine';
 import { prepWindowDetail } from './prepClock';
 import type { AgentEvent } from './types';
 import { parseNpmAuditSummary, npmAuditNote, auditSeverity, looksLikeDependencyInstall } from './npmAuditSummary';
-import { redactSecrets } from './SecretRedactor';
+import { redactSecrets } from './SourceSecretRedactor';
 import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
 import { isDeadSandboxSignal, detectSilentDbFailure } from './sandbox/EngineerAI/actuators/sandboxHealth';
 import { sandboxCost, describeSandboxCost } from './sandboxCost';

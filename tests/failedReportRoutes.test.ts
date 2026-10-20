@@ -7,7 +7,7 @@ const oauth = vi.hoisted(() => ({ register: vi.fn(), authorize: vi.fn(), pending
 const autopsy = vi.hoisted(() => ({ read: vi.fn(), update: vi.fn() }));
 vi.mock('../src/server/lib/failedReportOAuth', async original => ({ ...await original<any>(), reportOAuthService: () => oauth }));
 vi.mock('../src/server/lib/failedReportAccess', () => ({ createReportAccess: mocked.create, listReportAccess: mocked.list, revokeReportAccess: mocked.revoke, reportTokenOk: mocked.tokenOk }));
-vi.mock('../src/server/lib/failedBuildReports', async (original) => ({ ...await original<any>(), readFailedBuildPage: mocked.page, readFailedBuild: mocked.detail }));
+vi.mock('../src/server/lib/failedBuildReports', async (original) => ({ ...await original<any>(), readFailedBuildPage: mocked.page, readFailedBuildWithDigest: mocked.detail }));
 vi.mock('../src/server/lib/failedReportAutopsy', async original => ({ ...await original<any>(),
   readFailedReportAutopsy: autopsy.read, updateFailedReportAutopsy: autopsy.update,
   withFailedReportAutopsies: async (page: unknown) => page,
@@ -36,7 +36,7 @@ beforeAll(async () => {
   port = (server.address() as { port: number }).port;
 });
 afterAll(async () => { await new Promise<void>((r) => server.close(() => r())); });
-beforeEach(() => { mocked.page.mockReset().mockResolvedValue({ reports: [], nextCursor: null, scanned: 1 }); mocked.detail.mockReset().mockResolvedValue({ ok: false }); mocked.tokenOk.mockReset().mockImplementation(async (s) => s === 'Bearer read-only'); mocked.create.mockReset().mockResolvedValue({ id: 'a'.repeat(64), token: 'only-once' }); mocked.list.mockResolvedValue([]); mocked.revoke.mockResolvedValue(undefined);
+beforeEach(() => { mocked.page.mockReset().mockResolvedValue({ reports: [], nextCursor: null, scanned: 1 }); mocked.detail.mockReset().mockResolvedValue({ report: { ok: false }, reportDigest: failedReportDigest({ ok: false }) }); mocked.tokenOk.mockReset().mockImplementation(async (s) => s === 'Bearer read-only'); mocked.create.mockReset().mockResolvedValue({ id: 'a'.repeat(64), token: 'only-once' }); mocked.list.mockResolvedValue([]); mocked.revoke.mockResolvedValue(undefined);
   oauth.tokenOk.mockReset().mockResolvedValue(false); oauth.tokenPrincipal.mockReset().mockResolvedValue(null);
   autopsy.read.mockReset().mockResolvedValue({ reportDigest: 'a'.repeat(64), revision: 0, state: 'not_started', record: null });
   autopsy.update.mockReset().mockResolvedValue({ reportDigest: 'a'.repeat(64), revision: 1, state: 'in_progress', record: {} });
@@ -103,14 +103,15 @@ describe('separate autopsy write boundary', () => {
     expect(autopsy.update).not.toHaveBeenCalled();
     expect(oauth.tokenPrincipal).toHaveBeenCalledWith('Bearer read-only', 'failed-reports:autopsy');
   });
-  it('returns the evidence digest from the full report snapshot, not a later metadata read', async () => {
+  it('forwards the snapshot-bound digest unchanged without re-redaction or a later metadata read', async () => {
     const evidence = { ok: false, startedAt: 100, endedAt: 101, summary: 'The evidence actually returned.' };
-    mocked.detail.mockResolvedValue(evidence);
+    const suppliedDigest = 'e'.repeat(64);
+    mocked.detail.mockResolvedValue({ report: evidence, reportDigest: suppliedDigest });
     const detail = await request('/api/v1/failedbr/reports/app/100', { headers: bearer });
-    expect(detail.body).toEqual({ report: evidence, reportDigest: failedReportDigest(evidence) });
+    expect(detail.body).toEqual({ report: evidence, reportDigest: suppliedDigest });
     const tool = await request('/api/v1/failedbr/mcp', { method: 'POST', headers: bearer,
       body: rpc('tools/call', { name: 'get_failed_build', arguments: { workspaceId: 'app', historyId: '100' } }) });
-    expect(JSON.parse(tool.body.result.content[0].text)).toEqual({ ...evidence, reportDigest: failedReportDigest(evidence) });
+    expect(JSON.parse(tool.body.result.content[0].text)).toEqual({ ...evidence, reportDigest: suppliedDigest });
     expect(autopsy.read).not.toHaveBeenCalled();
   });
   it('explicit write consent exposes only the metadata tool and binds actor to the verified grant', async () => {

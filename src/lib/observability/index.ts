@@ -81,6 +81,10 @@ const state = {
    * tests/crashReportsCarryNoSecrets.test.ts: a `{ kind: 'user' }` call reaching a non-production harness).
    */
   generation: 0,
+  /** Each authentication change invalidates hash and sink-load work for the previous user. */
+  userContextRevision: 0,
+  /** Latest requested pseudonymous id; no raw uid is retained. */
+  desiredUserId: '',
 };
 
 function safe(fn: () => unknown): void {
@@ -168,7 +172,11 @@ function crashlytics(): Promise<CrashlyticsSink | null> {
   if (!state.crashlyticsLoad) {
     // Loaded ONCE. A failed load is remembered as null, so a broken SDK is not retried in a loop.
     state.crashlyticsLoad = deps.loadCrashlytics()
-      .then((sink) => { state.crashlytics = sink; return sink; })
+      .then((sink) => {
+        if (state.generation !== gen) return null;
+        state.crashlytics = sink;
+        return sink;
+      })
       .catch(() => null);
   }
   return state.crashlyticsLoad.then((sink) => (state.generation === gen ? sink : null));
@@ -263,22 +271,41 @@ export async function crashUserId(uid: string): Promise<string | null> {
   }
 }
 
+/** A queued id must still belong to this module instance and the latest authentication change. */
+function deliverUserId(id: string, generation: number, contextRevision?: number): Promise<void> {
+  const current = () => state.generation === generation && state.deps?.enabled === true
+    && (contextRevision === undefined || state.userContextRevision === contextRevision);
+  if (!current()) return Promise.resolve();
+  state.desiredUserId = id;
+  return crashlytics().then((sink) => {
+    if (!sink || !current()) return;
+    // A newer auth change can cancel queued work, not a native operation already dispatched here.
+    return sink.setUserId(id);
+  });
+}
+
 /** Attach a signed-in user to future reports (hashed uid only). */
 export function setUserContext(uid: string): void {
+  const revision = ++state.userContextRevision;
   setCrashKey('signed_in', true);
   if (!state.deps?.enabled) return;
   const gen = state.generation;
   safe(() => crashUserId(uid).then((id) => {
-    if (!id || state.generation !== gen || !state.deps?.enabled) return;
-    return crashlytics().then((sink) => sink?.setUserId(id));
+    if (state.generation !== gen || state.userContextRevision !== revision || !state.deps?.enabled) return;
+    // A failed new hash must not leave the previous account attached. An existing pending clear
+    // already owns that work and remains valid until it is dispatched, before any newer valid id.
+    if (!id) return state.desiredUserId ? deliverUserId('', gen) : undefined;
+    return deliverUserId(id, gen, revision);
   }));
 }
 
 /** Forget the user on sign-out: an empty id, and `signed_in` false. */
 export function clearUserContext(): void {
+  state.userContextRevision++;
   setCrashKey('signed_in', false);
   if (!state.deps?.enabled) return;
-  safe(() => crashlytics().then((sink) => sink?.setUserId('')));
+  const gen = state.generation;
+  safe(() => deliverUserId('', gen));
 }
 
 /**
@@ -298,6 +325,8 @@ export function crashTestTools(): { nonFatal: () => void; crash: () => void } | 
 /** Test-only: reset every piece of module state. */
 export function __resetObservability(): void {
   state.generation++;
+  state.userContextRevision++;
+  state.desiredUserId = '';
   state.deps = null;
   state.crashlytics = null;
   state.crashlyticsLoad = null;

@@ -10,7 +10,7 @@
 //   §5 the ErrorBoundary and the global handlers report through the reporter, nowhere else;
 //   §6 the server intake sanitizes again and dist/'s private files are never served;
 //   §7 native wiring and the crash-test gate.
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sanitizeText, sanitizeUrl, sanitizeKeys, REDACTED } from '../src/lib/observability/sanitize';
@@ -102,7 +102,7 @@ function harness(over: Partial<ObservabilityDeps> = {}, sinkOver: Partial<Crashl
   };
   initializeObservability(deps);
   return {
-    posted, calls, advance: (ms: number) => { t += ms; },
+    posted, calls, sink, advance: (ms: number) => { t += ms; },
     nextUserId: () => new Promise<string>((resolve) => { userWaiters.push(resolve); }),
   };
 }
@@ -225,6 +225,211 @@ describe('§4 the user is a one-way hash, and forgotten on sign-out', () => {
     expect(near).toContain('setUserContext(currentUser.uid)');
     expect(near).toContain('clearUserContext()');
     expect(app).not.toMatch(/setUserContext\([^)]*email/);
+  });
+});
+
+describe('a queued crash user id belongs to the current authentication context', () => {
+  beforeEach(() => __resetObservability());
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((done) => { resolve = done; });
+    return { promise, resolve };
+  }
+
+  async function controlledHashes(...uids: string[]) {
+    const hashes = await Promise.all(uids.map(async (uid) => {
+      const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`nbai-crash:${uid}`));
+      return { bytes, pending: deferred<ArrayBuffer>(), id: Buffer.from(bytes).toString('hex').slice(0, 32) };
+    }));
+    const digest = vi.spyOn(crypto.subtle, 'digest');
+    for (const hash of hashes) digest.mockReturnValueOnce(hash.pending.promise);
+    return hashes.map((hash) => ({ id: hash.id, finish: () => hash.pending.resolve(hash.bytes) }));
+  }
+
+  // Every native operation in these negative checks has a controlled, resolved promise. This
+  // event-loop checkpoint drains their continuations; it does not guess how long native hashing takes.
+  const settled = () => new Promise<void>((resolve) => setImmediate(resolve));
+  const userIds = (h: ReturnType<typeof harness>) => h.calls.filter((call) => call.kind === 'user').map((call) => call.arg);
+
+  it('a digest that finishes after sign-out cannot reattach the previous user', async () => {
+    const [hash] = await controlledHashes('uid-a');
+    const h = harness();
+    setUserContext('uid-a');
+    const cleared = h.nextUserId();
+    clearUserContext();
+    expect(await cleared).toBe('');
+    hash.finish();
+    await settled();
+    expect(userIds(h)).toEqual(['']);
+  });
+
+  it('the latest uid wins when two digests finish in the opposite order', async () => {
+    const [first, second] = await controlledHashes('uid-a', 'uid-b');
+    const h = harness();
+    setUserContext('uid-a');
+    setUserContext('uid-b');
+    const delivered = h.nextUserId();
+    second.finish();
+    expect(await delivered).toBe(second.id);
+    first.finish();
+    await settled();
+    expect(userIds(h)).toEqual([second.id]);
+  });
+
+  it('sign-out invalidates a hashed id already waiting for the native sink', async () => {
+    const [hash] = await controlledHashes('uid-a');
+    const loading = deferred<CrashlyticsSink>();
+    const h = harness({ loadCrashlytics: () => loading.promise });
+    setUserContext('uid-a');
+    hash.finish();
+    await settled();
+    const cleared = h.nextUserId();
+    clearUserContext();
+    loading.resolve(h.sink);
+    expect(await cleared).toBe('');
+    expect(userIds(h)).toEqual(['']);
+  });
+
+  it('a queued clear lands before the new hashed id when the sink becomes ready', async () => {
+    const [hash] = await controlledHashes('uid-b');
+    const loading = deferred<CrashlyticsSink>();
+    const h = harness({ loadCrashlytics: () => loading.promise });
+    clearUserContext();
+    setUserContext('uid-b');
+    hash.finish();
+    await settled();
+    const cleared = h.nextUserId();
+    const delivered = h.nextUserId();
+    loading.resolve(h.sink);
+    expect(await cleared).toBe('');
+    expect(await delivered).toBe(hash.id);
+    expect(userIds(h)).toEqual(['', hash.id]);
+  });
+
+  it('the latest uid also replaces an older id already queued behind the sink load', async () => {
+    const [first, second] = await controlledHashes('uid-a', 'uid-b');
+    const loading = deferred<CrashlyticsSink>();
+    const h = harness({ loadCrashlytics: () => loading.promise });
+    setUserContext('uid-a');
+    first.finish();
+    await settled();
+    setUserContext('uid-b');
+    second.finish();
+    await settled();
+    const delivered = h.nextUserId();
+    loading.resolve(h.sink);
+    expect(await delivered).toBe(second.id);
+    expect(userIds(h)).toEqual([second.id]);
+  });
+
+  it('a clear stays valid when the next sign-in digest fails', async () => {
+    const [first] = await controlledHashes('uid-a');
+    const h = harness();
+    const initial = h.nextUserId();
+    setUserContext('uid-a');
+    first.finish();
+    expect(await initial).toBe(first.id);
+    vi.mocked(crypto.subtle.digest).mockRejectedValueOnce(new Error('hash unavailable'));
+    const cleared = h.nextUserId();
+    clearUserContext();
+    setUserContext('uid-b');
+    await settled();
+    expect(userIds(h)).toEqual([first.id, '']);
+    expect(await cleared).toBe('');
+  });
+
+  it('a clear does not wait for the next sign-in digest to finish', async () => {
+    const [first, second] = await controlledHashes('uid-a', 'uid-b');
+    const h = harness();
+    const initial = h.nextUserId();
+    setUserContext('uid-a');
+    first.finish();
+    await initial;
+    const cleared = h.nextUserId();
+    clearUserContext();
+    setUserContext('uid-b');
+    try {
+      await settled();
+      expect(userIds(h)).toEqual([first.id, '']);
+      expect(await cleared).toBe('');
+      const latest = h.nextUserId();
+      second.finish();
+      expect(await latest).toBe(second.id);
+      expect(userIds(h)).toEqual([first.id, '', second.id]);
+    } finally { second.finish(); }
+  });
+
+  it.each(['rejects', 'is unavailable'])('a direct user switch clears the previous id when hashing %s', async (failure) => {
+    const [first] = await controlledHashes('uid-a');
+    const h = harness();
+    const initial = h.nextUserId();
+    setUserContext('uid-a');
+    first.finish();
+    expect(await initial).toBe(first.id);
+    if (failure === 'rejects') vi.mocked(crypto.subtle.digest).mockRejectedValueOnce(new Error('hash unavailable'));
+    else vi.stubGlobal('crypto', undefined);
+    const cleared = h.nextUserId();
+    setUserContext('uid-b');
+    await settled();
+    expect(userIds(h)).toEqual([first.id, '']);
+    expect(await cleared).toBe('');
+  });
+
+  it('a module reset still invalidates a previous harness digest', async () => {
+    const [hash] = await controlledHashes('uid-a');
+    const first = harness();
+    setUserContext('uid-a');
+    __resetObservability();
+    const disabled = harness({ enabled: false });
+    hash.finish();
+    await settled();
+    expect(userIds(first)).toEqual([]);
+    expect(disabled.calls).toEqual([]);
+  });
+
+  it('a loader from a reset module cannot replace the new module sink cache', async () => {
+    const [first, later] = await controlledHashes('uid-b', 'uid-c');
+    const oldLoading = deferred<CrashlyticsSink>();
+    const old = harness({ loadCrashlytics: () => oldLoading.promise });
+    __resetObservability();
+    const current = harness();
+    const firstDelivery = current.nextUserId();
+    setUserContext('uid-b');
+    first.finish();
+    expect(await firstDelivery).toBe(first.id);
+    oldLoading.resolve(old.sink);
+    await settled();
+    const nextDelivery = Promise.race([
+      current.nextUserId().then((id) => ({ sink: 'current', id })),
+      old.nextUserId().then((id) => ({ sink: 'old', id })),
+    ]);
+    setUserContext('uid-c');
+    later.finish();
+    expect(await nextDelivery).toEqual({ sink: 'current', id: later.id });
+    expect(userIds(old)).toEqual([]);
+  });
+
+  it('clearing context does not wait for a native call already dispatched', async () => {
+    const sent = deferred<string>();
+    const cleared = deferred<void>();
+    const nativeCompletion = deferred<void>();
+    const ids: string[] = [];
+    harness({}, { setUserId: async (id) => {
+      ids.push(id);
+      if (id) { sent.resolve(id); await nativeCompletion.promise; }
+      else cleared.resolve();
+    } });
+    setUserContext('uid-a');
+    const id = await sent.promise;
+    clearUserContext();
+    await cleared.promise;
+    expect(ids).toEqual([id, '']);
+    nativeCompletion.resolve();
+    await settled();
+    // The reporter cannot undo native work that was already dispatched; it sends no second stale id.
+    expect(ids).toEqual([id, '']);
   });
 });
 

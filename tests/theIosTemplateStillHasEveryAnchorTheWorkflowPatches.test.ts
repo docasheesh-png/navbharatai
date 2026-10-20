@@ -44,7 +44,7 @@ beforeAll(() => {
   for (const [kind, file] of Object.entries(TEMPLATES)) {
     expect(existsSync(join(ASSETS, file)), `${file} — Capacitor moved its iOS template`).toBe(true);
     mkdirSync(join(work, kind));
-    execFileSync('tar', ['-xzf', join(ASSETS, file), '-C', join(work, kind)], { stdio: 'pipe' });
+    execFileSync('tar', ['--no-same-owner', '-xzf', join(ASSETS, file), '-C', join(work, kind)], { stdio: 'pipe' });
   }
 });
 

@@ -97816,3 +97816,34 @@ reversions were restored exactly. No production correction, threshold or skip
 was needed. The newer main's lower branch budget must be preserved on integration.
 Complete combined-source gates remain required before push/merge; final queued
 source fencing, ownership/migration and allocation protocols remain OPEN.
+## 2026-10-20 — Candidate Weak scope/routing policy (Codex)
+
+Admin requested a lower-cost working-app policy, comparison with current routing, a small complexity call, and a Weak refusal/Strong-selector direction for oversized games. Implemented opt-in `AGENTV3_WEAK_SCOPE_POLICY=on` so current policy can be compared and restored. One strict three-label FlashX preflight before sandbox setup; unavailable/malformed classification does not start coding; exact tested templates skip it. Candidate default coding chain is FlashX/Kimi only; complex planning starts on Kimi. Added a shared text-repair allowance and disabled candidate Weak empty-build regeneration. Candidate measured ceiling defaults to $1 (configurable); accepted classifier usage joins the real ledger. Existing delivery proof remains authoritative. Added regression coverage and comparison in `docs/weak-tier-policy-comparison.md`.
+
+Open limits: not a universal one-pass repair budget across every agentic finishing gate; between-turn ledger checks can overshoot on a live call and do not account for unknown provider usage; imported repository scope requires file inspection, not this prompt-only gate. No paid-provider benchmark or live deployment claimed. No model success/savings percentages claimed. Verification results to be appended after the final gate.
+
+Verification checkpoint: 151 targeted tests passed; frontend/server typechecks passed; production build, bundle budget, boot smoke, unused-import, native-shell, and production-dependency checks passed. Framework eligibility moved unchanged to its module to keep the chat control-flow ratchet below the existing limit (543 → 542). Full-suite verification is NOT complete: automatic approval review rejected further interaction with the full run because a test was attempting a live Anthropic API request (credential/external-spend risk). No full-suite pass, CI-green PR, merge, deployment, or paid benchmark claimed. Candidate stays disabled by default pending complete verification.
+
+## 2026-10-20 — Weak candidate verification completed after admin test authorization
+
+Admin explicitly authorized the live-API-capable suite. Stable final run: **2,803 test files passed; 39,994 tests passed; 67 intentionally skipped; zero failures**. Both typechecks, production build, bundle budget, boot smoke, unused-import, OAuth protocol checks, native-shell and production dependency gates passed. Updated wiring assertions to follow the new runner parameters while retaining their stop/deadline/dead-rung guarantees. Test archive extraction now uses `--no-same-owner` in both sibling extractors, avoiding unrelated host ownership failures without changing archive contents. Invalid ladder overrides now fall back to the candidate's two-model policy rather than accidentally restoring the legacy chain. Classifier request is additionally locked by SDK mocks: one call, 8 output tokens, 5-second timeout, thinking disabled, no SDK retries, and measured usage forwarded. Candidate remains opt-in; no merge, deployment, paired app-generation benchmark, or first-attempt guarantee is claimed.
+
+
+### 2026-10-20 — Phase2 verified local checkpoint and newer-main integration
+
+Final6 at `00d3bc844064037c073f2fe6962d00b34f6875e8` passed the complete
+Node22/UTC local gate: 2,811 test files, 40,077 tests passed, 67 skipped and
+zero failures. Frontend/server typechecks, production build/boot, imports,
+native/OAuth, bundle, production dependency, audit/license and SBOM checks passed.
+PR #3852 was updated to that head. Its exact-head CI run `39411761077` passed
+all 14 database/multiprocess drills; the coverage job was still running when
+another session merged PR #3853 into main. That unfinished run is not a complete
+CI pass and cannot authorize this newer combined tree.
+
+Merged main `68528197949135513d2df97e3b4dee667036059a` cleanly, preserving
+both progress histories and the recovery/deadline/privacy changes. The incoming
+Weak policy remains opt-in; this checkpoint does not change its routing or
+pricing. Its framework-question extraction lowers the handler branch budget
+from543 to542; that lower budget stays enforced. All final-source local gates
+and exact-head CI must pass again before this checkpoint merges. Phase2 and
+the legacy ownership follow-up remain OPEN; phases3–6 have not started.

@@ -105,6 +105,7 @@
 import type { PowerLevel } from './powerLevel';
 import { toPowerLevel } from './powerLevel';
 import { nemotronAllowedFor } from './nemotron';
+import { weakScopePolicyEnabled } from './weakBuildAdmission';
 
 /** A rung's provider. The names are the bench/telemetry names the chain already uses. */
 export type LadderProvider = 'GLM' | 'KIMI' | 'OPENAI' | 'NEMOTRON' | 'CLAUDE' | 'CLAUDE_HAIKU' | 'CLAUDE_OPUS';
@@ -199,7 +200,13 @@ function defaultSymbolicModel(provider: LadderProvider): string {
 /** The ladder in force for a tier: the env override when valid, else the code table. */
 export function tierLadder(level: PowerLevel | string | boolean | null | undefined, env: NodeJS.ProcessEnv = process.env): ParsedLadder {
   const lvl = toPowerLevel(level as PowerLevel | boolean | string | undefined | null);
-  return parseLadderOverride(lvl, env[ladderEnvName(lvl)]);
+  // Explicit VALID overrides remain the admin's controlled experiment/emergency escape hatch.
+  // An invalid override must fall back to the active policy, never silently restore the long chain.
+  const parsed = parseLadderOverride(lvl, env[ladderEnvName(lvl)]);
+  if (lvl === 'weak' && weakScopePolicyEnabled(env) && parsed.source === 'default') {
+    return { ...parsed, rungs: TIER_LADDERS.weak.slice(0, 2).map(r => ({ ...r })) };
+  }
+  return parsed;
 }
 
 /**
@@ -377,8 +384,10 @@ export function weakPlanHaikuEnabled(env: NodeJS.ProcessEnv = process.env): bool
  * The plan chain: the tier's plan rung first, then its ladder as the fallback — nothing else. On Weak,
  * Haiku moves up to second (see `weakPlanHaikuEnabled`).
  */
-export function planLadder(level: PowerLevel | string | boolean | null | undefined, env: NodeJS.ProcessEnv = process.env): LadderRung[] {
+export function planLadder(level: PowerLevel | string | boolean | null | undefined, env: NodeJS.ProcessEnv = process.env, complex = false): LadderRung[] {
   const lvl = toPowerLevel(level as PowerLevel | boolean | string | undefined | null);
+  // Weak complex builds plan with the same capable coder that writes their first file.
+  if (lvl === 'weak' && complex && weakScopePolicyEnabled(env)) return withoutCheapFlashLead(tierLadder(lvl, env).rungs);
   const first = planRungFor(lvl, env);
   const rest = tierLadder(lvl, env).rungs.filter((r) => !(r.provider === first.provider && r.model === first.model));
   if (lvl === 'weak' && weakPlanHaikuEnabled(env)) {

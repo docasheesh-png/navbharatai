@@ -54,59 +54,22 @@ describe('planBotSessionErase — the per-bot range (Q-761)', () => {
   });
 });
 
-describe('buildHistoryKeysFor — erasing canonical histories without guessing legacy ownership', () => {
-  it('takes the union of both exact sources, deduplicated', () => {
-    const keys = buildHistoryKeysFor(UID, ['pro-111'], [`agentv3-${UID}-pro-222`, `agentv3-${UID}-pro-111`]);
-    expect(keys).toEqual([`agentv3-${UID}-pro-111`, `agentv3-${UID}-pro-222`]);
+describe('canonical history keys still require independently verified workspace ownership', () => {
+  it.each(['abc', 'abc-d', UID])('does not turn an own session row into proof of bytes at a colliding key for %s', (uid) => {
+    expect(buildHistoryKeysFor(uid, ['session1'], [`agentv3-${uid}-session1`])).toEqual([]);
   });
 
-  it('keeps the owner in the key instead of targeting an unowned legacy bare-session row', () => {
-    expect(buildHistoryKeysFor(UID, [], [`agentv3-${UID}-pro-1757000000000`]))
-      .toEqual([`agentv3-${UID}-pro-1757000000000`]);
+  it('refuses the same physical key derived from different owner/session pairs', () => {
+    const sameKey = 'agentv3-abc-d-session1';
+    expect(buildHistoryKeysFor('abc', ['d-session1'], [sameKey])).toEqual([]);
+    expect(buildHistoryKeysFor('abc-d', ['session1'], [sameKey])).toEqual([]);
   });
 
-  it('DROPS a workspace id that is not this user`s, instead of using it bare', () => {
-    // Using it bare would delete `build_history/{someoneElsesSessionId}` — a stranger's version history.
-    const keys = buildHistoryKeysFor(UID, [], [
-      'agentv3-someoneelse000000000000000-pro-9',
-      'agentv3-anon-pro-9',
-      'pro-9',
-      '',
-    ]);
-    expect(keys).toEqual([]);
-  });
-
-  it('derives canonical ids from the uid-indexed source even when the source workspace is gone', () => {
-    expect(buildHistoryKeysFor(UID, ['  pro-7  ', ''], [])).toEqual([`agentv3-${UID}-pro-7`]);
-  });
-
-  it('never erases another owner or anonymous history from a full id in the session field', () => {
-    expect(buildHistoryKeysFor(UID, [
-      'agentv3-victim-same-session', 'agentv3-anon-same-session', `agentv3-${UID}-owned-session`,
-    ], [])).toEqual([`agentv3-${UID}-owned-session`]);
-  });
-
-  it('users choosing the same session suffix get disjoint erase keys; the old bare key is retained', () => {
-    const alice = buildHistoryKeysFor('alice', ['shared123'], ['agentv3-alice-shared123']);
-    const bob = buildHistoryKeysFor('bob', ['shared123'], ['agentv3-bob-shared123']);
-    expect(alice).toEqual(['agentv3-alice-shared123']);
-    expect(bob).toEqual(['agentv3-bob-shared123']);
-    expect(alice.filter((key) => bob.includes(key))).toEqual([]);
-    expect([...alice, ...bob]).not.toContain('shared123');
-  });
-
-  it('refuses unusable or reserved owners and unsafe document paths', () => {
-    for (const uid of ['', 'has space', 'anon', 'u'.repeat(65)]) {
-      expect(buildHistoryKeysFor(uid, ['s1'], [`agentv3-${uid}-s1`])).toEqual([]);
+  it('does not target global legacy rows, anonymous rows, foreign keys or unsafe paths', () => {
+    for (const uid of [UID, '', 'has space', 'anon', 'u'.repeat(65)]) {
+      expect(buildHistoryKeysFor(uid, ['../victim', 'nested/path', 'shared123'], [
+        'agentv3-other-shared123', 'agentv3-anon-shared123', `agentv3-${uid}-shared123`,
+      ])).toEqual([]);
     }
-    expect(buildHistoryKeysFor(UID, ['../victim', 'nested/path', '.', '..'], [
-      `agentv3-${UID}-../victim`, `agentv3-${UID}-s::green`,
-    ])).toEqual([]);
-  });
-
-  it('resolves nothing at all for a uid the workspace eraser itself refuses', () => {
-    // A hyphenated uid makes `agentv3-{uid}-` ambiguous (planWorkspaceErase refuses it for that
-    // reason), so no workspace id may be split on it here either.
-    expect(buildHistoryKeysFor('abc-d', [], ['agentv3-abc-d-pro-1'])).toEqual([]);
   });
 });

@@ -26,6 +26,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { redactProvidersText } from '../src/server/lib/providerRedaction';
 import { userFacingReport } from '../src/server/AgentV3/BuildDiagnostics';
+import { buildExceptionDetails, publishBuildException } from '../src/server/AgentV3/BuildRequestCoordination';
 
 const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
 
@@ -61,6 +62,19 @@ describe('🔒 real provider errors are scrubbed before they reach a browser', (
   it('🔒 …and the message still says something useful, never an empty string', () => {
     const out = redactProvidersText('anthropic: rate_limit_error — claude is overloaded');
     expect(out.trim().length).toBeGreaterThan(0);
+  });
+
+  it('the extracted crash publisher redacts the actual client event and preserves raw diagnostic input', () => {
+    for (const raw of ['429 from open.bigmodel.cn', 'anthropic: rate_limit_error — claude-sonnet-4-6', 'gemini-2.5-pro returned 503']) {
+      const error = new Error(raw);
+      const events: any[] = [];
+      publishBuildException(error, undefined, (event) => events.push(event));
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('error');
+      expect(leaks(events[0].message)).toEqual([]);
+      expect(events[0].message.trim().length).toBeGreaterThan(0);
+      expect(buildExceptionDetails(error).message).toBe(raw);
+    }
   });
 
   it('🔒 the user’s OWN preview link is NOT redacted away — they must be able to open it', () => {
@@ -103,6 +117,7 @@ describe('🔒 the route sends the safe versions — pinned against the source',
   // error card, and the vendor name simply reappears inside it. So the wiring itself is the assertion.
   it('the crash report is passed through userFacingReport before being emitted', () => {
     expect(route).toContain('crashReportForClient = userFacingReport(crashReport)');
+    expect(route).toContain('publishBuildException(err, crashReportForClient, emit);');
   });
 
   it('every client-bound error message is redacted', () => {
@@ -118,7 +133,8 @@ describe('🔒 the route sends the safe versions — pinned against the source',
   it('🔒 the raw report is STILL recorded for the admin — this must not blind our own diagnostics', () => {
     // The point is to anonymize the USER's copy, not to lose the forensic one. The admin-side record
     // keeps the verbatim message and the full report; the gated endpoint serves it with detail.
-    expect(route).toContain("code: 'BUILD_EXCEPTION', message: errMsg");
+    expect(route).toContain('const errMsg = crash.message;');
+    expect(route).toContain("phase: crash.phase, severity: 'error', code: crash.code, message: errMsg");
     expect(route).toContain('saveDiagnostics(workspaceId, crashReport)');
   });
 });

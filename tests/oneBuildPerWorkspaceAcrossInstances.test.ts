@@ -142,10 +142,20 @@ describe('🔒 the wiring', () => {
     expect(route).toContain('preflight.reject(503, { error:');
   });
 
-  it('the build\'s own finally and the deadline finalizer release the lease', () => {
+  it('the real body finally releases its lease; deadline stream closure retains that authority', () => {
     // Since autopsy 1219c639 the lock is released only by its owner (`releaseBuildLock`).
     expect(route).toMatch(/releaseBuildLock\(buildKey, buildLockToken\);\n {6}\/\/ The workspace is free on every instance the moment this build ends \(autopsy eed79815\)\.\n {6}await releaseBuildLease\(\);/);
-    expect(route).toMatch(/releaseBuildLock\(buildKey, buildLockToken\);\n {6}await releaseBuildLease\(\);\n {6}if \(runningBuilds\.get\(buildKey\) === rb\) runningBuilds\.delete\(buildKey\);\n {6}endBuild\(rb\);/);
+    const start = route.indexOf('deadlineFinalization = createBuildDeadlineFinalization({');
+    const end = route.indexOf('const finalizeOnDeadline = deadlineFinalization.run;', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const deadline = route.slice(start, end);
+    expect(deadline).toContain('begin: () => retainBuildUntilBodyExit(buildKey, rb, stoppingBuilds)');
+    expect(deadline).toContain('await coordination.flushPublication();');
+    expect(deadline).toContain('close: () => closeDeadlineBuildStream(buildKey, rb, runningBuilds, endBuild)');
+    for (const prematureExit of ['releaseBuildLock(', 'releaseBuildLease(', 'markBuildExited(']) {
+      expect(deadline, `deadline response is not body exit: ${prematureExit}`).not.toContain(prematureExit);
+    }
     expect(route).toContain('buildLeaseRb = rb;');
   });
 

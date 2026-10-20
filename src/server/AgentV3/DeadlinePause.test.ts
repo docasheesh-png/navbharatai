@@ -10,11 +10,16 @@ describe('deadlinePauseMessage (RC-4: honest deadline-pause wording)', () => {
     }
   });
 
-  it('states the REAL files-saved progress when work was done', () => {
+  it('states observed file changes and requires actual exit before retry', () => {
     const m = deadlinePauseMessage(12);
     expect(m.narration).toContain('12 files');
     expect(m.summary).toContain('12 files');
-    expect(m.narration).toContain('Continuing automatically');
+    for (const text of [m.narration, m.summary]) {
+      expect(text).toContain('12 files changed');
+      expect(text).toContain('still stopping');
+      expect(text).toContain('retry after it finishes');
+      expect(text).not.toMatch(/saved|automatically|almost|nearly/i);
+    }
   });
 
   it('singular "file" for exactly one', () => {
@@ -25,15 +30,15 @@ describe('deadlinePauseMessage (RC-4: honest deadline-pause wording)', () => {
 
   it('is honest when NOTHING was written (no fake progress)', () => {
     const m = deadlinePauseMessage(0);
-    expect(m.narration).toContain('before any files were written');
-    expect(m.narration).toContain('nothing was lost');
-    expect(m.summary).toContain('continuing automatically');
+    expect(m.narration).toContain('still stopping');
+    expect(m.summary).toContain('retry after it finishes');
+    expect(m.narration).not.toMatch(/\d+ files?|nothing was lost|saved|automatically/i);
   });
 
   it('guards garbage input (negative / NaN / Infinity) → treated as zero progress', () => {
     for (const bad of [-3, NaN, Infinity]) {
       const m = deadlinePauseMessage(bad);
-      expect(m.narration).toContain('before any files were written');
+      expect(m).toEqual(deadlinePauseMessage(0));
     }
   });
 });

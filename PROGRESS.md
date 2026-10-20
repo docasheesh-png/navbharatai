@@ -97423,6 +97423,43 @@ Nine relevant files pass116/116 underNode22/UTC; no production code changed.
 The known-failing preflight was stopped and all final-source local checks must
 run again before push. No full-suite or remoteCI pass is claimed by this entry.
 
+### 2026-10-20 — Phase 2 recovery identity and completed asset erasure checkpoint
+
+PR #3848 subsequently passed both exact-head CI jobs at
+`7241043914134488c4f54b005988fc76cc62ef9d` and merged as
+`06f8065629debbd846c1f836241c5be9a5a8337e`. Remote coverage suite:
+39,947 passed /73 skipped /0 failed; downloaded real database evidence:
+14 distinct drills passed /0 failed. This supersedes only the earlier pending
+release status, not the open runtime/state-preservation boundaries.
+
+The next scoped checkpoint stops unknown identity reads and nonterminal
+reconnect errors from creating replacement sandboxes. Strict tri-state lookup,
+nominal retryable recovery error and public/nested retry propagation retain
+explicit-ID behavior and typed static-connect not-found source restoration.
+Actual SDK classification is exercised over loopback HTTP, and actual actuator
+lifecycle tests include timeout/late resolution and subsequent retry. Initial
+builder setup refuses before execution; registered preview JSON/stream routes
+report retry honestly without a false missing-package diagnosis. Only definite
+pre-builder refusal settles failed with a zero-step result; later failures retain
+unknown outcome. Extracted crash publishing preserves client redaction and raw
+admin diagnostics; the handler's down-only branch budget remains543.
+
+Account deletion now erases completed private asset spill bytes by a verified
+safe owner prefix, independent of lost Firestore metadata. Writer, reader and
+eraser share the bucket/object path definition. The planner also refuses the
+unowned anonymous namespace. The additive response reports unconfigured/partial
+storage removal separately and honestly. Actual spill→registeredDELETE tests
+preserve foreign/shared/APK objects and cover retry and authorization. Reverting
+the erasure to a success-shaped no-op reproduces retained owner bytes.
+
+Focused component checks pass; complete final-source local gates and exact-head
+CI are still required before this checkpoint can ship. Fresh-create ambiguity,
+first-allocation races, physical command/source fencing, best-effort restore
+sinks, complete local/browser state preservation, late uploads, historical
+buckets and ZIP chunk reconciliation remain OPEN. A separate review found queue
+bindings settle too early on resumable results; the next Phase2 slice will
+address that lifecycle. Phases3–6 remain unstarted. Detail and evidence limits:
+`docs/PHASE2_STATE_PRESERVATION.md`.
 ## 2026-10-20 — Q-1126 batch 2: the four-field ratchet 40 → 24, and the batch caught its own bad measurement
 
 **Fifteen rows cleared, and HOW they cleared is the finding.** Batch 1 had already corrected this row's
@@ -97475,6 +97512,191 @@ its own documentation): here it is a census re-written instead of re-used.
 group; Q-891 and Q-894 genuinely need the admin (revenue columns, coupon policy) and stay blocked. Then
 Q-886 and Q-888 as their own rows of work, one at a time.
 
+### 2026-10-20 — Phase2 deadline body-exit hold added to PR #3852
+
+The recovery/asset checkpoint's original head `e379b88` passed the full local
+gate: 2,805 files /40,032 tests passed /67 skipped /0 failed, plus both
+typechecks, build/boot, imports/native/OAuth/bundle/server-dependency, audit,
+license and SBOM gates. PR #3852 opened, but main advanced with unrelated
+documentation PR #3851 during verification; both append-only progress histories
+were preserved by a clean main merge. The final combined state must be gated
+again before push. No remoteCI or merge success is claimed yet.
+
+The next sibling was the deadline finalizer marking a build exited and releasing
+ownership while an unabortable body or the finalizer's own awaited persistence
+could still run. Deadline response closure now differs from actual exit: install
+a captured nonreclaimable hold synchronously, share/join the finalizer, cancel
+future timers before cleanup awaits, guarantee stream closure on rejection, and
+keep the exact receipt/lease until real cleanup. Queue publication has its own
+barrier. Stopped-build and reaper paths cannot time-reclaim the deadline-held
+body. A failed deadline reports still stopping and disables automatic resume
+while exit is unconfirmed; changed files are not represented as confirmed saved.
+
+Focused tests exercise independently blocked body/finalizer completion,
+publication versus receipt settlement, heartbeat continuation across eight
+virtual stale windows, failed finalization, newer-map preservation and timer
+cleanup. Independent review caught and corrected early-timer/cleanup and
+lost-renewal release siblings. Full final-source local and exact-head remote
+coverage/database checks remain required.
+
+Still OPEN: physical provider command/source fences, ordinary Stop's older
+time-based local reclaim, fresh allocation ambiguity, complete state/origin
+preservation, queued resumable handoff and late external writes. Normal and
+deadline pricing/terminal paths can still interleave within the same attempt;
+stable operation refs dedupe debits but do not compare requested amounts or
+return prior debit amounts. No pricing policy changed. This bounded authority
+fix does not complete Phase2; phases3–6 remain unstarted.
+
+### 2026-10-20 — Phase2 deadline lease census corrected before push
+
+The combined full-suite preflight found one older wiring assertion demanding
+lease release from the deadline finalizer, the unsafe behavior this checkpoint
+removes. The run was stopped, not recorded as passing. The guard now retains
+owner-bound real-finally release and requires the deadline's captured hold,
+publication barrier and stream close while prohibiting premature lock/lease
+release or false exit marking. Existing behavioral deadline/lease tests exercise
+that invariant through actual lifecycle and transactional implementations. All
+final-source local gates must run again after this correction; remoteCI remains
+pending and PR #3852 is unmerged.
+
+### 2026-10-20 — Phase2 deadline message remains a single reachable module
+
+The subsequent preflight found the replaced deadline wording module unreachable.
+The deadline lifecycle now re-exports the established DeadlinePause helper,
+whose text matches the new body-exit hold: observed files changed, still stopping,
+retry after exit. Its original unit tests now prohibit saved/automatic-continuation
+promises and retain the no-fake-progress/near-success protections. The whole-source
+dead-code guard is unchanged; no exemption was added. That failed preflight was
+stopped and is not passing evidence. Focused and complete final-source checks
+must pass again before the updated PR head is pushed.
+
+### 2026-10-20 — Phase2 asset owner collision caught before updated PR push
+
+The combined deadline/recovery head `f29da58` passed the full Node22/UTC suite:
+2,807 files /40,051 tests passed /67 skipped /0 failed, plus both typechecks,
+production build/boot and imports/native/OAuth/bundle/server-dependency checks.
+That proof predates the following ownership correction and is not the final gate
+for its new source. PR #3852 remains unmerged and its original remote head has
+not yet received these local changes.
+
+Independent review reproduced a dangerous inverse prefix collision in the
+proposed asset eraser: deleting for uid `abc` also selected legacy objects for
+`abc-d`. Refusing only hyphenated deleting UIDs did not protect the shorter
+neighbor. New spills now receive only the server-verified owner separately and
+use an encoded, slash-delimited `workspace-assets-v2` owner component. Erasure
+selects only that exact namespace. Legacy opaque pointers remain readable;
+legacy objects are never deleted by guessing a workspace/session owner. Overall
+`removed` remains false with a legacy ownership limitation, while a separate
+`verifiedOwnerObjectsRemoved` confirms only completed verified-owner objects.
+The registered profile fallback preserves that honest outcome on unexpected
+errors without exposing internal storage details.
+
+The focused asset cohort passed 104 tests and both typechecks. Mutating the
+delete selector back to the unsafe prefix deletes the foreign neighbor and
+fails the stateful regression; replacing deletion with a no-op fails on retained
+verified-owner bytes. These were restored before commit `fa9c876`. Root profile
+limitation checks also pass. Complete final-source local and exact-head remote
+checks remain required after all ownership corrections are frozen.
+
+The sibling audit also confirmed that legacy full workspace IDs themselves
+collide (`abc` + `d-session1` equals `abc-d` + `session1`). Verified tokens and
+fresh history/session collections using that same full key do not disambiguate
+ownership. Existing workspace documents have no trustworthy historical owner
+stamp. A bounded refusal of legacy prefix-only erasure is in progress; a safe
+prospective owner boundary and verified legacy migration are still OPEN for
+private reads/writes. The roadmap now explicitly qualifies Phase1 security
+readiness. No unconditional security/100-percent claim is justified.
+
+### 2026-10-20 — Phase2 unverified deletion siblings and honest user outcomes
+
+The inverse UID collision also reaches legacy Firestore workspace ranges,
+derived histories/build events and hosted snapshots. Their shared planner now
+refuses prefix-only attribution for every valid UID, not only a hyphenated
+requester, and reports `ownership-unverified` before destructive selection.
+A deliberate planner-only reversion of the registered profile test deletes the
+foreign `workspace_files_v3/agentv3-abc-d-session1` document and fails on its
+missing actual bytes. The safe source was restored.
+
+The sibling audit found distinct composite-key cases: sync's `abc__c0` can be
+another account's manifest or `abc`'s chunk, and legacy conversation turns can
+belong to a colliding workspace while the parent retains a different userId.
+A parent owner field does not prove the ownership of mixed historical payloads.
+The sync eraser now refuses attribution without reads/deletes; its actual-body
+reversion loses foreign manifest/chunk data in both directions and fails.
+Known mixed-owner platform stores retain their registry/child inventory while
+returning explicit zero-deletion refusal, rather than being hidden from the
+census. ADR/debt and app-identity composite stores are being checked under this
+same policy; final scope and gates are recorded after their source freezes.
+
+The in-app confirmation screen and public deletion instructions now disclose
+retained ownership-unverified workspace/conversation/sync/snapshot/asset data.
+An account-removal acknowledgment never proves all data was wiped. A missing or
+failed response never proves nothing changed; sign-out follows confirmed account
+removal. The 25 focused product/profile checks passed before the final combined
+freeze. Full local and exact-head remote checks are still required. Private
+read/write ownership, verified legacy migration and late-write fencing remain
+OPEN; these destructive-action mitigations do not complete either Phase2 or
+unconditional security readiness.
+
+### 2026-10-20 — Phase2 destructive ownership scope frozen for final gate
+
+The completed bounded sibling audit now covers five proven mixed-owner platform
+stores through one pre-query refusal policy: agentv3_conversations,
+sonic_voice_memory, adrDecisions, techDebt and app_ai_apps. Their inventory and
+children remain declared. Actual production writers reproduce shared physical
+keys and mixed turns/arrays/previous nonces; selective policy reversions delete
+foreign persisted bytes and fail the regressions. Whole-eraser no-op controls
+also fail because independently attributable platform records must still erase.
+The real registered profile regression invokes retention, derived, workspace,
+snapshot and sync erasers together; ambiguous data survives while exact-owner
+platform/bot paths remain exercised.
+
+Final combined focused ownership/product cohort: 17 files /172 tests passed,
+zero failed/skipped, Node22/UTC. Asset namespace, sync, platform retention and
+legacy planner changes are committed locally as fa9c876, 96c5a1f, 958dd8e and
+dbe7fe7. No updated head is pushed yet. The bounded additional registry review
+found no further reachable mixed-owner collision in its selected current caller
+domains; that is not proof of historical attribution or deployed Firestore rules.
+The independent prospective ownership design is retained in the execution
+artifact at /tmp/navbharatai-phase2-staging/verified-workspace-owner-design.md.
+
+The queue normal-module handoff is a separate isolated checkpoint, local
+37e667e, with 261 focused tests, 21/21 real Firestore multiprocess drills and
+both typechecks passed. It still needs the final combined-source gate and CI.
+Phase2 remains IN PROGRESS. Legacy private access/migration, physical SDK/source
+fencing, full state/origin preservation and production-provider evidence remain
+OPEN. Phases3–6 have not started. Merge authorization remains conditional on
+green exact-head CI; no 100/100 or phase completion is inferred from these fixes.
+
+### 2026-10-20 — Phase2 final preflight preserves the handler branch ratchet
+
+The full final4 preflight at `9ca0ddd` found 544 branch tokens against the
+unchanged 543 chat-handler budget. It was stopped (exit130), not counted as a
+passing full suite. The verified-owner asset caller had added a redundant null
+coalescing fallback although its owner parameter already accepts undefined;
+removing only that fallback keeps the same verified-only identity and unverified
+legacy policy with one fewer branch. No budget, threshold or guard was raised.
+The headroom/real-asset/authenticated-preview cohort then passed 3 files /80 tests.
+All final-source typechecks, build/checks and full suite must pass again before
+push; PR #3852 remains unmerged and no remote CI success is claimed.
+
+### 2026-10-20 — Phase2 old canonical-history erasure contract corrected
+
+Final5 at `24a502e` completed with 2,810 files /40,076 tests passing /67 skipped
+and one failing test, `historyErasureOwnerIsolation`. All quick gates passed, but
+the full suite did not: that older Phase1 test still treated a full-key history
+parent as sufficient ownership proof and expected deletion after source removal.
+The focused ownership sweep had missed this sibling.
+
+The existing stateful test now retains full-key, bare, anonymous and neighboring
+histories, including the identical physical key made by alice/x-shared123 and
+alice-x/shared123. It asserts actual bytes remain and no collection selection or
+delete occurs, followed by the explicit ownership-unverified outcome. Restoring
+only the old prefix planner deletes the foreign history/version and fails the
+byte assertion; the safe production file was restored unchanged. The restored
+history/profile/conversation/headroom cohort passes 4 files /12 tests. No
+production code, inventory, threshold or skip changed for this correction. The
+complete final-source suite and local checks must pass again before push/merge.
 ## 2026-10-20 — Q-886: a customer's own details never go into a log line whole (and Q-1227, found hunting it)
 
 **The defect was on the NORMAL path, not an error branch.** Three live sites printed a real person's

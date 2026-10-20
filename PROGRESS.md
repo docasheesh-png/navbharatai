@@ -98157,3 +98157,44 @@ row is opened.
 merged while it ran, so main moved and the queue row still had to go on — a gate finishing on a state I was
 about to change would have produced a green I could honestly report and honestly believe about the wrong
 tree. One gate on the final state is both cheaper and the only one that means anything.
+
+## 2026-10-20 — Q-1126 batch 3: the four-field gap reaches ZERO, and the ratchet becomes an invariant
+
+**154 blocked rows, 0 deficient**, measured with the census's own parser. The guard's baseline is now `0`,
+which changes what it is: from here a new 🟡 BLOCKED row that omits a field **fails CI outright**, because
+there is no slack left to absorb it. That is the 50/50 law's other half — not just fix the instances, make
+the wrong branch impossible.
+
+**How the last 24 went, and it is the same story batch 1 found and batch 2 confirmed.** Fifteen were
+label-only: the information was already written, under a heading the census does not recognise. In several,
+the missing `Why` was sitting in the row's **own STATE column** — *"(admin console)"*, *"(admin, money)"*,
+*"a decision that is the admin's: what Doctor AI shows"* — so the row knew the answer and the detector could
+not see it, because it reads only the body. Those fills move the fact into the body; they do not invent it.
+
+**One more was not deficient but MIS-FILED, and it is the third such case.** Q-881 read 🟡 BLOCKED
+*"awaiting the admin's approval of the audit plan"* while carrying a fix that needs no decision — exactly
+like Q-886 and Q-888, both now fixed. **Verified live at `src/server/lib/UsdInrRate.ts:50-62`:** the whole
+validation on the rate that multiplies every bill is `Number.isFinite(rate) && rate > 0`, so any positive
+number `open.er-api.com` returns becomes the multiplier until the next hourly refresh. Its stated fix is
+**strictly safer than today**, so the row is OPEN. ⚠️ Its third clause — *"record the rate on every
+debit"* — is deliberately left out: that touches the billing WRITE path, and bundling is how a safe fix
+inherits a risky one's blocker (the same reasoning that kept Q-1227 out of Q-886).
+
+**The last eight are the payment audit** (Q-882–Q-885, Q-891–Q-894), where fields were genuinely absent and
+are now written from the evidence each row already carried. 🔒 **And where nothing had actually been tried,
+the field says so:** Q-892 and Q-894 read *"nothing yet"* with the reason. An invented `Needs:` for a
+blocker nobody investigated is the precise defect this row exists to prevent, and a row that admits a gap is
+worth more than one that hides it.
+
+**3 reversions bite:** one label fill removed → 1 fail · Q-881 back to BLOCKED → 1 · a brand-new fieldless
+blocked row → 1.
+
+### 🔒 And the guard caught me editing its own anchor wrongly
+
+I set Q-1126's row to IN PROGRESS, and `theQueueSaysWhatIsTrue` failed: it pins the measured gap to a
+**resting** row (`OPEN` / 🟡 BLOCKED), because that row is where the number lives and a transient state
+would leave the baseline unanchored. The row stays OPEN with its PR named until the merge closes it the
+normal way. The guard was right and my edit was wrong — which is exactly why a number gets pinned to a row
+instead of living only in a test file.
+
+**Next:** Q-881's band — the strongest remaining piece of work that needs no decision from the admin.

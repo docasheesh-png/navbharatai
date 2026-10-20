@@ -40,6 +40,15 @@ export interface AppFeature {
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
+    id: 'app_data_storage_access',
+    name: 'App database and upload access controls',
+    path: 'Publish → Database; generated app sign-in and upload integration',
+    description: 'The small shared database requires an app key plus a separately verified Firebase ID token from the platform trusted project. The key alone grants no record access. Users access their own records; the verified app owner can access app records, including unowned legacy records. Other authentication projects/providers need their own connected database and verified policies. Lists expose a continuation cursor. Record-query capacity is reserved transactionally before reads; this is not a hard invoice cap. Upload recipes require the app’s real session verifier and a durable byte-quota reservation; they return an unavailable response until connected. Supabase private buckets read only the signed-in user’s folder. Cloudinary uploads are bounded on the app server rather than exposing reusable signing credentials. Existing published apps need their integration updated and republished; a code change does not repair their saved source automatically.',
+    howToUse: 'Connect actual sign-in before publishing database workflows. For the small database, configureNbaiAuth supplies a real supported ID token; never send a claimed user id. Configure upload access with the app’s real session verification and atomic quota reservation. Test two users and a signed-out visitor. Public server hosting additionally requires operator-verified build and network isolation; live cloud checks and restore drills cannot be inferred from unit tests.',
+    relatedFeatures: [],
+    keywords: ['database', 'storage', 'uploads', 'privacy', 'shared database', 'quota', 'pagination'],
+  },
+  {
     id: 'platform_maintenance',
     name: 'Service Maintenance',
     path: 'Admin console → Monitor → Maintenance (administrators only)',

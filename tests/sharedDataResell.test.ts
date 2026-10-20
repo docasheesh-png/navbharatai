@@ -32,7 +32,10 @@ function fakeDb(): { api: SharedDb; docs: Map<string, unknown> } {
     };
   }
   function makeCollection(path: string) {
-    const list = (pred: (data: any) => boolean) => ({
+    const list = (pred: (data: any) => boolean, after = ''): any => ({
+      where(field: string, _op: string, value: unknown) { return list((data) => pred(data) && data?.[field] === value, after); },
+      orderBy() { return list(pred, after); },
+      startAfter(value: string) { return list(pred, value); },
       limit(n: number) {
         return {
           async get() {
@@ -41,10 +44,10 @@ function fakeDb(): { api: SharedDb; docs: Map<string, unknown> } {
             for (const [p, data] of docs) {
               if (!p.startsWith(prefix)) continue;
               const rest = p.slice(prefix.length);
-              if (rest.includes('/') || !pred(data)) continue;
+              if (rest.includes('/') || !pred(data) || rest <= after) continue;
               found.push({ id: rest, data: () => data, ref: makeRef(p) });
             }
-            const page = found.slice(0, n);
+            const page = found.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).slice(0, n);
             return { empty: page.length === 0, size: page.length, docs: page };
           },
         };
@@ -128,18 +131,18 @@ describe('the store', () => {
     expect(stored).toContain(hashApiKey(made.key));
 
     const denied = await runSharedData(api, WS, {
-      op: 'create', collection: 'orders', id: null, key: 'nb_not-the-key', nowMs: now, data: { item: 'chai' },
+      actorUid: 'user1', op: 'create', collection: 'orders', id: null, key: 'nb_not-the-key', nowMs: now, data: { item: 'chai' },
     });
     expect(denied.status).toBe(401);
     expect([...docs.keys()].some((k) => k.includes('/records/'))).toBe(false);
 
     const saved = await runSharedData(api, WS, {
-      op: 'create', collection: 'orders', id: null, key: made.key, nowMs: now, data: { item: 'chai' },
+      actorUid: 'user1', op: 'create', collection: 'orders', id: null, key: made.key, nowMs: now, data: { item: 'chai' },
     });
     expect(saved.status).toBe(200);
     expect(saved.body.ok).toBe(true);
     const listed = await runSharedData(api, WS, {
-      op: 'list', collection: 'orders', id: null, key: made.key, nowMs: now, data: null,
+      actorUid: 'user1', op: 'list', collection: 'orders', id: null, key: made.key, nowMs: now, data: null,
     });
     expect(listed.status).toBe(200);
     expect(listed.body.records).toEqual([{ id: saved.body.id, record: { item: 'chai' } }]);
@@ -151,9 +154,10 @@ describe('the store', () => {
     const made = await createSharedDatabase(api, { workspaceId: WS, ownerUid: 'user1', expiresAtMs: now + 86_400_000, nowMs: now });
     if (!made.ok) throw new Error('create');
     await markSharedReady(api, WS, now);
+    const meta = docs.get(`nbai_app_data/${WS}`) as any; delete meta.opsUsed;
     docs.set(`nbai_app_data/${WS}/ops/0`, { n: SHARED_DATA_OPS_CAP });
     const blocked = await runSharedData(api, WS, {
-      op: 'create', collection: 'orders', id: null, key: made.key, nowMs: now, data: { item: 'more' },
+      actorUid: 'user1', op: 'create', collection: 'orders', id: null, key: made.key, nowMs: now, data: { item: 'more' },
     });
     expect(blocked.status).toBe(429);
     expect(String(blocked.body.error)).toContain('nothing extra was charged');
@@ -166,7 +170,7 @@ describe('the store', () => {
     const made = await createSharedDatabase(api, { workspaceId: WS, ownerUid: 'user1', expiresAtMs: now + 86_400_000, nowMs: now });
     if (!made.ok) throw new Error('create');
     await markSharedReady(api, WS, now);
-    await runSharedData(api, WS, { op: 'create', collection: 'orders', id: null, key: made.key, nowMs: now, data: { item: 'chai' } });
+    await runSharedData(api, WS, { actorUid: 'user1', op: 'create', collection: 'orders', id: null, key: made.key, nowMs: now, data: { item: 'chai' } });
     const gone = await destroySharedDatabase(api, WS);
     expect(gone.ok).toBe(true);
     expect([...docs.keys()].some((k) => k.startsWith(`nbai_app_data/${WS}`))).toBe(false);
@@ -211,5 +215,76 @@ describe('the wires', () => {
     expect(r.status).toBe(200);
     expect(String(r.body.message)).toContain('₹49');
     expect(r.body.env).toBeUndefined();
+  });
+});
+
+
+describe('verified caller boundaries and pre-query admission', () => {
+  async function setup() {
+    const { api, docs } = fakeDb();
+    const now = Date.parse('2026-10-20T12:00:00Z');
+    const made = await createSharedDatabase(api, { workspaceId: WS, ownerUid: 'owner', expiresAtMs: now + 86_400_000, nowMs: now });
+    if (!made.ok) throw Error('setup');
+    await markSharedReady(api, WS, now);
+    return { api, docs, now, key: made.key };
+  }
+  it('a copied public key alone has no authority; caller cannot read, overwrite or delete another user record', async () => {
+    const { api, key, now } = await setup();
+    const base = { collection: 'orders', id: null, key, nowMs: now, data: { item: 'private' } };
+    expect((await runSharedData(api, WS, { ...base, op: 'create' })).status).toBe(401);
+    const a = await runSharedData(api, WS, { ...base, op: 'create', actorUid: 'alice' });
+    expect(a.status).toBe(200);
+    for (const op of ['get', 'replace', 'delete'] as const) {
+      expect((await runSharedData(api, WS, { ...base, id: String(a.body.id), op, actorUid: 'bob' })).status).toBe(404);
+    }
+    const bob = await runSharedData(api, WS, { ...base, op: 'list', data: null, actorUid: 'bob' });
+    expect(bob.body.records).toEqual([]);
+    const alice = await runSharedData(api, WS, { ...base, id: String(a.body.id), op: 'get', data: null, actorUid: 'alice' });
+    expect(alice.body.record).toEqual({ item: 'private' });
+    expect((await runSharedData(api, WS, { ...base, id: String(a.body.id), op: 'get', data: null, actorUid: 'owner' })).status).toBe(200);
+  });
+  it('old records stay owner-only and are not discarded during the counter migration', async () => {
+    const { api, docs, key, now } = await setup();
+    docs.set(`nbai_app_data/${WS}/records/orders_legacy`, { collection: 'orders', id: 'legacy', data: { value: 'kept' }, updatedAt: new Date(now).toISOString() });
+    const base = { collection: 'orders', id: 'legacy', key, nowMs: now, data: null, op: 'get' as const };
+    expect((await runSharedData(api, WS, { ...base, actorUid: 'alice' })).status).toBe(404);
+    expect((await runSharedData(api, WS, { ...base, actorUid: 'owner' })).body.record).toEqual({ value: 'kept' });
+  });
+  it('exhausted requests reserve nothing and issue no record query, even on repeated attempts', async () => {
+    const { api, docs, key, now } = await setup();
+    const meta = docs.get(`nbai_app_data/${WS}`) as any;
+    meta.opsUsed = SHARED_DATA_OPS_CAP;
+    let recordQueries = 0;
+    const collection = api.collection.bind(api);
+    api.collection = (path) => { if (path.includes('/records')) recordQueries++; return collection(path); };
+    for (let i = 0; i < 3; i++) expect((await runSharedData(api, WS, { actorUid: 'alice', op: 'list', collection: 'orders', id: null, key, nowMs: now, data: null })).status).toBe(429);
+    expect(recordQueries).toBe(0);
+    expect(meta.opsUsed).toBe(SHARED_DATA_OPS_CAP);
+  });
+  it('two concurrent admissions cannot both spend the last operation', async () => {
+    const { api, docs, key, now } = await setup();
+    const meta = docs.get(`nbai_app_data/${WS}`) as any; meta.opsUsed = SHARED_DATA_OPS_CAP - 1;
+    // Model Firestore's serializable transaction contract instead of an interleavable Map.
+    const raw = api.runTransaction.bind(api); let serial = Promise.resolve();
+    api.runTransaction = ((fn: any) => {
+      const next = serial.then(() => raw(fn)); serial = next.then(() => {}, () => {}); return next;
+    }) as SharedDb['runTransaction'];
+    const call = { actorUid: 'alice', op: 'create' as const, collection: 'orders', key, nowMs: now, data: { value: 'last' } };
+    const results = await Promise.all([runSharedData(api, WS, { ...call, id: 'one' }), runSharedData(api, WS, { ...call, id: 'two' })]);
+    expect(results.map(r => r.status).sort()).toEqual([200, 429]);
+    expect([...docs.keys()].filter(k => k.includes('/records/'))).toHaveLength(1);
+    expect((docs.get(`nbai_app_data/${WS}`) as any).opsUsed).toBe(SHARED_DATA_OPS_CAP);
+  });
+  it('walks beyond the first page without exposing somebody else’s rows', async () => {
+    const { api, key, now } = await setup();
+    for (let i = 0; i < 25; i++) expect((await runSharedData(api, WS, { actorUid: 'alice', op: 'create', collection: 'orders', id: `row${String(i).padStart(2, '0')}`, key, nowMs: now, data: { i } })).status).toBe(200);
+    await runSharedData(api, WS, { actorUid: 'bob', op: 'create', collection: 'orders', id: 'privatebob', key, nowMs: now, data: { i: 99 } });
+    const base = { actorUid: 'alice', op: 'list' as const, collection: 'orders', id: null, key, nowMs: now, data: null };
+    const first = await runSharedData(api, WS, base);
+    const second = await runSharedData(api, WS, { ...base, cursor: String(first.body.nextCursor) });
+    expect((first.body.records as any[]).length).toBe(20);
+    expect((second.body.records as any[]).length).toBe(5);
+    expect(second.body.nextCursor).toBeNull();
+    expect([...first.body.records as any[], ...second.body.records as any[]].some(r => r.id === 'privatebob')).toBe(false);
   });
 });

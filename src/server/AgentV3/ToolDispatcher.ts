@@ -10011,7 +10011,7 @@ export class ToolDispatcher {
       }
 
       case 'generate_storage': {
-        // U-4 recipe — real BYO file uploads (S3-compatible presigned / Cloudinary signed). Pure generator.
+        // U-4 recipe — authenticated, byte-bounded BYO uploads with a durable quota. Pure generator.
         const sProvider = optStr(input, 'provider');
         if (!isStorageProvider(sProvider)) return 'generate_storage: pass provider = "supabase" (zero setup) | "s3" | "cloudinary".';
         const scfg = generateStorageIntegration(sProvider);

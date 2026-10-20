@@ -4418,3 +4418,17 @@ Cloud Build now passes `AGENTV3_WEAK_SCOPE_POLICY=${_WEAK_SCOPE_POLICY}` and `AG
 ### User-app hosting isolation gates (2026-10-20)
 
 `NAVBHARAT_APPS_BUILD_ISOLATION_VERIFIED=on` and `NAVBHARAT_APPS_EGRESS_VERIFIED=on` are explicit operator attestations, default unset/false. For a non-admin publish, both AND `NAVBHARAT_APPS_CREDENTIALLESS_BUILD=on` are required in addition to the existing public hosting flag, plan and identities. Set build verification only after the existing real Cloud Build probe succeeds; set egress verification only after actual network policy and cross-tenant tests pass. They are not automatically set by CI or this change. Admin-only probes remain possible. These attestations do not create IAM/network controls; they prevent an unverified public rollout.
+
+## Managed Supabase default (prepared 2026-10-20; NOT verified live)
+
+- `NAVBHARAT_SUPABASE_TOKEN`: server-only Secret Manager binding, never app env/client output.
+- `NAVBHARAT_SUPABASE_ORG`, `NAVBHARAT_SUPABASE_REGION`: selected organization and new-project region.
+- `NAVBHARAT_SUPABASE_DEFAULT`: exact `on` selects the dedicated product for new Publish database offers.
+- `NAVBHARAT_SUPABASE_PRODUCTION_APPROVED`: exact `on` required for managed purchases after billing approval.
+- `NAVBHARAT_SUPABASE_MAX_PROJECTS`: explicit integer 1–999; counts all org projects, not an invoice cap.
+
+These are proposed runtime keys, not a claim they were configured by the admin.
+Lifecycle deletion retains access when new purchases are disabled. See
+`docs/DEFAULT_SUPABASE.md` for the dry-run installer, paid activation, retained creation holds,
+separate Storage backups and the required live pilot. User-selected platform defaults supersede
+older BYO-only guidance for this rollout; existing BYO and shared apps are not migrated.

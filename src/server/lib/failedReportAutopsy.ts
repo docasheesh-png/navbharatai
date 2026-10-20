@@ -4,6 +4,7 @@
  */
 import { createHash } from 'node:crypto';
 import { getServerDb } from './serverDb';
+import { RETENTION_PURGE_TOKEN, hasRetentionFence, isRetentionPurgeToken } from './retentionFence';
 import { FailedReportsInputError, failedReportDigest, redactFailedReport, settledFailure, validReportId } from './failedBuildReports';
 import type { FailedBuildPage } from '../../lib/failedBuildReports';
 import type { FailedReportAutopsyInput, FailedReportAutopsyRecord, FailedReportAutopsyView } from '../../lib/failedReportAutopsy';
@@ -78,6 +79,9 @@ function view(reportDigest: string, record: FailedReportAutopsyRecord | null): F
 }
 function storedRecord(value: unknown, workspaceId: string, historyId: string): FailedReportAutopsyRecord | null {
   if (value === undefined) return null;
+  // All read paths and the writer's parent transaction use this parser. A purge fence must also
+  // refuse an idempotent replay: its receipt may already be gone during resumable child cleanup.
+  if (hasRetentionFence(value)) throw new Error('Autopsy metadata cleanup is in progress. Retry later; no status was substituted.');
   try {
     const r = object(value, ['expectedRevision', 'reportDigest', 'mutationId', 'status', 'summary', 'ledgerUrl', 'counts',
       'blockers', 'verification', 'reason', 'revision', 'workspaceId', 'historyId', 'updatedAt', 'actor']);
@@ -107,7 +111,16 @@ export async function withFailedReportAutopsies(page: FailedBuildPage): Promise<
   if (!db) throw new Error('Autopsy storage unavailable.');
   const snapshots = await db.getAll(...page.reports.map(r => db.collection(COLLECTION).doc(reference(r.workspaceId, r.historyId).id)));
   return { ...page, reports: page.reports.map((r, i) => {
-    const record = storedRecord(snapshots[i].data(), r.workspaceId, r.historyId);
+    const raw = snapshots[i].data();
+    if (hasRetentionFence(raw)) {
+      if (!isRetentionPurgeToken(raw?.[RETENTION_PURGE_TOKEN])) throw new Error('Stored autopsy cleanup fence is invalid.');
+      const retained = { ...raw };
+      delete retained[RETENTION_PURGE_TOKEN];
+      // Only a valid fenced record gets the explicit list-only state; never hide corrupt metadata.
+      storedRecord(retained, r.workspaceId, r.historyId);
+      return { ...r, autopsy: { state: 'cleanup_in_progress' as const, revision: null } };
+    }
+    const record = storedRecord(raw, r.workspaceId, r.historyId);
     return { ...r, autopsy: { state: view(r.reportDigest, record ?? null).state, revision: record?.revision ?? 0 } };
   }) };
 }

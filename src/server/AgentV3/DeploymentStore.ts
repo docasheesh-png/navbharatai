@@ -9,8 +9,8 @@
 // Doc ID:     `<workspaceId>` (one record per workspace — the latest deploy wins)
 // Fields:     workspaceId, userId, url, fileCount, updatedAt
 //
-// Pattern mirrors UserCostStore: VITEST-skip (tests never touch Firestore), best-effort (never
-// throws, never blocks a deploy), set+merge so a missing doc is created atomically.
+// Telemetry writes are best-effort; moderation/lifecycle reads are strict so an outage cannot lift
+// a ban or claim that an app is offline. VITEST skips Firestore; successful-read tests inject it.
 import { randomBytes } from 'node:crypto';
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
@@ -30,6 +30,7 @@ import { appAiRegistryStore } from '../lib/AppAiRegistryStore';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
 import { probeHostingPlan } from '../lib/hostingPlan';
 import { audit } from '../lib/audit';
+import { hostedRepublishRefusal } from './hostedRepublish';
 
 /** Lifecycle status of a published app (registry — enables takedown/report in later slices). */
 /**
@@ -83,8 +84,8 @@ export interface DeploymentRecord {
   /** Registry status; defaults to 'active'. */
   status?: DeploymentStatus;
   /**
-   * The status the app had when it was put on HOLD (Q-703). A hold takes nothing offline, so this is how a
-   * restore knows whether a live version is still out there: `'active'` = it was serving and still is.
+   * The status preserved by a hold (Q-703). Refusing a new version preserves the prior live version
+   * as 'active'; taking unsafe live content offline records 'unpublished' so restore needs republish.
    * Written only together with `status: 'held'`; absent on holds recorded before it existed.
    */
   heldFrom?: DeploymentStatus | 'none';
@@ -209,6 +210,14 @@ class DeploymentStore {
     } catch {
       return null;
     }
+  }
+
+  /** Security/lifecycle callers must distinguish a missing record from an unreadable registry. */
+  async getStrict(workspaceId: string): Promise<DeploymentRecord | null> {
+    const db = this.getDb();
+    if (!db || !workspaceId) throw new Error('The deployment registry is temporarily unavailable.');
+    const snap = await db.collection('agentv3_deployments').doc(workspaceId).get();
+    return snap.exists ? snap.data() as DeploymentRecord : null;
   }
 
   /**
@@ -413,6 +422,24 @@ class DeploymentStore {
 
 export const deploymentStore = new DeploymentStore();
 
+/** A missing record permits a first publish; an unreadable moderation registry never does. */
+export async function readDeploymentForPublish(workspaceId: string): Promise<DeploymentRecord | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      deploymentStore.getStrict(workspaceId),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Deployment registry lookup timed out.')), 3_000);
+      }),
+    ]);
+  } catch {
+    // Provider errors may contain connection details. Keep the user-facing refusal retryable and generic.
+    throw new Error('The deployment registry is temporarily unavailable. Please retry publishing shortly.');
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * True when a deployment record means the app is REALLY reachable at its URL right now:
  * it has a URL and its registry status is 'active' (not held for review, not taken down).
@@ -509,19 +536,14 @@ export function withDeploymentPersistence(
       throw new Error(('message' in verdict && verdict.message) ? verdict.message : 'Hosting limit reached.');
     }
 
-    // TAKEDOWN re-publish guard: an app an admin took down for a policy violation must not be
-    // silently re-published. Bounded (3s) + fail-OPEN — a store outage must never block a legit
-    // deploy (blocking a taken-down republish during a rare outage is an acceptable trade vs rule #1).
+    // Both held and taken-down apps must stay blocked. An uncertain registry cannot prove an app
+    // is unbanned; static and server publishing use the same bounded, strict lookup and refusal.
     // Kept outside the block: a publish-scan hold below records what this record's status WAS (Q-703).
     let existing: DeploymentRecord | null = null;
     if (isFirstPartyProvider(providerId)) {
-      existing = await Promise.race([
-        deploymentStore.get(workspaceId),
-        new Promise<DeploymentRecord | null>((r) => setTimeout(() => r(null), 3_000)),
-      ]).catch(() => null);
-      if (existing?.status === 'taken_down') {
-        throw new Error('This app was taken down for a policy violation and cannot be re-published. Contact support if you believe this is a mistake.');
-      }
+      existing = await readDeploymentForPublish(workspaceId);
+      const refusal = hostedRepublishRefusal(existing);
+      if (refusal) throw new Error(refusal);
     }
 
     // CONTENT-SAFETY scan (Phase A): inspect the built page for phishing / wallet-drainer / brand-

@@ -57,7 +57,7 @@ export type PlatformDatabaseResult =
  * The password is inside `env` and nowhere else. This function does not log it.
  */
 export async function createPlatformDatabase(
-  input: { token: string; orgId: string; region: string; appLabel?: string | null; timeoutMs?: number },
+  input: { token: string; orgId: string; region: string; appLabel?: string | null; timeoutMs?: number; onCreated?: (projectRef: string) => Promise<void> },
   deps: Partial<PlatformDbDeps> = {},
 ): Promise<PlatformDatabaseResult> {
   const d = { ...defaultDeps, ...deps };
@@ -69,7 +69,15 @@ export async function createPlatformDatabase(
     region: input.region,
     dbPass,
   });
-  if (!created.ok) return { ok: false, message: created.message, cleaned: true };
+  if (!created.ok) return {
+    ok: false, message: created.message,
+    // Network/5xx/malformed success can lose the acknowledgement of a real paid project.
+    cleaned: created.failure !== 'api-error' && created.failure !== 'timeout',
+  };
+
+  // Persist the resource identity before readiness polling can be interrupted. A failed durable
+  // acknowledgement aborts and retains admission for reconciliation; it does not retry creation.
+  await input.onCreated?.(created.project.id);
 
   const discard = async (message: string): Promise<PlatformDatabaseResult> => {
     const gone = await d.deleteProject(input.token, created.project.id).catch(() => ({ ok: false as const }));

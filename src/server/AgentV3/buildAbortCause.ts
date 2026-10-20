@@ -38,6 +38,7 @@ export type AbortCause =
   | 'advisory-cap'   // the build had already succeeded; post-build advisory work overran
   | 'deploy-drain'   // the server is restarting; the build resumes on its own
   | 'lock-reclaimed' // a newer build took over an abandoned lock
+  | 'authority-unavailable' // the store could not confirm this build still owns its lease
   | 'reaper'         // the zombie reaper cleaned up a build that stopped reporting
   | 'cost-cap'       // the build spent past its cost ceiling (buildCostCeiling.ts)
   | 'futile'         // the build produced nothing for the whole window (futilityBreaker.ts)
@@ -51,7 +52,7 @@ export type AbortCause =
  * above and not here fails to compile, and so does one listed here that the union does not have.
  */
 const EVERY_CAUSE: Readonly<Record<AbortCause, true>> = Object.freeze({
-  'user-stop': true, watchdog: true, 'advisory-cap': true, 'deploy-drain': true, 'lock-reclaimed': true,
+  'user-stop': true, watchdog: true, 'advisory-cap': true, 'deploy-drain': true, 'lock-reclaimed': true, 'authority-unavailable': true,
   reaper: true, 'cost-cap': true, futile: true, 'review-budget': true, 'recheck-budget': true,
   'repair-budget': true, unknown: true,
 });
@@ -191,6 +192,8 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
       return 'NavBharatAI restarted (a deploy) while this build was running. Your files are safe and the build resumes automatically.';
     case 'lock-reclaimed':
       return 'This build was replaced by a newer one you started on the same project.' + (saved ? ' Its files so far are saved.' : '');
+    case 'authority-unavailable':
+      return 'Build ownership could not be confirmed, so I stopped this attempt to protect your app. Wait for it to finish stopping before retrying.';
     case 'reaper':
       return `This build stopped responding and was cleaned up.${resume}`;
     case 'cost-cap':
@@ -288,6 +291,7 @@ export function stoppedCallOwner(cause: AbortCause): StoppedCallOwner {
       return 'our-clock';
     case 'deploy-drain':
     case 'lock-reclaimed':
+    case 'authority-unavailable':
     case 'reaper':
       return 'our-platform';
     case 'unknown':
@@ -314,6 +318,7 @@ const OUR_CLOCK_WORDS: Readonly<Record<string, string>> = Object.freeze({
 const OUR_PLATFORM_WORDS: Readonly<Record<string, string>> = Object.freeze({
   'deploy-drain': 'a deploy drained the build',
   'lock-reclaimed': 'a newer build reclaimed the lock',
+  'authority-unavailable': 'the database could not confirm build ownership',
   reaper: 'the zombie reaper ended the build',
 });
 
@@ -461,6 +466,7 @@ export function interruptedBeforeAnyVerdict(cause: AbortCause): boolean {
     case 'user-stop':
     case 'deploy-drain':
     case 'lock-reclaimed':
+    case 'authority-unavailable':
     case 'reaper':
     case 'unknown':
       return true;

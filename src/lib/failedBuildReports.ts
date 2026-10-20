@@ -9,7 +9,7 @@ export interface FailedBuildRow {
   appLabel: string;
   rootCause: string | null;
   reportDigest: string;
-  autopsy?: Pick<FailedReportAutopsyView, 'state' | 'revision'>;
+  autopsy?: Pick<FailedReportAutopsyView, 'state' | 'revision'> | { state: 'cleanup_in_progress'; revision: null };
 }
 export interface FailedBuildPage {
   reports: FailedBuildRow[];
@@ -28,5 +28,9 @@ export function isFailedBuildPage(value: unknown): value is FailedBuildPage {
   return Array.isArray(p.reports) && (p.nextCursor === null || typeof p.nextCursor === 'string') &&
     typeof p.scanned === 'number' && p.reports.every((r) => r && typeof r.workspaceId === 'string' &&
       typeof r.historyId === 'string' && typeof r.startedAt === 'number' && typeof r.endedAt === 'number' &&
-      typeof r.appLabel === 'string');
+      typeof r.appLabel === 'string' && (r.autopsy === undefined || (r.autopsy && typeof r.autopsy === 'object' &&
+        (r.autopsy.state === 'cleanup_in_progress' ? r.autopsy.revision === null :
+          ['not_started', 'stale', 'in_progress', 'blocked', 'done'].includes(r.autopsy.state) &&
+          Number.isSafeInteger(r.autopsy.revision) && r.autopsy.revision >= 0 && r.autopsy.revision <= 1000 &&
+          (r.autopsy.state === 'not_started' ? r.autopsy.revision === 0 : r.autopsy.revision > 0)))));
 }

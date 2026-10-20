@@ -153,6 +153,13 @@ describe('rescanSummary is honest about what it could not do', () => {
 
 describe('🔒 the wiring', () => {
   const server = readFileSync(join(process.cwd(), 'server.ts'), 'utf8');
+  const sweepBody = () => {
+    const at = server.indexOf("id: 'outbound-rescan'");
+    const end = server.indexOf('// SLEEPING DATABASES', at);
+    expect(at).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(at);
+    return server.slice(at, end);
+  };
 
   it('the sweep is registered as an EXCLUSIVE job — it HOLDS apps', () => {
     const at = server.indexOf("id: 'outbound-rescan'");
@@ -161,11 +168,11 @@ describe('🔒 the wiring', () => {
   });
 
   it('🔒 it HOLDS rather than takes down — reversible by the admin', () => {
-    const at = server.indexOf("id: 'outbound-rescan'");
-    const body = server.slice(at, at + 2400);
-    // …and records that the app was LIVE when held, so a restore puts it back to live rather than writing
-    // a false 'unpublished' over a site that never stopped serving (Q-703).
-    expect(body).toContain("setStatus(workspaceId, 'held', { heldFrom: 'active' })");
+    const body = sweepBody();
+    // The currently serving unsafe version is removed; a NEW-version refusal is a separate hold.
+    expect(body).toContain("takeAppOffline(workspaceId, 'held'");
+    expect(body).toContain("heldFrom: 'unpublished'");
+    expect(body).toContain('if (!held) throw');
     expect(body).not.toContain("'taken_down'");
   });
 
@@ -174,7 +181,6 @@ describe('🔒 the wiring', () => {
   });
 
   it('a safety sweep can never affect the server', () => {
-    const at = server.indexOf("id: 'outbound-rescan'");
-    expect(server.slice(at, at + 2600)).toMatch(/catch\(\(\) => \{ \/\* a safety sweep must never affect the server/);
+    expect(sweepBody()).toMatch(/catch\(\(\) => \{ \/\* a safety sweep must never affect the server/);
   });
 });

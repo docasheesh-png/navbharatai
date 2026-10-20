@@ -100,7 +100,7 @@ describe('Q-767 — the windows are the ones the Privacy Policy publishes, not n
 
   it('the build reports keep the 180 days the policy publishes for them', () => {
     expect(POLICY).toMatch(/reports of your past builds[\s\S]{0,160}180 days/);
-    for (const c of ['admin_build_reports', 'admin_apk_reports', 'admin_build_triage']) {
+    for (const c of ['admin_build_reports', 'admin_apk_reports', 'admin_build_triage', 'admin_failed_report_autopsies']) {
       expect(policyFor(c)?.ttlDays, `${c} must keep the published build-report window`).toBe(180);
     }
   });

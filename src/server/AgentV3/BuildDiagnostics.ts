@@ -14,6 +14,7 @@ import { startBandLabel } from './RequestAnalyser';
 import { todoOnlyTurnsLine } from './todoOnlyTurn';
 import { isBuildStoppedError } from './stopSignal';
 import { stoppedCallCauseWords, type AbortCause } from './buildAbortCause';
+import { ABORT_OUTCOME_CODES } from './abortOutcome';
 import { toolCallDetail } from './toolCallTarget';
 import { isPlatformFixRequest, looksLikeMachineError, PLATFORM_COMPOSED_PREFIXES } from '../../lib/platformFixRequest';
 import { isProjectSummaryNarration } from './ProjectSummary';
@@ -306,7 +307,7 @@ export const PROCESS_ONLY_CODES = new Set([
   // nothing about the app's code, and counting one as a "build-breaking blocker" on the user's health
   // card is the provider-error-as-app-blocker class (autopsy 4efab9d7) through a new door.
   'OUTCOME_USER_STOPPED', 'OUTCOME_COST_CEILING', 'OUTCOME_FUTILE', 'OUTCOME_DEPLOY_DRAIN',
-  'OUTCOME_SUPERSEDED', 'OUTCOME_REAPED',
+  'OUTCOME_SUPERSEDED', 'OUTCOME_REAPED', 'OUTCOME_AUTHORITY_UNAVAILABLE',
   // …and the two the deadline finalizer already wrote, for the same reason (the siblings, rule 3): the
   // wall-clock cap and an abort with no recorded cause end the RUN; neither is evidence about the app.
   // The release gate is RED on `buildOk:false` regardless, so this changes no verdict — only the
@@ -3723,8 +3724,8 @@ export interface EtaAccuracy {
   evidenced: boolean;
   line: string;
   /**
-   * True when the build was CUT SHORT (stopped by the user, a deploy, the reaper…) before the band ended:
-   * then it never ran long enough to test the estimate, and its ratio must not be counted as a miss.
+   * True when a non-delivery stop occurs at or before the band's upper bound. Its elapsed time cannot
+   * certify completion inside the band, and its ratio must not be counted as an accurate delivery.
    */
   untested?: boolean;
   /** The promise's slice and source (see EtaPromise) — absent on reports written before 2026-10-12. */
@@ -3733,14 +3734,11 @@ export interface EtaAccuracy {
 }
 
 /**
- * Outcomes that END a build from outside its own work. A build cut short before the band's top did not
- * test the estimate (autopsy 19641ab5: a build stopped by the user at 1.8 min was scored "0.2× the
- * midpoint and UNDER the band" — as if the estimate had been wrong about it).
+ * Canonical non-delivery stops. Keep the abort producer's class rather than a second list: omitting
+ * FUTILE credited report 78e7e226's empty ten-minute run as an accurate delivery. Advisory-cap and
+ * unknown-code measurement policy is unchanged. Past the upper bound, elapsed time still proves a miss.
  */
-export const ETA_UNTESTED_OUTCOMES: ReadonlySet<string> = new Set([
-  'OUTCOME_USER_STOPPED', 'OUTCOME_STOPPED', 'OUTCOME_DEPLOY_DRAIN', 'OUTCOME_SUPERSEDED',
-  'OUTCOME_REAPED', 'OUTCOME_ABORTED_UNKNOWN', 'OUTCOME_COST_CEILING',
-]);
+export const ETA_UNTESTED_OUTCOMES: ReadonlySet<string> = new Set(Object.values(ABORT_OUTCOME_CODES));
 
 /**
  * MEASURE THE PROMISE AGAINST THE CLOCK — the half that was missing (open root cause #6, 2026-09-17).
@@ -3813,15 +3811,18 @@ function judgeEtaPromise(
       // Admin 2026-09-26: an unevidenced estimate is SHOWN, labelled a guess (etaEvidence.ts).
       ? `The user was shown a ROUGH ESTIMATE, labelled a guess (unevidenced): ${band} (midpoint ${mins(promisedMs)})`
       : `No figure was shown to the user (unevidenced — they saw the PHASE). The estimator's own midpoint was ${mins(promisedMs)}, band ${band}`;
-  // Cut short from outside before the band ended: the clock measured the interruption, not the build.
-  // A build stopped AFTER the band's top still proves the estimate was too low, so that one is judged.
-  if (ETA_UNTESTED_OUTCOMES.has(outcomeCode) && actualMs < highMs && !withinBand) {
+  // A stop anywhere inside the inclusive band measured interruption, never completed delivery.
+  // AFTER the upper bound, the elapsed lower bound still proves the completion estimate was too low.
+  const cutShort = ETA_UNTESTED_OUTCOMES.has(outcomeCode);
+  if (cutShort && actualMs <= highMs) {
     return {
       promisedMs, lowMs, highMs, actualMs, ratio, withinBand, evidenced, untested: true,
-      line: `${head}; the build was cut short (${outcomeCode}) at ${mins(actualMs)}${waitNote}, before the band ended, so it does not test the estimate.`,
+      line: `${head}; the build was cut short (${outcomeCode}) at ${mins(actualMs)}${waitNote}, without completing, so it does not test completion time.`,
     };
   }
-  const verdict = withinBand
+  const verdict = cutShort
+    ? `the build was cut short (${outcomeCode}) at ${mins(actualMs)} — already OVER the band before completion (${ratio.toFixed(1)}× the midpoint)`
+    : withinBand
     ? 'the build landed INSIDE that band'
     : `the build took ${mins(actualMs)} — ${ratio.toFixed(1)}× the midpoint and ${actualMs > highMs ? 'OVER' : 'UNDER'} the band`;
   return { promisedMs, lowMs, highMs, actualMs, ratio, withinBand, evidenced, line: `${head}; ${verdict}${waitNote}.` };

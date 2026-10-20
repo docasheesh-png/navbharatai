@@ -10,7 +10,7 @@
 // The tests drive the real functions against fakes — behaviour, not source text — plus three censuses that
 // fail when a NEW path skips the shared function.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { globSync } from 'glob';
@@ -129,6 +129,25 @@ describe('the deploy state machine', () => {
 });
 
 describe('one server publish', () => {
+  it('an unreadable moderation registry cannot be treated as an unbanned new app', async () => {
+    const { d, calls, mem } = deps({ existing: async () => { throw new Error('unreadable'); } });
+    const out = await runServerPublish(input, d);
+    expect(out.status).toBe(503);
+    expect(calls.host).toBe(0);
+    expect(mem.leases.size).toBe(0);
+  });
+  it('a coordination outage starts no build, reads no secrets and reports a retryable 503', async () => {
+    const { d, calls } = deps();
+    d.store.claim = async () => { throw new Error('database unavailable'); };
+    const vault = vi.spyOn(d, 'vault');
+    const token = vi.spyOn(d, 'token');
+    const out = await runServerPublish(input, d);
+    expect(out).toMatchObject({ status: 503, live: false, ready: false, body: { code: 'deploy-coordination-unavailable', retryable: true } });
+    expect(calls.host).toBe(0);
+    expect(calls.record).toBe(0);
+    expect(vault).not.toHaveBeenCalled();
+    expect(token).not.toHaveBeenCalled();
+  });
   it('goes live, records BEFORE answering, walks every state and releases the lease', async () => {
     const { d, mem, calls } = deps();
     const out = await runServerPublish(input, d);
@@ -308,6 +327,18 @@ describe('taking an app offline takes its SERVERS offline', () => {
     const refused = cloud({ deleteStatus: 403 });
     await expect(takeAppOffline(WS, 'taken_down', { ...base, remove: (o) => removeWorkspaceServers(o, refused.fake) })).rejects.toThrow(/could not be confirmed removed/);
     expect(order).toEqual(['channel']); // the status was never written
+  });
+
+  it('never claims an app offline after a failed static removal or an uncertain registry read', async () => {
+    const setStatus = vi.fn();
+    const deleteChannel = vi.fn(async () => false);
+    const rec = { workspaceId: WS, userId: 'u', url: 'x', fileCount: 1, updatedAt: 1 };
+    await expect(takeAppOffline(WS, 'held', { deleteChannel, get: async () => rec, setStatus })).rejects.toThrow(/static app/);
+    expect(setStatus).not.toHaveBeenCalled();
+    deleteChannel.mockClear();
+    await expect(takeAppOffline(WS, 'held', { deleteChannel, get: async () => { throw new Error('registry unavailable'); }, setStatus })).rejects.toThrow();
+    expect(deleteChannel).not.toHaveBeenCalled();
+    expect(setStatus).not.toHaveBeenCalled();
   });
 });
 

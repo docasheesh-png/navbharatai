@@ -24,8 +24,8 @@
 //   • A structured event line per transition (`[hosting-event]`): ids, state, a reason CATEGORY. Never a
 //     secret, never the provider's raw text.
 //
-// 🔒 FAILS OPEN, like the build lease: a store that cannot be read lets the deploy START (the old behaviour
-// for the length of the outage) rather than locking every server app out of publishing.
+// A durable claim is mandatory before paid build/deploy work. A store outage refuses NEW deploys;
+// existing hosted apps keep serving. An uncertain transaction must never become a second build.
 
 import { randomBytes } from 'node:crypto';
 import * as admin from 'firebase-admin';
@@ -43,7 +43,7 @@ export type HostedDeployState = typeof HOSTED_DEPLOY_STATES[number];
  * such) — never by the attempt itself.
  */
 export const HOSTED_DEPLOY_TRANSITIONS: Readonly<Record<HostedDeployState, readonly HostedDeployState[]>> = {
-  queued: ['building', 'failed', 'abandoned'],
+  queued: ['building', 'deploying', 'failed', 'abandoned'],
   building: ['deploying', 'failed', 'abandoned'],
   deploying: ['live', 'failed', 'abandoned'],
   live: [],
@@ -74,6 +74,7 @@ export interface HostedDeployAttempt {
   createdAt: number;
   updatedAt: number;
   events: DeployEvent[];
+  operation?: 'publish' | 'rollback';
   url?: string;
   service?: string;
   buildId?: string;
@@ -91,11 +92,12 @@ export interface HostedDeployAttempt {
 export const DEPLOY_LEASE_STALE_MS = (BUILD_TIMEOUT_SECONDS + 10 * 60) * 1000;
 
 /** A fresh attempt in `queued`. PURE. */
-export function newDeployAttempt(input: { workspaceId: string; userId: string; now: number; deploymentId?: string }): HostedDeployAttempt {
+export function newDeployAttempt(input: { workspaceId: string; userId: string; now: number; deploymentId?: string; operation?: 'publish' | 'rollback' }): HostedDeployAttempt {
   const deploymentId = input.deploymentId ?? `dep_${input.now.toString(36)}_${randomBytes(6).toString('hex')}`;
   return {
     deploymentId, workspaceId: input.workspaceId, userId: input.userId,
     state: 'queued', createdAt: input.now, updatedAt: input.now, events: [{ state: 'queued', at: input.now }],
+    ...(input.operation ? { operation: input.operation } : {}),
   };
 }
 
@@ -153,8 +155,8 @@ export const HOSTED_DEPLOY_LEASE_COLLECTION = 'hosted_deploy_leases';
 export const HOSTED_DEPLOY_ATTEMPTS_COLLECTION = 'hosted_deploy_attempts';
 
 export interface DeployStore {
-  /** Atomically claim the workspace, or report the deploy already running. Never throws. */
-  claim(workspaceId: string, userId: string, now: number): Promise<DeployClaim>;
+  /** Atomically claim the workspace, or report the deploy already running. Throws if unavailable. */
+  claim(workspaceId: string, userId: string, now: number, operation?: 'publish' | 'rollback'): Promise<DeployClaim>;
   save(a: HostedDeployAttempt): Promise<void>;
   /** Release the lease — only if it is still this attempt's. */
   release(workspaceId: string, deploymentId: string): Promise<void>;
@@ -170,11 +172,16 @@ function db(): admin.firestore.Firestore | null {
   }
 }
 
-export const firestoreDeployStore: DeployStore = {
-  async claim(workspaceId, userId, now) {
-    const attempt = newDeployAttempt({ workspaceId, userId, now });
-    const store = db();
-    if (!store) return { claimed: true, attempt }; // fail open — see the header
+export class DeployStoreUnavailable extends Error {
+  constructor() { super('Deployment coordination is temporarily unavailable. Please retry shortly; no new build was started.'); }
+}
+
+export function createFirestoreDeployStore(database: () => admin.firestore.Firestore | null = db): DeployStore {
+  return {
+  async claim(workspaceId, userId, now, operation) {
+    const attempt = newDeployAttempt({ workspaceId, userId, now, operation });
+    const store = database();
+    if (!store) throw new DeployStoreUnavailable();
     try {
       const leaseRef = store.collection(HOSTED_DEPLOY_LEASE_COLLECTION).doc(workspaceId);
       const result = await store.runTransaction(async (tx) => {
@@ -201,16 +208,16 @@ export const firestoreDeployStore: DeployStore = {
       }
       return result;
     } catch {
-      return { claimed: true, attempt }; // fail open
+      throw new DeployStoreUnavailable();
     }
   },
   async save(a) {
-    const store = db();
+    const store = database();
     if (!store) return;
     await store.collection(HOSTED_DEPLOY_ATTEMPTS_COLLECTION).doc(a.deploymentId).set(a).catch(() => undefined);
   },
   async release(workspaceId, deploymentId) {
-    const store = db();
+    const store = database();
     if (!store) return;
     try {
       const ref = store.collection(HOSTED_DEPLOY_LEASE_COLLECTION).doc(workspaceId);
@@ -220,7 +227,10 @@ export const firestoreDeployStore: DeployStore = {
       });
     } catch { /* a lease left behind goes stale on its own — see DEPLOY_LEASE_STALE_MS */ }
   },
-};
+  };
+}
+
+export const firestoreDeployStore: DeployStore = createFirestoreDeployStore();
 
 /**
  * A running deploy, tracked: every move goes through `nextDeployState`, is saved, and is logged. A move the

@@ -109,6 +109,7 @@ const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; wh
 };
 
 const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
+  admin_failed_report_autopsies: { kind: 'retained', why: 'admin-authored report-linked review notes, keyed by a hash of workspace/history, NOT system configuration; 180 days after updatedAt like admin_build_triage, with transaction-fenced children-first expiry of revisions and mutation receipts; does not claim synchronous diagnostic or account erasure' },
   agentv3_build_requests: { kind: 'user', why: 'bounded digest/status request replay tombstones, no raw inputs; explicit verified ownerId account erasure, account-lifetime retention prevents old UUID replay' },
   admin_failed_report_oauth_clients: { kind: 'platform', why: 'OAuth dynamic client registrations for the owner-only failed-report connector (failedReportOAuth.ts): client name, redirect URLs and a HASHED secret, capped at 100 in a transaction, 30-day expiry, expired rows swept on the next registration — no customer data' },
   admin_failed_report_oauth_requests: { kind: 'platform', why: 'pending owner-consent requests for that connector (failedReportOAuth.ts): client id, redirect URL, PKCE challenge, and after approval a HASHED one-time code; capped at 100, 10-minute expiry (2 minutes once approved), deleted on denial or code exchange, expired rows swept on the next request — no customer data' },
@@ -383,6 +384,19 @@ const UNREADABLE_RECEIVERS: Record<string, string> = {
     + "`root.collection('assets' | 'files' | 'history')` is a subcollection, already registered as a `sub`",
 };
 
+/** A new document-ref alias is excused only in its verified file, never everywhere named `ref`. */
+const SCOPED_DOCUMENT_RECEIVERS: Record<string, Record<string, { why: string; assignment: RegExp }>> = {
+  'src/server/lib/failedReportAutopsy.ts': {
+    ref: {
+      why: 'the hashed autopsy parent document; revisions and mutations are retained-parent children',
+      assignment: /\bref\s*=\s*db\.collection\(COLLECTION\)\.doc\(r\.id\)/,
+    },
+  },
+};
+function declaredReceiver(name: string, file: string): boolean {
+  return !!UNREADABLE_RECEIVERS[name] || !!SCOPED_DOCUMENT_RECEIVERS[file]?.[name];
+}
+
 /** Comments cannot name a store. `serverDb.ts`'s doc comment says `doc(db, 'coll', 'id')`, and an
  *  earlier draft of this scan duly reported a collection called `coll`. */
 function stripComments(src: string): string {
@@ -563,14 +577,28 @@ describe('every declared collection is classified', () => {
     // be listed in UNREADABLE_RECEIVERS with its reason, so a NEW handle name (a refactor renaming `db`,
     // a new helper) fails here instead of quietly removing stores from the census again.
     const undeclared = [...scan.unreadable.entries()]
-      .filter(([name]) => !UNREADABLE_RECEIVERS[name])
-      .map(([name, files]) => `${name}.collection(…) in ${[...files].join(', ')}`);
+      .flatMap(([name, files]) => [...files].filter(file => !declaredReceiver(name, file))
+        .map(file => `${name}.collection(…) in ${file}`));
     expect(
       undeclared,
       'the scan met a receiver it does not understand. If it is a Firestore ROOT, add it to DB_HANDLES '
       + 'so its collections are counted. If it is a `.doc()` reference, add it to UNREADABLE_RECEIVERS '
       + 'with that reason:\n' + undeclared.join('\n'),
     ).toEqual([]);
+  });
+
+  it('a file-scoped document receiver is proved at its assignment and cannot hide another file', () => {
+    for (const [file, names] of Object.entries(SCOPED_DOCUMENT_RECEIVERS)) {
+      const source = stripComments(readFileSync(join(root, file), 'utf8'));
+      for (const [name, entry] of Object.entries(names)) {
+        expect(entry.why.length).toBeGreaterThan(30);
+        expect(source).toMatch(entry.assignment);
+        expect(scan.unreadable.get(name)?.has(file), 'stale receiver exemption').toBe(true);
+      }
+    }
+    expect(declaredReceiver('ref', 'src/server/lib/failedReportAutopsy.ts')).toBe(true);
+    expect(declaredReceiver('ref', 'src/server/lib/aNewStore.ts')).toBe(false);
+    expect(DB_HANDLES.has('ref')).toBe(false);
   });
 
   it('🔒 every `workspace`-kind collection is erased with the app', () => {

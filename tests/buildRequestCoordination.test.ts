@@ -3,6 +3,7 @@ import { createBuildPreflightStream, startBuildLeaseHeartbeat, withBuildRequestC
 import { claimWorkspaceBuild, requestWorkspaceBuildStop, releaseWorkspaceBuild, LEASE_HEARTBEAT_MS, LEASE_STALE_MS, WORKSPACE_BUILD_LEASE_COLLECTION, type BuildLeaseStore } from '../src/server/AgentV3/workspaceBuildLease';
 import { mockReq, mockRes } from './helpers/routeTestUtils';
 import type { RunningBuild } from '../src/server/AgentV3/runningBuildRegistry';
+import { abortCauseOf, abortSummary } from '../src/server/AgentV3/buildAbortCause';
 afterEach(() => vi.useRealTimers());
 describe('accepted request finalization survives preflight/initializer exits', () => {
   it.each([false, true])('runs its registered cleanup after early return or throw=%s', async (throws) => {
@@ -38,6 +39,33 @@ function leaseFixture() {
   return { db, docs, build, released, lost };
 }
 describe('lease heartbeat lifecycle uses the captured accepted build', () => {
+  it.each(['reject', 'timeout'] as const)('uncertain renewal (%s) stops work and holds admission until the body exits', async (fault) => {
+    vi.useFakeTimers(); const f = leaseFixture(); const now = Date.now();
+    await claimWorkspaceBuild(f.db, { workspaceId: 'workspace', token: 'attempt-A', owner: 'worker-A', nowMs: now });
+    const transaction = f.db.runTransaction.bind(f.db);
+    f.db.runTransaction = fault === 'reject'
+      ? async () => { throw new Error('database offline'); }
+      : () => new Promise(() => {});
+    const timer = startBuildLeaseHeartbeat({ store: f.db, workspaceId: 'workspace', token: 'attempt-A', admittedAt: now,
+      build: () => f.build, current: () => f.build.ended ? undefined : f.build, active: () => true, release: f.released, lost: f.lost });
+    await vi.advanceTimersByTimeAsync(LEASE_HEARTBEAT_MS + 4_001);
+    expect(f.build.abort.signal.aborted).toBe(true);
+    expect(f.build.requiresBodyExit).toBe(true);
+    expect(abortCauseOf(f.build.abort.signal)).toBe('authority-unavailable');
+    expect(abortSummary('authority-unavailable')).not.toMatch(/newer|replaced|as you asked|resumes automatically/);
+    expect(f.released).not.toHaveBeenCalled();
+    // A recovered database must not revive the aborted worker or admit a successor while it drains.
+    f.db.runTransaction = transaction;
+    f.build.ended = true;
+    await vi.advanceTimersByTimeAsync(2 * LEASE_STALE_MS);
+    expect(f.build.abort.signal.aborted).toBe(true);
+    expect(f.released).not.toHaveBeenCalled();
+    expect(await claimWorkspaceBuild(f.db, { workspaceId: 'workspace', token: 'attempt-B', owner: 'worker-B' })).toMatchObject({ ok: false, reason: 'busy' });
+    f.build.exited = true;
+    await vi.advanceTimersByTimeAsync(LEASE_HEARTBEAT_MS);
+    expect(f.released).toHaveBeenCalledTimes(1);
+    clearInterval(timer);
+  });
   it('keeps a stopped-but-leaving build blocked, then releases when that same build exits', async () => {
     vi.useFakeTimers(); const f = leaseFixture(); const now = Date.now();
     await claimWorkspaceBuild(f.db, { workspaceId: 'workspace', token: 'attempt-A', owner: 'worker-A', nowMs: now });

@@ -94,11 +94,61 @@ REST equivalents (same read gate, and additional write consent for POST):
 - `GET /api/v1/failedbr/reports/<workspaceId>/<historyId>/autopsy`
 - `POST /api/v1/failedbr/reports/<workspaceId>/<historyId>/autopsy`
 
-Writes go only to `admin_failed_report_autopsies`, with an atomic current record, immutable revision
-and idempotency receipt. Metadata is bounded to 1,000 revisions per retained reference, 10,000 counted
+Writes go only to `admin_failed_report_autopsies`, with an atomic current record, append-only revision
+and idempotency receipt. Revisions are immutable while retained, not a permanent audit archive.
+Metadata is bounded to 1,000 revisions per retained reference, 10,000 counted
 items, short text fields and a 64 KB request body. Reports remain in their original collection.
 Storage failure is an error, never a fabricated unreviewed or done status. Keep credentials, private
 prompts and raw logs out of metadata and repository ledgers; use safe IDs and minimum necessary notes.
+
+### Metadata retention and retry lifetime
+
+Review metadata follows the existing admin-triage policy: it becomes eligible for scheduled cleanup
+**180 days after the last accepted review update** (`updatedAt`, numeric epoch milliseconds). A
+read or successful idempotent retry does not renew that timestamp. The current record, every revision
+and every mutation receipt expire as one review lifecycle. Idempotency and revision history are
+guaranteed only while that lifecycle is retained; this is not an unlimited replay archive.
+
+Cleanup transactionally rechecks the clock and fences the parent before removing anything. A fresh
+update committed before that claim is preserved. Once claimed, metadata-detail reads and writes
+(including old receipt retries) report temporarily unavailable, never an invented review state.
+The original report feed stays readable: only the affected row carries the explicit list-only
+`cleanup_in_progress` state and a `null` revision. Other reports, statuses and pagination are preserved;
+malformed metadata or a real storage failure is still an error, not an absent review.
+Cleanup is resumable: child-deletion failures or the shared 500-document-per-run allowance leave the
+fenced parent discoverable for the next run. Every deletion batch and final parent deletion checks
+the same unique generation token, preventing a stale or duplicate cleaner from deleting a newly
+created review. Children and the parent both consume the allowance.
+
+After complete metadata expiry, a still-retained failed report reads as `not_started` at revision 0
+and can receive a new review. Previous mutation IDs no longer prove an earlier update was accepted.
+Clients must reload current state before starting that new lifecycle.
+
+This review-activity clock is **not synchronous with source-report expiry or project/account
+erasure**. It neither edits nor extends the original diagnostics policy: historical diagnostics keep
+their existing 180-day `savedAt` window, and the legacy latest-report root retains its existing
+policy. A metadata hash is not proof of user ownership; this change does not guess ownership from
+legacy workspace IDs or register hashed metadata IDs as workspace-ID erase ranges.
+Account deletion explicitly reports an `ownership-unverified` refusal for this metadata and both
+children without querying a guessed owner. It says records **may** remain, not that any specific
+account has them. Independent owner attribution and verified account-linked erasure remain an
+unresolved prerequisite; the operational clock is not a claim of account-erasure compliance.
+Scheduled cleanup is bounded and best-effort. Capped runs and failed collections are warned about
+using only bounded collection names and counts, never raw database errors or review contents.
+
+The unresolved attribution root is concrete: the metadata key is a hash of `(workspaceId, historyId)`,
+and its body has no independently verified account owner. `workspaceDataErase.planWorkspaceErase`
+already refuses legacy workspace ownership inference. Fixing account-linked erasure requires a
+verified owner registry or migration proving the physical report's owner, not parsing a UID from its
+workspace name. The new `OWNERSHIP_UNVERIFIED_COLLECTIONS` entry names the parent and both children;
+tests prove refusal before database access, **not** completed account erasure.
+
+Fenced cleanup uses at most **16 child deletes per transaction**, independently of the existing
+ordinary 300-document delete page. Three allowed 4,000-character Unicode text fields alone exceed
+10 MiB across 300 revisions. The smaller batch leaves headroom for this bounded schema's document
+and default-index deletion bytes; adding composite indexes, enlarging this schema, or opting another
+collection into fenced retention requires rechecking that request-size budget. The overall run still
+allows at most 500 deleted documents, including parents.
 
 ## Coverage and limits
 

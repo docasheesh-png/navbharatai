@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'fs';
-import { resolve, join } from 'path';
+import { readFileSync } from 'fs';
+import { sourceCensusFiles } from './helpers/sourceCensus';
+import { resolve } from 'path';
 import { stripCodeComments } from '../src/server/AgentV3/stripCodeComments';
 import { flowStarved, flowStarvedNote, FLOW_MIN_FRAMES, playtestVerdict } from '../src/server/AgentV3/gamePlaytest';
 
@@ -98,11 +99,7 @@ describe('🔒 the signal has a CONSUMER — the half Q-1132 left undone', () =>
     const root = resolve(__dirname, '..');
     const readers = new Map<string, string[]>(exported.map((n) => [n, []]));
     const walk = (dir: string) => {
-      for (const entry of readdirSync(dir)) {
-        if (entry === 'node_modules' || entry === 'dist') continue;
-        const full = join(dir, entry);
-        if (statSync(full).isDirectory()) { walk(full); continue; }
-        if (!/\.tsx?$/.test(entry)) continue;
+      for (const full of sourceCensusFiles(dir, p => /\.tsx?$/.test(p), ['node_modules', 'dist'])) {
         const rel = full.slice(root.length + 1);
         const code = stripCodeComments(readFileSync(full, 'utf8'));
         for (const name of exported) {

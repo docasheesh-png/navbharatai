@@ -332,3 +332,48 @@ describe('the bill itself', () => {
     expect(publish).toBeGreaterThan(lock);
   });
 });
+
+
+describe('database handover payment receipts', () => {
+  it.each([{ cleanup: false, refund: false }, { cleanup: true, refund: false }, { cleanup: true, refund: true }])('reports the actual debit/refund state when handover fails: %j', async ({ cleanup, refund }) => {
+    let refunded = false;
+    const r = await executeDatabaseResell({ agreedToTerms: true, workspaceId: WS }, {
+      quoteInput: { product: 'dedicated', plansOn: true, configured: true, workspaceId: WS, active: [], canPay: true },
+      create: async () => ({ ok: true, projectRef: 'abcdefghijklmnop', url: 'https://fixture.invalid', env: {} }),
+      charge: async () => ({ ok: true, charged: true, active: true }), save: async () => false,
+      destroy: async () => ({ ok: cleanup }), refund: async () => { refunded = true; return { ok: refund }; },
+    });
+    expect(r.status).toBe(500);
+    expect(r.body).toMatchObject({ charged: true, refunded: cleanup && refund, delivered: false, cleanupPending: !cleanup });
+    expect(refunded).toBe(cleanup);
+  });
+});
+
+
+describe('uncertain payment outcomes preserve provisioned resources', () => {
+  it('a lost database charge response is unknown, not a false no-charge receipt', async () => {
+    let destroyed = false;
+    const r = await executeDatabaseResell({ agreedToTerms: true, workspaceId: WS }, {
+      quoteInput: { product: 'dedicated', plansOn: true, configured: true, workspaceId: WS, active: [], canPay: true },
+      create: async () => ({ ok: true, projectRef: 'abcdefghijklmnop', url: 'https://fixture.invalid', env: {} }),
+      charge: async () => { throw Error('lost response'); }, save: async () => true,
+      destroy: async () => { destroyed = true; return { ok: true }; }, refund: async () => ({ ok: true }),
+    });
+    expect(r.body).toMatchObject({ charged: null, paymentStatus: 'unknown' });
+    expect(destroyed).toBe(false);
+  });
+});
+
+
+describe('lost server payment confirmation', () => {
+  it('keeps a ready server when the debit response is unknown', async () => {
+    let tornDown = false;
+    const r = await executeServerResell({ agreedToTerms: true, workspaceId: WS }, {
+      quoteInput: { ...baseServer, liveWorkspaceIds: Array.from({ length: 10 }, (_, i) => 'old' + i) },
+      publish: async () => ({ status: 200, live: true, ready: true, service: 'fixture', url: 'https://fixture.a.run.app', body: { ok: true } }),
+      charge: async () => { throw Error('lost response'); }, teardown: async () => { tornDown = true; return { ok: true }; },
+    });
+    expect(r.body).toMatchObject({ charged: null, paymentStatus: 'unknown', delivered: true });
+    expect(tornDown).toBe(false);
+  });
+});

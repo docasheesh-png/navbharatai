@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /**
  * ZERO-SETUP FILE UPLOADS — a real storage bucket in the USER'S OWN Supabase project.
  *
@@ -79,12 +81,19 @@ export function bucketSetupSql(spec: BucketSpec): BucketSqlResult {
   if (!BUCKET_NAME_RE.test(name)) {
     return { ok: false, message: 'A bucket name must be 3–63 characters, lowercase letters, numbers or dashes, and cannot start or end with a dash.' };
   }
-  if (!Number.isFinite(spec.maxBytes) || spec.maxBytes <= 0 || spec.maxBytes > 5 * 1024 * 1024 * 1024) {
+  if (!Number.isSafeInteger(spec.maxBytes) || spec.maxBytes <= 0 || spec.maxBytes > 5 * 1024 * 1024 * 1024) {
     return { ok: false, message: 'The per-file size limit must be between 1 byte and 5 GB.' };
   }
+  if ((spec.mimeTypes ?? []).some((m) => typeof m !== 'string' || !/^[\w.+-]+\/[\w.*+-]+$/.test(m))) return { ok: false, message: 'Every allowed MIME type must be valid.' };
   const mimes = (spec.mimeTypes ?? []).filter((m) => typeof m === 'string' && /^[\w.+-]+\/[\w.*+-]+$/.test(m));
   const mimeSql = mimes.length > 0 ? `array[${mimes.map(lit).join(', ')}]::text[]` : 'null';
-  const policy = (suffix: string) => lit(`nbai_${name}_${suffix}`);
+  const policy = (suffix: string) => {
+    const full = `nbai_${name}_${suffix}`;
+    // PostgreSQL truncates identifiers at 63 bytes; a long bucket must not collapse all
+    // four operation policies into the same name. Keep existing short names for migration.
+    const id = full.length <= 63 ? full : `nbai_h_${createHash('sha256').update(name).digest('hex').slice(0, 32)}_${suffix}`;
+    return '"' + id.replace(/"/g, '""') + '"';
+  };
 
   // `on conflict` + `drop policy if exists` make this safe to run again — a second build of the same
   // app must not fail because the bucket is already there.
@@ -99,7 +108,7 @@ on conflict (id) do update
 drop policy if exists ${policy('read')} on storage.objects;
 create policy ${policy('read')} on storage.objects for select
   to ${spec.publicRead ? 'public' : 'authenticated'}
-  using (bucket_id = ${lit(name)});
+  using (bucket_id = ${lit(name)}${spec.publicRead ? '' : ' and (storage.foldername(name))[1] = auth.uid()::text'});
 
 drop policy if exists ${policy('insert')} on storage.objects;
 create policy ${policy('insert')} on storage.objects for insert

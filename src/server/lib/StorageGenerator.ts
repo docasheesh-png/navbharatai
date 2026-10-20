@@ -2,8 +2,8 @@
 //
 // Real direct-to-storage uploads (the browser uploads straight to the provider; the file is never proxied
 // through the app server, and the secret never leaves the server). Bring-Your-Own keys (pasted into .env;
-// NavBharatAI never stores them). S3 uses a presigned PUT URL (works with AWS S3, Cloudflare R2, Supabase
-// Storage, MinIO via S3_ENDPOINT); Cloudinary uses a server-issued upload signature. PURE builders; the
+// NavBharatAI never stores them). S3 uses a size-bound presigned PUT URL (S3-compatible provider support must be verified);
+// Cloudinary uses a size-bounded authenticated server upload. PURE builders; the
 // generated code is complete and correct (no TODO stubs — the real-features rule). Unit-tested.
 
 import { zeroSetupStorageFiles, defaultBucketSpec, bucketSetupSql } from './supabaseStorageBucket';
@@ -25,6 +25,33 @@ export interface StorageConfig {
 
 const ENV_EXAMPLE = '.env.example';
 
+const UPLOAD_ACCESS = `// Bind the app's REAL session verifier and atomic byte-quota reservation at server startup.
+// Without both, signing fails closed. A client-supplied user id is never authentication.
+type UploadAccess = {
+  getUser: (req: import('express').Request) => Promise<{ uid: string } | null>;
+  reserveBytes: (uid: string, bytes: number) => Promise<boolean>;
+};
+let uploadAccess: UploadAccess | undefined;
+export function configureUploadAccess(access: UploadAccess): void {
+  if (typeof access?.getUser !== 'function' || typeof access?.reserveBytes !== 'function') throw new Error('Connect upload authentication and a durable byte quota.');
+  uploadAccess = access;
+}
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+`;
+
+const S3_ADMISSION = `async function admitUpload(req: import('express').Request, res: import('express').Response): Promise<{ uid: string; bytes: number; contentType: string } | null> {
+  if (!uploadAccess) { res.status(503).json({ error: 'Upload sign-in and storage quota are not connected yet.' }); return null; }
+  const user = await uploadAccess.getUser(req);
+  if (!user?.uid) { res.status(401).json({ error: 'Please sign in before uploading.' }); return null; }
+  const bytes = req.body?.size;
+  const contentType = req.body?.contentType;
+  if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes > MAX_UPLOAD_BYTES || !['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(contentType)) {
+    res.status(400).json({ error: 'Choose a supported image or PDF no larger than 10 MiB.' }); return null;
+  }
+  if (!await uploadAccess.reserveBytes(user.uid, bytes)) { res.status(429).json({ error: 'Your upload allowance has been used. Nothing was uploaded.' }); return null; }
+  return { uid: user.uid, bytes, contentType };
+}`;
+
 const S3_SERVER = `import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Router } from 'express';
@@ -43,17 +70,23 @@ const s3 = new S3Client({
 
 export const uploadRouter = Router();
 
+${UPLOAD_ACCESS}
+${S3_ADMISSION}
+
 // Return a presigned PUT URL so the browser uploads DIRECTLY to storage (never proxied through the server).
 uploadRouter.post('/presign', async (req, res) => {
-  const { filename, contentType } = req.body ?? {};
+  const admitted = await admitUpload(req, res);
+  if (!admitted) return;
+  const { filename } = req.body ?? {};
+  const { contentType, bytes, uid } = admitted;
   if (!filename || !contentType) return res.status(400).json({ error: 'filename and contentType are required' });
   const safe = String(filename).replace(/[^\\w.-]/g, '_');
-  const key = Date.now() + '-' + crypto.randomBytes(6).toString('hex') + '-' + safe;
+  const key = encodeURIComponent(uid) + '/' + Date.now() + '-' + crypto.randomBytes(16).toString('hex') + '-' + safe.slice(-80);
   try {
     const url = await getSignedUrl(
       s3,
-      new PutObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key, ContentType: contentType }),
-      { expiresIn: 300 },
+      new PutObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key, ContentType: contentType, ContentLength: bytes }),
+      { expiresIn: 60, signableHeaders: new Set(['content-length', 'content-type']) },
     );
     res.json({ uploadUrl: url, key, publicUrl: (process.env.S3_PUBLIC_BASE ?? '') + '/' + key });
   } catch {
@@ -66,7 +99,7 @@ const S3_CLIENT = `// Upload a File directly to storage via a server-issued pres
 export async function uploadFile(file: File): Promise<{ key: string; url: string }> {
   const presign = await fetch('/api/upload/presign', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ filename: file.name, contentType: file.type }),
+    body: JSON.stringify({ filename: file.name, contentType: file.type, size: file.size }),
   });
   if (!presign.ok) throw new Error('Could not get an upload URL');
   const { uploadUrl, key, publicUrl } = await presign.json();
@@ -77,43 +110,58 @@ export async function uploadFile(file: File): Promise<{ key: string; url: string
 `;
 
 const CLOUDINARY_SERVER = `import { v2 as cloudinary } from 'cloudinary';
-import { Router } from 'express';
-import { zeroSetupStorageFiles, defaultBucketSpec, bucketSetupSql } from './supabaseStorageBucket';
+import { Router, raw } from 'express';
+import crypto from 'node:crypto';
 
-// Bring-Your-Own Cloudinary keys — from the Cloudinary Console → Settings → API Keys, pasted into .env.
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME as string,
   api_key: process.env.CLOUDINARY_API_KEY as string,
   api_secret: process.env.CLOUDINARY_API_SECRET as string,
 });
-
 export const uploadRouter = Router();
-
-// Issue a short-lived signature so the browser uploads DIRECTLY to Cloudinary (the api_secret never leaves
-// the server). The client posts the file + this signature to Cloudinary's upload endpoint.
-uploadRouter.post('/sign', (_req, res) => {
-  const timestamp = Math.round(Date.now() / 1000);
-  const folder = 'uploads';
-  const signature = cloudinary.utils.api_sign_request({ timestamp, folder }, process.env.CLOUDINARY_API_SECRET as string);
-  res.json({ signature, timestamp, folder, apiKey: process.env.CLOUDINARY_API_KEY, cloudName: process.env.CLOUDINARY_CLOUD_NAME });
+${UPLOAD_ACCESS}
+// Cloudinary's signature is not bound to the uploaded byte count. Use a bounded server upload
+// instead of issuing a reusable client signature and trusting a browser's declared size.
+let activeUploads = 0;
+uploadRouter.post('/file', async (req, res, next) => {
+  if (!uploadAccess) return res.status(503).json({ error: 'Connect upload sign-in and a durable storage quota first.' });
+  const user = await uploadAccess.getUser(req);
+  if (!user?.uid) return res.status(401).json({ error: 'Please sign in before uploading.' });
+  if (activeUploads >= 2) return res.status(429).json({ error: 'Uploads are busy. Try again shortly.' });
+  activeUploads++;
+  let released = false;
+  const release = () => { if (!released) { released = true; activeUploads--; } };
+  res.locals.releaseUpload = release;
+  res.once('finish', () => { if (!res.locals.uploadRunning) release(); });
+  res.once('close', () => { if (!res.locals.uploadRunning) release(); });
+  res.locals.uploadUid = user.uid;
+  next();
+}, raw({ type: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'], limit: MAX_UPLOAD_BYTES }), async (req, res) => {
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: 'Choose a supported image or PDF no larger than 10 MiB.' });
+  const uid = res.locals.uploadUid as string;
+  if (!await uploadAccess!.reserveBytes(uid, req.body.length)) return res.status(429).json({ error: 'Your upload allowance has been used.' });
+  res.locals.uploadRunning = true;
+  try {
+    const uploaded = await new Promise<{ secure_url: string; public_id: string }>((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream({ resource_type: 'auto', public_id: crypto.randomUUID(), folder: 'uploads/' + encodeURIComponent(uid), overwrite: false, allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'pdf'] }, (error, result) => {
+        if (error || !result) reject(error || new Error('Upload did not complete')); else resolve(result);
+      });
+      const abort = () => { stream.destroy(); reject(new Error('Upload connection closed')); };
+      res.once('close', abort);
+      stream.once('close', () => res.off('close', abort));
+      stream.end(req.body);
+    });
+    return res.json({ url: uploaded.secure_url, publicId: uploaded.public_id });
+  } catch { return res.status(502).json({ error: 'The file could not be stored. Please try again.' }); }
+  finally { res.locals.releaseUpload(); }
 });
 `;
 
-const CLOUDINARY_CLIENT = `// Upload a File directly to Cloudinary using a server-issued signature. Returns the secure URL.
+const CLOUDINARY_CLIENT = `// Auth is checked before parsing; actual bytes and quota are checked on the app server.
 export async function uploadFile(file: File): Promise<{ url: string; publicId: string }> {
-  const sigRes = await fetch('/api/upload/sign', { method: 'POST' });
-  if (!sigRes.ok) throw new Error('Could not sign the upload');
-  const { signature, timestamp, folder, apiKey, cloudName } = await sigRes.json();
-  const form = new FormData();
-  form.append('file', file);
-  form.append('api_key', apiKey);
-  form.append('timestamp', String(timestamp));
-  form.append('folder', folder);
-  form.append('signature', signature);
-  const up = await fetch('https://api.cloudinary.com/v1_1/' + cloudName + '/auto/upload', { method: 'POST', body: form });
-  if (!up.ok) throw new Error('Upload failed');
-  const data = await up.json();
-  return { url: data.secure_url, publicId: data.public_id };
+  const result = await fetch('/api/upload/file', { method: 'POST', headers: { 'content-type': file.type }, body: file });
+  if (!result.ok) throw new Error('The file could not be uploaded. Sign in and check your storage allowance.');
+  return result.json();
 }
 `;
 
@@ -155,7 +203,7 @@ export function generateStorageIntegration(provider: StorageProvider): StorageCo
             ['S3_PUBLIC_BASE', 'Optional — the public base URL objects are served from'],
           ]),
         },
-        instructions: 'Mount the router: app.use("/api/upload", uploadRouter). On the client, call uploadFile(file) — the browser uploads DIRECTLY to storage via a presigned URL (never through your server). Works with AWS S3, Cloudflare R2, Supabase Storage or MinIO (set S3_ENDPOINT). Your keys stay in YOUR env.',
+        instructions: 'First call configureUploadAccess with your real session verifier and durable atomic per-user byte-quota reservation (never trust a uid from the browser). Pass your existing auth headers/cookies in the client fetch. Unconfigured uploads return 503. Mount the router: app.use("/api/upload", uploadRouter). On the client, call uploadFile(file) — the browser uploads DIRECTLY to storage via a presigned URL (never through your server). Works with AWS S3, Cloudflare R2, Supabase Storage or MinIO (set S3_ENDPOINT). Your keys stay in YOUR env.',
       };
     case 'cloudinary':
       return {
@@ -171,7 +219,7 @@ export function generateStorageIntegration(provider: StorageProvider): StorageCo
             ['CLOUDINARY_API_SECRET', 'Cloudinary API secret (server-side only)'],
           ]),
         },
-        instructions: 'Mount the router: app.use("/api/upload", uploadRouter). On the client, call uploadFile(file) — the browser uploads DIRECTLY to Cloudinary using a server-issued signature (the api_secret never leaves the server). Your keys stay in YOUR env; NavBharatAI never stores them.',
+        instructions: 'First call configureUploadAccess with your real session verifier and durable atomic per-user byte-quota reservation (never trust a uid from the browser). Pass your existing auth headers/cookies in the client fetch. Unconfigured uploads return 503. Mount the router: app.use("/api/upload", uploadRouter). On the client, call uploadFile(file). Cloudinary uploads pass through this app server with an actual 10 MiB body limit and at most two concurrent buffers; no reusable upload signature is exposed. The provider secret stays on the server. Your keys stay in YOUR env; NavBharatAI never stores them.',
       };
     default:
       throw new Error(`Unknown storage provider: ${provider}`);

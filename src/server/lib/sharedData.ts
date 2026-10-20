@@ -4,7 +4,7 @@
 // machine is the same shape of bill. This product is neither: it is a namespace on the Firestore
 // the platform already runs, and an API on the server the platform already runs. The user's price
 // has to stay above that marginal cost, so the number of operations is capped and the API stops
-// at the cap. Stopping is free for us. We do not sell a pack of extra operations, and we do not
+// at the cap. The record query is refused before it runs; authentication and admission still have overhead. We do not sell a pack of extra operations, and we do not
 // keep serving past the cap.
 //
 // The key is a public key for one app. It is stored only as a hash. The raw key is handed to the
@@ -35,9 +35,14 @@ export interface SharedMeta {
   /** False while create / charge / save is still in flight. A ready database is not replaced. */
   ready: boolean;
   docCount: number;
+  /** Server-side admission reservations, including reads that fail after admission. */
+  opsUsed?: number;
 }
 
 export interface SharedRecord {
+  /** Set by verified caller identity, never by request JSON. Legacy rows remain owner-only. */
+  createdBy?: string;
+  scope?: string;
   collection: string;
   id: string;
   data: Record<string, SharedScalar>;
@@ -119,6 +124,7 @@ export function sanitizeRecord(body: unknown): { ok: true; data: Record<string, 
 }
 
 export interface DecideInput {
+  actorUid?: string;
   meta: SharedMeta | null;
   opsCount: number;
   nowMs: number;
@@ -185,6 +191,11 @@ export function decideDataOp(input: DecideInput): DecideResult {
   if (!keysMatch(input.meta.keyHash, presented)) {
     return refused(401, 'That key does not match this app. Nothing was changed.');
   }
+  if (!input.actorUid) return refused(401, 'Sign in before accessing this app database.');
+  const ownsApp = input.actorUid === input.meta.ownerUid;
+  if (input.record && !ownsApp && input.record.createdBy !== input.actorUid) {
+    return refused(404, 'That record was not found. Nothing was changed.');
+  }
   const exp = Date.parse(input.meta.expiresAt);
   if (!input.meta.ready || !Number.isFinite(exp) || exp <= input.nowMs) {
     return refused(402, 'This database period has ended. Nothing more was charged. Start it again from Publish, or connect your own database, which stays free.');
@@ -226,7 +237,10 @@ export function decideDataOp(input: DecideInput): DecideResult {
   }
   const id = input.op === 'create' ? (input.id && SHARED_RECORD_ID_RE.test(input.id) ? input.id : newRecordId()) : (input.id as string);
   if (!SHARED_RECORD_ID_RE.test(id)) return refused(400, 'That record id is not allowed. Nothing was saved.');
+  const createdBy = input.record?.createdBy || input.actorUid;
   const record: SharedRecord = {
+    createdBy,
+    scope: `${input.collection}:${createdBy}`,
     collection: input.collection,
     id,
     data: input.data,

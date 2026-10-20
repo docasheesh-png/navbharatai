@@ -8,57 +8,32 @@ import {
  * Erasing someone's built apps is irreversible. These pin the two decisions that, if wrong, delete the
  * wrong person's work — so they are asserted as behaviour, not trusted to a comment.
  */
-describe('the range that decides whose apps get erased', () => {
-  it('covers exactly this user, ending the prefix at the session separator', () => {
-    const plan = planWorkspaceErase('abc123');
-    expect(plan.range).toEqual({ startAt: 'agentv3-abc123-', endAt: `agentv3-abc123-${String.fromCharCode(0xf8ff)}` });
+describe('legacy workspace ids never supply independently verified ownership', () => {
+  it.each(['abc', 'abc-d', 'abc123', 'aB3dEfGhIjKlMnOpQrStUvWxYz01'])(
+    'refuses all prefix-only attribution for %s, including normal Firebase-shaped ids', (uid) => {
+      expect(planWorkspaceErase(uid)).toEqual({ range: null, refusal: 'ownership-unverified' });
+    },
+  );
+
+  it('refuses a shorter deleting uid even when the foreign uid contains the separator', () => {
+    // These two valid owner/session pairs produce IDENTICAL physical workspace ids.
+    const foreign = 'agentv3-abc-d-session1';
+    expect(foreign).toBe(`agentv3-${'abc'}-${'d-session1'}`);
+    expect(foreign).toBe(`agentv3-${'abc-d'}-${'session1'}`);
+    expect(planWorkspaceErase('abc').range).toBeNull();
+    expect(eraseableWorkspaceId('abc', foreign)).toBe(false);
+    expect(eraseableWorkspaceId('abc-d', foreign)).toBe(false);
   });
 
-  it('a LONGER uid is outside the range — agentv3-abc- never reaches agentv3-abcd-', () => {
-    // The trailing '-' is the whole reason. Without it, deleting user "abc" would take "abcd" with it.
-    const { range } = planWorkspaceErase('abc');
-    const victim = 'agentv3-abcd-sess';
-    expect(victim >= range!.startAt && victim <= range!.endAt).toBe(false);
-  });
-
-  it("this user's own workspaces ARE inside the range", () => {
-    const { range } = planWorkspaceErase('abc');
-    for (const id of ['agentv3-abc-sess', 'agentv3-abc-9f3a-2b', 'agentv3-abc-zzzz']) {
-      expect(id >= range!.startAt && id <= range!.endAt, id).toBe(true);
-    }
-  });
-
-  it('REFUSES a hyphenated uid rather than risk a different user — and says why', () => {
-    // agentv3-abc- also matches agentv3-abc-d-… , which belongs to uid "abc-d". Real Firebase uids are
-    // 28 chars of [A-Za-z0-9] so this cannot arise, which is a reason to be confident, not to skip it.
-    const plan = planWorkspaceErase('abc-d');
-    expect(plan.range).toBeNull();
-    expect(plan.refusal).toBe('ambiguous-uid');
-  });
-
-  it('REFUSES an unusable uid — an empty key would range over everybody', () => {
+  it('refuses an unusable uid without selecting any data', () => {
     for (const bad of ['', null, undefined, 'anon', 'has space', 'a'.repeat(65), '../x']) {
-      const plan = planWorkspaceErase(bad as never);
-      expect(plan.range, String(bad)).toBeNull();
-      expect(plan.refusal, String(bad)).toBe('unusable-uid');
+      expect(planWorkspaceErase(bad as never), String(bad)).toEqual({ range: null, refusal: 'unusable-uid' });
     }
   });
-});
 
-describe('the per-document ownership re-check, over and above the range', () => {
-  it('accepts only ids that belong to the uid', () => {
-    expect(eraseableWorkspaceId('abc', 'agentv3-abc-sess')).toBe(true);
-    expect(eraseableWorkspaceId('abc', 'agentv3-abcd-sess')).toBe(false);
-    expect(eraseableWorkspaceId('abc', 'agentv3-other-sess')).toBe(false);
-  });
-
-  it('refuses an anon workspace — it has no owner, so it is nobody\'s to erase by uid', () => {
-    expect(eraseableWorkspaceId('abc', 'agentv3-anon-sess')).toBe(false);
-  });
-
-  it('refuses anything not shaped like a workspace id at all', () => {
-    for (const junk of ['', 'agentv3-', 'random', 'users/abc']) {
-      expect(eraseableWorkspaceId('abc', junk), junk).toBe(false);
+  it('an apparent own prefix is insufficient to authorize irreversible per-document erasure', () => {
+    for (const ws of ['agentv3-abc-sess', 'agentv3-abcd-sess', 'agentv3-other-sess', 'agentv3-anon-sess', '', 'agentv3-', 'random', 'users/abc']) {
+      expect(eraseableWorkspaceId('abc', ws), ws).toBe(false);
     }
   });
 });
@@ -107,7 +82,7 @@ describe('the registry of collections that hold a built app', () => {
 describe('a refusal is an honest answer, not a silent success', () => {
   it('reports the refusal instead of claiming a clean erase', async () => {
     const report = await deleteUserWorkspaceData('abc-d');
-    expect(report.refusal).toBe('ambiguous-uid');
+    expect(report.refusal).toBe('ownership-unverified');
     expect(report.totalDeleted).toBe(0);
     expect(report.collections).toEqual([]);
   });

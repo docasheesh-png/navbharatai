@@ -269,15 +269,38 @@ async function fulfilGiftOrder(db: any, txRef: any, orderId: string, txData: any
   return { success: true, data: { giftCode: code, giftFaceInr: faceNow, paidInr: Number(txData.amountPaid) || 0, buyerUid: txData.userId } };
 }
 
-export async function verifyPaymentInternal(orderId: string): Promise<{ success: boolean; data?: any; error?: string }> {
+/**
+ * 🔑 `settled` SAYS WHETHER A FAILURE IS FINAL, AND IT EXISTS FOR THE WEBHOOK (Q-888).
+ *
+ * The signed-webhook route used to answer **400** to every `success: false`, so Cashfree re-sent an
+ * event we had already decided about — a PAYMENT_FAILED or USER_DROPPED order was settled as EXPIRED,
+ * answered 400, and delivered again, forever. The route could not tell a decision from an outage,
+ * because this function did not say.
+ *
+ * `settled: true` means THIS ORDER WILL NEVER BE FULFILLED AND THAT IS THE ANSWER — the gateway says it
+ * closed unpaid, the amounts disagree, it is not an order this server created, or a pass payment was
+ * below the price and is recorded for a manual refund. Re-delivery would reach the same conclusion.
+ *
+ * 🔴 ABSENT MEANS RETRYABLE, AND THAT DEFAULT IS DELIBERATE. A missing database, unreadable gateway
+ * credentials or a PAID order whose `order_amount` cannot be read are conditions that may clear; a
+ * later delivery fulfils the order. Acknowledging an event we could not complete LOSES it, and losing
+ * a payment event costs a customer their credit, so the unflagged direction is the safe one. The
+ * reversal path above answers 502 for the same reason, in its own words.
+ * `tests/aSettledWebhookIsNotRejected.test.ts` fails if a failure return omits the field, so the next
+ * one cannot inherit either behaviour by accident.
+ */
+export async function verifyPaymentInternal(orderId: string): Promise<{ success: boolean; data?: any; error?: string; settled?: boolean }> {
   const db = getDb() as any;
-  if (!db) return { success: false, error: 'Database not initialized' };
+  // retryable (settled: false): no database is an outage, not a verdict on this order.
+  if (!db) return { success: false, error: 'Database not initialized', settled: false };
 
   try {
     const txRef = doc(db, 'payment_transactions', orderId);
     const txSnap = await getDoc(txRef);
     if (!txSnap.exists()) {
-      return { success: false, error: 'Transaction record not found' };
+      // settled: not an order this server created. The reversal path already answers 200/IGNORED for
+      // its own unknown-order case; re-delivering this one forever would never produce a different answer.
+      return { success: false, error: 'Transaction record not found', settled: true };
     }
 
     const txData = txSnap.data();
@@ -298,7 +321,9 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
     const availability = cashfreePaymentsAvailability();
     if (!availability.ok) {
       console.error(`[CASHFREE] Cannot verify order ${orderId}: ${availability.code}`);
-      return { success: false, error: availability.message };
+      // retryable: the platform's own gateway keys are missing or test keys are live. Once the admin
+      // fixes that, a re-delivery fulfils the order; acknowledging it now would strand the payer.
+      return { success: false, error: availability.message, settled: false };
     }
     const { clientId, clientSecret, mode: env } = availability;
 
@@ -357,7 +382,9 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
         const expectedAmount = Number(txData.amountPaid);
         if (!Number.isFinite(paidAmount)) {
           console.error(`[CASHFREE] Order ${orderId} is PAID but carries no readable order_amount (${JSON.stringify(orderDetails.order_amount)}). Nothing to reconcile against — refusing to credit.`);
-          return { success: false, error: 'This payment could not be verified — please contact support.' };
+          // retryable: the gateway said PAID but its own `order_amount` was unreadable. We refuse to
+          // credit against nothing, and we do not acknowledge a payload we could not read.
+          return { success: false, error: 'This payment could not be verified — please contact support.', settled: false };
         }
         if (!Number.isFinite(expectedAmount)) {
           /**
@@ -378,7 +405,8 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
           unreconciled = unreconciledCreditPatch(paidAmount, txData.amountPaid, new Date().toISOString());
         } else if (Math.abs(paidAmount - expectedAmount) > 0.01) {
           console.error(`[CASHFREE] Amount mismatch for order ${orderId}: the provider charged ${paidAmount}, expected ${expectedAmount}. Refusing to credit.`);
-          return { success: false, error: 'Payment amount mismatch detected — please contact support.' };
+          // settled: a deliberate, repeatable refusal. The same figures will disagree on every delivery.
+          return { success: false, error: 'Payment amount mismatch detected — please contact support.', settled: true };
         }
         isPaid = true;
         cfOrderIdRef = orderDetails.cf_order_id || 'cf_' + orderId;
@@ -392,7 +420,9 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
             tx.update(txRef, { paymentStatus: 'EXPIRED', expiredAt: new Date().toISOString(), providerOrderStatus: String(orderDetails.order_status) });
           }
         });
-        return { success: false, error: 'This payment was not completed.' };
+        // settled: Cashfree says this order can never be paid, and it has just been marked EXPIRED.
+        // This is Q-888's own case — PAYMENT_FAILED / USER_DROPPED, answered 400 and re-sent forever.
+        return { success: false, error: 'This payment was not completed.', settled: true };
       }
     }
 
@@ -486,7 +516,9 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
             `NOTHING granted; this payment needs a manual refund.`,
           );
           try { await updateDoc(txRef, { fulfilmentError: 'amount_below_pass_price', fulfilledAt: new Date().toISOString() }); } catch { /* logged above */ }
-          return { success: false, error: 'That payment did not cover the Professional Pass price. Please contact support for a refund.' };
+          // settled: recorded as `fulfilmentError` above and awaiting a manual refund. Re-running this
+          // reaches the same conclusion, and the order already carries the record of it.
+          return { success: false, error: 'That payment did not cover the Professional Pass price. Please contact support for a refund.', settled: true };
         }
         if (entitlement.capped) {
           console.error(

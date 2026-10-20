@@ -83,9 +83,10 @@ describe('§1 nothing private leaves the device', () => {
 function harness(over: Partial<ObservabilityDeps> = {}, sinkOver: Partial<CrashlyticsSink> = {}) {
   const posted: string[] = [];
   const calls: { kind: string; arg: unknown }[] = [];
+  const userWaiters: Array<(id: string) => void> = [];
   const sink: CrashlyticsSink = {
     recordException: async (r) => { calls.push({ kind: 'record', arg: r }); },
-    setUserId: async (id) => { calls.push({ kind: 'user', arg: id }); },
+    setUserId: async (id) => { calls.push({ kind: 'user', arg: id }); userWaiters.shift()?.(id); },
     setCustomKey: async (k, v) => { calls.push({ kind: 'key', arg: [k, v] }); },
     log: async (m) => { calls.push({ kind: 'log', arg: m }); },
     crash: async () => { calls.push({ kind: 'crash', arg: null }); },
@@ -100,7 +101,10 @@ function harness(over: Partial<ObservabilityDeps> = {}, sinkOver: Partial<Crashl
     ...over,
   };
   initializeObservability(deps);
-  return { posted, calls, advance: (ms: number) => { t += ms; } };
+  return {
+    posted, calls, advance: (ms: number) => { t += ms; },
+    nextUserId: () => new Promise<string>((resolve) => { userWaiters.push(resolve); }),
+  };
 }
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
@@ -189,8 +193,10 @@ describe('§4 the user is a one-way hash, and forgotten on sign-out', () => {
 
   it('Crashlytics sees a 32-hex hash of the uid, never the uid itself', async () => {
     const h = harness();
+    const delivered = h.nextUserId();
     setUserContext('firebase-uid-123');
-    await flush(); await flush(); await new Promise((r) => setTimeout(r, 10));
+    // WebCrypto and the native bridge settle independently of timers, especially under coverage.
+    await delivered;
     const user = h.calls.find((c) => c.kind === 'user');
     expect(user?.arg).toMatch(/^[0-9a-f]{32}$/);
     expect(user?.arg).not.toContain('firebase-uid-123');
@@ -199,10 +205,12 @@ describe('§4 the user is a one-way hash, and forgotten on sign-out', () => {
 
   it('sign-out clears the id and marks the session signed out', async () => {
     const h = harness();
+    const signedIn = h.nextUserId();
     setUserContext('uid-a');
-    await new Promise((r) => setTimeout(r, 10));
+    await signedIn;
+    const signedOut = h.nextUserId();
     clearUserContext();
-    await flush();
+    await signedOut;
     const users = h.calls.filter((c) => c.kind === 'user').map((c) => c.arg);
     expect(users[users.length - 1]).toBe('');
     expect(h.calls.filter((c) => c.kind === 'key').map((c) => c.arg)).toContainEqual(['signed_in', false]);

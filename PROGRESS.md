@@ -97278,6 +97278,74 @@ Final exact-source Node 22.23.3/UTC `npm test`: 2,790 files passed; 39,829 tests
 
 Required GitHub coverage CI and merge remain pending at this checkpoint. Legacy snapshot ownership attribution/recovery and actual deployed/staging verification remain explicit limitations, not completed migration or a 100/100 claim. No paid provider build, store binary or production data mutation was performed by the local checks.
 
+## 2026-10-20 — Q-1135: the un-reconciled credit is on the order — and measuring it found a live money defect (Q-1226)
+
+**Q-1135, the half the row asked for, is built.** When the paid-vs-recorded check cannot run, the order
+itself now says so: `unreconciledCredit` / `unreconciledReason` / `unreconciledProviderInr` /
+`unreconciledRecordedSeen` / `unreconciledAt`, named once in a new pure `paymentReconciliation.ts`
+(`REVERSAL_FIELDS`' pattern, for the same reason — a writer and its readers must not drift apart) and
+merged into the SAME `tx.update` that flips PENDING→SUCCESS. Never a second write: Q-613 exists to keep
+that one transaction whole, and a mark written separately could land while the credit rolled back.
+
+**Both SUCCESS flips carry it, not just the obvious one.** Wallet top-ups claim inside the credit
+transaction; PASS and GIFT products claim in a separate `tx.update` further down the same function. Both
+read `amountPaid` from the same stored record, so both can be un-reconcilable — and a source census now
+fails if any `tx.update` that flips SUCCESS does not carry the patch (the census asserts it FOUND the
+sites first; a census that matches nothing passes vacuously, which cost this session a wrong green once).
+
+**It is read, not just written.** `purchaseLedger.ts` — the one reading of `payment_transactions` —
+carries `PurchaseRow.unreconciled` and `PurchaseSummary.unreconciledRows`, and the admin Revenue table
+marks those rows **Not reconciled** with a count line above the pager.
+
+**Firestore-safe by construction, which is the part that could have stranded a payment.** The recorded
+value is rendered with `String()`, never `JSON.stringify` — whose result for `undefined` IS `undefined`,
+the one value Firestore rejects, and a rejected update inside that transaction rolls the credit back with
+it. The in-memory harness in the test enforces that rule, so the proof is real rather than asserted. The
+provider amount is omitted when unreadable rather than written as a `0` that would read as "the provider
+charged nothing" — a lie about money, in the record that exists because a money fact was unreadable.
+
+Locked by `tests/anUnreconciledCreditIsOnTheOrder.test.ts` — 15 tests against the real
+`verifyPaymentInternal`. **Six reversions bite:** the wallet flip loses the patch → 4 fail · the gift flip
+loses it → 2 · `JSON.stringify` instead of `String` → 4 · a `0` provider amount → 1 · the ledger stops
+carrying it → 2 · the old log sentence returns → 1.
+
+### 🔴 AND THE MEASUREMENT FOUND SOMETHING NOBODY REPORTED — Q-1226, a live money defect
+
+Q-890's log line said *"Crediting the server-recorded amount"*. It does not. Measured on the real
+function, gateway reporting ₹100 PAID, `amountPaid: 'legacy'`:
+
+```
+response  {success:true, balanceAdded:100, currentBalance:100, tokenBalance:0}
+wallet    tokenBalance: 0 · remaining_balance: 100 · total_balance: 100
+ledger    "Wallet recharge: ₹0 (0 tokens added)"
+healthy row on the same path: tokenBalance: 10000
+```
+
+So the payer is told ₹100 arrived, and holds ₹100 in one view of the wallet and nothing in the other.
+
+**The root cause is not the unreadable value.** `computeCreditedWallet` sets `tokenBalance` from
+`orderCreditedTokens(amountPaid − fee)` and `remaining_balance` from `balanceAdded` — two independent
+reads of two different stored fields. They are equal for every healthy row, and the file explains why for
+each rail, but **the equality is assumed and never enforced**, so the moment one field is junk the two
+views separate. **The class is a wallet writer that is not mirrored.** `walletMirror.ts` exists for
+exactly this and says so in its first line — *"ONE RULE FOR EVERY WALLET CREDIT: MOVE BOTH VIEWS, BY THE
+SAME MONEY"*, taking the delta once so *"there is no way to call it and move one view without the
+other"*. CLAUDE.md requires every new wallet writer to go through it; the oldest and largest writer —
+real money — never did.
+
+**And the sibling was root-caused once already and never hunted.** The pending-promo branch deleted in
+the 2026-10-04 forensic audit (P0) was this same divergence from a different input, and that file's own
+comment names the cost: *"the spending gate reads the larger while the overdraft floor reads the smaller —
+free usage"*. So it loses money in both directions — the payer's credit, and spending against a ₹ balance
+no token view backs.
+
+**What shipped here, and what deliberately did not.** The system's honesty is fixed now (fifth rule, step
+5): the log says the token credit is ZERO and needs a hand-check, and the order carries the mark so these
+rows are findable. The credit itself is **not** changed — every option alters how much money reaches a
+wallet, and migrating the main credit path onto the mirror also shifts `total_balance` and gift-clamp
+semantics on every paid credit by a rounding amount. That is the money path CLAUDE.md reserves to the
+admin, so Q-1226 is 🟡 BLOCKED — REQUIRES A DECISION with three options and a recommendation (credit the
+provider's verified `order_amount`, which is the better-verified figure, not a weaker one).
 ## 2026-10-20 — the CI outage ended, and three rows reached a final state (Q-1140, Q-1141, Q-1131)
 
 **Q-1131 is over, and it is closed with its measurement rather than with a code fix** — the same way Q-1082

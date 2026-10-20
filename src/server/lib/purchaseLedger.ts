@@ -32,6 +32,7 @@
 // PURE. Rows are untrusted JSON.
 
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
+import { isUnreconciledCredit } from './paymentReconciliation';
 
 /** Rails that only ever GIVE credit — a SUCCESS row from one of these is never money that arrived. */
 const FREE_CREDIT_PROVIDERS = new Set(['WELCOME_BONUS', 'COUPON_REDEEM', 'COUPON', 'REFERRAL', 'REFERRAL_REWARD']);
@@ -69,6 +70,13 @@ export interface PurchaseRow {
   revenue: boolean;
   /** ₹ returned to the payer since (successful refunds + lost chargebacks), capped at `amountInr`. 0 when none recorded. */
   refundedInr: number;
+  /**
+   * True when this credit went through WITHOUT the paid-vs-recorded check being able to run (Q-1135) —
+   * our own recorded amount was unreadable, so the provider's figure had nothing to be compared against.
+   * The credit itself was the server-recorded amount, which is what made it safe to let through; this
+   * flag is how a support question or an autopsy can find those rows instead of grepping rolled logs.
+   */
+  unreconciled: boolean;
 }
 
 function str(v: unknown): string {
@@ -181,6 +189,7 @@ export function purchaseRow(id: string, raw: unknown): PurchaseRow {
     storePriceInr: optionalMoney(tx.storePriceInr),
     revenue: isRevenueRow(tx),
     refundedInr: Math.min(money(tx.amountPaid), Math.round((money(tx.refundedInr) + money(tx.disputeLostInr)) * 100) / 100),
+    unreconciled: isUnreconciledCredit(tx),
   };
 }
 
@@ -202,11 +211,14 @@ export interface PurchaseSummary {
    * check (whose own last run the admin route reports — see the module header). Never the App Store, today.
    */
   refundTracked: 'web-and-google-play';
+  /** Rows whose credit was never reconciled against the provider's own figure (Q-1135). Normally 0. */
+  unreconciledRows: number;
 }
 
 export function summarisePurchases(rows: readonly PurchaseRow[]): PurchaseSummary {
-  let revenueInr = 0, revenueRows = 0, pendingRows = 0, failedRows = 0, freeCreditRows = 0, creditedInr = 0, creditedTokens = 0, refundedInr = 0;
+  let revenueInr = 0, revenueRows = 0, pendingRows = 0, failedRows = 0, freeCreditRows = 0, creditedInr = 0, creditedTokens = 0, refundedInr = 0, unreconciledRows = 0;
   for (const r of rows) {
+    if (r.unreconciled) unreconciledRows++;
     if (r.revenue) { revenueInr += r.amountInr; revenueRows++; refundedInr += r.refundedInr || 0; }
     if (r.status === 'PENDING') pendingRows++;
     else if (r.status === 'FAILED') failedRows++;
@@ -224,6 +236,7 @@ export function summarisePurchases(rows: readonly PurchaseRow[]): PurchaseSummar
     creditedTokens,
     refundedInr: Math.round(refundedInr * 100) / 100,
     refundTracked: 'web-and-google-play',
+    unreconciledRows,
   };
 }
 

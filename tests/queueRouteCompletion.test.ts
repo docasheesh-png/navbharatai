@@ -11,6 +11,7 @@ import { serializeQueue } from '../src/server/AgentV3/BuildQueue';
 import * as weakPreflight from '../src/server/AgentV3/weakBuildPreflight';
 import { weakAdmissionReply } from '../src/server/AgentV3/weakBuildAdmission';
 import * as liveSearch from '../src/server/lib/liveSearchContext';
+import { clarityJudgeAsk } from '../src/server/AgentV3/clarityJudgeAsk';
 
 // These are external ports, not the queue/lease/receipt lifecycle exercised below.
 // Replace them before importing the route so a fixture can never call a real provider.
@@ -18,6 +19,10 @@ vi.mock('../src/server/AI/AIRouterManager', () => ({ AIRouterManager: { getRoute
 vi.mock('../src/server/routes/actuatorFactory', () => ({ buildActuator: vi.fn(() => { throw new Error('Unexpected real builder invocation'); }) }));
 vi.mock('../src/server/lib/liveSearchContext', () => ({ liveSearchContext: vi.fn(async () => '') }));
 vi.mock('../src/server/AgentV3/weakBuildAdmissionAsk', () => ({ weakBuildAdmissionAsk: vi.fn(() => { throw new Error('Unexpected scope-provider call in queue fixture'); }) }));
+
+// The preceding scope fixtures reach the clarity judge before scope refusal. A real SDK call
+// there leaves an undici keep-alive timer that can be scheduled under the next test's fake clock.
+vi.mock('../src/server/AgentV3/clarityJudgeAsk', () => ({ clarityJudgeAsk: vi.fn() }));
 
 /** Keep a failing cleanup assertion actionable without clearing or draining any timer for it. */
 function tracePendingTimers() {
@@ -93,6 +98,7 @@ describe('build admission preserves read-only chat and refuses uncertain mutatio
     process.env.AGENTV3_ENABLED = 'true'; process.env.AGENTV3_ALLOWLIST = ''; process.env.AGENTV3_FREE_LIST = 'queue-route-owner';
     process.env.ANTHROPIC_API_KEY = 'unit-test-not-a-real-credential'; process.env.NODE_ENV = 'test';
     setServerDb(null);
+    vi.mocked(clarityJudgeAsk).mockReset().mockResolvedValue('{"clear":true,"category":"general"}');
     const chatReply = 'Hello from the chat fixture.';
     const modelRoute = vi.fn(async () => ({ response: { content: chatReply, provider: 'fixture' } }));
     vi.spyOn(AIRouterManager, 'getRouter').mockReturnValue({ route: modelRoute } as never);
@@ -143,6 +149,7 @@ describe('build admission preserves read-only chat and refuses uncertain mutatio
     expect(events.find((e) => e.type === 'result')).toMatchObject({ ok: false, summary: reply, steps: 0, billedUsd: 0, billedInr: 0 });
     expect(builder).not.toHaveBeenCalled();
     expect(modelRoute).not.toHaveBeenCalled();
+    expect(clarityJudgeAsk).toHaveBeenCalledExactlyOnceWith(expect.any(String), body.prompt, expect.any(AbortSignal));
   });
   it('a normal queued chat completes only its own step, retains its reply and allows the next step', async () => {
     const { req, res, events, chatReply } = configure();
@@ -202,6 +209,7 @@ describe('build admission preserves read-only chat and refuses uncertain mutatio
     await request;
     expect(events.some((e) => e.type === 'error' && e.code === 'BUILD_AUTHORITY_UNAVAILABLE')).toBe(true);
     expect(events.some((e) => e.type === 'result' && e.ok === false)).toBe(true);
+    expect(clarityJudgeAsk).not.toHaveBeenCalled();
     expect(vi.getTimerCount(), pendingTimerDetails()).toBe(0);
     // afterEach restores the tracking spies before restoring real timers, including on failure.
   });

@@ -217,6 +217,10 @@ export function analyzeArchitecture(graph: ProjectGraph): ArchitectureReport {
   for (const [file, specs] of Object.entries(graph.imports)) {
     const edges: string[] = [];
     const frontend = isFrontendFile(file);
+    // A type-only import (`import type …`) is still checked below — it must resolve, and it still makes
+    // the target "used" — but it is erased before anything runs, so it is no edge of the RUNTIME cycle
+    // graph (typeOnlyImports.ts: 18 phantom cycles zeroed a working app's readiness score).
+    const typeOnly = new Set(graph.typeOnlyImports?.[file] ?? []);
     for (const spec of specs) {
       if (!spec.startsWith('.')) {
         // External or Node builtin. A server-only builtin in front-end code breaks
@@ -239,7 +243,7 @@ export function analyzeArchitecture(graph: ProjectGraph): ArchitectureReport {
          */
         const localFromBare = resolveLocalImport(file, spec, files);
         if (!localFromBare) continue;
-        edges.push(localFromBare);
+        if (!typeOnly.has(spec)) edges.push(localFromBare);
         edgeCount++;
         if (frontend && /(^|\/)(src\/)?server\b/i.test(localFromBare)) {
           layeringViolations.push(`${file} -> ${localFromBare}`);
@@ -256,7 +260,7 @@ export function analyzeArchitecture(graph: ProjectGraph): ArchitectureReport {
         unresolvedImports.push(`${file} -> ${spec}`);
         continue;
       }
-      edges.push(resolved);
+      if (!typeOnly.has(spec)) edges.push(resolved);
       edgeCount++;
       // Layering: a client/frontend module importing a server module is a violation.
       if (frontend && /(^|\/)(src\/)?server\b/i.test(resolved)) {

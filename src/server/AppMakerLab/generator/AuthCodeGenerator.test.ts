@@ -48,8 +48,15 @@ describe('generateAuthCode — supabase (zero setup)', () => {
   });
 
   it('never silently ships a login screen that cannot work', () => {
-    // Missing config is loud in development rather than a login form that fails forever in silence.
-    expect(gen().files[0].content).toContain('console.error');
+    // Missing config is announced in the console rather than a login form that fails forever in silence —
+    // but as a WARNING: every render check counts a console ERROR as a broken app (autopsy 40868260).
+    expect(gen().files[0].content).toContain('console.warn');
+  });
+
+  it('CLASS: no generated auth module logs through console.error — an honest "not configured" state must not fail the render check', () => {
+    for (const type of ['jwt', 'firebase', 'supabase'] as const) {
+      for (const f of generateAuthCode({ type }).files) expect(f.content, `${type}: ${f.path}`).not.toMatch(/console\.error\(/);
+    }
   });
 
   it('unsubscribes from auth changes — an un-cleaned listener leaks on every mount', () => {

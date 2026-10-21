@@ -63,7 +63,8 @@ describe('1 · the staleness probe asks what is on disk', () => {
     expect(src).toContain('if (hasLock && !treePresent) {');
     expect(src).toMatch(/const treePresent = await sandbox\.files\.exists\(`\$\{WORKSPACE_ROOT\}\/node_modules`\)/);
     // Every successful install stamps the tree so the mtime test settles.
-    expect(src.match(/return settled\(/g)?.length).toBe(4);
+    // 4 → 5 on 2026-10-21: the ETARGET manifest-repair retry (step 2.6) stamps the tree on success too.
+    expect(src.match(/return settled\(/g)?.length).toBe(5);
     expect(src).toContain("sandbox.commands.run('touch node_modules'");
   });
 

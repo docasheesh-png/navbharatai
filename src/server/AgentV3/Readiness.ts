@@ -110,6 +110,9 @@ export function maturityTierLabel(t: MaturityTier): string {
   }
 }
 
+/** At most this many import cycles cost points; more are reported but priced no further. */
+const MAX_PRICED_CYCLES = 3;
+
 // Per-defect penalties (points off 100).
 const PENALTY = {
   unresolvedImport: 25, // breaks the build
@@ -150,7 +153,11 @@ export function assessReadiness(
     blockers.push(`${arch.nodeBuiltinsInFrontend.length} server-only Node builtin import(s) in front-end code — these break the browser build: ${arch.nodeBuiltinsInFrontend.slice(0, 3).join(', ')}${arch.nodeBuiltinsInFrontend.length > 3 ? ', …' : ''}`);
   }
   if (arch.cycles.length) {
-    score -= PENALTY.cycle * arch.cycles.length;
+    // ADVISORY MEANS CAPPED (autopsy 1d3ff0d5). Cycles are "never a reason to fail a build" (see
+    // findCircularDependencies), but priced per cycle they could still zero the score on their own — 18
+    // cycles was −144 — and the score-floor blocker below then handed a RENDERED app back as unfinished.
+    // A handful of cycles costs what a handful costs; a large number is the same single finding.
+    score -= PENALTY.cycle * Math.min(arch.cycles.length, MAX_PRICED_CYCLES);
     warnings.push(`${arch.cycles.length} import cycle(s)`);
   }
   if (arch.layeringViolations.length) {

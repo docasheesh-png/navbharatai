@@ -42,6 +42,15 @@
 //     The ordinary remedy is to complete the delivery (the reconciler already does this on the next
 //     sign-in); a return is the fallback when crediting genuinely cannot be completed.
 //
+// 🔴 2026-10-21 — THE ADMIN'S NEXT RULING, WHICH SUPERSEDES THE "TWO THINGS DELIBERATELY NOT COVERED" NOTE
+// ABOVE. Verbatim: *"token purchase kiye ya koi service li -> sab non refundable hai. double payments ya
+// galti se jyada/extra payment bhi non refundable hai. agar user ne payment kiya token nahi mile -> to case
+// investigation ke bad token diye jayenge!"*. So there is no cash path left at all: a duplicate or extra
+// payment is credited to the wallet as tokens (never returned as money), and a payment that reached us
+// without delivering credit is investigated and then CREDITED. The chargeback worry in the note above is real
+// and is the admin's to weigh; it is named in the PR that made this change. The Consumer Protection Act line
+// at the end of the policy stays, because it costs nothing (the law applies either way).
+//
 // 🔒 IT MUST NEVER CONTRADICT THE TERMS. Section 4 of the Terms is the contract; this document is
 // that contract stated in full, in the order a person with a refund question actually asks. If one
 // of them is ever changed, BOTH must change in the same commit — `theRefundPolicyHasItsOwnUrl`
@@ -53,7 +62,7 @@
 // absence is exactly what an aggregator's reviewer looks for.
 
 export const REFUND_POLICY_TITLE = 'Refund & Cancellation Policy';
-export const REFUND_POLICY_UPDATED = '18 October 2026';
+export const REFUND_POLICY_UPDATED = '21 October 2026';
 
 export const REFUND_POLICY = `# Refund & Cancellation Policy
 
@@ -63,7 +72,7 @@ This policy explains what happens to your money once you pay, what you receive i
 
 It is the full statement of the rules summarised in **Section 4 of our [Terms of Service](/terms)**. Where this page and the Terms describe the same rule, they mean the same thing.
 
-**The short version:** payments are **final and non-refundable**, because what you buy is delivered to your account immediately. A build that fails is never charged in the first place. If our own defect consumes your credit, we put the credit back. Nothing you have made is ever deleted over a payment question.
+**The short version:** everything you pay for is **final and non-refundable** — tokens, hosting and other plans, App Mart purchases and any other service — because what you buy is delivered to your account immediately. That includes a payment made twice, or for more than you meant: it is never returned as money. If you paid and did not receive what you paid for, tell us: we investigate, and then the credit is added to your wallet. A build that fails is never charged in the first place. If our own defect consumes your credit, we put the credit back. Nothing you have made is ever deleted over a payment question.
 
 ---
 
@@ -81,20 +90,21 @@ So the moment a payment succeeds, you have received two things in full: the cred
 
 Please add credit in the amount you actually intend to use. If you are unsure whether NavBharatAI suits you, **try it before you pay**: a new account can build and publish without spending a rupee, and every app in App Mart can be run for free before it is bought.
 
-**A payment made by mistake is final too.** If you meant to add ₹500 and added ₹5,000, or you topped up when you did not mean to, the full amount is credited to your wallet and stays there — usable, and it does not expire. We cannot turn it back into money. **Please check the amount on the payment screen before you confirm it.**
+**A payment made by mistake is final too — and so is a payment made twice, or for more than you meant.** If you meant to add ₹500 and added ₹5,000, if you topped up when you did not mean to, or if you paid the same amount twice, every rupee that reached us is credited to your wallet and stays there — usable, and it does not expire. We cannot turn it back into money. **Please check the amount on the payment screen before you confirm it, and confirm it once.**
 
-This is about a mistake *you* made with an amount. A payment you **did not authorise at all** is a different matter entirely, and section 5 covers it.
+This is about a payment *you* made. A payment you **did not authorise at all** is a different matter entirely, and section 5 covers it.
 
 This applies equally to:
 
 - **purchased credit you have not spent** — it stays in your wallet and remains usable, but it is not returnable as cash;
 - **credit already spent** on work that was delivered;
 - **gift, welcome, referral and promotional credit** — this has no cash value and is not refundable at any time, and is always spent before credit you paid for, so your own money is never consumed while a bonus sits unused;
-- **hosting and other plans**, for the period already paid for.
+- **hosting and other plans**, for the period already paid for;
+- **App Mart purchases and every other service** you buy on NavBharatAI.
 
 ## 3. What protects you instead
 
-A refund window is the wrong instrument for the thing customers actually worry about, so NavBharatAI answers that worry inside the product rather than after the fact. These are enforced by the Platform, not merely promised here:
+A cash return is the wrong instrument for the thing customers actually worry about, so NavBharatAI answers that worry inside the product rather than after the fact. These are enforced by the Platform, not merely promised here:
 
 - **A build that was meant to produce an app and did not succeed is not charged.** You are not billed for a failure. A build fails when it ends without succeeding for any reason other than you stopping it.
 - **A build you stop yourself is not a failure, and you pay only for work you keep.** Unsending your message or typing "stop" counts the same as pressing Stop. You pay nothing if nothing at all had been written yet; if only our untouched starter template was in place and no app had yet been seen running; or if you stopped a change to an existing app before it was seen working. Once files had been written and an app had been seen running in the preview, even if it was still only our starter template, you pay for the work done up to that point, not for a full build. If you were building a new app, files of your own were saved, and no app had yet been seen running, you pay half of the work done so far, or what that work actually cost to run if that is more, and never more than the work done. This holds even if your Stop arrives after the build has finished and only its final checks are still running. Closing the app or losing your signal does not stop a build: it carries on and is billed normally.
@@ -113,11 +123,11 @@ If you believe you were charged for something that did not work, write to us. Te
 
 ## 5. When a payment goes wrong
 
-These are **not refunds**. In each case something failed on the payment rail or on our side, and correcting it is not the same as returning money for a purchase you completed.
+None of these is a refund, and **none of them ends with money being returned.** In each case something failed on the payment rail or on our side, and we correct it **in credit** — so you never lose the value of a payment that reached us.
 
-- **Money taken, credit not added.** This normally corrects itself: the Platform reconciles unfinished payments automatically and credits them the next time you sign in, so an interrupted UPI payment is not lost. If the credit has not appeared within 24 hours, email us with the order ID and we will settle it by hand. Where crediting genuinely cannot be completed, we return the money.
-- **Charged twice for one purchase.** Send us both order IDs — you made one purchase, and the second charge was never a purchase you made, so you do not keep it. You choose how it comes back: **the full amount added to your wallet as credit**, which is immediate, or **the full amount returned to the original payment method**, which takes your bank a few working days. Either way it is the whole of the duplicate charge.
-- **A payment you do not recognise.** Please write to us before raising a chargeback if you can. We can usually identify a payment the same day, whereas a chargeback locks the amount for weeks while the banks work through it.
+- **Money taken, credit not added.** This normally corrects itself: the Platform reconciles unfinished payments automatically and credits them the next time you sign in, so an interrupted UPI payment is not lost. If the credit has not appeared within 24 hours, email us with the order ID. **We investigate the case** — we check the payment with the payment provider and the record on our side — and **once the payment is confirmed, the credit is added to your wallet.**
+- **Paid twice, or paid more than you meant.** Every rupee that reaches us is credited to your wallet and stays there as usable credit; **it is not returned as money.** If the extra amount was taken but not credited, send us the order IDs: we investigate in the same way, and once the payments are confirmed the credit is added.
+- **A payment you do not recognise.** Please write to us before raising a chargeback if you can. We can usually identify a payment the same day, whereas a chargeback locks the amount for weeks while the banks work through it. We investigate it and tell you what we found.
 
 ## 6. Purchases made through an app store
 
@@ -127,13 +137,13 @@ If you bought credit **inside our mobile app using the app store's own billing**
 
 Apps sold by their creators in **App Mart** are **not refundable**, and the reason is built into the product: every such app can be **run for free before you buy it**, so you are never buying something you have not tried.
 
-If an app you bought does not work as described, or its listing misled you, tell us. We act against listings that misrepresent themselves, and where the listing was at fault we will make it right.
+If an app you bought does not work as described, or its listing misled you, tell us. We act against listings that misrepresent themselves, and where the listing was at fault we will make it right — in credit, as with every other correction on this page.
 
 ## 8. How to reach us
 
 Email **info@navbharatai.com** from the address on your NavBharatAI account, with the **order ID** — or the date and amount — which you can see in **Billing → Invoice Records**, and one line on what happened. Our [Contact](/contact) page lists what to write about where.
 
-We acknowledge within **2 working days** and answer with a decision and the reason for it within **5 working days**.
+We acknowledge within **2 working days** and answer with the outcome of the investigation and the reason for it within **5 working days**. Where credit is owed, it is added to your wallet.
 
 ## 9. If you are not satisfied with our answer
 

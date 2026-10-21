@@ -27,6 +27,7 @@ import { buildCostAlertReport } from '../lib/CostAlertEngine';
 import { usdToInr } from '../lib/UsdInrRate';
 import { adultPreferenceFrom, ADULT_CONFIRMATIONS } from '../../lib/adultContent';
 import { audit } from '../lib/audit';
+import { parseAcceptanceRequest, recordTermsAcceptance } from '../lib/termsAcceptance';
 import { scanProfanity } from '../lib/pollinationsGuard';
 import { publicCreatorId, forgetCreator } from '../lib/storeCreator';
 import { forgetPerson } from '../lib/appMartSocialStore';
@@ -160,6 +161,25 @@ export function registerProfileRoutes(app: Express): void {
     } catch (e) {
       return sendSafeError(res, 500, 'The photo could not be removed. Please try again.', e);
     }
+  });
+
+  // ── POST /api/profile/terms-acceptance ─────────────────────────────
+  // The evidence behind the sign-in checkbox "I am 18 or older, and I agree to the Terms of Service and Privacy
+  // Policy" (admin 2026-10-21): which versions, when (the SERVER's clock), and that the age was confirmed.
+  // The app posts it the moment an account is signed in and clears its held marker only on `{ ok: true }`.
+  // See src/server/lib/termsAcceptance.ts and src/lib/signupAcceptance.ts.
+  const acceptanceLimiter = rateLimiter({ name: 'terms-acceptance', authed: 60, anon: 5, noun: 'requests' });
+  app.post('/api/profile/terms-acceptance', acceptanceLimiter, async (req: Request, res: Response) => {
+    const userId = await verifyFirebaseToken(req);
+    if (!userId) return res.status(401).json({ error: 'Authentication required.' });
+    const parsed = parseAcceptanceRequest(req.body);
+    if (parsed.ok === false) return res.status(400).json({ error: parsed.error });
+    const db = getDb() as any;
+    if (!db) return res.status(503).json({ error: 'The record could not be saved right now.' });
+    const saved = await recordTermsAcceptance(db, userId, parsed.value);
+    // Honest: `ok` only after the document was really written. The app keeps its marker on anything else.
+    if (!saved) return res.status(503).json({ error: 'The record could not be saved right now.' });
+    return res.json({ ok: true });
   });
 
   app.put('/api/profile/budget', async (req: Request, res: Response) => {

@@ -93,17 +93,22 @@ describe('it is findable, and it agrees with the Terms', () => {
     expect(terms).toMatch(/re-?credit/i);
     expect(refund).toMatch(/in credit, not in money/i);
 
-    // The two things that are NOT refunds must stay covered: refusing a duplicate charge invites a
-    // chargeback, which costs more than the disputed amount.
-    expect(refund).toMatch(/duplicate/i);
-    expect(refund).toMatch(/Charged twice/i);
+    // 2026-10-21 (admin): there is NO cash path at all any more. What stays covered is the REMEDY for
+    // "I paid and did not get what I paid for": it is investigated, and then the credit is added.
+    expect(refund).toMatch(/Money taken, credit not added/i);
+    expect(refund).toMatch(/We investigate the case/i);
+    expect(refund).toMatch(/the credit is added to your wallet/i);
+    expect(terms).toMatch(/we investigate the case, and once the payment is confirmed the tokens are added to your wallet/i);
   });
 
   it('🔒 A PAYMENT MADE BY MISTAKE IS FINAL — but an UNAUTHORISED one is not the same thing', () => {
     // Admin, 2026-09-21: *"koi kahe galti se payment ho gaya, woh bhi non refundable hai. xx
     // payment karna chah raha tha, xxx ho gaya, non refundble"*. This is the commonest refund
     // request there is, so the policy states it rather than leaving it to be argued case by case.
-    expect(refund).toMatch(/payment made by mistake is final/i);
+    expect(refund).toMatch(/payment made by mistake is final too/i);
+    // …and so is a payment made TWICE or for MORE than meant (admin 2026-10-21): credited as tokens, never as money.
+    expect(refund).toMatch(/made twice, or for more than you meant/i);
+    expect(terms).toMatch(/payment made twice or for more than you meant/i);
     expect(refund).toMatch(/check the amount on the payment screen/i);
 
     // 🔴 THE LINE THAT MUST NOT BE ERASED WITH IT. "I chose the wrong amount" is the customer's own
@@ -112,6 +117,44 @@ describe('it is findable, and it agrees with the Terms', () => {
     // careless typist under one sentence. The policy keeps them apart and points at section 5.
     expect(refund).toMatch(/did not authorise at all/i);
     expect(refund).toMatch(/A payment you do not recognise/i);
+  });
+
+  // 🔴 ONE MONEY RULE, IN EVERY DOCUMENT (admin 2026-10-21). The 7-day promise that was reversed on
+  // 2026-09-21 survived for a month in Terms Section 9 ("refunded on request", "we refund unused purchased
+  // tokens") because the guard above matched one phrase, "refundable within <n>". A guard that names one
+  // sentence of an old promise lets its siblings through, so this one names the VOCABULARY of a cash return and
+  // reads EVERY legal document, not two of them.
+  it('🔒 NO LEGAL DOCUMENT OFFERS MONEY BACK, IN ANY WORDS', () => {
+    const OLD_PROMISE: Array<[RegExp, string]> = [
+      [/refund window/i, 'a refund window'],
+      [/refunded on request/i, '"refunded on request"'],
+      [/we refund (the )?unused/i, '"we refund unused …"'],
+      [/refunds? (the )?unused/i, '"refund unused …"'],
+      [/refundable within/i, '"refundable within …"'],
+      [/within (the|a) \d+.?day/i, 'a day-count window'],
+      [/money leaves/i, '"the money leaves …"'],
+      [/returned to the original payment method/i, 'a return to the card'],
+      [/return the money/i, '"return the money"'],
+      [/where we approve one/i, '"where we approve a refund"'],
+      [/for our convenience[^.]*refund/i, 'a refund on termination for convenience'],
+    ];
+    for (const doc of LEGAL_DOCS.filter((d) => ['legal_terms', 'legal_refund', 'legal_privacy', 'legal_dpa', 'legal_grievance'].includes(d.id))) {
+      for (const [re, what] of OLD_PROMISE) expect(doc.body, `${doc.id} still offers ${what}`).not.toMatch(re);
+    }
+    expect(contactDoc(null)).not.toMatch(/money leaves|where we approve one|ask for a \*\*refund\*\*/i);
+  });
+
+  it('🔒 BOTH DOCUMENTS SAY THE THREE THINGS THE ADMIN RULED, IN THE SAME WORDS OF EFFECT', () => {
+    for (const [name, body] of [['terms', terms], ['refund', refund]] as const) {
+      expect(body, `${name}: everything is non-refundable`).toMatch(/non-refundable/i);
+      expect(body, `${name}: a double or extra payment is final too`).toMatch(/twice/i);
+      expect(body, `${name}: a payment with no credit is investigated`).toMatch(/investigat/i);
+      expect(body, `${name}: …and then credited`).toMatch(/added to your wallet/i);
+    }
+    // The Terms' two money sentences in Section 9 now point at Section 4 instead of making their own promise.
+    const s9 = terms.slice(terms.indexOf('## 9.'), terms.indexOf('## 10.'));
+    expect(s9).toMatch(/Section 4/);
+    expect(s9).not.toMatch(/refund/i);
   });
 
   it('🔒 THE PERMANENT-UNLOCK CLAIM IS THE JUSTIFICATION, so it may not quietly disappear', () => {
@@ -164,7 +207,8 @@ describe('Contact Us — the third page, and it may invent nothing', () => {
     const c = contactDoc(null);
     expect(CONTACT_TITLE).toMatch(/Contact/i);
     expect(c).toContain(CONTACT_EMAIL);
-    for (const topic of [/Refund/i, /Payment/i, /Grievance/i, /SECURITY/]) expect(c).toMatch(topic);
+    for (const topic of [/Payment/i, /Grievance/i, /SECURITY/]) expect(c).toMatch(topic);
+    expect(c).toMatch(/non-refundable/i);
     expect(c).toMatch(/Indian Rupees|₹/);            // the aggregator also asks that pricing be INR
     expect(c).toContain('(/refund)');
     expect(c).toContain('(/terms)');

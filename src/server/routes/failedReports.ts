@@ -1,3 +1,4 @@
+import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
 /** Immutable reports and separately consented, evidence-bound autopsy metadata. */
 import type { Express, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
@@ -86,6 +87,13 @@ export function registerFailedReportRoutes(app: Express): void {
     const principal = await failedReportOAuth.tokenPrincipal(req.headers.authorization, REPORT_AUTOPSY_SCOPE);
     return principal ? `oauth:${principal.grantId}` : null;
   };
+  app.post('/api/failedbr/report-numbers', readGate, async (req, res) => {
+    try { res.json({ numbers: await readBuildReportNumbers('failed', req.body?.reports) }); }
+    catch (err) {
+      if (err instanceof ReportNumberingInputError) { res.status(400).json({ error: 'Invalid report-number references.' }); return; }
+      failure(res, err);
+    }
+  });
   app.get('/api/failedbr/reports', readGate, async (req, res) => {
     try { res.json(await withFailedReportAutopsies(await readFailedBuildPage(req.query.cursor, req.query.limit))); }
     catch (err) { failure(res, err); }

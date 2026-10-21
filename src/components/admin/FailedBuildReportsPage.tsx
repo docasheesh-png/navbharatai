@@ -1,3 +1,5 @@
+import { useBuildReportNumbers } from '../../hooks/useBuildReportNumbers';
+import { BuildReportNumber } from './BuildReportNumber';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import { FailedReportOAuthConsent } from './FailedReportOAuthConsent';
@@ -10,6 +12,7 @@ const button = 'rounded-xl border border-line bg-card px-4 py-2 text-ink disable
 
 export function FailedBuildReportsPage({ token, onLogout }: { token: string; onLogout: () => void }) {
   const [page, setPage] = useState<FailedBuildPage | null>(null);
+  const numberedReports = useBuildReportNumbers(page?.reports, 'failed', token);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<unknown>(null);
@@ -95,15 +98,15 @@ export function FailedBuildReportsPage({ token, onLogout }: { token: string; onL
       <div><p className="text-sm text-muted">Private · Admin access</p><h1 className="text-3xl font-serif text-ink">Failed build reports</h1></div>
       <div className="flex gap-2"><a href="https://navbharatai.com/admin" className={button}>Admin console</a><button className={button} onClick={onLogout}>Sign out</button></div>
     </header>
-    <p className="text-sm text-muted">Reports come automatically from retained build history, including failures before a later successful build. This page refreshes its current batch every minute. Browse every batch to see all retained failures; batches are in workspace/history order.</p>
+    <p className="text-sm text-muted">Reports come automatically from retained build history, including failures before a later successful build. This page refreshes its current batch every minute. Browse every batch to see all retained failures; batches stay in workspace/history order. Numbers run oldest (1) to newest across all retained failures, not just this batch. The numbering snapshot is reused for up to 10 minutes; retention can change numbers.</p>
     <FailedReportOAuthConsent token={token} />
     {error && <p role="alert" className="rounded-xl border border-line p-4 text-danger">{error}</p>}
     {message && <p role="status" className="text-success">{message}</p>}
     <section className="rounded-2xl border border-line bg-card p-4 space-y-4" aria-label="Reports">
       <div className="flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={() => void load()}>Refresh from beginning</button><button className={button} disabled={busy || !page?.nextCursor} onClick={() => void load(page?.nextCursor ?? undefined)}>Next batch</button><span role="status" className="self-center text-sm text-muted">{busy ? 'Loading…' : page ? `${page.reports.length} failures · ${page.scanned} records checked in this batch` : 'Waiting for reports'}</span></div>
       {page && page.reports.length === 0 && <p>{page.nextCursor ? 'No failures in this batch. Continue to the next batch.' : 'No failures in this final batch.'}</p>}
-      <ul className="space-y-3">{page?.reports.map((r) => <li key={`${r.workspaceId}/${r.historyId}`} className="rounded-xl border border-line p-4">
-        <div className="flex flex-wrap justify-between gap-3"><div className="min-w-0"><h2 className="font-semibold text-ink break-words">{r.appLabel || 'Untitled build'}</h2><p className="text-sm text-muted">{new Date(r.endedAt).toLocaleString()} · Failed</p><p className="text-xs text-muted break-all">{r.workspaceId} / {r.buildId ?? r.historyId}</p></div><button className={button} onClick={() => void openReport(r.workspaceId, r.historyId)}>Read full report</button></div>
+      <ul className="space-y-3">{numberedReports.map((r) => <li key={`${r.workspaceId}/${r.historyId}`} className="rounded-xl border border-line p-4">
+        <div className="flex flex-wrap justify-between gap-3"><div className="min-w-0"><BuildReportNumber numbering={r.numbering} /><h2 className="font-semibold text-ink break-words">{r.appLabel || 'Untitled build'}</h2><p className="text-sm text-muted">{new Date(r.endedAt).toLocaleString()} · Failed</p><p className="text-xs text-muted break-all">{r.workspaceId} / {r.buildId ?? r.historyId}</p></div><button className={button} onClick={() => void openReport(r.workspaceId, r.historyId)}>Read full report</button></div>
         {r.rootCause && <p className="mt-2 text-sm break-words">{r.rootCause}</p>}
         <p className="mt-2 text-sm text-muted">Autopsy: {r.autopsy ? r.autopsy.state.replaceAll('_', ' ') : 'Status not supplied'}</p>
       </li>)}</ul>

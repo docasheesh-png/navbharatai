@@ -1,3 +1,6 @@
+import { useBuildReportNumbers } from '../hooks/useBuildReportNumbers';
+import { BuildReportNumber } from './admin/BuildReportNumber';
+import type { BuildReportNumbering } from '../lib/buildReportNumbering';
 import { MaintenanceCard } from './admin/MaintenanceCard';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight} from 'lucide-react';
@@ -358,6 +361,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [reportPart, setReportPart] = useState('all');
   // ALL BUILDS browser (admin 2026-08-06) — every user's every build, no user submit needed.
   interface AllBuildRow {
+    numbering?: BuildReportNumbering;
     workspaceId: string; savedAt: number; ownerUid: string | null;
     id: string; startedAt?: number; endedAt?: number; ok?: boolean;
     summary?: string; rootCause?: string; prompt?: string;
@@ -555,7 +559,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    * means something different, so it starts at page one.
    */
   const pagedUserReports = usePagedList(userReports, { resetKey: reportFilter });
-  const pagedAllBuilds = usePagedList(allBuilds, { resetKey: `${allBuildsSearch}|${allBuildsStatus}|${allBuildsDate}|${allBuildsUid}` });
+  const numberedAllBuilds = useBuildReportNumbers(allBuilds, 'latest', adminToken);
+  const pagedAllBuilds = usePagedList(numberedAllBuilds, { resetKey: `${allBuildsSearch}|${allBuildsStatus}|${allBuildsDate}|${allBuildsUid}` });
   const pagedAdultOptIns = usePagedList(adultOptIns);
   const pagedPromos = usePagedList(promos);
   const fetchAdultOptIns = useCallback(async () => {
@@ -4806,7 +4811,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   )}
                 />
                 <p className="text-[10px] text-muted">
-                  Showing {allBuilds.length}
+                  Numbers run oldest (1) to newest across all retained latest-per-workspace reports, before filters. Snapshot reused for up to 10 minutes; retention can change numbers. Showing {allBuilds.length}
                   {allBuildsFetched && allBuildsFetched.fetched >= allBuildsFetched.limit
                     /* Honest about the fetch ceiling: at the limit there may be OLDER builds this
                        list has not looked at, so "0 failed" must not read as "none exist". */
@@ -4824,6 +4829,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         onClick={() => void expandWorkspaceBuilds(b.workspaceId)}
                         className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-raised"
                       >
+                        <BuildReportNumber numbering={b.numbering} />
                         <span className={`shrink-0 w-2 h-2 rounded-full ${b.ok === true ? 'bg-emerald-400' : b.ok === false ? 'bg-rose-400' : 'bg-faint'}`} />
                         <span className="flex-1 min-w-0">
                           <span className="block text-[12px] font-bold text-ink truncate">{b.prompt || b.summary || b.workspaceId}</span>

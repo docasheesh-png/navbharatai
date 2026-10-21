@@ -1,3 +1,4 @@
+import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
 import { registerAiMaintenanceRoutes } from './aiMaintenance';
 import crypto from 'crypto';
 import { AggregateField } from 'firebase-admin/firestore';
@@ -1287,6 +1288,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // already durably recorded (workspace latest doc + per-build history, including in-progress
   // upserts); these routes are the missing ADMIN-ONLY global window over it. Full provider detail —
   // this is the forensic surface; nothing here is ever user-reachable (verifyAdminToken on each).
+
+  // Read-only metadata is separate so a cold numbering scan never delays report browsing.
+  app.post('/api/admin/all-builds/numbers', verifyAdminToken, async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    try { res.json({ numbers: await readBuildReportNumbers('latest', req.body?.reports) }); }
+    catch (err) { res.status(err instanceof ReportNumberingInputError ? 400 : 503).json({ error: 'Report numbers could not be read.' }); }
+  });
 
   app.get('/api/admin/all-builds', verifyAdminToken, async (req: Request, res: Response) => {
     try {

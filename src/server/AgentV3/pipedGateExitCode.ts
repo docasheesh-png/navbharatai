@@ -26,7 +26,7 @@
 //
 // Pure + deterministic: no I/O, no shell, no LLM. Kill switch lives at the call site.
 
-import { looksLikeTypecheckCommand, tscVerdict } from './TscGate';
+import { looksLikeTypecheckCommand, tscCommandVerdict } from './TscGate';
 
 /** A verification tool whose real verdict lives in its OUTPUT, not just its exit status. */
 const GATE_TOOL = /\b(tsc|vue-tsc|svelte-check|eslint|vitest|jest|mocha|pytest|mypy|ruff)\b|\bnpm\s+(?:run\s+)?(?:test|typecheck|type-check|lint|build)\b|\b(?:yarn|pnpm|bun)\s+(?:test|lint|build|typecheck)\b/i;
@@ -87,18 +87,18 @@ export function pipedGateExitCodeWarning(
   if (exitCode !== 0) return null;              // it already told the truth
   if (!isPipedGateCommand(command)) return pipedMissingCommandWarning(command, output);
   const text = (output ?? '').slice(0, 20000);
-  if (!text.trim()) return null;
   // The shared verdict also recognises help pages, missing compiler binaries and an unrelated
   // package claiming the `tsc` command. None checked the app: do not call that clean, and do not
   // tell the builder to repair app code as if the compiler had found type errors.
-  if (looksLikeTypecheckCommand(command) && tscVerdict(text) === 'not-run') {
+  if (looksLikeTypecheckCommand(command) && tscCommandVerdict(command, text) === 'not-run') {
     return [
-      '⚠️ THIS COMMAND DID NOT ACTUALLY PASS. THE COMPILER DID NOT RUN.',
+      '⚠️ THIS COMMAND DID NOT ACTUALLY PASS. THE COMPILER DID NOT RUN A TYPECHECK.',
       'The pipe exited 0, but TypeScript did not check the project.',
       'This is not evidence that the app passed or failed. Ensure the project has a valid tsconfig',
-      'and its local TypeScript compiler, then rerun the typecheck without a pipe.',
+      'and its local TypeScript compiler, remove nonchecking flags, then rerun the typecheck without a pipe.',
     ].join('\n');
   }
+  if (!text.trim()) return null;
   if (!REAL_ERROR.some((re) => re.test(text))) return null;
   const first = (text.match(/^[^\n]*error[^\n]*$/im) || [''])[0].trim().slice(0, 200);
   return [

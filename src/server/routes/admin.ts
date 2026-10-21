@@ -1,3 +1,4 @@
+import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
 import { registerAiMaintenanceRoutes } from './aiMaintenance';
 import crypto from 'crypto';
 import { AggregateField } from 'firebase-admin/firestore';
@@ -205,6 +206,8 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'bill_of_supply', 'bill_of_supply_counters',
 ];
 import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSuccess } from '../lib/adminLoginGuard';
+import { createSharedAdminGuard, firestoreSharedStore } from '../lib/adminLoginShared';
+import { consumeDurableRate } from '../lib/DurableRateLimit';
 import { routeParam, routeParams } from '../lib/expressCompat';
 import { lifetimeMoneySpentInr, lifetimeTokensUsed, lifetimeTokensPurchased } from '../lib/walletLifetime';
 import { hasEverPaid } from '../AgentV3/FreeTierBuildRouting';
@@ -327,6 +330,32 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       }
     }
 
+    // THE SHARED LAYER (adminLoginShared.ts). The checks above live in THIS instance's memory; with up to 100 Cloud Run
+    // instances an attacker would meet a fresh 5/min and a fresh lockout on each. Here the same limits are counted in
+    // Firestore, and a GLOBAL ceiling on failed logins (any address) is added — addresses the admin has logged in from
+    // are exempt from that one, so flooding failures can never lock the real admin out. Fail-open: no store, no extra layer.
+    const sharedGuard = createSharedAdminGuard(firestoreSharedStore(), validPass || '');
+    if (adminLockoutEnabled()) {
+      const sharedLock = await sharedGuard.check(clientIp);
+      if (sharedLock.locked) {
+        const retryAfterSec = Math.max(1, Math.ceil(sharedLock.retryAfterMs / 1000));
+        audit('ADMIN_LOGIN_LOCKED', { ip: clientIp, retryAfterSec, shared: sharedLock.reason });
+        res.setHeader('Retry-After', String(retryAfterSec));
+        return res.status(429).json({
+          error: sharedLock.reason === 'global'
+            ? 'Admin sign-in is temporarily restricted for new locations because of repeated failed attempts. Try again later.'
+            : 'Too many failed attempts. Try again later.',
+          retryAfterSec,
+        });
+      }
+    }
+    // The per-minute limit, durable across instances (the in-memory `adminLimiter` above is only the fast first gate).
+    const slot = await consumeDurableRate('admin-login', clientIp, 5, 60_000, Date.now());
+    if (!slot.allowed) {
+      res.setHeader('Retry-After', '60');
+      return res.status(429).json({ error: 'Too many admin requests.' });
+    }
+
     if (!validPass) {
       audit('ADMIN_LOGIN_BLOCKED', { reason: 'ADMIN_PASSWORD not set', ip: req.ip });
       return res.status(503).json({ error: 'Admin access not configured on server.' });
@@ -352,13 +381,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           serverStats.failedLogins++;
           // A correct password with a wrong TOTP is still a failed attempt — count it toward the
           // lockout so TOTP guessing (1M codes) also gets throttled, not just password guessing.
-          if (adminLockoutEnabled()) recordAdminFail(clientIp);
+          if (adminLockoutEnabled()) { recordAdminFail(clientIp); await sharedGuard.recordFail(clientIp); }
           return res.status(401).json({ error: 'Invalid authenticator code.', mfaRequired: true });
         }
       }
       // Full success (password + MFA if enabled) — clear this IP's failure history immediately so a
       // legitimate admin who mistyped earlier is never left waiting out a lock.
-      if (adminLockoutEnabled()) recordAdminSuccess(clientIp);
+      if (adminLockoutEnabled()) { recordAdminSuccess(clientIp); await sharedGuard.recordSuccess(clientIp); }
       // SEC Phase 5 (F8): a TIME-STAMPED token with a 30-day TTL (was a static, never-expiring HMAC).
       // The issued-at is signed in, so a leaked token now expires instead of granting permanent access.
       const token = mintAdminToken(validPass, username, Date.now());
@@ -370,7 +399,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     serverStats.failedLogins++;
     serverStats.failedLoginIPs.push({ ip: String(req.ip), time: Date.now(), username });
     if (serverStats.failedLoginIPs.length > 100) serverStats.failedLoginIPs.shift();
-    if (adminLockoutEnabled()) recordAdminFail(clientIp);
+    if (adminLockoutEnabled()) { recordAdminFail(clientIp); await sharedGuard.recordFail(clientIp); }
     return res.status(401).json({ error: 'Invalid credentials.' });
   });
 
@@ -1259,6 +1288,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // already durably recorded (workspace latest doc + per-build history, including in-progress
   // upserts); these routes are the missing ADMIN-ONLY global window over it. Full provider detail —
   // this is the forensic surface; nothing here is ever user-reachable (verifyAdminToken on each).
+
+  // Read-only metadata is separate so a cold numbering scan never delays report browsing.
+  app.post('/api/admin/all-builds/numbers', verifyAdminToken, async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    try { res.json({ numbers: await readBuildReportNumbers('latest', req.body?.reports) }); }
+    catch (err) { res.status(err instanceof ReportNumberingInputError ? 400 : 503).json({ error: 'Report numbers could not be read.' }); }
+  });
 
   app.get('/api/admin/all-builds', verifyAdminToken, async (req: Request, res: Response) => {
     try {

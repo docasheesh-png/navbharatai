@@ -1,3 +1,5 @@
+import { manifestRangeRepairEnabled, repairUnavailableRanges, manifestRepairNote } from '../../../manifestRangeRepair';
+import { missingRanges, latestVersionsCommand, isSafePackageName } from '../../../npmVersionHint';
 import { shouldSeedStarter } from './seedStarter';
 import { Sandbox, SandboxNotFoundError } from 'e2b';
 import { parseNpmAuditSummary } from '../../../npmAuditSummary';
@@ -990,6 +992,37 @@ export class E2BActuator implements IEngineerActuator {
       const againLog = installLog + '\n[transient fs-race retry]\n' + again.stdout + again.stderr;
       if (again.exitCode === 0) return settled({ success: true, log: await withAuditFix(againLog) });
       // Fell through: let the ERESOLVE branch below look at the ORIGINAL log too.
+    }
+
+    // Step 2.6: A DECLARED VERSION THAT DOES NOT EXIST (ETARGET) — manifestRangeRepair.ts, autopsy b4173fb7.
+    // Running the same install again cannot succeed; only a confirmed registry version permits a manifest
+    // repair and retry. Failed or inconclusive lookups leave it unchanged. Same repair as the build's
+    // own bare `npm install`, for every path that funnels through here (preview boot, hydration, publish).
+    if (manifestRangeRepairEnabled() && /ETARGET|No matching version found/i.test(installLog)) {
+      try {
+        const missing = missingRanges(installLog, 8);
+        const lookup = latestVersionsCommand(missing);
+        const printed = lookup
+          ? await sandbox.commands.run(lookup, { cwd: WORKSPACE_ROOT, timeoutMs: 30_000 }).then((r) => r.stdout ?? '').catch(() => '')
+          : '';
+        const latest = new Map<string, string>();
+        for (const m of String(printed).matchAll(/^NBAI_LATEST ((?:@[\w.-]+\/)?[\w.-]+)=(\d+\.\d+\.\d+[\w.-]*)\s*$/gm)) latest.set(m[1], m[2]);
+        const raw = await sandbox.files.read(`${WORKSPACE_ROOT}/package.json`).catch(() => null);
+        const repair = repairUnavailableRanges(
+          typeof raw === 'string' ? raw : '',
+          missing.filter((m) => isSafePackageName(m.name)),
+          latest,
+        );
+        if (repair.text !== null) {
+          await sandbox.files.write(`${WORKSPACE_ROOT}/package.json`, repair.text);
+          const again = await sandbox.commands.run('npm install', {
+            cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
+          }).catch((err: any) => commandFailureResult(err));
+          const againLog = `${installLog}\n${manifestRepairNote(repair.changes, again.exitCode === 0)}\n${again.stdout}${again.stderr}`;
+          if (again.exitCode === 0) return settled({ success: true, log: await withAuditFix(againLog) });
+          return { success: false, log: againLog };
+        }
+      } catch { /* repair is best-effort — the original failure is reported below */ }
     }
 
     // Step 3: peer-dep conflict — retry with --legacy-peer-deps

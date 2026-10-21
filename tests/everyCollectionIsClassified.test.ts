@@ -259,6 +259,7 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   platform_config:        { kind: 'platform', why: 'one or two fixed documents: the release gate and its checks' },
   provider_cooldowns:     { kind: 'platform', why: 'one doc per provider — how long it stays benched' },
   rate_limits_v1:         { kind: 'platform', why: 'one doc per rate-limit bucket; expires by its own clock' },
+  admin_login_guard_v1:   { kind: 'platform', why: 'admin login throttle: keyed-hash address records, a global failure window, known-address marks; every doc expires by its own expireAt (adminLoginShared.ts)' },
   site_content:           { kind: 'platform', why: 'a single document holding the public About text' },
   own_audience_totals:    { kind: 'platform', why: 'one doc per page: lifetime view counters, no person in it' },
   admin_notifications:    { kind: 'platform', why: 'one doc per notice the ADMIN wrote; who read it is `user_notification_reads` above' },
@@ -388,6 +389,12 @@ const UNREADABLE_RECEIVERS: Record<string, string> = {
 
 /** A new document-ref alias is excused only in its verified file, never everywhere named `ref`. */
 const SCOPED_DOCUMENT_RECEIVERS: Record<string, Record<string, { why: string; assignment: RegExp }>> = {
+  'src/server/lib/buildReportNumbering.ts': {
+    ref: {
+      why: 'parent is a workspace_diagnostics_v3 query document snapshot; its history is the existing workspace subcollection, read-only here',
+      assignment: /const history = parent\.ref\.collection\('history'\)/,
+    },
+  },
   'src/server/lib/failedReportAutopsy.ts': {
     ref: {
       why: 'the hashed autopsy parent document; revisions and mutations are retained-parent children',

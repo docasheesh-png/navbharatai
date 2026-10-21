@@ -329,7 +329,7 @@ export function goldenBuildPrompt(golden: GoldenScaffold, buildPrompt: string, e
   const added = String(extension ?? '').trim();
   // The user's own words on top of a chip (chipExtensionFor, autopsy ca99778e) — said FIRST and as the priority.
   const customise = added
-    ? `[CUSTOMISE THIS WORKING TEMPLATE — THE USER'S OWN WORDS COME FIRST] This workspace was just pre-seeded with NavBharatAI's tested "${golden.label}" ${golden.tier === 'pro' ? 'foundation' : 'app'}; it compiles, runs, and is already on the user's preview. `
+    ? `[CUSTOMISE THIS WORKING TEMPLATE — THE USER'S OWN WORDS COME FIRST] This workspace was just pre-seeded with NavBharatAI's tested "${golden.label}" ${golden.tier === 'pro' ? 'foundation' : 'app'}; its template files are prepared in this workspace. `
       + `The user tapped that suggestion AND added, in their own words: «${added.slice(0, 600)}». That addition is the real request: change the template's content, sections, data, labels and language to match it exactly `
       + `(the exam, subjects, level and the language of the questions they named) — wherever it differs from the suggestion text below, the user's addition wins. `
       + `READ src/App.tsx first and edit it in place (read the exact region before each edit_file; write_file a file you replace whole), and never start over. `
@@ -341,14 +341,14 @@ export function goldenBuildPrompt(golden: GoldenScaffold, buildPrompt: string, e
   }
   const head = customise + (golden.tier === 'pro'
     ? `[EXTEND THIS WORKING FOUNDATION — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested "${golden.label}" foundation. ` +
-      `It already compiles and runs: src/lib/ui.tsx holds the shared components (Shell, Card, StatTile, Badge, Button, Field, Select, Modal, Empty), ` +
+      `The tested foundation includes these files: src/lib/ui.tsx holds the shared components (Shell, Card, StatTile, Badge, Button, Field, Select, Modal, Empty), ` +
       `src/lib/store.ts holds persistent state (useCollection, inr, shortDate), and src/App.tsx has the working screens. ` +
       `READ all three FIRST. It is a STARTING POINT, not the finished app — BUILD OUT everything the request below asks for that is not there yet, ` +
       `reusing those existing components and the useCollection pattern rather than inventing a second set. Add new screens as their own files under src/. ` +
       `Do NOT rewrite what already works, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.`
     : `[VERIFY & FINISH — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested, working "${golden.label}" app template. ` +
-      `It already compiles cleanly and fully implements the request below. READ src/App.tsx first. If the request matches the template (it should — the prompt is the template's own), ` +
-      `make NO edits unless tsc fails or the request asks for something the template does not do — a finished template needs no polish, and every edit is a chance to break it. The live preview has ALREADY been started by the platform. Before any edit_file, read_file the exact region you will change (one read of src/App.tsx, not fragments) — never edit text you have not read. Otherwise run the type check and finish. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists. ` +
+      `This tested template is the starting point for the request below. READ src/App.tsx first. If the request matches the template (it should — the prompt is the template's own), ` +
+      `make NO edits unless tsc fails or the request asks for something the template does not do — a finished template needs no polish, and every edit is a chance to break it. Preparing template files does not by itself confirm that the live preview has started or rendered. Before any edit_file, read_file the exact region you will change (one read of src/App.tsx, not fragments) — never edit text you have not read. Otherwise run the type check and finish. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists. ` +
       // Autopsy 8257ca59: a polish step replaced the template's working light/dark switch with a
       // hand-rolled one that set a class no stylesheet styles, and a repair pass had to put it back.
       KEEP_THE_SWITCH);

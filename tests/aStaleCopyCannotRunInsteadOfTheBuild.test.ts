@@ -192,7 +192,7 @@ describe('a heal the evaluate tool tries on a green app is refused AND named (th
 describe('the wiring', () => {
   const ROUTE = read('src/server/routes/agentv3.ts');
   it('the route arms the guard with what this build wrote, and shares it with sub-agents', () => {
-    expect(ROUTE).toMatch(/dispatcher\.armShadowTwins\(\(\) => modelAuthoredPaths\(writtenFiles\)\)/);
+    expect(ROUTE).toMatch(/dispatcher\.armShadowTwins\(\(\) => writtenFiles\.keys\(\)\)/);
     expect(ROUTE).toMatch(/shadowTwins: \(\) => dispatcherForSubAgents\?\.sharedShadowTwins\(\)/);
     expect(read('src/server/AgentV3/SubAgent.ts')).toMatch(/childDispatcher\.shareShadowTwins\(sharedTwins\)/);
   });

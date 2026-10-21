@@ -100,7 +100,7 @@ describe('1 · the fast lane hands off when told its engine now reasons before e
 describe('2 · when the scope analyzer and the complexity router disagree, the dearer one no longer wins by default', () => {
   it('a famous name USED in a small app, scored simple, stands the planner down', () => {
     // A prompt the tool-mention fix does not catch — the name stands alone — but the other two facts do.
-    const scope = analyzeAppScope('ek quiz app banao, instagram, jisme mere sawal ho');
+    const scope = analyzeAppScope('ek quiz app banao, instagram jaisa, jisme mere sawal ho');
     expect(scope.decision).toBe('analyze');
     expect(scope.famousApp).toBe('Instagram');
     expect(scope.smallHint).toBe(true);
@@ -109,7 +109,7 @@ describe('2 · when the scope analyzer and the complexity router disagree, the d
     expect(reason).toMatch(/used, not cloned/);
   });
   it('🔒 the dispute is NARROW: a complex score, heavy infra, a feature list or no small noun all keep the roadmap', () => {
-    const smallName = analyzeAppScope('ek quiz app banao, instagram, jisme mere sawal ho');
+    const smallName = analyzeAppScope('ek quiz app banao, instagram jaisa, jisme mere sawal ho');
     expect(scopeDispute(smallName, { complex: true })).toBeNull();
     expect(scopeDispute(analyzeAppScope('pubg banao'), { complex: false })).toBeNull(); // no small hint
     expect(scopeDispute(analyzeAppScope('instagram jaisa app with real-time chat between users'), { complex: false })).toBeNull(); // heavy infra

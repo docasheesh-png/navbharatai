@@ -41,11 +41,16 @@ describe('Weak scope preflight', () => {
 
 describe('Weak two-coder policy', () => {
   it('has no automatic flagship or Claude chain by default', () => {
-    expect(tierLadder('weak', { AGENTV3_WEAK_SCOPE_POLICY: 'on' }).rungs.map(r => r.model)).toEqual(['glm-4.7-flashx', 'kimi-k2.7-code']);
+    expect(tierLadder('weak', { AGENTV3_WEAK_SCOPE_POLICY: 'on' }).rungs.map(r => r.model)).toEqual(['glm-4.7-flashx', 'kimi-k2.7-code', 'glm-5.3']); // + the thinking GLM, admin 2026-10-21
   });
   it('uses the capable coder for a complex plan and cheap opener for simple plans', () => {
-    expect(planLadder('weak', { AGENTV3_WEAK_SCOPE_POLICY: 'on' }, true).map(r => r.model)).toEqual(['kimi-k2.7-code']);
+    expect(planLadder('weak', { AGENTV3_WEAK_SCOPE_POLICY: 'on' }, true).map(r => r.model)).toEqual(['kimi-k2.7-code', 'glm-5.3']);
     expect(planLadder('weak', { AGENTV3_WEAK_SCOPE_POLICY: 'on' })[0].model).toBe('glm-4.7-flashx');
+  });
+  it('the thinking GLM sits BEHIND Kimi, and neither Haiku nor Nemotron joins the free policy ladder', () => {
+    const rungs = tierLadder('weak', { AGENTV3_WEAK_SCOPE_POLICY: 'on' }).rungs;
+    expect(rungs.map((r) => r.provider)).toEqual(['GLM', 'KIMI', 'GLM']);
+    expect(rungs.some((r) => r.provider === 'CLAUDE_HAIKU' || r.provider === 'NEMOTRON')).toBe(false);
   });
   it('does not change Normal or Strong planning when scope is complex', () => {
     for (const tier of ['off', 'mini']) expect(planLadder(tier, {}, true)).toEqual(planLadder(tier, {}));
@@ -57,12 +62,13 @@ import { readFileSync } from 'node:fs';
 describe('rollout and measured cost guard', () => {
   it('leaves the current policy available for comparison and rollback', () => {
     expect(tierLadder('weak', {}).rungs).toHaveLength(5);
-    expect(tierLadder('weak', { AGENTV3_WEAK_SCOPE_POLICY: 'on' }).rungs).toHaveLength(2);
+    // 2 → 3 on 2026-10-21 (admin: add the thinking GLM to the free ladder).
+    expect(tierLadder('weak', { AGENTV3_WEAK_SCOPE_POLICY: 'on' }).rungs.map((r) => r.model)).toEqual(['glm-4.7-flashx', 'kimi-k2.7-code', 'glm-5.3']);
   });
   it('does not restore the long chain on a malformed experiment override', () => {
     const parsed = tierLadder('weak', { AGENTV3_WEAK_SCOPE_POLICY: 'on', AGENTV3_LADDER_WEAK: 'TYPO:bad-model' });
     expect(parsed.rejected).toBeTruthy();
-    expect(parsed.rungs.map(r => r.model)).toEqual(['glm-4.7-flashx', 'kimi-k2.7-code']);
+    expect(parsed.rungs.map(r => r.model)).toEqual(['glm-4.7-flashx', 'kimi-k2.7-code', 'glm-5.3']);
   });
   it('respects explicit admin experiment ladders', () => {
     expect(tierLadder('weak', { AGENTV3_WEAK_SCOPE_POLICY: 'on', AGENTV3_LADDER_WEAK: 'HAIKU' }).rungs[0].provider).toBe('CLAUDE_HAIKU');

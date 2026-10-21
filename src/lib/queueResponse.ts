@@ -1,4 +1,5 @@
 /** An acknowledged queue response. Invalid/truncated JSON is an unknown durable outcome. */
+import { validQueueContinuation, type QueueContinuationState } from './queueContinuation';
 export interface QueueResponseItem {
   id: string;
   prompt: string;
@@ -7,6 +8,7 @@ export interface QueueResponseItem {
   createdTs: number;
   note?: string;
   claimToken?: string;
+  continuation?: QueueContinuationState;
 }
 function validItem(value: unknown): value is QueueResponseItem {
   const item = value as QueueResponseItem;
@@ -14,7 +16,8 @@ function validItem(value: unknown): value is QueueResponseItem {
     && ['user', 'planner', 'advisor'].includes(item.source)
     && ['pending', 'running', 'done', 'failed', 'cancelled'].includes(item.status)
     && typeof item.createdTs === 'number' && Number.isFinite(item.createdTs)
-    && (item.claimToken === undefined || typeof item.claimToken === 'string');
+    && (item.claimToken === undefined || typeof item.claimToken === 'string')
+    && (item.continuation === undefined || validQueueContinuation(item.continuation));
 }
 export function confirmedQueueResponse(value: unknown): { items: QueueResponseItem[]; paused: boolean } {
   const body = value as { items?: unknown; paused?: unknown };

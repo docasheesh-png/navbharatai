@@ -4413,7 +4413,7 @@ price is not. Recorded as a queue row, not done here.
 
 ### `AGENTV3_WEAK_SCOPE_POLICY` — candidate Weak scope and two-coder policy (2026-10-20)
 
-Explicit `on` enables one bounded preflight, a two-model default ladder, complex Kimi planning, one shared text-repair allowance, and no whole-build empty-result retry. Off/unset preserves existing policy for comparison/rollback. Imports retain their separate inspection pipeline. `AGENTV3_LADDER_WEAK` remains the admin's deliberate experiment override. See `docs/weak-tier-policy-comparison.md` for scope and limitations.
+Explicit `on` enables one bounded preflight, a three-rung default ladder (GLM `glm-4.7-flashx` → KIMI `kimi-k2.7-code` → GLM `glm-5.3`; the third rung added by the admin 2026-10-21 — it was two when the policy shipped), complex Kimi planning, one shared text-repair allowance, and no whole-build empty-result retry. Off/unset preserves existing policy for comparison/rollback. Imports retain their separate inspection pipeline. `AGENTV3_LADDER_WEAK` remains the admin's deliberate experiment override. See `docs/weak-tier-policy-comparison.md` for scope and limitations.
 
 ### `AGENTV3_WEAK_BUILD_COST_CEILING_USD`
 

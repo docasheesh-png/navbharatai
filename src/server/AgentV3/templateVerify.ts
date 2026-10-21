@@ -98,7 +98,7 @@ export async function settleVerbatimTemplate(input: {
       return { deliver: false, summary: '' };
     }
     await input.startPreview();
-    const summary = 'Your app is NavBharatAI\'s tested template for this request. It is already on the preview — nothing else was generated.';
+    const summary = 'NavBharatAI\'s tested template files are prepared for this request and passed the syntax check. No additional app code was generated.';
     input.narrate(summary);
     input.record({ severity: 'info', code: 'GOLDEN_SCAFFOLD', message: summary });
     return { deliver: true, summary };

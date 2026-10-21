@@ -69,8 +69,13 @@ export function createSharedAdminGuard(store: SharedGuardStore | null, secret: s
       if (ceiling > 0) {
         const idx = Math.floor(now / GLOBAL_WINDOW_MS);
         const fails = await safe(store.readGlobalFails(idx), 0);
-        if (fails >= ceiling && !(await safe(store.isKnownAddress(key, now), false))) {
-          return { locked: true, retryAfterMs: (idx + 1) * GLOBAL_WINDOW_MS - now, reason: 'global' };
+        if (fails >= ceiling) {
+          // A failed exemption lookup is UNKNOWN, not proof of a foreign address. Fail open on that
+          // partial store failure too; confirmed per-address locks above and the local guards remain.
+          const known = await safe<boolean | null>(store.isKnownAddress(key, now), null);
+          if (known === false) {
+            return { locked: true, retryAfterMs: (idx + 1) * GLOBAL_WINDOW_MS - now, reason: 'global' };
+          }
         }
       }
       return { locked: false, retryAfterMs: 0 };

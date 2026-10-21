@@ -123,7 +123,7 @@ describe('the web app\'s own install icon is the same mark', () => {
 
 describe('a framework\'s default favicon never survives in a generated web app', () => {
   const page = (link: string) => `<!doctype html><html><head><meta charset="UTF-8">${link}<title>Chai Shop</title></head><body><div id="root"></div></body></html>`;
-  it.each(['/vite.svg', '/react.svg', '/favicon.ico', 'capacitor.png'])('%s is replaced with the app\'s own icon', (href) => {
+  it.each(['/vite.svg', '/react.svg', 'capacitor.png', '/vite.svg?v=2', '/react.svg#logo'])('%s is replaced with the app\'s own icon', (href) => {
     const r = planAppDefaults(page(`<link rel="icon" type="image/svg+xml" href="${href}" />`), 'Chai Shop');
     expect(r.indexHtml).toContain('href="/icon.svg"');
     expect(r.indexHtml).not.toContain(href);
@@ -132,6 +132,12 @@ describe('a framework\'s default favicon never survives in a generated web app',
   it('an app\'s OWN icon link is left alone', () => {
     const r = planAppDefaults(page('<link rel="icon" href="/my-logo.png" />'), 'Chai Shop');
     expect(r.indexHtml).toContain('href="/my-logo.png"'); expect(r.indexHtml).not.toContain('href="/icon.svg"');
+  });
+  it.each(['/favicon.ico', '/favicon.png', '/favicon.svg', 'favicon.ico', './favicon.png', '/assets/favicon.ico', '/favicon.ico?v=2', '/favicon.svg#brand'])('preserves the owner icon %s: a conventional filename is not proof of a framework asset', (href) => {
+    const r = planAppDefaults(page(`<link rel="icon" href="${href}" />`), 'Chai Shop');
+    expect(r.indexHtml).toContain(`href="${href}"`);
+    expect(r.indexHtml).not.toContain('href="/icon.svg"');
+    expect(r.added).not.toContain('icon link (replaced a framework default)');
   });
   it('a page with no icon link gets the app\'s mark', () => {
     expect(planAppDefaults(page(''), 'Chai Shop').indexHtml).toContain('href="/icon.svg"');

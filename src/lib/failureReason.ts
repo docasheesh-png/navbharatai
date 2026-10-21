@@ -94,6 +94,8 @@ export const NO_ROOT_CAUSE_REASON: FailureReason = Object.freeze({
  * reappearing as "Other".
  */
 export const OUTCOME_REASONS: Readonly<Record<string, FailureReason>> = {
+  OUTCOME_INITIAL_DECLINED: { key: 'initial-declined', label: 'The initial build lane declined; its answer was preserved without building' },
+  OUTCOME_FINALIZATION_FAILED: { key: 'finalization-failed', label: 'The engine failed while finalizing the initial answer' },
   OUTCOME_BUILD_TIMEOUT: { key: 'timeout', label: 'Ran out of time before the app was finished' },
   OUTCOME_STOPPED: { key: 'stopped', label: 'The run ended before it finished' },
   OUTCOME_SYNTAX_ERROR: { key: 'syntax-error', label: 'The generated code did not parse' },

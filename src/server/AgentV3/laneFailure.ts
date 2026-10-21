@@ -19,13 +19,16 @@
 // absolute rules both forbid, and which is worse than the failure itself.
 //
 // ── THE DISTINCTION THE PLATFORM WAS MISSING ─────────────────────────────────────────────────────
-// A lane can fail two completely different ways, and almost everything downstream should branch on
-// which one it was:
+// A lane's failure reason must distinguish provider trouble, our own deadline, and unusable content:
 //
 //   • PROVIDER-DEGRADED — a timeout, a rate limit, an exhausted fallback chain. The model never got
 //     to answer, or answered too late to be used. Nothing about the APP caused this, so a second
 //     lane on the same sick provider is not a retry — it is the same failure at full price. And no
 //     amount of the user's money makes our provider faster.
+//
+//   • OWN-DEADLINE — our budget ended the call. This may be a step cap, not the whole build's clock;
+//     it proves neither provider degradation nor that the app needs a stronger engine. The caller's
+//     independent stop and fallback-admission gates still decide whether another lane may run.
 //
 //   • CONTENT — the model answered and the answer was unusable: a manifest too small, output that
 //     would not parse, a file set that cannot build. THIS is where a stronger engine genuinely
@@ -33,7 +36,9 @@
 //
 // PURE — no clock, no I/O, no env.
 
-export type LaneFailureKind = 'provider-degraded' | 'content' | 'unknown';
+import { isBudgetEndedError } from './turnDeadline';
+
+export type LaneFailureKind = 'provider-degraded' | 'own-deadline' | 'content' | 'unknown';
 
 /**
  * Signatures of a provider that did not answer, as they appear in the reasons lanes actually record.
@@ -77,18 +82,31 @@ const CONTENT_MARKERS = [
   'nothing parseable',
 ];
 
+// MultiProviderTurnRunner's exact envelope, after the classifier's existing normalization.
+// Its "no provider failed" negation is not provider evidence, but the inner reason may still be.
+const OWN_DEADLINE_ENVELOPE_PREFIX = 'the time allowed for this step ran out before it could finish (';
+const OWN_DEADLINE_ENVELOPE_SUFFIX = '). no provider failed — the work was stopped by our own deadline.';
+
 /**
  * Classify a lane's failure reason.
  *
  * ⚠️ ORDER MATTERS AND IS DELIBERATE: degraded is checked FIRST. A reason can carry both ("plan
  * timed out — no files"), and in that pairing the timeout is the cause and the emptiness is its
  * symptom. Reading it the other way round is exactly how a provider outage gets reported to a user
- * as their app being too hard.
+ * as their app being too hard. Our known budget markers also precede content: a deadline ending
+ * with no files does not establish that the model's answer was unusable.
  */
 export function classifyLaneFailure(reason: string | null | undefined): LaneFailureKind {
-  const r = String(reason ?? '').toLowerCase().trim();
+  let r = String(reason ?? '').toLowerCase().trim();
   if (!r) return 'unknown';
+  if (r.startsWith(OWN_DEADLINE_ENVELOPE_PREFIX) && r.endsWith(OWN_DEADLINE_ENVELOPE_SUFFIX)) {
+    const innerReason = r.slice(OWN_DEADLINE_ENVELOPE_PREFIX.length, -OWN_DEADLINE_ENVELOPE_SUFFIX.length);
+    // Strip once, and only for a recognized own-budget reason. Keep every inner provider marker;
+    // malformed, unknown and nested envelopes must not gain a broad negation exception.
+    if (isBudgetEndedError(innerReason)) r = innerReason;
+  }
   if (DEGRADED_MARKERS.some((m) => r.includes(m))) return 'provider-degraded';
+  if (isBudgetEndedError(r)) return 'own-deadline';
   if (CONTENT_MARKERS.some((m) => r.includes(m))) return 'content';
   return 'unknown';
 }

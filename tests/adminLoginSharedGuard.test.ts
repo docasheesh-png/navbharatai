@@ -76,6 +76,18 @@ describe('it can never be the thing that blocks a real admin', () => {
     await expect(g.recordFail('1.2.3.4', T0)).resolves.toBeUndefined();
     expect((await g.check('1.2.3.4', T0)).locked).toBe(false);
   });
+  it('FAIL-OPEN when only the known-address lookup fails during an attack', async () => {
+    const store = memoryStore();
+    const g = createSharedAdminGuard(store, 's');
+    await g.recordSuccess('192.0.2.77', T0);
+    for (let i = 0; i < 30; i++) await g.recordFail(`198.51.100.${i}`, T0 + i);
+    // The global count is readable, but the exemption lookup has a transient failure.
+    store.isKnownAddress = async () => { throw new Error('known-address read unavailable'); };
+    expect((await g.check('192.0.2.77', T0 + 100)).locked).toBe(false);
+    // The unavailable exemption does not disable a confirmed per-address lockout.
+    for (let i = 0; i < 10; i++) await g.recordFail('203.0.113.9', T0 + i);
+    expect(await g.check('203.0.113.9', T0 + 100)).toMatchObject({ locked: true, reason: 'address' });
+  });
   it('no store at all (a dev machine) does nothing', async () => {
     const g = createSharedAdminGuard(null, 's');
     await g.recordFail('1.2.3.4', T0);

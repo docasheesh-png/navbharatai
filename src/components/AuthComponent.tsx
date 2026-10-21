@@ -33,6 +33,11 @@ import {
 import { normalizeReferralCodeClient } from '../lib/referralCodeClient';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { cn } from '../lib/utils';
+import { LEGAL_META } from '../content/legal/meta';
+import { openExternalUrl, isNativeApp } from '../lib/mobileNative';
+import {
+  ACCEPTANCE_REFUSAL, PRIVACY_URL, TERMS_URL, buildPendingAcceptance, holdAcceptance,
+} from '../lib/signupAcceptance';
 import { firebaseConfig } from '../config/firebase';
 import { signOutEverywhere } from '../lib/firebase';
 import { markRedirectStarted } from '../lib/redirectSignInMarker';
@@ -242,6 +247,28 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   const [isOtpSent, setIsOtpSent] = useState(false);
   const [isOtpVerified, setIsOtpVerified] = useState(false);
   const [isLogin, setIsLogin] = useState(true);
+  // "I am 18 or older, and I agree to the Terms of Service and Privacy Policy" — ONE box (see signupAcceptance.ts for
+  // why one and not two). Unticked on every open on purpose: a remembered tick would be agreement nobody gave today.
+  const [accepted, setAccepted] = useState(false);
+  const termsVersion = LEGAL_META.find((m) => m.id === 'legal_terms')?.updated ?? '';
+  const privacyVersion = LEGAL_META.find((m) => m.id === 'legal_privacy')?.updated ?? '';
+  /**
+   * The gate every action that signs somebody in, or sends them a sign-in code, passes through FIRST. With the box
+   * ticked it holds the evidence (versions + time) to be recorded against the account the moment one is signed in;
+   * without it, it refuses in words. The buttons are also disabled while unticked — this is the net under the
+   * Enter key and under any path that forgot to.
+   */
+  const requireAcceptance = (): boolean => {
+    if (!accepted) {
+      setSuccessMessage('');
+      setError(ACCEPTANCE_REFUSAL);
+      return false;
+    }
+    let store: Storage | null = null;
+    try { store = window.localStorage; } catch { /* private mode: the tick still counts for this sign-in */ }
+    holdAcceptance(store, buildPendingAcceptance(termsVersion, privacyVersion, Date.now()));
+    return true;
+  };
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
@@ -317,6 +344,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   };
 
   const handleSendOtp = async () => {
+    if (!requireAcceptance()) return;
     // ONE normaliser, shared with the server (src/lib/phoneNumber.ts). This used to be four lines of
     // the same rule written here, and the server was about to need it too — two copies of "10 digits
     // means +91" drift silently, and when they do the client sends one number while the server looks
@@ -490,6 +518,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     // Using the code a second time can only fail, so a tap here stands down instead of competing.
     if (otpClaim.current === 'done') { onClose(); return; }
     if (otpClaim.current === 'working') return;
+    if (!requireAcceptance()) return;
     setLoading(true);
     otpClaim.current = 'working';
     try {
@@ -542,6 +571,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       return; // OTP sent but not fully typed — Enter must never fall through to the email path
     }
 
+    if (!requireAcceptance()) return;
     setError('');
     setLoading(true);
     try {
@@ -807,6 +837,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   };
 
   const handleGoogleSignIn = async () => {
+    if (!requireAcceptance()) return;
     setError('');
     setLoading(true);
     const provider = new GoogleAuthProvider();
@@ -828,6 +859,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   };
 
   const handleAppleSignIn = async () => {
+    if (!requireAcceptance()) return;
     setError('');
     setLoading(true);
     // Apple is a Firebase OAuthProvider ('apple.com'). On native iOS the socialSignIn helper routes
@@ -863,6 +895,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   };
 
   const handleGithubSignIn = async () => {
+    if (!requireAcceptance()) return;
     setError('');
     setLoading(true);
     const provider = new GithubAuthProvider();
@@ -1053,6 +1086,51 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             </div>
           )}
 
+          {/* THE ONE CHECKBOX (admin 2026-10-21): age and agreement in one plain sentence, above every way in.
+              The two links open in a NEW tab (or the phone's own browser) so the form is never lost; they are
+              absolute addresses because a relative /terms in the bundled app means https://localhost/terms. */}
+          <div className="rounded-2xl border border-line bg-surface p-4">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={accepted}
+                onChange={(e) => {
+                  setAccepted(e.target.checked);
+                  if (e.target.checked) setError((cur) => (cur === ACCEPTANCE_REFUSAL ? '' : cur));
+                }}
+                aria-describedby="nb-accept-hint"
+                style={{ accentColor: 'var(--accent)' }}
+                className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer"
+              />
+              <span className="text-[12px] font-semibold leading-relaxed text-body">
+                I am 18 years or older, and I agree to the{' '}
+                <a
+                  href={TERMS_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => { e.stopPropagation(); if (isNativeApp()) { e.preventDefault(); openExternalUrl(TERMS_URL); } }}
+                  className="font-bold text-accent-text underline underline-offset-2"
+                >
+                  Terms of Service
+                </a>{' '}
+                and{' '}
+                <a
+                  href={PRIVACY_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => { e.stopPropagation(); if (isNativeApp()) { e.preventDefault(); openExternalUrl(PRIVACY_URL); } }}
+                  className="font-bold text-accent-text underline underline-offset-2"
+                >
+                  Privacy Policy
+                </a>
+                .
+              </span>
+            </label>
+            <p id="nb-accept-hint" className="mt-2 pl-8 text-[10px] font-semibold text-muted">
+              {accepted ? 'Thank you. You can continue below.' : 'Tick the box to continue.'}
+            </p>
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-4">
             {isLogin && authMethod === 'phone' ? (
               <div className="space-y-4">
@@ -1070,7 +1148,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                     <button 
                       type="button"
                       onClick={handleSendOtp}
-                      disabled={otpSending || otpCooldown > 0}
+                      disabled={otpSending || otpCooldown > 0 || !accepted}
                       className={cn(
                         "px-4 rounded-2xl text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-all flex items-center justify-center gap-1.5 min-w-[124px]",
                         otpSending || otpCooldown > 0
@@ -1190,7 +1268,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                           <button 
                             type="button"
                             onClick={handleSendOtp}
-                            disabled={otpSending || otpCooldown > 0}
+                            disabled={otpSending || otpCooldown > 0 || !accepted}
                             className={cn(
                               "px-4 rounded-2xl text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-all flex items-center justify-center gap-1.5 min-w-[124px]",
                               otpSending || otpCooldown > 0
@@ -1249,7 +1327,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
 
                 <button 
                   type="submit" 
-                  disabled={loading || (!isLogin && mobile.trim().length > 0 && !isOtpVerified)}
+                  disabled={loading || !accepted || (!isLogin && mobile.trim().length > 0 && !isOtpVerified)}
                   className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-20 text-on-accent rounded-2xl font-black uppercase tracking-[0.3em] transition-all shadow-2xl active:scale-95 flex items-center justify-center gap-3"
                 >
                   {loading ? (
@@ -1286,7 +1364,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             <button
               type="button"
               onClick={handleGoogleSignIn}
-              disabled={loading}
+              disabled={loading || !accepted}
               className="w-full py-4 bg-white hover:bg-gray-100 disabled:opacity-50 text-gray-900 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"/></svg>
@@ -1300,7 +1378,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             <button
               type="button"
               onClick={handleAppleSignIn}
-              disabled={loading}
+              disabled={loading || !accepted}
               // Force white text + icon inline so the label is readable no matter what theme/global CSS is
               // applied around the modal (the button rendered with dark, unreadable text otherwise).
               style={{ color: '#ffffff' }}
@@ -1313,7 +1391,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             <button
               type="button"
               onClick={handleGithubSignIn}
-              disabled={loading}
+              disabled={loading || !accepted}
               // Lighter GitHub grey + forced white text/icon so the label reads clearly (was too dark).
               style={{ color: '#ffffff' }}
               className="w-full py-4 bg-raised hover:bg-[#3a4048] disabled:opacity-50 text-on-accent border border-line rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"

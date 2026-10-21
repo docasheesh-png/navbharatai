@@ -9,6 +9,7 @@
 
 import { PLACEHOLDER_TITLE } from './appDisplayName';
 import { chooseMark, markSvg } from '../../lib/brandMark';
+import { FRAMEWORK_ICON_PATH } from '../../lib/frameworkIcon';
 import {
   nativeFeelEnabled, nativeFeelHeadTags, nativeFeelLinkTag, nativeFeelStylesheet, NATIVE_FEEL_HREF,
   withViewportFitCover, hasNativeFeel,
@@ -26,8 +27,6 @@ export interface AppDefaultsResult {
 const MANIFEST_HREF = '/manifest.webmanifest';
 const ICON_HREF = '/icon.svg';
 const SW_HREF = '/sw.js';
-/** The favicons frameworks and Capacitor ship by default — never an app's own. */
-const GENERIC_FAVICON = /(^|\/)(vite|react|vue|svelte|angular|capacitor|favicon)\.(svg|png|ico)$/i;
 
 function manifestJson(appName: string, shortName?: string): string {
   return JSON.stringify(
@@ -295,7 +294,7 @@ export function planAppDefaults(
   // `<link rel="icon" href="/vite.svg">`, and an `ensures` presence test would keep it; it is replaced with the app's own mark.
   const iconLink = html.match(/<link\b[^>]*\brel=["'](?:shortcut )?icon["'][^>]*>/i);
   const iconHref = iconLink ? /href=["']([^"']*)["']/i.exec(iconLink[0]) : null;
-  if (iconLink && iconHref && GENERIC_FAVICON.test(iconHref[1])) {
+  if (iconLink && iconHref && FRAMEWORK_ICON_PATH.test(iconHref[1])) {
     html = html.replace(iconLink[0], `<link rel="icon" href="${ICON_HREF}" type="image/svg+xml" />`);
     added.push('icon link (replaced a framework default)');
   }

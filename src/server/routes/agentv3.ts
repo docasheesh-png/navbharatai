@@ -622,6 +622,7 @@ import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshSt
 import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
 import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, engineTimeDominated, type WasteKind } from '../AgentV3/providerWaste';
 import { readTurnAnswer, answeredWithoutBuilding, modelsOwnWords } from '../AgentV3/turnAnswer';
+import type { InitialLaneDecline } from '../AgentV3/initialLaneDecline';
 import { assessBuildInput, shouldAskWhatToBuild } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
@@ -3454,8 +3455,8 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
   // 🔴 A PLANNING CALL CLIMBS THE PLAN LADDER, NOT THE BUILD'S (autopsy SignBridge, 2026-09-26). A plan is
   // ONE structured answer; `complex` exists to open a whole BUILD on a stronger coder, and on Weak that
   // coder always reasons first. The Project Mode planner took the complex build chain, opened on
-  // kimi-k2.7-code, then glm-5.3 — both spent their full 12,000-token allowance thinking and wrote
-  // nothing, and the planner's clock ran out at 315s: 22% of the build, for no plan. The fast lane had
+  // kimi-k2.7-code, then glm-5.3 — both were authorised 12,000 output tokens but returned reasoning
+  // without a plan, and the planner's clock ran out at 315s: 22% of the build, for no plan. The fast lane had
   // already learned this (fastLaneRung.ts skips a reasoning opener); the planners were the sibling.
   // `planLadder` puts the tier's plan rung first (a rung that can be told not to think) and keeps the
   // tier's own ladder behind it, so nothing another tier forbids can be reached.
@@ -14015,8 +14016,11 @@ async function noteBuildOutcome(
       // Fix 37a (admin: "app kitni baar fail hui yeh bhi likho"): stamp how many earlier builds in
       // THIS workspace's durable history ended not-ok, so a repeat failure is visible in every
       // report instead of each report looking like a first attempt. Best-effort, non-blocking.
-      void listDiagnosticsHistory(workspaceId, 50)
-        .then((h) => {
+      void listDiagnosticsHistoryResult(workspaceId, 50)
+        .then(({ entries: h, ok }) => {
+          // The array-only API collapses a failed read into []; that is UNKNOWN, not zero failures
+          // or a known first-turn session. Only a successful read may seed either report field.
+          if (!ok) return;
           // A build the user STOPPED did not fail (build b4745cb1 counted one as a prior failure).
           buildDiag.setPriorFailedBuilds(h.filter((e) => e.ok === false && !isUserStoppedBuild(e)).length);
           // THE SESSION, not just this turn (admin 2026-08-06). Two complaints, one root cause: a
@@ -18136,6 +18140,8 @@ async function noteBuildOutcome(
       // the objective gate (build completed?) fails — the last tier is always delivered as a
       // best-effort backstop, so the build never "breaks". `deliveredTier` feeds telemetry.
       let result: Awaited<ReturnType<typeof runner.run>> | undefined;
+      // Stable evidence from an initial lane, not inferred again after maintenance could write files.
+      let initialTerminalDecline = false;
       let deliveredTier: StartTier = analysis?.startTier ?? (pinnedOpus ? 'opus' : onlyOpus ? 'sonnet' : 'gemini');
       // T1-escalation-on — how many ladder escalations this build actually performed (0 = first tier
       // delivered). Set by the escalation lane below; feeds the canary-measurement telemetry.
@@ -18930,6 +18936,16 @@ async function noteBuildOutcome(
           fastLaneGated = typecheckRan;
         };
 
+        const settleInitialDecline = (decline: InitialLaneDecline | undefined): boolean => {
+          if (!decline || abort.signal.aborted) return false;
+          initialTerminalDecline = true;
+          result = { ok: false, summary: decline.modelAnswer, modelAnswer: decline.modelAnswer,
+            steps: 0, usage: osUsage, billedUsd: billedAmountUsd(osUsage, powerLevelReqEffective) };
+          // No successor owns this lane's files. Revoke its lease without asserting build readiness.
+          laneFence.handoff();
+          return true;
+        };
+
         // 1) SIMPLE BUILDER (primary) — plan a file manifest, then generate EACH file in its own
         //    focused call. This beats the single-call OneShot's ~8k-token truncation that made
         //    multi-file apps produce "no files" and drop into the slow agentic loop.
@@ -18962,7 +18978,7 @@ async function noteBuildOutcome(
           writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: weakCandidateActive(powerLevelReqEffective) ? 1 : 3,
           signal: abort.signal });
         // A STOP IS NOT A FALLBACK (autopsy 31254f9a): nothing is handed to the full builder after a Stop.
-        buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : sb.stopped ? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
+        buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : sb.stopped ? 'SIMPLE_BUILD_STOPPED' : sb.initialDecline ? 'SIMPLE_BUILD_DECLINED' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // The lane's FILE PLAN is not the plan of record once it hands off (autopsy de3bb2bb): the full builder
         // plans its own files, so "9 of 10 files written · ~1 min to go" at minute 4 counted against a list
         // nobody was following any more. Forget it; the architect's own plan steps drive the ETA from here.
@@ -19085,7 +19101,7 @@ async function noteBuildOutcome(
         }
         // HONESTY (rule 5): a lane we DECIDED not to run must say so, and say why. Silence here would
         // read in the report as "the one-shot was never eligible", which is a different fact.
-        if (!sb.ok && !sb.stopped && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
+        if (!sb.ok && !sb.stopped && !sb.initialDecline && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: oneShotSkipReason(sb) ?? 'Skipped the one-shot fast lane — going straight to the full builder.', autoResolved: true });
         }
         // 🔴 THE SECOND WAY THIS LANE WAS WASTED, and the one the file-count gate above cannot see
@@ -19098,13 +19114,15 @@ async function noteBuildOutcome(
         // The one-shot walks the SAME chain with the same stop, so it reached the same rung 12 ms later,
         // stopped again, and wrote a second "Model call failed" plus "One-shot could not generate the
         // app" — for a call that was never made.
-        else if (!sb.ok && !sb.stopped && classifyForOneShot(analysis?.startTier) && fastLaneReasoningRung) {
+        else if (!sb.ok && !sb.stopped && !sb.initialDecline && classifyForOneShot(analysis?.startTier) && fastLaneReasoningRung) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: `Skipped the one-shot fast lane: the fast lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer, and a one-shot on the same engine would stop at the same place. Going straight to the full builder.`, autoResolved: true, detail: sb.reason });
         }
-        else if (!sb.ok && !sb.stopped && classifyForOneShot(analysis?.startTier) && !anotherLaneWorthTrying(sb.reason)) {
+        else if (!sb.ok && !sb.stopped && !sb.initialDecline && classifyForOneShot(analysis?.startTier) && !anotherLaneWorthTrying(sb.reason)) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: 'Skipped the one-shot fast lane: the previous lane failed because the engine did not respond in time, not because of the app — a second lane on the same engine would fail the same way. Going straight to the full builder.', autoResolved: true, detail: sb.reason });
         }
-        if (sb.ok) {
+        if (settleInitialDecline(sb.initialDecline)) {
+          // The model answered without building; final accounting and answer handling still run.
+        } else if (sb.ok) {
           if (sb.typecheckRan === false) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'VERIFY_DID_NOT_RUN', message: 'The fast-lane type-check could not execute in the sandbox (after one retry) — the app shipped unverified; the agentic readiness gate stays ON.', autoResolved: false });
           }
@@ -19117,8 +19135,10 @@ async function noteBuildOutcome(
           //    report the manifest had planned 8 files, so "the manifest skips it" was already false,
           //    and this lane still ran for 150 seconds to fail at something a single call cannot do.
           const os = await runOneShot({ prompt: fastLaneRequest + requestNotesSuffix, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
-          buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
-          if (os.ok) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : os.initialDecline ? 'ONESHOT_DECLINED' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
+          if (settleInitialDecline(os.initialDecline)) {
+            // The sibling declined too; no full-runner retry or preview/repair is appropriate.
+          } else if (os.ok) {
             // VERIFY GATE for the one-shot lane too (autopsy 2026-07-07: a NowPlaying.tsx TRUNCATED
             // mid-JSX by max_tokens shipped as "built" — only the manifest lane had the tsc gate, the
             // one-shot secondary had NONE, and the workspace can also hold the failed manifest
@@ -19155,8 +19175,8 @@ async function noteBuildOutcome(
         // to it again (autopsy a38c6fef). This single line is what the whole fence exists for: it does
         // not matter which lane forgot to cancel itself, how its deadline was implemented, or whether a
         // future lane remembers to stop — after this, an abandoned lane's write is refused and said out
-        // loud. `result` being set means a fast lane SUCCEEDED and still owns the app, so we leave its
-        // lease alone: its own post-success repairs must keep working.
+        // loud. A successful result keeps its lease for post-success repairs. An initial decline has
+        // already revoked its lease in settleInitialDecline; it owns an answer, not an app.
         if (!result) laneFence.handoff();
         // C — BULLETPROOF PREVIEW: persist the produced files to the durable store SYNCHRONOUSLY the
         // moment the fast lane succeeds — not via the 3s debounce or the fire-and-forget end-of-flow
@@ -19498,7 +19518,7 @@ async function noteBuildOutcome(
       // so a failed todo app never silently spirals to $26. An honest error is emitted instead.
       const costAfterFirstAttempt = result.billedUsd;
       const capUsd = sessionCostCapUsd();
-      if (expectsArtifacts && builderWroteCount() === 0 && costAfterFirstAttempt > capUsd) {
+      if (!initialTerminalDecline && expectsArtifacts && builderWroteCount() === 0 && costAfterFirstAttempt > capUsd) {
         events.emit({
           type: 'narration', agent: 'architect',
           // "No files were produced" was false for a seeded build (a game kit is not counted as the builder's own,
@@ -20200,7 +20220,9 @@ async function noteBuildOutcome(
           return { players: projectAdServingPlayers(files), ownAds: projectOwnAdSdks(files) };
         } catch { return { players: [], ownAds: [] }; }
       };
-      try {
+      // An initial decline must not manufacture artifacts through deterministic maintenance.
+      // Keep the normal answer capture, release diagnostics and billing/finalization below.
+      if (!initialTerminalDecline) try {
         // FULL-WORKSPACE view for integrity (FitPulse autopsy 2026-07-17, hardened after the edit-build
         // re-test): `writtenFiles` holds only the files THIS build wrote. On an EDIT build that is 3-4
         // files — so the mixed-specifier check could not see the OTHER modules importing ThemeContext
@@ -22422,7 +22444,7 @@ async function noteBuildOutcome(
         }
       } catch { /* app-scaffold defaults are best-effort — never affect the build result */ }
       };
-      await applyFinishingPasses(result);
+      if (!initialTerminalDecline) await applyFinishingPasses(result);
       // POST-GREEN FINISHING RE-CHECK (owner item 2, finishingRecheck.ts): the passes above can write after
       // this build was already proven green. One look; only a CONCLUSIVE non-render rolls back exactly their
       // files to the last green snapshot. Kill switch AGENTV3_POST_GREEN_RECHECK=off.
@@ -25656,7 +25678,10 @@ async function noteBuildOutcome(
       if (result && result.ok === false) {
         try {
           if (!outcomeCodeOf(buildDiag.report().issues)) {
-            buildDiag.record({
+            buildDiag.record(initialTerminalDecline && !abort.signal.aborted ? {
+              phase: 'build', severity: 'info', code: 'OUTCOME_INITIAL_DECLINED', autoResolved: true,
+              message: 'Build outcome: DECLINED — an initial build lane declined to build and wrote no files. Its original answer was preserved, not retried.',
+            } : {
               phase: 'build', severity: 'error', code: 'OUTCOME_UNEXPLAINED', autoResolved: false,
               message: 'Build outcome: NOT OK — the run ended without an outcome code. The engine did not record why; this is not a fact about the app.',
             });
@@ -26530,13 +26555,12 @@ async function noteBuildOutcome(
           // both — when providers really were flaky, saying so is the more useful of the two truths.
           const misconfigured = !stopped && !refused && !degraded
             && providerFailuresLookMisconfigured(buildDiag.providerFailureBreakdown());
-          // (e) OUR OWN OUTPUT CEILING (build report ee20478d, 2026-09-15). The rungs ANSWERED — three
-          // times, inside their clock, HTTP 200 every time — and produced nothing, because the ceiling
-          // we authorise is spent on a reasoning model's thinking before any content exists. The user
-          // was told "the model replied without building" and asked to buy a stronger engine. A fuller
-          // wallet would have changed nothing: the ceiling is a constant of ours, identical on every
-          // tier. Grouped with (d) because it is the same KIND of fact — our configuration, not their
-          // service — and tested last only because the readings above are strictly more specific.
+          // (e) RECORDED OUTPUT STARVATION (build report ee20478d, 2026-09-15). At least one failure
+          // bucket says a turn returned no usable text or tool call while truncated or reasoning-only.
+          // This is enough to withhold a capability upsell, not proof that every rung answered, every
+          // granted token was consumed, or another tier would fail. Allowances can differ by caller,
+          // lane, effective cap and reasoning-unclamp policy. Preserve the existing configuration
+          // narration and precedence; this check does not diagnose the whole chain or invalid input.
           const starved = !stopped && !refused && !degraded && !misconfigured
             && buildStarvedItsOutputBudget(buildDiag.providerFailureBreakdown());
           if (!refused && !stopped && !interrupted && !answerOnlyNow()) {
@@ -26563,10 +26587,9 @@ async function noteBuildOutcome(
                 : refused
                 ? 'Did not ask this user to add credits: the engine DECLINED this request and wrote no files — a refusal, or an honest "this cannot be done here" (autopsy 707f8e56: an MP4 video asked of a web-app builder, declined with an HTML5-animation offer). `modelAnswer.declined` does not tell those apart, so neither is called a policy refusal. Either way it is an answer, not a shortfall a stronger engine would fix — no upsell.'
                 : starved
-                  // Deliberately NOT the "did not respond" wording below: it responded, inside its clock,
-                  // every time. Saying otherwise would send the next reader to a provider status page
-                  // when the number to change is ours (see floorBudget.ts).
-                  ? 'Did not ask this user to add credits: every rung ANSWERED and produced nothing, because our own output ceiling was spent before the answer began. A fuller wallet buys a different model, not a different ceiling — this build would have failed identically on the strongest engine we have.'
+                  // The predicate is existential: one recorded output-budget failure is enough.
+                  // Neither measured usage nor an all-rung or cross-tier outcome follows from it.
+                  ? 'Did not ask this user to add credits: at least one recorded failure was output starvation, a truncated or reasoning-only turn with no usable text or tool call. This evidence does not establish that every rung answered, that the full authorised allowance was consumed, or that a stronger engine would succeed or fail. It does not justify asking the user to pay for a capability upgrade.'
                   : 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
             });
           }
@@ -27537,6 +27560,15 @@ async function noteBuildOutcome(
       let crashReportForClient: unknown = undefined;
       try {
         buildDiagRef?.record({ phase: crash.phase, severity: 'error', code: crash.code, message: errMsg, autoResolved: false });
+        // A preserved initial answer cannot mask a later failure while finalizing that answer.
+        // All older outcomes keep their existing precedence; only this new informational one yields.
+        if (outcomeCodeOf(buildDiagRef?.report()?.issues ?? []) === 'OUTCOME_INITIAL_DECLINED') {
+          buildDiagRef?.record({
+            phase: crash.phase, severity: 'error', autoResolved: false,
+            code: crash.code === 'SANDBOX_RECOVERY_UNAVAILABLE' ? 'OUTCOME_SANDBOX_UNAVAILABLE' : 'OUTCOME_FINALIZATION_FAILED',
+            message: crash.summary,
+          });
+        }
         if (crash.code === 'BUILD_EXCEPTION') {
           try {
             if (!outcomeCodeOf(buildDiagRef?.report()?.issues ?? [])) {

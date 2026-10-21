@@ -59,8 +59,7 @@ Write in **English or Hindi** — both are read.
 
 | If you want to | Write to us with the subject | And please include |
 |---|---|---|
-| Ask for a **refund** | \`Refund\` | the order ID, or the date and amount (Billing → Invoice Records) |
-| Report a **payment problem** — money taken, credit not added, charged twice | \`Payment\` | the order ID(s) and the time it happened |
+| Report a **payment problem** — money taken but credit not added, a payment made twice, a charge you do not recognise | \`Payment\` | the order ID(s), or the date and amount (Billing → Invoice Records), and the time it happened |
 | Ask about **your account** — sign-in, balance, a build that went wrong | \`Support\` | the email address on the account |
 | **Delete your account** | \`Delete my account\` | nothing else — see [Account & data deletion](/delete-account) |
 | Make a **formal complaint** | \`Grievance\` | what happened, and what you want done |
@@ -72,7 +71,7 @@ The subject line is a convenience, not a condition. **An email with the wrong su
 ## How quickly we answer
 
 - **Ordinary questions:** we aim to reply within **2 working days**.
-- **Refunds:** a decision, with the reason, within **5 working days** — and where we approve one, the money leaves within **7 working days**. The full rules are in our [Refund & Cancellation Policy](/refund).
+- **Payment questions:** the outcome of our investigation, with the reason, within **5 working days** — and where credit is owed it is added to your wallet. Payments are final and non-refundable, and a correction is made in credit, never in money; the full rules are in our [Refund & Cancellation Policy](/refund).
 - **Formal complaints:** acknowledged within **${ACK_HOURS} hours** and resolved within **${RESOLVE_DAYS} days**, which are the timelines the Information Technology (Intermediary Guidelines) Rules, 2021 require of us. Our [Grievance Redressal](/grievance) page names the officer responsible and states your right to escalate.
 
 We do not run a telephone support line, and we would rather say so than publish a number nobody answers.

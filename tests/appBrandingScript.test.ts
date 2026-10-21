@@ -277,6 +277,22 @@ describe('branding script — iOS, PWA, and one source for all three', () => {
     expect(run('verify', 'pwa').out).toContain('generic framework icon');
   });
 
+  it('a real PNG called favicon.png is not rejected as a framework icon', () => {
+    project();
+    w('dist/favicon.png', solidPng(512, 512, 'owner-real-artwork'));
+    w('dist/manifest.webmanifest', JSON.stringify({ icons: [{ src: '/favicon.png', sizes: '512x512', type: 'image/png' }] }));
+    const result = run('verify', 'pwa');
+    expect(result.code).toBe(0);
+    expect(result.out).not.toContain('generic framework icon');
+  });
+
+  it.each(['/icons/owner.png?v=2', './icons/owner.png#brand', '/icons/owner.png?v=2#brand'])('verifies the file path, not the URL query or fragment: %s', (src) => {
+    project();
+    w('dist/icons/owner.png', solidPng(512, 512, 'owner-versioned-artwork'));
+    w('dist/manifest.webmanifest', JSON.stringify({ icons: [{ src, sizes: '512x512', type: 'image/png' }] }));
+    expect(run('verify', 'pwa').code).toBe(0);
+  });
+
   it('two different generated apps receive DISTINCT branding', () => {
     const outputs: string[][] = [];
     for (const [name, id] of [['Chai Shop', 'com.shop.chai'], ['Quran Reader', 'com.quran.reader']]) {
@@ -404,17 +420,28 @@ describe.skipIf(!SHARP_DIR)('the mark is drawn for real (needs the image library
       expect(html).toContain('href="/icons/nbai-192.png"'); expect(html).toContain('apple-touch-icon');
       expect(html).not.toContain('href="/icon.svg"');
     });
-    it('with NO logo chosen, the app\'s mark replaces a generic or generated icon — and the status says "the app\'s own mark"', () => {
-      setup('none', [{ src: '/vite.svg', sizes: 'any', type: 'image/svg+xml' }], { html: '<html><head><link rel="icon" href="/vite.svg"></head><body></body></html>' });
+    it.each(['/vite.svg', '/vite.svg?v=2', '/react.svg#logo'])('with NO logo chosen, replaces explicit framework icon %s', (src) => {
+      setup('none', [{ src, sizes: 'any', type: 'image/svg+xml' }], { html: `<html><head><link rel="icon" href="${src}"></head><body></body></html>` });
       run('pwa-apply');
       expect(manifestIcons()[0].src).toBe('/icons/nbai-192.png');
-      expect(r('index.html').toString()).not.toContain('vite.svg');
+      expect(r('index.html').toString()).not.toContain(src);
       expect(status().pwa).toContain("the app's own mark");
     });
     it('with NO logo chosen, an app\'s own real icons are LEFT ALONE', () => {
       setup('none', [{ src: '/logo.png', sizes: '64x64', type: 'image/png' }]);
       run('pwa-apply');
       expect(manifestIcons().map((i) => i.src)).toEqual(['/logo.png']);
+    });
+    it.each(['/favicon.png', 'favicon.png', './favicon.png', '/icons/favicon.png'])('without a chosen logo preserves real owner artwork named %s in the manifest and page', (src) => {
+      setup('none', [{ src, sizes: '512x512', type: 'image/png' }], { html: `<html><head><link rel="icon" href="${src}"></head><body></body></html>` });
+      const file = 'public/' + src.replace(/^\//, '');
+      w(file, solidPng(512, 512, 'owner-real-artwork'));
+      const before = sha(r(file));
+      expect(run('pwa-apply').code).toBe(0);
+      expect(manifestIcons().map((i) => i.src)).toEqual([src]);
+      expect(r('index.html').toString()).toContain(`href="${src}"`);
+      expect(sha(r(file))).toBe(before);
+      expect(run('verify', 'pwa').code).toBe(0);
     });
     it('nothing of the owner\'s is overwritten or removed: their own picture is byte-identical afterwards', () => {
       setup('user', [{ src: '/logo.png', sizes: '64x64', type: 'image/png' }]);

@@ -1,11 +1,20 @@
 // NavBharatAI — Terms of Service. Grounded in the real product: token wallet + tiered builds,
 // user-owned built apps, BYO-database law, Nav App Store review, Doctor-AI-for-doctors (web),
 // Cashfree payments, honest-billing rules ("working app or free"). ⚠️ NOT LEGAL ADVICE — for
-// lawyer review before reliance. Assumed defaults the admin can change: governing courts New Delhi;
-// refund of UNUSED purchased tokens within 7 days on request.
+// lawyer review before reliance. Assumed default the admin can change: governing courts New Delhi.
+//
+// 🔴 PAYMENTS ARE NON-REFUNDABLE EVERYWHERE (admin 2026-09-21, restated 2026-10-21). The first version of this
+// file assumed "refund of unused purchased tokens within 7 days on request"; the admin reversed that on
+// 2026-09-21 (Section 4 and the Refund Policy were rewritten) but Section 9 kept two sentences of the old
+// promise until 2026-10-21, and the guard test only matched "refundable within <n>", so it never saw them.
+// The admin's final rule, verbatim: *"token purchase kiye ya koi service li -> sab non refundable hai. double
+// payments ya galti se jyada/extra payment bhi non refundable hai. agar user ne payment kiya token nahi mile
+// -> to case investigation ke bad token diye jayenge!"*. Every sentence about money in this file must say the
+// same thing as Section 4 and `refundPolicy.ts`; `tests/theRefundPolicyHasItsOwnUrl.test.ts` now checks the
+// WHOLE document for the old promise's vocabulary, not one phrase.
 
 export const TERMS_OF_SERVICE_TITLE = 'Terms of Service';
-export const TERMS_OF_SERVICE_UPDATED = '21 September 2026';
+export const TERMS_OF_SERVICE_UPDATED = '21 October 2026';
 
 export const TERMS_OF_SERVICE = `# Terms of Service
 
@@ -30,7 +39,7 @@ By creating an account or using the Platform you accept these Terms and our Priv
 
 - NavBharatAI builds real, working software from your descriptions, previews it, stores it durably, and helps you ship it (hosting, domains, APK/AAB, the Nav App Store). We put unusual engineering effort into honesty: the Platform reports real success and real failure, and **a build that was supposed to produce an app and did not succeed is not charged**.
 - The Platform is provided "**as is**". We do not promise uninterrupted availability, that every build will be perfect, or that AI output will be correct. What we do promise is honest reporting and continuous repair.
-- We may add, change or retire features. If a change materially reduces something you paid for, Section 4 (refunds) explains how we put that right.
+- We may add, change or retire features. If a change materially reduces something you paid for, Section 4 (refunds) explains how we put that right — in credit.
 
 ## 3. Acceptable use
 
@@ -57,7 +66,7 @@ If you are using NavBharatAI as a business and need the processor terms, they ar
 - **Honest metering.** Usage is billed from real, measured consumption. Two standing consumer-protection rules are built into the Platform: a **failed build is never charged**, and where usage cannot be measured, **nothing is charged**.
 - **Gift/welcome tokens** (for example a sign-up bonus) are promotional, have no cash value, may expire on notice, and are consumed before purchased tokens.
 - **Purchases** are processed by Cashfree Payments. Prices are shown in ₹ (INR) inclusive of applicable taxes unless stated otherwise. If a payment succeeds but crediting is interrupted (for example you closed the app mid-UPI), the Platform automatically reconciles and credits it on your next sign-in — paid money is never silently lost.
-- **Refunds.** The full rules, including cancellation and what to do about a duplicate or unrecognised payment, are in our [Refund & Cancellation Policy](/refund). In short: **a successful payment is final and non-refundable**, whether or not the tokens have been spent — because your first payment delivers two things at once and immediately: the tokens, and a **permanent** upgrade of your account that unlocks every build tier and survives your balance reaching zero. What you get instead of a refund window is built into the Platform: a failed build is never charged, unmeasurable usage is never charged, and **if a Platform defect consumed tokens without delivering what was promised we re-credit those tokens** — in credit, not in money, with no time limit. A **duplicate charge** and a payment that took money **without delivering any credit** are not refunds and are corrected in full. Statutory rights under Indian consumer law are not limited by this paragraph.
+- **Refunds.** The full rules, including cancellation and what to do when a payment goes wrong, are in our [Refund & Cancellation Policy](/refund). In short: **everything you pay for — tokens, hosting and other plans, App Mart purchases and any other service — is final and non-refundable**, whether or not the tokens have been spent, and **that includes a payment made twice or for more than you meant**: every rupee that reaches us is credited to your wallet as tokens, and none of it is returned as money. This is because your first payment delivers two things at once and immediately: the tokens, and a **permanent** upgrade of your account that unlocks every build tier and survives your balance reaching zero. What protects you instead is built into the Platform: a failed build is never charged, unmeasurable usage is never charged, and **if a Platform defect consumed tokens without delivering what was promised we re-credit those tokens** — in credit, not in money, with no time limit. **If you paid and the tokens did not arrive, tell us: we investigate the case, and once the payment is confirmed the tokens are added to your wallet.** Statutory rights under Indian consumer law are not limited by this paragraph.
 - **Plans** (for example the Custom Domain plan) renew as described at purchase, from your wallet, with advance reminders; a lapsed plan suspends only the plan's feature (your app and files are never deleted for a lapsed plan).
 - We may change pricing prospectively; changes never apply retroactively to tokens you already hold.
 
@@ -67,6 +76,7 @@ If you are using NavBharatAI as a business and need the processor terms, they ar
 - **Licence to us.** You grant us only the licence needed to run the service: to store, process, display, back up, build, preview and (when you ask) deploy or publish your content. This licence ends when you delete the content or your account, except for the retention windows in the Privacy Policy.
 - **Your responsibility.** You confirm you have the rights to what you upload (code, images, music, data) and that your apps comply with law and with Section 3.
 - **Your apps' users are yours.** Apps you build run on **your own** connected services (your Supabase/Firebase/database accounts — by design, never ours) and you are the data controller for their users. You are responsible for your app's own legal pages; NavBharatAI can generate drafts for you.
+- **One exception: small shared entries in App Mart instant apps.** An instant app you publish to App Mart can keep small shared entries (a guestbook message, a chat line, a score, a booking) on **our** servers, within fixed limits — at most 2 KB per entry, 5,000 entries per app and 2,000 new entries per app per day — as the Privacy Policy (Section 12) describes. Those entries are visible to anyone who can open your app, and you remain responsible for what your app asks visitors to type into them. Anything larger — sign-in, personal records, files — must use your own database. We may delete an app's entries if the app is removed from App Mart or breaks Section 3.
 - **Platform materials.** The Platform's own code, brand, and interface remain ours. The optional "made by NavBharatAI" badge on built apps can be turned off in Settings.
 
 ## 6. The Nav App Store
@@ -96,8 +106,8 @@ Your use of connected third parties — your GitHub account, your database provi
 
 ## 9. Suspension and termination
 
-- **By you:** you can stop using the Platform any time, and delete your account (Privacy Policy Section 9). Unused purchased tokens within the refund window are refunded on request.
-- **By us:** we may suspend or terminate accounts that break these Terms, create legal risk, or abuse the Platform (including free-allowance farming or attacking the service). Where the breach is not dangerous, we will warn first. On termination for our convenience (not for your breach), we refund unused purchased tokens.
+- **By you:** you can stop using the Platform any time, and delete your account (Privacy Policy Section 9). Unused tokens are not converted back into money (Section 4).
+- **By us:** we may suspend or terminate accounts that break these Terms, create legal risk, or abuse the Platform (including free-allowance farming or attacking the service). Where the breach is not dangerous, we will warn first. Purchased tokens are not returned as money on termination either (Section 4); your statutory rights under Indian consumer law are not affected.
 - After termination, your right to use the Platform ends; the Privacy Policy governs what happens to data.
 
 ## 10. Disclaimers and limits on our liability

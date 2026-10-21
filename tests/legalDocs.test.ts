@@ -114,7 +114,8 @@ describe('Refund & Cancellation Policy — the sections a payment aggregator che
   });
 
   it('covers the cases people actually write in about', () => {
-    expect(r).toMatch(/Charged twice|duplicate/i);
+    // 2026-10-21 (admin): a payment made twice is final too — credited as tokens, never returned as money.
+    expect(r).toMatch(/Paid twice, or paid more than you meant|made twice/i);
     expect(r).toMatch(/app store|Android or iOS/i);   // store purchases are the store's to refund
     expect(r).toMatch(/App Mart/);
     expect(r).toMatch(/Consumer Protection Act/);

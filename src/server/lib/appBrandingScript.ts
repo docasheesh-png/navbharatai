@@ -4,6 +4,8 @@
 // apply it, and REFUSE to finish while the project still holds Capacitor's default or another app's icon.
 //
 // ⚠️ This string is the only copy. Edit it here; tests/appBrandingScript.test.ts runs it for real.
+import { FRAMEWORK_ICON_PATH } from '../../lib/frameworkIcon';
+
 export const BRANDING_SCRIPT_PATH = 'scripts/nbai-branding.mjs';
 
 export const BRANDING_SCRIPT = String.raw`#!/usr/bin/env node
@@ -432,7 +434,8 @@ function verifyIos() {
   notStale('ios', errors);
   return errors;
 }
-const GENERIC_ICON = /(^|\/)(vite|react|vue|capacitor|favicon)\.(svg|ico|png)$/i;
+// Shared with the web defaults: favicon.* alone never proves the artwork is a framework default.
+const GENERIC_ICON = ${FRAMEWORK_ICON_PATH};
 function verifyPwa() {
   const errors = [], notes = [];
   const bases = ['www', 'dist', 'public', '.'];
@@ -444,7 +447,8 @@ function verifyPwa() {
   if (!m || !Array.isArray(m.icons) || m.icons.length === 0) return { errors: ['the web manifest has no icons, so the app is not installable'], notes };
   let big = false;
   for (const ic of m.icons) {
-    const src = String(ic.src || '').replace(/^\/+/, '');
+    // Query strings and fragments are URL metadata, never part of the on-disk icon filename.
+    const src = String(ic.src || '').split(/[?#]/, 1)[0].replace(/^\/+/, '');
     if (!src) { errors.push('a manifest icon has no src'); continue; }
     if (GENERIC_ICON.test(src)) errors.push('manifest icon ' + src + ' is a generic framework icon, not this app\'s');
     const p = [J(base, src), J('public', src), J('dist', src), J('www', src)].find((q) => fs.existsSync(q));

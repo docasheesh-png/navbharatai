@@ -12,6 +12,42 @@ import * as weakPreflight from '../src/server/AgentV3/weakBuildPreflight';
 import { weakAdmissionReply } from '../src/server/AgentV3/weakBuildAdmission';
 import * as liveSearch from '../src/server/lib/liveSearchContext';
 
+// These are external ports, not the queue/lease/receipt lifecycle exercised below.
+// Replace them before importing the route so a fixture can never call a real provider.
+vi.mock('../src/server/AI/AIRouterManager', () => ({ AIRouterManager: { getRouter: vi.fn(() => { throw new Error('Unexpected router call before fixture setup'); }) } }));
+vi.mock('../src/server/routes/actuatorFactory', () => ({ buildActuator: vi.fn(() => { throw new Error('Unexpected real builder invocation'); }) }));
+vi.mock('../src/server/lib/liveSearchContext', () => ({ liveSearchContext: vi.fn(async () => '') }));
+vi.mock('../src/server/AgentV3/weakBuildAdmissionAsk', () => ({ weakBuildAdmissionAsk: vi.fn(() => { throw new Error('Unexpected scope-provider call in queue fixture'); }) }));
+
+/** Keep a failing cleanup assertion actionable without clearing or draining any timer for it. */
+function tracePendingTimers() {
+  const key = (handle: unknown): unknown => typeof handle === 'object' && handle !== null && Symbol.toPrimitive in handle ? Number(handle) : handle;
+  const pending = new Map<unknown, { kind: string; delay: unknown; stack: string | undefined }>();
+  for (const kind of ['setTimeout', 'setInterval', 'setImmediate'] as const) {
+    const schedule = globalThis[kind];
+    vi.spyOn(globalThis, kind).mockImplementation(((callback: (...args: unknown[]) => unknown, ...args: unknown[]) => {
+      if (typeof callback !== 'function') return Reflect.apply(schedule, globalThis, [callback, ...args]);
+      const stack = new Error('Timer allocated here').stack;
+      let handle: unknown;
+      const invoke = function (this: unknown, ...callbackArgs: unknown[]) {
+        if (kind !== 'setInterval') pending.delete(key(handle));
+        return callback.apply(this, callbackArgs);
+      };
+      handle = Reflect.apply(schedule, globalThis, [invoke, ...args]);
+      pending.set(key(handle), { kind, delay: kind === 'setImmediate' ? undefined : args[0], stack });
+      return handle;
+    }) as never);
+  }
+  for (const kind of ['clearTimeout', 'clearInterval', 'clearImmediate'] as const) {
+    const clear = globalThis[kind];
+    vi.spyOn(globalThis, kind).mockImplementation(((handle: unknown) => {
+      pending.delete(key(handle));
+      return Reflect.apply(clear, globalThis, [handle]);
+    }) as never);
+  }
+  return () => JSON.stringify([...pending.values()], null, 2);
+}
+
 let routes: Map<string, any>;
 const savedEnv = { ...process.env };
 afterAll(() => { for (const key of ['AGENTV3_ENABLED', 'AGENTV3_ALLOWLIST', 'AGENTV3_FREE_LIST', 'ANTHROPIC_API_KEY', 'NODE_ENV']) { if (savedEnv[key] === undefined) delete process.env[key]; else process.env[key] = savedEnv[key]; } });
@@ -150,11 +186,14 @@ describe('build admission preserves read-only chat and refuses uncertain mutatio
   it('a slow read-only classifier publishes a ping within one second, then refuses unavailable authority without a builder run', async () => {
     const { req, res, events } = configure();
     vi.useFakeTimers();
+    const pendingTimerDetails = tracePendingTimers();
     let release!: (value: any) => void;
     const held = new Promise<any>((resolve) => { release = resolve; });
-    const classified = vi.spyOn(intentClassifier, 'classifyIntentSmartDetailed').mockReturnValue(held);
+    let markClassifierStarted!: () => void;
+    const classifierStarted = new Promise<void>((resolve) => { markClassifierStarted = resolve; });
+    const classified = vi.spyOn(intentClassifier, 'classifyIntentSmartDetailed').mockImplementation(() => { markClassifierStarted(); return held; });
     const request = routes.get('POST /api/agentv3/chat')(req({ prompt: 'Build a React weather dashboard application with a search input and a five day forecast.', sessionId: 'queue-chat-slow' }), res);
-    for (let i = 0; i < 100 && !classified.mock.calls.length; i++) await Promise.resolve();
+    await Promise.race([classifierStarted, request.then(() => { throw new Error('Request exited before reaching the held classifier'); })]);
     expect(classified).toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1001);
     expect(res.headersSent).toBe(true);
@@ -163,8 +202,8 @@ describe('build admission preserves read-only chat and refuses uncertain mutatio
     await request;
     expect(events.some((e) => e.type === 'error' && e.code === 'BUILD_AUTHORITY_UNAVAILABLE')).toBe(true);
     expect(events.some((e) => e.type === 'result' && e.ok === false)).toBe(true);
-    expect(vi.getTimerCount()).toBe(0);
-    vi.useRealTimers();
+    expect(vi.getTimerCount(), pendingTimerDetails()).toBe(0);
+    // afterEach restores the tracking spies before restoring real timers, including on failure.
   });
   it('deterministic admission failure leaves the same request UUID usable on a later admitted retry', async () => {
     const first = configure();

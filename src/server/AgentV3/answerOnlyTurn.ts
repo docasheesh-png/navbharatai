@@ -47,8 +47,8 @@ export const ANSWER_ONLY_GATE_CODE = 'RELEASE_GATE_INFORMATIONAL' as const;
 export function answerOnlyGateNote(gateState: string): { phase: 'readiness'; severity: 'info'; code: typeof ANSWER_ONLY_GATE_CODE; message: string; autoResolved: true } {
   return {
     phase: 'readiness', severity: 'info', code: ANSWER_ONLY_GATE_CODE, autoResolved: true,
-    message: `Answer-only turn (nothing was asked to be built, no file was written): the release gate (${String(gateState).toUpperCase()}) `
-      + 'describes the existing app and did not decide this turn\'s verdict.',
+    message: `Answer-only turn: the release gate (${String(gateState).toUpperCase()}) `
+      + 'is informational and did not decide this turn\'s verdict.',
   };
 }
 

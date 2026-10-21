@@ -98683,3 +98683,88 @@ measurable: #3859 was gated **three times** (40,606 → 40,664 → 40,776 tests,
 under each run, and a gate run takes about as long as the interval between merges. The queue's integrity
 survived it — `main`'s closed register and open table hold 668 ids each with **zero** overlap and zero
 duplicates, so the #3543 reopening did not recur — but that was checked, not assumed.
+
+## 2026-10-20 — the gate list was wrong about CI's own test step, and a new row for the failure that revealed it
+
+### The gate gap (CLAUDE.md corrected in this change)
+
+Landing #3859 produced a CI failure that six local runs could not reproduce. Chasing it turned up the reason
+the local gate could not have seen it: **CI's test step is `npm run test:coverage`, not `npx vitest run`** —
+the command every "run vitest" instruction in `CLAUDE.md` named. Coverage instrumentation changes module
+evaluation and timing, so a plain `vitest run` is structurally blind to any failure living on that axis, which
+is precisely the axis of a `vi.getTimerCount()` race. This is the same stale-list failure the file already
+records for `scripts/noUnusedImports.mjs` (2026-09-10), repeated on a different step.
+
+A second gap the same day: **#3867 added `typecheck:benchmark` to `ci.yml` mid-session**, so a gate list
+assembled an hour earlier was already a step short. Both are now in the file, together with the only
+instruction that does not go stale — `grep -nE '^ +run:' .github/workflows/ci.yml` and gate on what it prints.
+
+### Q-2203 (new) — a released timer is not proven released
+
+`tests/queueRouteCompletion.test.ts:166` asserts `vi.getTimerCount()` is 0 immediately after `await request` on
+the build-authority refusal path. CI read 1 (run11842). The assertion is UNCHANGED by #3859 — `:96` on `main`,
+`:166` on that branch, moved only because 74 lines of new tests were inserted above it, with no +/- inside its
+block — and `main`'s CI is green on it.
+
+**It is recorded 🟡 BLOCKED rather than fixed, and that is a deliberate choice.** One CI failure against six
+local passes: the file alone 3x, the file alone under `--coverage` 2x, the whole suite on the identical commit,
+and then the full suite under CI's own `test:coverage` step (40,802 passed). A probe advancing 60 extra
+microtasks after `await request` saw the count at 0 on the first read. A race that will not reproduce cannot be
+root-caused honestly, and guessing would be a surface patch on the build route — which the fourth absolute rule
+forbids outright.
+
+**The class, and why hunting the siblings mattered:** asserting a resource has been released at a point that
+does not await the release. There are 13 `getTimerCount()` assertions across 8 files, and **eleven are sound** —
+`deploymentRegistry.test.ts:76` awaits the rejection that clears the deadline, `buildSourcePublication.test.ts:53`
+awaits `joined`. Only this one awaits a REQUEST whose cleanup is registered to run after the response. So the
+right fix, if it ever reproduces, is to make the handler's cleanup part of what the request promise awaits, so
+"response sent" and "timers cleared" cannot be observed out of order. The row says plainly that widening the
+assertion or quarantining the test is forbidden: it protects a real property.
+
+### The same day, a third gate-list gap — and a redundant fix that proves the concurrency cost
+
+**`audit:gate` and `license:gate` are not conditional on a dependency change.** `CLAUDE.md` said to run them
+"when dependencies changed"; `ci.yml` runs both on EVERY run, before the tests. Two advisories published
+against `follow-redirects@1.16.0` (GHSA-q3jh-wrc6-jgq8, GHSA-8r9p-f939-6h3c) therefore turned every PR and
+`main` itself red in about 90 seconds, at a step that never reaches the suite — including #3859's second run,
+whose diff had nothing to do with it. The lesson is in the file now: read a red audit step as repo-wide before
+blaming a branch.
+
+**And the fix this session prepared was redundant, which is worth recording rather than hiding.** While its
+twelve-step gate ran (green, 40,641 tests), another session landed the same bump via #3869/#3870 — *with*
+`tests/redirectCredentialsStayAtTheirOrigin.test.ts`, a regression test for the exact advisory. Their version
+is strictly better: a bump without a test is a fix on borrowed time, which is what the fourth absolute rule
+says about precisely this. No PR was opened. About twelve minutes of gate time was spent, and it was
+unavoidable — the advisory appeared mid-session and two sessions raced the same public database. Safeguard #6
+cannot prevent this class: there was nothing in `main` or in any open PR's diff to find, because the trigger
+was external.
+
+**A smaller operational fact:** branch deletion is not available to this session. `git push --delete` fails at
+the proxy and `DELETE /git/refs/...` returns *"Write access to this GitHub API path is not permitted through
+this proxy"*, so `claude/a-new-advisory-must-not-redden-every-pr` remains on the remote with no PR against it
+until someone with write access removes it.
+
+### Q-2203 CONFIRMED the same evening — second occurrence, and the distribution names the cause
+
+The `vi.getTimerCount()` assertion failed again at the same line with the same value, on a **different commit
+and run**: `c7e827aab` (run11842), then `99e13b200` (run11866). CLAUDE.md's rule is that a second failure is
+real, so the "one unreproduced occurrence" reading is retired.
+
+**The distribution is the diagnosis, and it is sharper than "load-sensitive".** Twice on
+`codex/phase-2-queue-handoff` (#3859); zero times anywhere else. `main` is green on this test throughout
+(run11858, `94c4d7d84`), and seven local runs passed — the file alone 3x, under `--coverage` 2x, the whole
+suite twice, once through CI's own `npm run test:coverage` at 40,802 passed. The failing path is
+`BUILD_AUTHORITY_UNAVAILABLE`, and `BuildRequestCoordination.ts` is one of only two files where #3859 and
+`main` genuinely overlap (measured from the merge base: 94 files on main's side, 36 on the branch's, overlap =
+that file plus `PROGRESS.md`). #3859 also rewrites `runningBuildRegistry.ts` and `LiveChannel.ts` on the same
+refusal path.
+
+So #3859's refusal path appears to leave a timer un-cleared, and a pre-existing `main` test is catching it
+correctly. **#3859 cannot reach green until its author clears that timer** — five merge-and-gate cycles from
+this session cannot fix a defect inside its own diff, and that is worth stating plainly rather than running a
+sixth.
+
+**Deliberately not pushed into their logic.** A larger ask on a PR this session did not open goes to the author
+with a proposal: make the handler's cleanup part of what the request promise awaits, so "response sent" and
+"timers cleared" cannot be observed out of order. That kills the class rather than this one branch, and it is
+the same fix the row already prescribed before the second occurrence arrived.

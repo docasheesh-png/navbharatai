@@ -95,7 +95,7 @@ describe('🔒 the error must survive every classifier it passes — each miss s
 });
 
 describe('the honesty path — an HTTP 200 that produced nothing must reach the checks that read the ledger', () => {
-  it('one occurrence is enough, because the budget is a constant for the run', () => {
+  it('one recorded occurrence is enough, without proving what happened on other calls', () => {
     expect(buildStarvedItsOutputBudget({ GLM: '1 output-budget' })).toBe(true);
     expect(buildStarvedItsOutputBudget({ GLM: '3 rate-limit, 1 output-budget' })).toBe(true);
     expect(buildStarvedItsOutputBudget({ GLM: '3 rate-limit' })).toBe(false);
@@ -120,8 +120,10 @@ describe('the honesty path — an HTTP 200 that produced nothing must reach the 
     const msg = diag.report().issues.find((f) => f.code === 'OUTPUT_BUDGET_STARVED')!.message;
     // Admin-facing, so the bench NAME is allowed; what must not appear is the claim that the provider
     // was down or that the prompt was at fault — the two readings that send someone to the wrong fix.
-    expect(msg.toLowerCase()).toContain('not a provider outage');
-    expect(msg.toLowerCase()).toContain('our own output ceiling');
+    expect(msg).toContain("does not by itself establish an outage or a problem with the user's prompt");
+    expect(msg).toContain('effective call clock, overhead and AGENTV3_FLOOR_MS_PER_TOKEN');
+    expect(msg).toContain('FLOOR_TIMEOUT_CAP_MS applies to non-streamed calls');
+    expect(msg).toContain('streamed calls use their own hard cap');
   });
 });
 
@@ -192,7 +194,7 @@ describe('🔒 the wiring — every half of this fix, pinned where it lives', ()
     expect(loop).toContain('if (!starvedTurn) {\n          messages.push({ role: \'assistant\', content: turn.rawContent });');
   });
 
-  it('the free-tier upsell is suppressed — a fuller wallet buys a different model, not a different ceiling', () => {
+  it('the free-tier upsell remains suppressed when an output-budget failure is recorded', () => {
     expect(route).toContain('&& buildStarvedItsOutputBudget(buildDiag.providerFailureBreakdown());');
     expect(route).toContain('const emptyCause = misconfigured || starved');
     // ⚠️ Pinned as a SHAPE, not a transcript (autopsy fdd59ef8 added a sixth reason, `stopped`, and a

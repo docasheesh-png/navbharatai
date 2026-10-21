@@ -24,7 +24,7 @@ import {
 } from '../src/server/AgentV3/providers/glmThinking';
 import {
   reconcileFloorBudget, starvedBudgetError, isStarvedBudgetError, isUnclampedStarvation,
-  isLaneBoundStarvation, floorMaxTokensForTimeout, FLOOR_TIMEOUT_CAP_MS,
+  isLaneBoundStarvation, isAskBoundStarvation, floorMaxTokensForTimeout, FLOOR_TIMEOUT_CAP_MS,
 } from '../src/server/AgentV3/floorBudget';
 import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
 
@@ -116,11 +116,13 @@ describe('🔒 a starvation says WHICH clock cut the ceiling', () => {
     expect(err.message).toContain('not our own cap');
   });
 
-  it('our OWN cap bounding the call is unmarked — today\'s wording exactly', () => {
+  it('our OWN cap bounding the call is unmarked and preserves the granted and requested allowance', () => {
     const err = starvedBudgetError(4833, ASKED, false);
     expect(isStarvedBudgetError(err)).toBe(true);
     expect(isLaneBoundStarvation(err)).toBe(false);
-    expect(err.message).toContain('Our own ceiling, not this provider.');
+    expect(err.message).toContain('authorised 4833 output tokens, cut down from 8000');
+    expect(isAskBoundStarvation(err)).toBe(false);
+    expect(isUnclampedStarvation(err)).toBe(false);
   });
 
   it('⚠️ the two markers are mutually exclusive by construction', () => {
@@ -166,14 +168,18 @@ describe('🔒 the report prints the right one of three explanations', () => {
     expect(msg).not.toContain('FLOOR_TIMEOUT_CAP_MS');
   });
 
-  it('our own cap ⇒ the original sentence, unchanged', () => {
+  it('our own cap ⇒ the effective clock, overhead and rate, with the non-streamed cap qualified', () => {
     const msg = starvedLine(starvedBudgetError(4833, ASKED, false));
-    expect(msg).toContain('FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN');
+    expect(msg).toContain('effective call clock, overhead and AGENTV3_FLOOR_MS_PER_TOKEN');
+    expect(msg).toContain('FLOOR_TIMEOUT_CAP_MS applies to non-streamed calls');
+    expect(msg).toContain('streamed calls use their own hard cap');
+    expect(msg).not.toContain('REMAINING BUDGET OF THE LANE');
   });
 
-  it('unclamped ⇒ still says the ceiling was NOT reduced by us', () => {
+  it('unclamped ⇒ names the bypassed clock/rate clamp without ruling out another ceiling', () => {
     const msg = starvedLine(starvedBudgetError(ASKED, ASKED, true));
-    expect(msg).toContain('NOT reduced by us');
+    expect(msg).toContain('The clock/rate clamp was bypassed');
+    expect(msg).toContain("another ceiling may still make the granted allowance smaller than the caller's ask");
     expect(msg).not.toContain('FLOOR_TIMEOUT_CAP_MS');
   });
 

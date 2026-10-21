@@ -143,8 +143,8 @@ describe('🔒 honesty — an unclamped starvation must not blame "our own ceili
   const clampedErr = starvedBudgetError(9_833, 32_000);
   const unclampedErr = starvedBudgetError(32_000, 32_000, true);
 
-  it('the clamped wording is unchanged', () => {
-    expect(clampedErr.message).toContain('Our own ceiling, not this provider');
+  it('the clamped wording retains the granted allowance and original ask', () => {
+    expect(clampedErr.message).toContain('authorised 9833 output tokens');
     expect(clampedErr.message).toContain('cut down from 32000');
     expect(isUnclampedStarvation(clampedErr)).toBe(false);
   });

@@ -31,7 +31,7 @@
 // ⚠️ NOT LEGAL ADVICE: drafted to be reviewed by a lawyer before being relied on in a dispute.
 
 export const PRIVACY_POLICY_TITLE = 'Privacy Policy';
-export const PRIVACY_POLICY_UPDATED = '5 October 2026';
+export const PRIVACY_POLICY_UPDATED = '21 October 2026';
 
 export const PRIVACY_POLICY = `# Privacy Policy
 
@@ -78,6 +78,7 @@ This mailbox also serves as our **Grievance contact** for the purposes of Indian
 - **Build history and reports.** What a build did, which steps ran, what failed and was repaired, timing, and honest success/failure verdicts. These records exist so builds can resume, so you can see what happened, and so we can fix real defects.
 - **Wallet and usage records.** Your token balance, the ledger of purchases and deductions, and per-build/per-action usage — kept accurately because they are money.
 - **Preferences.** Theme, text size, language, and similar settings.
+- **Your agreement to our documents.** When you sign in you tick one box confirming that you are 18 or older and agree to the Terms of Service and this Privacy Policy. We record that you confirmed it, which version of each document you agreed to, and when (our server's clock), against your account — so that we can show what you agreed to. It is kept with your account.
 - **Secrets you store on purpose.** API keys and credentials you save in Settings → Secrets & API Keys so your built apps can use them. These are stored **encrypted**, are injected only into **your own** apps, and are never used for any other purpose.
 - **Learning signals.** The Platform learns from real build errors so mistakes are not repeated. Cross-user learning is **anonymous by construction**: it is keyed by machine "error signatures" with numbers, file paths and quoted text stripped, the stored text passes an automatic secret-and-personal-data redaction step, and **no account identifier is ever attached** (this design is enforced by automated tests).
 - **Technical logs.** IP address, device/browser type, timestamps, pages visited, errors encountered. We use privacy-friendly analytics; the consent banner in the app describes and controls measurement.
@@ -197,6 +198,7 @@ If you use it, you may enter health-related information or upload clinical docum
 - **App Mart notifications and comment reports.** App Mart notifications ("Asha liked your app") are deleted after **90 days**. If someone reports a comment, we keep the report — the reason, a copy of the reported comment's text, and who reported it — for **180 days** so a person can review it, and like the other safety records it survives the deletion of either account for that period.
 - **Removal records.** If we remove something you published — an app, a listing, a site — we keep a short record of **what was removed, why, when, and who published it**, for **180 days**, because the Information Technology (Intermediary Guidelines) Rules, 2021 require it for investigation. That record holds a description and a fingerprint of the content, **never a copy of the content itself**, and it is used only for that purpose. See our [Grievance Redressal](/grievance) page.
 - **After deletion.** When you delete your account (Section 9), personal data is deleted or irreversibly anonymised within **30 days**, except the payment/tax records above, the 180-day safety-check and removal records just described, and data we must keep for a live legal matter.
+- **Shared entries of App Mart instant apps** (Section 12) stay for as long as the app is in App Mart and are not deleted automatically when it is removed; email us to have them erased.
 - **Apps you published to the Nav App Store.** These are anonymised rather than deleted. Your display name, your public creator code and the link to your account are removed, and the listing is taken out of the public store — but **the app itself is kept**, because people who bought it would otherwise lose what they paid for, and a purchase is not refundable. Once your account is gone a paid app of yours can no longer be bought, since there would be nobody to pay. Submissions that were never published are deleted outright. If you want a published app taken down completely, ask us and we will remove it.
 
 ---
@@ -276,6 +278,14 @@ Requests that identify themselves as bots are not counted, and browsers that sen
 ## 12. Apps YOU build, and their users
 
 When you build an app with NavBharatAI and share or deploy it, **you** are responsible to the people who use it. Their data lives in the database and services **you** connect (your own Supabase/Firebase/other account — NavBharatAI deliberately provisions user apps on the builder's own accounts, not ours). If your app collects personal data, you need your own privacy policy for it — you can generate a starting draft with NavBharatAI, and the same review advice applies: have it checked before you rely on it.
+
+**The one exception: small shared entries in App Mart instant apps.** An instant app published to App Mart can keep small shared entries — a guestbook message, a chat line, a score, a booking — on **NavBharatAI's own servers**, so that it works between visitors without its creator first setting up a database. If you use such an app, or publish one, this is what that means:
+
+- **What is stored.** Exactly what the app sends: each entry is a small piece of data of at most **2 KB**, saved with the time it was added. NavBharatAI does **not** attach your name, account, phone number, IP address or device to an entry. But an app can ask you to type your name or other details, and if you do, they are stored with the entry — so type only what you are comfortable sharing.
+- **Who can see it.** Entries are **shared**: anyone who can open that app can read its most recent entries (a private app asks for its password first). They are not private to you.
+- **Limits.** At most **5,000 entries per app** and **2,000 new entries per app per day**. Past that, the app shows an error and stores nothing.
+- **How long they stay.** For as long as the app is in App Mart. **They are not deleted automatically** when an app is removed from App Mart or when its creator deletes their account (an app that remains listed keeps its entries). To have the entries of an app removed, email **info@navbharatai.com** with the app's link and we will delete them.
+- **What is NOT stored this way.** Sign-in, personal records, files and anything of real volume must use the **creator's own database**, as described above — never ours.
 
 **Visitor counts for apps published on NavBharatAI hosting.** So that you can see whether anyone is visiting the app you published, pages served from NavBharatAI's own hosting carry a small script that reports each visit to us. It sends only: the page path (never the query string), the referring site's hostname (never the full address), **how many bytes** the page and its files transferred (a number the browser itself measures, so we can show you your app's traffic and account for our own hosting costs — it describes the page, not the person), and a short code derived from the visitor's IP address and browser using a secret that **rotates daily** — so the same visitor is counted once per day, the code cannot be turned back into a person, and it cannot be joined across days. It sets no cookie and stores nothing on the visitor's device. Browsers that send **Do Not Track** or Global Privacy Control are not counted at all. These counts are shown only to you, the app's builder, and are kept for 30 days. Apps you deploy to your own hosting provider do not carry this script.
 

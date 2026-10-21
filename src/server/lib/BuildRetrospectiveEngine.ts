@@ -46,6 +46,8 @@ const clean = (s: unknown): string => (typeof s === 'string' ? s.trim() : '');
  * code (an imported build, a crash before any outcome was recorded, a caller that has only a string).
  */
 export const OUTCOME_TO_CATEGORY: Readonly<Record<string, { category: FailureCategory; hint: string }>> = {
+  OUTCOME_INITIAL_DECLINED: { category: 'incomplete', hint: 'The initial build lane declined and wrote no files. Its original answer was preserved; this does not establish a defect in app code.' },
+  OUTCOME_FINALIZATION_FAILED: { category: 'incomplete', hint: 'The engine encountered an error while finalizing the initial answer. The recorded exception describes that failure; this is not evidence of a compiler or app-code defect.' },
   OUTCOME_BUILD_TIMEOUT: { category: 'timeout', hint: 'The build hit its wall-clock ceiling — it ran out of time rather than out of ideas.' },
   OUTCOME_SYNTAX_ERROR: { category: 'syntax', hint: 'Generated code did not parse — check the file the diagnostic names.' },
   OUTCOME_TYPECHECK_FAILED: { category: 'type', hint: 'The project does not typecheck — align the value with its expected type.' },

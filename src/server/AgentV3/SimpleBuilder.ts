@@ -2582,14 +2582,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // more common apps) had the SAME gap, so wire the same two pure generators here. Best-effort; only ever
       // turns a broken build into a working one. Kill: AGENTV3_CSS_MODULE_GEN / AGENTV3_BARREL_GEN = off.
       try {
+        // Presence is not source evidence: preserve existing modules without pretending an unread
+        // scaffold file is empty (that could falsely resolve an ambiguous export-star chain).
         const beforeGen = Object.fromEntries(written.map((f) => [f.path, f.content]));
         const created: Array<{ path: string; content: string }> = [];
         if (process.env.AGENTV3_CSS_MODULE_GEN !== 'off') {
-          for (const s of generateMissingCssModules(beforeGen)) created.push({ path: s.path, content: s.content });
+          for (const s of generateMissingCssModules(beforeGen, deps.scaffoldPaths)) created.push({ path: s.path, content: s.content });
         }
         if (process.env.AGENTV3_BARREL_GEN !== 'off') {
           const withCss = { ...beforeGen, ...Object.fromEntries(created.map((c) => [c.path, c.content])) };
-          for (const b of await generateMissingBarrels(withCss)) created.push({ path: b.path, content: b.content });
+          for (const b of await generateMissingBarrels(withCss, deps.scaffoldPaths)) created.push({ path: b.path, content: b.content });
         }
         // VITE CLIENT TYPES — the same certainty as the stubs above, and it lands BEFORE this lane's own
         // tsc gate, so an app reading import.meta.env never spends a repair round on

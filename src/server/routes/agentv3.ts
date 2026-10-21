@@ -14015,8 +14015,11 @@ async function noteBuildOutcome(
       // Fix 37a (admin: "app kitni baar fail hui yeh bhi likho"): stamp how many earlier builds in
       // THIS workspace's durable history ended not-ok, so a repeat failure is visible in every
       // report instead of each report looking like a first attempt. Best-effort, non-blocking.
-      void listDiagnosticsHistory(workspaceId, 50)
-        .then((h) => {
+      void listDiagnosticsHistoryResult(workspaceId, 50)
+        .then(({ entries: h, ok }) => {
+          // The array-only API collapses a failed read into []; that is UNKNOWN, not zero failures
+          // or a known first-turn session. Only a successful read may seed either report field.
+          if (!ok) return;
           // A build the user STOPPED did not fail (build b4745cb1 counted one as a prior failure).
           buildDiag.setPriorFailedBuilds(h.filter((e) => e.ok === false && !isUserStoppedBuild(e)).length);
           // THE SESSION, not just this turn (admin 2026-08-06). Two complaints, one root cause: a

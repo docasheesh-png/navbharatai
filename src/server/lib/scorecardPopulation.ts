@@ -29,6 +29,7 @@
 // `listAllDiagnostics` and then the BUILDS from each workspace's own history.
 import { listAllDiagnostics, listDiagnosticsHistoryResult } from '../AgentV3/DiagnosticsStore';
 import type { BuildMetricInput } from '../../lib/builderMetrics';
+import { repairCountFromProjection, type HealCountInterpretation } from '../../lib/healIssue';
 
 /** Workspaces whose per-build history is fetched. Bounded: this is one Firestore query each. */
 export const DEFAULT_HISTORY_WORKSPACES = 60;
@@ -70,8 +71,8 @@ export function toMetricInput(e: {
   endedAt?: number | null;
   ok?: boolean | null;
   billedInr?: number | null;
-  counts?: { autoResolved?: number | null; workarounds?: number | null } | null;
-  healCodes?: { codes: Record<string, number>; total: number | null; unattributed: number | null; open?: Record<string, number> } | null;
+  counts?: { autoResolved?: number | null; workarounds?: number | null; healRule?: number | null } | null;
+  healCodes?: { codes: Record<string, number>; total: number | null; unattributed: number | null; open?: Record<string, number>; interpretation?: HealCountInterpretation } | null;
   workaroundCount?: number | null;
   rootCause?: string | null;
   prompt?: string | null;
@@ -81,6 +82,9 @@ export function toMetricInput(e: {
 }): BuildMetricInput {
   const started = typeof e.startedAt === 'number' ? e.startedAt : null;
   const ended = typeof e.endedAt === 'number' ? e.endedAt : null;
+  // Undefined means this adapter was not run; null means it could not establish a total.
+  const repair = repairCountFromProjection(e);
+  const healCount = repair?.total ?? null;
   return {
     workspaceId: e.workspaceId ?? null,
     // `startedAt` is the build's own clock; `savedAt` is when the row was written. Prefer the build's.
@@ -89,12 +93,9 @@ export function toMetricInput(e: {
     // A build with no end has not finished — never a zero-length build.
     buildMs: started !== null && ended !== null && ended >= started ? ended - started : null,
     billedInr: typeof e.billedInr === 'number' ? e.billedInr : null,
-    // `undefined`, not 0, when the field is absent: healPressure EXCLUDES an unrecorded build and
-    // would otherwise score a legacy row as a clean first pass.
-    // The breakdown's CORRECTED total first (an older report's own count still includes findings that
-    // were left open, not repaired — see healCountOf), then the recorder's field.
-    healCount: typeof e.healCodes?.total === 'number' ? e.healCodes.total
-      : typeof e.counts?.autoResolved === 'number' ? e.counts.autoResolved : undefined,
+    // Explicit normalized unknown wins over raw data, including a failed normalization (null).
+    healCount,
+    ...(repair && repair.provenance !== 'current-rule' ? { healCountProvenance: repair.provenance } : {}),
     // The store's derived count first (it recovers a legacy zero from a complete timeline), then the
     // recorder's own field; `undefined` when neither can say, so the row is EXCLUDED, never scored.
     workaroundCount: typeof e.workaroundCount === 'number' ? e.workaroundCount

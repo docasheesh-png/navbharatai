@@ -21,7 +21,7 @@
 //   • SIZE       — from the paths the build actually wrote (the manifest's file list, which carries EVERY
 //     file; `generatedFiles` is capped at 20 and is only the fallback): full-stack when any path is a
 //     backend/data-layer marker; otherwise by file count. Deterministic, and stated on the card.
-//   • HEALS      — `counts.autoResolved`, the 50/50 law's red flag, carried so cost can be read beside it.
+//   • HEALS      — producer-qualified repair totals (interpretRepairCount), never an unversioned raw counter.
 //
 // PURE — no clock, no I/O, no env. The USD→INR rate is passed in.
 
@@ -29,7 +29,7 @@ import type { BuildDiagnosticsReport, LlmCallRecord } from '../AgentV3/BuildDiag
 import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
 import { toPowerLevel, type PowerLevel } from '../AgentV3/powerLevel';
 import { tierDisplayName } from '../AgentV3/tierLadder';
-import { healCountOf } from '../../lib/healIssue';
+import { interpretRepairCount, type HealCountInterpretation } from '../../lib/healIssue';
 import { LEGACY_STORED_LLM_CALLS_MAX } from '../AgentV3/DiagnosticsStore';
 import { channelWasTruncated, type ReportTruncation } from '../AgentV3/reportTruncation';
 
@@ -121,7 +121,8 @@ export interface BuildCostRow {
   files: number;
   ok: boolean | null;
   minutes: number | null;
-  heals: number;
+  heals: number | null;
+  repairCount?: HealCountInterpretation;
   /** ₹ the user was charged; null = never settled / not recorded (NOT zero). */
   billedInr: number | null;
   zeroBillReason: string | null;
@@ -174,6 +175,7 @@ export function buildCostRow(entry: StoredReport, usdInr: number): BuildCostRow 
   const realInr = realKnown ? money((realUsd as number) * rate) : null;
   const started = Number(r.startedAt) || Number(entry.savedAt) || 0;
   const ended = Number(r.endedAt) || 0;
+  const repairCount = interpretRepairCount(r);
   return {
     workspaceId: String(entry.workspaceId ?? ''),
     startedAt: started,
@@ -183,8 +185,9 @@ export function buildCostRow(entry: StoredReport, usdInr: number): BuildCostRow 
     files: new Set(paths).size,
     ok: typeof r.ok === 'boolean' ? r.ok : null,
     minutes: started > 0 && ended > started ? Math.round(((ended - started) / 60_000) * 10) / 10 : null,
-    // Repairs, not findings left open — one definition (healCountOf), so this column agrees with the scorecard.
-    heals: healCountOf(r) ?? 0,
+    // Unknown is not zero, and legacy compatibility counters are not measured repairs.
+    heals: repairCount.total,
+    repairCount,
     billedInr: billedInr === null ? null : money(billedInr),
     zeroBillReason: typeof billing?.zeroBillReason === 'string' && billing.zeroBillReason.trim() ? billing.zeroBillReason.trim() : null,
     realInr,
@@ -215,6 +218,9 @@ export interface CostSummaryCell {
   avgMarginInr: number | null;
   nMargin: number;
   avgHeals: number | null;
+  /** The denominator of avgHeals; unknown repair totals are excluded. */
+  nHeals: number;
+  nQualifiedHeals: number;
   avgMinutes: number | null;
 }
 
@@ -236,6 +242,7 @@ export function summarizeCosts(rows: readonly BuildCostRow[]): CostSummaryCell[]
     const billed = group.filter((g) => g.billedInr !== null);
     const margin = group.filter((g) => g.marginInr !== null);
     const timed = group.filter((g) => g.minutes !== null);
+    const repaired = group.filter((g) => typeof g.heals === 'number' && Number.isFinite(g.heals));
     return {
       tier: first.tier, tierName: first.tierName, size: first.size,
       n: group.length,
@@ -246,7 +253,9 @@ export function summarizeCosts(rows: readonly BuildCostRow[]): CostSummaryCell[]
       avgBilledInr: avg(billed.map((g) => g.billedInr as number)),
       avgMarginInr: avg(margin.map((g) => g.marginInr as number)),
       nMargin: margin.length,
-      avgHeals: avg(group.map((g) => g.heals)),
+      avgHeals: avg(repaired.map((g) => g.heals as number)),
+      nHeals: repaired.length,
+      nQualifiedHeals: repaired.filter((g) => g.repairCount && g.repairCount.provenance !== 'current-rule').length,
       avgMinutes: avg(timed.map((g) => g.minutes as number)),
     };
   }).sort((a, b) => (order[a.tier] - order[b.tier]) || (sizeOrder[a.size] - sizeOrder[b.size]));
@@ -327,7 +336,7 @@ export function costTrend(rows: readonly BuildCostRow[]): CostTrend {
     realInr: metric(priced(recent), priced(older)),
     billedInr: metric(pick(recent, (r) => r.billedInr), pick(older, (r) => r.billedInr)),
     minutes: metric(pick(recent, (r) => r.minutes), pick(older, (r) => r.minutes)),
-    heals: metric(recent.map((r) => r.heals), older.map((r) => r.heals)),
+    heals: metric(pick(recent, (r) => r.heals), pick(older, (r) => r.heals)),
     successRate: metric(settled(recent), settled(older)),
     comparable: false,
   };

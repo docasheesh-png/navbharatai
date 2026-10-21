@@ -471,8 +471,9 @@ broken `main`. Concurrency is a reason to hold those tighter, never looser.
 
 5. **Mandatory verification gate before every push — never skipped.**
    `npx tsc --noEmit` (frontend) + `npx tsc -p tsconfig.server.json` (server,
-   if touched) + `npx vitest run` (read the actual pass/fail line, don't
-   trust a truncated `tail`) + a manual/boot smoke check for server changes.
+   if touched) + the suite **as CI runs it, `npm run test:coverage`** (read the
+   actual pass/fail line, don't trust a truncated `tail`) + a manual/boot smoke
+   check for server changes.
    This gate is non-negotiable, even under time or credit pressure.
 
    ⚠️ **THE GATE ABOVE IS NARROWER THAN CI, AND THAT GAP HAS COST A RED BUILD
@@ -484,12 +485,35 @@ broken `main`. Concurrency is a reason to hold those tighter, never looser.
    real gate; the list above is a subset of it.** Before a push, run the steps
    CI runs that the list omits:
    `npm run typecheck` · `node scripts/noUnusedImports.mjs` ·
-   `npm run typecheck:server` · `npm run build` · `npm run test:bundle` ·
-   `npm run boot:check` (and `npm run audit:gate` / `license:gate` when
-   dependencies changed). They take about two minutes together — far less than
-   a red CI round trip, and they catch what the two-command gate cannot.
+   `npm run native:guard` · `npm run typecheck:server` ·
+   `npm run typecheck:benchmark` · `npm run build` · `npm run test:bundle` ·
+   `npm run boot:check` · `npm run deps:server-gate` · `npm run audit:gate` ·
+   `npm run license:gate`. They take about two minutes
+   together — far less than a red CI round trip, and they catch what the
+   two-command gate cannot.
    **Re-read the workflow rather than trusting this list**: CI gains steps, and
    a list in a doc goes stale exactly the way this one did.
+
+   🔴 **AND IT WENT STALE AGAIN, THREE TIMES OVER, BY 2026-10-20 — WHICH IS WHY
+   THE LINE ABOVE IS AN INSTRUCTION AND NOT A DISCLAIMER.** Three gaps were found
+   in one day, every one by reading `ci.yml` instead of this list:
+   · **CI's test step is `npm run test:coverage`, NOT `npx vitest run`.** Every
+     "run vitest" instruction in this file names the wrong command. Coverage
+     instrumentation changes module evaluation and timing, so a plain `vitest
+     run` is structurally blind to any failure that lives on that axis — and
+     one did: a `vi.getTimerCount()` assertion that passed six times locally
+     (including under `--coverage` alone) failed once in CI.
+   · **`typecheck:benchmark` was added to `ci.yml` by #3867 mid-session**, so a
+     gate list assembled an hour earlier was already a step short.
+   · **`audit:gate` and `license:gate` are NOT conditional on a dependency
+     change** — `ci.yml` runs both on EVERY run, before the tests. So a brand-new
+     advisory published against a package we never touched turns every PR, and
+     `main` itself, red in about 90 seconds at a step that never reaches the
+     suite. That happened on 2026-10-20 (`follow-redirects` 1.16.0,
+     GHSA-q3jh-wrc6-jgq8 + GHSA-8r9p-f939-6h3c): a red run on a branch whose diff
+     had nothing to do with it. Read the step as repo-wide before blaming a branch.
+   Run `grep -nE '^ +run:' .github/workflows/ci.yml` and gate on what it
+   prints. A list is a hint; the workflow is the gate.
 
    🔴 **RUN IT AT THE END, ON THE FINAL STATE OF THE CHANGE — NEVER MID-WAY.**
    A gate run before the last file was written proves nothing about what is
@@ -702,7 +726,7 @@ arrival is now tell the admin and wait, not merge — see that correction for th
    never break the app; real features only). No half-done work.
 2. **Run the full verification gate** (safeguard #5, non-negotiable):
    `npx tsc --noEmit` (frontend) + `npx tsc -p tsconfig.server.json` (if server touched)
-   + `npx vitest run` (read the real pass/fail line) + a boot/smoke check for server
+   + `npm run test:coverage` — CI's own step (read the real pass/fail line) + a boot/smoke check for server
    changes. Green or it does not leave your machine.
 3. **Branch → commit → push** the work to the feature branch.
 4. **Open a PR** to `main`.

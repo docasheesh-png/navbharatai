@@ -253,8 +253,8 @@ export interface OneShotDeps {
   scaffoldPaths: string[];
   /** Read an existing project file (preview bridge stripped) — see existingConfig.ts. Absent → today's behaviour. */
   readExisting?: (path: string) => Promise<string | null>;
-  /** ONE cheap text-generation call (Haiku/Gemini/Grok). Returns the raw model text. */
-  generate: (system: string, user: string) => Promise<string>;
+  /** Text generation and any continuations share the lane's absolute deadline, not a fresh budget. */
+  generate: (system: string, user: string, opts?: { deadlineAt?: number }) => Promise<string>;
   /**
    * Write the generated files (single batch). Throws on a hard failure, and answers with one outcome per
    * file (Q-982 — see writeOutcomes.ts); a writer that answers nothing is read as "all written", as before.
@@ -275,10 +275,10 @@ export interface OneShotDeps {
    */
   previewTimeoutMs?: number;
   /**
-   * Hard cap (ms) on the WHOLE one-shot attempt (generate + writeFiles + preview). If any step
+   * Hard cap (ms) on the generate + writeFiles phase; preview has its own cap after files land. If a step
    * hangs (e.g. the model call never returns because the HTTP request stalls), the attempt is
    * abandoned and returns ok:false so the caller FALLS BACK to the agentic loop fast, instead of
-   * the build spinning at "working…" for 10+ minutes. Default 180 s.
+   * the build spinning at "working…" for 10+ minutes. Default 150 s.
    */
   overallTimeoutMs?: number;
 }
@@ -297,6 +297,11 @@ export interface OneShotDeps {
  */
 export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
   const minFiles = deps.minFiles ?? 1;
+  const overallTimeoutMs = deps.overallTimeoutMs ?? 150_000;
+  // The same instant bounds both our wait and the provider work. Compute it BEFORE config reads:
+  // giving generation a fresh duration afterwards lets setup + fallbacks + continuations outlive us.
+  // The provider keeps the build's Stop signal separately; a lane budget ending must not stop the build.
+  const deadlineAt = Date.now() + overallTimeoutMs;
   let files: OneShotFile[];
   // ZOMBIE-WRITE KILL (autopsy a38c6fef, 2026-09-13 — the SIBLING of the StudySync fix that
   // `SimpleBuilder` got in July and this lane did not). `withTimeout` only RACES: losing the race
@@ -322,7 +327,7 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
         for (const p of deps.scaffoldPaths.filter((x) => isProjectConfigPath(x) && !skip.has(x))) existingConfigs[p] = await deps.readExisting(p).catch(() => null);
       }
       if (lapsed) throw new Error('one-shot-cancelled');
-      const text = await deps.generate(oneShotSystemPrompt(deps.framework), oneShotUserPrompt(deps.prompt, deps.scaffoldPaths, existingConfigs));
+      const text = await deps.generate(oneShotSystemPrompt(deps.framework), oneShotUserPrompt(deps.prompt, deps.scaffoldPaths, existingConfigs), { deadlineAt });
       // Checked BEFORE parsing as well as before writing: a lane that has already been handed off must
       // stop at the first opportunity, not merely stop short of the damage.
       if (lapsed) throw new Error('one-shot-cancelled');
@@ -342,7 +347,7 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
       const { landed } = readWriteOutcomes(parsed, await deps.writeFiles(parsed));
       if (landed.length < minFiles) throw new Error(ONE_SHOT_FILES_REFUSED);
       return landed;
-    })(), deps.overallTimeoutMs ?? 150_000, 'one-shot');
+    })(), overallTimeoutMs, 'one-shot');
   } catch (e) {
     lapsed = true; // from this instant the orphaned closure can never touch the workspace
     // Generation / write failed or timed out → no app produced, fall back to the full builder.

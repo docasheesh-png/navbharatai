@@ -13,6 +13,7 @@ import { adultOptInSummary } from '../lib/adultContent';
 import { confirmCopy, ownerConfirmCopy, MODERATION_ROUTE, type ModerationAction } from '../lib/adminAppModeration';
 import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
 import { BotsLedgerPanel } from './admin/BotsLedgerPanel';
+import { AdsPanel } from './admin/AdsPanel';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
 import {
   ADMIN_TABS, ENGINE_REPORTS_ON, tabOfPage, tabDef, firstPageOf, pageTitle, pageBadge, pageHint,
@@ -134,7 +135,7 @@ interface AdminBuildReportRow extends ReportTriage {
   /** How many defects the engine repaired in its OWN output, and how many it left unresolved.
    *  Absent on reports written before this measurement existed — those rows are EXCLUDED from the
    *  first-pass rate rather than counted as clean (see firstPassStatsFromMeta). */
-  healCount?: number;
+  healCount?: number | null;
   unresolvedCount?: number;
   /** How many builds/edits of the session the record carries (1 when only the focused build exists). */
   sessionParts?: number;
@@ -4041,8 +4042,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               {/* FIRST-PASS QUALITY (ROADMAP #1 Phase 0.2) — the headline engine number. A build that
                   healed itself is NOT counted as a success (50/50 law: a heal is a red flag), so this
                   deliberately reads lower than the delivered rate shown beside it. Honest by
-                  construction: shows nothing rather than a fake 0% when no row carries the signal. */}
-              {firstPass && firstPass.cleanRate !== null && (
+                  construction: an unmeasured window stays visible as unknown, never a fake 0%. */}
+              {firstPass && (
                 <div className="bg-card border border-line rounded-[1.25rem] p-4">
                   <div className="flex items-center gap-2 mb-3 flex-wrap">
                     <Target className="w-4 h-4 text-accent-text" />
@@ -4051,7 +4052,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <ReportExportButtons label="First-pass quality" data={firstPass} tab="Build Reports" source="/api/admin/first-pass-quality" onStatus={toast} />
                       </span>
                     <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${
-                      firstPass.cleanRate >= FIRST_PASS_TARGET
+                      firstPass.cleanRate !== null && firstPass.cleanRate >= FIRST_PASS_TARGET
                         ? 'bg-emerald-500/15 text-success border-emerald-500/30'
                         : 'bg-amber-500/15 text-warn border-amber-500/30'
                     }`}>
@@ -4060,7 +4061,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
                     <div>
-                      <p className="text-2xl font-black text-ink tabular-nums">{(firstPass.cleanRate * 100).toFixed(1)}%</p>
+                      <p className="text-2xl font-black text-ink tabular-nums">{firstPass.cleanRate === null ? 'unknown' : `${(firstPass.cleanRate * 100).toFixed(1)}%`}</p>
                       <p className="text-[10px] text-muted font-bold uppercase tracking-wider">Right first time</p>
                     </div>
                     <div>
@@ -4069,30 +4070,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     </div>
                     <div>
                       <p className="text-2xl font-black text-warn tabular-nums">{firstPass.healed}</p>
-                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider">Needed repair</p>
+                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider">Not first-pass</p>
                     </div>
                     <div>
                       <p className="text-2xl font-black text-danger tabular-nums">{firstPass.failed}</p>
                       <p className="text-[10px] text-muted font-bold uppercase tracking-wider">Failed</p>
                     </div>
                   </div>
-                  <p className="text-[11px] text-muted leading-snug">{firstPassHeadline(firstPass)} <span className="text-faint">Across EVERY build by every user — not only the ones someone reported.</span></p>
-                  {/* THE GAP IS THE SIGNAL (admin screenshot 2026-08-12). Complaints far below the
-                      engine-wide rate is healthy self-selection — people report what broke. The two
-                      being EQUAL would mean users are reporting a fair sample, which is much worse
-                      news, and only showing both makes that visible. */}
-                  {firstPass.reported && firstPass.reported.cleanRate !== null && (
+                  <p className="text-[11px] text-muted leading-snug">{firstPassHeadline(firstPass)} <span className="text-faint">Source: every user’s build records, not only reported complaints. Rate denominator: {firstPass.total} classifiable build(s); unknown repair totals are excluded.</span></p>
+                  {((firstPass.repaired ?? 0) > 0 || (firstPass.warningOnly ?? 0) > 0) && (
                     <p className="text-[10px] text-muted mt-1.5 leading-snug">
-                      Among the {firstPass.reported.total} build(s) users actually pressed “Report” on, {(firstPass.reported.cleanRate * 100).toFixed(1)}% were right first time.
-                      {firstPass.cleanRate !== null && firstPass.reported.cleanRate < firstPass.cleanRate
-                        ? ' Lower than the rate above, which is expected — people report what broke.'
-                        : ' NOT lower than the rate above — users are reporting a fair sample, so the gap is not self-selection.'}
+                      Of the {firstPass.healed} that delivered but were not right first time: {firstPass.repaired ?? 0} the engine repaired, {firstPass.warningOnly ?? 0} only left a warning. The headline stays the clean rate — a warning is not counted as a clean build.
+                    </p>
+                  )}
+                  {(firstPass.userStopped ?? 0) > 0 && (
+                    <p className="text-[10px] text-muted mt-1.5 leading-snug">
+                      {firstPass.userStopped} build(s) the user stopped are not counted as failures.
+                    </p>
+                  )}
+                  {/* Both source populations name their coverage; exclusions cannot prove selection bias. */}
+                  {firstPass.reported && (
+                    <p className="text-[10px] text-muted mt-1.5 leading-snug">
+                      Among the {firstPass.reported.total} classifiable build(s) users actually pressed “Report” on,
+                      {firstPass.reported.cleanRate === null ? ' first-pass quality is unknown.'
+                        : ` ${(firstPass.reported.cleanRate * 100).toFixed(1)}% were right first time.`}
+                      {firstPass.reported.skippedLegacy > 0 && ` ${firstPass.reported.skippedLegacy} additional reported build(s) have unknown repair totals or historical semantics and are excluded.`}
+                      {(firstPass.reported.userStopped ?? 0) > 0 && ` ${firstPass.reported.userStopped} user-stopped report(s) are also excluded.`}
+                      {(firstPass.reported.qualifiedBuilds ?? 0) > 0 && ` ${firstPass.reported.qualifiedBuilds} reported build(s) retain older/future producer-rule semantics.`}
+                      {firstPass.cleanRate === null || firstPass.reported.cleanRate === null
+                        || firstPass.skippedLegacy > 0 || firstPass.reported.skippedLegacy > 0
+                        || (firstPass.qualifiedBuilds ?? 0) > 0 || (firstPass.reported.qualifiedBuilds ?? 0) > 0
+                        ? ' Different or unknown measurement coverage prevents a reliable comparison of these rates.'
+                        : firstPass.reported.cleanRate < firstPass.cleanRate
+                          ? ' Lower than the rate above; people report what broke, so self-selection may contribute.'
+                          : ' Not lower in this measured window; that alone does not show whether reports are a representative sample.'}
                     </p>
                   )}
                   {firstPass.skippedLegacy > 0 && (
                     <p className="text-[10px] text-muted mt-1.5 leading-snug">
-                      {firstPass.skippedLegacy} older build(s) excluded — they predate this measurement and
-                      carry no repair count. Counting them as clean would inflate the number.
+                      {firstPass.skippedLegacy} build(s) excluded — repair totals or their historical meaning are unknown.
+                      They cannot be scored as clean or repaired.
+                      {(firstPass.unknownWithWarnings ?? 0) > 0 && ` ${firstPass.unknownWithWarnings} of these have known findings left open.`}
                     </p>
                   )}
                   {firstPass.topHealCodes.length > 0 && (
@@ -4907,6 +4925,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               {/* Restoring a removed app is built in PR 3 (the server route exists; this screen does not offer it yet). */}
             </div>
+          )}
+
+          {/* ADS (admin 2026-10-20): the admin's own products shown to people who have not paid. The form, the picture
+              crop, the live preview and the list are `admin/AdsPanel.tsx`; the data is /api/admin/ads. */}
+          {activeTab === 'ads' && (
+            <AdsPanel headers={headers} />
           )}
 
           {/* ── APPS · BOTS (admin 2026-10-05) — who built which hosted chat bot, and whether a WhatsApp bot is signed ── */}

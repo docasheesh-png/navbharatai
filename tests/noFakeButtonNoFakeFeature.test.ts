@@ -88,7 +88,7 @@ describe('🔴 the shape-reader: a feature that only pretends, with no provider 
     expect(kinds({ 'src/auth.tsx': HASHED_DEMO_LOGIN })).toEqual(['login']);
   });
 
-  it('the SAME login page is real when a provider lives anywhere in the project — even another file', () => {
+  it('opaque login callbacks stay unproven when a provider exists elsewhere; a provider is not connectivity proof', () => {
     expect(kinds({ 'src/pages/LoginPage.tsx': DEMO_LOGIN, 'src/lib/supabase.ts': "import { createClient } from '@supabase/supabase-js'; export const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);" })).toEqual([]);
     expect(kinds({ 'src/pages/LoginPage.tsx': SUPABASE_LOGIN })).toEqual([]);
     expect(kinds({ 'src/pages/LoginPage.tsx': DEMO_LOGIN, 'server/routes/auth.ts': "app.post('/api/login', async (req, res) => { const ok = await bcrypt.compare(req.body.password, user.hash); });" })).toEqual([]);
@@ -419,7 +419,7 @@ export function register(name: string, email: string, password: string) {
     expect(impliedRequirementsFor(hits).map((r) => r.id)).toEqual(['login']);
   });
 
-  it('every app the explorer judges NOT browser-only is not called a demo login either', () => {
+  it('browser-store evidence alone stays unproven when the explorer cannot establish browser-only accounts', () => {
     const with_ = (path: string, content: string) => ({ ...SCHOOL, [path]: content });
     const real: Array<[string, Record<string, string>]> = [
       ['supabase', with_('src/lib/supabase.ts', "import { createClient } from '@supabase/supabase-js';")],

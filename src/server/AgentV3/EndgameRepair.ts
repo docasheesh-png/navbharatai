@@ -20,9 +20,9 @@
 // unit-testable with the real QuizArena error text. The dispatcher/runner supply sandbox I/O and
 // the single LLM call. Kill switch: AGENTV3_ENDGAME_REPAIR=off.
 
-import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
+import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports as fixProvenTypeOnlyValueImports } from './ImportExportReconcile';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
-import { tscNeverRan } from './TscGate';
+import { countTscErrors, tscVerdict } from './TscGate';
 import { reactNamespaceValueUse } from './PostEditReviewer';
 import { applySnapshotRestore, snapshotRestoreComplete, snapshotRestoreDetail, type SnapshotRestoreOutcome } from './snapshotRestore';
 
@@ -321,6 +321,13 @@ export async function endgameDeterministicPass(
   const typeOnly = fixTypeOnlyValueImports(cur, errors);
   cur = typeOnly.files;
   fixes.push(...typeOnly.fixed);
+  // The diagnostic regex above handles named imports (including packages). Local default and
+  // namespace bindings need the shared export/binding proof used by generation and readiness too.
+  try {
+    const proven = await fixProvenTypeOnlyValueImports(cur);
+    cur = proven.files;
+    fixes.push(...proven.fixes.map(f => `${f.file}: imported '${f.name}' as a value from '${f.from}'`));
+  } catch { /* leave uncertain bindings to the existing compiler-driven repair */ }
   const clash = fixTypeImportValueClash(cur, errors);
   cur = clash.files;
   fixes.push(...clash.fixed);
@@ -411,8 +418,9 @@ export interface EndgameVerdict {
   llmFilesWritten: number;
   clean: boolean;
   /**
-   * The compiler did not finish a later run (timeout, crash, help page, missing binary). The counts
-   * above are the last VERIFIED ones — never "0 errors" read off a run that did not happen.
+   * The compiler result could not be verified (timeout, crash, help page, missing binary, or
+   * diagnostics this file-scoped repair cannot fully parse). Counts are the last VERIFIED ones,
+   * when available — never "0 errors" inferred from an incomplete or non-compiling result.
    */
   tscUnverified?: boolean;
   /** True when the batch LLM repair INCREASED the error count and was rolled back (CrewHub 59→67). */
@@ -519,13 +527,19 @@ export function resolveRepairTarget(
   return { target: null, how: 'rejected' };
 }
 
-/** A later `tsc` either produced a real result or it did not. A throw is "did not", not "0 errors". */
-async function tscChecked(io: EndgameIo): Promise<{ out: string; ran: boolean }> {
+/** Only a real verdict with a complete diagnostic count can prove clean or improved repairs. */
+async function tscChecked(io: EndgameIo): Promise<{ out: string; verified: boolean; errors: TscError[] }> {
   try {
-    const out = await io.runTsc();
-    return { out: String(out ?? ''), ran: !tscNeverRan(out) };
+    const out = String(await io.runTsc() ?? '');
+    const verdict = tscVerdict(out);
+    const errors = parseTscErrors(out);
+    // Project-level diagnostics have no file/line. Never silently drop them and call the smaller
+    // file-scoped count a clean/improved result, or invent a file for the repair to overwrite.
+    const verified = verdict === 'passed'
+      || (verdict === 'failed' && errors.length > 0 && countTscErrors(out) === errors.length);
+    return { out, verified, errors };
   } catch {
-    return { out: '', ran: false };
+    return { out: '', verified: false, errors: [] };
   }
 }
 
@@ -591,11 +605,10 @@ function lapsedVerdict(errorsBefore = 0): EndgameVerdict {
 export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
   try {
     if (io.signal?.aborted) return lapsedVerdict();
-    const out1 = await io.runTsc();
-    // A compiler that never ran (missing, a help page, a torn install — autopsy 120eb52f) is not
-    // "already clean": nothing was checked, so nothing is claimed.
-    if (tscNeverRan(out1)) return NO_ATTEMPT;
-    const errors1 = parseTscErrors(out1);
+    const checked1 = await tscChecked(io);
+    // Missing/unknown compiler evidence or unparsed diagnostics cannot authorize a repair.
+    if (!checked1.verified) return { ...NO_ATTEMPT, clean: false, tscUnverified: true };
+    const errors1 = checked1.errors;
     if (errors1.length === 0) return { ...NO_ATTEMPT, attempted: true }; // already clean — nothing to do
     io.log?.(`🔧 Endgame repair: ${errors1.length} compile error(s) left — fixing mechanically first…`);
     let files = await io.readFiles();
@@ -620,14 +633,14 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
       } catch { /* a failed deterministic write is not counted and not rolled forward */ }
     }
     let deterministicFixes = detWritten.length > 0 ? det.fixes : [];
-    const checked2 = detWritten.length > 0 ? await tscChecked(io) : { out: out1, ran: true };
-    if (!checked2.ran) {
+    const checked2 = detWritten.length > 0 ? await tscChecked(io) : checked1;
+    if (!checked2.verified) {
       const rollback = await rollbackTouched(io, preDet, files);
       if (!rollback.complete) return incompleteRollbackVerdict(io, unverifiedVerdict(errors1.length), rollback.outcome);
-      io.log?.('tsc did not complete after the deterministic pass — reverted those writes; types are NOT verified');
+      io.log?.('tsc did not produce a complete verifiable result after the deterministic pass — reverted those writes; types are NOT verified');
       return unverifiedVerdict(errors1.length);
     }
-    let errors2 = parseTscErrors(checked2.out);
+    let errors2 = checked2.errors;
     if (detWritten.length > 0 && errors2.length > errors1.length) {
       const rollback = await rollbackTouched(io, preDet, files);
       if (!rollback.complete) return incompleteRollbackVerdict(io, {
@@ -676,15 +689,16 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
       }
       if (llmFilesWritten > 0) {
         const checkedFinal = await tscChecked(io);
-        if (!checkedFinal.ran) {
+        if (!checkedFinal.verified) {
           const rollback = await rollbackTouched(io, preRepair, files);
           if (!rollback.complete) return incompleteRollbackVerdict(io, {
             ...unverifiedVerdict(errors1.length, deterministicFixes), errorsAfterDeterministic: errors2.length, errorsAfter: errors2.length, llmFilesWritten,
           }, rollback.outcome);
-          io.log?.('tsc did not complete after the batch repair — reverted those writes; types are NOT verified');
-          return unverifiedVerdict(errors1.length, deterministicFixes);
+          io.log?.('tsc did not produce a complete verifiable result after the batch repair — reverted those writes; types are NOT verified');
+          return { ...unverifiedVerdict(errors1.length, deterministicFixes),
+            errorsAfterDeterministic: errors2.length, errorsAfter: errors2.length };
         }
-        finalErrors = parseTscErrors(checkedFinal.out);
+        finalErrors = checkedFinal.errors;
         if (finalErrors.length > errors2.length) {
           const rollback = await rollbackTouched(io, preRepair, files);
           if (!rollback.complete) return incompleteRollbackVerdict(io, {

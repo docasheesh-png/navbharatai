@@ -98597,6 +98597,55 @@ Another session added **375 new OPEN rows** (Q-1300–Q-2024). This morning the 
 actionable rows; it now holds 517. Those rows are not touched here — a row somebody created an hour ago is
 theirs — but anyone reading "complete the remaining queue" needs to know the denominator moved.
 
+---
+
+## 2026-10-20 — Admin house ads: the admin's own products, shown to people who have not paid
+
+**Asked by the admin (2026-10-20):** *"admin panel me ads ka ek option banao! jahan admin apne kisi saman ka ads chala sake, admin — naam, description aur photo upload kare, aur user ko woh ads dikhne lage."* Placements, from the admin's own list: App Mart (a Sponsored tile between app tiles), Home (a small banner at the bottom), the success screen after publishing or posting to App Mart (a banner below the message, never an overlay), the phone app's App Mart (a bottom banner), and the public pages. **No full-screen ads** (the admin's ruling). **Only paid accounts are ad-free; a signed-in free user is shown ads like a visitor** (the admin's correction).
+
+### What was built (branch `claude/admin-house-ads`)
+
+| Piece | Where |
+|---|---|
+| The rules both sides share: places, limits, validation, the ONE status rule, pick-an-ad, the shape check on a served ad | `src/lib/houseAds.ts` |
+| The admin form's pure half (form → request body, DST-safe inclusive end date) and the picture crop (1200×300, JPEG, ≤ 300 KB, in the browser) | `src/lib/houseAdForm.ts`, `src/lib/houseAdImage.ts` |
+| Storage: two collections, `house_ads` (small) and `house_ad_images` (the picture), written picture-first / deleted ad-first | `src/server/lib/houseAdStore.ts` |
+| Who is shown an ad: `hasEverPaid` OR an active hosting plan ⇒ none; wallet unreadable ⇒ none | `src/server/lib/houseAdAudience.ts` |
+| Public routes `GET /api/ads/:placement`, `GET /api/ads/image/:id` | `src/server/routes/houseAds.ts` |
+| Admin routes `GET/POST /api/admin/ads`, `PUT/DELETE /api/admin/ads/:id` (admin token, audited) | `src/server/routes/admin.ts` |
+| Admin page **Money → Ads** (form, picture, live preview, list, on/off, edit, delete) | `src/components/admin/AdsPanel.tsx` |
+| The client's single way to ask, and the banner and tile | `src/lib/houseAdClient.ts`, `src/components/ads/` |
+| Screens that draw one | `NavAppStore.tsx` (tile, post-success, phone banner), `HomeView.tsx`, `PublishCelebration.tsx`, `PublishToNavStore.tsx` |
+
+Nothing changes for any user until the admin creates and turns on an ad: with no ad, every placement draws nothing.
+
+### Decisions taken without asking (all reversible; say so to change one)
+
+1. **"Dashboard" = Home.** There is no separate project-list screen; the banner is at the bottom of Home, which is also the phone app's home.
+2. **A link is optional and https-only**, so a tap can go to the admin's shop. No link ⇒ a picture and text, and no button.
+3. **Pictures are cropped to a 4:1 strip in the browser**, so the preview the admin approves is the file that is stored.
+4. **Each ad carries its own places and an optional start/end date**, and can be turned off without deleting it.
+5. **The Money tab now has two pages (Revenue, Ads)**, so the old page title "Money" became "Money · Revenue".
+6. **A change reaches every user within a minute** (the public list is read once a minute per instance; the admin's own instance sees it at once).
+7. **No counters** (impressions/clicks). Not asked for; the page says nothing it cannot back.
+
+### 🔴 ONE PLACEMENT NOT BUILT, ON PURPOSE — the server-rendered public pages (`/ai-app-builder`, `/pricing`, …)
+
+The admin listed "landing, pricing, blog, public pages". Those pages are static HTML for crawlers ("no script runs here"), and **they cannot tell who is reading**. A paying customer opening `/pricing` would be shown an ad — which breaks the admin's own rule (paid never sees one) and the hosting plan's own promise ("keeps NavBharatAI ad-free for you", `GalleryPanel.tsx`, `WebAppPlayer.tsx`). A tick box for a place that does nothing would be a control that lies, so `public_pages` is **absent from `HOUSE_AD_PLACEMENTS`** (a test fails if it comes back without a way to know the reader). There is also no blog in the repo.
+
+**Options, for the admin:** (a) leave the public pages ad-free — recommended, they are the pages that must stay fast and findable; (b) show the banner on the acquisition pages only (`/ai-app-builder`, `/indian-ai-assistant`, `/hindi-ai-assistant`, `/about`) and accept that a paying customer who opens one is shown it; (c) a small script that skips the banner when the browser holds a "paid" hint — this breaks the pages' "no script" design and the hint is not proof. **Status: 🟡 BLOCKED on that decision.**
+
+### Honest statement about the Privacy Policy
+
+The policy says NavBharatAI shows **no third-party advertising inside the product** (`privacyPolicy.ts`, pinned by `privacyPolicyTruth.test.ts`). That stays true **only while every ad here is the operator's own** — the admin form says "your own goods only". If the admin ever sells a slot to someone else, that sentence becomes false and must change first.
+
+### Proof, by reversion
+
+Thirteen bugs were put back one at a time and each made a test fail: a token that fails to verify treated as a visitor; the hosting-plan rule removed; a gifted balance counted as "paid"; an unreadable wallet counted as free; the picture signature check removed; SVG allowed; an http link allowed; a `javascript:` link in a served ad; an "off" ad still live; `public_pages` brought back; the client asking before sign-in is known; a viewer-blind cache key; the ad written before its picture.
+
+### Watch for on the first real ad
+
+Create one ad with every place ticked, then open Home, App Mart (5+ apps in the general view), publish an app and post one to App Mart, once as a signed-out visitor, once as a free signed-in user and once as a paid user — the paid user must see none. In the phone app only the bundle that carries this change shows it (a frontend change reaches phone users only through a fresh bundle); the server half is live at once.
 ## 2026-10-20 — Q-1226 closed on another session's fix; Q-979 re-measured, and the first measurement was wrong
 
 ### Q-1226 ✅ RESOLVED — by PR #3863 (`5315e95f8`), verified here before the row was closed
@@ -98678,3 +98727,87 @@ favicon (vite.svg…). Locked by `tests/brandMark.test.ts`, `tests/appBrandingSc
 `NBAI_TEST_SHARP_DIR` points at a `sharp` install — CI does not carry sharp, so those 12 are skipped there), `tests/appBranding.test.ts`.
 NOT done: the TTL policy (no gcloud credentials here — Q-1111 has the exact command); AppMakerLab's legacy templates (Q-1112).
 
+## 2026-10-20 — the gate list was wrong about CI's own test step, and a new row for the failure that revealed it
+
+### The gate gap (CLAUDE.md corrected in this change)
+
+Landing #3859 produced a CI failure that six local runs could not reproduce. Chasing it turned up the reason
+the local gate could not have seen it: **CI's test step is `npm run test:coverage`, not `npx vitest run`** —
+the command every "run vitest" instruction in `CLAUDE.md` named. Coverage instrumentation changes module
+evaluation and timing, so a plain `vitest run` is structurally blind to any failure living on that axis, which
+is precisely the axis of a `vi.getTimerCount()` race. This is the same stale-list failure the file already
+records for `scripts/noUnusedImports.mjs` (2026-09-10), repeated on a different step.
+
+A second gap the same day: **#3867 added `typecheck:benchmark` to `ci.yml` mid-session**, so a gate list
+assembled an hour earlier was already a step short. Both are now in the file, together with the only
+instruction that does not go stale — `grep -nE '^ +run:' .github/workflows/ci.yml` and gate on what it prints.
+
+### Q-2203 (new) — a released timer is not proven released
+
+`tests/queueRouteCompletion.test.ts:166` asserts `vi.getTimerCount()` is 0 immediately after `await request` on
+the build-authority refusal path. CI read 1 (run11842). The assertion is UNCHANGED by #3859 — `:96` on `main`,
+`:166` on that branch, moved only because 74 lines of new tests were inserted above it, with no +/- inside its
+block — and `main`'s CI is green on it.
+
+**It is recorded 🟡 BLOCKED rather than fixed, and that is a deliberate choice.** One CI failure against six
+local passes: the file alone 3x, the file alone under `--coverage` 2x, the whole suite on the identical commit,
+and then the full suite under CI's own `test:coverage` step (40,802 passed). A probe advancing 60 extra
+microtasks after `await request` saw the count at 0 on the first read. A race that will not reproduce cannot be
+root-caused honestly, and guessing would be a surface patch on the build route — which the fourth absolute rule
+forbids outright.
+
+**The class, and why hunting the siblings mattered:** asserting a resource has been released at a point that
+does not await the release. There are 13 `getTimerCount()` assertions across 8 files, and **eleven are sound** —
+`deploymentRegistry.test.ts:76` awaits the rejection that clears the deadline, `buildSourcePublication.test.ts:53`
+awaits `joined`. Only this one awaits a REQUEST whose cleanup is registered to run after the response. So the
+right fix, if it ever reproduces, is to make the handler's cleanup part of what the request promise awaits, so
+"response sent" and "timers cleared" cannot be observed out of order. The row says plainly that widening the
+assertion or quarantining the test is forbidden: it protects a real property.
+
+### The same day, a third gate-list gap — and a redundant fix that proves the concurrency cost
+
+**`audit:gate` and `license:gate` are not conditional on a dependency change.** `CLAUDE.md` said to run them
+"when dependencies changed"; `ci.yml` runs both on EVERY run, before the tests. Two advisories published
+against `follow-redirects@1.16.0` (GHSA-q3jh-wrc6-jgq8, GHSA-8r9p-f939-6h3c) therefore turned every PR and
+`main` itself red in about 90 seconds, at a step that never reaches the suite — including #3859's second run,
+whose diff had nothing to do with it. The lesson is in the file now: read a red audit step as repo-wide before
+blaming a branch.
+
+**And the fix this session prepared was redundant, which is worth recording rather than hiding.** While its
+twelve-step gate ran (green, 40,641 tests), another session landed the same bump via #3869/#3870 — *with*
+`tests/redirectCredentialsStayAtTheirOrigin.test.ts`, a regression test for the exact advisory. Their version
+is strictly better: a bump without a test is a fix on borrowed time, which is what the fourth absolute rule
+says about precisely this. No PR was opened. About twelve minutes of gate time was spent, and it was
+unavoidable — the advisory appeared mid-session and two sessions raced the same public database. Safeguard #6
+cannot prevent this class: there was nothing in `main` or in any open PR's diff to find, because the trigger
+was external.
+
+**A smaller operational fact:** branch deletion is not available to this session. `git push --delete` fails at
+the proxy and `DELETE /git/refs/...` returns *"Write access to this GitHub API path is not permitted through
+this proxy"*, so `claude/a-new-advisory-must-not-redden-every-pr` remains on the remote with no PR against it
+until someone with write access removes it.
+
+### Q-2203 CONFIRMED the same evening — second occurrence, and the distribution names the cause
+
+The `vi.getTimerCount()` assertion failed again at the same line with the same value, on a **different commit
+and run**: `c7e827aab` (run11842), then `99e13b200` (run11866). CLAUDE.md's rule is that a second failure is
+real, so the "one unreproduced occurrence" reading is retired.
+
+**The distribution is the diagnosis, and it is sharper than "load-sensitive".** Twice on
+`codex/phase-2-queue-handoff` (#3859); zero times anywhere else. `main` is green on this test throughout
+(run11858, `94c4d7d84`), and seven local runs passed — the file alone 3x, under `--coverage` 2x, the whole
+suite twice, once through CI's own `npm run test:coverage` at 40,802 passed. The failing path is
+`BUILD_AUTHORITY_UNAVAILABLE`, and `BuildRequestCoordination.ts` is one of only two files where #3859 and
+`main` genuinely overlap (measured from the merge base: 94 files on main's side, 36 on the branch's, overlap =
+that file plus `PROGRESS.md`). #3859 also rewrites `runningBuildRegistry.ts` and `LiveChannel.ts` on the same
+refusal path.
+
+So #3859's refusal path appears to leave a timer un-cleared, and a pre-existing `main` test is catching it
+correctly. **#3859 cannot reach green until its author clears that timer** — five merge-and-gate cycles from
+this session cannot fix a defect inside its own diff, and that is worth stating plainly rather than running a
+sixth.
+
+**Deliberately not pushed into their logic.** A larger ask on a PR this session did not open goes to the author
+with a proposal: make the handler's cleanup part of what the request promise awaits, so "response sent" and
+"timers cleared" cannot be observed out of order. That kills the class rather than this one branch, and it is
+the same fix the row already prescribed before the second occurrence arrived.

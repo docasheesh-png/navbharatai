@@ -62,7 +62,7 @@ const report = (over: Record<string, unknown> = {}) => ({
   workspaceId: 'ws1', savedAt: 5_000,
   report: {
     schema: 'navbharatai.v3.build-diagnostics/1', startedAt: 1_000, endedAt: 1_000 + 6 * 60_000, ok: true,
-    counts: { total: 3, errors: 0, warnings: 1, autoResolved: 2, unresolved: 0 },
+    counts: { healRule: 3, total: 3, errors: 0, warnings: 1, autoResolved: 2, unresolved: 0 },
     issues: [],
     generatedFiles: files(5).map((p) => ({ ts: 1, path: p, content: '' })),
     llmCalls: [{ ts: 1, provider: 'GLM', model: 'glm-5.3-flash', inputTokens: 200_000, outputTokens: 20_000, ok: true }],

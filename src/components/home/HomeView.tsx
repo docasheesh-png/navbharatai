@@ -9,6 +9,7 @@ import { cn } from '../../lib/utils';
 // `openExternalUrl` — the tutorial strip's video link. `isNativeApp` — the web-only links to the public
 // pages at the foot of Home (SEO audit 2026-10-18); see the comment there.
 import { openExternalUrl, isNativeApp } from '../../lib/mobileNative';
+import { SponsoredBanner } from '../ads/SponsoredAd';
 
 /**
  * THE "HOW DO I BUILD AN APP?" VIDEO.
@@ -486,6 +487,11 @@ export const HomeView = ({
         >
           Made with ❤️ for Bharat · Free to use · No credit card required
         </motion.p>
+
+        {/* The admin's own product ad — one small banner at the bottom of Home, in the flow and never over anything
+            (admin 2026-10-20). Web and phone app alike. Shown only to someone who has not paid; drawn not at all
+            when there is no ad or anything about the read is in doubt (src/lib/houseAds.ts). */}
+        <SponsoredBanner placement="dashboard" className="pb-3" />
 
         {/* ── Public pages (SEO audit 2026-10-18) ──
             Plain links to the server-rendered pages that explain NavBharatAI — the homepage was the only

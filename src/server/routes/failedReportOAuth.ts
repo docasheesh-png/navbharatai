@@ -4,7 +4,7 @@ import { adminUsername, requireAdmin } from '../lib/adminAuth';
 import { getServerDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
 import { routeParam } from '../lib/expressCompat';
-import { reportOAuthService, ReportOAuthError, REPORT_ORIGIN, REPORT_ISSUER, REPORT_RESOURCE, REPORT_RESOURCE_METADATA, REPORT_SCOPE } from '../lib/failedReportOAuth';
+import { reportOAuthService, ReportOAuthError, normalizeReportScope, REPORT_ORIGIN, REPORT_ISSUER, REPORT_RESOURCE, REPORT_RESOURCE_METADATA, REPORT_SCOPE, REPORT_SCOPES } from '../lib/failedReportOAuth';
 
 export const failedReportOAuth = reportOAuthService(getServerDb, adminUsername);
 export const reportOAuthChallenge = `Bearer resource_metadata="${REPORT_RESOURCE_METADATA}", scope="${REPORT_SCOPE}"`;
@@ -21,12 +21,12 @@ export function registerFailedReportOAuthRoutes(app: Express): void {
   };
   const resourceMetadata = wrap((_req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.json({ resource: REPORT_RESOURCE, authorization_servers: [REPORT_ISSUER], scopes_supported: [REPORT_SCOPE], bearer_methods_supported: ['header'], resource_name: 'NavBharat private failed build reports' });
+    res.json({ resource: REPORT_RESOURCE, authorization_servers: [REPORT_ISSUER], scopes_supported: REPORT_SCOPES, bearer_methods_supported: ['header'], resource_name: 'NavBharat private failed build reports and autopsy metadata' });
   });
   for (const path of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/api/v1/failedbr/mcp', '/.well-known/oauth-protected-resource/api/failedbr/mcp']) app.get(path, resourceMetadata);
   const serverMetadata = wrap((_req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.json({ issuer: REPORT_ISSUER, authorization_endpoint: `${REPORT_ISSUER}/authorize`, token_endpoint: `${REPORT_ISSUER}/token`, registration_endpoint: `${REPORT_ISSUER}/register`, revocation_endpoint: `${REPORT_ISSUER}/revoke`, response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'], token_endpoint_auth_methods_supported: ['none', 'client_secret_post', 'client_secret_basic'], revocation_endpoint_auth_methods_supported: ['none', 'client_secret_post', 'client_secret_basic'], code_challenge_methods_supported: ['S256'], scopes_supported: [REPORT_SCOPE] });
+    res.json({ issuer: REPORT_ISSUER, authorization_endpoint: `${REPORT_ISSUER}/authorize`, token_endpoint: `${REPORT_ISSUER}/token`, registration_endpoint: `${REPORT_ISSUER}/register`, revocation_endpoint: `${REPORT_ISSUER}/revoke`, response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'], token_endpoint_auth_methods_supported: ['none', 'client_secret_post', 'client_secret_basic'], revocation_endpoint_auth_methods_supported: ['none', 'client_secret_post', 'client_secret_basic'], code_challenge_methods_supported: ['S256'], scopes_supported: REPORT_SCOPES });
   });
   // RFC 8414 discovery and the fallback paths used by older MCP clients.
   for (const path of ['/.well-known/oauth-authorization-server/api/v1/failedbr/oauth', '/.well-known/oauth-authorization-server', '/api/failedbr/oauth/.well-known/oauth-authorization-server', '/api/failedbr/oauth/.well-known/openid-configuration']) app.get(path, serverMetadata);
@@ -49,8 +49,10 @@ export function registerFailedReportOAuthRoutes(app: Express): void {
     if (req.headers.origin && ![REPORT_ORIGIN, 'https://www.navbharatai.com'].includes(req.headers.origin)) { res.status(403).json({ error: 'invalid_request' }); return; }
     if (typeof req.body?.approve !== 'boolean') { res.status(400).json({ error: 'invalid_request' }); return; }
     const id = routeParam(req.params.id);
-    const redirect = await failedReportOAuth.decide(id, req.body.approve);
-    audit('ADMIN_FAILED_REPORT_OAUTH_CONSENT', { admin: adminUsername(), requestId: id, approved: req.body.approve });
+    const redirect = req.body.scope === undefined
+      ? await failedReportOAuth.decide(id, req.body.approve)
+      : await failedReportOAuth.decide(id, req.body.approve, req.body.scope);
+    audit('ADMIN_FAILED_REPORT_OAUTH_CONSENT', { admin: adminUsername(), requestId: id, approved: req.body.approve, scope: req.body.approve ? normalizeReportScope(req.body.scope) : null });
     res.json({ redirect });
   }));
 }

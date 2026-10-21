@@ -18,7 +18,7 @@
 // implemented LOCALLY in ordinary-looking code, so the machinery that demands the credential never fired,
 // and the user was handed a button that only pretends. This module reads the SHAPE, not the words:
 //   login    — a sign-in screen whose password is written into the app (or compared in the browser), and no
-//              auth provider anywhere in the project;
+//              auth provider anywhere in the project; or a narrowly proven local success handler;
 //   oauth    — a "Continue with Google / Apple" control with no OAuth SDK or route anywhere;
 //   payment  — a pay/checkout action that marks itself paid with no gateway (or UPI link) anywhere;
 //   otp      — an OTP the page generates or compares against a literal, with no SMS/auth provider;
@@ -30,7 +30,8 @@
 //
 // 🔒 PRECISION FIRST, like every sibling (scriptedAssistant.ts, AuthenticityAnalysis.ts): the provider check
 // is PROJECT-WIDE (a LoginPage that calls a context backed by Supabase is real, and the Supabase import may
-// live in another file), a PIN lock on a personal diary is not a login, "mark as paid" in an expense tracker
+// live in another file). Only a directly proven local success path overrides this stand-down; opaque
+// callbacks remain unknown. A PIN lock on a personal diary is not a login, "mark as paid" in an expense tracker
 // is not a payment, a chat's "message sent" is not an email, and a request that ASKED for a demo / offline /
 // local login is left alone. A false positive costs a user one red line on a working screen; a false
 // negative is the fake button the admin saw. Both halves are tested. PURE — no I/O.
@@ -40,6 +41,10 @@ import { impliedRequirement, type AppRequirement } from './AppRequirements';
 import { recipeFor, preferredOption, requiredVarNames } from '../../lib/credentialRecipes';
 import { HONESTY_BANNER_OPEN, HONESTY_BANNER_CLOSE, stripHonestyBanner, hasHonestyBanner } from '../../lib/honestyBanner';
 import { SECRETS_SCREEN } from '../AppContext/navPaths';
+import { provenLocalLoginPath } from './localLoginPath';
+import { localLoginNotice, LOCAL_LOGIN_NOTICE } from './localLoginNotice';
+import { LOCAL_UPLOAD_LIMITS, provenLocalUploadPath } from './localUploadPath';
+import { localUploadNotice, LOCAL_UPLOAD_NOTICE } from './localUploadNotice';
 
 export { hasHonestyBanner };
 
@@ -55,6 +60,8 @@ export interface FakeFeatureFinding {
   line: number;
   snippet: string;
   requirementId: ImpliedServiceId;
+  /** Proven local handler despite provider code elsewhere; wiring, not missing credentials. */
+  evidence?: 'local-login-path' | 'local-upload-path';
 }
 
 /** `AGENTV3_NO_FAKE_FEATURES=off` reverts every reader of this module with no deploy. Default ON. */
@@ -149,12 +156,15 @@ export function findFakeFeatures(files: Readonly<Record<string, string>>, prompt
   const localLoginAsked = ASKED_LOCAL_LOGIN_RE.test(req) || PASSWORD_MANAGER_RE.test(req);
   const noPaymentAsked = ASKED_NO_PAYMENT_RE.test(req);
 
+  // Bound only the new AST work across the project; existing readers and finding caps stay unchanged.
+  const localPathDeadline = Date.now() + 150;
+  let localPathAttempts = 0;
   const out: FakeFeatureFinding[] = [];
   const seen = new Set<string>();
-  const add = (kind: FakeFeatureKind, file: string, hit: { line: number; text: string } | null) => {
+  const add = (kind: FakeFeatureKind, file: string, hit: { line: number; text: string } | null, evidence?: FakeFeatureFinding['evidence']) => {
     if (!hit || seen.has(`${kind}\u0000${file}`) || out.length >= MAX_FINDINGS) return;
     seen.add(`${kind}\u0000${file}`);
-    out.push({ kind, file, line: hit.line, snippet: trimSnippet(hit.text), requirementId: REQUIREMENT_OF[kind] });
+    out.push({ kind, file, line: hit.line, snippet: trimSnippet(hit.text), requirementId: REQUIREMENT_OF[kind], ...(evidence ? { evidence } : {}) });
   };
 
   for (const [file, content] of sources) {
@@ -164,6 +174,13 @@ export function findFakeFeatures(files: Readonly<Record<string, string>>, prompt
       const demo = signInCandidates({ [file]: content }).length > 0;
       const hit = firstHit(content, CRED_COMPARE_RE) ?? (demo ? firstHit(content, /\b(?:password|pass(?:word)?(?:Hash|Digest)?)\s*:/i) : null);
       if (hit) add('login', file, hit);
+    }
+    // A provider elsewhere is not a connection. This proof excludes opaque callbacks and any
+    // provider/context call, so the broad stand-down above is still correct for ambiguous auth.
+    if (authProvider && !localLoginAsked && out.length < MAX_FINDINGS && localPathAttempts < 16
+      && Date.now() < localPathDeadline && SIGNIN_SURFACE_RE.test(content) && /Storage\.setItem/.test(content)) {
+      localPathAttempts++;
+      add('login', file, provenLocalLoginPath(file, content), 'local-login-path');
     }
     // OAUTH BUTTON: "Continue with Google" with no SDK or route that could do it.
     if (!oauth && !localLoginAsked) add('oauth-button', file, firstHit(content, OAUTH_BUTTON_RE));
@@ -181,9 +198,11 @@ export function findFakeFeatures(files: Readonly<Record<string, string>>, prompt
   // ONE JUDGEMENT WITH THE SIGN-IN EXPLORER (Q-540, #3526). `authLivesInTheBrowser` decides that an app's
   // accounts live in the browser alone — the explorer signs a throwaway account up there because the app has
   // no server to keep one. That is the very fake this module exists to disclose, so the two must never
-  // disagree: on the real school app the sign-up wrote to `localStorage.setItem(USERS_KEY, …)`, which the
+  // disagree on that browser-only case: on the real school app the sign-up wrote to `localStorage.setItem(USERS_KEY, …)`, which the
   // shape above did not read, and the explorer knew what the user was never told. A sign-in surface is still
   // required (a page that only stores a password is not a login), and every stand-down above still holds.
+  // The stronger local-handler proof above is disclosure evidence, NEVER permission for the explorer
+  // to create an account where a provider might exist; its conservative safety guard is unchanged.
   if (!out.some((f) => f.kind === 'login') && !authProvider && !localLoginAsked && out.length < MAX_FINDINGS) {
     let browserOnly = false;
     try { browserOnly = authLivesInTheBrowser(files); } catch { browserOnly = false; }
@@ -192,6 +211,17 @@ export function findFakeFeatures(files: Readonly<Record<string, string>>, prompt
         ?? sources.find(([, c]) => BROWSER_STORE_WRITE_RE.test(c));
       if (store) add('login', store[0], firstHit(store[1], BROWSER_STORE_WRITE_RE));
     }
+  }
+  // Unlike the legacy marker rule, this bounded root proof establishes a specific local claim.
+  // It cannot infer delivery or general capability from a provider elsewhere in the project.
+  if (storage && out.length < MAX_FINDINGS) {
+    // Count original supplied characters before the sole recognized generated block is normalized.
+    const supplied = Object.values(files);
+    if (supplied.length > LOCAL_UPLOAD_LIMITS.files || supplied.some((source) => typeof source !== 'string')
+      || supplied.reduce((sum, source) => sum + source.length, 0) > LOCAL_UPLOAD_LIMITS.chars) return out;
+    const html = htmlForLocalUploadProof(files['index.html']);
+    const upload = html === null ? null : provenLocalUploadPath({ ...files, 'index.html': html });
+    if (upload) add('upload', upload.file, upload, 'local-upload-path');
   }
   return out;
 }
@@ -207,7 +237,8 @@ export const KEYS_PATH_PHONE = `NavBharatAI → ${SECRETS_SCREEN.inBuilderPath}`
 export const KEYS_PATH_WEB = SECRETS_SCREEN.canonical;
 
 /** The exact env names the real version reads — the recipe's recommended provider, first option. */
-export function keysForFinding(finding: Pick<FakeFeatureFinding, 'requirementId'>): string[] {
+export function keysForFinding(finding: Pick<FakeFeatureFinding, 'requirementId' | 'evidence'>): string[] {
+  if (finding.evidence === 'local-login-path' || finding.evidence === 'local-upload-path') return [];
   const option = preferredOption(recipeFor(finding.requirementId), null);
   return requiredVarNames(option, []);
 }
@@ -220,6 +251,7 @@ export function impliedRequirementsFor(findings: readonly FakeFeatureFinding[]):
   const out: AppRequirement[] = [];
   const seen = new Set<string>();
   for (const f of findings) {
+    if (f.evidence === 'local-login-path' || f.evidence === 'local-upload-path') continue;
     if (seen.has(f.requirementId)) continue;
     seen.add(f.requirementId);
     const req = impliedRequirement(f.requirementId, keysForFinding(f));
@@ -346,12 +378,23 @@ export function fakeFeatureNotice(findings: readonly FakeFeatureFinding[], langC
   if (!findings || findings.length === 0) return '';
   const s = stringsFor(langCode);
   const where = `${KEYS_PATH_PHONE} / ${KEYS_PATH_WEB}`;
-  const lines = byKind(findings).map((g) => s.line(s.feature[g.kind], g.files.slice(0, 3).join(', '), g.keys.join(', '), where));
-  return ['', '', ...lines, s.tail].join('\n');
+  const ordinary = findings.filter((f) => f.evidence !== 'local-login-path' && f.evidence !== 'local-upload-path');
+  const local = findings.filter((f) => f.evidence === 'local-login-path');
+  const lines = byKind(ordinary).map((g) => s.line(s.feature[g.kind], g.files.slice(0, 3).join(', '), g.keys.join(', '), where));
+  if (local.length) lines.push(`🔴 ${localLoginNotice(langCode)} (${[...new Set(local.map((f) => f.file))].slice(0, 3).join(', ')}).`);
+  const uploads = findings.filter((f) => f.evidence === 'local-upload-path');
+  if (uploads.length) lines.push(`🔴 ${localUploadNotice(langCode)} (${[...new Set(uploads.map((f) => f.file))].slice(0, 3).join(', ')}).`);
+  return ['', '', ...lines, ...(ordinary.length ? [s.tail] : [])].join('\n');
 }
 
 /** The admin-report line. PURE. */
 export function fakeFeatureReportLine(findings: readonly FakeFeatureFinding[]): string {
+  if (findings.some((f) => f.evidence === 'local-login-path' || f.evidence === 'local-upload-path')) {
+    return findings.slice(0, 5).map((f) => `${f.evidence === 'local-login-path'
+      ? 'A proven local sign-in success path needs real authentication wiring'
+      : f.evidence === 'local-upload-path' ? 'A proven local upload success claim needs real upload wiring'
+      : `${f.kind} only pretends to work (no matching provider found)`}: ${f.file}:${f.line} ${f.snippet}`).join(' · ');
+  }
   const kinds = [...new Set(findings.map((f) => f.kind))];
   return `The app has ${kinds.join(', ')} that only pretend${kinds.length === 1 ? 's' : ''} to work (no provider anywhere in the project): `
     + findings.slice(0, 5).map((f) => `${f.file}:${f.line} ${f.snippet}`).join(' · ');
@@ -364,24 +407,17 @@ const BANNER_CLOSE = HONESTY_BANNER_CLOSE;
 /** Text for the banner — the same words as the chat line, minus the file names (a visitor has no files). */
 export function honestyBannerLines(findings: readonly FakeFeatureFinding[], langCode?: string | null): string[] {
   const s = stringsFor(langCode);
-  return byKind(findings).map((g) => `⚠️ ${s.feature[g.kind]}: ${s.banner}. ${g.keys.join(', ')} → ${KEYS_PATH_PHONE} / ${KEYS_PATH_WEB}`);
+  const lines = byKind(findings.filter((f) => f.evidence !== 'local-login-path' && f.evidence !== 'local-upload-path'))
+    .map((g) => `⚠️ ${s.feature[g.kind]}: ${s.banner}. ${g.keys.join(', ')} → ${KEYS_PATH_PHONE} / ${KEYS_PATH_WEB}`);
+  if (findings.some((f) => f.evidence === 'local-login-path')) lines.push(`⚠️ ${localLoginNotice(langCode)}`);
+  if (findings.some((f) => f.evidence === 'local-upload-path')) lines.push(`⚠️ ${localUploadNotice(langCode)}`);
+  return lines;
 }
 
-/**
- * index.html with the red notice block replaced, added, or removed — whichever the findings call for.
- * Idempotent: a block from an earlier build is always replaced, and no findings means no block, so an
- * app whose demo was made real loses the banner on the next build. Fixed to the top of the page, red,
- * in the user's language, dismissible for the session (the × is 36px for a thumb). The text avoids
- * every word `scanAuthenticity` reads as a left-over stub, because index.html is scanned too. PURE.
- */
-export function withHonestyBanner(html: string | null | undefined, findings: readonly FakeFeatureFinding[], langCode?: string | null): string | null {
-  if (html == null) return null;
-  const stripped = stripHonestyBanner(html);
-  if (!findings || findings.length === 0) return stripped;
-  const lines = honestyBannerLines(findings, langCode);
-  const lang = langCode && STRINGS[langCode] ? langCode : 'en';
+/** Single byte-preserving generator shared by emission and strict local-proof recognition. */
+function canonicalHonestyScript(lines: readonly string[], lang: string): string {
   const json = JSON.stringify(lines).replace(/</g, '\\u003c');
-  const script = [
+  return [
     BANNER_OPEN,
     '<script>',
     '(function(){',
@@ -406,6 +442,49 @@ export function withHonestyBanner(html: string | null | undefined, findings: rea
     '</script>',
     BANNER_CLOSE,
   ].join('\n');
+}
+
+/** Only our exact complete inert-text banner may be removed from the closed upload shell. */
+function htmlForLocalUploadProof(html: string | undefined): string | null {
+  if (typeof html !== 'string' || html.length > 131_072) return null;
+  if (!html.includes(BANNER_OPEN) && !html.includes(BANNER_CLOSE)) return html;
+  if (html.split(BANNER_OPEN).length !== 2 || html.split(BANNER_CLOSE).length !== 2) return null;
+  const start = html.indexOf(BANNER_OPEN);
+  const end = html.indexOf(BANNER_CLOSE) + BANNER_CLOSE.length;
+  if (end <= start) return null;
+  // Emission places the complete block last in the body. Removing it from an attribute,
+  // tag name or text context would manufacture entry/root reachability absent in the input.
+  if (!/^\s*<\/body>\s*<\/html>\s*$/i.test(html.slice(end))) return null;
+  const block = html.slice(start, end);
+  if (block.length > 32_768) return null;
+  const payload = /^  var lines=(.+);$/m.exec(block)?.[1];
+  const language = /^    bar.setAttribute\("lang",(.+)\);$/m.exec(block)?.[1];
+  if (!payload || !language) return null;
+  try {
+    const lines: unknown = JSON.parse(payload);
+    const lang: unknown = JSON.parse(language);
+    if (!Array.isArray(lines) || lines.length > 12 || !lines.every((line) => typeof line === 'string' && line.length <= 4_000)
+      || typeof lang !== 'string' || !Object.hasOwn(LOCAL_UPLOAD_NOTICE, lang)) return null;
+    if (canonicalHonestyScript(lines, lang) !== block) return null;
+    return html.slice(0, start) + html.slice(end);
+  } catch { return null; }
+}
+
+/**
+ * index.html with the red notice block replaced, added, or removed — whichever the findings call for.
+ * Idempotent: a block from an earlier build is always replaced, and no findings means no block, so an
+ * app whose demo was made real loses the banner on the next build. Fixed to the top of the page, red,
+ * in the user's language, dismissible for the session (the × is 36px for a thumb). The text avoids
+ * every word `scanAuthenticity` reads as a left-over stub, because index.html is scanned too. PURE.
+ */
+export function withHonestyBanner(html: string | null | undefined, findings: readonly FakeFeatureFinding[], langCode?: string | null): string | null {
+  if (html == null) return null;
+  const stripped = stripHonestyBanner(html);
+  if (!findings || findings.length === 0) return stripped;
+  const lines = honestyBannerLines(findings, langCode);
+  const lang = langCode && (STRINGS[langCode] || findings.some((f) => f.evidence === 'local-login-path') && Object.hasOwn(LOCAL_LOGIN_NOTICE, langCode)
+    || findings.some((f) => f.evidence === 'local-upload-path') && Object.hasOwn(LOCAL_UPLOAD_NOTICE, langCode)) ? langCode : 'en';
+  const script = canonicalHonestyScript(lines, lang);
   if (/<\/body>/i.test(stripped)) return stripped.replace(/<\/body>/i, `    ${script}\n  </body>`);
   return `${stripped}\n${script}\n`;
 }
@@ -431,10 +510,12 @@ export function fakeFeatureWriteNote(file: string, content: string): string {
   if (typeof content !== 'string' || !content) return '';
   const hits = findFakeFeatures({ [file]: content });
   if (hits.length === 0) return '';
-  const lines = hits.map((h) => `  ${file}:${h.line} ${h.snippet}\n  → ${WRITE_NOTE_FIX[h.kind]}.`).join('\n');
+  const lines = hits.map((h) => `  ${file}:${h.line} ${h.snippet}\n  → ${h.evidence === 'local-login-path' ? localLoginNotice('en') : WRITE_NOTE_FIX[h.kind]}.`).join('\n');
   return `\n\n⛔ NO FAKE BUTTON, NO FAKE FEATURE — ${file} has a feature that only pretends to work:\n${lines}\n`
     + 'Until the real provider is wired, that screen MUST carry a clearly visible RED line in the user\'s language saying it is a '
-    + `demo and not real, and which key makes it real (${KEYS_PATH_WEB}, or ${KEYS_PATH_PHONE} without leaving the build); `
+    + (hits.some((h) => h.evidence === 'local-login-path')
+      ? 'demo and not real. Connect the local sign-in handler to real authentication; keys alone do not wire it. '
+      : `demo and not real, and which key makes it real (${KEYS_PATH_WEB}, or ${KEYS_PATH_PHONE} without leaving the build); `)
     + 'say the same in your final message. '
     + 'Never present it as working.';
 }

@@ -11,6 +11,7 @@
  *
  * ADMIN-ONLY. Real cost and margin never reach a user-facing surface (White-Label Law).
  */
+import type { HealCountInterpretation } from '../../lib/healIssue';
 import React, { useCallback, useEffect, useState } from 'react';
 import { IndianRupee, RefreshCw, AlertTriangle, TrendingDown, TrendingUp, Minus } from 'lucide-react';
 
@@ -27,6 +28,8 @@ export interface CostCell {
   avgMarginInr: number | null;
   nMargin: number;
   avgHeals: number | null;
+  nHeals?: number;
+  nQualifiedHeals?: number;
   avgMinutes: number | null;
 }
 
@@ -38,7 +41,8 @@ export interface CostRow {
   files: number;
   ok: boolean | null;
   minutes: number | null;
-  heals: number;
+  heals: number | null;
+  repairCount?: HealCountInterpretation;
   billedInr: number | null;
   zeroBillReason: string | null;
   realInr: number | null;
@@ -123,6 +127,23 @@ export function costHeadline(data: BuildCostsResponse | null, error: string): st
     : tail;
 }
 
+/** Unknown and qualified producer counts must remain visible, including to a text-only reader. */
+export function repairCountLabel(row: Pick<CostRow, 'heals' | 'repairCount'>): string {
+  if (row.heals === null || row.heals === undefined) {
+    const c = row.repairCount?.compatibilityCount;
+    return c == null ? 'unknown' : `unknown (compatibility value ${c}, unverified)`;
+  }
+  const p = row.repairCount?.provenance;
+  if (p === undefined) return `unknown (stored value ${row.heals}, unverified)`;
+  return `${row.heals}${p === 'future-rule' ? ' (future rule)' : p === 'rule-2-visible-adjustment'
+    ? ' (rule 2, partial adjustment)' : p === 'rule-2-adjusted' ? ' (rule 2 adjusted)' : ''}`;
+}
+
+export function repairAverageLabel(cell: Pick<CostCell, 'avgHeals' | 'nHeals' | 'nQualifiedHeals'>): string {
+  if (cell.avgHeals === null || cell.nHeals === undefined) return 'unknown';
+  return `${cell.avgHeals} (n=${cell.nHeals})${cell.nQualifiedHeals ? `; ${cell.nQualifiedHeals} older/future rule` : ''}`;
+}
+
 /** ₹/min/heal deltas: DOWN is better. Success rate is the one exception and is handled on its own. */
 export function deltaLabel(m: TrendMetric | undefined, unit: 'inr' | 'plain', higherIsBetter = false): string {
   if (!m || m.delta === null || m.recent === null || m.older === null) {
@@ -133,6 +154,12 @@ export function deltaLabel(m: TrendMetric | undefined, unit: 'inr' | 'plain', hi
   const arrow = m.delta === 0 ? 'no change' : `${m.delta > 0 ? '+' : '−'}${fmt(Math.abs(m.delta))}`;
   const verdict = m.delta === 0 ? '' : better ? ' better' : ' worse';
   return `${fmt(m.recent)} vs ${fmt(m.older)} · ${arrow}${verdict}`;
+}
+
+/** Comparable heal trends show their own known denominators, not the overall window size. */
+export function repairTrendLabel(m: TrendMetric | undefined): string {
+  const label = deltaLabel(m, 'plain');
+  return m && m.delta !== null ? `${label} (measured n=${m.nRecent} vs ${m.nOlder})` : label;
 }
 
 /** The one line that answers "are we making progress?" without reading the table. */
@@ -222,7 +249,7 @@ export function BuildCostCard({ adminToken }: { adminToken: string }): React.Rea
               ['Real cost (ours)', deltaLabel(data.trend?.realInr, 'inr'), data.trend?.realInr.delta, false],
               ['Bill (user)', deltaLabel(data.trend?.billedInr, 'inr'), null, false],
               ['Minutes', deltaLabel(data.trend?.minutes, 'plain'), data.trend?.minutes.delta, false],
-              ['Heals', deltaLabel(data.trend?.heals, 'plain'), data.trend?.heals.delta, false],
+              ['Heals', repairTrendLabel(data.trend?.heals), data.trend?.heals.delta, false],
               ['Success rate', deltaLabel(data.trend?.successRate, 'plain', true), data.trend?.successRate.delta, true],
             ] as [string, string, number | null | undefined, boolean][]).map(([label, text, delta, higherIsBetter]) => (
               <div key={label} className="rounded-lg bg-raised px-2 py-1.5">
@@ -275,7 +302,7 @@ export function BuildCostCard({ adminToken }: { adminToken: string }): React.Rea
                   <td className="py-2 pr-3 text-right">{avgWithSample(c.avgRealInr, c.nMeasured)}</td>
                   <td className="py-2 pr-3 text-right">{avgWithSample(c.avgBilledInr, c.nBilled)}</td>
                   <td className={`py-2 pr-3 text-right ${c.avgMarginInr !== null && c.avgMarginInr < 0 ? 'text-danger' : ''}`}>{avgWithSample(c.avgMarginInr, c.nMargin)}</td>
-                  <td className="py-2 pr-3 text-right">{c.avgHeals === null ? '—' : c.avgHeals}</td>
+                  <td className="py-2 pr-3 text-right">{repairAverageLabel(c)}</td>
                   <td className="py-2 text-right">{c.avgMinutes === null ? '—' : c.avgMinutes}</td>
                 </tr>
               ))}
@@ -288,6 +315,7 @@ export function BuildCostCard({ adminToken }: { adminToken: string }): React.Rea
         <div className="text-[10px] text-faint leading-snug space-y-1">
           <p>{data.sizeRule}</p>
           <p>{data.note}</p>
+          <p>Unknown repair totals are excluded from heal averages and trends. Older/future rule totals retain their producer definitions; partial rule-2 adjustments may include unseen reclassifications.</p>
           <p>Rate used: ₹{data.usdInr} per USD.</p>
         </div>
       )}
@@ -326,7 +354,7 @@ export function BuildCostCard({ adminToken }: { adminToken: string }): React.Rea
                     <td className="py-1.5 pr-3 text-right">{r.sandboxInr === null ? '—' : inr(r.sandboxInr)}</td>
                     <td className="py-1.5 pr-3 text-right whitespace-nowrap">{billLabel(r)}</td>
                     <td className={`py-1.5 pr-3 text-right ${r.marginInr !== null && r.marginInr < 0 ? 'text-danger' : ''}`}>{inr(r.marginInr)}</td>
-                    <td className="py-1.5 pr-3 text-right">{r.heals}</td>
+                    <td className="py-1.5 pr-3 text-right">{repairCountLabel(r)}</td>
                     <td className="py-1.5 text-right">{r.minutes === null ? '—' : r.minutes}</td>
                   </tr>
                 ))}

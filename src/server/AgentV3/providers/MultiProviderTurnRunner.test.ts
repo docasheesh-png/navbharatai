@@ -292,7 +292,8 @@ describe('cheap-floor combined design (admin 2026-07-07): size gate + prompt die
     const { makeMultiProviderTurnRunner: make } = await import('./MultiProviderTurnRunner');
     const glm = runnerFail('Request timed out.');
     const backstop = runnerOk('from claude');
-    const runner = make([{ name: 'GLM', runner: glm }, { name: 'CLAUDE', runner: backstop }]);
+    // Exercise the independent per-runner streak, not the earlier shared first-strike cooldown.
+    const runner = make([{ name: 'GLM', runner: glm }, { name: 'CLAUDE', runner: backstop }], { cooldowns: createRateLimitCooldowns(0) });
     await runner.runTurn(PARAMS); // timeout 1
     await runner.runTurn(PARAMS); // timeout 2 → benched
     await runner.runTurn(PARAMS); // benched — GLM not called
@@ -311,7 +312,7 @@ describe('cheap-floor combined design (admin 2026-07-07): size gate + prompt die
   it('2 CONSECUTIVE 429s bench a provider for the rest of the run (no 429 storm); a success resets the streak', async () => {
     const { makeMultiProviderTurnRunner: make } = await import('./MultiProviderTurnRunner');
     const glm = runnerFail('429 Rate limit reached');
-    const runner = make([{ name: 'GLM', runner: glm }, { name: 'CLAUDE', runner: runnerOk('from claude') }]);
+    const runner = make([{ name: 'GLM', runner: glm }, { name: 'CLAUDE', runner: runnerOk('from claude') }], { cooldowns: createRateLimitCooldowns(0) });
     await runner.runTurn(PARAMS); // 429 #1
     await runner.runTurn(PARAMS); // 429 #2 → benched
     await runner.runTurn(PARAMS); // benched — GLM NOT called a third time (the storm is stopped)
@@ -324,7 +325,7 @@ describe('cheap-floor combined design (admin 2026-07-07): size gate + prompt die
       .mockResolvedValueOnce({ text: 'recovered', usage: { inputTokens: 1, outputTokens: 1 } })
       .mockRejectedValueOnce(new Error('429 Rate limit reached'))
       .mockResolvedValue({ text: 'recovered again', usage: { inputTokens: 1, outputTokens: 1 } });
-    const r2 = make([{ name: 'KIMI', runner: flaky as never }, { name: 'CLAUDE', runner: runnerOk('from claude') }]);
+    const r2 = make([{ name: 'KIMI', runner: flaky as never }, { name: 'CLAUDE', runner: runnerOk('from claude') }], { cooldowns: createRateLimitCooldowns(0) });
     await r2.runTurn(PARAMS); // 429 #1 → falls to Claude
     expect((await r2.runTurn(PARAMS)).text).toBe('recovered'); // success resets the streak
     await r2.runTurn(PARAMS); // 429 #1 again (streak was reset) → falls to Claude, NOT benched
@@ -809,11 +810,16 @@ describe('a model that can never answer is retired after ONE attempt (report faa
     let n = 0;
     const flaky: TurnRunner = { runTurn: vi.fn(async () => { n++; if (n === 1) throw new Error('429 Rate limit reached'); return ok('recovered'); }) };
     const backstop = runnerOk('from claude');
+    let now = 1_000_000;
     const runner = makeMultiProviderTurnRunner([
       { name: 'GLM', runner: flaky, modelId: 'glm-4.7' },
       { name: 'CLAUDE', runner: backstop },
-    ]);
+    ], { now: () => now });
     expect((await runner.runTurn(PARAMS)).text).toBe('from claude');
+    // Transient is not permanent, but the documented shared cooldown must expire before retry.
+    expect((await runner.runTurn(PARAMS)).text).toBe('from claude');
+    expect(flaky.runTurn).toHaveBeenCalledTimes(1);
+    now += 60_000;
     expect((await runner.runTurn(PARAMS)).text).toBe('recovered');
   });
 });

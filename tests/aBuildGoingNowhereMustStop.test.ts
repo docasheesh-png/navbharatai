@@ -6,6 +6,7 @@ import {
   initialFutilityState,
   tickFutility,
   futilityDetail,
+  futilityStopApplies,
   DEFAULT_FUTILITY_MINUTES,
   MIN_FUTILITY_MINUTES,
   MAX_FUTILITY_MINUTES,
@@ -54,6 +55,7 @@ describe('the reported build — 25 quiet minutes against a 10-minute window', (
     const detail = futilityDetail(quietMinutes(10, 10), 10);
     expect(detail).toContain('10 consecutive minute(s)');
     expect(detail).toContain('0 file(s), 0 command(s), 0 step(s)');
+    expect(detail).toContain('0 path(s) read');
     // The distinction the 29-minute timeline never made.
     expect(detail).toContain('A provider call, a narration line and a heartbeat are deliberately NOT counted');
     expect(detail).toContain('AGENTV3_FUTILITY_MINUTES');
@@ -61,7 +63,7 @@ describe('the reported build — 25 quiet minutes against a 10-minute window', (
 });
 
 describe('ANY of the three signals moving is progress — the counter resets', () => {
-  for (const field of ['filesWritten', 'commandsRun', 'stepsDone'] as const) {
+  for (const field of ['filesWritten', 'commandsRun', 'stepsDone', 'pathsRead'] as const) {
     it(`a change in ${field} resets the quiet count`, () => {
       let state = initialFutilityState();
       for (let i = 0; i < 9; i++) state = tickFutility(state, snap(), 10).state;
@@ -96,6 +98,26 @@ describe('ANY of the three signals moving is progress — the counter resets', (
     let v = tickFutility(state, snap({ filesWritten: 20 }), 10);
     for (let i = 1; i < 10; i++) { v = tickFutility(v.state, snap({ filesWritten: 20 }), 10); }
     expect(v.stop).toBe(true);
+  });
+});
+
+describe('a rendered app is not "producing nothing"', () => {
+  it('a quiet window still reports stop, and the route must not abort once a browser has seen the app', () => {
+    const v = quietMinutes(10, 10);
+    expect(v.stop).toBe(true);
+    expect(futilityStopApplies(v, { appRendered: false })).toBe(true);
+    expect(futilityStopApplies(v, { appRendered: true })).toBe(false);
+    expect(futilityStopApplies(quietMinutes(9, 10), { appRendered: false })).toBe(false);
+  });
+
+  it('a first read of a new path is progress; the same path again is not', () => {
+    let state = initialFutilityState();
+    for (let i = 0; i < 9; i++) state = tickFutility(state, snap(), 10).state;
+    const read = tickFutility(state, snap({ pathsRead: 1 }), 10);
+    expect(read.stop).toBe(false);
+    expect(read.quietMinutes).toBe(0);
+    // Holding at 1 path is silence again — re-reading does not grow the counter.
+    expect(quietMinutes(11, 10, snap({ pathsRead: 1 })).stop).toBe(true);
   });
 });
 

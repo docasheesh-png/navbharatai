@@ -427,7 +427,7 @@ import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
 import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
-import { hasTscErrors, tscNeverRan, looksLikeBrokenTscInstall, buildScriptTypecheckVerdict, salvageTypecheckLine } from '../AgentV3/TscGate';
+import { tscVerdict, looksLikeBrokenTscInstall, buildScriptTypecheckVerdict, salvageTypecheckLine } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, describeJudgeVerdict, judgeEngineLabel, type JudgeRunTurn, type JudgeVerdict } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
@@ -482,7 +482,7 @@ import { withStopSignal } from '../AgentV3/stopSignal';
 import { withAnswerNotDeliberation } from '../AgentV3/answerNotDeliberate';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
-import { redactPII, redactEventForUser } from '../AgentV3/SecretRedactor';
+import { redactPII, redactEventForUser } from '../AgentV3/SourceSecretRedactor';
 import { audit } from '../lib/audit';
 import { persistenceHealth } from '../lib/persistenceHealth';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
@@ -527,10 +527,10 @@ import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince, splitAuthRefusals, splitAssetMisses } from '../AgentV3/renderCheckConsole';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
 import { fillGateFromLedger, renderProvenInLedger } from '../AgentV3/evidenceLedger';
-import { appRenderedRecord } from '../AgentV3/renderProof';
+import { appRenderedRecord, renderSeenThisBuild } from '../AgentV3/renderProof';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
-import { futilityMinutes, initialFutilityState, armedFutilityState, tickFutility, futilityDetail } from '../AgentV3/futilityBreaker';
+import { futilityMinutes, initialFutilityState, armedFutilityState, tickFutility, futilityDetail, futilityStopApplies } from '../AgentV3/futilityBreaker';
 import { waitingForUserLine } from '../AgentV3/userWait';
 import { STOP_DRAIN_WAIT_MS, BUILD_STILL_STOPPING_CODE, BUILD_STILL_STOPPING_MESSAGE, stoppedBuildGate, waitForBuildExit, markBuildExited, hasBuildBodyExitHold } from '../AgentV3/stoppingBuild';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -13510,6 +13510,8 @@ async function noteBuildOutcome(
      * on completion, which is exactly the signal wanted.
      */
     let commandsRun = 0;
+    /** Distinct paths read, asked at the heartbeat. Assigned once the build dispatcher exists. */
+    let pathsReadNow = (): number => 0;
     let futilityState = initialFutilityState();
     let futilityFired = false;
     /**
@@ -13579,11 +13581,12 @@ async function noteBuildOutcome(
           const limit = futilityMinutes();
           const verdict = tickFutility(
             futilityState,
-            { filesWritten: writtenFiles.size, commandsRun, stepsDone: etaStepsDone },
+            { filesWritten: writtenFiles.size, commandsRun, pathsRead: pathsReadNow(), stepsDone: etaStepsDone },
             limit,
           );
           futilityState = verdict.state;
-          if (verdict.stop) {
+          // A rendered app is not "producing nothing". The wall clock still bounds it.
+          if (futilityStopApplies(verdict, { appRendered: renderSeenThisBuild(workspaceId) })) {
             futilityFired = true;
             try {
               buildDiagRef?.record({
@@ -16051,6 +16054,9 @@ async function noteBuildOutcome(
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
+      pathsReadNow = () => {
+        try { return dispatcher.sharedReadLedger().size; } catch { return 0; }
+      };
       /**
        * Every platform write in this build — the fast lanes and the post-build passes — goes through here: the
        * model's write door with every guard, no steering note (unreadWrites.ts), and ONE outcome per file back
@@ -18121,7 +18127,7 @@ async function noteBuildOutcome(
 
       // THE BUILD STARTS HERE, so the futility breaker's quiet window does too (futilityBreaker.ts,
       // `armedFutilityState`): everything above is the platform's own bounded preparation.
-      futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, stepsDone: etaStepsDone });
+      futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, pathsRead: pathsReadNow(), stepsDone: etaStepsDone });
       futilityArmed = true;
 
       // Cost-ladder escalation (P3) — DORMANT unless AGENTV3_ESCALATION=on. When off,
@@ -18353,7 +18359,7 @@ async function noteBuildOutcome(
               // The seed is the platform's preparation, not the build moving. The futility breaker was armed
               // above ("THE BUILD STARTS HERE"), before the platform's seeds; re-armed now, so ~30 kit files and
               // the `three` install do not read as the builder making progress on its first quiet minute.
-              futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, stepsDone: etaStepsDone });
+              futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, pathsRead: pathsReadNow(), stepsDone: etaStepsDone });
             }
           } catch (kitErr) {
             gameKitSeedFailed = true;
@@ -18814,16 +18820,16 @@ async function noteBuildOutcome(
                 return { ok: false, errors: `CSS SYNTAX ERROR in ${cssPath}: ${Math.abs(imbalance)} ${imbalance > 0 ? 'unclosed' : 'extra closing'} brace(s) — postcss will reject the whole file ("Unclosed block") and the app will render unstyled. Rewrite ${cssPath} with balanced braces.` };
               }
             }
-            // Fix 38b — the old command hid a tsc that never ran (`--no-install … || true` → no
-            // "error TS" → fake "verified ✓"). The __TSC_CLEAN__ marker prints ONLY when tsc really
-            // ran and exited 0; no errors AND no marker now means UNVERIFIED, which fails honestly.
+            // Fix 38b — zero diagnostics alone is not verification. The marker records executable
+            // exit zero, not compiler identity; require both canonical output evidence and the marker.
+            // A missing marker remains unverified even when no diagnostic was printed.
             const r = await actuator.runCommand(workspaceId, `${TSC_ENSURE}; if ${TSC_BIN} --noEmit > /tmp/nb_tsc.log 2>&1; then echo __TSC_CLEAN__; fi; tail -200 /tmp/nb_tsc.log 2>/dev/null || true`);
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
-            // A torn TypeScript install prints `error TS2318: Cannot find global type 'Array'` about the
-            // compiler's OWN library (autopsy 120eb52f) — never the app's errors, and never a reason to
-            // spend a repair on the app. Unverified, the same as a compiler that is not there.
+            // Preserve the torn-install short circuit. Other unverified outputs must still reach
+            // the independent CSS checks below, but cannot earn the final compiler success claim.
             if (looksLikeBrokenTscInstall(out)) return { ok: true, errors: '', ran: false };
-            const hasErrors = /error TS\d+/.test(out);
+            const verdict = tscVerdict(out);
+            const hasErrors = verdict === 'failed';
             if (hasErrors) {
               // #1 — capture the OFFENDING files into the diagnosis bundle so the exact mismatch is
               // visible in the report (no inference). Parse the file paths tsc names (e.g.
@@ -18883,8 +18889,8 @@ async function noteBuildOutcome(
               const cssErr = cssConsistencyError(project);
               if (cssErr) return { ok: false, errors: cssErr };
             } catch { /* css check is best-effort — never blocks on its own failure */ }
-            if (!out.includes('__TSC_CLEAN__')) {
-              // The compiler could not EXECUTE — no compile errors AND no clean marker. The common case
+            if (verdict !== 'passed' || !out.includes('__TSC_CLEAN__')) {
+              // The compiler is UNVERIFIED: known refusal/unknown output or no clean marker. A common case
               // is a vite-react JS app whose scaffold has no `typescript` dependency, so `npx --no-install
               // tsc` simply isn't there (or npx failed). This is NOT a compile failure.
               //
@@ -19813,10 +19819,11 @@ async function noteBuildOutcome(
             const ensureCfg = "if [ ! -f tsconfig.json ] && [ ! -f tsconfig.app.json ] && find src -name '*.ts' -o -name '*.tsx' 2>/dev/null | head -1 | grep -q .; then printf '%s' '{\"compilerOptions\":{\"target\":\"ES2020\",\"lib\":[\"ES2020\",\"DOM\",\"DOM.Iterable\"],\"module\":\"ESNext\",\"moduleResolution\":\"bundler\",\"jsx\":\"react-jsx\",\"strict\":false,\"skipLibCheck\":true,\"noEmit\":true,\"esModuleInterop\":true,\"allowSyntheticDefaultImports\":true,\"isolatedModules\":true},\"include\":[\"src\"]}' > tsconfig.json; fi";
             const r = await actuator.runCommand(workspaceId, `${ensureCfg}; ${TSC_ENSURE}; ${TSC_BIN} --noEmit 2>&1 | tail -200 || true`);
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
-            // A help-page result, or a shell that could not find the compiler at all, means tsc STILL
-            // didn't really run — treat as "unverified, don't block", never as a clean pass (no fake success).
-            if (tscNeverRan(out)) return { ok: true, verified: false, errors: '' };
-            return hasTscErrors(out)
+            // The same output reader as the fast lane: unknown setup output is not proof of a
+            // compile, even when the shell pipeline itself exits successfully.
+            const verdict = tscVerdict(out);
+            if (verdict === 'not-run' || verdict === 'unknown') return { ok: true, verified: false, errors: '' };
+            return verdict === 'failed'
               ? { ok: false, verified: true, errors: out.slice(0, 6000) }
               : { ok: true, verified: true, errors: '' };
           } catch {
@@ -19954,8 +19961,8 @@ async function noteBuildOutcome(
           // exhausted the step-limit). Kill: AGENTV3_CSS_MODULE_GEN=off.
           if (missing.length > 0 && process.env.AGENTV3_CSS_MODULE_GEN !== 'off') {
             try {
-              const fileMapForCss: Record<string, string> = { ...Object.fromEntries(scaffoldPaths.map((p) => [p, ''])), ...Object.fromEntries(writtenFiles) };
-              const cssStubs = generateMissingCssModules(fileMapForCss);
+              const fileMapForCss = Object.fromEntries(writtenFiles);
+              const cssStubs = generateMissingCssModules(fileMapForCss, scaffoldPaths);
               if (cssStubs.length > 0) {
                 // Claimed only for what the workspace took (Q-982); the re-check below reads the workspace either way.
                 const { landed } = readWriteOutcomes(cssStubs, await runInPass('css-module-stubs', () => writePlatform(cssStubs, 'cssmod-w')));
@@ -19973,8 +19980,9 @@ async function noteBuildOutcome(
           // Runs before the repair pass so the budget goes to real gaps. Kill: AGENTV3_BARREL_GEN=off.
           if (missing.length > 0 && process.env.AGENTV3_BARREL_GEN !== 'off') {
             try {
-              const fileMapForBarrel: Record<string, string> = { ...Object.fromEntries(scaffoldPaths.map((p) => [p, ''])), ...Object.fromEntries(writtenFiles) };
-              const barrels = await generateMissingBarrels(fileMapForBarrel);
+              // Keep unread scaffold paths out of the export graph: presence is not an empty module.
+              const fileMapForBarrel = Object.fromEntries(writtenFiles);
+              const barrels = await generateMissingBarrels(fileMapForBarrel, scaffoldPaths);
               if (barrels.length > 0) {
                 // Claimed only for what the workspace took (Q-982); the re-check below reads the workspace either way.
                 const { landed } = readWriteOutcomes(barrels, await runInPass('barrel-stubs', () => writePlatform(barrels, 'barrel-w')));
@@ -24446,6 +24454,7 @@ async function noteBuildOutcome(
           screenshotTaken: buildDiag.toolWasUsed('screenshot'),
           // "✅ Login with Google" about a login whose password is written into the app (fakeFeatureScan.ts).
           fakeFeatures: fakeFeatures.map((f) => f.kind),
+          fakeFeatureEvidence: fakeFeatures,
           // THE LEDGER, not this pass's local memory (2026-09-21). Three lines of this same function
           // already asked `renderProvenNow()`; asking a narrower source here let the platform accuse
           // the model of claiming a working preview in a report that itself proves one rendered.
@@ -25640,6 +25649,19 @@ async function noteBuildOutcome(
         try {
           buildDiag.record({ phase: 'build', severity: 'error', code: 'OUTCOME_REVIEW_CRITICAL', message: `${n} reviewer [CRITICAL] finding(s) were not verifiably fixed — the app is not fully working:\n- ${reviewCriticalsUnresolved.join('\n- ')}`, autoResolved: false });
         } catch { /* best-effort */ }
+      }
+
+      // A not-ok build with no OUTCOME_* is the panel's "never recorded WHY" / "no cause" hole.
+      // Every named ending above writes its own code; this is only the runs that wrote none.
+      if (result && result.ok === false) {
+        try {
+          if (!outcomeCodeOf(buildDiag.report().issues)) {
+            buildDiag.record({
+              phase: 'build', severity: 'error', code: 'OUTCOME_UNEXPLAINED', autoResolved: false,
+              message: 'Build outcome: NOT OK — the run ended without an outcome code. The engine did not record why; this is not a fact about the app.',
+            });
+          }
+        } catch { /* the record must never be what breaks the build it is describing */ }
       }
 
       // ── SOFTWARE PROJECT MODE (SPM-2): settle this module's status from the REAL result ──────
@@ -27515,6 +27537,16 @@ async function noteBuildOutcome(
       let crashReportForClient: unknown = undefined;
       try {
         buildDiagRef?.record({ phase: crash.phase, severity: 'error', code: crash.code, message: errMsg, autoResolved: false });
+        if (crash.code === 'BUILD_EXCEPTION') {
+          try {
+            if (!outcomeCodeOf(buildDiagRef?.report()?.issues ?? [])) {
+              buildDiagRef?.record({
+                phase: 'build', severity: 'error', code: 'OUTCOME_UNEXPLAINED', autoResolved: false,
+                message: 'Build outcome: NOT OK — the run ended without an outcome code. The engine did not record why; this is not a fact about the app.',
+              });
+            }
+          } catch { /* naming the hole must not replace the crash record */ }
+        }
         // SAME STALE-SUMMARY SIBLING AS THE WATCHDOG PATH (see the comment beside `pauseMsgForReport`
         // above): `ingestEvent`'s `case 'done'` sets `this.summary` unconditionally on every mid-build
         // `done` event, and `finish()` only overwrites it when a summary is actually passed. Calling

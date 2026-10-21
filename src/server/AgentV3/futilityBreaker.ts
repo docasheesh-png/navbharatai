@@ -54,6 +54,12 @@ export interface ProgressSnapshot {
   filesWritten: number;
   commandsRun: number;
   stepsDone: number;
+  /**
+   * Distinct file paths (or ranges) read for the first time. A re-read does not grow this — the
+   * ledger size is the counter — so a model looping on one file is still going nowhere. A failed
+   * provider call is still not progress. Absent reads as 0, so an older snapshot stays valid.
+   */
+  pathsRead?: number;
 }
 
 /** The breaker's carried state. Opaque to the caller apart from `quietTicks`, which the report uses. */
@@ -84,7 +90,7 @@ export const MIN_FUTILITY_MINUTES = 6;
 /** Past the wall clock there is nothing left to bound — the watchdog owns it. */
 export const MAX_FUTILITY_MINUTES = 30;
 
-const ZERO: ProgressSnapshot = { filesWritten: 0, commandsRun: 0, stepsDone: 0 };
+const ZERO: ProgressSnapshot = { filesWritten: 0, commandsRun: 0, stepsDone: 0, pathsRead: 0 };
 
 /**
  * The configured window, in minutes.
@@ -119,12 +125,21 @@ export function initialFutilityState(): FutilityState {
  * (never on zero, or a pre-seeded file would read as fresh progress). PURE.
  */
 export function armedFutilityState(now: ProgressSnapshot): FutilityState {
-  return { last: { filesWritten: num(now?.filesWritten), commandsRun: num(now?.commandsRun), stepsDone: num(now?.stepsDone) }, quietTicks: 0 };
+  return {
+    last: {
+      filesWritten: num(now?.filesWritten),
+      commandsRun: num(now?.commandsRun),
+      stepsDone: num(now?.stepsDone),
+      pathsRead: num(now?.pathsRead),
+    },
+    quietTicks: 0,
+  };
 }
 
 /** Did anything at all move? A single field is enough — this is "getting anywhere", not "getting far". */
 function madeProgress(a: ProgressSnapshot, b: ProgressSnapshot): boolean {
-  return b.filesWritten > a.filesWritten || b.commandsRun > a.commandsRun || b.stepsDone > a.stepsDone;
+  return b.filesWritten > a.filesWritten || b.commandsRun > a.commandsRun || b.stepsDone > a.stepsDone
+    || num(b.pathsRead) > num(a.pathsRead);
 }
 
 /** Read one counter defensively: a NaN must never be mistaken for movement, in either direction. */
@@ -152,11 +167,13 @@ export function tickFutility(
     filesWritten: num(now?.filesWritten),
     commandsRun: num(now?.commandsRun),
     stepsDone: num(now?.stepsDone),
+    pathsRead: num(now?.pathsRead),
   };
   const prev = state?.last ?? { ...ZERO };
   const wentBackwards = seen.filesWritten < prev.filesWritten
     || seen.commandsRun < prev.commandsRun
-    || seen.stepsDone < prev.stepsDone;
+    || seen.stepsDone < prev.stepsDone
+    || num(seen.pathsRead) < num(prev.pathsRead);
   if (madeProgress(prev, seen) || wentBackwards) {
     return { state: { last: seen, quietTicks: 0 }, stop: false, quietMinutes: 0 };
   }
@@ -170,17 +187,31 @@ export function tickFutility(
 }
 
 /**
+ * Should this tick actually abort?
+ *
+ * `tickFutility` still says `stop` after a quiet window — that fact stays checkable. A build a real
+ * browser has already watched render is not "producing nothing": the app is on screen. The wall
+ * clock still bounds it. Failing that build is the honesty debt (worked, called failed).
+ */
+export function futilityStopApplies(verdict: FutilityVerdict | null | undefined, opts?: { appRendered?: boolean } | null): boolean {
+  if (verdict?.stop !== true) return false;
+  if (opts?.appRendered === true) return false;
+  return true;
+}
+
+/**
  * The ADMIN-facing line for the build report.
  *
- * It names the three counters, because "nothing happened" is a claim a reader must be able to check —
- * and on the reported build all three were zero, which is the fact the 29-minute timeline never said.
+ * It names the counters, because "nothing happened" is a claim a reader must be able to check —
+ * and on the reported build they were zero, which is the fact the 29-minute timeline never said.
  */
 export function futilityDetail(v: FutilityVerdict, limitMinutes: number): string {
   const p = v.state.last;
   return `Build stopped as futile: ${v.quietMinutes} consecutive minute(s) with no files written, `
-    + `no commands completed and no plan steps done (totals for the whole build so far: `
-    + `${p.filesWritten} file(s), ${p.commandsRun} command(s), ${p.stepsDone} step(s)), against a `
+    + `no commands completed, no plan steps done and no new file read (totals for the whole build so far: `
+    + `${p.filesWritten} file(s), ${p.commandsRun} command(s), ${p.stepsDone} step(s), ${num(p.pathsRead)} path(s) read), against a `
     + `window of ${limitMinutes} min. A provider call, a narration line and a heartbeat are `
-    + `deliberately NOT counted as progress — all three were happening throughout. Widen or disable `
+    + `deliberately NOT counted as progress — all three were happening throughout. A re-read of a path `
+    + `already read does not count either. Widen or disable `
     + `with AGENTV3_FUTILITY_MINUTES (0 = no futility breaker).`;
 }

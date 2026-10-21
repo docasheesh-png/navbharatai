@@ -17,6 +17,7 @@ import React, { useState } from 'react';
 import { Store, Loader2, CheckCircle2, AlertTriangle, X } from 'lucide-react';
 // The submit rules, and — the part that was missing — the sentence explaining which one is not met yet.
 import { storeSubmissionProblems, storeSubmissionBlockedReason, type StoreField } from '../../lib/storeSubmissionReady';
+import { SponsoredBanner } from '../ads/SponsoredAd';
 
 interface Props {
   owner: string;
@@ -91,6 +92,8 @@ export function PublishToNavStore({ owner, repo, artifactId, ghHeaders, defaultA
             </span>
           </span>
         </p>
+        {/* A small banner BELOW the success message, in the flow — never over it. Only after a real success. */}
+        <SponsoredBanner placement="publish_success" className="mt-3" />
       </div>
     );
   }

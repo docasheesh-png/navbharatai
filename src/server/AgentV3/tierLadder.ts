@@ -204,14 +204,7 @@ export function tierLadder(level: PowerLevel | string | boolean | null | undefin
   // An invalid override must fall back to the active policy, never silently restore the long chain.
   const parsed = parseLadderOverride(lvl, env[ladderEnvName(lvl)]);
   if (lvl === 'weak' && weakScopePolicyEnabled(env) && parsed.source === 'default') {
-    // THE FREE LADDER UNDER THE SCOPE POLICY IS THREE RUNGS: flashx → KIMI → glm-5.3 (admin, verbatim,
-    // 2026-10-21: "glm ka ek upar ka module (jisme thinking ho) free wale me add kar do"). It was two
-    // (flashx → KIMI) when the policy shipped on 2026-10-20. glm-5.3 is the next GLM above flashx and the one
-    // that always reasons (`glmThinking.ts`): it sits BEHIND Kimi so a Z.ai silence on the lead rung is
-    // answered by a different vendor first, and it is the rung that answers when Kimi itself is down — which
-    // the two-rung ladder could not do (autopsies 81a0eda5 / 14ea28b8, Kimi quota). Nemotron and Haiku stay
-    // OFF this ladder: this is the policy's "no Claude, no fourth vendor" shape, with one more coder.
-    return { ...parsed, rungs: TIER_LADDERS.weak.slice(0, 3).map(r => ({ ...r })) };
+    return { ...parsed, rungs: TIER_LADDERS.weak.slice(0, 2).map(r => ({ ...r })) };
   }
   return parsed;
 }

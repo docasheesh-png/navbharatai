@@ -214,6 +214,9 @@ export const PROCESS_ONLY_CODES = new Set([
   'TURN_ANSWERED_A_QUESTION',
   // …and its sibling (2026-09-26): the model DECLINED, and its refusal was left standing as the answer.
   'TURN_DECLINED',
+  // Initial-lane answers and their terminal outcome describe routing, not a defect in the app.
+  'SIMPLE_BUILD_DECLINED', 'ONESHOT_DECLINED', 'OUTCOME_INITIAL_DECLINED',
+  'OUTCOME_FINALIZATION_FAILED', // a failure settling our answer, not an app-code repair
   // …and its third sibling (Q-1019, 2026-10-15): the turn's whole ask was to remove ads that live inside
   // another service's player, which the app cannot reach into. The model said so and changed nothing — our
   // retry policy correctly left that answer standing. An unregistered code costs the USER 6 app-health
@@ -3739,7 +3742,11 @@ export interface EtaAccuracy {
  * FUTILE credited report 78e7e226's empty ten-minute run as an accurate delivery. Advisory-cap and
  * unknown-code measurement policy is unchanged. Past the upper bound, elapsed time still proves a miss.
  */
-export const ETA_UNTESTED_OUTCOMES: ReadonlySet<string> = new Set(Object.values(ABORT_OUTCOME_CODES));
+export const ETA_UNTESTED_OUTCOMES: ReadonlySet<string> = new Set([
+  ...Object.values(ABORT_OUTCOME_CODES),
+  'OUTCOME_INITIAL_DECLINED', // a preserved answer is not completed app delivery
+  'OUTCOME_FINALIZATION_FAILED', // neither is a failure while settling that answer
+]);
 
 /**
  * MEASURE THE PROMISE AGAINST THE CLOCK — the half that was missing (open root cause #6, 2026-09-17).

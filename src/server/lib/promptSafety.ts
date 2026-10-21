@@ -217,7 +217,7 @@ export function looksLikeRefusal(text: string | null | undefined): boolean {
  * first-person inability to build/help, not a feature negation ("fake login nahi banaunga").
  * Quoted labels and fenced code are not the model speaking; conditional examples are not refusals.
  */
-function looksLikeHindiRefusal(head: string): boolean {
+export function looksLikeHindiRefusal(head: string): boolean {
   const prose = head.split(/```|~~~/, 1)[0].replace(/`[^`\n]*`/g, '').replace(/[*_]/g, '');
   return prose.split(/[.!?।;\n]+/).some((part) => {
     const statement = part.trim().slice(0, 220);

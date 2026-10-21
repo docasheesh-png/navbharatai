@@ -28,7 +28,7 @@ describe('cloudbuild.yaml — every $ in a step is a Cloud Build variable, a $_u
     );
     const active = render();
     expect(weakScopePolicyEnabled(active)).toBe(true);
-    expect(tierLadder('weak', active).rungs.map((rung) => rung.model)).toEqual(['glm-4.7-flashx', 'kimi-k2.7-code']);
+    expect(tierLadder('weak', active).rungs.map((rung) => rung.model)).toEqual(['glm-4.7-flashx', 'kimi-k2.7-code', 'glm-4.7-flash']);
     expect(planLadder('weak', active, true)[0].provider).toBe('KIMI');
     expect(buildCostCeilingUsd(active, true)).toBe(1);
     const rollback = render({ _WEAK_SCOPE_POLICY: 'off' });

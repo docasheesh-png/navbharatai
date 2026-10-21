@@ -204,7 +204,11 @@ export function tierLadder(level: PowerLevel | string | boolean | null | undefin
   // An invalid override must fall back to the active policy, never silently restore the long chain.
   const parsed = parseLadderOverride(lvl, env[ladderEnvName(lvl)]);
   if (lvl === 'weak' && weakScopePolicyEnabled(env) && parsed.source === 'default') {
-    return { ...parsed, rungs: TIER_LADDERS.weak.slice(0, 2).map(r => ({ ...r })) };
+    // Admin 2026-10-21: "glm ka sabse sasta no thinking module use karo" — a third rung that can NEVER think.
+    // glm-5.3 always reasons and the provider refuses to switch it off (glmThinking.ts), so the cheapest GLM that
+    // accepts `thinking: disabled` is glm-4.7-flash ($0). Honest limit: it is the weakest GLM (DeepSWE ~46), so it is a
+    // last free rung, not a speed fix for a silent lead.
+    return { ...parsed, rungs: [...TIER_LADDERS.weak.slice(0, 2), { provider: 'GLM' as const, model: 'glm-4.7-flash' }].map(r => ({ ...r })) };
   }
   return parsed;
 }

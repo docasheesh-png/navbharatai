@@ -98792,3 +98792,14 @@ the same fix the row already prescribed before the second occurrence arrived.
 
 ### Proof, by reversion
 Fourteen bugs were put back one at a time and each made a test fail: the Terms promising the refund window again, the refund policy returning money to the card, the contact page approving refunds, the Terms losing the investigate-then-credit remedy; a sign-in handler without the gate, a social button without the disabled gate, a second checkbox, a remembered tick, the marker cleared on a refusal, the server accepting a missing age confirmation, a version label that accepts anything; a quota changed without the notice, rows starting to be deleted, the exception paragraph removed.
+
+## 2026-10-21 — Newest-10 failed-report autopsy (via the "navbharatai failed br" connector)
+Connector read to exhaustion (110 pages, ~602 reports, all `not_started`); the ten newest by `startedAt` were autopsied in full. Ledger (Q-2230…Q-2245 in `BUILD_REPORT_QUEUE.md`):
+- 35bd9e17 · yes-to-offer then asked again, ended `OUTCOME_UNEXPLAINED` → offer-accepted builder note; `OUTCOME_ASKED_USER`.
+- 5c461dc7 / 1d3ff0d5 · $1 cost ceiling hit twice; the second also carried phantom type-only cycles (readiness 0/100 → false "unfinished" resume), saved≠sandbox after a looped `sed -i`/`node -e` → type-only imports are not cycles, cycle penalty capped, shell writes reconciled against the sandbox.
+- bd20f9b2 · two 300 s truncated mega-writes → futility (BLOCKED: deferred file-budget gate).
+- 40868260 · own auth template's `console.error` failed our own render gate; gate label "did not render" over a rendered app → `console.warn`; label fixed.
+- 55ae489d, d060c346 · stopped by the user, nothing wrong (RESOLVED as not-a-defect); d060c346 also showed the false "clone of WhatsApp" scope (7th shape) → clone needs intent.
+- ce8845e1 · `combo` export error (BLOCKED, files missing).
+- 81a0eda5, 14ea28b8 · AI pause recorded as a build error/blocker → `OUTCOME_AI_PAUSED`; 14ea28b8 also: platform kit `Game.ts` deleted as a "stale twin" → guard armed with seeds.
+Every fix has a test proven by reversion. Open root causes are rows Q-2240…Q-2245.

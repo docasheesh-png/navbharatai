@@ -98768,3 +98768,27 @@ sixth.
 with a proposal: make the handler's cleanup part of what the request promise awaits, so "response sent" and
 "timers cleared" cannot be observed out of order. That kills the class rather than this one branch, and it is
 the same fix the row already prescribed before the second occurrence arrived.
+
+---
+
+## 2026-10-21 — Privacy Policy and Terms matched against the code: the five HIGH fixes
+
+**Asked by the admin (2026-10-21), after an audit that read both documents against the code:** fix the HIGH items first; the medium and low ones later. The audit's 14 findings are queue rows **Q-2204…Q-2217** (nothing is left only in a reply).
+
+### What this change does
+
+| # | The admin's instruction | What was done |
+|---|---|---|
+| 5 | "token purchase kiye ya koi service li → sab non refundable. Double payments ya galti se jyada/extra payment bhi non refundable. Payment kiya aur token nahi mile → investigation ke baad token diye jayenge. Sabhi jagah aisa likho." | One money rule in **every** document: Terms §4 and §9 (the old 7-day sentences that survived there for a month are gone), Refund Policy (intro, §2, §5, §7, §8), Contact (the "Refund" row and the "money leaves within 7 working days" line), `meta.ts` subtitles. Everything is final; a duplicate or extra payment is credited as tokens, never returned as money; a payment with no credit is investigated, then credited. `tests/theRefundPolicyHasItsOwnUrl.test.ts` now reads the **vocabulary** of a cash return across every legal document (it used to match one phrase, which is why Section 9 slipped through). |
+| 3 | "NavData ka exception likho. Jo sahi hai woh likho." | Privacy §12 and §6 and Terms §5 now describe the App Mart shared entries: what is stored (≤ 2 KB, no account/IP/device attached by us), who can read it (anyone who can open the app), the limits (5,000 per app, 2,000 a day), and — truthfully — that **nothing deletes the entries** when an app is removed or its creator's account is deleted (Q-2206). `tests/theSharedDataNoticeMatchesTheCode.test.ts` reads the numbers from the code and fails the day anything starts deleting. |
+| 4 | "Ek checkbox mein terms aur 18+ dono? Jo best ho woh banao. Neeche terms padhne ka link, new tab ya popup." | **One** checkbox on the sign-in card: *"I am 18 years or older, and I agree to the Terms of Service and Privacy Policy"*, both links in a new tab (the phone's own browser in the app). One box, not two: both statements are conditions of using the product at all, and two boxes only add a tap and a way to be half-ready; anything truly optional (Meta measurement) stays in the consent banner. Every way in is behind it (the buttons are disabled, and every handler refuses without it — a census fails if a new sign-in function skips the gate). The evidence — which version of each document, when (server clock), and that the age was confirmed — is stored on the profile by `POST /api/profile/terms-acceptance`, cleared from the device only on a real `{ ok: true }`, and disclosed in Privacy §2.2. Existing users are not asked (no record for them yet). |
+| 2 | "Free image generator ab hai hi kahan? Dekh ke batao." | Verified: **no free or browser-direct path remains** (removed 2026-10-05). Every Pollinations call needs `POLLINATIONS_API_KEY` and runs from our server; `IMAGE_GEN_POLLINATIONS=off` removes it. Prompts can still reach Cloudflare, the keyed Pollinations account, `IMAGE_PRO_KEY`'s host, Gemini and Grok — which are live depends on production env (Q-2207, the admin's console). |
+| 1 | "Account delete ka option hi hata do — code aur policy dono se; user delete karke naya account bana ke phir free bonus lega." | **NOT DONE, on purpose — Q-2204 (🟡 BLOCKED, the admin's decision).** Google Play and the App Store require an in-app account-deletion path; Privacy §9 promises erasure; and removing it would not stop the farming (a new e-mail does that). Recommended instead: keep deletion, and stop the bonus cycle at its root with a one-way hash of the e-mail/number that already took a bonus. Nothing about deletion was changed. |
+
+### Open and honest
+- Q-2205: the 30-day erasure promise is wider than what the code erases (conversations, voice, workspace copies are retained). Not changed here because it depends on Q-2204.
+- Q-2217: the all-non-refundable rule has two named risks (chargebacks, and termination for convenience); both documents keep the Consumer Protection Act sentence.
+- The documents' dates were moved to 21 October 2026 (`meta.ts` kept equal to the documents by `appCheck.test.ts`). Privacy §13 promises an in-app announcement of a material change before it takes effect — that announcement is the admin's to send.
+
+### Proof, by reversion
+Fourteen bugs were put back one at a time and each made a test fail: the Terms promising the refund window again, the refund policy returning money to the card, the contact page approving refunds, the Terms losing the investigate-then-credit remedy; a sign-in handler without the gate, a social button without the disabled gate, a second checkbox, a remembered tick, the marker cleared on a refusal, the server accepting a missing age confirmation, a version label that accepts anything; a quota changed without the notice, rows starting to be deleted, the exception paragraph removed.

@@ -79,6 +79,7 @@ import { markTestingNoticeSeen, testingNoticeSeen, unreadWithTestingNotice } fro
 import { useReferralProgress, useRefreshReferralOnResume } from './hooks/useReferralProgress';
 import { REFERRAL_GRANTED_EVENT } from './lib/referralClaim';
 import { useHeldReferralCode } from './hooks/useHeldReferralCode';
+import { useRecordTermsAcceptance } from './hooks/useRecordTermsAcceptance';
 import { useShakeToReport } from './hooks/useShakeToReport';
 // EngineerAIChat retired — replaced by NavBharatAI Pro (ProV3Surface).
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -1626,6 +1627,8 @@ export default function App() {
   // A code typed on the sign-in screen is applied here, once, the moment there is an account for it.
   // Returns a message either way; it can never throw into the screen the user just signed in to.
   useHeldReferralCode(user?.uid ?? null, referralProgress.refresh);
+  // The sign-in checkbox (18+ and the Terms/Privacy) is recorded against the account the moment one is signed in.
+  useRecordTermsAcceptance(user?.uid ?? null);
   useRefreshReferralOnResume(referralProgress.refresh, Boolean(user?.uid));
   // A referral reward that landed automatically (the Gmail-login ₹100 on sign-in, or a step verified on
   // any screen) is announced ONCE here — every useReferralProgress instance refreshes on the same event,

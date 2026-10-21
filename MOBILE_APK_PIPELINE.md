@@ -123,14 +123,14 @@ with no manifest is skipped, said plainly. A missing 512 px icon is a warning, n
    android/ sails past a script-only check and dies at Gradle ("Unable to access jarfile", 2026-08-04
    autopsy). Missing jar → fetch the EXACT pinned-version jar; still missing → re-scaffold android/ fresh;
    final guard verifies BOTH script and jar
-7. **App branding** (`scripts/nbai-branding.mjs`, admin 2026-10-16 — the app's launcher icon and splash are
-   ALWAYS its own, never Capacitor's default): records what the fresh project holds, picks the branding source
-   (the user's logo, else a logo generated for the app, else an explicitly reported app-specific mark),
-   generates every launcher size / adaptive layer / round icon / splash (`@capacitor/assets`), then VERIFIES the
-   native project — manifest icon references resolve to real files, and no icon or splash is byte-identical to
-   the default (or another app's) it started with. A failed or unusable logo → the fallback, said so in the run
-   summary; the step fails only when even the fallback cannot be verified. Replaces the old "warn and ship the
-   default icon" path.
+7. **App branding** (`scripts/nbai-branding.mjs`, admin 2026-10-16 and 2026-10-21 — the app's launcher icon, splash and web install icon are
+   ALWAYS its own, never Capacitor's default): a step BEFORE the web build (`Prepare the app's logo and web icons`) picks the
+   branding source — the logo the user chose, else the app's own mark (a Lucide symbol that fits its name, else the first letter of its
+   name; `src/lib/brandMark.ts`, no AI image) — and writes the web manifest / favicon icons. The native step records what the fresh
+   project holds, generates every launcher size / adaptive layer / round icon / splash (`@capacitor/assets`), then VERIFIES the
+   native project — manifest icon references resolve to real files, and no icon or splash is byte-identical to the default (or another
+   app's) it started with. A failed generator → a plain app-specific pattern, said so in the run summary; the step fails only when even
+   that cannot be verified.
 8. **Splash drawable heal** — Capacitor's launch theme references `@drawable/splash`, which a fresh cap
    add can omit → resource linking dies; a placeholder is written
 9. **Launcher-foreground heal** — `mipmap-anydpi-v26` XML references `ic_launcher_foreground`, which a

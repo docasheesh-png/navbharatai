@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { createSharedAdminGuard, globalCeiling, GLOBAL_WINDOW_MS, type SharedAttempt, type SharedGuardStore } from '../src/server/lib/adminLoginShared';
+import { KNOWN_ADDRESS_TTL_MS, createSharedAdminGuard, globalCeiling, GLOBAL_WINDOW_MS, type SharedAttempt, type SharedGuardStore } from '../src/server/lib/adminLoginShared';
 import { adminMfaWarning } from '../src/lib/adminMfaWarning';
 
 // ADMIN 2026-10-17 — the admin login's throttle lived in each Cloud Run instance's memory and was keyed only by the
@@ -117,5 +117,19 @@ describe('a login without a second factor is said out loud', () => {
     const ui = readFileSync('src/components/AdminDashboard.tsx', 'utf8');
     expect(ui).toMatch(/useEffect\(\(\) => \{ void fetchMfaStatus\(\); \}, \[fetchMfaStatus\]\)/);
     expect(ui).toContain('adminMfaWarning(mfaStatus)');
+  });
+});
+
+describe('retention: nothing the guard stores outlives 30 days (admin 2026-10-21, "30 din baad mita do")', () => {
+  const DAY = 24 * 60 * 60_000;
+  it('the longest-lived record (a known admin address) expires after 30 days, and every other record sooner', () => {
+    expect(KNOWN_ADDRESS_TTL_MS).toBeLessThanOrEqual(30 * DAY);
+    expect(GLOBAL_WINDOW_MS * 2).toBeLessThan(KNOWN_ADDRESS_TTL_MS);
+  });
+  it('source guard: every document the Firestore store writes carries an expireAt', () => {
+    const src = readFileSync('src/server/lib/adminLoginShared.ts', 'utf8');
+    const writes = (src.match(/setDoc\(/g) || []).length;
+    expect(writes).toBeGreaterThanOrEqual(4);
+    expect((src.match(/expireAt: ts\(/g) || []).length).toBe(writes);
   });
 });

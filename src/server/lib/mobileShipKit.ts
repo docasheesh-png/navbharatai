@@ -306,8 +306,6 @@ ${ENSURE_WEB_PAGE_GUARD}          if [ ! -d android ]; then
           # fallback and says so in the run summary — it never ships the default icon and never reports a success it did
           # not have. The step fails only when even the fallback cannot be verified.
           node scripts/nbai-branding.mjs snapshot android
-          npm install --no-save --no-audit --no-fund --prefix .nbai-tools @capacitor/assets sharp || echo "::warning::the icon generator could not be installed — the app's own fallback icon will be applied instead"
-          node scripts/nbai-branding.mjs prepare
           if ! node scripts/nbai-branding.mjs ensure android; then
             echo "NBAI_FAILED_STAGE=capacitor"
             echo "::error::The app's launcher icon could not be set up and checked, so the build stopped instead of shipping a default icon."
@@ -519,7 +517,20 @@ const gradleCacheSave = (java: number): string => `      - name: Save the Gradle
           key: nbai-gradle-\${{ runner.os }}-java${java}-\${{ hashFiles('package.json') }}
 `;
 
-const WEB_BUILD_STEP = `      - name: Build the web app
+// THE APP'S LOGO, BEFORE ANYTHING IS BUILT (admin 2026-10-21). The chosen logo — or, with none, the app's own mark (a Lucide symbol
+// that fits its name, else the first letter of its name) — is turned into the launcher source and splash, and into the web install
+// icons, BEFORE the web build, so the icons land in the bundle. The icon generator and the image library are installed into
+// `.nbai-tools`, out of the app's own node_modules. The native steps later only snapshot, generate and verify.
+const BRANDING_PREPARE_STEP = `      - name: Prepare the app's logo and web icons
+        run: |
+          set -e
+          npm install --no-save --no-audit --no-fund --prefix .nbai-tools @capacitor/assets sharp || echo "::warning::the icon generator could not be installed — the app's own fallback icon will be applied instead"
+          node scripts/nbai-branding.mjs prepare
+          node scripts/nbai-branding.mjs pwa-apply
+
+`;
+
+const WEB_BUILD_STEP = BRANDING_PREPARE_STEP + `      - name: Build the web app
         env:
           NODE_OPTIONS: --max-old-space-size=4096
         run: |
@@ -923,8 +934,6 @@ ${ENSURE_WEB_PAGE_GUARD}          if [ ! -d ios ]; then
           # PNGs and that nothing is byte-identical to the default it started with. If generation fails it applies the
           # app-specific fallback and says so in the run summary.
           node scripts/nbai-branding.mjs snapshot ios
-          npm install --no-save --no-audit --no-fund --prefix .nbai-tools @capacitor/assets sharp || echo "::warning::the icon generator could not be installed — the app's own fallback icon will be applied instead"
-          node scripts/nbai-branding.mjs prepare
           if ! node scripts/nbai-branding.mjs ensure ios; then
             echo "NBAI_FAILED_STAGE=capacitor"
             echo "::error::The app's icon could not be set up and checked, so the build stopped instead of shipping a default icon."

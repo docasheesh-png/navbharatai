@@ -98665,3 +98665,16 @@ measurable: #3859 was gated **three times** (40,606 → 40,664 → 40,776 tests,
 under each run, and a gate run takes about as long as the interval between merges. The queue's integrity
 survived it — `main`'s closed register and open table hold 668 ids each with **zero** overlap and zero
 duplicates, so the #3543 reopening did not recur — but that was checked, not assumed.
+
+## 2026-10-21 — The app's own mark: Lucide symbol → first letter; no AI logo; the chosen logo is the web icon too (admin decisions)
+Admin: "pahle lucide, fir alfabet"; "AI se logo nahi banwana, user khud banwa lega"; "Capacitor wala logo kahin nahi — apk, webapp, kahin bhi";
+Q-1108: the chosen logo must be the web icon, and with none, the letter; Q-1111: apply the TTL, delete after 30 days.
+Done: `src/lib/brandMark.ts` (+ vendored `brandGlyphs.generated.ts`: 81 Lucide glyphs, ISC notice kept, made by `scripts/vendorBrandGlyphs.mjs`) — ONE
+function chooses (keyword symbol → first Latin letter/digit → a stable generic symbol for a name in another script) and ONE draws, seeded by the
+NAME alone so web, Android, iOS and splash are one mark. The AI logo path is removed. The runner script gained: `prepare` draws the mark
+(or uses the owner's logo), `pwa-apply` (a step BEFORE the web build) writes the web install icons and favicon from the chosen logo / the mark
+without overwriting anything of the owner's. `appDefaults.ts` draws the web app's icon with the same mark and replaces a framework default
+favicon (vite.svg…). Locked by `tests/brandMark.test.ts`, `tests/appBrandingScript.test.ts` (12 cases need the image library and run when
+`NBAI_TEST_SHARP_DIR` points at a `sharp` install — CI does not carry sharp, so those 12 are skipped there), `tests/appBranding.test.ts`.
+NOT done: the TTL policy (no gcloud credentials here — Q-1111 has the exact command); AppMakerLab's legacy templates (Q-1112).
+

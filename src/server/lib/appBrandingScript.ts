@@ -174,38 +174,69 @@ function branding() {
   const b = readJson(BRANDING_JSON, null);
   return {
     appName: (b && b.appName) || 'App', appId: (b && b.appId) || 'app',
-    declared: b && (b.declared === 'user' || b.declared === 'ai') ? b.declared : 'none',
+    declared: b && b.declared === 'user' ? 'user' : 'none',
     iconFile: (b && b.iconFile) || '',
-    aiFailure: (b && b.aiFailure) || '',
+    mark: (b && b.mark) || '',
     seed: (b && b.seed) || ((b && b.appId) || 'app') + '|' + ((b && b.appName) || 'App'),
   };
 }
 const status = () => readJson(STATUS_JSON, null);
 
-function prepare() {
+/** The app's two brand colours, read from the mark the server drew (so every surface uses ONE pair); else derived from the seed. */
+function markColours(seed) {
+  try {
+    const svg = fs.readFileSync(J('resources', 'brand-mark.svg'), 'utf8');
+    const stops = [...svg.matchAll(/stop-color="(#[0-9a-fA-F]{6})"/g)].map((m) => m[1]);
+    if (stops.length >= 2) {
+      const rgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+      return { a: rgb(stops[0]), b: rgb(stops[1]), hexB: stops[1] };
+    }
+  } catch { /* no mark file: the seed decides */ }
+  const lk = look(seed);
+  return { a: lk.a, b: lk.b, hexB: lk.hex };
+}
+/** The app's own mark as a 1024 PNG (opaque, no alpha — the App Store refuses a transparent icon), or null with the reason. */
+async function drawMark(fgOnly) {
+  const sharp = loadSharp();
+  if (!sharp) return { buf: null, why: 'sharp is not installed' };
+  const f = J('resources', fgOnly ? 'brand-mark-fg.svg' : 'brand-mark.svg');
+  if (!fs.existsSync(f)) return { buf: null, why: 'the mark file is missing from the project' };
+  try {
+    const img = sharp(fs.readFileSync(f), { density: 96 }).resize(1024, 1024);
+    return { buf: await (fgOnly ? img.png() : img.removeAlpha().png()).toBuffer(), why: '' };
+  } catch (e) { return { buf: null, why: String(e && e.message || e).slice(0, 100) }; }
+}
+async function prepare() {
   const b = branding();
   fs.mkdirSync(J('assets'), { recursive: true });
   let source = 'fallback', reason = '', chosen = null;
-  if (b.declared === 'none') {
-    reason = b.aiFailure ? 'no logo was supplied and AI logo generation failed: ' + b.aiFailure : 'no logo was supplied and none was generated';
-  } else {
+  if (b.declared === 'user') {
     // Only the file the SERVER wrote for THIS ship counts — an icon left in the repo by an earlier ship (maybe a
-    // different app) is ignored because the server declared this one.
-    // The server names the exact file it wrote; nothing else in resources/ is looked at.
+    // different app) is ignored because the server declared this one. The server names the exact file it wrote.
     if (b.iconFile && /^resources\/icon\.(png|jpg|jpeg|webp)$/i.test(b.iconFile) && fs.existsSync(J(b.iconFile))) chosen = J(b.iconFile);
-    if (!chosen) reason = 'the ' + (b.declared === 'ai' ? 'generated' : 'uploaded') + ' logo file is missing from the project';
+    if (!chosen) reason = 'the logo you chose is missing from the project';
     else {
       const buf = fs.readFileSync(chosen), why = unsuitable(buf);
-      if (why) { reason = 'the ' + (b.declared === 'ai' ? 'generated' : 'uploaded') + ' logo cannot be used: ' + why; chosen = null; }
-      else { source = b.declared; fs.writeFileSync(J('assets', 'icon.png'), buf); }
+      if (why) { reason = 'the logo you chose cannot be used: ' + why; chosen = null; }
+      else { source = 'user'; fs.writeFileSync(J('assets', 'icon.png'), buf); }
     }
   }
-  if (source === 'fallback') fs.writeFileSync(J('assets', 'icon.png'), png(SOURCE_PX, SOURCE_PX, b.seed, { bg: 'gradient', markScale: 0.62, corner: 0 }, false));
+  if (source !== 'user') {
+    // NO LOGO CHOSEN (or the chosen one is unusable): the app's own mark — a Lucide symbol that fits its name, else the first
+    // letter of its name (src/lib/brandMark.ts drew it; this only turns it into a PNG). Not an emergency, the normal case.
+    const drawn = await drawMark(false);
+    if (drawn.buf) { source = 'mark'; fs.writeFileSync(J('assets', 'icon.png'), drawn.buf); }
+    else {
+      reason = (reason ? reason + '; ' : '') + "the app's own mark could not be drawn (" + drawn.why + ') — a plain app-specific pattern is used instead';
+      fs.writeFileSync(J('assets', 'icon.png'), png(SOURCE_PX, SOURCE_PX, b.seed, { bg: 'gradient', markScale: 0.62, corner: 0 }, false));
+    }
+  }
   const out = fs.readFileSync(J('assets', 'icon.png'));
   const info = imageInfo(out);
-  writeJson(STATUS_JSON, { source, reason, requested: b.declared, aiFailure: b.aiFailure, sourceSha256: sha(out), width: info && info.width, height: info && info.height, seed: b.seed, splash: 'pending' });
+  const col = markColours(b.seed);
+  writeJson(STATUS_JSON, { source, reason, requested: b.declared, mark: b.mark, sourceSha256: sha(out), width: info && info.width, height: info && info.height, seed: b.seed, splash: 'pending', brandColour: col.hexB });
   composeSplashSource(source, b.seed);
-  console.log('Branding source: ' + source + (reason ? ' — ' + reason : ''));
+  console.log('Branding source: ' + source + (b.mark && source === 'mark' ? ' (' + b.mark + ')' : '') + (reason ? ' — ' + reason : ''));
 }
 function loadSharp() {
   try { return createRequire(J('.nbai-tools', 'x.js'))('sharp'); } catch { return null; }
@@ -225,20 +256,21 @@ function composeSplashSource(source, seed) {
   } else {
     st.splash = 'generated-mark (the logo could not be placed on the splash: sharp is not installed)';
   }
-  st.brandColour = lk.hex;
   writeJson(STATUS_JSON, st);
 }
 async function finishSplash() {
   const st = status();
   if (!st || !st.splashPending) return;
   const sharp = loadSharp();
-  const lk = look(st.seed), bg = { r: lk.b[0], g: lk.b[1], b: lk.b[2], alpha: 1 };
+  const col = markColours(st.seed), bg = { r: col.b[0], g: col.b[1], b: col.b[2], alpha: 1 };
   try {
-    const logo = await sharp(J('assets', 'icon.png')).resize(900, 900, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+    // The app's own mark sits on the splash as its bare symbol (white on the brand colour); a chosen logo sits as itself.
+    const fg = st.source === 'mark' ? (await drawMark(true)).buf : null;
+    const logo = await sharp(fg || J('assets', 'icon.png')).resize(900, 900, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
     for (const n of ['splash.png', 'splash-dark.png']) {
       await sharp({ create: { width: 2732, height: 2732, channels: 4, background: bg } }).composite([{ input: logo, gravity: 'centre' }]).png().toFile(J('assets', n));
     }
-    st.splash = 'logo-on-brand-colour';
+    st.splash = st.source === 'mark' ? 'mark-on-brand-colour' : 'logo-on-brand-colour';
   } catch (e) {
     st.splash = 'generated-mark (placing the logo failed: ' + String(e && e.message || e).slice(0, 80) + ')';
   }
@@ -471,10 +503,70 @@ function ensure(platform) {
   console.log('::notice::' + platform + ' launcher icon and splash: ' + final.source + (final.reason ? ' (' + final.reason + ')' : '') + '; splash ' + final.splash);
   return 0;
 }
+// ───────────────────────────── the web install icons (PWA) ─────────────────────────────
+// Run BEFORE the web build so the files land in the bundle. The chosen logo — or, with none, the app's own mark — becomes the
+// manifest's icons and the page's favicon. Only files WE add are written; nothing of the owner's is overwritten or removed.
+async function pwaApply() {
+  const st = status();
+  const done = (msg) => { if (st) { st.pwa = msg; writeJson(STATUS_JSON, st); } console.log('Web install icons: ' + msg); return 0; };
+  if (!st) return done('skipped (branding was not prepared)');
+  const bases = ['public', 'www'];
+  let mpath = null;
+  for (const b of bases) for (const n of ['manifest.webmanifest', 'manifest.json']) { const p = J(b, n); if (!mpath && fs.existsSync(p)) mpath = p; }
+  if (!mpath) return done('skipped (the app has no web manifest, so there is no installable web app)');
+  const root = path.dirname(mpath), manifest = readJson(mpath, null);
+  if (!manifest || typeof manifest !== 'object') return done('skipped (the web manifest is not valid JSON)');
+  const sharp = loadSharp();
+  const mark = fs.existsSync(J('resources', 'brand-mark.svg'));
+  const icons = [];
+  if (sharp) {
+    const src = fs.readFileSync(J('assets', 'icon.png'));
+    fs.mkdirSync(path.join(root, 'icons'), { recursive: true });
+    for (const n of [192, 512]) {
+      const f = path.join(root, 'icons', 'nbai-' + n + '.png');
+      fs.writeFileSync(f, await sharp(src).resize(n, n, { fit: 'cover' }).removeAlpha().png().toBuffer());
+      icons.push({ src: '/icons/nbai-' + n + '.png', sizes: n + 'x' + n, type: 'image/png', purpose: 'any' });
+    }
+    // Maskable: the logo at 76% on the brand colour, so the OS can crop it to any shape without cutting it.
+    const col = markColours(st.seed), inner = Math.round(512 * 0.76);
+    const logo = await sharp(src).resize(inner, inner, { fit: 'cover' }).png().toBuffer();
+    fs.writeFileSync(path.join(root, 'icons', 'nbai-maskable-512.png'), await sharp({ create: { width: 512, height: 512, channels: 3, background: { r: col.b[0], g: col.b[1], b: col.b[2] } } }).composite([{ input: logo, gravity: 'centre' }]).png().toBuffer());
+    icons.push({ src: '/icons/nbai-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' });
+  } else if (st.source === 'mark' && mark) {
+    // No image library: the mark is already an SVG, which a manifest can use as it is.
+    fs.mkdirSync(path.join(root, 'icons'), { recursive: true });
+    fs.copyFileSync(J('resources', 'brand-mark.svg'), path.join(root, 'icons', 'nbai-icon.svg'));
+    icons.push({ src: '/icons/nbai-icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' });
+  } else {
+    console.log('::warning::the web install icons could not be made from your logo (the image library is not installed); the manifest is unchanged');
+    return done('skipped (the image library is not installed, so the chosen logo could not be resized)');
+  }
+  // WHEN TO REPLACE THE MANIFEST'S ICONS. The owner's chosen logo always wins. With no logo chosen, only icons that are missing, a
+  // generic framework icon, or the monogram NavBharatAI generated are replaced — an app's own real PNG icons are left alone.
+  const own = (src) => /(^|\/)icon\.svg$|nbai-/.test(String(src || ''));
+  const current = Array.isArray(manifest.icons) ? manifest.icons : [];
+  const replaceable = current.length === 0 || current.every((i) => GENERIC_ICON.test(String(i.src || '')) || own(i.src));
+  if (st.source === 'user' || replaceable) { manifest.icons = icons; fs.writeFileSync(mpath, JSON.stringify(manifest, null, 2) + '\n'); }
+  // The page's favicon and home-screen icon: set only when missing, generic, or ours.
+  const html = ['index.html'].map((n) => path.join(root === J('public') ? J() : root, n)).find((p) => fs.existsSync(p));
+  if (html) {
+    let x = fs.readFileSync(html, 'utf8');
+    const href = icons[0].type === 'image/svg+xml' ? icons[0].src : '/icons/nbai-192.png';
+    const link = /<link[^>]*rel=["'](?:shortcut )?icon["'][^>]*>/i.exec(x);
+    const linkHref = link && /href=["']([^"']*)["']/i.exec(link[0]);
+    if (st.source === 'user' || !link || (linkHref && (GENERIC_ICON.test(linkHref[1]) || own(linkHref[1])))) {
+      const tag = '<link rel="icon" type="' + icons[0].type + '" href="' + href + '">';
+      x = link ? x.replace(link[0], tag) : x.replace('</head>', '  ' + tag + '\n  </head>');
+    }
+    if (!/rel=["']apple-touch-icon["']/i.test(x) && icons[0].type === 'image/png') x = x.replace('</head>', '  <link rel="apple-touch-icon" href="/icons/nbai-192.png">\n  </head>');
+    fs.writeFileSync(html, x);
+  }
+  return done('applied (' + (st.source === 'user' ? 'your logo' : "the app's own mark") + ')');
+}
 function report() {
   const st = status();
   const text = st
-    ? '### App branding\n- Logo source: **' + st.source + '**' + (st.reason ? ' — ' + st.reason : '') + '\n- Splash: ' + st.splash + '\n- Source fingerprint: ' + String(st.sourceSha256).slice(0, 12) + '\n'
+    ? '### App branding\n- Logo: **' + ({ user: 'the logo you chose', mark: "the app's own mark (" + (st.mark || 'symbol or letter') + ')', fallback: 'an app-specific pattern (the mark could not be drawn)' }[st.source] || st.source) + '**' + (st.reason ? ' — ' + st.reason : '') + '\n- Splash: ' + st.splash + (st.pwa ? '\n- Web install icons: ' + st.pwa : '') + '\n- Source fingerprint: ' + String(st.sourceSha256).slice(0, 12) + '\n'
     : '### App branding\n- not prepared\n';
   console.log(text);
   if (process.env.GITHUB_STEP_SUMMARY) { try { fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text); } catch { /* the summary is a courtesy */ } }
@@ -482,7 +574,8 @@ function report() {
 
 const [cmd, arg] = process.argv.slice(2);
 (async () => {
-  if (cmd === 'prepare') { prepare(); await finishSplash(); return 0; }
+  if (cmd === 'prepare') { await prepare(); await finishSplash(); return 0; }
+  if (cmd === 'pwa-apply') return pwaApply();
   if (cmd === 'snapshot' && (arg === 'android' || arg === 'ios')) { snapshot(arg); return 0; }
   if (cmd === 'ensure' && (arg === 'android' || arg === 'ios')) return ensure(arg);
   if (cmd === 'verify' && (arg === 'android' || arg === 'ios' || arg === 'pwa')) {
@@ -492,7 +585,7 @@ const [cmd, arg] = process.argv.slice(2);
     return r.errors.length ? 1 : 0;
   }
   if (cmd === 'report') { report(); return 0; }
-  console.log('usage: nbai-branding.mjs prepare | snapshot|ensure|verify <android|ios> | verify pwa | report');
+  console.log('usage: nbai-branding.mjs prepare | pwa-apply | snapshot|ensure|verify <android|ios> | verify pwa | report');
   return 2;
 })().then((c) => process.exit(c), (e) => { console.log('::error::' + (e && e.message || e)); process.exit(1); });
 `;

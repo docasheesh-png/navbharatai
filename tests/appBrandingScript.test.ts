@@ -6,6 +6,7 @@ import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { BRANDING_SCRIPT } from '../src/server/lib/appBrandingScript';
+import { chooseMark, markLabel, markSvg } from '../src/lib/brandMark';
 
 // ADMIN 2026-10-16: "A successful build must never expose the default Capacitor icon as the generated application's
 // launcher icon." These tests run the REAL branding script, as a process, against fixture native projects shaped like
@@ -60,12 +61,16 @@ function defaultIos(tag = 'capacitor-default') {
   w(`${sp}/splash-2732x2732.png`, solidPng(64, 64, `${tag}-ios-splash`));
   w('ios/App/App/Info.plist', '<plist>CFBundleIdentifier com.shop.chai</plist>');
 }
-function project(opts: { declared?: 'user' | 'ai' | 'none'; icon?: Buffer; ext?: string; aiFailure?: string; appName?: string; appId?: string } = {}) {
+function project(opts: { declared?: 'user' | 'none'; icon?: Buffer; ext?: string; appName?: string; appId?: string } = {}) {
   const appName = opts.appName ?? 'Chai Shop', appId = opts.appId ?? 'com.shop.chai';
   w('scripts/nbai-branding.mjs', BRANDING_SCRIPT);
   const declared = opts.declared ?? 'none', ext = opts.ext ?? 'png';
   if (opts.icon) w(`resources/icon.${ext}`, opts.icon);
-  w('resources/branding.json', JSON.stringify({ appName, appId, declared, iconFile: opts.icon ? `resources/icon.${ext}` : '', aiFailure: opts.aiFailure ?? '', seed: `${appId}|${appName}` }));
+  const mark = chooseMark(appName);
+  // The same files the server writes (appBranding.ts brandingTextFiles): the mark, already drawn.
+  w('resources/brand-mark.svg', markSvg(mark, { size: 1024, tile: 'square' }));
+  w('resources/brand-mark-fg.svg', markSvg(mark, { size: 1024, tile: 'none' }));
+  w('resources/branding.json', JSON.stringify({ appName, appId, declared, iconFile: opts.icon ? `resources/icon.${ext}` : '', mark: markLabel(mark), seed: `${appId}|${appName}` }));
 }
 /** A stand-in for @capacitor/assets: writes launcher + splash files derived from the source icon, at the sizes it is asked for. */
 function fakeGenerator(mode: 'ok' | 'fail' | 'nosplash' | 'noicons' = 'ok') {
@@ -116,18 +121,13 @@ describe('branding script — the logo choice', () => {
     expect(status().emergency).toBeUndefined();
   });
 
-  it('no logo and AI generation succeeded: the generated logo is the source, reported as "ai"', () => {
-    defaultAndroid(); project({ declared: 'ai', icon: solidPng(1024, 1024, 'generated-for-this-app') }); fakeGenerator('ok');
-    const { e } = prepareAndEnsure('android');
-    expect(e.code).toBe(0); expect(status().source).toBe('ai');
-  });
-
-  it('AI generation failed: an EXPLICIT app-specific fallback is used, the reason names the AI failure, and it is reported', () => {
-    defaultAndroid(); project({ declared: 'none', aiFailure: 'image service timeout' });
+  it('no logo chosen and no image library on the runner: an EXPLICIT app-specific pattern is used, never a default, and it is reported', () => {
+    defaultAndroid(); project({ declared: 'none' });
     const { p, e, v } = prepareAndEnsure('android');
     expect(e.code).toBe(0); expect(v.code).toBe(0);
     expect(status().source).toBe('fallback');
-    expect(status().reason).toContain('AI logo generation failed: image service timeout');
+    expect(status().reason).toContain("the app's own mark could not be drawn");
+    expect(status().reason).toContain('sharp is not installed');
     expect(p.out).toContain('Branding source: fallback');
     expect(e.out).toContain('launcher icon and splash: fallback');
   });
@@ -301,5 +301,126 @@ describe('branding script — iOS, PWA, and one source for all three', () => {
     expect(keep.map((f) => sha(r(f)))).toEqual(before);
     expect(r('android/app/src/main/AndroidManifest.xml').toString()).toContain('package="com.shop.chai"');
     expect(r('android/app/src/main/AndroidManifest.xml').toString()).toContain('android:label="Chai"');
+  });
+});
+
+// ───────────────────────── the app's own mark, the splash and the web install icons ─────────────────────────
+// Admin 2026-10-21: a chosen logo first; else a Lucide symbol fitting the name; else the first letter. Never Capacitor's.
+describe('web install icons — what needs no image library (runs everywhere)', () => {
+  const manifest = (icons: unknown[]) => JSON.stringify({ name: 'Chai', icons });
+  it('an app with no web manifest is left alone, and the run says why', () => {
+    project({ declared: 'none' }); run('prepare');
+    const r = run('pwa-apply');
+    expect(r.code).toBe(0); expect(r.out).toContain('no web manifest');
+    expect(has('public/icons')).toBe(false);
+  });
+  it('without an image library the chosen logo cannot be resized: the manifest is left UNCHANGED and the run warns (never half-applied)', () => {
+    project({ declared: 'user', icon: solidPng(1024, 1024, 'my-logo') });
+    w('public/manifest.webmanifest', manifest([{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' }]));
+    run('prepare');
+    const before = r('public/manifest.webmanifest').toString();
+    const out = run('pwa-apply');
+    expect(out.out).toContain('could not be made from your logo');
+    expect(r('public/manifest.webmanifest').toString()).toBe(before);
+  });
+});
+
+const SHARP_DIR = process.env.NBAI_TEST_SHARP_DIR || '';
+/** Makes the runner's `.nbai-tools/node_modules/sharp` resolvable in the fixture (CI installs it; here it is linked from NBAI_TEST_SHARP_DIR). */
+function withSharp() {
+  fs.mkdirSync(path.join(dir, '.nbai-tools'), { recursive: true });
+  fs.symlinkSync(path.join(SHARP_DIR, 'node_modules'), path.join(dir, '.nbai-tools', 'node_modules'), 'dir');
+}
+const pngInfo = (rel: string) => { const b = r(rel); return { w: b.readUInt32BE(16), h: b.readUInt32BE(20), colourType: b[25] }; };
+
+describe.skipIf(!SHARP_DIR)('the mark is drawn for real (needs the image library: set NBAI_TEST_SHARP_DIR)', () => {
+  it('no logo chosen → source "mark": a 1024 opaque PNG, not an emergency, labelled with the symbol or letter', () => {
+    defaultAndroid(); project({ declared: 'none', appName: 'Chai Shop' }); withSharp();
+    const p = run('prepare');
+    expect(p.code).toBe(0);
+    expect(status().source).toBe('mark'); expect(status().reason).toBe(''); expect(status().mark).toBe('lucide:coffee');
+    expect(pngInfo('assets/icon.png')).toEqual({ w: 1024, h: 1024, colourType: 2 }); // RGB: the App Store refuses an alpha icon
+    expect(p.out).toContain('(lucide:coffee)');
+  });
+  it('the splash carries the mark on the brand colour (2732 square), and the status says so', () => {
+    defaultAndroid(); project({ declared: 'none' }); withSharp(); run('prepare');
+    expect(pngInfo('assets/splash.png')).toMatchObject({ w: 2732, h: 2732 });
+    expect(status().splash).toBe('mark-on-brand-colour');
+  });
+  it('a name with no fitting symbol gets its first LETTER', () => {
+    defaultAndroid(); project({ declared: 'none', appName: 'Pixelyt' }); withSharp(); run('prepare');
+    expect(status().mark).toBe('letter:P'); expect(status().source).toBe('mark');
+  });
+  it('the chosen logo still wins over the mark', () => {
+    defaultAndroid(); project({ declared: 'user', icon: solidPng(1024, 1024, 'my-logo'), appName: 'Chai Shop' }); withSharp(); run('prepare');
+    expect(status().source).toBe('user');
+    expect(sha(r('assets/icon.png'))).toBe(sha(solidPng(1024, 1024, 'my-logo')));
+  });
+  it('an unusable chosen logo falls back to the MARK (not to blocks), and says why', () => {
+    defaultAndroid(); project({ declared: 'user', icon: solidPng(256, 256, 'tiny'), appName: 'Chai Shop' }); withSharp(); run('prepare');
+    expect(status().source).toBe('mark'); expect(status().reason).toMatch(/smaller than the 512x512/);
+  });
+  it('the whole Android path with the mark: generator ok → verified, source stays "mark", Capacitor default gone', () => {
+    defaultAndroid(); project({ declared: 'none' }); withSharp(); fakeGenerator('ok');
+    const defaults = walk(path.join(dir, 'android')).filter((f) => /\.png$/.test(f)).map((f) => sha(fs.readFileSync(f)));
+    run('snapshot', 'android'); run('prepare');
+    expect(run('ensure', 'android').code).toBe(0); expect(run('verify', 'android').code).toBe(0);
+    expect(status().source).toBe('mark');
+    const after = new Set(walk(path.join(dir, 'android')).filter((f) => /\.png$/.test(f)).map((f) => sha(fs.readFileSync(f))));
+    for (const d of defaults) expect(after.has(d)).toBe(false);
+  });
+  it('two different apps get two different icons; the same app always gets the same one', () => {
+    const icons: string[] = [];
+    for (const name of ['Chai Shop', 'Pixelyt', 'Chai Shop']) {
+      fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
+      project({ declared: 'none', appName: name }); withSharp(); run('prepare'); icons.push(sha(r('assets/icon.png')));
+    }
+    expect(icons[0]).not.toBe(icons[1]); expect(icons[0]).toBe(icons[2]);
+  });
+
+  describe('pwa-apply with the image library', () => {
+    const setup = (declared: 'user' | 'none', icons: unknown[], opts: { html?: string } = {}) => {
+      project({ declared, icon: declared === 'user' ? solidPng(1024, 1024, 'my-logo') : undefined, appName: 'Chai Shop' }); withSharp();
+      w('public/manifest.webmanifest', JSON.stringify({ name: 'Chai', icons }));
+      w('index.html', opts.html ?? '<html><head><link rel="icon" href="/icon.svg"></head><body></body></html>');
+      w('public/logo.png', solidPng(64, 64, 'the-apps-own-picture'));
+      run('prepare');
+    };
+    const manifestIcons = () => JSON.parse(r('public/manifest.webmanifest').toString()).icons as Array<{ src: string; sizes: string; purpose?: string }>;
+    it('the chosen logo becomes the install icons: 192, 512 and a maskable 512 of the right sizes', () => {
+      setup('user', [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' }]);
+      expect(run('pwa-apply').code).toBe(0);
+      expect(manifestIcons().map((i) => i.sizes)).toEqual(['192x192', '512x512', '512x512']);
+      expect(manifestIcons()[2].purpose).toBe('maskable');
+      expect(pngInfo('public/icons/nbai-192.png')).toMatchObject({ w: 192, h: 192 });
+      expect(pngInfo('public/icons/nbai-512.png')).toMatchObject({ w: 512, h: 512 });
+      expect(pngInfo('public/icons/nbai-maskable-512.png')).toMatchObject({ w: 512, h: 512 });
+      expect(run('verify', 'pwa').code).toBe(0);
+    });
+    it('the page favicon follows, and an apple-touch-icon is added', () => {
+      setup('user', [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' }]);
+      run('pwa-apply');
+      const html = r('index.html').toString();
+      expect(html).toContain('href="/icons/nbai-192.png"'); expect(html).toContain('apple-touch-icon');
+      expect(html).not.toContain('href="/icon.svg"');
+    });
+    it('with NO logo chosen, the app\'s mark replaces a generic or generated icon — and the status says "the app\'s own mark"', () => {
+      setup('none', [{ src: '/vite.svg', sizes: 'any', type: 'image/svg+xml' }], { html: '<html><head><link rel="icon" href="/vite.svg"></head><body></body></html>' });
+      run('pwa-apply');
+      expect(manifestIcons()[0].src).toBe('/icons/nbai-192.png');
+      expect(r('index.html').toString()).not.toContain('vite.svg');
+      expect(status().pwa).toContain("the app's own mark");
+    });
+    it('with NO logo chosen, an app\'s own real icons are LEFT ALONE', () => {
+      setup('none', [{ src: '/logo.png', sizes: '64x64', type: 'image/png' }]);
+      run('pwa-apply');
+      expect(manifestIcons().map((i) => i.src)).toEqual(['/logo.png']);
+    });
+    it('nothing of the owner\'s is overwritten or removed: their own picture is byte-identical afterwards', () => {
+      setup('user', [{ src: '/logo.png', sizes: '64x64', type: 'image/png' }]);
+      const before = sha(r('public/logo.png'));
+      run('pwa-apply');
+      expect(sha(r('public/logo.png'))).toBe(before);
+    });
   });
 });

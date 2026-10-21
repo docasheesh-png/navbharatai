@@ -8,7 +8,7 @@
 // Next.js metadata API) the tool says so honestly rather than writing something wrong.
 
 import { PLACEHOLDER_TITLE } from './appDisplayName';
-import { createHash } from 'node:crypto';
+import { chooseMark, markSvg } from '../../lib/brandMark';
 import {
   nativeFeelEnabled, nativeFeelHeadTags, nativeFeelLinkTag, nativeFeelStylesheet, NATIVE_FEEL_HREF,
   withViewportFitCover, hasNativeFeel,
@@ -26,6 +26,8 @@ export interface AppDefaultsResult {
 const MANIFEST_HREF = '/manifest.webmanifest';
 const ICON_HREF = '/icon.svg';
 const SW_HREF = '/sw.js';
+/** The favicons frameworks and Capacitor ship by default — never an app's own. */
+const GENERIC_FAVICON = /(^|\/)(vite|react|vue|svelte|angular|capacitor|favicon)\.(svg|png|ico)$/i;
 
 function manifestJson(appName: string, shortName?: string): string {
   return JSON.stringify(
@@ -44,17 +46,13 @@ function manifestJson(appName: string, shortName?: string): string {
   ) + '\n';
 }
 
-/** A minimal, self-contained maskable app icon: a monogram of the app's first letter. Pure. */
+/**
+ * The app's install icon: its OWN mark (admin 2026-10-21) — a Lucide symbol that fits its name, else the first letter of its name,
+ * on a colour taken from the name. The same function draws the Android / iOS launcher icon and the splash, so one app has one
+ * look on every surface. Self-contained SVG (no font, no external reference). Pure.
+ */
 function iconSvg(appName: string): string {
-  const letter = (appName.trim()[0] || 'A').toUpperCase().replace(/[<>&"']/g, 'A');
-  // The tile colour comes from the app's NAME (admin 2026-10-16: every app's icon must be its own). It used to be one
-  // fixed colour, so two apps whose names start with the same letter shipped byte-identical install icons.
-  const hue = parseInt(createHash('sha256').update(appName.trim().toLowerCase()).digest('hex').slice(0, 4), 16) % 360;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="${escapeHtml(appName)} icon">
-  <rect width="512" height="512" rx="96" fill="hsl(${hue} 55% 26%)"/>
-  <text x="50%" y="50%" dy=".35em" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="280" font-weight="700" fill="#ffffff">${letter}</text>
-</svg>
-`;
+  return markSvg(chooseMark(appName), { size: 512, tile: 'rounded' });
 }
 
 /**
@@ -291,6 +289,15 @@ export function planAppDefaults(
   if (titleMatch && appName !== 'App' && PLACEHOLDER_TITLE.test(titleMatch[1].replace(/\s+/g, ' ').trim())) {
     html = html.replace(titleMatch[0], `<title>${safeName}</title>`);
     added.push('title (replaced a placeholder)');
+  }
+
+  // A FRAMEWORK'S DEFAULT FAVICON names no app (admin 2026-10-21: never a default logo, anywhere). Vite's template ships
+  // `<link rel="icon" href="/vite.svg">`, and an `ensures` presence test would keep it; it is replaced with the app's own mark.
+  const iconLink = html.match(/<link\b[^>]*\brel=["'](?:shortcut )?icon["'][^>]*>/i);
+  const iconHref = iconLink ? /href=["']([^"']*)["']/i.exec(iconLink[0]) : null;
+  if (iconLink && iconHref && GENERIC_FAVICON.test(iconHref[1])) {
+    html = html.replace(iconLink[0], `<link rel="icon" href="${ICON_HREF}" type="image/svg+xml" />`);
+    added.push('icon link (replaced a framework default)');
   }
 
   const toInsert: string[] = [];

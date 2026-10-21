@@ -110,8 +110,12 @@ describe('the SWEEP — no call site may re-invent the lossy version (rule 3)', 
      *
      * 14 → 8 on 2026-09-25: the legacy Engineer AI actuator and agent loop were removed with the retired
      * /api/build engine, and their six call sites went with them. No live site left the helper.
+     *
+     * 8 → 9 on 2026-10-21: the ETARGET manifest-repair retry (`_npmInstall` step 2.6, autopsy b4173fb7) runs
+     * `npm install` once more — through the shared helper, because if the repaired install ALSO fails, its
+     * log is the only evidence the repair was not enough.
      */
     const total = FILES.reduce((n, f) => n + (read(f).match(/commandFailureResult\(err\)/g) || []).length, 0);
-    expect(total).toBe(8);
+    expect(total).toBe(9);
   });
 });

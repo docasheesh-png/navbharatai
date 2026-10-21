@@ -99317,3 +99317,56 @@ The shared hook aborts/ignores stale page, filter, token and unmount responses; 
 or full-report rereads. Loading and unavailable numbers are distinct. Verification results are recorded in the PR; full hosted CI is
 required before merge. Local provider graph/boot and networked audit remain outside the
 credential-free, hard-offline verification scope.
+
+### PR #3890 hosted-CI follow-up
+
+Run 11908 passed 42,568 tests and found three source-census integration gaps: the new
+read-only metadata reader needed file-scoped document-receiver and retained-history
+classification; the paging guard still named the pre-enrichment input variable. The
+classifications now point at the existing workspace history/retention policies, and
+the paging guard verifies both the enrichment pipeline and the unchanged filter reset
+key. No runtime behavior, retention rule, coverage floor or assertion was removed.
+## 2026-10-21 — Q-2203's root cause was found by #3859's author, and my hypothesis was wrong
+
+**What I claimed:** that #3859's `BUILD_AUTHORITY_UNAVAILABLE` refusal path left its preflight ping timer
+un-cleared, and that `BuildRequestCoordination.ts` was implicated because it was one of only two files where
+that branch and `main` overlapped.
+
+**What it actually was,** in the author's own comment in the test: *"The preceding scope fixtures reach the
+clarity judge before scope refusal. A real SDK call there leaves an undici keep-alive timer that can be
+scheduled under the next test's fake clock."* An EARLIER test in the same file did real outbound I/O; its
+keep-alive timer outlived that test and surfaced under the fake clock of the one that failed. The handler was
+never at fault.
+
+**Why the evidence misled me, stated so the mistake is reusable.** Two failures on their branch and none on
+`main` was real evidence, and narrowing away the preflight helper (byte-identical to `main`) and any
+newly-added timer (their 136-line coordination diff adds none) was correct reasoning. But both facts were
+equally consistent with pollution from their own newly-added fixtures — the explanation I considered first,
+tested with a single-file run, saw pass 3/3, and then moved away from. **A single-file run cannot reproduce
+cross-test pollution that depends on a real network call completing**, so "it passes in isolation" was not the
+evidence against pollution that I treated it as.
+
+**Their fix is a real one, and I checked that before saying so** — a test-only fix to a red test is exactly the
+shape the fourth absolute rule forbids. `expect(vi.getTimerCount()).toBe(0)` survives, gaining only a message
+argument so a failure prints the culprit; they ADDED assertions; they added `tracePendingTimers()`, explicitly
+commented *"keep a failing cleanup assertion actionable without clearing or draining any timer for it"*; and
+they replaced a brittle 100-microtask spin with a real race against the request promise. CI green on
+`72ad455da`.
+
+### Q-2252 (new) — the class, and the architectural half they could not do from inside one file
+
+**Nothing stops a unit test from making a real outbound call.** `vitest.config.ts` declares no `setupFiles` at
+all. Measured: 43 test files use `useFakeTimers`; 37 never call `vi.mock(`; of those, **17** also reference a
+route or provider path. That is a risk set to check, not a defect count — all 17 pass today, and the row says
+so plainly.
+
+**The precedent that makes it a class rather than an incident:** `vitest.config.ts` already carries
+`env: { IMAGE_GEN_ANON_PROBE: 'off' }` with the comment *"A test must never make that network call."* The repo
+met this exact concern before and answered it per-case with an env flag. Q-2203 is the same concern returning
+in a different costume — a timer leak instead of a network call — which is what an unfixed class does.
+
+**Proposed:** a `setupFiles` that makes real outbound I/O impossible in a unit test (undici `MockAgent` +
+`disableNetConnect`, failing the test and naming the module). **Not pushed, and the row says why:** CI runs a
+whole `queue-retry-drills` job against the Firestore emulator and some tests legitimately reach loopback, so a
+blanket block would break working tests. Never-break outranks the cleanup; the safe shape is a loopback/emulator
+allowlist plus a hard failure for everything else, landed alone and gated.

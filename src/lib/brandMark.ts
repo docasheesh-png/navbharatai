@@ -127,7 +127,11 @@ export interface MarkSvgOptions {
   tile?: 'rounded' | 'square' | 'round' | 'none';
   /** Fraction of the tile the glyph spans. Default 0.58 (0.40 for a 'none' foreground, which must sit inside the adaptive-icon safe zone). */
   scale?: number;
+  /** An accessible name for the image ("Chai Shop icon"); omitted for a decorative use. Escaped here. */
+  label?: string;
 }
+
+const esc = (t: string): string => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 /** The mark as a standalone SVG document (valid XML; no fonts, no external references). */
 export function markSvg(m: BrandMark, o: MarkSvgOptions = {}): string {
@@ -144,7 +148,7 @@ export function markSvg(m: BrandMark, o: MarkSvgOptions = {}): string {
     `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs>`
     + (tile === 'round' ? `<circle cx="512" cy="512" r="512" fill="url(#${gid})"/>`
       : `<rect width="1024" height="1024"${tile === 'rounded' ? ' rx="228"' : ''} fill="url(#${gid})"/>`);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 1024 1024" data-nbai-mark="${markLabel(m)}">`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 1024 1024" data-nbai-mark="${markLabel(m)}"${o.label ? ` role="img" aria-label="${esc(o.label)}"` : ''}>`
     + bg
     + `<g transform="translate(${off} ${off}) scale(${k})" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${inner}</g></svg>\n`;
 }

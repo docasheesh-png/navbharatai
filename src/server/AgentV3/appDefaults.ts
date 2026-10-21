@@ -52,7 +52,7 @@ function manifestJson(appName: string, shortName?: string): string {
  * look on every surface. Self-contained SVG (no font, no external reference). Pure.
  */
 function iconSvg(appName: string): string {
-  return markSvg(chooseMark(appName), { size: 512, tile: 'rounded' });
+  return markSvg(chooseMark(appName), { size: 512, tile: 'rounded', label: `${appName} icon` });
 }
 
 /**

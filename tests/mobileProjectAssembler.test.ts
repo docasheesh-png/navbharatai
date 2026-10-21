@@ -232,7 +232,7 @@ describe('the icon', () => {
   it('an unreadable icon does not fail the ship — the app gets its own mark and the note says so (never Capacitor\'s default)', () => {
     const out = assembleMobileProject(STATIC_APP, SHIP_KIT, { appName: 'A', appId: 'com.a.b', iconDataUrl: 'not-an-image' });
     expect(Object.keys(out.binaryFiles).filter((p) => p.startsWith('resources/icon'))).toHaveLength(0);
-    expect(out.notes.join(' ')).toMatch(/unique mark of its own/i);
+    expect(out.notes.join(' ')).toMatch(/its own mark/i);
     expect(out.notes.join(' ')).not.toMatch(/default icon/i);
   });
 

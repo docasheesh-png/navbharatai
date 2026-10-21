@@ -66,6 +66,11 @@ describe('the drawn mark', () => {
     expect(fg).not.toMatch(/<rect|<circle|linearGradient/);
     expect(fg).toContain('scale(' + (1024 * 0.4 / 24) + ')');
   });
+  it('can carry an accessible name, escaped (the install icon is announced as "<app> icon")', () => {
+    const svg2 = markSvg(chooseMark('Chai Shop'), { label: 'Tom "&" <Jerry> icon' });
+    expect(svg2).toContain('role="img" aria-label="Tom &quot;&amp;&quot; &lt;Jerry&gt; icon"');
+    expect(markSvg(chooseMark('Chai Shop'))).not.toContain('aria-label'); // decorative by default
+  });
   it('the tile shapes: rounded (launcher / install), square (full-bleed), round', () => {
     expect(markSvg(chooseMark('Zen'), { tile: 'rounded' })).toContain('rx="228"');
     expect(markSvg(chooseMark('Zen'), { tile: 'square' })).not.toContain('rx=');

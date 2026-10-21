@@ -30,7 +30,7 @@ Consumer requirements come from bound references, not spelling. Ordinary imports
 | `reconcileImportExports` | Named/default conversion cannot manufacture a runtime import for a type/ambient declaration; per-specifier modifiers survive. |
 | `generateMissingBarrels` | Combine all consumers first, choose unique capable leaves and emit `export type` for erased exports. A first type-only consumer cannot conceal a later runtime requirement. |
 
-This does not replace the compiler, inspect installed package implementations, repair namespace imports, or redesign the existing enum-member drift check. Declaration files describe implementations; they do not prove the corresponding JavaScript exists. Such unknowns remain conservative rather than being reported as successful repairs.
+This does not replace the compiler, inspect installed package implementations, or redesign the existing enum-member drift check. Declaration files describe implementations; they do not prove the corresponding JavaScript exists. Such unknowns remain conservative rather than being reported as successful repairs.
 
 The barrel writer uses the shared module resolver before creating an index, including
 existing `.mts`, `.cts`, `.mjs` and `.cjs` indexes. Explicit module-format leaf imports
@@ -61,6 +61,26 @@ project imports and wrong-source repairs map `.mts` to `.mjs` and `.cts` to `.cj
 The source resolver and emitted path spelling are separate contracts. A resolver
 that accepts a source file is not proof that TypeScript permits its source suffix
 in an import without `allowImportingTsExtensions`.
+
+### Lexical JSX and erased default/namespace imports
+
+JSX binding checks resolve the actual tag in its lexical scope, with a separate
+in-memory TypeScript program for each file. A parameter or local in another
+function, or an unrelated script file, cannot hide a missing component. Valid
+same-scope values, type/value merges, and the existing injected React/Fragment
+compatibility remain supported. A same-file ambient value can describe an injected
+runtime binding; it does not prove that the runtime actually supplies it.
+
+The shared type-only healer covers named and default imports whose local producer
+is proven to emit the requested value. Namespace promotion is opt-in and requires
+all observed static member reads to resolve to emitted values. Dynamic/object
+namespace use, uncertain producers, and mixed default/named clauses stay
+conservative; this is not a universal namespace repair. The endgame repair uses
+the same proof rather than a separate default/namespace heuristic.
+
+Existing-path metadata prevents overwriting a module without pretending its source
+was read. Only actual supplied source enters the export capability graph; an unread
+transitive star export cannot become a known-empty export table.
 
 ## Regression proof
 

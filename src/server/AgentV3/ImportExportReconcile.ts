@@ -579,6 +579,9 @@ export interface TypeOnlyValueFix {
  * thing is the keyword. Types imported in the same statement KEEP their `type` (they become
  * `import { InputAction, type PlayerInputState }`), so nothing that is only a type starts being emitted.
  *
+ * Default imports use the same proof; namespace imports require every runtime member read to name a
+ * proven emitted export. Dynamic namespace reads remain unchanged rather than guessed.
+ *
  * Precision: a project module only (never a package — its exports are not in the file set), the target's
  * export must emit a value, and the bound import must be read outside erased type positions. Pure; never throws.
  */
@@ -612,6 +615,25 @@ export async function fixTypeOnlyValueImports(files: Record<string, string>): Pr
       if (!target || !sources.has(target)) continue;
       let declTypeOnly = false;
       try { declTypeOnly = !!imp.isTypeOnly?.(); } catch { continue; }
+      // Default and namespace imports have no named specifiers. Treat them as their own bindings,
+      // with the same emitted-value and lexical-read proof; never promote a declaration-file promise.
+      const surface = capabilities.exportsOf(target);
+      const bindings = capabilities.importsOf(path, true).filter(b => b.from === spec);
+      const defaultName = imp.getDefaultImport?.()?.getText?.();
+      const namespaceName = imp.getNamespaceImport?.()?.getText?.();
+      const binding = bindings.find(b => b.local === (defaultName || namespaceName));
+      const defaultValue = defaultName && !namespaceName && (imp.getNamedImports?.() ?? []).length === 0 &&
+        surface.exports.get('default')?.runtime === 'value';
+      const namespaceValue = namespaceName && binding?.runtimeMembers && binding.runtimeMembers.length > 0 &&
+        binding.runtimeMembers.every(name => surface.exports.get(name)?.runtime === 'value');
+      if (declTypeOnly && !surface.uncertain && binding?.readsValue && (defaultValue || namespaceValue)) {
+        try {
+          imp.setIsTypeOnly(false);
+          touched.add(path);
+          fixes.push({ file: path, name: defaultName || namespaceName, from: spec });
+        } catch { /* leave untouched if this declaration cannot be changed safely */ }
+        continue;
+      }
       let named: any[] = [];
       try { named = imp.getNamedImports?.() ?? []; } catch { continue; }
       // Source export name and local alias are separate facts; the shared binder follows both.

@@ -5,6 +5,7 @@
 // decision in ONE pure, unit-tested function stops the two call-sites from drifting apart (one of them
 // treating a warning as a failure, or missing a real error) — the same single-parser discipline used
 // by ContractMap. PURE & deterministic (string in → boolean out), so it is fully testable.
+import { buildScriptChecksTypes, explicitTscCommandMode } from './tscCommandMode';
 
 /**
  * True when `tsc --noEmit` output contains at least one real TypeScript compile error (`error TSxxxx`).
@@ -40,7 +41,13 @@ export function countTscErrors(output: string | null | undefined): number {
  */
 export function looksLikeTscHelpOutput(output: string | null | undefined): boolean {
   if (!output) return false;
-  return /tsc:\s*The TypeScript Compiler|COMMON COMMANDS|Compiles the current project|tsc \[options\]|Version\s+\d+\.\d+\.\d+[\s\S]*Syntax:/.test(output);
+  // An unrelated package can own the `tsc` executable and print a refusal instead of compiling.
+  // Match its stable CLI banner, not the package/version warning: a deprecation alone is not proof
+  // that compilation did not run. Colours and padding are presentation, but a quoted banner inside
+  // an app diagnostic is data, so only the complete line counts.
+  const plain = output.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  return /^\s*This is not the tsc command you are looking for\s*$/m.test(plain)
+    || /tsc:\s*The TypeScript Compiler|COMMON COMMANDS|Compiles the current project|tsc \[options\]|Version\s+\d+\.\d+\.\d+[\s\S]*Syntax:/.test(output);
 }
 
 /**
@@ -93,12 +100,15 @@ export function looksLikeBrokenTscInstall(output: string | null | undefined): bo
 }
 
 /**
- * The one question every reader of `tsc --noEmit` output must ask first: did the compiler really run?
- * The help page, a missing binary and a torn install are all "no" — none is a pass and none is a
- * failure of the app. Pure.
+ * Does the canonical `tscVerdict` reader positively recognise a compiler that did not check the app?
+ * The help page, an unrelated executable, a missing binary and a torn install are all "no" — none
+ * is a pass and none is a failure of the app. Real diagnostics accompanying help/refusal output still
+ * count: direct readers must not discard app errors that `tscVerdict` would retain. False is NOT proof
+ * that compilation ran: an unknown output also returns false. Evidence consumers must use tscVerdict,
+ * not negate this convenience predicate to claim verification. Pure.
  */
 export function tscNeverRan(output: string | null | undefined): boolean {
-  return looksLikeTscHelpOutput(output) || looksLikeMissingTscBinary(output) || looksLikeBrokenTscInstall(output);
+  return tscVerdict(output) === 'not-run';
 }
 
 /**
@@ -126,9 +136,19 @@ export function tscVerdict(output: string | null | undefined): TscVerdict {
   // A torn install prints `error TS` lines about TypeScript's own library — never the app's errors.
   if (looksLikeBrokenTscInstall(out)) return 'not-run';
   if (hasTscErrors(out)) return 'failed';
-  if (tscNeverRan(out)) return 'not-run';
+  if (looksLikeTscHelpOutput(out) || looksLikeMissingTscBinary(out)) return 'not-run';
   if (/command not found|: not found|No such file or directory|ENOENT|Cannot find module 'typescript'|npm ERR!|npm error/i.test(out)) return 'unknown';
   return 'passed';
+}
+
+/** Command-aware sibling of the output-only reader. Explicit nonchecking modes cannot prove clean. */
+export function tscCommandVerdict(command: string, output: string | null | undefined): TscVerdict {
+  const verdict = tscVerdict(output);
+  if (verdict !== 'passed') return verdict;
+  const mode = explicitTscCommandMode(command);
+  if (mode === 'not-checking') return 'not-run';
+  if (mode === 'unknown') return 'unknown';
+  return verdict;
 }
 
 /**
@@ -157,23 +177,23 @@ export function commandOutcomeText(rec: { command: string; exitCode: number | nu
     // 🔴 AUTOPSY 12c642ed. `./node_modules/.bin/tsc --noEmit 2>&1 | head -40 → exit 0` — about a compiler
     // that did not exist. A piped typecheck's code is the LAST stage's, so a 0 there says nothing about
     // tsc. The code is still shown, but never alone when the output says the compiler did not answer.
-    const v = tscVerdict(out);
-    if (v === 'not-run') return `exit ${rec.exitCode}, but the compiler did not run (help page, missing binary or a broken TypeScript install)`;
-    if (v === 'unknown') return `exit ${rec.exitCode}, but no verdict (the compiler was stopped before it could check)`;
+    const v = tscCommandVerdict(rec.command, out);
+    if (v === 'not-run') return `exit ${rec.exitCode}, but the compiler did not run a typecheck (nonchecking mode, help page, wrong executable, missing binary or a broken TypeScript install)`;
+    if (v === 'unknown') return `exit ${rec.exitCode}, but no verdict (the compiler was stopped or its checking mode could not be established)`;
     if (v === 'failed' && rec.exitCode === 0) {
       const n = countTscErrors(out);
       return `exit 0 from the pipe, but ${n} type error${n === 1 ? '' : 's'} in the output`;
     }
     return `exit ${rec.exitCode}`;
   }
-  switch (tscVerdict(out)) {
+  switch (tscCommandVerdict(rec.command, out)) {
     case 'passed': return 'clean (read from the output; the pipe hides tsc\'s own exit code)';
     case 'failed': {
       const n = countTscErrors(out);
       return `${n} type error${n === 1 ? '' : 's'} (read from the output; the pipe hides tsc's own exit code)`;
     }
-    case 'not-run': return 'the compiler did not run (help page, missing binary or a broken TypeScript install)';
-    default: return 'no verdict (the compiler was stopped before it could check)';
+    case 'not-run': return 'the compiler did not run a typecheck (nonchecking mode, help page, wrong executable, missing binary or a broken TypeScript install)';
+    default: return 'no verdict (the compiler was stopped or its checking mode could not be established)';
   }
 }
 
@@ -221,7 +241,7 @@ export function typecheckEvidenceFromCommands(
     const viaBuild = buildScriptTypecheckVerdict(c);
     if (viaBuild) { verdict = viaBuild; continue; }
     if (!looksLikeTypecheckCommand(c?.command)) continue;
-    const v = tscVerdict(`${c.stdout ?? ''}\n${c.stderr ?? ''}`);
+    const v = tscCommandVerdict(c.command, `${c.stdout ?? ''}\n${c.stderr ?? ''}`);
     // Never really ran (help page / missing binary), or stopped before it could (a failed install) —
     // not evidence either way. The second half used to read as a PASS here while project memory
     // refused it; both now ask `tscVerdict`.
@@ -249,7 +269,14 @@ export function buildScriptTypecheckVerdict(c: { command?: string | null; stdout
   if (!c?.command || !/\b(?:npm|pnpm|yarn)\s+(?:run\s+)?build\b/.test(c.command)) return undefined;
   const out = `${c.stdout ?? ''}\n${c.stderr ?? ''}`;
   if (!/^>\s[^\n]*\btsc\b[^\n]*&&/m.test(out)) return undefined;
-  if (/\berror TS\d+:/.test(out)) return 'failed';
+  const verdict = tscVerdict(out);
+  if (verdict === 'failed') return 'failed';
+  // A script echo and bundle marker cannot overrule explicit evidence that tsc did not check.
+  // Use the same reader as stand-alone typechecks, including compiler-owned install errors.
+  if (verdict !== 'passed') return undefined;
+  // A successful `tsc --version`, `--noCheck`, listing or dry build did not check types. Read literal
+  // compiler argv in the echoed && chain, without interpreting arbitrary shell code or reading config.
+  if (!out.split('\n').some((line) => /^>\s/.test(line) && buildScriptChecksTypes(line.replace(/^>\s+/, '')))) return undefined;
   // A piped run (`npm run build | tail`) reports tail's exit code, so an unknown or zero code is read
   // together with the bundler's own line — which, after `tsc … &&`, can only appear if tsc passed.
   if ((c.exitCode === 0 || c.exitCode == null) && /\bbuilt in\s+\d/.test(out)) return 'passed';

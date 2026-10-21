@@ -56,7 +56,10 @@ function resolveBase(importer: string, spec: string, hasSrc: boolean): string | 
  * For every folder-barrel import (`import { A, B } from '.../Icons'`) that does NOT resolve but whose folder
  * contains leaf files exporting A and B, generate `.../Icons/index.ts` re-exporting them. Pure; never throws.
  */
-export async function generateMissingBarrels(files: Record<string, string>): Promise<BarrelStub[]> {
+export async function generateMissingBarrels(
+  files: Record<string, string>,
+  existingPaths: readonly string[] = [],
+): Promise<BarrelStub[]> {
   if (!files || typeof files !== 'object') return [];
   const mod = await loadTsMorph();
   if (!mod) return [];
@@ -66,7 +69,10 @@ export async function generateMissingBarrels(files: Record<string, string>): Pro
     project = new mod.Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true, compilerOptions: { allowJs: true, jsx: 2 } });
   } catch { return []; }
 
+  // An unread existing file protects its path from creation, but says nothing about its exports.
+  // In particular, never insert an empty source into the capability graph for an unread star target.
   const paths = new Set(Object.keys(files));
+  const presentPaths = new Set([...paths, ...existingPaths]);
   const hasSrc = [...paths].some((p) => p === 'src' || p.startsWith('src/'));
   const sources = new Map<string, any>();
   for (const [path, content] of Object.entries(files)) {
@@ -77,7 +83,7 @@ export async function generateMissingBarrels(files: Record<string, string>): Pro
 
   const capabilities = createExportCapabilities(files);
 
-  const resolvesToFile = (base: string): boolean => resolveExportTarget('', `./${base}`, paths) !== null;
+  const resolvesToFile = (base: string): boolean => resolveExportTarget('', `./${base}`, presentPaths) !== null;
   const leavesUnder = (base: string): string[] => [...paths].filter((p) => p.startsWith(`${base}/`) && CODE_FILE_RE.test(p) && !/\/index\.[cm]?[jt]sx?$/i.test(p));
   const relLeaf = (base: string, leaf: string): string => {
     // Explicit module formats need their output extension: extensionless .mjs/.cjs imports

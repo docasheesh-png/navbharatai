@@ -58,7 +58,7 @@ import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
 import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER } from './tscCommand';
 import { parseTscErrors, fixTypeOnlyValueImports as fixTypeOnlyValueImportsFromErrors, type TscError } from './EndgameRepair';
-import { tscOutputProvesClean, looksLikeTypecheckCommand, tscVerdict, countTscErrors } from './TscGate';
+import { tscCommandVerdict, looksLikeTypecheckCommand, tscVerdict, countTscErrors } from './TscGate';
 import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome, withSandboxBrowsers, withTestFilter } from './testRunner';
@@ -3428,10 +3428,11 @@ export class ToolDispatcher {
    * always 0, so a FAILING tsc was recorded as clean), and nothing ever resolved an old error. The
    * verdict is read from the output, never an exit code. Best-effort: memory must never break a tool.
    */
-  private noteCompileOutput(output: string): void {
-    try { if (tscOutputProvesClean(output)) getWorkspaceMemory(this.workspaceId).markTscClean(); }
+  private noteCompileOutput(output: string, command?: string): void {
+    const verdict = command ? tscCommandVerdict(command, output) : tscVerdict(output);
+    try { if (verdict === 'passed') getWorkspaceMemory(this.workspaceId).markTscClean(); }
     catch { /* audit best-effort */ }
-    this.noteTypeErrorCount(output);
+    this.noteTypeErrorCount(output, verdict !== 'passed');
   }
 
   /**
@@ -6247,7 +6248,7 @@ export class ToolDispatcher {
         }
         // Read from the OUTPUT, never the exit code: `tsc --noEmit 2>&1 | head -40` exits with head's 0
         // whether or not tsc failed, and that used to be recorded as "TypeScript already checked CLEAN".
-        if (looksLikeTypecheckCommand(command) && exitCode === 0) this.noteCompileOutput(`${stdout}\n${stderr}`);
+        if (looksLikeTypecheckCommand(command) && exitCode === 0) this.noteCompileOutput(`${stdout}\n${stderr}`, command);
         if (typoFix.fixed) out = `(Ran it as ./node_modules/… — the folder is node_modules, with no leading dot.)\n${out}`;
         // A compile whose exit code already said it failed still tells the done check it has errors
         // (autopsy 33812996) — it can never mark anything clean.

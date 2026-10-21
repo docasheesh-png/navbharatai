@@ -17,6 +17,16 @@ export interface ImportBinding {
   readsValue: boolean;
   start: number;
   line: number;
+  /** Namespace imports are opt-in: they request an object, not a named "*" export. */
+  namespace?: boolean;
+  /** Null means a namespace value use is not a statically named property read. */
+  runtimeMembers?: string[] | null;
+}
+export interface JsxBindingReference {
+  root: string;
+  component: string;
+  line: number;
+  state: 'value' | 'type-only' | 'missing';
 }
 
 export const EXPORT_CODE_FILE = /\.[cm]?[jt]sx?$/i;
@@ -248,39 +258,83 @@ export function createExportCapabilities(files: Record<string, string>) {
     if (sf) visit(sf);
     valueReadsCache.set(path, result); return result;
   };
-  const importsOf = (path: string): ImportBinding[] => {
+  const allImportsOf = (path: string): ImportBinding[] => {
     const cached = importsCache.get(path); if (cached) return cached;
     const result: ImportBinding[] = [];
     const sf = sources.get(normalize(path)); if (!sf) return result;
     for (const st of sf.statements) {
       if (!ts.isImportDeclaration(st) || !st.importClause || !ts.isStringLiteralLike(st.moduleSpecifier)) continue;
       const clause = st.importClause;
-      const add = (id: ts.Identifier, imported: string, typeOnly: boolean, start: number) => {
+      const add = (id: ts.Identifier, imported: string, typeOnly: boolean, start: number, namespace = false) => {
         const symbol = checker.getSymbolAtLocation(id);
+        const reads = (valueReads(path).get(id.text) ?? []).filter(ref => {
+          // Re-exporting a type-imported binding forwards its type, not its runtime value.
+          if (typeOnly && ts.isExportSpecifier(ref.parent)) return false;
+          // A type-only alias can legally coexist with a same-named local value. TypeScript merges
+          // their symbol, but the runtime read belongs to that value, not to the erased import.
+          if (typeOnly && symbol && (symbol.flags & ts.SymbolFlags.Value)) return false;
+          const refSymbol = ts.isShorthandPropertyAssignment(ref.parent) ? checker.getShorthandAssignmentValueSymbol(ref.parent) :
+            ts.isExportSpecifier(ref.parent) ? checker.getExportSpecifierLocalTargetSymbol(ref.parent) : checker.getSymbolAtLocation(ref);
+          const lexical = refSymbol ?? checker.resolveName(ref.text, ref, ts.SymbolFlags.Value | ts.SymbolFlags.Type | ts.SymbolFlags.Namespace | ts.SymbolFlags.Alias, false);
+          return !!symbol && lexical === symbol;
+        });
+        let runtimeMembers: string[] | null = [];
+        if (namespace) for (const ref of reads) {
+          const p = ref.parent;
+          if (ts.isPropertyAccessExpression(p) && p.expression === ref) runtimeMembers.push(p.name.text);
+          else if (ts.isElementAccessExpression(p) && p.expression === ref && ts.isStringLiteralLike(p.argumentExpression)) runtimeMembers.push(p.argumentExpression.text);
+          else { runtimeMembers = null; break; } // dynamic/object uses cannot prove the requested members
+        }
         result.push({ from: (st.moduleSpecifier as ts.StringLiteral).text, imported, local: id.text, typeOnly, start,
-          line: sf.getLineAndCharacterOfPosition(st.getStart(sf)).line + 1,
-          readsValue: (valueReads(path).get(id.text) ?? []).some(ref => {
-            // Re-exporting a type-imported binding forwards only its type; it is not a request
-            // to promote the original import. Downstream value consumers still see ERASED.
-            if (typeOnly && ts.isExportSpecifier(ref.parent)) return false;
-            const refSymbol = ts.isShorthandPropertyAssignment(ref.parent) ? checker.getShorthandAssignmentValueSymbol(ref.parent) :
-              ts.isExportSpecifier(ref.parent) ? checker.getExportSpecifierLocalTargetSymbol(ref.parent) : checker.getSymbolAtLocation(ref);
-            // Invalid use of an interface/alias as a value has NO value symbol. Resolve in
-            // both namespaces to retain its lexical import binding without counting shadows.
-            const lexical = refSymbol ?? checker.resolveName(ref.text, ref, ts.SymbolFlags.Value | ts.SymbolFlags.Type | ts.SymbolFlags.Namespace | ts.SymbolFlags.Alias, false);
-            return !!symbol && lexical === symbol;
-          }),
+          line: sf.getLineAndCharacterOfPosition(st.getStart(sf)).line + 1, readsValue: reads.length > 0,
+          ...(namespace ? { namespace: true, runtimeMembers } : {}),
         });
       };
       if (clause.name) add(clause.name, 'default', clause.isTypeOnly, clause.name.getStart(sf));
+      if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
+        const id = clause.namedBindings.name;
+        add(id, '*', clause.isTypeOnly, id.getStart(sf), true);
+      }
       if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) for (const ni of clause.namedBindings.elements) {
         add(ni.name, (ni.propertyName ?? ni.name).text, clause.isTypeOnly || ni.isTypeOnly, ni.getStart(sf));
       }
     }
     importsCache.set(path, result); return result;
   };
+  // JSX needs the binding at THIS tag, not a union of declarations elsewhere in the file. Use the
+  // same binder as import value reads, retaining function-expression names and lexical shadows.
+  const jsxBindingsOf = (path: string): JsxBindingReference[] => {
+    const sf = sources.get(normalize(path));
+    const result: JsxBindingReference[] = [];
+    if (!sf || (sf as ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics?.length) return result;
+    const visit = (node: ts.Node): void => {
+      if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+        const tag = node.tagName;
+        let root: ts.Node = tag;
+        while (ts.isPropertyAccessExpression(root)) root = root.expression;
+        if (ts.isIdentifier(root) && (ts.isPropertyAccessExpression(tag) || /^[A-Z]/.test(root.text))) {
+          const symbol = checker.getSymbolAtLocation(root) ?? checker.resolveName(root.text, root,
+            ts.SymbolFlags.Value | ts.SymbolFlags.Type | ts.SymbolFlags.Namespace | ts.SymbolFlags.Alias, false);
+          const erasedImport = symbol?.declarations?.some(d =>
+            ts.isImportSpecifier(d) ? d.isTypeOnly || d.parent.parent.isTypeOnly :
+              ts.isImportClause(d) ? d.isTypeOnly : ts.isNamespaceImport(d) ? d.parent.isTypeOnly : false);
+          // Ambient value declarations may describe an injected runtime global. Their existence is
+          // not proof of a missing binding; local type aliases/interfaces alone are not value bindings.
+          const state = !symbol ? 'missing' : symbol.flags & ts.SymbolFlags.Value ? 'value' :
+            erasedImport || !(symbol.flags & ts.SymbolFlags.Alias) ? 'type-only' : 'value';
+          result.push({ root: root.text, component: tag.getText(sf), line: sf.getLineAndCharacterOfPosition(tag.getStart(sf)).line + 1, state });
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    return result;
+  };
   return {
-    exportsOf, importsOf,
+    exportsOf, jsxBindingsOf,
+    // Existing producer-export consumers deliberately do not see namespace imports: a namespace
+    // object is not a request for an export named '*'. The type-only healer explicitly opts in.
+    importsOf: (path: string, includeNamespaces = false) => allImportsOf(path).filter(b => includeNamespaces || !b.namespace),
     hasValueRead: (path: string, name: string) => !!valueReads(path).get(name)?.length,
     resolve: (path: string, from: string) => resolveExportTarget(normalize(path), from, paths),
   };

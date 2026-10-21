@@ -16034,8 +16034,8 @@ async function noteBuildOutcome(
               const st = await saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files, { mode: 'replace' });
               if (st === 'saved') {
                 inBuildGreenAt = Date.now();
-                billingCtx.appFirstRenderedAt = earliestRenderProof(billingCtx.appFirstRenderedAt, inBuildGreenAt); // billing reads the earliest proof (a75153ab)
                 etaAppRenderedAt = inBuildGreenAt; // the ETA stops counting down to an app already on screen (9c612cdb)
+                billingCtx.appFirstRenderedAt = earliestRenderProof(billingCtx.appFirstRenderedAt, inBuildGreenAt); // billing reads the earliest proof (a75153ab)
                 events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
                 emitEtaPhaseNow();
               } else {
@@ -21745,7 +21745,8 @@ async function noteBuildOutcome(
       // same build had watched it render. Nothing failed, nothing logged; the report simply lied.
       let previewVerifiedRendered = false;
       /** When THIS pass first saw the app render (epoch ms) — compared with the stop request (cancelledBuildBilling). */
-      let appFirstRenderedAt: number | null = null;
+      // Seeded from the in-build green proof, which can land long before this pass and is billing's earliest evidence (a75153ab).
+      let appFirstRenderedAt: number | null = earliestRenderProof(billingCtx.appFirstRenderedAt);
       // When a real-browser render check last came back CLEAN (its start time). Every console line logged
       // before it has been answered by it, so the runtime auto-fix loop does not hand those to a repair
       // (autopsy 12511a9c — `runtimeAutofixSince`).
@@ -26692,7 +26693,7 @@ async function noteBuildOutcome(
           appRendered: appSeenRunningForBill,
           // WAS IT RUNNING BEFORE THEY ASKED TO STOP? (r6–r10 autopsy, owner 2026-10-18.) A ledger-only proof
           // has no time, so it cannot show it came first — that case is billed at cost, not in full.
-          appRenderedAt: earliestRenderProof(appFirstRenderedAt, billingCtx.appFirstRenderedAt),
+          appRenderedAt: appFirstRenderedAt,
           stopRequestedAt: abortRequestedAtOf(abort.signal),
           stoppedDuringOurStylePass: stopFellInWindow(abortRequestedAtOf(abort.signal), stylePassWindow.startedAt, stylePassWindow.endedAt),
           // An unverified EDIT may have left the user's working app worse than it started — see

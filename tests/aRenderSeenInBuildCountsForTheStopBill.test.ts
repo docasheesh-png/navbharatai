@@ -21,9 +21,9 @@ describe('the earliest render proof feeds the stop bill', () => {
     const b = decideCancelledBuildBill({ ...base, appRenderedAt: earliestRenderProof(3000), stopRequestedAt: 2000 });
     expect(b.delivery).toBe('running-not-before-stop');
   });
-  it('source guard: the in-build green producer and both billing points use the shared clock', () => {
+  it('source guard: the in-build green producer and the post-answer pass starts from that proof', () => {
     const src = readFileSync('src/server/routes/agentv3.ts', 'utf8');
     expect(src).toMatch(/billingCtx\.appFirstRenderedAt = earliestRenderProof\(billingCtx\.appFirstRenderedAt, inBuildGreenAt\)/);
-    expect(src).toMatch(/appRenderedAt: earliestRenderProof\(appFirstRenderedAt, billingCtx\.appFirstRenderedAt\)/);
+    expect(src).toMatch(/let appFirstRenderedAt: number \| null = earliestRenderProof\(billingCtx\.appFirstRenderedAt\);/);
   });
 });

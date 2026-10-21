@@ -35,12 +35,18 @@ describe('the repair itself', () => {
     expect(JSON.parse(r.text as string).devDependencies['@types/react-dropzone']).toBe('^4.2.2');
     expect(r.changes[0]).toMatch(/does not exist/);
   });
-  it('a package npm has never heard of is removed — nothing can import it', () => {
-    const r = repairUnavailableRanges(MANIFEST, missing, new Map());
-    const parsed = JSON.parse(r.text as string);
-    expect('@types/react-dropzone' in parsed.devDependencies).toBe(false);
-    expect(parsed.dependencies['react-dropzone']).toBe('^14.2.3'); // its sibling is untouched
-    expect(r.changes[0]).toMatch(/not on npm at all/);
+  it.each([undefined, '', 'unavailable', 'ETIMEDOUT', 'E401'])('an unknown registry result (%s) preserves the manifest', (latest) => {
+    const versions = latest === undefined ? new Map<string, string>() : new Map([['@types/react-dropzone', latest]]);
+    expect(repairUnavailableRanges(MANIFEST, missing, versions)).toEqual({ text: null, changes: [] });
+  });
+  it('a partial lookup repairs only the confirmed package, across every dependency section', () => {
+    for (const section of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+      const manifest = JSON.stringify({ [section]: { confirmed: '^99.0.0', unknown: '^99.0.0' } });
+      const r = repairUnavailableRanges(manifest, [{ name: 'confirmed', range: '^99.0.0' }, { name: 'unknown', range: '^99.0.0' }], new Map([['confirmed', '1.2.3']]));
+      expect(JSON.parse(r.text as string)[section]).toEqual({ confirmed: '^1.2.3', unknown: '^99.0.0' });
+      expect(r.changes).toHaveLength(1);
+      expect(r.changes[0]).not.toMatch(/removed|not on npm/);
+    }
   });
   it('nothing to do ⇒ no rewrite; unreadable manifest ⇒ no rewrite and no throw', () => {
     expect(repairUnavailableRanges(MANIFEST, [{ name: 'left-pad', range: '^9' }], new Map()).text).toBeNull();
@@ -58,11 +64,13 @@ class Act implements ActuatorPort {
   files = new Map<string, string>([['package.json', MANIFEST]]);
   installs = 0;
   registry: string;
+  registryError?: Error;
   constructor(registry = 'NBAI_LATEST @types/react-dropzone=4.2.2') { this.registry = registry; }
   async readFile(_w: string, p: string) { const f = this.files.get(p); if (f === undefined) throw new Error(`ENOENT ${p}`); return f; }
   async writeFile(_w: string, p: string, c: string) { this.files.set(p, c); }
   async listFiles() { return [...this.files.keys()]; }
   async runCommand(_w: string, cmd: string) {
+    if (cmd.includes('NBAI_LATEST') && this.registryError) throw this.registryError;
     if (cmd.includes('NBAI_LATEST')) return { exitCode: 0, stdout: `${this.registry}\n`, stderr: '' };
     if (/npm install/.test(cmd)) {
       this.installs++;
@@ -90,11 +98,23 @@ describe('the install a build runs', () => {
     expect(JSON.parse(act.files.get('package.json') as string).devDependencies['@types/react-dropzone']).toBe('^4.2.2');
     expect(recorded.get('package.json')).toBe(act.files.get('package.json'));
   });
-  it('a package npm does not know is dropped and the install succeeds', async () => {
-    const act = new Act('');
+  it.each(['', 'NBAI_LATEST @types/react-dropzone=', 'NBAI_LATEST @types/react-dropzone=unavailable'])('an inconclusive lookup (%s) never removes a dependency or claims repair', async (registry) => {
+    const act = new Act(registry);
     const { res } = await run(act, BARE);
-    expect(res).toMatch(/exit=0/);
-    expect('@types/react-dropzone' in JSON.parse(act.files.get('package.json') as string).devDependencies).toBe(false);
+    expect(res).toMatch(/exit=1/);
+    expect(res).toContain('ETARGET');
+    expect(res).not.toMatch(/\[manifest repaired\]|not on npm|removed from/);
+    expect(act.files.get('package.json')).toBe(MANIFEST);
+    expect(act.installs).toBe(1);
+  });
+  it('a rejected lookup preserves the failed install and manifest', async () => {
+    const act = new Act();
+    act.registryError = new Error('registry lookup timed out');
+    const { res } = await run(act, BARE);
+    expect(res).toMatch(/exit=1/);
+    expect(res).not.toMatch(/\[manifest repaired\]|not on npm/);
+    expect(act.files.get('package.json')).toBe(MANIFEST);
+    expect(act.installs).toBe(1);
   });
   it('an install that names packages is left alone (the model gets its version hint as before)', async () => {
     const act = new Act();
@@ -111,14 +131,17 @@ describe('the install a build runs', () => {
 import { E2BActuator } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
 
 describe('the actuator\'s install repairs the same manifest', () => {
-  it('ETARGET on `npm install` → registry lookup, package.json rewritten, one more install, success', async () => {
+  it.each(['success', 'blank', 'timeout', 'authentication', 'network'])('ETARGET with %s registry lookup preserves unknown dependencies', async (lookup) => {
     let manifest = MANIFEST;
     let installs = 0;
     const sandbox = {
       sandboxId: 'sbx-range',
       commands: {
         run: async (cmd: string) => {
-          if (cmd.includes('NBAI_LATEST')) return { exitCode: 0, stdout: 'NBAI_LATEST @types/react-dropzone=4.2.2\n', stderr: '' };
+          if (cmd.includes('NBAI_LATEST')) {
+            if (lookup === 'timeout') throw new Error('registry lookup timed out');
+            return { exitCode: lookup === 'success' || lookup === 'blank' ? 0 : 1, stdout: lookup === 'success' ? 'NBAI_LATEST @types/react-dropzone=4.2.2\n' : '', stderr: lookup === 'authentication' ? 'E401' : lookup === 'network' ? 'ECONNRESET' : '' };
+          }
           if (/^npm (?:ci|install)\b/.test(cmd)) {
             installs++;
             return /"\^14\.2\.7"/.test(manifest) ? { exitCode: 1, stdout: '', stderr: NPM_LOG } : { exitCode: 0, stdout: 'ok', stderr: '' };
@@ -135,9 +158,17 @@ describe('the actuator\'s install repairs the same manifest', () => {
     };
     const act = new E2BActuator('test-key') as unknown as { _npmInstallLocked: (s: unknown) => Promise<{ success: boolean; log: string }> };
     const r = await act._npmInstallLocked(sandbox);
-    expect(r.success).toBe(true);
-    expect(installs).toBe(2);
-    expect(JSON.parse(manifest).devDependencies['@types/react-dropzone']).toBe('^4.2.2');
-    expect(r.log).toMatch(/\[manifest repaired\]/);
+    if (lookup === 'success') {
+      expect(r.success).toBe(true);
+      expect(installs).toBe(2);
+      expect(JSON.parse(manifest).devDependencies['@types/react-dropzone']).toBe('^4.2.2');
+      expect(r.log).toMatch(/\[manifest repaired\]/);
+    } else {
+      expect(r.success).toBe(false);
+      expect(installs).toBe(1);
+      expect(manifest).toBe(MANIFEST);
+      expect(r.log).toContain('ETARGET');
+      expect(r.log).not.toMatch(/\[manifest repaired\]|not on npm|removed from/);
+    }
   });
 });

@@ -12,7 +12,7 @@
  *
  * So the deterministic half lives here. For a bare manifest install that failed with ETARGET:
  *   · a package whose LATEST version is known gets that version as its range (`^<latest>`);
- *   · a package the registry does not know at all is removed from the manifest — nothing can import it;
+ *   · a missing or unusable registry answer leaves the dependency untouched (it may be a lookup failure);
  * then the install runs once more. A command that NAMES packages (`npm install cors@^4`) is a model's guess and
  * keeps its hint; this module never touches it. PURE — the registry query and the write live at the call site.
  */
@@ -51,8 +51,9 @@ export interface ManifestRepair {
 const SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const;
 
 /**
- * Apply the repair to a manifest. `latest` maps a package to the version the registry reports ('' or absent =
- * the registry does not know it). Packages not declared in the manifest are ignored. Never throws. PURE.
+ * Apply the repair to a manifest. `latest` maps a package to a confirmed registry version. Missing, blank or
+ * unusable results are inconclusive: registry/auth/network failures must never delete a dependency or claim
+ * the package does not exist. Packages not declared in the manifest are ignored. Never throws. PURE.
  */
 export function repairUnavailableRanges(
   manifestText: string,
@@ -78,9 +79,6 @@ export function repairUnavailableRanges(
       if (real && /^\d+\.\d+\.\d+/.test(real)) {
         table[name] = `^${real}`;
         changes.push(`${name}@${range} does not exist — set to ^${real}, the version npm has`);
-      } else {
-        delete table[name];
-        changes.push(`${name} is not on npm at all — removed from ${section}`);
       }
     }
   }

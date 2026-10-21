@@ -995,8 +995,8 @@ export class E2BActuator implements IEngineerActuator {
     }
 
     // Step 2.6: A DECLARED VERSION THAT DOES NOT EXIST (ETARGET) — manifestRangeRepair.ts, autopsy b4173fb7.
-    // Running the same install again cannot succeed; the registry knows the real version (or that the package
-    // does not exist), so the manifest is repaired once and the install retried. Same repair as the build's
+    // Running the same install again cannot succeed; only a confirmed registry version permits a manifest
+    // repair and retry. Failed or inconclusive lookups leave it unchanged. Same repair as the build's
     // own bare `npm install`, for every path that funnels through here (preview boot, hydration, publish).
     if (manifestRangeRepairEnabled() && /ETARGET|No matching version found/i.test(installLog)) {
       try {

@@ -98803,3 +98803,6 @@ Connector read to exhaustion (110 pages, ~602 reports, all `not_started`); the t
 - ce8845e1 · `combo` export error (BLOCKED, files missing).
 - 81a0eda5, 14ea28b8 · AI pause recorded as a build error/blocker → `OUTCOME_AI_PAUSED`; 14ea28b8 also: platform kit `Game.ts` deleted as a "stale twin" → guard armed with seeds.
 Every fix has a test proven by reversion. Open root causes are rows Q-2240…Q-2245.
+
+### 2026-10-21 (later) — second batch of the failed-report autopsy (reports 13–22 by time + 2 newer)
+Read in full: a75153ab, b4173fb7, f9ed7833, 97413d93, b94550aa, 232b184f, 42d9dcae, 5cf2fd6c, 18777f36, a9b327b8, 51eaaa90, dd8c0cdb. Ten were user-stopped (no defect except the rows below). Fixed: manifest versions that do not exist (Q-2246). Already fixed on main: the 183-call `update_preview` loop (Q-2247, commit 665b59334). Blocked with all four fields: Q-2248 … Q-2251.

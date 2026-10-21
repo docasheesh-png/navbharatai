@@ -5553,7 +5553,15 @@ export class ToolDispatcher {
           }
           try {
             const wrote = await this.guardedWrite(file.path, file.content, { agent, source: 'write_files_batch', allowOverwrite: true });
-            const shrink = wrote.kind === 'modify' && assessFullRewrite(wrote.existingContent, wrote.content).level === 'shrink';
+            // Match write_file: replacing our untouched starter is the job, not user-code loss.
+            // Use the guarded write's canonical preimage, not the earlier batch probe.
+            let replacedStarter = false;
+            if (wrote.kind === 'modify') {
+              try {
+                replacedStarter = isOurStarterFile(toWorkspaceRelPath(file.path, SANDBOX_WORKSPACE_ROOT), wrote.existingContent, starterTemplates());
+              } catch { /* Unproven ownership keeps the warning; the write already succeeded. */ }
+            }
+            const shrink = wrote.kind === 'modify' && !replacedStarter && assessFullRewrite(wrote.existingContent, wrote.content).level === 'shrink';
             this.state?.recordFileChange({ path: file.path, kind: wrote.kind }, agent);
             this.events?.emit({
               type: 'diff', agent,
@@ -5562,7 +5570,7 @@ export class ToolDispatcher {
             });
             batchMem.indexFile(file.path, wrote.content);
             getEmbeddingStore(this.workspaceId).addFile(file.path, wrote.content).catch(() => {});
-            return { path: file.path, kind: wrote.kind, shrink, kitNote: wrote.kitNote, content: wrote.content };
+            return { path: file.path, kind: wrote.kind, shrink, replacedStarter, kitNote: wrote.kitNote, content: wrote.content };
           } catch (err) {
             const reason = err instanceof Error ? err.message : String(err);
             return { path: file.path, kind, shrink: false, blocked: false, failed: reason };
@@ -5572,7 +5580,7 @@ export class ToolDispatcher {
         const notWritten = perFile.filter((r): r is typeof r & { failed: string } => typeof (r as { failed?: string }).failed === 'string');
         const writtenRows = perFile.filter((r) => !(r as { blocked?: boolean }).blocked && !(r as { failed?: string }).failed);
         const written: string[] = writtenRows.map((r) => r.path);
-        const overwritten: string[] = writtenRows.filter((r) => r.kind === 'modify').map((r) => r.path);
+        const overwritten: string[] = writtenRows.filter((r) => r.kind === 'modify' && !('replacedStarter' in r && r.replacedStarter)).map((r) => r.path);
         const shrunk: string[] = writtenRows.filter((r) => r.shrink).map((r) => r.path);
         // Checkpoint ONCE for the whole batch — NOT once per file. A git commit per file made an
         // N-file batch cost N commits (with `git add -A` each ~45s pre-gitignore), which is exactly

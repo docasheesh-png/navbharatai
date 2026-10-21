@@ -99370,3 +99370,21 @@ in a different costume — a timer leak instead of a network call — which is w
 whole `queue-retry-drills` job against the Firestore emulator and some tests legitimately reach loopback, so a
 blanket block would break working tests. Never-break outranks the cleanup; the safe shape is a loopback/emulator
 allowlist plus a hard failure for everything else, landed alone and gated.
+
+### Q-2203 ✅ RESOLVED — by #3859 (merged 2026-10-21 12:55 UTC), closed here
+
+The resolving PR has merged, so the row leaves the open table and its id is appended to the closed register
+in this same commit. Credit is another session's: they found that an earlier fixture in the same test file
+made a real clarity-judge SDK call, whose undici keep-alive timer surfaced under the next test's fake clock.
+The handler's refusal path — what this session had named — was never at fault.
+
+Verified before closing, because a test-only fix to a red test is the shape the fourth absolute rule forbids:
+`expect(vi.getTimerCount()).toBe(0)` survives with only a message argument added so a failure prints the
+culprit; they ADDED assertions (`clarityJudgeAsk` called exactly once in the scope fixture, not at all on the
+refusal path); and `tracePendingTimers()` carries its own refusal of the shortcut — *"keep a failing cleanup
+assertion actionable without clearing or draining any timer for it"*.
+
+**The class it exposed stays open as Q-2252** (nothing stops a unit test making a real outbound call;
+`vitest.config.ts` declares no `setupFiles`; 43 fake-timer files, 37 unmocked, 17 touching a route or provider
+path). That is deliberate: closing Q-2203 closes the instance, and the row that closes the class is still open
+with its fix proposed and its breakage risk named.

@@ -750,3 +750,11 @@ Q-1126
 # PR's own test table, and Q-888's settled/retryable webhook contract survived the refusal moving from
 # an inline return to a thrown PaymentAmountMismatchError (payments.ts catches it and keeps settled:true).
 Q-1226
+
+# 2026-10-21: Q-2203 — resolved by ANOTHER session's PR #3859 (merged 12:55 UTC), and this row's own
+# hypothesis was wrong. The leaked timer was never the handler's: an earlier fixture in the same test
+# file made a real clarity-judge SDK call whose undici keep-alive timer surfaced under the next test's
+# fake clock. Their fix is a real one (the getTimerCount assertion survives, gaining only a message
+# argument; they added assertions and a timer tracer that refuses to drain anything). The CLASS it
+# exposed — nothing stops a unit test making a real outbound call — is open as Q-2252.
+Q-2203

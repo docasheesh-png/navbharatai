@@ -99388,3 +99388,41 @@ assertion actionable without clearing or draining any timer for it"*.
 `vitest.config.ts` declares no `setupFiles`; 43 fake-timer files, 37 unmocked, 17 touching a route or provider
 path). That is deliberate: closing Q-2203 closes the instance, and the row that closes the class is still open
 with its fix proposed and its breakage risk named.
+
+## 2026-10-21 — the retained failed-build reports became readable, and what mining them actually yields
+
+Report tooling (`list_failed_builds` / `get_failed_build` / `get_failed_build_autopsy`) became available to this
+session. **That lifts the blocker this session had reported on the Q-1300+ rows**, whose recorded next action
+needed the historical build's own report — previously unrecoverable from here.
+
+### The honest yield: three leads chased, three already fixed
+
+| lead, from a retained report | verdict |
+|---|---|
+| `"Can you generate images?"` → a 29-minute, 16-file image app, `ok:false`, 12 unresolved (`5abad374`, 2026-09-12) | **already fixed.** `buildConfirmation.ts` landed 2026-10-05 and refuses all three real prompts (`{confirmed:false, reason:'question'}`), and `tests/capabilityQuestion.test.ts` pins the exact prompt — its header cites autopsy `5abad374`, the same build id |
+| `rootCause` claiming *"NO unresolved problem was recorded"* against its own `counts.unresolved: 1` (`52c214ac`) | **already fixed** by #3538 (2026-10-05); today's `deriveRootCause`, fed the real problems, names the item instead |
+| `summary` *"Stopped, as you asked."* on a build the user never stopped (same report) | **already fixed** by autopsy b89ba6f8 (2026-09-17), whose comment in `agentv3.ts:19419` quotes that exact three-way disagreement |
+
+**The reason is dates, and it is the method lesson:** of 15 reports sampled, **10 are September**, 4 October, 1
+August — and the engine was heavily autopsied in late September and October. The listing is in workspace/history
+order, **not** date order (the tool says so), so a naive cursor walk reads the oldest and least useful reports
+first. **Mine the newest.** Recorded here because the next session will otherwise spend the same hour proving the
+same three fixes exist.
+
+### What survived verification: Q-2254
+
+A build cut off by its **own** time budget has no name in the abort taxonomy. `buildAbortCause.ts`'s `AbortCause`
+union has 13 members and none is the build's own budget — `review-budget`, `recheck-budget` and `repair-budget`
+are each annotated *"a pass's signal, never the build's"* — while `BUDGET_REACHED_MESSAGE` is imported into that
+same module. So `52c214ac`'s three honest `info` entries (`LLM_CALL_BUDGET_ENDED`, `SIMPLE_BUILD_FALLBACK`,
+`ONESHOT_SKIPPED`) cannot reach the verdict, because `deriveRootCause` only weighs non-`info` unresolved items —
+and the admin is told "why it failed is not known from this report".
+
+**Verified on current code, not inferred:** today's `deriveRootCause` fed those real problems still says the
+cause is unknown; the union genuinely lacks the member. **Not established, and the row says so:** whether another
+current path records a terminal cause for this shape. In that report `abortBuild` was never called — the fast
+lane was cut off, handed to the full builder, and the build ended — so the 2026-09-17 back-fill through
+`abortBuild` does not cover it. The next step is a trace, not a reproduction: a 2026-09-14 build cannot be re-run
+on today's code.
+
+**No autopsy metadata was written.** That tool requires explicit write consent, which this session does not have.

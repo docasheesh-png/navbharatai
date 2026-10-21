@@ -298,19 +298,20 @@ ${ENSURE_WEB_PAGE_GUARD}          if [ ! -d android ]; then
             npx cap add android
             npx cap sync android
           fi
-          # Turn the user's UPLOADED icon into the REAL, full app-icon set (all densities + the adaptive
-          # foreground/background/round layers). Without this the icon upload silently does nothing on CI —
-          # the app would ship with Capacitor's default icon. Runs only when an icon source exists, and
-          # degrades gracefully: if the generator is unavailable or the icon is too small it just warns, and
-          # the foreground self-heal below still guarantees a resolvable icon so the build never fails.
-          if ls resources/icon.* assets/icon.* >/dev/null 2>&1; then
-            mkdir -p assets
-            for s in resources/icon.png assets/icon.png resources/icon.jpg resources/icon.jpeg; do
-              if [ -f "$s" ]; then cp "$s" assets/icon.png; break; fi
-            done
-            echo "Generating the app icon set from your uploaded icon…"
-            npx --yes @capacitor/assets generate --android --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#111111' || echo "::warning::could not generate the full icon set from your icon (it may be under 1024x1024) — using the built-in icon heal instead"
+          # THE APP'S OWN LOGO, ICON AND SPLASH — never Capacitor's default (appBranding.ts, admin 2026-10-16). The script
+          # records what the fresh project holds, picks the app's branding source (the user's logo, a generated one, or an
+          # explicitly reported app-specific mark), generates every launcher size, adaptive layer, round icon and splash,
+          # then VERIFIES the native project: the manifest's icon references resolve to real files, and no icon or splash
+          # is byte-identical to the default (or a previous app's) it started with. If generation fails it applies the
+          # fallback and says so in the run summary — it never ships the default icon and never reports a success it did
+          # not have. The step fails only when even the fallback cannot be verified.
+          node scripts/nbai-branding.mjs snapshot android
+          if ! node scripts/nbai-branding.mjs ensure android; then
+            echo "NBAI_FAILED_STAGE=capacitor"
+            echo "::error::The app's launcher icon could not be set up and checked, so the build stopped instead of shipping a default icon."
+            exit 1
           fi
+          node scripts/nbai-branding.mjs report
           # Capacitor's launch theme (styles.xml) references @drawable/splash; a fresh cap add (Capacitor 8)
           # can omit the splash asset when @capacitor/splash-screen ships no image → resource linking fails
           # with "resource drawable/splash not found". Guarantee a resolvable @drawable/splash exists.
@@ -319,6 +320,9 @@ ${ENSURE_WEB_PAGE_GUARD}          if [ ! -d android ]; then
             mkdir -p android/app/src/main/res/drawable
             printf '<?xml version="1.0" encoding="utf-8"?>\\n<layer-list xmlns:android="http://schemas.android.com/apk/res/android">\\n  <item android:drawable="@android:color/white" />\\n</layer-list>\\n' > android/app/src/main/res/drawable/splash.xml
           fi
+          # LINK-FAILURE GUARD (autopsy 2026-08-11), kept AFTER the branding step: the branding step has just verified that
+          # the adaptive foreground exists, so this is a no-op — it stays so a resource-linking failure remains impossible
+          # even if the branding step is ever changed. It can no longer be the path that picks the icon.
           # SIBLING of the splash case (same class): the adaptive launcher icon's mipmap-anydpi-v26/
           # ic_launcher*.xml reference @mipmap/ic_launcher_foreground, which a fresh cap add / a partial
           # icon set can omit → "resource mipmap/ic_launcher_foreground not found" at resource-linking.
@@ -513,7 +517,20 @@ const gradleCacheSave = (java: number): string => `      - name: Save the Gradle
           key: nbai-gradle-\${{ runner.os }}-java${java}-\${{ hashFiles('package.json') }}
 `;
 
-const WEB_BUILD_STEP = `      - name: Build the web app
+// THE APP'S LOGO, BEFORE ANYTHING IS BUILT (admin 2026-10-21). The chosen logo — or, with none, the app's own mark (a Lucide symbol
+// that fits its name, else the first letter of its name) — is turned into the launcher source and splash, and into the web install
+// icons, BEFORE the web build, so the icons land in the bundle. The icon generator and the image library are installed into
+// `.nbai-tools`, out of the app's own node_modules. The native steps later only snapshot, generate and verify.
+const BRANDING_PREPARE_STEP = `      - name: Prepare the app's logo and web icons
+        run: |
+          set -e
+          npm install --no-save --no-audit --no-fund --prefix .nbai-tools @capacitor/assets sharp || echo "::warning::the icon generator could not be installed — the app's own fallback icon will be applied instead"
+          node scripts/nbai-branding.mjs prepare
+          node scripts/nbai-branding.mjs pwa-apply
+
+`;
+
+const WEB_BUILD_STEP = BRANDING_PREPARE_STEP + `      - name: Build the web app
         env:
           NODE_OPTIONS: --max-old-space-size=4096
         run: |
@@ -525,7 +542,12 @@ const WEB_BUILD_STEP = `      - name: Build the web app
             npx vite build
             rc=$?
           fi
-          exit "$rc"`;
+          exit "$rc"
+
+      # The web manifest is what a browser install (PWA) uses for the home-screen icon: every icon it names must
+      # exist, be the size it claims, and not be a generic framework icon (appBranding.ts).
+      - name: Check the web app's install icons
+        run: node scripts/nbai-branding.mjs verify pwa`;
 
 const ANDROID_APK_WORKFLOW = (appName: string, java: number): string => `# Build an INSTALLABLE Android app (.apk) for ${appName} — generated by NavBharatAI.
 #
@@ -906,6 +928,18 @@ ${ENSURE_WEB_PAGE_GUARD}          if [ ! -d ios ]; then
             echo "::error::The iOS project was not created, so there is nothing to compile."
             exit 1
           fi
+          # THE APP'S OWN ICON AND SPLASH — Capacitor's default AppIcon is never what ships (appBranding.ts). Same
+          # script as the Android lane, so both stores get the same branding source: it generates the AppIcon set
+          # (including the 1024 App Store icon) and the splash, then verifies that Contents.json resolves to real
+          # PNGs and that nothing is byte-identical to the default it started with. If generation fails it applies the
+          # app-specific fallback and says so in the run summary.
+          node scripts/nbai-branding.mjs snapshot ios
+          if ! node scripts/nbai-branding.mjs ensure ios; then
+            echo "NBAI_FAILED_STAGE=capacitor"
+            echo "::error::The app's icon could not be set up and checked, so the build stopped instead of shipping a default icon."
+            exit 1
+          fi
+          node scripts/nbai-branding.mjs report
 
       # Apple rejects a re-used build number, and pre-answering export compliance stops the
       # "App Encryption Documentation" popup on every single upload.

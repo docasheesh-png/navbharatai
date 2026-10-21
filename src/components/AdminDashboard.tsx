@@ -20,6 +20,7 @@ import {
   tabBarBadges, tabHint, type AdminTabId, type AdminPageId,
 } from '../lib/adminTabs';
 import { banCopy, tokenAdjustCopy, broadcastCopy, readTokenDelta, readAdminReason, ALL_USERS_SCOPE } from '../lib/adminActionReason';
+import { adminMfaWarning } from '../lib/adminMfaWarning';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon, RotateCcw } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
@@ -1576,6 +1577,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch (e) { console.error(e); setMfaStatus(null); }
   }, [adminToken]);
 
+  // The second-factor state is loaded once, whichever tab is open, so a missing second factor is never hidden in a tab nobody visits.
+  useEffect(() => { void fetchMfaStatus(); }, [fetchMfaStatus]);
   useEffect(() => { if (activeTab === 'security') { fetchMfaStatus(); fetchLicenceExposure(); void fetchAdultOptIns(); void fetchSafetyFlags(); } }, [activeTab, fetchMfaStatus, fetchLicenceExposure, fetchAdultOptIns, fetchSafetyFlags]);
 
   const startMfaEnroll = async () => {
@@ -1906,6 +1909,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           Logout
         </button>
       </div>
+
+      {adminMfaWarning(mfaStatus) && (
+        <button
+          type="button"
+          onClick={() => setActiveTab('security')}
+          className="w-full flex items-start gap-2 text-left px-4 py-3 rounded-2xl border border-line bg-card text-danger text-xs font-bold"
+          data-testid="admin-mfa-warning"
+        >
+          <ShieldAlert size={15} className="shrink-0 mt-0.5" />
+          <span>{adminMfaWarning(mfaStatus)}</span>
+        </button>
+      )}
 
       {/* Tabs — HIDDEN on mobile while the bottom bar is carrying them (admin 2026-09-20).
           `hidden lg:flex` rather than a JS branch, the same idiom AgentV3Panel uses for its own

@@ -98,6 +98,11 @@ the packaging bar must not be silently stricter than the bar the app was verifie
 `APP_CODE_BUILD_FAILED` — and Phase A4 exists precisely so that class is caught before GitHub.
 `BUILD_SCRIPT_MISSING` covers a package.json with no build script at all.
 
+### Step B5b — "Check the web app's install icons"
+Runs `nbai-branding.mjs verify pwa` right after the web build: when the app has a web manifest, every icon it
+names must exist, be the size it claims, and not be a generic framework icon (`vite.svg`, `react.svg`, …). An app
+with no manifest is skipped, said plainly. A missing 512 px icon is a warning, not a failure.
+
 ### Step B6 — "Generate and sync the Android project" (the single biggest step: 14 sub-checks)
 0. **`TYPESCRIPT_MISSING`** (added 2026-09-22) — Capacitor's CLI reads `capacitor.config.ts` with the
    PROJECT's own TypeScript and fatals ("Could not find installation of TypeScript") when package.json
@@ -118,8 +123,14 @@ the packaging bar must not be silently stricter than the bar the app was verifie
    android/ sails past a script-only check and dies at Gradle ("Unable to access jarfile", 2026-08-04
    autopsy). Missing jar → fetch the EXACT pinned-version jar; still missing → re-scaffold android/ fresh;
    final guard verifies BOTH script and jar
-7. **Icon set generation** — the user's uploaded icon becomes the real multi-density adaptive icon set
-   (`@capacitor/assets`); degraded gracefully when the icon is too small
+7. **App branding** (`scripts/nbai-branding.mjs`, admin 2026-10-16 and 2026-10-21 — the app's launcher icon, splash and web install icon are
+   ALWAYS its own, never Capacitor's default): a step BEFORE the web build (`Prepare the app's logo and web icons`) picks the
+   branding source — the logo the user chose, else the app's own mark (a Lucide symbol that fits its name, else the first letter of its
+   name; `src/lib/brandMark.ts`, no AI image) — and writes the web manifest / favicon icons. The native step records what the fresh
+   project holds, generates every launcher size / adaptive layer / round icon / splash (`@capacitor/assets`), then VERIFIES the
+   native project — manifest icon references resolve to real files, and no icon or splash is byte-identical to the default (or another
+   app's) it started with. A failed generator → a plain app-specific pattern, said so in the run summary; the step fails only when even
+   that cannot be verified.
 8. **Splash drawable heal** — Capacitor's launch theme references `@drawable/splash`, which a fresh cap
    add can omit → resource linking dies; a placeholder is written
 9. **Launcher-foreground heal** — `mipmap-anydpi-v26` XML references `ic_launcher_foreground`, which a

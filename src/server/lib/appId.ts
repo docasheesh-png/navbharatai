@@ -83,3 +83,23 @@ export function resolveAppId(requestedAppId: string | undefined, appName: string
   }
   return deriveAppId(appName);
 }
+
+/**
+ * Make sure the package name is one Android will accept, changing it as little as possible.
+ *
+ * This id is the app's PERMANENT identity on the Play Store — it can never be changed once published,
+ * and two ids that differ by a single letter are two different apps. So a valid id is returned exactly
+ * as the user typed it, including capitals (Java package rules allow them). Only an id Android would
+ * actually reject is replaced, and the caller reports that replacement rather than doing it silently.
+ */
+export function normaliseAppId(appId: string, appName: string): string {
+  // The real rule: two or more segments, each starting with a letter, letters/digits/underscore after.
+  const valid = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
+  const candidate = (appId || '').trim();
+  // A well-formed id can still carry a lowercase Java reserved word (com.new.shop), which Android's
+  // package tooling rejects at `cap add`. Repair that segment in place rather than discard the id (G8) —
+  // shared with appId.ts so both appId validators enforce the SAME reserved-word rule.
+  if (valid.test(candidate)) return sanitizeReservedSegments(candidate);
+  const slug = (appName || 'app').toLowerCase().replace(/[^a-z0-9]/g, '') || 'app';
+  return sanitizeReservedSegments(`com.navbharat.${slug}`);
+}

@@ -135,7 +135,9 @@ export type SeedState = 'platform-template' | 'kept-seed';
  */
 export function seedKeptSentence(seed: SeedState): string {
   return seed === 'platform-template'
-    ? 'The tested starting template is still in your workspace and preview — send your request again to build on it.'
+    ? // ⚠️ Autopsy b001fd78 (Q1): this said "and preview" while the same report's gate said no preview ever ran. A stop can
+      // land before the preview is up, and nothing here knows — so the sentence claims only what is verifiable: the files.
+      'The tested starting template is still in your workspace — send your request again to build on it.'
     : "The starting files are kept in your workspace — send another message and I'll continue from them.";
 }
 

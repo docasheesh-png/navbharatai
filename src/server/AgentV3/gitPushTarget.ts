@@ -37,3 +37,32 @@ export function gitPushTarget(input: {
 export function wipPushNote(branch: string, userBranch: string): string {
   return `This build did not finish working, so its files were saved to the ‘${branch}’ branch instead — your ‘${userBranch}’ only receives work that ran. Nothing was lost.`;
 }
+
+/**
+ * True when a build that did not work produced nothing but the platform's own template — there is nothing of the
+ * build's to keep, so no `wip/` branch is pushed for it (autopsy b001fd78, Q5). A build that worked always pushes. PURE.
+ */
+export function keepsNothingOfItsOwn(input: { buildOk: boolean; seed: 'platform-template' | 'kept-seed' | null }): boolean {
+  return !input.buildOk && input.seed === 'platform-template';
+}
+
+/**
+ * Times the step that connects a build to the user's GitHub storage (repo create/find + first sync). It ran 7s with
+ * no SETUP_TIMING line in autopsy b001fd78 (Q2), so TIME_TO_FIRST_CALL could not say where the wait went. Observation
+ * only — never throws into a build. Kept out of the route, whose body is at the compiler's control-flow limit.
+ */
+export function recordGitConnectTiming(
+  diag: { recordSetupTiming(t: { startMs: number; message: string; detail: string }): void },
+  startMs: number,
+  userAccount: boolean,
+  connected: boolean,
+  now: number = Date.now(),
+): void {
+  try {
+    diag.recordSetupTiming({
+      startMs,
+      message: `GitHub storage ready in ${Math.round((now - startMs) / 1000)}s`,
+      detail: `${userAccount ? 'user account' : 'platform store'} · ${connected ? 'connected' : 'not connected (fell back to the durable store)'} · repo create/find + first sync`,
+    });
+  } catch { /* timing is observation only — it must never affect a build */ }
+}

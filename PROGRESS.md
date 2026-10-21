@@ -96216,6 +96216,37 @@ note beside a fix names the function the fix stopped calling, so a guard reading
 its own documentation. It is a pattern — a source census must read stripped code, and the assertion that
 needs stripping is always the negative one.
 
+## 2026-10-16 — App logo and native icon must both be custom (admin-mandated)
+Before: a mobile ship with no uploaded logo, or with a failed icon generator (only a `::warning::`), finished with
+Capacitor's default icon; the iOS lane never touched icons at all; nothing inspected the native project.
+Now: `scripts/nbai-branding.mjs` (embedded in `appBrandingScript.ts`, written into every mobile project) runs in the
+Android (APK + AAB) and iOS workflows: snapshot the fresh project → choose the branding source (user logo → saved or newly
+generated AI logo → explicit app-specific fallback mark) → generate launcher/adaptive/round/splash (and the iOS AppIcon set
+with the 1024 icon) → VERIFY the native project (manifest references resolve, density sizes, adaptive layers, nothing
+byte-identical to the default or another app's icon, rebuild-of-same-logo accepted via a stamp) → on failure apply the
+fallback in place (only the broken part) and say so. The step fails only if even the fallback cannot be verified. The web
+build also checks the PWA manifest's icons (`verify pwa`). `decideLogo` runs in `routes/mobileSetup.ts`; the PWA tile colour
+now comes from the app name, so two apps no longer share an install icon. Tests: `tests/appBrandingScript.test.ts` runs the
+real script on fixture Capacitor trees (25 cases); `tests/appBranding.test.ts` covers the decision, assembler and workflows.
+**NOT done, honestly:** the packaged .apk/.aab/.ipa is not unpacked and inspected (see BUILD_REPORT_QUEUE Q-1107); the
+fallback mark is a geometric mark, not a designed logo; the splash for a user logo needs `sharp` on the runner (else a
+generated mark is used and reported).
+
+## 2026-10-17 — Admin login throttle: shared, account-level, and its second factor said out loud (admin: "jo kami mili root cause se fix karo")
+Found (read-only, same day): the admin login's rate limit and lockout lived in each Cloud Run instance's MEMORY (up to 100 instances →
+a fresh budget per instance, forgotten on restart) and were keyed only by the attacker's address (many addresses → never met);
+the second factor is opt-in and its "off" state showed only inside the Security tab, fetched only when opened.
+Root cause: the most sensitive credential gate was never moved onto the durable limiter the platform built for exactly this
+(`DurableRateLimit.ts`), and nothing counted failures against the ONE account being attacked.
+Fixed: `adminLoginShared.ts` — per-address failure record + a GLOBAL failed-login ceiling (30/15 min, `ADMIN_LOGIN_GLOBAL_CEILING`) in
+Firestore, fail-open, addresses stored only as an HMAC; addresses the admin has logged in from are EXEMPT from the ceiling so an attacker
+cannot lock the real admin out; the per-minute count is also durable (`consumeDurableRate('admin-login')`). `adminMfaWarning` +
+AdminDashboard: the MFA status loads on mount and a banner says so when it is off. SIBLING found and fixed the same day: a private
+published app's password (`/api/nav-store/web/app/:id/open` and `/remix`) had no throttle at all → `privateAppPasswordBudget.ts`
+(20 password-bearing attempts / 10 min per app+address, durable). Tests: `tests/adminLoginSharedGuard.test.ts`,
+`tests/privateAppPasswordIsThrottled.test.ts` (each proven by reversion). NOT changed: the in-memory limiter stays as the fast first gate;
+chat/preview/payment limiters are cost limits keyed by account identity, not credential gates (left as they are).
+
 ## 2026-10-16 — Admin-approved stage 1 of the forensic-audit plan: P0-1 (a RED gate is told to the user) + P1-1 (benchmark evidence)
 **P0-1 — `gateRedNotice.ts`.** Reproduced with the real gate: preview/page/journey `failed` + no ERROR finding → gate RED, `result.ok` true, ordinary success summary (a failed page render or journey is recorded at WARNING, the verdict flip needs an ERROR, and `AGENTV3_RUNTIME_RED_FLIP` is off by default — "D-1 unanswered"). UNKNOWN already had its own line; RED had none. Now the user's summary names what a real browser saw fail and says it was NOT confirmed to work. **Billing semantics are untouched by construction:** only `summary` changes (`ok`, the bill, the wallet debit are returned exactly), it is a no-op when the flip already set `ok:false`, and a RED built only from static findings is never told it failed to run. Admin report gains `RELEASE_GATE_RED_TOLD` (info). 16 tests; three reversions failed the right tests (call removed · notice flips `ok` · …); the fourth reversion (drop the runtime-proven guard) is correctly NOT caught because the evidence-parts check is a second guard on the same property.
 **P1-1 — `reliability/benchEvidence.ts`.** The benchmark now reads from each build's own report: model calls (failed ones counted), input / **cached-input** / output tokens as each provider reported them, build and model seconds, real provider cost, preview evidence (`rendered` / `failed` / `not-proven`, from the platform's observation) and the release-gate state. A missing figure is `null`, never 0. `buildSucceeded` is deliberately unchanged; `verifiedOutcome` (proven / contradicted / unproven) and `falsePositive` sit beside it, so `ok:true` + RED gate is counted as a false positive. Runner prints it per build and in a summary; `bench:compare` prints a per-metric delta table. Fixtures are slices of the REAL reports 398db9f3 and 67a2b0a2. Dry run verified (no build, no spend). 22 tests, four reversions each failed.
@@ -99047,6 +99078,18 @@ under each run, and a gate run takes about as long as the interval between merge
 survived it — `main`'s closed register and open table hold 668 ids each with **zero** overlap and zero
 duplicates, so the #3543 reopening did not recur — but that was checked, not assumed.
 
+## 2026-10-21 — The app's own mark: Lucide symbol → first letter; no AI logo; the chosen logo is the web icon too (admin decisions)
+Admin: "pahle lucide, fir alfabet"; "AI se logo nahi banwana, user khud banwa lega"; "Capacitor wala logo kahin nahi — apk, webapp, kahin bhi";
+Q-1108: the chosen logo must be the web icon, and with none, the letter; Q-1111: apply the TTL, delete after 30 days.
+Done: `src/lib/brandMark.ts` (+ vendored `brandGlyphs.generated.ts`: 81 Lucide glyphs, ISC notice kept, made by `scripts/vendorBrandGlyphs.mjs`) — ONE
+function chooses (keyword symbol → first Latin letter/digit → a stable generic symbol for a name in another script) and ONE draws, seeded by the
+NAME alone so web, Android, iOS and splash are one mark. The AI logo path is removed. The runner script gained: `prepare` draws the mark
+(or uses the owner's logo), `pwa-apply` (a step BEFORE the web build) writes the web install icons and favicon from the chosen logo / the mark
+without overwriting anything of the owner's. `appDefaults.ts` draws the web app's icon with the same mark and replaces a framework default
+favicon (vite.svg…). Locked by `tests/brandMark.test.ts`, `tests/appBrandingScript.test.ts` (12 cases need the image library and run when
+`NBAI_TEST_SHARP_DIR` points at a `sharp` install — CI does not carry sharp, so those 12 are skipped there), `tests/appBranding.test.ts`.
+NOT done: the TTL policy (no gcloud credentials here — Q-1111 has the exact command); AppMakerLab's legacy templates (Q-1112).
+
 ## 2026-10-20 — the gate list was wrong about CI's own test step, and a new row for the failure that revealed it
 
 ### The gate gap (CLAUDE.md corrected in this change)
@@ -99156,6 +99199,51 @@ the same fix the row already prescribed before the second occurrence arrived.
 ### Proof, by reversion
 Fourteen bugs were put back one at a time and each made a test fail: the Terms promising the refund window again, the refund policy returning money to the card, the contact page approving refunds, the Terms losing the investigate-then-credit remedy; a sign-in handler without the gate, a social button without the disabled gate, a second checkbox, a remembered tick, the marker cleared on a refusal, the server accepting a missing age confirmation, a version label that accepts anything; a quota changed without the notice, rows starting to be deleted, the exception paragraph removed.
 
+
+## 2026-10-21 — PR #3882 pre-merge safety review and current-main integration
+
+Merged current main `3c73b4a8535bacf6ffccad99d3f40b2c7a392700` into the existing branding/security PR
+head `67ecc982799bdf4c9d84c343eb47c11e7bb2cecb`. The only conflict was independent append-only
+BUILD_REPORT_QUEUE.md additions: both sides were preserved. Automatic route integration was checked;
+main's initial-decline, starvation-evidence and own-deadline fixes remain unchanged.
+
+Review found three defects, recorded as Q-2218–Q-2220 above: ambiguous favicon ownership, URL metadata
+mistaken for a disk filename, and partial-store failure incorrectly closing the admin global guard.
+Each has an original-code failing behavioral regression and fixed positive controls. The classifier is
+shared by web defaults and the emitted runner; no server dependency leaks into the browser. The guard
+continues to deny confirmed foreign addresses above the ceiling and confirmed per-address locks.
+Independent static review accepted both bounded fixes before integration.
+
+Pre-integration evidence: 120 focused tests passed with real official sharp 0.34.5, zero skipped;
+frontend/server/benchmark typechecks, unused-import/local check and native shell guard passed.
+The image library is a temporary external test dependency only, installed without lifecycle scripts;
+repository dependency manifests are unchanged. All tests ran in a credential-free offline harness,
+with the network guard log unchanged. This entry is written BEFORE the final merged-state gate;
+full-suite/build/boot and exact-head hosted CI still need to pass before publication/merge is approved.
+Packaged APK/IPA inspection remains unverified (Q-1107); no paid native build, production account,
+MFA, Firestore TTL or security configuration action was taken. No live provider request was made.
+
+Validation-scope clarification: the final local gate was stopped during server typechecking, BEFORE
+full-suite execution, when the coordinator identified legacy unmocked provider fixtures in the full
+suite. No network attempt occurred. The final local run therefore uses the affected offline tests and
+static/build/boot gates; the FULL coverage suite and database/multiprocess drills must pass on the
+fresh exact-head hosted CI. A focused pass is not reported as a full-suite pass.
+
+Merged-state local evidence (same production/test source): all three typechecks, unused-import/local
+check, native shell guard, OAuth protocol checks, 21 affected test files / 495 tests (including every
+real-sharp case), frontend/server build, bundle budget/lookbehind, production dependency gate and
+license gate passed. FULL coverage was not run locally. Boot was NOT a pass: the hard offline guard
+blocked startup's unmocked exchange-rate request and wildcard-address DNS lookup; the smoke process
+exited and its temporary bundle was removed. No request left the guard. The audited guard log grew
+344→440 bytes; after reconciliation the static dependency/license checks left it unchanged at 440.
+Do not alter production networking to satisfy this harness. Fresh-head hosted CI must prove full
+coverage, database drills and boot before merge. These remaining checks are not waived.
+
+Latest-base reconciliation: before publication, main advanced to
+`fa706fcd44a1ec015332b07ba01ee1cc1cc036d6` (#3888). Its four files (golden scaffold registry,
+template verification and their two test files) merge cleanly; its five production prose changes do
+not overlap this PR's source edits. Those files are kept byte-for-byte from new main. The affected
+combined test set is rerun before the merge commit, and fresh hosted CI remains mandatory.
 ## 2026-10-21 — Newest-10 failed-report autopsy (via the "navbharatai failed br" connector)
 Connector read to exhaustion (110 pages, ~602 reports, all `not_started`); the ten newest by `startedAt` were autopsied in full. Ledger (Q-2230…Q-2245 in `BUILD_REPORT_QUEUE.md`):
 - 35bd9e17 · yes-to-offer then asked again, ended `OUTCOME_UNEXPLAINED` → offer-accepted builder note; `OUTCOME_ASKED_USER`.
@@ -99169,3 +99257,32 @@ Every fix has a test proven by reversion. Open root causes are rows Q-2240…Q-2
 
 ### 2026-10-21 (later) — second batch of the failed-report autopsy (reports 13–22 by time + 2 newer)
 Read in full: a75153ab, b4173fb7, f9ed7833, 97413d93, b94550aa, 232b184f, 42d9dcae, 5cf2fd6c, 18777f36, a9b327b8, 51eaaa90, dd8c0cdb. Ten were user-stopped (no defect except the rows below). Fixed: manifest versions that do not exist (Q-2246). Already fixed on main (no open row): the 183-call `update_preview` loop of b94550aa — commit 665b59334 (Q-1899), merged two hours before that build ran, most likely before the deploy; verify on the next report that `update_preview` repeats end after 3 no-op turns. Blocked with all four fields: Q-2248 … Q-2251.
+
+## 2026-10-21 — PR #3882 reconciled after #3885 reached main
+
+Integrated exact main `c5f28538d1227540e2317bb8eea4a5edf25aae45` on top of published PR head
+`db187499efdfb427b942b3f6c13b0fc30f1e5882`. The sole conflict was independent queue appends;
+both Q-2218–Q-2220 and #3885's Q-2230–Q-2251 records are preserved. Progress history auto-merges.
+The route retains #3885's platform-seed shadow-twin protection, accepted-offer notes and explicit
+asked-user outcome alongside #3882's Git timing and untouched-template push gate. All other #3885
+production/test files remain byte-identical to main, including manifest-range repair safeguards.
+The previous hosted run is allowed to finish, but is not evidence for this newer combined source.
+Validation: 666 tests in 30 affected suites pass with real sharp and no skips. Frontend/server/benchmark
+types, unused-import/native/OAuth guards, build, bundle budget, production dependencies and license
+gates pass. The hard offline guard stays at 440 bytes. Previous-head hosted CI 39600772687 finished
+green including boot, but fresh-head full hosted CI including boot remains mandatory. No local full
+provider suite or external startup probe is retried.
+
+
+## 2026-10-21 — PR #3882 refreshed after external #3859 merge
+
+Main advanced to `3ccac529e546e76c64f75bec80035116416d1239` before the prepared c5 integration
+was published. Integrated it cleanly; queue continuation/module-retirement changes and their tests
+are preserved. The route delta against current main is only the existing #3882 Git timing and
+untouched-template push gate. This integration does not assert that separate security prerequisites
+were resolved. Combined offline checks and fresh hosted CI are required for this exact composition.
+
+Exact combined validation: 1,028 tests in 46 suites pass with real sharp, zero skips. All three
+typechecks, unused-import/native/OAuth checks, build, bundle, production-dependency and license
+gates pass; hard offline guard remains 440 bytes. Independent composed-route review also passes.
+Fresh-head hosted full coverage, real queue drills and boot remain mandatory before merge.

@@ -45,7 +45,7 @@ describe('🔒 project mode reads the one verdict', () => {
   });
 
   it('a famous name that stood down is not large for project mode either', () => {
-    const v = scopeVerdict('ek quiz app banao, instagram, jisme mere sawal ho', { complex: false });
+    const v = scopeVerdict('ek quiz app banao, instagram jaisa, jisme mere sawal ho', { complex: false });
     expect(v.scope.decision).toBe('analyze');
     expect(v.dispute).not.toBeNull();
     expect(v.large).toBe(false);

@@ -97763,6 +97763,80 @@ fencing, full state/origin preservation and production-provider evidence remain
 OPEN. Phases3–6 have not started. Merge authorization remains conditional on
 green exact-head CI; no 100/100 or phase completion is inferred from these fixes.
 
+### 2026-10-20 — Phase2 normal successful queued-module handoff checkpoint
+
+The isolated checkpoint `37e667e` keeps logical queue step A running across
+normal successful resumable module windows, so B cannot start early. A
+server-authored one-use ticket carries the exact claim and predecessor attempt.
+Only explicit normal retirement can atomically mark it READY and delete A's
+lease; the successor consumes that ticket under its own exact lease/attempt.
+Observed source/memory/proof jobs and captured stream/mirror cleanup are joined
+before READY. Generic heartbeat release cannot authorize continuation, including
+a committed READY whose ACK is delayed. Deadline provenance, Stop, later errors
+or uncertain cleanup pause/review rather than completing unfinished logical A.
+Stop and Unsend cancel queue+current lease durably; client Stop/Edit/Unsend and
+navigation invalidate captured polls. Reopen pauses for review. Same-window
+request retries retain their UUID/body; new authorized windows retain existing
+per-window optional-receipt/billing semantics without a queue-wide debit key.
+
+Pre-merge local evidence: 18 focused files /261 tests, 21/21 real Firestore
+multiprocess drills, sequential frontend/server typechecks and unused-imports/
+locals guard passed. Coordinator, atomic lease deletion, client readiness and
+mirror-join reversions each failed the corresponding real regression and were
+restored. Independent store and broad integration reviews cleared this scope.
+Merge `7c6194c` combines it with frozen state-preservation `9ca0ddd`, preserving
+the separately verified asset-owner argument, deadline helper/census, five
+unverified-erasure guards, disclosures and earlier progress history. Combined
+final-source gates and exact-head CI remain pending; no new head is pushed.
+
+This is normal logical handoff readiness, not physical provider/process drain.
+Timed-out underlying saves, ordinary manual/cross-worker source fencing,
+cross-instance account-mirror generation, mixed-version rollout, historical
+workspace ownership/private access and verified migration remain OPEN. Full
+state/origin preservation and production-provider outcomes are still unproven.
+Phase2 remains IN PROGRESS; phases3–6 have not started. The bounded contract and
+validation details are in `docs/PHASE2_QUEUE_MODULE_HANDOFF.md`.
+
+The reviewed prospective ownership artifact is now permanently retained in
+`docs/PHASE2_VERIFIED_WORKSPACE_OWNERSHIP_DESIGN.md`, rather than relying on the
+temporary execution artifact referenced in the earlier checkpoint. It is
+DESIGN/NOT IMPLEMENTED and preserves the corrected existing verified-conversation
+handler finding: a stale helper/comment is not a reachable production claimed-read
+path. Legacy private access, immutable owner attribution and verified migration
+remain OPEN; the design does not authorize automatic first-access adoption.
+
+Merged-source review also found known asset jobs outside the normal handoff
+barrier: an import can resume an existing plan, and the normal binary-save report
+uses a timeout that does not cancel its underlying write. The shared tracker now
+starts before imports, observes their file/asset jobs and partial/failed outcomes,
+and tracks both normal binary work and its reporting deadline. A wrapper timeout
+requires review even if that work later returns. Both asset writers receive only
+the verified optional owner. Joined void calls establish settlement, not confirmed
+byte durability. Actual asset-helper/queue tests and the updated lease census
+passed in the 5-file/79-test focused merged cohort. The branch ratchet remains
+543; no budget or source guard was weakened. Complete gates remain pending.
+
+The reviewed allocation protocol and its independent review are permanently
+retained in `docs/PHASE2_ALLOCATION_AUTHORITY_DESIGN.md` as DESIGN/NOT IMPLEMENTED.
+The local dummy-credential loopback fixture observed two allocation POSTs with
+SDK defaults and one with retries disabled. A retry option alone cannot provide
+durable dispatch, exact created-ID binding, private initialization ownership,
+complete source/asset receipts or conditional identity writers. UNKNOWN issued
+work must not become a time-reclaimed new create. No allocation runtime feature,
+provider test, old-machine drain or complete restoration guarantee is added.
+
+Final merged focused evidence is 20 files /310 tests, with frontend/server
+types (sequential), imports/locals, native, OAuth, production build, bundle,
+isolated-port boot, production dependencies, audit/license and SBOM all passing.
+An emulator rerun first failed on a real queue deadline during a concurrent
+Stop/retirement race: the drill required an ACK instead of preserving UNKNOWN.
+That failed run remains recorded. The race now reconciles an unconfirmed call
+through authoritative paused/no-ticket/exact-lease reads and, for unknown Stop,
+a positively confirmed idempotent Stop. Strict ordered scenarios, original
+fourteen checks, count21 and all production deadlines remain unchanged. Two
+explicit post-commit ACK-loss interleavings exercise that handling. The complete
+21/21 rerun passed. Full final-source suite and exact-head CI are still pending.
+
 ### 2026-10-20 — Phase2 final preflight preserves the handler branch ratchet
 
 The full final4 preflight at `9ca0ddd` found 544 branch tokens against the
@@ -97774,6 +97848,19 @@ legacy policy with one fewer branch. No budget, threshold or guard was raised.
 The headroom/real-asset/authenticated-preview cohort then passed 3 files /80 tests.
 All final-source typechecks, build/checks and full suite must pass again before
 push; PR #3852 remains unmerged and no remote CI success is claimed.
+
+### 2026-10-20 — Phase2 final queued-step drain remains a separate boundary
+
+Final scoped review confirmed that non-resumable final queued A→B transitions
+do not use the intermediate handoff join. A final result settles A before
+ordinary lease release, so an earlier timed-out app-side source/asset job can
+overlap B. This remains explicitly OPEN alongside general admission and
+manual/source fencing, with a separate exact-final-binding drain/pause design
+required. No all-queue source-drain guarantee is claimed. The same review found
+one intermediate sibling: a durable deletion chained after finalSave behind its
+own 15s wrapper. Both its raw deletion and wrapper now use the existing tracker;
+its actual-coordinator regression holds the delete and proves READY waits for
+the deletion to return. No final-step protocol or pricing behavior is added.
 
 ### 2026-10-20 — Phase2 old canonical-history erasure contract corrected
 
@@ -97792,6 +97879,96 @@ byte assertion; the safe production file was restored unchanged. The restored
 history/profile/conversation/headroom cohort passes 4 files /12 tests. No
 production code, inventory, threshold or skip changed for this correction. The
 complete final-source suite and local checks must pass again before push/merge.
+
+The separate normal-module queue branch merged correction `00d3bc8` without
+changing production/configuration/package bytes. Its final focused cohort is
+21 files /312 tests passed, including held durable deletion, all queue/request/
+receipt/Stop/client guards, verified asset erasure and corrected canonical-history
+retention. Renewed sequential frontend/server types, imports/locals, native,
+OAuth, build, bundle, isolated-port boot and server dependency gates all passed.
+The held-delete test was strengthened to wait for the actual join boundary;
+removing owned-work registration then produced durable READY while obsolete.ts
+still existed, and failed. Safe source was restored exactly. The 21 real database
+drills exercise unchanged script/store/lease bytes. Complete suite and exact-head
+CI remain pending; final queued-step/source fencing remains OPEN.
+
+### 2026-10-20 11:07 UTC — Phase2 queue preflight and newer main require a new gate
+
+The state-preservation head `00d3bc8` passed its final6 local suite: 2,811 files,
+40,077 tests passed, 67 skipped, with all local quick gates green. CI run
+39411761077 was running for that head; newer main `6852819` now supersedes it for
+review, so current combined local/CI evidence is pending, not remotely passed.
+
+The queue complete preflight at `a64370b` was stopped with exit130 after two
+obsolete exact-source assertions: the plain final-save fallback now passes
+through the publication tracker, and the binary helper callback now forwards
+the verified optional owner. The kept-turn guard, conditional save, ordering and
+best-effort error handling remain intact. Tests execute those actual production
+expressions and assert saved text/binary bytes and identity. The 5-file/125-test
+cohort passed. A no-op fallback loses the stored text and fails; a dropped owner
+keeps the binary bytes but fails the stored verified-owner check. Both deliberate
+reversions were restored exactly. No production correction, threshold or skip
+was needed. The newer main's lower branch budget must be preserved on integration.
+Complete combined-source gates remain required before push/merge; final queued
+source fencing, ownership/migration and allocation protocols remain OPEN.
+## 2026-10-20 — Q-886: a customer's own details never go into a log line whole (and Q-1227, found hunting it)
+
+**The defect was on the NORMAL path, not an error branch.** Three live sites printed a real person's
+details into the container log: `routes/payment.ts` logged `Name: … Email: … Phone: …` on EVERY Cashfree
+order; the same file logged the WHOLE webhook body whenever an event carried no order id — firing exactly
+when something was already wrong, so the worst payloads were the likeliest to print; and `routes/auth.ts`
+logged a full phone number on every successful OTP gate check. Nothing was wrong with wanting those lines:
+an order that fails is diagnosed from them. What was wrong is that the diagnosis needs an IDENTIFIER and
+the code printed an IDENTITY.
+
+**The sibling the hunt found is why this is a module and not three careful edits.** `phoneForLog` already
+existed and was already used — at `auth.ts:167`, eleven lines above `:229`, which printed the next phone
+in full. A rule that must be remembered at every log statement is a rule that will eventually be
+forgotten, and the forgetting is SILENT: a log line that says too much looks exactly like one that says
+enough. So `src/server/lib/piiForLog.ts` is one home (`emailForLog`, `nameForLog`, `webhookShapeForLog`,
+plus `phoneForLog` re-exported), every helper total — junk gives a safe string, never a throw, because a
+logging helper that can throw turns a diagnostic line into an outage.
+
+**The census is shape-based, and two drafts of it were wrong in instructive ways.** Banning the words
+"email"/"phone" near `console.log` flags `[CIRCUIT] ${p.name}` and misses `${cleanPhone}` — wrong in both
+directions, so the census matches the INTERPOLATION of a value whose identifier is a person's own detail.
+Then the first such draft forbade `customer[A-Z]…` wholesale and flagged `${customerIdClean}` **on the
+very line it was meant to bless**, which would have pushed the fix toward a log nobody can trace. An
+account id is OUR handle for "who"; name, email, phone and mobile are the person's. Both reasonings now
+sit beside the pattern rather than only in a commit message. The second draft flagged the fix's own
+`webhookShapeForLog(req.body)`, so the wrapped form is excluded explicitly.
+
+Locked by `tests/aCustomerIsNotIdentifiedInALog.test.ts` (11 tests). **Three reversions bite, one per
+original site:** the payment line back to Name/Email/Phone in full → 2 fail; the whole-body log back →
+2 fail; `auth.ts` back to a raw phone → 2 fail.
+
+### Q-1227 — two drifted `maskPhone` copies, recorded rather than bundled
+
+`src/lib/phoneNumber.ts` keeps the last FOUR digits; `src/server/lib/vaultPin.ts` the last TWO. Same name,
+different behaviour — the fourth rule's duplicated-code class in its worst shape, because a reader who
+checks one and trusts the other is wrong with no way to notice. No call site imports both, which is
+exactly why the drift stayed invisible.
+
+**It is NOT folded into Q-886 on purpose.** The `vaultPin` copy renders a string the USER reads — the
+fresh-sign-in destination hint — so unifying them is not a refactor; it changes what a person sees while
+verifying their identity, and if the last-two copy were the one kept, every OTP destination hint in the
+app would get less informative. Quietly changing a user-facing string while fixing log lines is the trade
+the first absolute rule forbids. 🟡 BLOCKED on the admin's choice of which masking the user should see,
+with last-4 recommended (it is what the rest of the product shows, and what `phoneForLog` already uses).
+
+**Q-888 is next** — the other row batch 2 moved from BLOCKED to OPEN: `routes/payment.ts:589` answers 400
+to a payment webhook we have definitively settled, so Cashfree re-sends it indefinitely.
+## 2026-10-20 — Candidate Weak scope/routing policy (Codex)
+
+Admin requested a lower-cost working-app policy, comparison with current routing, a small complexity call, and a Weak refusal/Strong-selector direction for oversized games. Implemented opt-in `AGENTV3_WEAK_SCOPE_POLICY=on` so current policy can be compared and restored. One strict three-label FlashX preflight before sandbox setup; unavailable/malformed classification does not start coding; exact tested templates skip it. Candidate default coding chain is FlashX/Kimi only; complex planning starts on Kimi. Added a shared text-repair allowance and disabled candidate Weak empty-build regeneration. Candidate measured ceiling defaults to $1 (configurable); accepted classifier usage joins the real ledger. Existing delivery proof remains authoritative. Added regression coverage and comparison in `docs/weak-tier-policy-comparison.md`.
+
+Open limits: not a universal one-pass repair budget across every agentic finishing gate; between-turn ledger checks can overshoot on a live call and do not account for unknown provider usage; imported repository scope requires file inspection, not this prompt-only gate. No paid-provider benchmark or live deployment claimed. No model success/savings percentages claimed. Verification results to be appended after the final gate.
+
+Verification checkpoint: 151 targeted tests passed; frontend/server typechecks passed; production build, bundle budget, boot smoke, unused-import, native-shell, and production-dependency checks passed. Framework eligibility moved unchanged to its module to keep the chat control-flow ratchet below the existing limit (543 → 542). Full-suite verification is NOT complete: automatic approval review rejected further interaction with the full run because a test was attempting a live Anthropic API request (credential/external-spend risk). No full-suite pass, CI-green PR, merge, deployment, or paid benchmark claimed. Candidate stays disabled by default pending complete verification.
+
+## 2026-10-20 — Weak candidate verification completed after admin test authorization
+
+Admin explicitly authorized the live-API-capable suite. Stable final run: **2,803 test files passed; 39,994 tests passed; 67 intentionally skipped; zero failures**. Both typechecks, production build, bundle budget, boot smoke, unused-import, OAuth protocol checks, native-shell and production dependency gates passed. Updated wiring assertions to follow the new runner parameters while retaining their stop/deadline/dead-rung guarantees. Test archive extraction now uses `--no-same-owner` in both sibling extractors, avoiding unrelated host ownership failures without changing archive contents. Invalid ladder overrides now fall back to the candidate's two-model policy rather than accidentally restoring the legacy chain. Classifier request is additionally locked by SDK mocks: one call, 8 output tokens, 5-second timeout, thinking disabled, no SDK retries, and measured usage forwarded. Candidate remains opt-in; no merge, deployment, paired app-generation benchmark, or first-attempt guarantee is claimed.
 ## 2026-10-20 — failed-build audit scope correction and persistent queue (PR #3846)
 
 **NOT COMPLETE under the fifth and sixth absolute rules.** The source milestone `f713e64` and its
@@ -98141,6 +98318,91 @@ counted here. Original counts remain **4 terminal source classes / 0 historical 
 0 whole-report resolutions**. No queue, CSV, source or third-ledger publication change is included.
 
 
+### 2026-10-20 — Phase2 verified local checkpoint and newer-main integration
+
+Final6 at `00d3bc844064037c073f2fe6962d00b34f6875e8` passed the complete
+Node22/UTC local gate: 2,811 test files, 40,077 tests passed, 67 skipped and
+zero failures. Frontend/server typechecks, production build/boot, imports,
+native/OAuth, bundle, production dependency, audit/license and SBOM checks passed.
+PR #3852 was updated to that head. Its exact-head CI run `39411761077` passed
+all 14 database/multiprocess drills; the coverage job was still running when
+another session merged PR #3853 into main. That unfinished run is not a complete
+CI pass and cannot authorize this newer combined tree.
+
+Merged main `68528197949135513d2df97e3b4dee667036059a` cleanly, preserving
+both progress histories and the recovery/deadline/privacy changes. The incoming
+Weak policy remains opt-in; this checkpoint does not change its routing or
+pricing. Its framework-question extraction lowers the handler branch budget
+from543 to542; that lower budget stays enforced. All final-source local gates
+and exact-head CI must pass again before this checkpoint merges. Phase2 and
+the legacy ownership follow-up remain OPEN; phases3–6 have not started.
+
+### 2026-10-20 — Phase2 newer-main Weak refusal preserves queued failure
+
+Final7 at `ff7175d` was stopped (exit130) after integration review found a
+terminal-outcome bug in the incoming opt-in Weak policy. That run is NOT a full
+suite pass; the earlier quick gates also do not verify this corrected source.
+A refused or unavailable scope was explained through the plain-chat lane, whose
+hardcoded successful done/result incorrectly marked queued step A done and let
+step B continue. Both terminal flags now use the existing scope-blocked decision:
+a refusal fails A and pauses its queue, while ordinary chat still completes.
+The original reply and zero builder billing remain intact; pricing, model routing
+and the default-OFF policy flag are unchanged.
+
+Actual registered chat-route regressions execute real lease, request-receipt and
+queue coordination against a stateful database fixture. Refusals for Strong scope
+and unknown scope retain their narration, persist failed terminal receipts and keep
+B pending/unclaimable after lease release. Normal queued chat keeps its own reply,
+completes A and allows B's next claim. No builder runs; classifier, chat-provider
+and unrelated live-search boundaries are mocked. Reverting only the two terminal
+flags to true makes both refusal regressions fail on persisted A=done bytes.
+The safe source was restored and the Node22/UTC focused integration cohort passed
+16 files /218 tests, with zero failures or skips. The handler budget remains 542.
+No full-suite, updated exact-head CI, push or merge is claimed for this correction;
+the complete final-source gates must run again. Phase2 remains IN PROGRESS.
+
+### 2026-10-20 11:25 UTC — Phase2 queue preserves both refusal-fix histories
+
+The parallel state-preservation update at `7fb7f52` has the same two corrected
+Weak-refusal terminal outcomes as local `8286c78`, plus an explanatory comment
+and a source-wiring regression. The queue branch merged that remote history,
+retaining both progress histories and all three registered-route/stateful
+regressions. The only source conflict was the adjacent explanatory comment;
+the merged code keeps that comment and both `ok: !weakScopeBlocked` outcomes.
+The handler budget stays 542; queue handoff, pricing and routing are unchanged.
+
+The previous queue full run at `6b7956e` was stopped with exit130 for this
+integration and is NOT a passing result. Its quick gates passed before the
+remote comment/test arrived. All final-source quick gates and one complete
+two-worker suite must run again on the newly frozen queue tree. Remote CI for
+`7fb7f52` is separate evidence and remains pending here; neither checkpoint is
+authorized to merge until its required exact-head jobs pass. Phase2, final
+queued-step source fencing and legacy ownership/allocation protocols remain OPEN.
+
+### 2026-10-20 11:48 UTC — Phase2 tracked import preserves first-call liveness
+
+The queue full run at `6f65357` was stopped with exit130 after the existing
+import-save census still expected an untracked launch expression. That run is
+NOT passing evidence. The production launch remains non-awaited and now registers
+the same background save with the intermediate handoff's source barrier.
+The census keeps its launch/settle ordering checks, asserts exactly one bounded
+settlement before billing and the final report, and recognizes the tracked call.
+
+A new behavioral proof executes that exact production statement with the real
+import-save and publication helpers. The caller returns while durable text bytes
+are still held, and retirement waits until those bytes are actually stored. The
+five-file focused cohort passes 107 tests. Removing only the tracking wrapper
+makes retirement finish while the save is held, failing the new proof; the exact
+safe production bytes were restored. No production correction, test removal,
+threshold change or paid provider call was required.
+
+The separately authorized main `3974c34` activates the Weak candidate through
+Cloud Build configuration and adds its shell-escaping regression. That incoming
+configuration must be preserved on integration; earlier default-OFF notes above
+are historical checkpoints. A bounded changed-caller census and all final-source
+gates remain required before this queue checkpoint can be pushed or merged.
+## 2026-10-20 — Admin authorized PR #3853 merge and Weak policy activation
+
 ### 2026-10-20 - published audit PR3856: integrate the next main policy activation
 
 PR3856 published commit `5db7cc763` / tree `2f38c4d2` after the final local gate:
@@ -98285,6 +98547,59 @@ Publish once green; merge only after admin explicitly names the new PR. No commi
 was performed by the documentation coordinator.
 Rechecked the exact PR head and green GitHub CI, then merged #3853 with an expected-head lease (merge commit 68528197949135513d2df97e3b4dee667036059a). Admin explicitly said to merge and turn on the policy. Activation is a separate additive Cloud Build configuration change: `_WEAK_SCOPE_POLICY=on`, `_WEAK_BUILD_COST_CEILING_USD=1`; trigger-level rollback remains available with `off`. Provider keys, explicit ladder overrides, and Normal/Strong routing are not changed. Deployment and runtime confirmation are pending; do not infer live activation merely from the merge.
 
+
+### 2026-10-20 12:04 UTC — Phase2 import memory stays beside the first call
+
+The queue full run at `9c2efa6` was stopped with exit130 as superseded after a
+review found a real latency regression in the new barrier. Import landing had
+changed its memory persistence from fire-and-forget to an unbounded await.
+An earlier successful intent hydration does not bound the subsequent durable
+replacement write. The actual extracted import-memory block and production
+memory helpers, with a locally held database-shaped write, confirm that the
+await keeps the caller pending while the previous void form returns. No live
+service was used. This stopped full run is NOT passing evidence.
+
+The import now tracks that raw memory job without awaiting it. Synchronous note
+and file indexing remain available to the first model call, while normal-module
+retirement still joins the save and rejects skipped-unconfirmed outcomes. The
+memory helper, hydration safeguards and persistence semantics are unchanged.
+Actual-block tests hold saved and unconfirmed jobs: the caller returns, the
+in-memory context is intact, and retirement waits before honoring the status.
+The four-file cohort passes 53 tests. Reverting to await fails on caller latency;
+dropping only tracking fails on premature retirement, in both cases. Exact safe
+source was restored. No other newly introduced first-call memory await was found;
+the remaining new awaits are explicit Stop/Unsend or retirement cleanup.
+
+Before this correction, the bounded changed-caller/PII cohort passed 24 files /
+420 tests and ten further source-writer sibling files passed 128 tests. Those
+results and prior quick checks do not replace renewed final-source checks.
+Both final-source local gates and exact-head CI remain required. Phase2 and
+final queued/manual/SDK source fencing, allocation and legacy ownership remain OPEN.
+
+
+### 2026-10-20 12:22 UTC — Phase2 green-freeze census follows nested save calls
+
+The complete queue run at `5022f54` finished exit1: one failed file, two failed
+assertions, 2,819 files and 40,263 tests passed, 67 skipped (538.50s). It is NOT a
+passing gate. Its green-freeze census extracted call arguments with a line regex;
+the new outer track/issue parentheses became part of two existing payload keys.
+The actual writers and their audited multiplicities remain three toSave calls
+and six captured-writtenFiles calls. No production correction was needed.
+
+The test now reads actual TypeScript CallExpression arguments, preserving nested
+payload parentheses while ignoring comment/string lookalikes. Every existing
+VERDICT reason and count is unchanged. Raw and tracked forms produce the same
+keys; injecting an extra classified call into the actual route produces count4,
+and injecting a genuinely new payload remains unclassified. Restoring only the
+old extractor reproduces both original failures; the safe AST test was restored.
+The final bounded sweep searches bare writer identifiers so quoted/regex census
+references are included. All 46 caller/sibling files pass, with 764 tests.
+
+This correction changes only the census test and this evidence. Runtime, package,
+threshold, freeze classifications and skips are unchanged. Final-source quick
+gates, the complete suite and both required exact-head CI jobs must still pass
+before merge. Phase2 and the previously documented source/ownership/allocation
+boundaries remain OPEN.
 ## 2026-10-20 — Q-888: a settled webhook is acknowledged, a failed attempt is news, an outage is retried
 
 **The defect.** The signed-webhook route answered **400** to every `success: false` from
@@ -98388,6 +98703,54 @@ deadline timers are cleared. Behavior tests exercise both moderation states, mis
 provider failure and a hung lookup; quota/content scan tests explicitly supply a readable registry.
 
 
+### 2026-10-20 12:48 UTC — Phase2 main integration preserves applied restore bytes and owned jobs
+
+The frozen queue checkpoint `92fee9b` completed the sole four-worker Node22/UTC
+suite with **2,820 files /40,268 tests passed /67 skipped /zero failures**
+(`queue-ast-final-vitest.log`, 540.17s). Sequential frontend/server types,
+imports/locals, native, OAuth, production build, bundle, isolated boot, server
+dependencies, audit, license and SBOM all passed. PR #3852 subsequently merged
+as `0e47ab8` after exact `16d00bde` CI passed both jobs. No queue PR was pushed
+on that historical result: main moved to substantive `6cdc155` first.
+
+This merge preserves main's runtime/restore/payment changes and both histories.
+The final fallback saves the actual applied `persisted` tree through the owned
+publication tracker. The shared automatic restore tracks its entire original
+job, including durable merge/forget continuations, while returning the unchanged
+outcome to callers. Complete/incomplete outcomes map to saved/failed publication
+facts; rejection remains observed. Raw removal and its 20s report are tracked
+separately. Stop/restore policy, pricing and asset verified-owner arguments are
+unchanged; physical SDK drain is not established.
+
+New proofs execute the actual extracted production adapter with the real restore
+algorithm and queue/lease/receipt coordinator. Held command, merge and deletion
+keep exact predecessor authority and pending A while B stays blocked. Incomplete,
+stopped, rejected and timed-out jobs cannot authorize READY. A dropped whole-job
+tracker failed six cases; dropping only raw-command tracking failed the held
+post-timeout join. The old attempted-tree fallback failed on actual saved bytes.
+All deliberate source controls were restored exactly.
+
+The first incoming/changed-caller cohort completed **65 files /1,490 tests passed,
+one file/test failed**: a source census assumed the old direct expression body.
+The corrected equivalent AST census follows the named raw-job initializer and
+original return, preserving all exact writer counts/allowlisted passes; its 38
+tests passed. The other incoming literal census now recognizes tracked finalSave
+without dropping restore/hash/order guarantees. The combined final cohort and
+full/quick gates must run again; the earlier full PASS is not a combined-tree
+claim. The renewed credential-free Firestore drill completed **21/21** against
+incoming payment/store bytes; all original fourteen checks remain intact.
+
+Permanent checkpoint/remaining gates are in
+`docs/PHASE2_QUEUE_MODULE_HANDOFF.md` and `docs/QUALITY_ROADMAP_2026-10-20.md`.
+Final queued A→B/general/manual source fencing, physical provider drain, legacy
+private ownership/migration, allocation authority and billing settlement gaps
+remain OPEN. Phase2 remains in progress; no phases 3–6 or 100/100 claim.
+
+The corrected combined source-writer/incoming-main cohort then passed **66 files /
+1,491 tests** with one worker (`queue-snapshot-final-focused-restored.log`,
+72.83s). Final source is now frozen for the new complete suite and all quick
+checks; exact-head CI remains separate. No broader safety claim follows from
+these focused results.
 ### 2026-10-20 - final next-batch main integration and verification freeze
 
 Committed the seven-ledger/source checkpoint as3d10a06a3, then integrated main
@@ -98881,3 +99244,45 @@ Latest-base reconciliation: before publication, main advanced to
 template verification and their two test files) merge cleanly; its five production prose changes do
 not overlap this PR's source edits. Those files are kept byte-for-byte from new main. The affected
 combined test set is rerun before the merge commit, and fresh hosted CI remains mandatory.
+## 2026-10-21 — Newest-10 failed-report autopsy (via the "navbharatai failed br" connector)
+Connector read to exhaustion (110 pages, ~602 reports, all `not_started`); the ten newest by `startedAt` were autopsied in full. Ledger (Q-2230…Q-2245 in `BUILD_REPORT_QUEUE.md`):
+- 35bd9e17 · yes-to-offer then asked again, ended `OUTCOME_UNEXPLAINED` → offer-accepted builder note; `OUTCOME_ASKED_USER`.
+- 5c461dc7 / 1d3ff0d5 · $1 cost ceiling hit twice; the second also carried phantom type-only cycles (readiness 0/100 → false "unfinished" resume), saved≠sandbox after a looped `sed -i`/`node -e` → type-only imports are not cycles, cycle penalty capped, shell writes reconciled against the sandbox.
+- bd20f9b2 · two 300 s truncated mega-writes → futility (BLOCKED: deferred file-budget gate).
+- 40868260 · own auth template's `console.error` failed our own render gate; gate label "did not render" over a rendered app → `console.warn`; label fixed.
+- 55ae489d, d060c346 · stopped by the user, nothing wrong (RESOLVED as not-a-defect); d060c346 also showed the false "clone of WhatsApp" scope (7th shape) → clone needs intent.
+- ce8845e1 · `combo` export error (BLOCKED, files missing).
+- 81a0eda5, 14ea28b8 · AI pause recorded as a build error/blocker → `OUTCOME_AI_PAUSED`; 14ea28b8 also: platform kit `Game.ts` deleted as a "stale twin" → guard armed with seeds.
+Every fix has a test proven by reversion. Open root causes are rows Q-2240…Q-2245.
+
+### 2026-10-21 (later) — second batch of the failed-report autopsy (reports 13–22 by time + 2 newer)
+Read in full: a75153ab, b4173fb7, f9ed7833, 97413d93, b94550aa, 232b184f, 42d9dcae, 5cf2fd6c, 18777f36, a9b327b8, 51eaaa90, dd8c0cdb. Ten were user-stopped (no defect except the rows below). Fixed: manifest versions that do not exist (Q-2246). Already fixed on main (no open row): the 183-call `update_preview` loop of b94550aa — commit 665b59334 (Q-1899), merged two hours before that build ran, most likely before the deploy; verify on the next report that `update_preview` repeats end after 3 no-op turns. Blocked with all four fields: Q-2248 … Q-2251.
+
+## 2026-10-21 — PR #3882 reconciled after #3885 reached main
+
+Integrated exact main `c5f28538d1227540e2317bb8eea4a5edf25aae45` on top of published PR head
+`db187499efdfb427b942b3f6c13b0fc30f1e5882`. The sole conflict was independent queue appends;
+both Q-2218–Q-2220 and #3885's Q-2230–Q-2251 records are preserved. Progress history auto-merges.
+The route retains #3885's platform-seed shadow-twin protection, accepted-offer notes and explicit
+asked-user outcome alongside #3882's Git timing and untouched-template push gate. All other #3885
+production/test files remain byte-identical to main, including manifest-range repair safeguards.
+The previous hosted run is allowed to finish, but is not evidence for this newer combined source.
+Validation: 666 tests in 30 affected suites pass with real sharp and no skips. Frontend/server/benchmark
+types, unused-import/native/OAuth guards, build, bundle budget, production dependencies and license
+gates pass. The hard offline guard stays at 440 bytes. Previous-head hosted CI 39600772687 finished
+green including boot, but fresh-head full hosted CI including boot remains mandatory. No local full
+provider suite or external startup probe is retried.
+
+
+## 2026-10-21 — PR #3882 refreshed after external #3859 merge
+
+Main advanced to `3ccac529e546e76c64f75bec80035116416d1239` before the prepared c5 integration
+was published. Integrated it cleanly; queue continuation/module-retirement changes and their tests
+are preserved. The route delta against current main is only the existing #3882 Git timing and
+untouched-template push gate. This integration does not assert that separate security prerequisites
+were resolved. Combined offline checks and fresh hosted CI are required for this exact composition.
+
+Exact combined validation: 1,028 tests in 46 suites pass with real sharp, zero skips. All three
+typechecks, unused-import/native/OAuth checks, build, bundle, production-dependency and license
+gates pass; hard offline guard remains 440 bytes. Independent composed-route review also passes.
+Fresh-head hosted full coverage, real queue drills and boot remain mandatory before merge.

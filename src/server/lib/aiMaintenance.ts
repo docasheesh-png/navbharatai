@@ -1,6 +1,7 @@
 import { getServerDb, type Firestore } from './serverDb';
 
-export const MAINTENANCE_MESSAGE = 'navbharatai now in Maintenance, please try after some time';
+import { MAINTENANCE_MESSAGE } from './aiMaintenanceMessage';
+export { MAINTENANCE_MESSAGE };
 export const MAINTENANCE_COLLECTION = 'platform_settings';
 export const MAINTENANCE_DOCUMENT = 'ai_maintenance';
 export const MAINTENANCE_FAILURE_WINDOW_MS = 120_000;

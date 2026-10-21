@@ -12,6 +12,7 @@
 // declaration-file implementations remain uncertain, and node_modules is never read.
 
 import { isAppAnalysisPath } from './appAnalysisPaths';
+import { typeOnlyImportSpecs } from './typeOnlyImports';
 import { createExportCapabilities, EXPORT_CODE_FILE, resolveExportTarget } from './exportCapabilities';
 
 export type ImportMismatchKind = 'named-import-not-exported' | 'default-import-missing';
@@ -157,12 +158,14 @@ export function findCircularDependencies(files: Record<string, string>): Circula
   const adj = new Map<string, string[]>();
   for (const path of fileSet) {
     const src = stripForCycles(files[path]);
+    // `import type …` is erased before runtime, so it is no edge of a runtime cycle (typeOnlyImports.ts).
+    const typeOnly = typeOnlyImportSpecs(src);
     const targets = new Set<string>();
     let m: RegExpExecArray | null;
     CYCLE_IMPORT_RE.lastIndex = 0;
     while ((m = CYCLE_IMPORT_RE.exec(src)) !== null) {
       const spec = m[1] ?? m[2] ?? m[3] ?? m[4];
-      if (!spec) continue;
+      if (!spec || typeOnly.has(spec)) continue;
       const target = resolveLocalTarget(path, spec, fileSet);
       if (target) targets.add(target);
     }

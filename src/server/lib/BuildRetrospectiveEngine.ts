@@ -79,6 +79,8 @@ export const OUTCOME_TO_CATEGORY: Readonly<Record<string, { category: FailureCat
   // Split out of OUTCOME_STOPPED on 2026-09-20 — an abort raised somewhere that never went through
   // `abortBuild`, so its signal carried no cause. An engine condition; nothing in the app caused it.
   OUTCOME_ABORTED_UNKNOWN: { category: 'incomplete', hint: 'Something aborted the build without recording why — it did not come through the abort funnel. An engine condition, not the app or the prompt; retry.' },
+  OUTCOME_ASKED_USER: { category: 'incomplete', hint: 'The model ended its turn by asking the user a question — nothing failed; the user\'s answer continues the build.' },
+  OUTCOME_AI_PAUSED: { category: 'network', hint: 'AI service was paused by NavBharatAI while the build ran — a service condition, not the app; the work so far is kept and a follow-up resumes it.' },
   OUTCOME_UNEXPLAINED: { category: 'incomplete', hint: 'The run ended not-ok and wrote no outcome code. An engine hole, not a fact about the app; retry.' },
 };
 

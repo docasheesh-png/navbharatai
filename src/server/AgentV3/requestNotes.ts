@@ -119,6 +119,24 @@ export interface RequestNoteInputs {
    * names the app's own ad slots too.
    */
   thirdPartyOwnAds?: readonly OwnAdNetwork[];
+  /** The user answered YES to our offer to build this request (buildConfirmation.ts). */
+  offerAccepted?: boolean;
+}
+
+/**
+ * 🔴 A YES IS NOT AN INVITATION TO ASK AGAIN (autopsy 35bd9e17, 2026-10-21). "Ai video makerwith prompt" got our
+ * offer to build; the user typed "Start". The build ran on that request — and the builder answered with a scope
+ * summary and "Does that match what you had in mind?", the same question the offer had just put to the user. The
+ * nudge rightly stands down for a model that asks (overriding an answer has cost users working apps), so the
+ * turn ended with no app and the user had to say yes a second time. The builder never knew the yes had happened:
+ * the offer lives in the chat route, and the model saw only the request. So it is told, in the one list every
+ * lane reads. The note forbids the question, not the thinking: defaults are chosen and stated.
+ */
+export function offerAcceptedBuilderNote(offerAccepted: boolean | undefined): string {
+  if (!offerAccepted) return '';
+  return 'CONFIRMED BY THE USER: they were already offered this exact build and answered yes. Do not ask them to confirm the scope, '
+    + 'style or defaults again, and do not end your turn with a question — pick sensible defaults, build the app, and say in one '
+    + 'closing line which defaults you chose. Ask only if something is impossible without their answer.';
 }
 
 /** The list, the joined text, and every fact the notes were derived from. */
@@ -192,6 +210,7 @@ export function requestNotesFor(input: RequestNoteInputs): RequestNotesResult {
     { code: 'request-scope', text: requestScopeText },
     { code: 'device', text: keypadPhone ? nonSmartphoneBuildRule(keypadPhone.device, keypadPhone.kind) : '' },
     { code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, players, input.thirdPartyOwnAds ?? []) },
+    { code: 'offer-accepted', text: offerAcceptedBuilderNote(input.offerAccepted) },
   ];
 
   return {

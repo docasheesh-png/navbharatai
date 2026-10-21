@@ -83,6 +83,7 @@ async function worker() {
   const receipt = existsSync(path.join(repo, 'src/server/lib/buildRequestReceipt.ts')) ? await load('src/server/lib/buildRequestReceipt.ts') : null;
   const modern = typeof store.createBuildQueueStore === 'function';
   const localStore = modern ? store.createBuildQueueStore(wrapped) : null;
+  const continuations = ['proposeContinuation', 'retireContinuation', 'cancelContinuation', 'stop'].every((name) => typeof localStore?.[name] === 'function');
   const workspace = (id) => {
     if (typeof id !== 'string' || !(id.startsWith(`${prefix}-`) || id.startsWith(`agentv3-${prefix}-`))) throw new Error('Refusing a non-fixture workspace.');
     return id;
@@ -93,7 +94,7 @@ async function worker() {
       const ws = data.workspaceId ? workspace(data.workspaceId) : undefined;
       if (action === 'ping') {
         await db.collection('phase2_drill_controls').doc(prefix).set({ project: PROJECT, prefix });
-        result = { modern, receipts: Boolean(receipt), pid: process.pid };
+        result = { modern, continuations, receipts: Boolean(receipt), pid: process.pid };
       } else if (action === 'enqueue') {
         fault = data.fault ?? null;
         const item = { id: data.itemId, prompt: data.prompt ?? data.itemId, source: 'user', createdTs: data.at ?? Date.now() };
@@ -108,8 +109,25 @@ async function worker() {
           result = claimed;
         }
       } else if (action === 'bind') {
+        fault = data.fault ?? null;
         result = modern ? (await localStore.bind(ws, data.prompt, data.attemptId, data.expected)).result
           : { itemId: data.expected.itemId, claimToken: data.expected.claimToken, attemptId: data.attemptId };
+      } else if (action === 'continuation-propose') {
+        if (!continuations) throw new Error('Continuation API is unavailable in this revision.');
+        fault = data.fault ?? null;
+        result = (await localStore.proposeContinuation(ws, data.binding, data.planRemaining, data.nonce)).result;
+      } else if (action === 'continuation-retire') {
+        if (!continuations) throw new Error('Continuation API is unavailable in this revision.');
+        fault = data.fault ?? null;
+        result = (await localStore.retireContinuation(ws, data.binding, data.nonce)).result;
+      } else if (action === 'continuation-cancel') {
+        if (!continuations) throw new Error('Continuation API is unavailable in this revision.');
+        fault = data.fault ?? null;
+        result = (await localStore.cancelContinuation(ws, data.binding, data.note)).result;
+      } else if (action === 'continuation-stop') {
+        if (!continuations) throw new Error('Continuation API is unavailable in this revision.');
+        fault = data.fault ?? null;
+        result = (await localStore.stop(ws)).result;
       } else if (action === 'settle') {
         if (modern) result = (await localStore.settle(ws, data.binding, data.ok, data.note)).result;
         else {
@@ -151,8 +169,10 @@ async function worker() {
       } else if (action === 'cleanup') {
         const collections = ['build_queues_v3', 'agentv3_build_leases', 'agentv3_runtime_targets', 'phase2_drill_controls'];
         for (const name of collections) {
-          const snaps = await db.collection(name).where(admin.firestore.FieldPath.documentId(), '>=', prefix).where(admin.firestore.FieldPath.documentId(), '<', `${prefix}\uf8ff`).get();
-          if (!snaps.empty) { const batch = db.batch(); snaps.docs.forEach((doc) => batch.delete(doc.ref)); await batch.commit(); }
+          for (const ownedPrefix of [prefix, `agentv3-${prefix}-`]) {
+            const snaps = await db.collection(name).where(admin.firestore.FieldPath.documentId(), '>=', ownedPrefix).where(admin.firestore.FieldPath.documentId(), '<', `${ownedPrefix}\uf8ff`).get();
+            if (!snaps.empty) { const batch = db.batch(); snaps.docs.forEach((doc) => batch.delete(doc.ref)); await batch.commit(); }
+          }
         }
         const wallets = await db.collection('user_token_wallets').where(admin.firestore.FieldPath.documentId(), '>=', prefix).where(admin.firestore.FieldPath.documentId(), '<', `${prefix}\uf8ff`).get();
         if (!wallets.empty) { const batch = db.batch(); wallets.docs.forEach((doc) => batch.delete(doc.ref)); await batch.commit(); }
@@ -191,8 +211,9 @@ async function coordinator() {
     if (!args.includes('--expect-regressions')) {
       assert.equal(version.result.modern, true, 'The current queue coordination API is required.');
       assert.equal(version.result.receipts, true, 'The current durable request receipt API is required.');
+      assert.equal(version.result.continuations, true, 'The current normal-module continuation API is required.');
     }
-    console.log(JSON.stringify({ project: PROJECT, emulator: endpoint, repo, prefix, modernQueue: version.result.modern, node: process.version, injection: 'Actual gRPC transport outage plus explicitly labelled SDK deadline/ack-loss injection; not a Cloud Run or E2B drill.' }));
+    console.log(JSON.stringify({ project: PROJECT, emulator: endpoint, repo, prefix, modernQueue: version.result.modern, normalModuleContinuations: version.result.continuations, node: process.version, injection: 'Actual gRPC transport outage plus explicitly labelled SDK deadline/ack-loss injection; not a Cloud Run or E2B drill.' }));
 
     await check('fresh cross-process reads see another worker enqueue', async () => {
       assert.equal((await b.ok('load', { workspaceId: ws('fresh') })).items.length, 0);
@@ -361,6 +382,229 @@ async function coordinator() {
       console.log(JSON.stringify({ additiveReceiptDrills: 'skipped: request receipt API is absent from the Phase1 negative-control revision' }));
     }
 
+    if (version.result.continuations) {
+      const moduleFixture = async (name, withReceipt = false) => {
+        const workspaceId = withReceipt ? `agentv3-${prefix}-owner-${name}` : ws(name);
+        const prompt = 'Build the approved module plan';
+        await control.ok('enqueue', { workspaceId, itemId: 'A', prompt });
+        await control.ok('enqueue', { workspaceId, itemId: 'B', prompt: 'Build the next approved step' });
+        const claim = await a.ok('claim', { workspaceId, token: randomUUID() });
+        assert.equal(claim.id, 'A');
+        const attemptId = randomUUID();
+        assert.equal((await a.ok('lease-claim', { workspaceId, token: attemptId, owner: 'normal-module-predecessor' })).ok, true);
+        const initial = { ownerId: `${prefix}-owner`, workspaceId, requestId: randomUUID(), attemptId,
+          input: { prompt, queueItemId: 'A', queueClaimToken: claim.claimToken, queueContinuationProtocol: 1 } };
+        const reserved = withReceipt ? await a.ok('receipt-reserve', initial) : null;
+        if (withReceipt) assert.equal(reserved.ok, true);
+        const binding = await a.ok('bind', { workspaceId, prompt, attemptId, expected: { itemId: 'A', claimToken: claim.claimToken } });
+        return { workspaceId, binding, initial, receipt: reserved?.receipt };
+      };
+      const propose = (fixture, worker = a, planRemaining = 3) => worker.ok('continuation-propose', {
+        workspaceId: fixture.workspaceId, binding: fixture.binding, planRemaining, nonce: randomUUID(),
+      });
+      const retire = (fixture, handoff, worker = a, extra = {}) => worker.ok('continuation-retire', {
+        workspaceId: fixture.workspaceId, binding: fixture.binding, nonce: handoff.nonce, ...extra,
+      });
+      const readyFixture = async (name) => {
+        const fixture = await moduleFixture(name);
+        const handoff = await propose(fixture);
+        assert.equal(await retire(fixture, handoff), true);
+        return { ...fixture, handoff };
+      };
+      const transfer = (fixture, attemptId, extra = {}) => ({ workspaceId: fixture.workspaceId, prompt: 'continue', attemptId,
+        expected: { itemId: 'A', claimToken: fixture.binding.claimToken, continuationNonce: fixture.handoff.nonce,
+          predecessorAttemptId: fixture.binding.attemptId, requestId: randomUUID() }, ...extra });
+
+      await check('normal module windows retain logical A until final success, with separate replay-safe receipts', async () => {
+        const f = await moduleFixture('normal-module-windows', true);
+        const handoff = await propose(f, a, 1);
+        const pending = await b.ok('load', { workspaceId: f.workspaceId });
+        assert.equal(pending.items[0].status, 'running');
+        assert.equal(pending.items[0].continuation.phase, 'pending');
+        assert.equal(await b.ok('claim', { workspaceId: f.workspaceId }), null);
+        assert.equal((await a.ok('receipt-complete', { receipt: f.receipt })).ok, true);
+        assert.equal(await retire(f, handoff), true);
+        assert.equal(await control.ok('durable', { workspaceId: f.workspaceId, collection: 'agentv3_build_leases' }), null);
+        assert.equal((await b.ok('load', { workspaceId: f.workspaceId })).items[0].continuation.phase, 'ready');
+        assert.equal(await b.ok('claim', { workspaceId: f.workspaceId }), null, 'B advanced in the READY gap before A finished.');
+        const attemptId = randomUUID();
+        assert.equal((await b.ok('lease-claim', { workspaceId: f.workspaceId, token: attemptId, owner: 'normal-module-successor' })).ok, true);
+        const next = transfer({ ...f, handoff }, attemptId);
+        const nextInput = { prompt: 'continue', queueItemId: 'A', queueClaimToken: f.binding.claimToken,
+          queueContinuationProtocol: 1, queueContinuationNonce: handoff.nonce, queuePredecessorAttemptId: f.binding.attemptId };
+        const changedOld = await b.ok('receipt-reserve', { ...f.initial, attemptId, input: nextInput });
+        assert.equal(changedOld.ok, false); assert.equal(changedOld.code, 'input-mismatch');
+        const second = await b.ok('receipt-reserve', { ownerId: f.initial.ownerId, workspaceId: f.workspaceId,
+          requestId: next.expected.requestId, attemptId, input: nextInput });
+        assert.equal(second.ok, true); assert.notEqual(second.receipt.buildRef, f.receipt.buildRef);
+        const successor = await b.ok('bind', next);
+        assert.equal(successor.attemptId, attemptId);
+        assert.equal((await a.ok('load', { workspaceId: f.workspaceId })).items[0].status, 'running');
+        assert.equal(await a.ok('settle', { workspaceId: f.workspaceId, binding: f.binding, ok: true }), false);
+        assert.equal(await a.ok('continuation-cancel', { workspaceId: f.workspaceId, binding: f.binding }), false);
+        assert.equal(await retire(f, handoff), false);
+        assert.equal((await control.ok('durable', { workspaceId: f.workspaceId, collection: 'agentv3_build_leases' })).token, attemptId);
+        assert.equal(await b.ok('settle', { workspaceId: f.workspaceId, binding: successor, ok: true }), true);
+        assert.equal((await b.ok('receipt-complete', { receipt: second.receipt })).ok, true);
+        const replay = await a.ok('receipt-reserve', { ...f.initial, attemptId: randomUUID() });
+        assert.equal(replay.ok, false); assert.equal(replay.code, 'terminal'); assert.equal(replay.receipt.buildRef, f.receipt.buildRef);
+        await b.ok('lease-release', { workspaceId: f.workspaceId, token: attemptId });
+        assert.equal((await a.ok('claim', { workspaceId: f.workspaceId })).id, 'B');
+        return { logicalA: ['running/pending', 'running/ready', 'running/successor', 'done'], nextStepAfterFinal: 'B',
+          distinctWindowBillingRefs: true, originalReceiptReplay: replay.code, oldCallbacksRefused: true,
+          limit: 'Explicit normal-retirement API invoked after fixture work; no builder body or physical SDK drain exercised.' };
+      });
+
+      await check('two real workers consume a one-use module handoff once', async () => {
+        const f = await readyFixture('handoff-consume-race');
+        const candidates = [randomUUID(), randomUUID()];
+        const claims = await Promise.all([a.ok('lease-claim', { workspaceId: f.workspaceId, token: candidates[0], owner: 'handoff-worker-a' }),
+          b.ok('lease-claim', { workspaceId: f.workspaceId, token: candidates[1], owner: 'handoff-worker-b' })]);
+        assert.equal(claims.filter((value) => value.ok).length, 1);
+        const attemptId = candidates[claims.findIndex((value) => value.ok)];
+        const request = transfer(f, attemptId);
+        // Both processes deliberately replay the same already-authorized attempt; the ticket CAS is
+        // still one-use independently of the separate lease-race result above.
+        const consumers = await Promise.all([a.ask('bind', request), b.ask('bind', request)]);
+        assert.equal(consumers.filter((value) => value.ok).length, 1);
+        assert.equal(consumers.find((value) => !value.ok).error.code, 'QUEUE_CLAIM_CONFLICT');
+        const current = await control.ok('load', { workspaceId: f.workspaceId });
+        assert.equal(current.items[0].boundAttemptId, attemptId);
+        assert.equal(current.items[0].continuation, undefined);
+        assert.equal(current.items[0].continuationWindow.requestId, request.expected.requestId);
+        assert.equal(await control.ok('claim', { workspaceId: f.workspaceId }), null);
+        return { leaseWinners: 1, ticketConsumers: 1, replayCode: 'QUEUE_CLAIM_CONFLICT', logicalA: 'running', nextStepBlocked: true };
+      });
+
+      await check('Stop and normal retirement serialize both queue readiness and predecessor lease deletion', async () => {
+        const observed = [];
+        for (const order of ['stop-first', 'retire-first', 'concurrent', 'concurrent-retire-ack-loss', 'concurrent-stop-ack-loss']) {
+          const f = await moduleFixture(`handoff-stop-retire-${order}`); const handoff = await propose(f);
+          let retired;
+          let retirementAck = 'confirmed'; let stopAck = 'confirmed';
+          if (order === 'stop-first') { await b.ok('continuation-stop', { workspaceId: f.workspaceId }); retired = await retire(f, handoff); }
+          else if (order === 'retire-first') { retired = await retire(f, handoff); await b.ok('continuation-stop', { workspaceId: f.workspaceId }); }
+          else {
+            const [retirement, stopped] = await Promise.all([
+              a.ask('continuation-retire', { workspaceId: f.workspaceId, binding: f.binding, nonce: handoff.nonce,
+                ...(order === 'concurrent-retire-ack-loss' ? { fault: 'ack-loss' } : {}) }),
+              b.ask('continuation-stop', { workspaceId: f.workspaceId,
+                ...(order === 'concurrent-stop-ack-loss' ? { fault: 'ack-loss' } : {}) }),
+            ]);
+            if (order === 'concurrent-retire-ack-loss') assert.equal(retirement.ok, false);
+            if (order === 'concurrent-stop-ack-loss') assert.equal(stopped.ok, false);
+            if (retirement.ok) { assert.equal(typeof retirement.result, 'boolean'); retired = retirement.result; }
+            else { assert.equal(retirement.error.code, 'QUEUE_STORE_UNAVAILABLE'); retirementAck = 'unknown'; }
+            if (!stopped.ok) {
+              assert.equal(stopped.error.code, 'QUEUE_STORE_UNAVAILABLE'); stopAck = 'unknown/reconciled';
+              // Contention can exceed the real production deadline; UNKNOWN is not an operation
+              // result. Confirm the same idempotent Stop before checking the durable invariant.
+              const confirmed = await control.ok('continuation-stop', { workspaceId: f.workspaceId });
+              assert.equal(confirmed.queuePaused, true);
+            }
+          }
+          const current = await control.ok('load', { workspaceId: f.workspaceId });
+          const lease = await control.ok('durable', { workspaceId: f.workspaceId, collection: 'agentv3_build_leases' });
+          assert.equal(current.paused, true); assert.equal(current.items[0].continuation, undefined);
+          if (retired === true) assert.equal(lease, null, 'READY committed without atomically deleting its predecessor lease.');
+          else if (retired === false || lease !== null) { assert.equal(lease.token, f.binding.attemptId); assert.equal(lease.stopRequested, true); }
+          assert.equal(await retire(f, handoff), false, 'Old cleanup recreated a cancelled handoff.');
+          assert.equal(await control.ok('claim', { workspaceId: f.workspaceId }), null);
+          observed.push({ order, retired: retired ?? 'unknown', retirementAck, stopAck, queuePaused: true,
+            predecessorLease: lease ? 'stop-requested' : 'deleted-in-retirement' });
+        }
+        return { interleavings: observed, nextStepBlocked: true,
+          injection: 'Two additional concurrent interleavings throw only AFTER an actual retirement or Stop commit; natural deadline outcomes remain explicitly unknown.' };
+      });
+
+      await check('Stop racing handoff consumption cancels the ticket and flags the current successor lease', async () => {
+        const observed = [];
+        for (const order of ['stop-first', 'consume-first', 'concurrent']) {
+          const f = await readyFixture(`handoff-stop-consume-${order}`); const attemptId = randomUUID();
+          assert.equal((await control.ok('lease-claim', { workspaceId: f.workspaceId, token: attemptId, owner: 'successor-before-stop' })).ok, true);
+          const request = transfer(f, attemptId); let consumed;
+          if (order === 'stop-first') { await b.ok('continuation-stop', { workspaceId: f.workspaceId }); consumed = await a.ask('bind', request); }
+          else if (order === 'consume-first') { consumed = await a.ask('bind', request); await b.ok('continuation-stop', { workspaceId: f.workspaceId }); }
+          else [consumed] = await Promise.all([a.ask('bind', request), b.ok('continuation-stop', { workspaceId: f.workspaceId })]);
+          const current = await control.ok('load', { workspaceId: f.workspaceId });
+          const lease = await control.ok('durable', { workspaceId: f.workspaceId, collection: 'agentv3_build_leases' });
+          assert.equal(current.paused, true); assert.equal(current.items[0].continuation, undefined);
+          assert.equal(current.items[0].continuationWindow, undefined);
+          assert.equal(lease.token, attemptId); assert.equal(lease.stopRequested, true);
+          if (consumed.ok) { assert.equal(current.items[0].status, 'running'); assert.equal(current.items[0].boundAttemptId, attemptId); }
+          else assert.equal(consumed.error.code, 'QUEUE_CLAIM_CONFLICT');
+          await control.ok('lease-release', { workspaceId: f.workspaceId, token: attemptId });
+          const replacement = randomUUID();
+          assert.equal((await control.ok('lease-claim', { workspaceId: f.workspaceId, token: replacement, owner: 'post-stop-replay' })).ok, true);
+          const replay = await a.ask('bind', { ...request, attemptId: replacement });
+          assert.equal(replay.ok, false); assert.equal(replay.error.code, 'QUEUE_CLAIM_CONFLICT');
+          observed.push({ order, consumedBeforeStop: consumed.ok, currentLeaseStopRequested: true, oldTicketReplay: replay.error.code });
+        }
+        return { interleavings: observed, physicalLimit: 'An already-issued provider operation is not revoked by this queue/lease transaction.' };
+      });
+
+      await check('normal retirement committed ACK loss reconciles READY from a fresh worker without replaying an old attempt', async () => {
+        const f = await moduleFixture('handoff-retire-ack'); const handoff = await propose(f);
+        const uncertain = await startWorker(endpoint);
+        const lost = await uncertain.ask('continuation-retire', { workspaceId: f.workspaceId, binding: f.binding, nonce: handoff.nonce, fault: 'ack-loss' });
+        assert.equal(lost.ok, false); assert.equal(lost.error.code, 'QUEUE_STORE_UNAVAILABLE');
+        await uncertain.kill();
+        const fresh = await startWorker(endpoint);
+        assert.equal((await fresh.ok('load', { workspaceId: f.workspaceId })).items[0].continuation.phase, 'ready');
+        assert.equal(await fresh.ok('durable', { workspaceId: f.workspaceId, collection: 'agentv3_build_leases' }), null);
+        const attemptId = randomUUID();
+        assert.equal((await fresh.ok('lease-claim', { workspaceId: f.workspaceId, token: attemptId, owner: 'retirement-ack-reconciler' })).ok, true);
+        const request = transfer({ ...f, handoff }, attemptId);
+        await fresh.ok('bind', request);
+        const replay = await a.ask('bind', request);
+        assert.equal(replay.ok, false); assert.equal(replay.error.code, 'QUEUE_CLAIM_CONFLICT');
+        assert.equal(await retire(f, handoff), false);
+        assert.equal((await control.ok('durable', { workspaceId: f.workspaceId, collection: 'agentv3_build_leases' })).token, attemptId);
+        await fresh.kill();
+        return { originalOutcome: lost.error.code, durableReconciliation: 'READY with predecessor lease absent', ticketConsumers: 1,
+          injection: 'Throw once AFTER actual emulator queue-READY + predecessor-lease-delete transaction committed.' };
+      });
+
+      await check('handoff consumption committed ACK loss preserves the consumed window and refuses old nonce after restart', async () => {
+        const f = await readyFixture('handoff-consume-ack'); const attemptId = randomUUID();
+        assert.equal((await control.ok('lease-claim', { workspaceId: f.workspaceId, token: attemptId, owner: 'consume-ack-owner' })).ok, true);
+        const request = transfer(f, attemptId); const uncertain = await startWorker(endpoint);
+        const lost = await uncertain.ask('bind', { ...request, fault: 'ack-loss' });
+        assert.equal(lost.ok, false); assert.equal(lost.error.code, 'QUEUE_STORE_UNAVAILABLE');
+        await uncertain.kill();
+        const fresh = await startWorker(endpoint);
+        const current = await fresh.ok('load', { workspaceId: f.workspaceId });
+        assert.equal(current.items[0].boundAttemptId, attemptId); assert.equal(current.items[0].continuation, undefined);
+        assert.equal(current.items[0].continuationWindow.requestId, request.expected.requestId);
+        const replay = await fresh.ask('bind', request);
+        assert.equal(replay.ok, false); assert.equal(replay.error.code, 'QUEUE_CLAIM_CONFLICT');
+        await fresh.ok('lease-release', { workspaceId: f.workspaceId, token: attemptId });
+        const replacement = randomUUID();
+        assert.equal((await fresh.ok('lease-claim', { workspaceId: f.workspaceId, token: replacement, owner: 'consume-ack-retry' })).ok, true);
+        const laterReplay = await fresh.ask('bind', { ...request, attemptId: replacement });
+        assert.equal(laterReplay.ok, false); assert.equal(laterReplay.error.code, 'QUEUE_CLAIM_CONFLICT');
+        assert.equal(await fresh.ok('claim', { workspaceId: f.workspaceId }), null);
+        await fresh.kill();
+        return { originalOutcome: lost.error.code, durableWindowAttempt: attemptId, requestIdentityPreserved: true,
+          replayAfterLeaseReplacement: laterReplay.error.code, injection: 'Throw once AFTER actual emulator handoff-consume + successor-bind commit.' };
+      });
+
+      await check('late module error cancels pending handoff and cannot be turned into readiness', async () => {
+        const f = await moduleFixture('handoff-late-error'); const handoff = await propose(f);
+        assert.equal(await b.ok('continuation-cancel', { workspaceId: f.workspaceId, binding: f.binding, note: 'Injected late cleanup failure; review required.' }), true);
+        assert.equal(await retire(f, handoff), false);
+        const current = await control.ok('load', { workspaceId: f.workspaceId });
+        assert.equal(current.paused, true); assert.equal(current.items[0].status, 'failed'); assert.equal(current.items[0].continuation, undefined);
+        assert.equal((await control.ok('durable', { workspaceId: f.workspaceId, collection: 'agentv3_build_leases' })).token, f.binding.attemptId);
+        await a.ok('lease-release', { workspaceId: f.workspaceId, token: f.binding.attemptId });
+        assert.equal(await b.ok('claim', { workspaceId: f.workspaceId }), null);
+        return { logicalA: 'failed/paused-for-review', nextStepBlocked: true, lateReadiness: false,
+          injection: 'Explicit cancellation API simulates the post-result error branch; actual HTTP/body wiring is tested separately.' };
+      });
+    } else {
+      console.log(JSON.stringify({ additiveContinuationDrills: 'skipped: normal-module continuation API is absent from this negative-control revision' }));
+    }
+
     proxy = await startProxy(port);
     await check('real transport outage never grants an unverified build lease', async () => {
       const disconnected = await startWorker(`127.0.0.1:${proxy.port}`);
@@ -424,7 +668,7 @@ async function coordinator() {
     await proxy?.close();
   }
   const failed = records.filter((record) => !record.pass);
-  console.log(JSON.stringify({ summary: { passed: records.length - failed.length, failed: failed.length, total: records.length }, negativeControl: args.includes('--expect-regressions'), limits: ['No paid model/E2B/Cloud Run calls', 'Recovery decision clock explicitly advanced', 'SDK deadline and acknowledgement loss are explicitly injected around a real emulator', 'HTTP authentication and route admission are covered separately'] }));
+  console.log(JSON.stringify({ summary: { passed: records.length - failed.length, failed: failed.length, total: records.length }, negativeControl: args.includes('--expect-regressions'), limits: ['No paid model/E2B/Cloud Run calls', 'Recovery decision clock explicitly advanced', 'SDK deadline and acknowledgement loss are explicitly injected around a real emulator', 'Normal-module retirement API called after fixture work; physical runtime/process drain is not exercised', 'HTTP authentication and route admission are covered separately'] }));
   if (args.includes('--expect-regressions')) assert(failed.length >= 4, 'Negative control did not reproduce the expected production defects.');
   else if (failed.length) process.exitCode = 1;
 

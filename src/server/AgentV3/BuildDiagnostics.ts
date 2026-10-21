@@ -15,6 +15,7 @@ import { todoOnlyTurnsLine } from './todoOnlyTurn';
 import { isBuildStoppedError } from './stopSignal';
 import { stoppedCallCauseWords, type AbortCause } from './buildAbortCause';
 import { ABORT_OUTCOME_CODES } from './abortOutcome';
+import { isMaintenanceMessage } from '../lib/aiMaintenanceMessage';
 import { toolCallDetail } from './toolCallTarget';
 import { isPlatformFixRequest, looksLikeMachineError, PLATFORM_COMPOSED_PREFIXES } from '../../lib/platformFixRequest';
 import { isProjectSummaryNarration } from './ProjectSummary';
@@ -323,6 +324,10 @@ export const PROCESS_ONLY_CODES = new Set([
   'OUTCOME_STOPPED', 'OUTCOME_BUILD_TIMEOUT', 'OUTCOME_ABORTED_UNKNOWN',
   // …and the sandbox that could not be set up (a9f8d186): infrastructure, the same class as a provider outage.
   'OUTCOME_SANDBOX_UNAVAILABLE',
+  // …and the admin's AI pause (aiMaintenance.ts): the service, not the app (autopsy 81a0eda5).
+  'OUTCOME_AI_PAUSED',
+  // …and a turn that ended by asking the user a question (autopsy 35bd9e17): a hand-back, not a finding.
+  'OUTCOME_ASKED_USER',
 ]);
 
 /**
@@ -2009,6 +2014,21 @@ export class BuildDiagnostics {
         break;
       }
       case 'error':
+        // 🔴 A PAUSE THE ADMIN CHOSE IS NOT A BUILD ERROR (autopsy 81a0eda5 + 14ea28b8, 2026-10-21). While AI
+        // service is paused (aiMaintenance.ts) the next model call throws the maintenance sentence; it reached
+        // here as `BUILD_ERROR` — an unresolved error in the BUILD phase, so the release gate counted it as "1
+        // build-breaking blocker" of an app that had rendered, and the user was told their app was "still
+        // broken" (naming the maintenance sentence). The sentence is a fact about the SERVICE, the same class
+        // as a cost ceiling or a deploy drain, and it gets the same treatment: a named outcome, never a blocker.
+        if (isMaintenanceMessage(e.message)) {
+          this.record({
+            phase: 'build', severity: 'error', code: 'OUTCOME_AI_PAUSED', autoResolved: false,
+            message: 'Build outcome: PAUSED — AI service was paused by NavBharatAI while this build was running. Not a defect in the app; the work so far is kept and a follow-up resumes it.',
+            detail: 'Recorded from the build\'s error event; the model call that hit the pause is in LLM_CALL_FAILED.',
+          });
+          this.recordFullError({ message: e.message, phase: 'build' });
+          break;
+        }
         this.record({
           phase: 'build', severity: 'error', code: 'BUILD_ERROR',
           message: e.message.slice(0, 800), autoResolved: false,

@@ -20,6 +20,7 @@
 import { scanSecurity, type SecurityFinding } from './SecurityAnalysis';
 import { BoundedCache } from '../lib/boundedCache';
 import { stripCodeComments } from './stripCodeComments';
+import { typeOnlyImportSpecs } from './typeOnlyImports';
 import { withoutPreviewBridge } from './previewBridge';
 import { bm25, type Bm25Doc } from './Bm25';
 import { toWorkspaceRelPath, SANDBOX_WORKSPACE_ROOT } from '../lib/workspacePath';
@@ -49,6 +50,9 @@ export interface ProjectGraph {
   routes: string[];
   /** file → the module specifiers it imports. */
   imports: Record<string, string[]>;
+  /** file → the subset of its `imports` that are type-only (erased before runtime — never a runtime
+   *  cycle edge; see typeOnlyImports.ts). Absent on a graph built before this field existed. */
+  typeOnlyImports?: Record<string, string[]>;
   /** External (bare) dependencies seen across imports. */
   dependencies: string[];
   /** file → the symbol NAMES it references (named-import bindings + JSX tags + call callees) — the
@@ -117,6 +121,8 @@ interface FileFacts {
   components: string[];
   routes: string[];
   imports: string[];
+  /** The specifiers in `imports` that this file imports ONLY as types. */
+  typeOnlyImports?: string[];
   dependencies: string[];
   /** Symbol names this file references (named-import bindings, JSX tags, call callees). */
   references: string[];
@@ -298,6 +304,7 @@ export function extractFacts(file: string, content: string): FileFacts {
     components: [...new Set(components)],
     routes: [...routes],
     imports: [...new Set(imports)],
+    typeOnlyImports: isCode(file) ? [...typeOnlyImportSpecs(code)] : [],
     // 🔴 A DECLARATION FILE DECLARES; IT DOES NOT DEPEND (autopsy 70e030bb). A generated `vite-env.d.ts`
     // carried `declare module '*.vue' { import type { DefineComponent } from 'vue' … }` in a React app,
     // `vue` became a project dependency, and the user was told "Stack: Vue". An ambient `.d.ts` import
@@ -552,9 +559,11 @@ export class WorkspaceMemory {
     const components = new Set<string>();
     const routes = new Set<string>();
     const imports: Record<string, string[]> = {};
+    const typeOnlyImports: Record<string, string[]> = {};
     const references: Record<string, string[]> = {};
     const deps = new Set<string>();
     for (const [file, facts] of this.fileFacts) {
+      if (facts.typeOnlyImports?.length) typeOnlyImports[file] = facts.typeOnlyImports;
       symbols.push(...facts.symbols);
       facts.components.forEach((c) => components.add(c));
       facts.routes.forEach((r) => routes.add(r));
@@ -568,6 +577,7 @@ export class WorkspaceMemory {
       components: [...components].sort(),
       routes: [...routes].sort(),
       imports,
+      typeOnlyImports,
       dependencies: [...deps].sort(),
       references,
     };

@@ -134,7 +134,7 @@ is now **`src/server/AgentV3/tierLadder.ts`**, and the build chain is built from
 
 | Tier (UI) | Internal | The ladder (first → last) | Escalation cap |
 |---|---|---|---|
-| Weak (free) | `weak` | GLM `glm-4.7-flashx` → KIMI `kimi-k2.7-code` → GLM `glm-5.3` → Claude **Haiku** | never escalates (NavBharatAI pays) |
+| Weak (free) | `weak` | GLM `glm-4.7-flashx` → KIMI `kimi-k2.7-code` → GLM `glm-5.3` → Claude **Haiku** (with `AGENTV3_WEAK_SCOPE_POLICY=on`, live since 2026-10-20: the first three only — flashx → KIMI → `glm-5.3`; the thinking GLM was added to that short ladder by the admin on 2026-10-21) | never escalates (NavBharatAI pays) |
 | Normal (paid economy) | `off` | GLM `glm-4.7-flashx` → KIMI `kimi-k2.7-code-highspeed` → GLM `glm-5.3` → Claude Sonnet | Sonnet |
 | Strong (paid premium) | `mini` | GLM `glm-5.3` → KIMI `kimi-k3` → Claude Sonnet → Claude **Opus** | Opus (its last rung) |
 

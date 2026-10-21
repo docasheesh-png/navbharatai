@@ -16107,7 +16107,14 @@ async function noteBuildOutcome(
       // A stale copy of a module under an earlier-resolving extension runs INSTEAD of the file the build
       // writes (autopsy e725e002). Armed with the files this build wrote, so a twin it wrote itself is
       // never touched; unarmed, nothing is removed.
-      dispatcher.armShadowTwins(() => modelAuthoredPaths(writtenFiles));
+      // 🔴 EVERY FILE THIS BUILD WROTE, PLATFORM SEEDS INCLUDED (autopsy 14ea28b8, 2026-10-21). This used to be
+      // `modelAuthoredPaths(writtenFiles)` — the set that EXCLUDES our own seeds, which is right for the
+      // authorship gate and exactly wrong here: the game kit's `src/game/Game.ts` was "not the build's", so
+      // when the model wrote its own `src/game/Game.tsx` the kit's file was deleted as a "stale copy", every
+      // kit module that imports `./Game` lost its exports, and the app that rendered failed its production
+      // build (TS2614). A seed is the platform's decision, never debris; only a file nobody in this build
+      // wrote (an earlier attempt's unsaved leftovers — the case e725e002 was about) is a stale twin.
+      dispatcher.armShadowTwins(() => writtenFiles.keys());
       // Every file this build removed, in order — the user is told about the ones their app had
       // (deletedFilesNotice.ts, queue Q-019). The admin line below stays as it was.
       const deletedThisBuild: string[] = [];
@@ -16694,6 +16701,7 @@ async function noteBuildOutcome(
         // Both have landed, so the note the blueprint lane reads now names the app's own ad slots too.
         thirdPartyPlayers: thirdPartyAdFactsAtStart.players,
         thirdPartyOwnAds: thirdPartyAdFactsAtStart.ownAds,
+        offerAccepted,
       });
       const requestNotesText = requestNoteSet.text;
       // The facts each note was derived from, kept under their old names so every report line and
@@ -19524,6 +19532,15 @@ async function noteBuildOutcome(
               + 'not retried on a higher rung, and not reported as an empty build. Before 2026-09-25 this was rebuilt '
               + 'from scratch on a stronger engine and the user was charged for an app they had not agreed to.',
           });
+          // …and the OUTCOME that sentence implies. Without it this deliberate ending reached the last-resort
+          // net below as OUTCOME_UNEXPLAINED — "an engine hole, not a fact about the app" — on a run whose
+          // ending was a question the engine chose to hand to the user (autopsy 35bd9e17).
+          if (!outcomeCodeOf(buildDiag.report().issues)) {
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'OUTCOME_ASKED_USER', autoResolved: true,
+              message: 'Build outcome: ASKED THE USER — the turn ended on a question the model handed back, with no file written. Nothing failed; the answer continues the build.',
+            });
+          }
         } catch { /* a note must never fail a build */ }
       }
       if (!(weakCandidateActive(powerLevelReqEffective)) && shouldRetryEmptyBuild({

@@ -121,7 +121,8 @@ import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefe
 import { currentPass, runInPass, inPlatformPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
 import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemovedOperands, removedRecordedPaths } from './shellWriteTargets';
 import { unfixableInstallNote } from '../lib/unfixablePackages';
-import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
+import { shellMayWriteOpaquely, markCommand, changedFilesCommand, parseChangedFiles } from './shellWriteReconcile';
+import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, shadowKeptToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames, mistypedImport } from './tscErrorCause';
 import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckWarmupCommand, WARMUP_COMPILED_MARKER, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
@@ -831,6 +832,26 @@ export class ToolDispatcher {
     const dataCmd = peerDataCommand(conflicts.map((c) => c.pkg));
     const forced = peerConflictHint(conflicts, dataCmd ? await run(dataCmd) : '', true);
     return [forced, deprecated].filter(Boolean).join('\n\n') || null;
+  }
+
+  /**
+   * Read back every file the sandbox says a marked command changed that the parser did not already name
+   * (shellWriteReconcile.ts). Never throws; a listing that fails records nothing, exactly as before.
+   */
+  private async reconcileShellWrites(command: string): Promise<void> {
+    try {
+      const listed = await this.actuator.runCommand(this.workspaceId, changedFilesCommand());
+      if (listed.exitCode !== 0) return;
+      let named: string[] = [];
+      try { named = shellReadBackTargets(command, null); } catch { named = []; }
+      for (const path of parseChangedFiles(listed.stdout, named)) {
+        this.kitCurrentPaths.delete(path);
+        try {
+          const content = await this.actuator.readFile(this.workspaceId, path);
+          if (typeof content === 'string') this.onFileWrite(path, content);
+        } catch { /* removed or unreadable — nothing to record */ }
+      }
+    } catch { /* reconciliation is best-effort — the parser's own read-back already ran */ }
   }
 
   private async recordShellWrites(command: string, skip: string | null): Promise<void> {
@@ -3205,7 +3226,11 @@ export class ToolDispatcher {
       if (!tree) return '';
       tree.add(path);
       const twins = shadowingTwins(path, tree, new Set(authoredGetter())).filter(removablePath);
-      if (twins.length === 0) return '';
+      if (twins.length === 0) {
+        // Nothing is stale — but a twin this build (or the platform's seed) owns can still shadow the new file.
+        // Deleting it is wrong (it is someone's module); staying silent leaves the new file unloaded.
+        return shadowKeptToolNote(path, shadowingTwins(path, tree, new Set()));
+      }
       const deletable: string[] = [];
       for (const twin of twins) {
         try { this.assertWritable(twin); deletable.push(twin); }
@@ -5859,6 +5884,11 @@ export class ToolDispatcher {
           refuse(blockMsg);
         }
         const cmdStartedAt = Date.now();
+        // A command that can write files the parser cannot name is bracketed by a marker, so what it changed can
+        // be read back afterwards (shellWriteReconcile.ts, autopsy 1d3ff0d5). Best-effort — never fails a command.
+        const reconcileMarked = shellMayWriteOpaquely(command)
+          ? await this.actuator.runCommand(this.workspaceId, markCommand()).then((r) => r.exitCode === 0, () => false)
+          : false;
         // TD-12 — pin, quote, detach, vault .env and Postgres live in runShellLikeBash (also used by
         // run_migrations, TD-15). Every retry below runs `prepared`, the same string as this first run.
         const shell = await this.runShellLikeBash(command, agent, { record: false });
@@ -5889,6 +5919,7 @@ export class ToolDispatcher {
         // PREVIEW_SNAPSHOT_STALE). Read back what the shell's own syntax says it wrote — whatever the exit
         // code, because a failed command may still have changed a file — and record it through the one door.
         await this.recordShellWrites(effectiveCommand, manifestRewrittenBy(effectiveCommand));
+        if (reconcileMarked) await this.reconcileShellWrites(effectiveCommand);
         // PRISMA RELATION SELF-HEAL (ShopKhata autopsy 2026-07-17): an LLM-written schema routinely
         // ships a HALF-relation ("user User?" with no opposite field / no references) — prisma
         // generate then fails with a validation error whose OWN message says the fix: "run `prisma

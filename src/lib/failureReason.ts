@@ -137,6 +137,8 @@ export const OUTCOME_REASONS: Readonly<Record<string, FailureReason>> = {
    * abort are different bugs with different fixes, and one label for both hides the second.
    */
   OUTCOME_ABORTED_UNKNOWN: { key: 'aborted-unknown', label: 'Aborted by something that never said why (not the wall clock, not the user)' },
+  OUTCOME_ASKED_USER: { key: 'asked-user', label: 'The model asked the user a question instead of building' },
+  OUTCOME_AI_PAUSED: { key: 'ai-paused', label: 'AI service was paused by NavBharatAI during the build (not the app)' },
   OUTCOME_UNEXPLAINED: { key: 'unexplained', label: 'The run ended not-ok and never recorded an outcome code' },
 };
 

@@ -88,6 +88,18 @@ export function shadowTwinToolNote(writtenPath: string, removed: readonly string
     + 'Do not recreate it; keep one file per module.';
 }
 
+/**
+ * A twin that shadows the file just written but was KEPT, because this build (or the platform that seeded it)
+ * wrote it. Nothing is deleted, so the model must be told — otherwise its new module is silently never loaded
+ * (autopsy 14ea28b8: the model's `Game.tsx` next to the kit's `Game.ts`). PURE.
+ */
+export function shadowKeptToolNote(writtenPath: string, kept: readonly string[]): string {
+  if (kept.length === 0) return '';
+  return `\n⚠️ NAME CLASH: ${kept.join(', ')} resolves BEFORE ${writtenPath} (the dev server tries ${RESOLUTION_ORDER.join(' → ')}), `
+    + `so every import of that module loads ${kept[0]} and your new file is never used. ${kept[0]} is part of this project`
+    + ' (the platform kit or an earlier file of this build) and is kept. Give your new module a different name instead of replacing it.';
+}
+
 /** Shared by a build's dispatchers so a sub-agent's removals reach the parent's report and store. */
 export type ShadowTwinTally = {
   removed: string[];

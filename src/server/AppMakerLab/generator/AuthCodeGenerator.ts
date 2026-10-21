@@ -169,7 +169,11 @@ function supabaseAuthModule(): string {
     '',
     '/** True once both keys are set — a login screen can show a "needs setup" state from it. */',
     'export const supabaseConfigured = Boolean(url && anonKey);',
-    'if (!supabaseConfigured) console.error(`[auth] ${NOT_CONFIGURED}`);',
+    // console.warn, NOT console.error (autopsy 40868260): the preview check, the journey check and the
+    // generated e2e suite all treat a console ERROR as "the app did not render". An unconfigured database is
+    // an honest, expected state the login screen already shows in words — not a crash — so logging it as an
+    // error made our own gate fail the app our own template produced.
+    'if (!supabaseConfigured) console.warn(`[auth] ${NOT_CONFIGURED}`);',
     '',
     // 🔴 Autopsy 2b1f845e: `createClient('', '')` THROWS ("supabaseUrl is required") while this module is
     // being imported, so an app whose keys were not set yet could not even open — every screen imports

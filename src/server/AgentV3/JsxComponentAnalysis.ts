@@ -8,12 +8,13 @@
 // It is conservative to keep false positives near zero:
 //   • Only component-cased tags (Uppercase) or member-expression tags are checked — lowercase host
 //     elements (`div`, `span`) are never flagged.
-//   • A tag is OK if its name is bound ANYWHERE in the file (import, const/let/var, function, class,
-//     parameter, or destructured binding) — a file-wide bound-name set, so an in-scope definition is
-//     never mis-flagged.
-//   • Known JSX globals (React, Fragment) are always allowed.
+//   • A tag must have a runtime binding in its actual lexical scope. Parameters and local declarations
+//     in unrelated scopes cannot hide an undefined component; named function expressions bind only
+//     inside their own body.
+//   • Known injected JSX globals (React, Fragment) remain allowed when no explicit local binding exists.
 
 import { isAppAnalysisPath } from './appAnalysisPaths';
+import { createExportCapabilities } from './exportCapabilities';
 
 export interface UndefinedComponent {
   file: string;
@@ -28,114 +29,34 @@ export interface JsxComponentReport {
   ok: boolean;
 }
 
-let TsMorph: any;
-async function loadTsMorph(): Promise<any | null> {
-  if (TsMorph) return TsMorph;
-  try { TsMorph = await import('ts-morph'); return TsMorph; } catch { return null; }
-}
-
 const JSX_FILE = /\.(t|j)sx$/;
 const GLOBALS = new Set(['React', 'Fragment']);
 
-/** Collect every identifier name bound anywhere in the source file (over-collect → safe). */
-function collectBoundNames(sf: any, mod: any): Set<string> {
-  const names = new Set<string>();
-  const add = (v: unknown) => { if (typeof v === 'string' && v) names.add(v); };
-  const K = mod.SyntaxKind;
-
-  try {
-    for (const imp of sf.getImportDeclarations()) {
-      add(imp.getDefaultImport?.()?.getText?.());
-      add(imp.getNamespaceImport?.()?.getText?.());
-      for (const ni of imp.getNamedImports?.() ?? []) add((ni.getAliasNode?.() ?? ni.getNameNode?.())?.getText?.());
-    }
-  } catch { /* ignore */ }
-
-  // Declaration names (functions, classes) + all binding identifiers (var/let/const, params, destructuring).
-  const kinds = [K.FunctionDeclaration, K.ClassDeclaration, K.VariableDeclaration, K.Parameter, K.BindingElement, K.ImportSpecifier];
-  for (const kind of kinds) {
-    let nodes: any[] = [];
-    try { nodes = sf.getDescendantsOfKind(kind); } catch { continue; }
-    for (const n of nodes) {
-      try {
-        const nameNode = n.getNameNode?.();
-        if (nameNode && nameNode.getKindName?.() === 'Identifier') add(nameNode.getText());
-        else if (typeof n.getName === 'function') add(n.getName());
-      } catch { /* ignore */ }
-    }
-  }
-  return names;
-}
-
-/** The root identifier of a JSX tag name: `Foo` → "Foo"; `Foo.Bar` / `lib.Widget` → "Foo" / "lib". */
-function tagRootName(tagNode: any): { root: string; full: string; isMember: boolean } | null {
-  if (!tagNode) return null;
-  const kind = tagNode.getKindName?.();
-  if (kind === 'Identifier') {
-    return { root: tagNode.getText(), full: tagNode.getText(), isMember: false };
-  }
-  if (kind === 'PropertyAccessExpression') {
-    // Walk to the leftmost identifier.
-    let n = tagNode;
-    while (n && n.getKindName?.() === 'PropertyAccessExpression') n = n.getExpression?.();
-    const root = n?.getText?.() ?? '';
-    return { root, full: tagNode.getText(), isMember: true };
-  }
-  return null;
-}
-
-/** Analyze a file set for JSX components used but never imported/declared. Pure + deterministic. */
+/** Analyze actual lexical JSX bindings without reading packages or the host filesystem. */
 export async function analyzeJsxComponents(files: Record<string, string>): Promise<JsxComponentReport> {
-  const mod = await loadTsMorph();
-  if (!mod) return { undefinedComponents: [], filesScanned: 0, ok: true };
-
-  const project = new mod.Project({
-    useInMemoryFileSystem: true,
-    skipAddingFilesFromTsConfig: true,
-    compilerOptions: { allowJs: true, jsx: 2 },
-  });
-  const K = mod.SyntaxKind;
-
+  const code = Object.fromEntries(Object.entries(files).filter(([path, content]) =>
+    JSX_FILE.test(path) && isAppAnalysisPath(path) && typeof content === 'string' && content.includes('<')));
   const undefinedComponents: UndefinedComponent[] = [];
-  let scanned = 0;
-
-  for (const [path, content] of Object.entries(files)) {
-    if (!JSX_FILE.test(path) || !isAppAnalysisPath(path) || typeof content !== 'string' || !content.includes('<')) continue;
-    scanned++;
-    let sf: any;
-    try { sf = project.createSourceFile(path, content, { overwrite: true }); } catch { continue; }
-
-    const bound = collectBoundNames(sf, mod);
-    const seen = new Set<string>(); // de-dupe per file
-
-    let tags: any[] = [];
-    try {
-      tags = [
-        ...sf.getDescendantsOfKind(K.JsxOpeningElement),
-        ...sf.getDescendantsOfKind(K.JsxSelfClosingElement),
-      ];
-    } catch { continue; }
-
-    for (const tag of tags) {
-      let info: ReturnType<typeof tagRootName>;
-      try { info = tagRootName(tag.getTagNameNode?.()); } catch { continue; }
-      if (!info || !info.root) continue;
-
-      // Only components: an Uppercase simple tag, OR any member-expression tag (Foo.Bar / lib.Widget).
-      const isComponentTag = info.isMember || /^[A-Z]/.test(info.root);
-      if (!isComponentTag) continue;
-      if (GLOBALS.has(info.root) || bound.has(info.root)) continue;
-      if (seen.has(info.full)) continue;
-      seen.add(info.full);
-
-      undefinedComponents.push({
-        file: path,
-        line: tag.getStartLineNumber?.() ?? 0,
-        component: info.full,
-        detail: `<${info.full}> is used but ${info.isMember ? `'${info.root}'` : `'${info.full}'`} is never imported or defined in this file — it will throw "${info.root} is not defined" at runtime.`,
-      });
+  try {
+    for (const path of Object.keys(code)) {
+      // A plain-script sibling is a separate bundler module, not this file's runtime scope. Analyze
+      // bindings per file so the TS program cannot merge unrelated script globals into a fake binding.
+      const model = createExportCapabilities({ [path]: code[path] });
+      const seen = new Set<string>();
+      for (const binding of model.jsxBindingsOf(path)) {
+        if (binding.state === 'value') continue;
+        // Keep the existing injected-global compatibility, but an explicit erased local import is
+        // positive evidence that THIS binding cannot be supplied by the global of the same name.
+        if (binding.state === 'missing' && GLOBALS.has(binding.root)) continue;
+        if (seen.has(binding.component)) continue;
+        seen.add(binding.component);
+        undefinedComponents.push({ file: path, line: binding.line, component: binding.component,
+          detail: binding.state === 'type-only'
+            ? `<${binding.component}> uses '${binding.root}' as a runtime value, but its binding is type-only and emits no value.`
+            : `<${binding.component}> is used but '${binding.root}' has no binding in this scope — it will throw "${binding.root} is not defined" at runtime.`,
+        });
+      }
     }
-  }
-
-  return { undefinedComponents, filesScanned: scanned, ok: undefinedComponents.length === 0 };
+  } catch { /* unavailable analysis cannot invent a blocker */ }
+  return { undefinedComponents, filesScanned: Object.keys(code).length, ok: undefinedComponents.length === 0 };
 }

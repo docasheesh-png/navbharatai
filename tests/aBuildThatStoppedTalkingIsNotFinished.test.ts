@@ -105,10 +105,11 @@ describe('2 · only an output that PROVES the compile passed may resolve anythin
     const src = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
     // The only markTscClean call is inside the helper.
     expect(src.match(/\.markTscClean\(/g)?.length).toBe(1);
-    expect(src).toMatch(/private noteCompileOutput\(output: string\): void \{[\s\S]{0,200}tscOutputProvesClean\(output\)[\s\S]{0,120}markTscClean\(\)/);
+    // Shell commands also carry their argv mode; fixed internal checks keep the output-only reader.
+    expect(src).toMatch(/private noteCompileOutput\(output: string, command\?: string\): void \{[\s\S]{0,200}tscCommandVerdict\(command, output\) : tscVerdict\(output\)[\s\S]{0,120}verdict === 'passed'[\s\S]{0,120}markTscClean\(\)/);
     // Three callers: the write-time check, the typecheck tool, and bash.
     expect(src.match(/this\.noteCompileOutput\(/g)?.length).toBe(3);
-    expect(src).toMatch(/looksLikeTypecheckCommand\(command\) && exitCode === 0\) this\.noteCompileOutput\(`\$\{stdout\}\\n\$\{stderr\}`\)/);
+    expect(src).toMatch(/looksLikeTypecheckCommand\(command\) && exitCode === 0\) this\.noteCompileOutput\(`\$\{stdout\}\\n\$\{stderr\}`, command\)/);
     expect(src).not.toMatch(/\\btsc\\b\[\^&\|;\]\*--noEmit\/\.test\(command\)\) mem\.markTscClean/);
   });
 });

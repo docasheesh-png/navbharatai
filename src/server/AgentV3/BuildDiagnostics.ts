@@ -1841,15 +1841,13 @@ export class BuildDiagnostics {
         severity: rec.ok ? 'warning' : 'error',
         code: rec.ok ? 'LLM_TRUNCATED' : 'LLM_CALL_FAILED',
         message: rec.ok
-          // 🔴 "MAY BE TRUNCATED" WAS TOO KIND BY HALF (autopsy ee20478d, 2026-09-15). This warning
-          // fired three times in a build that produced ZERO output — 4,833 tokens spent, 0 response
-          // characters, 0 tool calls, every time — and the hedged wording read like a caveat on an
-          // answer that arrived. The platform had the evidence in its hand (`responseChars` and
-          // `toolCalls` are on this very record) and described a total loss as a possible trim.
-          // Nothing downstream acted, because nothing downstream was told anything had gone wrong.
+          // Distinguish a truncated turn with no recorded usable output from a partial answer
+          // (autopsy ee20478d, 2026-09-15). `responseChars`, `toolCalls` and the finish reason describe
+          // what was recorded; `outputTokens` is not the authorised allowance. Neither missing usage
+          // nor a reported output count proves the entire grant was consumed or identifies the cause.
           ? (!rec.responseChars && !rec.toolCalls
-              ? `A model turn spent its ENTIRE output allowance (${rec.outputTokens ?? 0} tokens) and produced NOTHING — no text, no tool call (${rec.model ?? 'model'}, finish=${rec.finishReason}). `
-                + 'This is our own output ceiling being smaller than the answer needed, not a provider fault and not the app: see floorBudget.ts.'
+              ? `A model turn was marked truncated with no recorded text or tool call (outputTokens=${rec.outputTokens ?? 0}, defaulting to 0 when unreported; ${rec.model ?? 'model'}, finish=${rec.finishReason}). `
+                + 'This record does not establish the authorised allowance, whether it was fully consumed, or why no usable answer appeared; inspect the call and its budget provenance (see floorBudget.ts).'
               : `Model response hit the token limit (${rec.model ?? 'model'}, finish=${rec.finishReason}) — output may be truncated.`)
           : turnTimedOutUnanswered
             ? `A model turn timed out with no provider answering (${rec.error})`.slice(0, 400)
@@ -2311,13 +2309,12 @@ export class BuildDiagnostics {
         });
       }
 
-      // OUR OWN OUTPUT CEILING STARVED A HEALTHY RUNG (autopsy ee20478d, 2026-09-15).
+      // A RECORDED OUTPUT-BUDGET FAILURE NEEDS AN EXPLANATION (autopsy ee20478d, 2026-09-15).
       //
-      // Raised on the FIRST occurrence, unlike the dead-rung warning above which waits for a second:
-      // a dead rung needs a repeat to prove it is systematic rather than unlucky, whereas this one is
-      // arithmetic — the authorised budget is a constant for the run, so one starved call proves every
-      // later call on that rung would starve too. That is exactly why the rung is retired on first
-      // sight in MultiProviderTurnRunner, and this finding is the admin-facing half of that decision.
+      // Raised on the FIRST occurrence, once per provider: one recorded failure is enough to surface
+      // this signal. It does not prove every later call would fail, that every rung answered, or that
+      // the full authorised allowance was consumed. MultiProviderTurnRunner's retirement policy is
+      // unchanged; the report describes the evidence without presenting that policy as a prediction.
       //
       // It exists because the failure it names is INVISIBLE to every other signal: the provider
       // returned HTTP 200, so before this bucket existed nothing appeared in this ledger at all, and
@@ -2329,41 +2326,34 @@ export class BuildDiagnostics {
           phase: 'provider',
           severity: 'warning',
           code: 'OUTPUT_BUDGET_STARVED',
-          // 🔒 TWO DIFFERENT FACTS, TWO DIFFERENT SENTENCES (autopsy f5351721). Since the clamp is lifted
-          // for a rung known to always reason, "our own output ceiling" is no longer true of every
-          // starvation — and it is the clause the admin reads first. One that starves on the FULL ask
-          // is a model that cannot finish thinking inside any budget a turn can carry; saying "our
-          // ceiling" there would send the next autopsy to floorBudget.ts to fix arithmetic that is
-          // already correct.
-          // 🔴 AND A THIRD, BECAUSE THE SECOND ONE NAMED THE WRONG MODULE (autopsy d98dae01,
-          // 2026-09-17). The clamped sentence ends by pointing at FLOOR_TIMEOUT_CAP_MS and
-          // AGENTV3_FLOOR_MS_PER_TOKEN — true when the rung's OWN cap bounded the call, and false
-          // whenever `turnDeadline` picked the calling lane's remaining budget instead. That report's
-          // 2,314-token ceiling is 74,420 ms at the floor rate: the fast lane's 90 s plan cap minus a
-          // crawl, nothing like the 150 s cap the sentence blamed. Raising either of the two named
-          // knobs would have changed NOTHING, and an autopsy reading that line would have spent its
-          // time on arithmetic that was already correct.
+          // Preserve the allowance's provenance (autopsies f5351721 and d98dae01): a clock/rate-clamp
+          // bypass, the caller's unchanged ask, a lane deadline, and the runner's own effective cap
+          // are different facts. None establishes measured consumption. A reasoning-only turn can
+          // reach this finding without a length stop, and the bucket alone proves neither an outage
+          // nor a problem with the prompt. A lane-bound allowance still uses the configured floor
+          // rate; its selected clock is not the runner's own cap. Streamed calls also have their own
+          // cap, so the generic explanation must not present FLOOR_TIMEOUT_CAP_MS as universal.
           message: isUnclampedStarvation(reason)
-            ? `The ${name} rung answered inside its clock and produced nothing — "${detail}". `
-              + 'Its ceiling was NOT reduced by us: this rung always reasons, so it keeps the build loop\'s full per-turn ask, and it still spent every token thinking before any text or tool call appeared. '
-              + 'That is the model, not our arithmetic; the rung was retired for the rest of this build so the ladder could reach a vendor that fits.'
+            ? `The ${name} rung returned no text or tool call and was classified as output-budget — "${detail}". `
+              + 'The clock/rate clamp was bypassed; another ceiling may still make the granted allowance smaller than the caller\'s ask. A truncated or reasoning-only turn can reach this finding without measured usage. '
+              + 'This call did not produce a usable answer; it does not establish that another budget, call or engine would also fail.'
             // 🔴 AND A FOURTH (autopsy 57875eb3, 2026-09-17): the ask was never reduced at all. A
             // fast-lane repair asked for 8,000 tokens, the clock could carry ~9,800, and glm-5.3
-            // spent all 8,000 thinking — thirteen times. The "own cap" sentence below blamed
+            // returned reasoning without an answer — thirteen times. The "own cap" sentence below blamed
             // FLOOR_TIMEOUT_CAP_MS for a ceiling that was the caller's own `maxTokens`.
             : isAskBoundStarvation(reason)
-            ? `The ${name} rung answered inside its clock and produced nothing — "${detail}". `
-              + 'Its ceiling was the CALLER\'S OWN ASK: the call requested exactly this many output tokens, the clock would have carried more, and nothing in floorBudget.ts reduced it — so the number to look at is that caller\'s per-call ask, not this engine\'s own cap or rate constant in floorBudget.ts. '
-              + 'A reasoning model bills its thinking to the same ceiling, so an ask below its thinking returns a reply with no text and no tool call. '
-              + 'The rung was retired for the rest of this build so the ladder could reach a vendor that fits.'
+            ? `The ${name} rung returned no text or tool call and was classified as output-budget — "${detail}". `
+              + 'Its allowance was the CALLER\'S OWN ASK: the ask fitted the clock and nothing in floorBudget.ts reduced it. Inspect that caller\'s per-call ask, rather than attributing the allowance to this engine\'s own cap or rate constant. '
+              + 'The allowance is not measured consumption; reasoning-only output is sufficient for this classification even without a length stop. '
+              + 'This finding alone does not predict whether another call or engine would succeed.'
             : isLaneBoundStarvation(reason)
-            ? `The ${name} rung answered inside its clock and produced nothing, because the ceiling it was given was spent before the answer began — "${detail}". `
-              + 'This is NOT a provider outage and NOT the user\'s prompt: a reasoning model bills its thinking to the same ceiling, so a ceiling below its thinking returns a truncated reply with no text and no tool call. '
-              + 'The ceiling here came from the REMAINING BUDGET OF THE LANE that made the call, not from this engine\'s own cap — so the fix is how much clock that lane reserves for an answer, not the cap or the rate constant in floorBudget.ts. '
-              + 'The rung was retired for the rest of this build so the ladder could reach a vendor that fits.'
-            : `The ${name} rung answered inside its clock and produced nothing, because our own output ceiling was spent before the answer began — "${detail}". `
-              + 'This is NOT a provider outage and NOT the user\'s prompt: a reasoning model bills its thinking to the same ceiling, so a ceiling below its thinking returns a truncated reply with no text and no tool call. '
-              + 'The ceiling is FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN (see floorBudget.ts); the rung was retired for the rest of this build so the ladder could reach a vendor that fits.',
+            ? `The ${name} rung returned no text or tool call and was classified as output-budget — "${detail}". `
+              + 'The classification records a truncated or reasoning-only turn with no usable answer; it does not by itself establish an outage or a problem with the user\'s prompt. '
+              + 'The allowance here came from the REMAINING BUDGET OF THE LANE that made the call, not from this engine\'s own cap. Inspect that lane\'s remaining clock and the configured floor rate in floorBudget.ts. '
+              + 'The granted allowance is not measured consumption, and this finding does not predict whether another call or engine would succeed.'
+            : `The ${name} rung returned no text or tool call and was classified as output-budget — "${detail}". `
+              + 'The classification records a truncated or reasoning-only turn with no usable answer; it does not by itself establish an outage or a problem with the user\'s prompt. '
+              + 'For a cap-bound allowance, inspect the effective call clock, overhead and AGENTV3_FLOOR_MS_PER_TOKEN (see floorBudget.ts). FLOOR_TIMEOUT_CAP_MS applies to non-streamed calls; streamed calls use their own hard cap. The allowance is not measured consumption or a prediction about other calls.',
           autoResolved: false,
         });
       }
@@ -3336,11 +3326,11 @@ export function classifyProviderFailure(reason: unknown): string {
   // here only, which is precisely how the platform ended up able to NAME this defect in a report while
   // the runner that could have acted on it had never heard of the class.
   if (isModelUnavailableError(text)) return 'model-unavailable';
-  // OUR OWN CEILING, not the provider's (autopsy ee20478d, 2026-09-15). The rung answered — quickly,
-  // correctly, inside its clock — and we had authorised so little output that the answer never began.
-  // It gets its own bucket because every other reading of it is wrong and leads somewhere useless:
-  // `timeout` benches a healthy vendor for our arithmetic, `context-length` blames the user's prompt
-  // for a cap on the reply, and `other:` is where this class hid for two nights across two vendors.
+  // OUTPUT-BUDGET is a recorded truncated-or-reasoning-only turn with no usable answer (autopsy
+  // ee20478d, 2026-09-15), not proof of consumed tokens or a verdict about every provider call.
+  // Keep its legacy marker distinct from `timeout`, `context-length` and `model-unavailable`:
+  // this signal alone establishes none of those causes. The surrounding error text names the
+  // authorised allowance's provenance without turning it into measured consumption.
   // Checked here, above the generic tests, so a future reword of the marker cannot fall through them.
   if (isStarvedBudgetError(text)) return 'output-budget';
   // Some providers report an unfunded account as 429. It cannot recover through throttle retries.
@@ -3487,17 +3477,14 @@ export function providerFailuresLookDegraded(
 }
 
 /**
- * Did this build fail because OUR OWN output ceiling starved a healthy rung? PURE.
+ * Does the recorded breakdown contain at least one output-budget failure? PURE.
  *
- * 🔴 WHY IT IS A SEPARATE PREDICATE, AND WHY ONE OCCURRENCE IS ENOUGH (autopsy ee20478d, 2026-09-15).
- * `providerFailuresLookMisconfigured` needs three of a bucket before it will call our configuration
- * wrong, because a single `bad-request` can be a one-off the next call gets right. This bucket cannot:
- * the authorised budget is a constant for the run, so one starved call is a proof about every call.
- * Requiring three would mean burning three ~97-second turns to earn the right to say so — the precise
- * waste the retirement in MultiProviderTurnRunner exists to stop, which would make the two halves of
- * one fix contradict each other.
+ * One matching bucket is enough to surface output-starvation evidence and suppress a capability
+ * upsell. This existential check does not establish that every rung answered, that every authorised
+ * token was consumed, or that starvation was the sole cause of the build's result. Other failures
+ * can coexist in the breakdown, and another call or engine may behave differently.
  *
- * Reads the RECORDED buckets, so it can never disagree with the report the admin is looking at.
+ * Reads only the RECORDED buckets; it does not inspect usage, timing or the complete provider chain.
  */
 export function buildStarvedItsOutputBudget(
   reasons: Record<string, string> | null | undefined,

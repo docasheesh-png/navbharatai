@@ -23,8 +23,9 @@
 // built. So the engine was structurally incapable of writing a file whenever the floor was slow —
 // not unlucky, incapable.
 //
-// 🔑 THE INVARIANT THIS MODULE EXISTS TO HOLD: **never authorise more output than the clock can
-// carry.** When the two disagree, the ASK is clamped to the CLOCK — and that is the whole point,
+// 🔑 THE DEFAULT BUDGET RULE: fit the authorised output to the estimated capacity of the clock.
+// Forced-reasoning rungs can keep the full ask instead; see REASONING_UNCLAMP_OFF below. Otherwise,
+// when the two disagree, the ASK is clamped to the CLOCK — and that is the whole point,
 // because the two failure modes are not equally bad:
 //
 //     TRUNCATION  (finish_reason: 'length')  the files written so far COME BACK. The truncation
@@ -103,13 +104,13 @@ export function floorMaxTokensForTimeout(timeoutMs: number, env: NodeJS.ProcessE
 }
 
 export interface FloorBudget {
-  /** What to authorise the model to produce — never more than the clock can carry. */
+  /** Authorised output allowance, not measured usage; forced-reasoning rungs may keep the full ask. */
   maxTokens: number;
   /** True when the caller's ask was larger than the clock and had to be cut down. */
   clamped: boolean;
   /** The ask the caller made, kept so the report can say what was reduced and why. */
   requested: number;
-  /** True when the clamp was deliberately not applied because this rung always reasons. */
+  /** The clock/rate clamp was bypassed; another ceiling may still reduce the caller's ask. */
   reasoningUnclamped?: boolean;
 }
 
@@ -132,8 +133,8 @@ export interface FloorBudget {
  *   • 3 calls returned reasoning and nothing else, each authorised exactly 9,833 tokens.
  *   • The first of them finished **131 seconds** into a 300-second clock. It did not run out of time;
  *     it ran out of ceiling with **58% of its clock unused.**
- *   • The calls that DID succeed used 8,651 / 9,199 / 9,746 output tokens — the ceiling is 9,833, so
- *     every first turn was a coin flip decided by how long the model happened to think.
+ *   • The calls that DID succeed used 8,651 / 9,199 / 9,746 output tokens, close to the 9,833 ceiling.
+ *     Those measurements show why the clamp warranted investigation, not that every turn would fail.
  *
  * ⚠️ AND THE FIX IS NOT A FASTER RATE CONSTANT — that was measured and rejected. Across 73 real calls
  * in the reports to hand, `FLOOR_MS_PER_OUTPUT_TOKEN_DEFAULT` is well calibrated: kimi-k2.6 aggregates
@@ -141,14 +142,13 @@ export interface FloorBudget {
  * suit the one fast model would under-bound every slow one and re-open the class this file was written
  * for. The rate is right; applying it to tokens that are not the answer is what is wrong.
  *
- * 🔒 WHY UNCLAMPING CANNOT MAKE THINGS WORSE, which is what made it shippable without a tier change:
- * the clock still bounds the call. A slow forced-reasoning rung is still cut at the same moment it is
- * cut today, still with no answer, and still throws to the next rung — identical. What changes is only
- * the case where the answer WOULD have fitted and our own ceiling stopped it first.
+ * 🔒 THE CLOCK STILL APPLIES: lifting this clamp does not extend the call's time bound or change
+ * its tier. Keeping the full ask can permit an answer that the reduced allowance would have cut off;
+ * it does not guarantee an answer, identical consumption, or success on a later call.
  */
 export const REASONING_UNCLAMP_OFF = 'off';
 
-/** Kill switch. `off` restores the pre-2026-09-17 behaviour exactly: every rung is clamped. */
+/** Kill switch for this module's forced-reasoning bypass; the streaming budget policy is separate. */
 export function reasoningUnclampEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_REASONING_UNCLAMP ?? '').trim().toLowerCase() !== REASONING_UNCLAMP_OFF;
 }
@@ -157,8 +157,8 @@ export function reasoningUnclampEnabled(env: NodeJS.ProcessEnv = process.env): b
  * Reconcile the caller's token ask with the clock the call actually has. Pure.
  *
  * `timeoutMs` must be the EFFECTIVE clock — after `turnDeadline` has reconciled the runner's own bound
- * with the lane's remaining budget — because a lane with 30 seconds left must not authorise a
- * 32,000-token answer either. The whole rule in one line: ask for what you can be given.
+ * with the lane's remaining budget. Calls subject to the clamp use that clock's estimated output
+ * capacity; forced-reasoning calls may keep the full ask while the same time bound still applies.
  */
 export function reconcileFloorBudget(
   requestedMaxTokens: number,
@@ -168,8 +168,8 @@ export function reconcileFloorBudget(
 ): FloorBudget {
   const requested = Number.isFinite(requestedMaxTokens) && requestedMaxTokens > 0 ? Math.floor(requestedMaxTokens) : 0;
   const affordable = floorMaxTokensForTimeout(timeoutMs, env);
-  // A rung whose thinking is billed to this same ceiling keeps the caller's ask; the clock remains the
-  // only bound. See REASONING_UNCLAMP_OFF above for why this is the safe direction and not a widening.
+  // A rung whose thinking is billed to this same ceiling keeps the caller's ask; both that allowance
+  // and the clock still bound the call. See REASONING_UNCLAMP_OFF above for why the clamp is lifted.
   if (opts.alwaysReasons && requested > 0 && requested > affordable && reasoningUnclampEnabled(env)) {
     return { maxTokens: requested, clamped: false, requested, reasoningUnclamped: true };
   }
@@ -189,12 +189,11 @@ export function reconcileFloorBudget(
 // `finish_reason: 'length'` with no text, no tool call and nothing to salvage — the total loss the
 // clamp was written to prevent, arrived at by the clamp.
 //
-// The arithmetic, which is what makes this a fact rather than a reading: FLOOR_TIMEOUT_CAP_MS (150_000)
-// − FLOOR_CALL_OVERHEAD_MS (5_000) = 145_000 ms ÷ 30 ms/token = **4,833**. That is a CONSTANT — the
-// most any floor rung can ever be authorised, whatever it asks for. It is why report 58fe8254 shows
-// `outputTokens: 4833` three times on Kimi and report ee20478d shows `outputTokens: 4833` three times
-// on GLM, on different models, on different nights. Two vendors cannot independently stop at the same
-// number. It was ours.
+// In those reports, FLOOR_TIMEOUT_CAP_MS (150_000) − FLOOR_CALL_OVERHEAD_MS (5_000) = 145_000 ms
+// ÷ 30 ms/token = **4,833**, matching the reported `outputTokens: 4833` on three Kimi calls in
+// 58fe8254 and three GLM calls in ee20478d. That historical cap is not a universal allowance: streamed
+// calls, lane deadlines, caller asks and the reasoning unclamp can yield different budgets. The
+// granted allowance alone does not establish how many tokens a later call actually consumed.
 //
 // In ee20478d all three calls returned `ok: true`, so not one of them appeared in the provider-failure
 // ledger, and every honesty check the platform owns reads that ledger. The build wrote zero files in
@@ -206,7 +205,9 @@ export function reconcileFloorBudget(
 // separately.
 
 /**
- * The marker a starved turn is reported under.
+ * The legacy marker a starved turn is reported under, not a measurement of tokens consumed.
+ * The predicate also accepts reasoning-only turns without a length stop; keep this marker stable
+ * for existing classifiers and reports, and explain the narrower evidence in the surrounding prose.
  *
  * ⚠️ WORDED TO SURVIVE THE CLASSIFIERS, and each omission is deliberate. It must NOT match
  * `isTimeoutProviderError` (/timed? ?out|timeout/) or the provider would be benched for our budgeting;
@@ -221,19 +222,19 @@ export const STARVED_BUDGET_MESSAGE = 'the output budget ran out before the answ
 export interface StarvableTurn {
   text?: string;
   toolUses?: unknown[];
-  /** finish_reason was 'length' — the answer was cut at the authorised ceiling. */
+  /** The turn was marked truncated; this flag carries no measured token consumption. */
   truncated?: boolean;
   /** The provider returned reasoning and nothing else (OpenAI-compatible `reasoning_content`). */
   reasoningOnly?: boolean;
 }
 
 /**
- * Did this turn spend its whole budget without producing anything a caller can use? PURE.
+ * Did this turn return no usable text or tool call while truncated or reasoning-only? PURE.
  *
- * Deliberately provider-INDEPENDENT: it asks only "was anything produced, and was the answer cut", so
- * it is true for a vendor that reports `reasoning_content` and equally true for one that reports
- * nothing but a `length` stop. A vendor-specific field as the only signal is how this class hid for
- * two nights across two vendors.
+ * Deliberately provider-INDEPENDENT: either a truncation flag or a reasoning-only flag is sufficient
+ * when there is no usable output. A reasoning-only turn need not have a `length` stop. These flags
+ * establish neither measured token consumption nor that the whole authorised allowance was used.
+ * A vendor-specific field as the only signal is how this class hid across two vendors.
  *
  * ⚠️ It is FALSE the moment ANY text or ANY tool call came back — a genuinely truncated tool call is a
  * partial success the truncation guard already salvages, and must keep flowing to the loop.
@@ -253,18 +254,17 @@ export function isStarvedBudgetError(error: unknown): boolean {
 }
 
 /**
- * Marks a starvation that happened with the clamp ALREADY LIFTED.
+ * Marks a starvation with the clock/rate clamp bypassed, not necessarily the full ask granted.
  *
- * 🔒 THE HONESTY HALF OF THE UNCLAMP (rule 5). Once a forced-reasoning rung keeps the build loop's full
- * ask, "our own ceiling" stops being true — and it is the one sentence the admin report leads with. A
- * rung that starves on the full ask is telling us something completely different from one that starved
- * on a clamp: the first is a model that cannot finish thinking inside ANY budget one turn can carry,
- * the second was our arithmetic. Reporting them with the same words would send the next autopsy to the
- * wrong module.
+ * 🔒 THE HONESTY HALF OF THE UNCLAMP (rule 5). Both the forced-reasoning path and streamingBudget
+ * can set this flag. The streaming path may still cap the grant below the ask at a model ceiling.
+ * Report the actual granted allowance and the clock/rate-clamp bypass, not full-request equality,
+ * measured consumption or a prediction that no other budget could succeed. The legacy marker stays
+ * unchanged for classifiers; its surrounding prose identifies which clamp was bypassed.
  */
 export const STARVED_UNCLAMPED_MARK = 'the ceiling was not reduced';
 
-/** Did this starvation happen on a rung whose ask we had already stopped clamping? PURE. */
+/** Was this starvation marked as bypassing the clock/rate clamp? PURE. */
 export function isUnclampedStarvation(error: unknown): boolean {
   const text = error instanceof Error ? error.message : String(error ?? '');
   return text.includes(STARVED_BUDGET_MESSAGE) && text.includes(STARVED_UNCLAMPED_MARK);
@@ -280,13 +280,13 @@ export function isUnclampedStarvation(error: unknown): boolean {
  *
  * On that build the arithmetic says so exactly: the rung was authorised **2,314** tokens, and
  * 2,314 × 30 ms + 5,000 = **74,420 ms** — nothing like `FLOOR_TIMEOUT_CAP_MS` (150,000). It was the fast
- * lane's own plan cap (90 s, `preambleCapMs`) minus the 15.5 s a crawling rung had already spent. **So
- * raising this module's cap, or its rate constant, would have changed nothing at all** — and those are
- * the two things the printed sentence points at.
+ * lane's own plan cap (90 s, `preambleCapMs`) minus the 15.5 s a crawling rung had already spent.
+ * Raising this module's own cap would not extend that lane deadline. The configured floor rate
+ * still participates in converting the selected clock into an allowance; neither number is usage.
  *
- * ⚠️ IT IS MUTUALLY EXCLUSIVE WITH `STARVED_UNCLAMPED_MARK` by construction: an unclamped rung keeps the
- * caller's full ask, so no clock reduced its ceiling. A test asserts that, because two markers on one
- * error would make the report choose arbitrarily between two contradictory explanations.
+ * ⚠️ IT IS MUTUALLY EXCLUSIVE WITH `STARVED_UNCLAMPED_MARK` by construction: the clock/rate-clamp
+ * bypass takes the first branch, even if another ceiling reduced the ask. A test asserts that,
+ * because two markers on one error would give the report contradictory budget provenance.
  */
 export const STARVED_BY_LANE_MARK = 'the clock came from the lane that called it, not our own cap';
 
@@ -301,15 +301,15 @@ export function isLaneBoundStarvation(error: unknown): boolean {
  *
  * 🔴 THE THIRD CASE, AND THE REPORT PRINTED THE FIRST ONE'S SENTENCE FOR IT FIFTEEN TIMES (autopsy
  * 57875eb3, 2026-09-17). A fast-lane repair asked for 8,000 tokens; the 300 s streamed clock could
- * carry ~9,800, so `reconcileFloorBudget` granted the ask unchanged — and `glm-5.3` spent all 8,000 on
- * reasoning, thirteen calls in a row. Every one was reported as *"Our own ceiling … the ceiling is
+ * carry ~9,800, so `reconcileFloorBudget` granted the ask unchanged — and `glm-5.3` returned reasoning
+ * without an answer, thirteen calls in a row. Every one was reported as *"Our own ceiling … the ceiling is
  * FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN"*. Neither knob bounded that call. The number that
  * did is the CALLER's per-call `maxTokens`, which lives nowhere near this module.
  *
  * `granted === requested` (with `requested > 0`) is exactly the not-clamped case of
  * `reconcileFloorBudget` — the ask fitted the clock — so this fact is derivable from the two numbers
  * already passed and needs no new plumbing. It is mutually exclusive with BOTH other markers by
- * construction: an unclamped-reasoning rung takes the branch above, and a lane clock that did not
+ * construction: a clock/rate-clamp bypass takes the branch above, and a lane clock that did not
  * reduce the ask did not bound it.
  */
 export const STARVED_BY_ASK_MARK = 'the ceiling was the ask itself';
@@ -337,28 +337,28 @@ export function starvedBudgetError(
 ): Error {
   if (unclamped) {
     return new Error(
-      `${STARVED_BUDGET_MESSAGE} — this rung was authorised the full ${granted} output tokens the build `
-      + `asked for (${STARVED_UNCLAMPED_MARK}) and spent every one of them on reasoning before producing `
-      + 'text or a tool call. This model needs more output than one turn can carry, so the ladder moved on.',
+      `${STARVED_BUDGET_MESSAGE} — this rung was authorised ${granted} output tokens with the clock/rate `
+      + `clamp bypassed (${STARVED_UNCLAMPED_MARK}); another ceiling may still reduce the caller's ask. No text or tool call was returned. `
+      + 'The turn was truncated or returned reasoning only; authorised tokens are not measured usage. This does not predict the outcome of another call.',
     );
   }
   if (requested > 0 && requested === granted) {
     // Not clamped: the ask fitted the clock, so the ask IS the ceiling. See STARVED_BY_ASK_MARK.
     return new Error(
       `${STARVED_BUDGET_MESSAGE} — this rung was authorised the full ${granted} output tokens its caller `
-      + `asked for (${STARVED_BY_ASK_MARK}: nothing reduced it, and the clock would have carried more) and `
-      + 'spent every one of them on reasoning before producing text or a tool call. The number that bounded '
-      + "this call is the caller's own per-call ask, not this engine's cap or rate constant.",
+      + `asked for (${STARVED_BY_ASK_MARK}: nothing reduced it, and the ask fitted the clock) but `
+      + 'returned no text or tool call. The turn was truncated or returned reasoning only; the allowance is '
+      + "the caller's own per-call ask, not this engine's cap or rate constant, and is not measured usage.",
     );
   }
   const asked = requested > 0 && requested !== granted ? `, cut down from ${requested}` : '';
   const lane = typeof laneBoundMs === 'number' && Number.isFinite(laneBoundMs) && laneBoundMs > 0
-    ? ` ${STARVED_BY_LANE_MARK}: the lane that asked had ${Math.round(laneBoundMs)}ms left, which is what `
-      + `${granted} tokens costs at the floor rate, so raising this engine's own cap or its rate constant `
-      + 'would change nothing here.'
+    ? ` ${STARVED_BY_LANE_MARK}: the lane that asked had ${Math.round(laneBoundMs)}ms left, which bounded `
+      + `the ${granted}-token allowance at the configured floor rate. Inspect the lane's remaining clock `
+      + "and that rate calculation, rather than treating this engine's own cap as the selected clock."
     : '';
   return new Error(
     `${STARVED_BUDGET_MESSAGE} — this rung was authorised ${granted} output tokens${asked} `
-    + `and spent every one of them without producing text or a tool call. Our own ceiling, not this provider.${lane}`,
+    + `but returned no text or tool call. The turn was truncated or returned reasoning only; the authorised ceiling is not measured usage.${lane}`,
   );
 }

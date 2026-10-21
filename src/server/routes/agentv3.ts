@@ -3455,8 +3455,8 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
   // 🔴 A PLANNING CALL CLIMBS THE PLAN LADDER, NOT THE BUILD'S (autopsy SignBridge, 2026-09-26). A plan is
   // ONE structured answer; `complex` exists to open a whole BUILD on a stronger coder, and on Weak that
   // coder always reasons first. The Project Mode planner took the complex build chain, opened on
-  // kimi-k2.7-code, then glm-5.3 — both spent their full 12,000-token allowance thinking and wrote
-  // nothing, and the planner's clock ran out at 315s: 22% of the build, for no plan. The fast lane had
+  // kimi-k2.7-code, then glm-5.3 — both were authorised 12,000 output tokens but returned reasoning
+  // without a plan, and the planner's clock ran out at 315s: 22% of the build, for no plan. The fast lane had
   // already learned this (fastLaneRung.ts skips a reasoning opener); the planners were the sibling.
   // `planLadder` puts the tier's plan rung first (a rung that can be told not to think) and keeps the
   // tier's own ladder behind it, so nothing another tier forbids can be reached.
@@ -26548,13 +26548,12 @@ async function noteBuildOutcome(
           // both — when providers really were flaky, saying so is the more useful of the two truths.
           const misconfigured = !stopped && !refused && !degraded
             && providerFailuresLookMisconfigured(buildDiag.providerFailureBreakdown());
-          // (e) OUR OWN OUTPUT CEILING (build report ee20478d, 2026-09-15). The rungs ANSWERED — three
-          // times, inside their clock, HTTP 200 every time — and produced nothing, because the ceiling
-          // we authorise is spent on a reasoning model's thinking before any content exists. The user
-          // was told "the model replied without building" and asked to buy a stronger engine. A fuller
-          // wallet would have changed nothing: the ceiling is a constant of ours, identical on every
-          // tier. Grouped with (d) because it is the same KIND of fact — our configuration, not their
-          // service — and tested last only because the readings above are strictly more specific.
+          // (e) RECORDED OUTPUT STARVATION (build report ee20478d, 2026-09-15). At least one failure
+          // bucket says a turn returned no usable text or tool call while truncated or reasoning-only.
+          // This is enough to withhold a capability upsell, not proof that every rung answered, every
+          // granted token was consumed, or another tier would fail. Allowances can differ by caller,
+          // lane, effective cap and reasoning-unclamp policy. Preserve the existing configuration
+          // narration and precedence; this check does not diagnose the whole chain or invalid input.
           const starved = !stopped && !refused && !degraded && !misconfigured
             && buildStarvedItsOutputBudget(buildDiag.providerFailureBreakdown());
           if (!refused && !stopped && !interrupted && !answerOnlyNow()) {
@@ -26581,10 +26580,9 @@ async function noteBuildOutcome(
                 : refused
                 ? 'Did not ask this user to add credits: the engine DECLINED this request and wrote no files — a refusal, or an honest "this cannot be done here" (autopsy 707f8e56: an MP4 video asked of a web-app builder, declined with an HTML5-animation offer). `modelAnswer.declined` does not tell those apart, so neither is called a policy refusal. Either way it is an answer, not a shortfall a stronger engine would fix — no upsell.'
                 : starved
-                  // Deliberately NOT the "did not respond" wording below: it responded, inside its clock,
-                  // every time. Saying otherwise would send the next reader to a provider status page
-                  // when the number to change is ours (see floorBudget.ts).
-                  ? 'Did not ask this user to add credits: every rung ANSWERED and produced nothing, because our own output ceiling was spent before the answer began. A fuller wallet buys a different model, not a different ceiling — this build would have failed identically on the strongest engine we have.'
+                  // The predicate is existential: one recorded output-budget failure is enough.
+                  // Neither measured usage nor an all-rung or cross-tier outcome follows from it.
+                  ? 'Did not ask this user to add credits: at least one recorded failure was output starvation, a truncated or reasoning-only turn with no usable text or tool call. This evidence does not establish that every rung answered, that the full authorised allowance was consumed, or that a stronger engine would succeed or fail. It does not justify asking the user to pay for a capability upgrade.'
                   : 'Did not ask this user to add credits: the build failed because the engine did not respond, not because the app needed a stronger one. Charging for our own slowness is what this check exists to prevent.',
             });
           }

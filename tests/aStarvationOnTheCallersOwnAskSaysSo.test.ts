@@ -57,7 +57,9 @@ describe('🔑 a starvation on the caller\'s own ask says so', () => {
     // The other two cases are untouched.
     const clamped = starvedBudgetError(4_833, ASK);
     expect(isAskBoundStarvation(clamped)).toBe(false);
-    expect(clamped.message).toContain('Our own ceiling, not this provider');
+    expect(clamped.message).toContain('authorised 4833 output tokens, cut down from 8000');
+    expect(isLaneBoundStarvation(clamped)).toBe(false);
+    expect(isUnclampedStarvation(clamped)).toBe(false);
     const lane = starvedBudgetError(2_314, ASK, false, 74_420);
     expect(isAskBoundStarvation(lane)).toBe(false);
     expect(isLaneBoundStarvation(lane)).toBe(true);
@@ -96,10 +98,13 @@ describe('🔒 the report prints the ask-bound explanation, and stops pointing a
     expect(msg).not.toContain('REMAINING BUDGET OF THE LANE');
   });
 
-  it('the other three explanations are unchanged', () => {
-    expect(starvedLine(starvedBudgetError(4_833, ASK))).toContain('FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN');
+  it('the other three explanations retain their distinct allowance provenance', () => {
+    const cap = starvedLine(starvedBudgetError(4_833, ASK));
+    expect(cap).toContain('effective call clock, overhead and AGENTV3_FLOOR_MS_PER_TOKEN');
+    expect(cap).toContain('FLOOR_TIMEOUT_CAP_MS applies to non-streamed calls');
+    expect(cap).toContain('streamed calls use their own hard cap');
     expect(starvedLine(starvedBudgetError(2_314, ASK, false, 74_420))).toContain('REMAINING BUDGET OF THE LANE');
-    expect(starvedLine(starvedBudgetError(ASK, ASK, true))).toContain('NOT reduced by us');
+    expect(starvedLine(starvedBudgetError(ASK, ASK, true))).toContain('The clock/rate clamp was bypassed');
   });
 
   it('still a real finding, never auto-resolved', () => {
@@ -113,7 +118,7 @@ describe('🔒 the report prints the ask-bound explanation, and stops pointing a
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '')).join('\n');
     const ask = code.indexOf('isAskBoundStarvation(reason)');
     const lane = code.indexOf('isLaneBoundStarvation(reason)');
-    const own = code.indexOf('FLOOR_TIMEOUT_CAP_MS / AGENTV3_FLOOR_MS_PER_TOKEN (see floorBudget.ts)');
+    const own = code.indexOf('For a cap-bound allowance, inspect the effective call clock, overhead and AGENTV3_FLOOR_MS_PER_TOKEN');
     expect(ask).toBeGreaterThan(-1);
     expect(ask).toBeLessThan(lane);
     expect(lane).toBeLessThan(own);

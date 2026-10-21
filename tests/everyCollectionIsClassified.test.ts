@@ -389,6 +389,12 @@ const UNREADABLE_RECEIVERS: Record<string, string> = {
 
 /** A new document-ref alias is excused only in its verified file, never everywhere named `ref`. */
 const SCOPED_DOCUMENT_RECEIVERS: Record<string, Record<string, { why: string; assignment: RegExp }>> = {
+  'src/server/lib/buildReportNumbering.ts': {
+    ref: {
+      why: 'parent is a workspace_diagnostics_v3 query document snapshot; its history is the existing workspace subcollection, read-only here',
+      assignment: /const history = parent\.ref\.collection\('history'\)/,
+    },
+  },
   'src/server/lib/failedReportAutopsy.ts': {
     ref: {
       why: 'the hashed autopsy parent document; revisions and mutations are retained-parent children',

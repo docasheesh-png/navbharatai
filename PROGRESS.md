@@ -99287,6 +99287,45 @@ typechecks, unused-import/native/OAuth checks, build, bundle, production-depende
 gates pass; hard offline guard remains 440 bytes. Independent composed-route review also passes.
 Fresh-head hosted full coverage, real queue drills and boot remain mandatory before merge.
 
+
+## 2026-10-21 — Chronological numbers on private report lists
+
+Admin request: number Admin → Apps → All builds and `/failedbr`, oldest retained report = 1.
+The existing lists have different cohorts: latest report per workspace versus every retained
+settled failure. Each receives its own start-time rank (stable workspace/history tie-break),
+before filters and independent of pagination; existing list ordering is unchanged. Numbers
+are explicitly snapshot positions, not permanent report IDs. Retention can renumber them.
+
+A lazy server-only, field-projected read-only transaction builds each cohort separately.
+No new collection, writes, credentials, collection-group index, full-report client sweep,
+autopsy changes or permission changes. Ten-minute instance-local single-flight cache;
+30-second failure cache. Limits: 1,000 workspaces, 5,000 documents plus at most eight
+in-flight 100-document pages, 2,000 queries, eight concurrent history queries, 30-second
+response deadline. Timeout prevents further query admission and retains single-flight until
+the underlying transaction drains. Missing/changed/new rows, invalid chronology, incomplete
+scans and unavailable storage show “Number unavailable”, never a page index. Numbers
+carry total and as-of time. Each cold instance pays its own bounded metadata-read cost.
+
+Regression coverage: timestamp versus workspace/save/ID order, stable ties, separate cohorts,
+latest-only deduplication, settled failures, filters/subsets/pages, >100-document pagination,
+field projection, empty results, cached concurrent requests, new/replaced rows, deletion and
+retention refresh, unavailable storage, scan limits and hanging reads. Both UI surfaces share
+one validated number label. Two bounded authenticated read-only POST metadata endpoints
+receive only visible report references and timestamps. Existing list GET responses and MCP
+are unchanged: rows remain immediately browsable while a separate metadata request runs.
+The shared hook aborts/ignores stale page, filter, token and unmount responses; no polling
+or full-report rereads. Loading and unavailable numbers are distinct. Verification results are recorded in the PR; full hosted CI is
+required before merge. Local provider graph/boot and networked audit remain outside the
+credential-free, hard-offline verification scope.
+
+### PR #3890 hosted-CI follow-up
+
+Run 11908 passed 42,568 tests and found three source-census integration gaps: the new
+read-only metadata reader needed file-scoped document-receiver and retained-history
+classification; the paging guard still named the pre-enrichment input variable. The
+classifications now point at the existing workspace history/retention policies, and
+the paging guard verifies both the enrichment pipeline and the unchanged filter reset
+key. No runtime behavior, retention rule, coverage floor or assertion was removed.
 ## 2026-10-21 — Q-2203's root cause was found by #3859's author, and my hypothesis was wrong
 
 **What I claimed:** that #3859's `BUILD_AUTHORITY_UNAVAILABLE` refusal path left its preflight ping timer

@@ -99388,3 +99388,7 @@ assertion actionable without clearing or draining any timer for it"*.
 `vitest.config.ts` declares no `setupFiles`; 43 fake-timer files, 37 unmocked, 17 touching a route or provider
 path). That is deliberate: closing Q-2203 closes the instance, and the row that closes the class is still open
 with its fix proposed and its breakage risk named.
+
+## 2026-10-21 — newest failed reports (a75153ab, c48bba70, d693ecdc)
+
+Full connector list read to exhaustion; 3 reports newer than the previous cut. Two were user stops within 8–14 s (clean). a75153ab: stop billed as "app not running" although the app rendered at 261 s of 380 s. Root cause and class in BUILD_REPORT_QUEUE.md Q-2253; fix `earliestRenderProof()` in `cancelledBuildBilling.ts`, wired at the in-build green producer and both billing points; test `aRenderSeenInBuildCountsForTheStopBill.test.ts` (reversion-proven).

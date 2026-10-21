@@ -70,6 +70,8 @@ export interface RunningBuild {
   exited?: boolean;
   /** Deadline response has closed; time alone cannot retire this still-running body. */
   requiresBodyExit?: boolean;
+  /** Captured once: a predecessor must not close a successor's shared mirror during delayed cleanup. */
+  deliveryClose?: Promise<boolean>;
   /** When the user pressed Stop on it. */
   stoppedAt?: number;
   /** Woken when the build exits. */

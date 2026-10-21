@@ -150,7 +150,9 @@ describe('🔒 the wiring', () => {
     expect(start).toBeGreaterThan(0);
     expect(end).toBeGreaterThan(start);
     const deadline = route.slice(start, end);
-    expect(deadline).toContain('begin: () => retainBuildUntilBodyExit(buildKey, rb, stoppingBuilds)');
+    expect(deadline).toContain('coordination.invalidateQueuedWindow();');
+    expect(deadline).toContain('retainBuildUntilBodyExit(buildKey, rb, stoppingBuilds);');
+    expect(deadline.indexOf('coordination.invalidateQueuedWindow();')).toBeLessThan(deadline.indexOf('retainBuildUntilBodyExit('));
     expect(deadline).toContain('await coordination.flushPublication();');
     expect(deadline).toContain('close: () => closeDeadlineBuildStream(buildKey, rb, runningBuilds, endBuild)');
     for (const prematureExit of ['releaseBuildLock(', 'releaseBuildLease(', 'markBuildExited(']) {
@@ -160,7 +162,10 @@ describe('🔒 the wiring', () => {
   });
 
   it('Stop reaches a build on another instance, only for a workspace the verified caller owns', () => {
-    expect(route).toMatch(/workspaceOwnershipOk\(verifiedStopUid, null, stopWorkspaceId\)\) \{\n\s+wasRunning = await requestWorkspaceBuildStop\(/);
+    const stop = route.slice(route.indexOf("app.post('/api/agentv3/stop'"), route.indexOf('// ── UNSEND'));
+    expect(stop).toMatch(/if \(queuedStopWorkspaceId && verifiedWorkspaceReadOk\(verifiedStopUid, queuedStopWorkspaceId\)\) \{\n\s+try \{\n\s+const stopped = await stopWorkspaceQueueAndLease\(queuedStopWorkspaceId\);/);
+    expect(stop).toContain('stopped.result.leaseStopped || stopped.result.queuePaused');
+    expect(stop).toContain("res.status(503).json({ error: 'Your queued build could not be confirmed stopped.");
   });
 
   it('the client offers Stop on that refusal instead of a dead end', () => {

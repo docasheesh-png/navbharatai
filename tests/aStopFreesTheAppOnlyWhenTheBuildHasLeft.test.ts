@@ -223,7 +223,10 @@ describe('5 · a stopped build holds the app until it has left', () => {
     expect(start).toBeGreaterThan(-1);
     expect(finish).toBeGreaterThan(start);
     const deadline = ROUTE.slice(start, finish);
-    expect(deadline).toContain('begin: () => retainBuildUntilBodyExit(buildKey, rb, stoppingBuilds)');
+    const begin = deadline.slice(deadline.indexOf('begin:'), deadline.indexOf('close:'));
+    expect(begin).toContain('coordination.invalidateQueuedWindow();');
+    expect(begin).toContain('retainBuildUntilBodyExit(buildKey, rb, stoppingBuilds)');
+    expect(begin.indexOf('coordination.invalidateQueuedWindow();')).toBeLessThan(begin.indexOf('retainBuildUntilBodyExit('));
     expect(deadline).toContain('close: () => closeDeadlineBuildStream(buildKey, rb, runningBuilds, endBuild)');
     expect(deadline).toContain('await coordination.flushPublication();');
     for (const release of ['releaseBuildLock(', 'releaseBuildLease(', 'markBuildExited(', 'clearGreenLatch(', 'stoppingBuilds.delete(']) {

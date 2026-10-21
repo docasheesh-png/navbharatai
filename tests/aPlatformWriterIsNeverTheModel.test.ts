@@ -447,10 +447,21 @@ describe('🔒 census — every write the route makes after the model answers na
     expect(sharedRestore).toBeDefined();
     expect(sharedRestore!.end).toBeLessThan(start);
     expect(sharedRestore!.parameters[3].initializer?.getText(sf)).toBe("'green-guard-restore'");
-    expect(ts.isCallExpression(sharedRestore!.body)).toBe(true);
-    const zone = sharedRestore!.body as ts.CallExpression;
+    // The adapter now keeps its raw job for the publication barrier before returning it. The
+    // mutations must still live inside the SAME named pass; a surrounding tracker is not a pass.
+    expect(ts.isBlock(sharedRestore!.body)).toBe(true);
+    let restoring: ts.VariableDeclaration | undefined;
+    const returned: ts.ReturnStatement[] = [];
+    walk(sharedRestore!.body, (node) => {
+      if (ts.isVariableDeclaration(node) && node.name.getText(sf) === 'restoring') restoring = node;
+      if (ts.isReturnStatement(node)) returned.push(node);
+    });
+    expect(restoring?.initializer && ts.isCallExpression(restoring.initializer)).toBe(true);
+    const zone = restoring!.initializer as ts.CallExpression;
     expect(zone.expression.getText(sf)).toBe('runInPass');
     expect(zone.arguments[0].getText(sf)).toBe('pass');
+    expect(zone.arguments[1].getText(sf)).toContain('applySnapshotRestore(plan,');
+    expect(returned.map((node) => node.expression?.getText(sf))).toEqual(['restoring']);
     expect(restoreSites).toHaveLength(1);
     expect(restoreSites[0].named).toBe(true);
     expect(restorePasses.sort()).toEqual(['design-heal-revert', 'green-guard-restore', 'green-guard-restore', 'green-guard-restore']);

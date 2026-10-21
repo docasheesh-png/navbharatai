@@ -1,4 +1,5 @@
 import { createPendingRequestIdentities } from '../lib/requestIdentity';
+import { fetchQueuedContinuationAdmission } from '../components/agentv3/queuedContinuationClient';
 import { confirmedQueueResponse, confirmedQueueClaim, confirmedEnqueue, type QueueResponseItem } from '../lib/queueResponse';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clockKeptOnReattach, clockFromAttach } from '../components/agentv3/buildClock';
@@ -57,7 +58,7 @@ export interface UseAgentV3Build {
    * there is no app code a "Fix with AI" could refer to (autopsy fdd59ef8).
    */
   errorBeforeBuildStarted: boolean;
-  start: (prompt: string, opts?: { requestId?: string; queueItemId?: string; queueClaimToken?: string; userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean; confirmedFeatures?: { include: string[]; exclude: string[] } }) => Promise<void>;
+  start: (prompt: string, opts?: { requestId?: string; queueItemId?: string; queueClaimToken?: string; queueContinuationProtocol?: 1; queueContinuationNonce?: string; queuePredecessorAttemptId?: string; userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean; confirmedFeatures?: { include: string[]; exclude: string[] } }) => Promise<void>;
   /** Approve or reject a pending plan/permission gate (P4). */
   respond: (requestId: string, approved: boolean) => Promise<void>;
   /** A project import gave this session a workspace without a build — adopt it unless one is already live. */
@@ -81,7 +82,7 @@ export interface UseAgentV3Build {
   /** "Restore all files" — genuinely bring the whole project back into the workspace (writes the
    *  durably-saved files back) and reflect the real file list. Returns count + whether it restored. */
   restoreAllFiles: () => Promise<{ ok: boolean; count: number; restored: boolean }>;
-  stop: () => void;
+  stop: (workspaceId?: string) => void;
   /** UNSEND — take back the last message: stop any in-flight build AND purge it from the server
    *  transcript + workspace memory so it never resurfaces. Resolves true when the server confirmed the
    *  purge (the caller then removes the message from the visible thread). Never throws. */
@@ -109,6 +110,8 @@ export interface UseAgentV3Build {
   /** Queue UI (FIX #6): enqueue a command, list this app's queue, cancel a pending item. */
   queueEnqueue: (workspaceId: string | undefined, prompt: string, source: 'user' | 'planner' | 'advisor') => Promise<boolean>;
   queueList: (workspaceId?: string) => Promise<QueueItemView[]>;
+  /** Full authoritative state for a pending queued handoff; paused must not be discarded. */
+  queueState: (workspaceId?: string) => Promise<{ items: QueueItemView[]; paused: boolean }>;
   queueCancel: (workspaceId: string | undefined, id: string) => Promise<QueueItemView[]>;
   queueRecover: (workspaceId: string | undefined, id: string) => Promise<boolean>;
   /** Ask the server whether a build is running for this account (sets serverBuildRunning). Pass
@@ -363,7 +366,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   // suppressed by it (see serverBuildNeedsAttention).
   const resultWorkspaceRef = useRef<string | undefined>(undefined);
   // V4-1a — the last user turn's shape (for auto-continue) + the once-per-interruption guard.
-  const lastStartRef = useRef<{ prompt: string; opts: { userId?: string; email?: string; sessionId?: string; framework?: string } } | null>(null);
+  const lastStartRef = useRef<{ prompt: string; opts: { userId?: string; email?: string; sessionId?: string; framework?: string; queueItemId?: string } } | null>(null);
   const autoContinuedRef = useRef<boolean>(false);
   // True only for the auto-continue's own start() call — so it does NOT re-arm the one-shot guard
   // (a second death of the same interrupted turn must fall back to the honest error, never loop).
@@ -416,13 +419,14 @@ export function useAgentV3Build(): UseAgentV3Build {
     setBillingBlock(null);
   }, []);
 
-  const stop = useCallback(() => {
+  const stop = useCallback((workspaceId?: string) => {
     generationRef.current += 1; // invalidate any in-flight resume()/subscribeLive() from this point on
     const stopGeneration = generationRef.current;
     abortRef.current?.abort();
     abortRef.current = null;
     setRunning(false);
     setServerBuildRunning(false);
+    setState((previous) => ({ ...previous, resumable: false, queueContinuation: undefined }));
     // Clear any "a build is already running" error — Stop is exactly its resolution, so the banner must
     // not linger and re-tempt the user into the "Fix with AI" retry loop it produced.
     setError(null);
@@ -442,7 +446,7 @@ export function useAgentV3Build(): UseAgentV3Build {
         const res = await fetch('/api/agentv3/stop', {
           method: 'POST',
           headers: await authJsonHeaders(),
-          body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current, workspaceId: workspaceIdRef.current }),
+          body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current, workspaceId: workspaceId ?? workspaceIdRef.current }),
         });
         if (res.status !== 404) failure = await writeFailure(res, 'Stop did not reach the server.');
       } catch {
@@ -465,6 +469,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     abortRef.current = null;
     setRunning(false);
     setServerBuildRunning(false);
+    setState((previous) => ({ ...previous, resumable: false, queueContinuation: undefined }));
     setError(null);
     setErrorBeforeBuildStarted(false);
     const workspaceId = workspaceIdRef.current;
@@ -1141,17 +1146,19 @@ export function useAgentV3Build(): UseAgentV3Build {
     } catch (e) { throw e instanceof Error ? e : new Error('Your queued step could not be confirmed. Please retry.'); }
   }, []);
 
-  const queueList = useCallback(async (workspaceId?: string): Promise<QueueItemView[]> => {
-    if (!workspaceId) return [];
+  const queueState = useCallback(async (workspaceId?: string): Promise<{ items: QueueItemView[]; paused: boolean }> => {
+    if (!workspaceId) return { items: [], paused: false };
     try {
       const params = new URLSearchParams({ workspaceId });
       if (userIdRef.current) params.set('userId', userIdRef.current);
       const res = await fetch(`/api/agentv3/queue?${params.toString()}`, { headers: await authJsonHeaders() });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.error || 'Queue progress is temporarily unavailable. Please retry.');
-      return confirmedQueueResponse(j).items;
+      return confirmedQueueResponse(j);
     } catch (e) { throw e instanceof Error ? e : new Error('Queue progress could not be confirmed. Please retry.'); }
   }, []);
+
+  const queueList = useCallback(async (workspaceId?: string): Promise<QueueItemView[]> => (await queueState(workspaceId)).items, [queueState]);
 
   const queueCancel = useCallback(async (workspaceId: string | undefined, id: string): Promise<QueueItemView[]> => {
     if (!workspaceId || !id) return [];
@@ -1339,11 +1346,11 @@ export function useAgentV3Build(): UseAgentV3Build {
   }, []);
 
   const start = useCallback(
-    async (prompt: string, opts?: { requestId?: string; queueItemId?: string; queueClaimToken?: string; userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean; confirmedFeatures?: { include: string[]; exclude: string[] } }) => {
+    async (prompt: string, opts?: { requestId?: string; queueItemId?: string; queueClaimToken?: string; queueContinuationProtocol?: 1; queueContinuationNonce?: string; queuePredecessorAttemptId?: string; userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean; confirmedFeatures?: { include: string[]; exclude: string[] } }) => {
       if (running) return;
       // V4-1a — remember this turn's shape so an interrupted build can auto-continue itself
       // (attachments/importUrl deliberately dropped: the continue-turn resumes from durable files).
-      lastStartRef.current = { prompt, opts: { userId: opts?.userId, email: opts?.email, sessionId: opts?.sessionId, framework: opts?.framework } };
+      lastStartRef.current = { prompt, opts: { userId: opts?.userId, email: opts?.email, sessionId: opts?.sessionId, framework: opts?.framework, queueItemId: opts?.queueItemId } };
       if (!autoStartRef.current) autoContinuedRef.current = false; // only a REAL user turn re-arms the one-shot
       autoStartRef.current = false;
       userIdRef.current = opts?.userId;
@@ -1408,6 +1415,9 @@ export function useAgentV3Build(): UseAgentV3Build {
             sessionId: opts?.sessionId,
             queueItemId: opts?.queueItemId,
             queueClaimToken: opts?.queueClaimToken,
+            queueContinuationProtocol: opts?.queueContinuationProtocol,
+            queueContinuationNonce: opts?.queueContinuationNonce,
+            queuePredecessorAttemptId: opts?.queuePredecessorAttemptId,
             // Role chats (FIX #5): 'planner' | 'advisor' routes the turn into the read-only role lane
             // (no tools, no build lock) — absent for normal builder turns.
             chatRole: opts?.chatRole || undefined,
@@ -1436,15 +1446,17 @@ export function useAgentV3Build(): UseAgentV3Build {
       let receiptRefused = false;
 
       try {
-        const res = await fetch('/api/agentv3/chat', {
-          method: 'POST',
+        const sendBuild = async (signal: AbortSignal): Promise<Response> => {
           // SECURITY (C1): send the Firebase ID token so the server derives identity from the VERIFIED
           // token, not the body.userId (which it no longer trusts). forceRefresh=true mints a fresh
           // token so a stale/expired cached one self-heals instead of arriving unverifiable.
-          headers: await authJsonHeaders(true),
-          body: JSON.stringify({ ...executionBody, requestId }),
-          signal: controller.signal,
-        });
+          const headers = await authJsonHeaders(true);
+          if (signal.aborted || isStale(gen)) throw new DOMException('Build request cancelled', 'AbortError');
+          return fetch('/api/agentv3/chat', { method: 'POST', headers, body: JSON.stringify({ ...executionBody, requestId }), signal });
+        };
+        const res = opts?.queueContinuationNonce
+          ? await fetchQueuedContinuationAdmission({ send: sendBuild, signal: controller.signal, current: () => !isStale(gen) })
+          : await sendBuild(controller.signal);
 
         if (!res.ok || !res.body) {
           let msg = `AgentV3 request failed (${res.status}).`;
@@ -1487,7 +1499,7 @@ export function useAgentV3Build(): UseAgentV3Build {
           // (workspace-scoped — the attach route refuses a different session's build, so this can
           // never hijack another chat). The typed message was NOT queued into the running build —
           // the notice says so honestly, in-thread.
-          if (res.status === 409 && resumable && workspaceIdRef.current) {
+          if (res.status === 409 && resumable && workspaceIdRef.current && !opts?.queueItemId) {
             setRunning(false);
             await resume({
               userId: opts?.userId,
@@ -1507,7 +1519,7 @@ export function useAgentV3Build(): UseAgentV3Build {
             setRunning(false);
             return;
           }
-          if (res.status === 409 && resumable) {
+          if (res.status === 409 && resumable && !opts?.queueItemId) {
             // A build is running for this account but in a DIFFERENT (or unknown) session — attaching
             // it here would pour another chat's build into this one. But a bare error DEAD-ENDS the user
             // (root-cause fix): flip serverBuildRunning so the panel renders the real STOP button, which
@@ -1596,13 +1608,20 @@ export function useAgentV3Build(): UseAgentV3Build {
         if (!gotEvent && !isStale(gen)) {
           const sample = (rawSample || buffer).trim();
           setError(
-            sample
+            opts?.queueItemId
+              ? "This queued step's progress could not be confirmed. Refresh and review it before continuing."
+              : sample
               ? `The server did not return NavBharatAI Pro events. It replied with:\n${sample.slice(0, 300)}`
               : `No response from the NavBharatAI Pro engine (HTTP ${res.status}). The backend may be unreachable, or NavBharatAI Pro is not enabled on the server.`,
           );
         }
       } catch (err) {
         if (!(err instanceof DOMException && err.name === 'AbortError') && !isStale(gen)) {
+          if (opts?.queueItemId) {
+            // A workspace-only probe cannot prove which queued window owns that stream.
+            if (!sawResult) setError("This queued step's progress could not be confirmed. Refresh and review it before continuing.");
+            return;
+          }
           // A mid-stream network drop — iOS Safari surfaces this as "Load failed", and a
           // flaky mobile link or a brief server blip looks the same — must NOT dead-end the
           // build. The server keeps the build alive and BUFFERED (runningBuilds + /attach),
@@ -1711,14 +1730,16 @@ export function useAgentV3Build(): UseAgentV3Build {
               // instead of dead-ending on the notice, AUTO-CONTINUE with the proven recovery message,
               // exactly once per interruption. A second death of the same turn (or nothing to
               // continue) falls back to the honest notice.
-              if (shouldAutoContinue({ sawResult: sawResultRef.current, alreadyContinued: autoContinuedRef.current, hasLastPrompt: !!lastStartRef.current })) {
+              if (!lastStartRef.current?.opts.queueItemId && shouldAutoContinue({ sawResult: sawResultRef.current, alreadyContinued: autoContinuedRef.current, hasLastPrompt: !!lastStartRef.current })) {
                 autoContinuedRef.current = true;
                 const last = lastStartRef.current!;
                 setError(null);
     setErrorBeforeBuildStarted(false);
                 setTimeout(() => { autoStartRef.current = true; void start('please continue', last.opts); }, 400);
               } else {
-                setError('The build stopped responding — your files are saved. Send a message and I\'ll continue from where it left off.');
+                setError(lastStartRef.current?.opts.queueItemId
+                  ? "This queued step's progress could not be confirmed. Refresh and review it before continuing."
+                  : 'The build stopped responding — your files are saved. Send a message and I\'ll continue from where it left off.');
               }
             }
           }
@@ -1730,5 +1751,5 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
 
-  return { state, running, error, errorBeforeBuildStarted, start, respond, restore, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
+  return { state, running, error, errorBeforeBuildStarted, start, respond, restore, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueState, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

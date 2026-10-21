@@ -8,9 +8,32 @@
 //
 // This module is the PURE state machine for that queue (enqueue / claim-next / complete / cancel /
 // reorder), fully unit-testable. The durable store + the route executor wire on top of it.
+import { validQueueContinuation as validContinuation, validQueueContinuationNonce, validQueueContinuationProgress, type QueueContinuationState } from '../../lib/queueContinuation';
+export { MAX_QUEUED_CONTINUATIONS, validQueueContinuationNonce } from '../../lib/queueContinuation';
 
 export type QueueItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 export type QueueItemSource = 'user' | 'planner' | 'advisor';
+
+export type QueueContinuation = QueueContinuationState;
+export const validQueueContinuation = validContinuation;
+
+/** The consumed window keeps progress bounded across reconnects, without granting another execution. */
+export interface QueueContinuationWindow {
+  version: 1;
+  nonce: string;
+  predecessorAttemptId: string;
+  attemptId: string;
+  requestId?: string;
+  planRemaining: number;
+  ordinal: number;
+}
+
+export function validQueueContinuationWindow(value: unknown): value is QueueContinuationWindow {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return row.version === 1 && validQueueContinuationNonce(row.nonce) && validQueueContinuationNonce(row.predecessorAttemptId)
+    && validQueueContinuationNonce(row.attemptId) && (row.requestId === undefined || validQueueContinuationNonce(row.requestId)) && validQueueContinuationProgress(row);
+}
 
 export interface QueueItem {
   /** Stable id (caller-supplied — deterministic, so this stays pure/replayable). */
@@ -24,6 +47,8 @@ export interface QueueItem {
   claimToken?: string;
   claimedAt?: number;
   boundAttemptId?: string;
+  continuation?: QueueContinuation;
+  continuationWindow?: QueueContinuationWindow;
 }
 
 export interface CommandQueue {
@@ -97,6 +122,8 @@ export function completeRunning(q: CommandQueue, ok: boolean, note?: string): Co
   if (idx === -1) return q;
   const next = clone(q);
   next.items[idx].status = ok ? 'done' : 'failed';
+  delete next.items[idx].continuation;
+  delete next.items[idx].continuationWindow;
   if (note) next.items[idx].note = note;
   return next;
 }
@@ -160,13 +187,17 @@ export function parseStoredQueue(workspaceId: string, raw: unknown): CommandQueu
     if (typeof o?.id !== 'string' || typeof o?.prompt !== 'string' || typeof o?.createdTs !== 'number') continue;
     if (!STATUSES.includes(o.status as QueueItemStatus)) continue;
     if (!SOURCES.includes(o.source as QueueItemSource)) continue;
+    if (o.continuation !== undefined && !validQueueContinuation(o.continuation)) continue;
+    if (o.continuationWindow !== undefined && !validQueueContinuationWindow(o.continuationWindow)) continue;
     const status = o.status as QueueItemStatus;
     // Reading storage proves nothing about whether another process is still executing.
     if (status === 'running') { if (sawRunning) continue; sawRunning = true; }
     parsed.push({ id: o.id, prompt: o.prompt, source: o.source as QueueItemSource, status, createdTs: o.createdTs, ...(typeof o.note === 'string' ? { note: o.note } : {}),
       ...(typeof o.claimToken === 'string' ? { claimToken: o.claimToken } : {}),
       ...(typeof o.claimedAt === 'number' && Number.isFinite(o.claimedAt) ? { claimedAt: o.claimedAt } : {}),
-      ...(typeof o.boundAttemptId === 'string' ? { boundAttemptId: o.boundAttemptId } : {}) });
+      ...(typeof o.boundAttemptId === 'string' ? { boundAttemptId: o.boundAttemptId } : {}),
+      ...(o.continuation ? { continuation: { ...o.continuation } } : {}),
+      ...(o.continuationWindow ? { continuationWindow: { ...o.continuationWindow } } : {}) });
   }
   return { workspaceId, items: parsed, ...((obj as { paused?: unknown })?.paused === true ? { paused: true } : {}) };
 }

@@ -8,6 +8,7 @@ import {
   chooseRestoreBase, attemptIsHonoured, greenRestoreTurnStartEnabled, ATTEMPT_TTL_MS,
 } from '../src/server/AgentV3/GreenGuard';
 import { isAppWorkspaceKey } from '../src/server/lib/workspaceIdentity';
+import { createBuildSourcePublication } from '../src/server/AgentV3/BuildSourcePublication';
 
 /**
  * ADMIN 2026-08-09: "pehli build me 4-5 min me working app ban jati hai — baad me 20 min tak use edit
@@ -289,7 +290,7 @@ describe('LAYER 2 WIRING — the guard is on the real save path and can never co
     expect(undo).toBeGreaterThan(keep);
   });
 
-  it('the plain save still runs when the guard did not save — a user never loses their files', () => {
+  it('the plain save still runs when the guard did not save — a user never loses their files', async () => {
     // REPOINTED (2026-09-11): the same call is now BOUND to `finalSave`, because the snapshot
     // confirmation that follows must await the save it is about to outdate (snapshotIdentity.ts).
     // A partial undo changes only the files that landed. The fallback must save that actual tree,
@@ -298,14 +299,37 @@ describe('LAYER 2 WIRING — the guard is on the real save path and can never co
     const undo = seg.indexOf('const outcome = await applyGreenSnapshotRestore(plan)');
     const applied = seg.indexOf('persisted = snapshotRestoredFiles(toSave, plan, outcome)');
     const complete = seg.indexOf('if (snapshotRestoreComplete(plan, outcome))', applied);
-    const finalSave = seg.indexOf('const finalSave = saved ? Promise.resolve() : saveWorkspaceFiles(workspaceId, persisted).catch(() => {});');
+    const finalSave = seg.indexOf('const finalSave =', complete);
     expect(initial).toBeGreaterThan(-1);
     expect(undo).toBeGreaterThan(initial);
     expect(applied).toBeGreaterThan(undo);
     expect(complete).toBeGreaterThan(applied); // the applied tree is selected even when restoration was partial
     expect(finalSave).toBeGreaterThan(complete);
     expect(seg).not.toContain('persisted = snapshot;');
+    const initializer = seg.match(/const finalSave = ([^\n]+);/)?.[1];
+    expect(initializer).toBeDefined();
     expect(seg).toContain('/* the guard must never cost a user their save');
+    // Execute the actual initializer with the real tracker. A no-op fallback must fail on missing
+    // bytes, while a guard-owned save must not be overwritten and a failed fallback stays best-effort.
+    const run = new Function('saved', 'sourcePublication', 'saveWorkspaceFiles', 'workspaceId', 'toSave', 'persisted', `return ${initializer};`);
+    const attemptedFiles = { 'src/App.tsx': 'export const attempt = "broken turn";' };
+    const files = { 'src/App.tsx': 'export const kept = "confirmed applied tree";' };
+    const stored = new Map<string, Record<string, string>>();
+    let calls = 0;
+    const save = async (workspaceId: string, bytes: Record<string, string>) => {
+      calls++; stored.set(workspaceId, structuredClone(bytes)); return 'saved';
+    };
+    const publication = createBuildSourcePublication();
+    await run(false, publication, save, 'workspace-save', attemptedFiles, files);
+    expect(stored.get('workspace-save')).toEqual(files);
+    expect(await publication.join()).toBe(true);
+    await run(true, createBuildSourcePublication(), save, 'guard-already-saved', attemptedFiles, files);
+    expect(calls).toBe(1);
+    expect(stored.has('guard-already-saved')).toBe(false);
+    const failed = createBuildSourcePublication();
+    await expect(run(false, failed, async () => { throw Error('store unavailable'); }, 'failed-save', attemptedFiles, files)).resolves.toBeUndefined();
+    expect(await failed.join()).toBe(false);
+    expect(initializer).toBe('saved ? Promise.resolve() : sourcePublication.track(saveWorkspaceFiles(workspaceId, persisted)).catch(() => {})');
   });
 
   it('🔒 and the snapshot confirmation AWAITS that save — it may not stamp a copy before the save it outdates', () => {

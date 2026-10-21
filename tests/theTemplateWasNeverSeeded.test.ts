@@ -179,7 +179,8 @@ describe('§4 a Stop is reported as a Stop', () => {
   });
 
   it('SOURCE: no "handed off to the full builder" after a Stop; the stopped gate is not left open', () => {
-    expect(route).toMatch(/sb\.ok \? 'SIMPLE_BUILD_SUCCESS' : sb\.stopped \? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK'/);
+    // Initial declines have their own diagnostic, but Stop must still win before that branch.
+    expect(route).toMatch(/sb\.ok \? 'SIMPLE_BUILD_SUCCESS' : sb\.stopped \? 'SIMPLE_BUILD_STOPPED' : sb\.initialDecline \? 'SIMPLE_BUILD_DECLINED' : 'SIMPLE_BUILD_FALLBACK'/);
     expect(route).toMatch(/if \(sb\.outcome && !sb\.stopped\) \{/);
     // A module turn's not-yet-due gate is closed too (autopsy 0311186f); since 303e8a6f one helper decides
     // severity and closed together, and the route hands it the Stop and the module-turn facts. Since autopsy

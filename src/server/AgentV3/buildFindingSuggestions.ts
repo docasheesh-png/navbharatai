@@ -643,6 +643,9 @@ const NEVER_SUGGEST = new Set([
   'TURN_ANSWERED_A_QUESTION',
   // …and a refusal left standing as the answer (2026-09-26) — nothing for the user to fix.
   'TURN_DECLINED',
+  // Initial-lane answers and their terminal outcome describe routing, not a defect in the app.
+  'SIMPLE_BUILD_DECLINED', 'ONESHOT_DECLINED', 'OUTCOME_INITIAL_DECLINED',
+  'OUTCOME_FINALIZATION_FAILED', // a failure settling our answer, not an app-code repair
   // A device power a web app cannot have (autopsy 6bae5835) — "add a lock screen" is not a next move
   // anyone can make here, so it must never be offered as one.
   'DEVICE_CAPABILITIES_TOLD',

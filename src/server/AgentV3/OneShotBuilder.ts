@@ -8,7 +8,8 @@
 // sub-agents, no Opus, no rebuild spiral.
 //
 // SAFETY: OneShot is a best-effort FIRST attempt. If it produces nothing usable (or throws), the
-// caller falls through to the normal agentic loop — so the worst case is exactly today's behavior.
+// caller falls through to the normal agentic loop. An explicit initial text-only decline is an answer,
+// not a parser failure: typed metadata lets the caller settle it without starting another lane.
 // It can never make things worse; it can only make a simple build cheap when it works.
 //
 // This module is dependency-light and the side-effects (model call, file writes, preview) are
@@ -26,6 +27,7 @@ import { withTimeout } from './asyncUtils';
 import { isProjectConfigPath, existingConfigsBlock } from './existingConfig';
 import { planProvidedFiles } from './scaffoldBoilerplate';
 import { readWriteOutcomes, type WriteOutcome } from './writeOutcomes';
+import { readInitialLaneDecline, InitialLaneDeclinedError, initialLaneDeclineResult, type InitialLaneDecline } from './initialLaneDecline';
 
 /** The one-shot's files reached the model but not the workspace (Q-982) — never "could not generate". */
 const ONE_SHOT_FILES_REFUSED = 'files_not_written';
@@ -240,6 +242,8 @@ export function oneShotUserPrompt(prompt: string, scaffoldPaths: string[], exist
 }
 
 export interface OneShotResult {
+  /** Terminal initial answer, not a parser failure to hand to the full builder. */
+  initialDecline?: InitialLaneDecline;
   ok: boolean;
   filesWritten: number;
   summary: string;
@@ -286,7 +290,8 @@ export interface OneShotDeps {
 
 /**
  * Run the OneShot lane. Best-effort: returns ok:false (never throws) when it could not produce a
- * usable app, so the caller falls through to the agentic loop. On success the build is DONE — the
+ * usable app. Recovery falls through to the agentic loop; an explicit initial decline carries its
+ * own typed answer instead. On success the build is DONE — the
  * files are written and no loop/escalation runs.
  *
  * STICKY SUCCESS: the generate+write phase is time-bounded (a stalled model call falls back fast),
@@ -336,7 +341,10 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
       // The starter's compiler files and the error boundary are correct as shipped; a one-shot answer that
       // rewrites them is dropped, as the fast lane's plan drops them (scaffoldBoilerplate.ts, autopsy 70e030bb).
       const provided = new Set(deps.scaffoldPaths.length ? planProvidedFiles(deps.scaffoldPaths) : []);
-      const parsed = parseFileBlocks(text)
+      const rawFiles = parseFileBlocks(text);
+      const initialDecline = readInitialLaneDecline(text, rawFiles.length);
+      if (initialDecline) throw new InitialLaneDeclinedError(initialDecline);
+      const parsed = rawFiles
         .filter((f) => !provided.has(f.path))
         .map((f) => ({ ...f, content: ensureReactValueImport(f.path, f.content) }));
       if (parsed.length < minFiles) throw new Error('no_files_parsed');
@@ -350,6 +358,7 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
     })(), overallTimeoutMs, 'one-shot');
   } catch (e) {
     lapsed = true; // from this instant the orphaned closure can never touch the workspace
+    if (e instanceof InitialLaneDeclinedError) return initialLaneDeclineResult(e.decline);
     // Generation / write failed or timed out → no app produced, fall back to the full builder.
     const reason = e instanceof Error ? e.message : String(e);
     const summary = reason === 'no_files_parsed'

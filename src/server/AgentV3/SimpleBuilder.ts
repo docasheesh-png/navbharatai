@@ -25,6 +25,7 @@ import { deadlineFromBudget, isReasoningRungHandoff } from './turnDeadline';
 import { judgeRepair } from './repairAcceptance';
 import { scaffoldRestores, protectBoilerplateInRepair, planProvidedFiles } from './scaffoldBoilerplate';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
+import { readInitialLaneDecline, InitialLaneDeclinedError, initialLaneDeclineResult, type InitialLaneDecline } from './initialLaneDecline';
 import { isProjectConfigPath, existingFileBlock } from './existingConfig';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
@@ -1856,6 +1857,8 @@ export interface SimpleBuildDeps {
 }
 
 export interface SimpleBuildResult {
+  /** Terminal initial answer, not a failed attempt to hand to another lane. */
+  initialDecline?: InitialLaneDecline;
   ok: boolean;
   filesWritten: number;
   summary: string;
@@ -1947,7 +1950,8 @@ export interface SimpleBuildResult {
 /**
  * Run the Simple Builder. STICKY SUCCESS: once the files are written the build is a success even if
  * the best-effort preview is slow. Returns ok:false (never throws) on any failure so the caller falls
- * back to the agentic loop.
+ * back to the agentic loop, except an explicit initial decline: that carries its own typed answer
+ * rather than asking another lane to recover an intentional non-build.
  */
 export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuildResult> {
   const minFiles = deps.minFiles ?? 2;
@@ -2180,7 +2184,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // very FIRST generation pass overwrote it with a version missing the `extends React.Component`
       // clause. The prompt now says these are provided, and this filter means that instruction cannot be
       // ignored: a boilerplate path is dropped from the plan whatever the model answered.
-      const planned = parseFileManifest(manifestText).filter((m) => !aiClient || m.path !== aiClient.path);
+      // A stop wins over a late answer; the catch preserves the existing stop/salvage behavior.
+      if (deps.signal?.aborted) throw new BuildStoppedError();
+      const rawManifest = parseFileManifest(manifestText);
+      // Accepted artifacts win BEFORE scaffold filters or an injected starter entry. A response in
+      // file-block rather than manifest format still belongs to the existing recovery path.
+      const initialDecline = readInitialLaneDecline(manifestText, rawManifest.length + parseFileBlocks(manifestText).length);
+      if (initialDecline) throw new InitialLaneDeclinedError(initialDecline);
+      const planned = rawManifest.filter((m) => !aiClient || m.path !== aiClient.path);
       const provided = new Set(providedBoilerplate(deps.scaffoldPaths));
       const droppedBoilerplate = planned.filter((m) => provided.has(m.path)).map((m) => m.path);
       const keptProvided = droppedBoilerplate.length ? planned.filter((m) => !provided.has(m.path)) : planned;
@@ -2749,6 +2760,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         reason: BUILD_STOPPED_MESSAGE, outcome: 'BUILD_FAILED', salvagedPaths: saved.length ? saved : undefined,
         plannedFiles, phases: phasesNow(), plannedPaths,
       };
+    }
+    if (e instanceof InitialLaneDeclinedError) {
+      return { ...initialLaneDeclineResult(e.decline), plannedFiles, plannedPaths, phases: phasesNow() };
     }
     // SALVAGE (timeout only): hand the full builder the files that DID finish, so it continues from
     // real work instead of an empty tree. Written once, synchronously, BEFORE the fallback returns —

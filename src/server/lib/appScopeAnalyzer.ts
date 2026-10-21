@@ -152,7 +152,26 @@ const AUDIENCE_BEFORE = /\bfor\s+(?:the\s+|all\s+|our\s+|my\s+)?$/i;
 const LIKENESS_AFTER = /^[^.,;:!?\n]{0,40}\b(?:jaisa|jaise|jaisi|clone|replica|copy\s+(?:of|bana\w*))\b/i;
 const LIKENESS_BEFORE = /\b(?:like|jaisa|jaise|jaisi|clone\s+(?:of|like)|similar\s+to|inspired\s+by|copy\s+of|replica\s+of|version\s+of)\s+(?:the\s+|a\s+)?$/i;
 
-export function namesAsProduct(text: string, re: RegExp): boolean {
+/**
+ * 🔴 A NAME IS NOT AN INTENT TO CLONE (autopsy 6452c0a9, 2026-10-21). The seventh shape of the same defect.
+ *
+ * A "BOUNCER BOOKING PRO" spec that says "Use the official WhatsApp click-to-chat feature", "If WhatsApp is
+ * unavailable, provide a normal SMS option" and has a heading "7. WhatsApp and Contact System" was recorded
+ * as *"LARGE — clone of WhatsApp"*: each of the three mentions slipped past the tool/prompt lists above
+ * (`click-to-chat`, `is unavailable`, a bare heading), and one mention that is not provably a tool is
+ * enough to make the product a clone. Six earlier autopsies each added one more shape to those lists; the
+ * list can never be finished, because the question it answers is the wrong way round. A user who wants a
+ * clone SAYS so — "like X", "X clone", "X jaisa", "similar to X" — or the product IS the app they are
+ * asking for ("Build me an Instagram"). Everything else is a product being mentioned.
+ *
+ * So the scope analyzer now passes `needsIntent`: a mention counts only when a likeness word sits beside it
+ * or the name is in the request's SUBJECT line. PRECISION-FIRST in the non-escalating direction, exactly
+ * as the block above argues: a missed clone builds the ordinary way (and the feature count can still
+ * escalate it); a false clone costs a planner call and a roadmap for an app nobody asked for.
+ */
+export interface ProductMentionOptions { needsIntent?: boolean; subject?: string }
+
+export function namesAsProduct(text: string, re: RegExp, opts: ProductMentionOptions = {}): boolean {
   const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
   for (const m of text.matchAll(g)) {
     const at = m.index ?? 0;
@@ -168,6 +187,8 @@ export function namesAsProduct(text: string, re: RegExp): boolean {
     if (TOOL_BEFORE.test(before) || TOOL_BEFORE.test(listHead) || TOOL_AFTER.test(after)) continue;
     const after40 = noise(text.slice(at + m[0].length, at + m[0].length + 48));
     if (!LIKENESS_BEFORE.test(before) && !LIKENESS_AFTER.test(after40) && (AUDIENCE_AFTER.test(after) || AUDIENCE_BEFORE.test(before) || AUDIENCE_BEFORE.test(listHead))) continue;
+    if (opts.needsIntent && !LIKENESS_BEFORE.test(before) && !LIKENESS_AFTER.test(after40)
+      && !(opts.subject && new RegExp(re.source, re.flags.replace('g', '')).test(opts.subject))) continue;
     return true;
   }
   return false;
@@ -257,7 +278,8 @@ export function analyzeAppScope(prompt: string): AppScope {
 
   // Predicates read a Hindi request in English too (Q-104); the feature COUNT reads the request itself.
   const readable = withEnglishReading(text);
-  const famous = FAMOUS_APPS.find((f) => namesAsProduct(readable, f.re));
+  const subject = withEnglishReading(requestSubject(text));
+  const famous = FAMOUS_APPS.find((f) => namesAsProduct(readable, f.re, { needsIntent: true, subject }));
   const heavy = HEAVY_INFRA.filter((h) => h.re.test(readable));
   const feats = featureCount(text);
   // THE SIZE SIGNALS ONLY PROJECT MODE USED TO READ (Q-138): an explicit scale, a big-software system with

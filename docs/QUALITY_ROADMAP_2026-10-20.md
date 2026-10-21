@@ -31,7 +31,7 @@ probe load check passed.
 | Phase | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
 | 1 | Security and authorization | MERGED / CI VERIFIED; OWNERSHIP FOLLOW-UP OPEN | [PR #3847](https://github.com/docasheesh-png/navbharatai/pull/3847), [successful exact-head CI](https://github.com/docasheesh-png/navbharatai/actions/runs/39370215420), merged as `885ba41023c2f7327be956aadc71f79ee2840821`. Phase2 review found that full legacy workspace IDs still collide for valid custom UID/session pairs; private access needs independent verified ownership, not a prefix. Legacy recovery and dependency exceptions remain documented. |
-| 2 | Concurrent-build safety and recovery | IN PROGRESS | Queue/retry/import-lease [PR #3848](https://github.com/docasheesh-png/navbharatai/pull/3848) merged after [both CI jobs passed](https://github.com/docasheesh-png/navbharatai/actions/runs/39378125233), merge `06f8065629debbd846c1f836241c5be9a5a8337e`. [PR #3852](https://github.com/docasheesh-png/navbharatai/pull/3852) adds uncertain reconnect refusal, deadline body-exit holds and verified-owner asset storage/erasure, pending final verification. See PHASE2_STATE_PRESERVATION.md. Legacy ownership, full runtime/state preservation, queued resumable handoff and late-write reconciliation remain open. |
+| 2 | Concurrent-build safety and recovery | IN PROGRESS | Queue/retry/import-lease [PR #3848](https://github.com/docasheesh-png/navbharatai/pull/3848) merged after [both CI jobs passed](https://github.com/docasheesh-png/navbharatai/actions/runs/39378125233), merge `06f8065629debbd846c1f836241c5be9a5a8337e`. [PR #3852](https://github.com/docasheesh-png/navbharatai/pull/3852) adds uncertain reconnect refusal, deadline body-exit holds and verified-owner asset storage/erasure, pending final verification. See PHASE2_STATE_PRESERVATION.md. The separate normal-module queue handoff checkpoint retains the logical claim through one-use authorized windows; its combined-source gate and CI remain pending. See PHASE2_QUEUE_MODULE_HANDOFF.md. Legacy ownership, full runtime/state preservation, physical command/source fencing and late-write reconciliation remain open. |
 | 3 | Reproducible quality baseline | NOT STARTED | Start after Phase 2; use existing benchmark harness and real outcome evidence. |
 | 4 | Generated-app correctness | NOT STARTED | Start after Phase 3; prioritize measured failure cohorts. |
 | 5 | Maintainability and strict typing | NOT STARTED | Start after Phase 4; preserve behavior while extracting bounded modules. |
@@ -79,6 +79,13 @@ migration. Checking current Auth accounts or parsing the key cannot establish
 historical ownership. This is an OPEN security boundary, not completed Phase1
 readiness, and blocks an unconditional 100/100 claim.
 
+The concrete prospective registry, client continuity, rollout and verified legacy
+migration design is preserved in
+[PHASE2_VERIFIED_WORKSPACE_OWNERSHIP_DESIGN.md](PHASE2_VERIFIED_WORKSPACE_OWNERSHIP_DESIGN.md).
+It is **design only, not implemented**. New authority must precede every private
+read/write and retain existing app identities; erasure refusal does not make
+current private legacy access safe.
+
 ## Phase 2 — concurrent-build safety and recovery
 
 - Inspect the existing queue, workspace lease, write serialization and wallet
@@ -91,6 +98,19 @@ readiness, and blocks an unconditional 100/100 claim.
 Acceptance: meaningful concurrency/fault tests show no overlapping authorized
 writes or duplicate charges in the exercised scenarios. Record any untested
 production infrastructure boundary.
+
+The remaining fresh-allocation gate has a reviewed
+[allocation authority and initialization design](PHASE2_ALLOCATION_AUTHORITY_DESIGN.md).
+It is **design only, not implemented**: a small pending flag or SDK retry change
+does not cover unknown dispatch, initialization, identity publication and stale
+writers. A local SDK fixture observed two allocation POSTs under default retries
+and one with retries disabled; neither result establishes provider cancellation,
+full state restoration or a completed production allocation protocol.
+
+Final non-resumable queued A→B transitions also remain an OPEN source-drain
+boundary: their current final settlement precedes the intermediate handoff join.
+The next checkpoint must bind confirmed drain or durable pause to that exact
+final attempt without changing its app verdict or per-window pricing.
 
 Read-only preparation identified these existing paths to investigate after
 Phase 1 acceptance:
@@ -107,6 +127,16 @@ Phase 1 acceptance:
   for committed-but-unacknowledged operations, retries and concurrent replay.
 
 These are findings and implementation directions, not completed Phase 2 fixes.
+
+Verification snapshot — 2026-10-20 11:07 UTC: state-preservation head `00d3bc8`
+passed its local complete suite (2,811 files, 40,077 tests passed, 67 skipped).
+[CI run 39411761077](https://github.com/docasheesh-png/navbharatai/actions/runs/39411761077)
+was running for that older head and is superseded for review after newer main
+`6852819`; the combined head needs new local/CI evidence. The queue preflight
+at `a64370b` was stopped with two obsolete save-wiring assertions and is not a
+passing full suite. Equivalent tracked-save/verified-owner tests now execute the
+actual production expressions and preserve byte/identity checks. Combined-source
+gates remain pending; this dated snapshot does not claim current CI success.
 Live cross-instance interruption and database-outage drills require a staging
 environment. The current runtime has no configured application/sandbox credentials;
 the owner has been asked for a configured environment reference, test account and
@@ -115,6 +145,18 @@ demo-prefixed Firestore emulator project, two real workers and isolated Docker
 fixtures. Use it for the applicable database/process fault drills. Actual
 provider/E2B and Phase 3 paid-build runs still need configured access; local
 emulator evidence does not establish those external boundaries.
+
+Queue integration snapshot — 2026-10-20 12:48 UTC: `92fee9b` passed its full
+local suite (2,820 files /40,268 tests, 67 skipped, zero failures) and all quick
+gates. Substantive main `6cdc155` then required combined verification again.
+The [normal-module handoff checkpoint](PHASE2_QUEUE_MODULE_HANDOFF.md) retains
+main's applied snapshot tree and joins the whole shared restore job plus raw
+removal/report promises. Held durable writes, incomplete outcomes and deliberate
+tracker/payload reversions exercise this boundary. The renewed credential-free
+emulator run passed 21/21; combined complete suite and exact-head CI remain
+pending. Physical SDK drain, final queued-step/general source fencing, historical
+private ownership and fresh-allocation authority remain OPEN. Phase 2 is still
+in progress and phases 3–6 have not started.
 
 ## Phase 3 — reproducible quality baseline
 

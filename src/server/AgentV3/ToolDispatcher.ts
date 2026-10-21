@@ -17,7 +17,7 @@ import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAudi
 import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
 import { noteHeal } from './HealLedger';
 import { decideSupersede } from './previewSupersede';
-import { missingRanges, latestVersionsCommand, versionHint } from './npmVersionHint';
+import { missingRanges, latestVersionsCommand, versionHint, isSafePackageName } from './npmVersionHint';
 import { cdnPdfWorkerNote } from './pdfWorkerSource';
 import { parallelSiblingBrief, readSiblingTasks } from './parallelSiblings';
 import { caseOnlyTwins, caseTwinCheckable, caseTwinNote } from './caseTwin';
@@ -121,7 +121,9 @@ import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefe
 import { currentPass, runInPass, inPlatformPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
 import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemovedOperands, removedRecordedPaths } from './shellWriteTargets';
 import { unfixableInstallNote } from '../lib/unfixablePackages';
-import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
+import { isBareManifestInstall, manifestRangeRepairEnabled, repairUnavailableRanges, manifestRepairNote } from './manifestRangeRepair';
+import { shellMayWriteOpaquely, markCommand, changedFilesCommand, parseChangedFiles } from './shellWriteReconcile';
+import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, shadowKeptToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames, mistypedImport } from './tscErrorCause';
 import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckWarmupCommand, WARMUP_COMPILED_MARKER, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
@@ -831,6 +833,59 @@ export class ToolDispatcher {
     const dataCmd = peerDataCommand(conflicts.map((c) => c.pkg));
     const forced = peerConflictHint(conflicts, dataCmd ? await run(dataCmd) : '', true);
     return [forced, deprecated].filter(Boolean).join('\n\n') || null;
+  }
+
+  /**
+   * ETARGET on a bare install: ask the registry for the real versions, rewrite package.json, run the install once
+   * more. Returns null when there was nothing to repair. Throws never (the caller also guards).
+   */
+  private async repairManifestRanges(
+    command: string,
+    output: string,
+    rerun: () => Promise<{ exitCode: number; stdout?: string; stderr?: string }>,
+  ): Promise<{ result: { exitCode: number; stdout: string; stderr: string }; note: string } | null> {
+    const missing = missingRanges(output, 8);
+    if (missing.length === 0) return null;
+    const dir = /^\s*cd\s+([^\s&;|]+)\s*&&/.exec(command)?.[1]?.replace(/\/+$/, '');
+    const manifestPath = dir ? `${dir}/package.json` : 'package.json';
+    const lookup = latestVersionsCommand(missing);
+    const printed = lookup ? (await this.actuator.runCommand(this.workspaceId, lookup)).stdout ?? '' : '';
+    const latest = new Map<string, string>();
+    for (const m of String(printed).matchAll(/^NBAI_LATEST ((?:@[\w.-]+\/)?[\w.-]+)=(\d+\.\d+\.\d+[\w.-]*)\s*$/gm)) latest.set(m[1], m[2]);
+    // A package whose name is unsafe to put on a shell line was never looked up: it must not be treated as "unknown to npm".
+    const unlooked = missing.filter((m) => !isSafePackageName(m.name)).map((m) => m.name);
+    const repair = repairUnavailableRanges(
+      await this.actuator.readFile(this.workspaceId, manifestPath),
+      missing.filter((m) => !unlooked.includes(m.name)),
+      latest,
+    );
+    if (repair.text === null) return null;
+    await this.actuator.writeFile(this.workspaceId, manifestPath, repair.text);
+    this.onFileWrite(manifestPath, repair.text);
+    this.state?.recordFileChange({ path: manifestPath, kind: 'modify' }, 'architect');
+    const again = await rerun();
+    const result = { exitCode: again.exitCode, stdout: again.stdout ?? '', stderr: again.stderr ?? '' };
+    return { result, note: manifestRepairNote(repair.changes, again.exitCode === 0) };
+  }
+
+  /**
+   * Read back every file the sandbox says a marked command changed that the parser did not already name
+   * (shellWriteReconcile.ts). Never throws; a listing that fails records nothing, exactly as before.
+   */
+  private async reconcileShellWrites(command: string): Promise<void> {
+    try {
+      const listed = await this.actuator.runCommand(this.workspaceId, changedFilesCommand());
+      if (listed.exitCode !== 0) return;
+      let named: string[] = [];
+      try { named = shellReadBackTargets(command, null); } catch { named = []; }
+      for (const path of parseChangedFiles(listed.stdout, named)) {
+        this.kitCurrentPaths.delete(path);
+        try {
+          const content = await this.actuator.readFile(this.workspaceId, path);
+          if (typeof content === 'string') this.onFileWrite(path, content);
+        } catch { /* removed or unreadable — nothing to record */ }
+      }
+    } catch { /* reconciliation is best-effort — the parser's own read-back already ran */ }
   }
 
   private async recordShellWrites(command: string, skip: string | null): Promise<void> {
@@ -3205,7 +3260,11 @@ export class ToolDispatcher {
       if (!tree) return '';
       tree.add(path);
       const twins = shadowingTwins(path, tree, new Set(authoredGetter())).filter(removablePath);
-      if (twins.length === 0) return '';
+      if (twins.length === 0) {
+        // Nothing is stale — but a twin this build (or the platform's seed) owns can still shadow the new file.
+        // Deleting it is wrong (it is someone's module); staying silent leaves the new file unloaded.
+        return shadowKeptToolNote(path, shadowingTwins(path, tree, new Set()));
+      }
       const deletable: string[] = [];
       for (const twin of twins) {
         try { this.assertWritable(twin); deletable.push(twin); }
@@ -5859,6 +5918,11 @@ export class ToolDispatcher {
           refuse(blockMsg);
         }
         const cmdStartedAt = Date.now();
+        // A command that can write files the parser cannot name is bracketed by a marker, so what it changed can
+        // be read back afterwards (shellWriteReconcile.ts, autopsy 1d3ff0d5). Best-effort — never fails a command.
+        const reconcileMarked = shellMayWriteOpaquely(command)
+          ? await this.actuator.runCommand(this.workspaceId, markCommand()).then((r) => r.exitCode === 0, () => false)
+          : false;
         // TD-12 — pin, quote, detach, vault .env and Postgres live in runShellLikeBash (also used by
         // run_migrations, TD-15). Every retry below runs `prepared`, the same string as this first run.
         const shell = await this.runShellLikeBash(command, agent, { record: false });
@@ -5889,6 +5953,7 @@ export class ToolDispatcher {
         // PREVIEW_SNAPSHOT_STALE). Read back what the shell's own syntax says it wrote — whatever the exit
         // code, because a failed command may still have changed a file — and record it through the one door.
         await this.recordShellWrites(effectiveCommand, manifestRewrittenBy(effectiveCommand));
+        if (reconcileMarked) await this.reconcileShellWrites(effectiveCommand);
         // PRISMA RELATION SELF-HEAL (ShopKhata autopsy 2026-07-17): an LLM-written schema routinely
         // ships a HALF-relation ("user User?" with no opposite field / no references) — prisma
         // generate then fails with a validation error whose OWN message says the fix: "run `prisma
@@ -6122,6 +6187,17 @@ export class ToolDispatcher {
               if (note) getWorkspaceMemory(this.workspaceId).recordAudit(note);
             }
           } catch { /* a security step must never break the command it followed */ }
+        }
+        // A MANIFEST THAT DECLARES A VERSION THAT DOES NOT EXIST IS REPAIRED, NOT RE-RUN (manifestRangeRepair.ts,
+        // autopsy b4173fb7): a bare `npm install` that died on ETARGET cannot succeed by running again.
+        if (exitCode !== 0 && manifestRangeRepairEnabled() && isBareManifestInstall(command)) {
+          try {
+            const healed = await this.repairManifestRanges(command, `${stdout}\n${stderr}`, runPrepared);
+            if (healed) {
+              ({ exitCode, stdout, stderr } = healed.result);
+              stdout = `${stdout ?? ''}\n${healed.note}`;
+            }
+          } catch { /* self-heal is best-effort — npm's own error is still reported */ }
         }
         // T1-sec-redact: a command can print a secret (`cat .env`, `printenv`, `echo $API_KEY`).
         // Command stdout/stderr is NEVER an edit_file match source, so — unlike read_file content —

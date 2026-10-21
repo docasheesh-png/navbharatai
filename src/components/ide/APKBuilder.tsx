@@ -15,8 +15,7 @@ import { panelWidth, type DeviceMode } from '../../lib/panelWidth';
 // The SAME pure helpers the server uses to derive and normalise the package name (rule 4 — no drift, so
 // what the user sees here is exactly what the build will use). appId.ts / mobileProjectAssembler are pure
 // (no server-only deps), and client code already imports such pure server modules elsewhere.
-import { isValidAppId } from '../../server/lib/appId';
-import { normaliseAppId } from '../../server/lib/mobileProjectAssembler';
+import { isValidAppId, normaliseAppId } from '../../server/lib/appId';
 import { authHeaders } from '../../lib/authedFetch';
 
 // ─── APK BUILDER — ONE HONEST FLOW (redesigned admin 2026-08-11) ────────────────

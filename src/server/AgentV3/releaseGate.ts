@@ -256,7 +256,10 @@ const RUNTIME_LABEL: Record<CheckKey, string> = {
  * sentences can.
  */
 const FAILURE_LABEL: Record<CheckKey, string> = {
-  preview: 'the app did not come up or did not render',
+  // "or did not render" was FALSE for an app a real browser had rendered whose console then logged an error
+  // (autopsy 40868260: "did not come up or did not render" over a login page on screen). The failure covers
+  // both, so the sentence names both.
+  preview: 'the app did not come up, or came up but did not run cleanly',
   pages: 'a page route failed to render in a real browser',
   journeys: 'a real user journey failed — the app did not do what the user asked of it',
   typecheck: 'the project does not typecheck',

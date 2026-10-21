@@ -129,7 +129,7 @@ describe('wiring — the build records the identity, the final save confirms it,
     const restore = route.indexOf('const outcome = await applyGreenSnapshotRestore(plan);', route.indexOf('let persisted: Record<string, string> = toSave;'));
     const applied = route.indexOf('persisted = snapshotRestoredFiles(toSave, plan, outcome);', restore);
     const complete = route.indexOf('if (snapshotRestoreComplete(plan, outcome))', applied);
-    const save = route.indexOf('const finalSave = saved ? Promise.resolve() : saveWorkspaceFiles(workspaceId, persisted)', complete);
+    const save = route.indexOf('const finalSave = saved ? Promise.resolve() : sourcePublication.track(saveWorkspaceFiles(workspaceId, persisted))', complete);
     expect(restore).toBeGreaterThan(-1);
     expect(applied).toBeGreaterThan(restore);
     expect(complete).toBeGreaterThan(applied); // failed operations stay in the saved tree and its hash

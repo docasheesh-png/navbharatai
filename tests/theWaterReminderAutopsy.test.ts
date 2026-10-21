@@ -60,7 +60,8 @@ describe('1 · the app is named, not ordered', () => {
     expect(everything).not.toMatch(/Build a wate\b/);
     // The description tells a visitor what the app does, in their person, not ours.
     expect(out.indexHtml).toMatch(/<meta name="description" content="A water drinking reminder app which reminds you to drink water/);
-    expect(out.files['icon.svg']).toMatch(/>H<\/text>/);
+    // The icon is the app's own mark (admin 2026-10-21): "HydroTrack" has no fitting symbol, so it is the first letter — drawn, not typed.
+    expect(out.files['icon.svg']).toContain('data-nbai-mark="letter:H"');
   });
 
   it('a template placeholder title is not a name — the order, stripped of its verb, is', () => {

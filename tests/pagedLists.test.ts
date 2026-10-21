@@ -89,7 +89,10 @@ describe('🔴 DETAIL 2 — THE RESET, wired at the call sites that have a filte
     // The real failure: press "Load more" five times (72 rows), then search — and get 72 rows of the
     // new result with no sense of where you are.
     expect(admin).toContain('usePagedList(userReports, { resetKey: reportFilter })');
-    expect(admin).toContain('usePagedList(allBuilds, { resetKey:');
+    // Numbering enriches the same rows without changing their count/order or filter reset identity.
+    expect(admin).toContain("const numberedAllBuilds = useBuildReportNumbers(allBuilds, 'latest', adminToken)");
+    expect(admin).toContain('usePagedList(numberedAllBuilds, { resetKey:');
+    expect(admin).toContain('`${allBuildsSearch}|${allBuildsStatus}|${allBuildsDate}|${allBuildsUid}`');
   });
 });
 

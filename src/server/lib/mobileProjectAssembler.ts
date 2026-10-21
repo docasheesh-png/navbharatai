@@ -33,7 +33,7 @@ import { DEFAULT_CAPACITOR_MAJOR } from './capacitorToolchain';
 // Re-exported so existing importers keep a stable surface; the canonical value lives in the governed
 // toolchain table (capacitorToolchain.ts) — one source of truth, never a second copy that can drift.
 export { DEFAULT_CAPACITOR_MAJOR } from './capacitorToolchain';
-import { sanitizeReservedSegments } from './appId';
+import { sanitizeReservedSegments, normaliseAppId } from './appId';
 // The SAME data-uri parser the asset store writes with — a second local regex here would be a second
 // definition of what a stored asset looks like, and the two would drift.
 import { parseDataUri } from '../AgentV3/ProjectImport';
@@ -42,6 +42,8 @@ import { alignNativePlugins } from '../AgentV3/nativeCapabilities';
 // See assetImports.ts for why the two callers treat the same fact differently (a note vs a refusal).
 import { unshippableAssetImports } from './assetImports';
 import { isLiveEnvFile, publicEnvOnly, hasNoAssignments } from './publicEnvOnly';
+import { brandingNote, brandingTextFiles, decideLogo, type LogoDecision } from './appBranding';
+import { chooseMark } from '../../lib/brandMark';
 
 /** Ignore anything that cannot be part of a web build — these bloat the repo and break nothing by leaving. */
 const SKIP_PATH = /(^|\/)(node_modules|\.git|dist|build|\.next|\.cache|coverage)(\/|$)/;
@@ -51,8 +53,14 @@ export interface AssembleOptions {
   appId: string;
   /** The app's background colour (any `#rrggbb`); ignored unless it is a valid hex colour. */
   backgroundColor?: string;
-  /** Data URL of the icon the user chose or uploaded. Optional — omitted means the default icon. */
+  /** Data URL of the icon the user chose or uploaded. Optional — when omitted the app gets a generated logo or, if that
+   *  fails, an explicitly reported app-specific mark. NEVER Capacitor's default icon (appBranding.ts). */
   iconDataUrl?: string;
+  /**
+   * Which logo the app has, decided by the caller (`decideLogo`: the owner's, else none — the app then gets its own mark). When
+   * omitted it is derived from `iconDataUrl` alone, so a caller that never generates still gets the branding step.
+   */
+  branding?: LogoDecision;
   /** Include the iOS workflow + fastlane lane. */
   ios?: boolean;
   /**
@@ -302,25 +310,9 @@ export function detectWebDir(files: Record<string, string>, kind: 'built' | 'sta
   return 'dist';
 }
 
-/**
- * Make sure the package name is one Android will accept, changing it as little as possible.
- *
- * This id is the app's PERMANENT identity on the Play Store — it can never be changed once published,
- * and two ids that differ by a single letter are two different apps. So a valid id is returned exactly
- * as the user typed it, including capitals (Java package rules allow them). Only an id Android would
- * actually reject is replaced, and the caller reports that replacement rather than doing it silently.
- */
-export function normaliseAppId(appId: string, appName: string): string {
-  // The real rule: two or more segments, each starting with a letter, letters/digits/underscore after.
-  const valid = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
-  const candidate = (appId || '').trim();
-  // A well-formed id can still carry a lowercase Java reserved word (com.new.shop), which Android's
-  // package tooling rejects at `cap add`. Repair that segment in place rather than discard the id (G8) —
-  // shared with appId.ts so both appId validators enforce the SAME reserved-word rule.
-  if (valid.test(candidate)) return sanitizeReservedSegments(candidate);
-  const slug = (appName || 'app').toLowerCase().replace(/[^a-z0-9]/g, '') || 'app';
-  return sanitizeReservedSegments(`com.navbharat.${slug}`);
-}
+// `normaliseAppId` lives in appId.ts (the client's APK builder imports it, and this module pulls in server-only code).
+// Re-exported so every existing server import keeps working.
+export { normaliseAppId };
 
 /**
  * The package.json the runner will use.
@@ -741,17 +733,18 @@ export function assembleMobileProject(
     notes.push(`${skippedAssets.length} file(s) could not be read and were not included: ${skippedAssets.slice(0, 3).join(', ')}${skippedAssets.length > 3 ? '…' : ''}. Any image or font among them will be missing from the app.`);
   }
 
-  if (opts.iconDataUrl) {
-    const parsed = parseImageDataUrl(opts.iconDataUrl);
-    if (parsed) {
-      // Capacitor's asset generator reads resources/icon.png; keeping the name it expects means the
-      // icon is picked up without the user configuring anything.
-      binaryFiles[`resources/icon.${parsed.ext}`] = parsed.base64;
-      notes.push('Your icon was added as resources/icon.png — run "npx capacitor-assets generate" locally to produce every Android size, or Android will use the default icon.');
-    } else {
-      notes.push('The icon could not be read, so the default icon will be used.');
-    }
-  }
+  // THE APP'S OWN BRANDING (appBranding.ts). Always written — the branding script runs on every ship and decides,
+  // from `declared`, whether resources/icon.* is this app's logo. A file left in the repo by an earlier ship is
+  // therefore never mistaken for this app's logo, and "no logo" never means "Capacitor's default icon": it means the app's own mark.
+  const decision: LogoDecision = opts.branding ?? decideLogo({ iconDataUrl: opts.iconDataUrl });
+  const logo = decision.declared === 'user' && decision.dataUrl ? parseImageDataUrl(decision.dataUrl) : null;
+  // A logo that cannot be read as an image is not "the owner's choice" — the app gets its mark instead, and the note says so.
+  const effective: LogoDecision = logo ? decision : { declared: 'none' };
+  const iconFile = logo ? `resources/icon.${logo.ext}` : '';
+  Object.assign(files, brandingTextFiles({ appName: opts.appName, appId: opts.appId, decision: effective, iconFile }));
+  if (logo) binaryFiles[iconFile] = logo.base64;
+  notes.push(brandingNote(effective, chooseMark(opts.appName)));
+  if (decision.declared === 'user' && !logo) notes.push('The logo you chose could not be read as a PNG, JPEG or WebP picture, so the app\'s own mark is used instead.');
 
   // HONEST ABOUT WHAT STILL WILL NOT SHIP. With `files` and `binaryFiles` both final, this is a fact
   // rather than a guess — see unshippableAssetImports. A note, never a refusal.

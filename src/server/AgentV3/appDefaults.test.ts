@@ -104,7 +104,9 @@ describe('planAppDefaults', () => {
     expect(manifest.icons.length).toBeGreaterThan(0);
     expect(manifest.icons[0].src).toBe('/icon.svg');
     expect(r.files['icon.svg']).toContain('<svg');
-    expect(r.files['icon.svg']).toContain('>T<'); // monogram of "Todo App"
+    // The app's own mark (admin 2026-10-21): "Todo App" fits the checklist symbol; a name with no fitting symbol gets its first letter.
+    expect(r.files['icon.svg']).toContain('data-nbai-mark="lucide:square-check-big"');
+    expect(r.files['icon.svg']).not.toContain('<text');
     expect(r.indexHtml).toContain('rel="icon"');
     // theme-color (PWA + a11y)
     expect(r.indexHtml).toContain('name="theme-color"');

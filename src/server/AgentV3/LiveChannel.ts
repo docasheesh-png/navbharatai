@@ -44,6 +44,17 @@ export interface LiveChannel {
   /** Flush any pending events, release the in-memory mirror AND delete the shared doc for a
    *  finished build — a closed channel must leave NO stale tail behind for later polls to replay. */
   close(channelId: string): void;
+  /** Join captured mirror writes and confirm deletion before a queued successor may use this channel. */
+  closeAndWait(channelId: string): Promise<boolean>;
+}
+
+/** An explicit boundary for tests; the production path still uses the server Firestore handle. */
+export interface LiveChannelDb {
+  collection(name: string): { doc(id: string): {
+    set(value: Record<string, unknown>, options: { merge: boolean }): Promise<unknown>;
+    get(): Promise<{ exists: boolean; data(): unknown }>;
+    delete(): Promise<unknown>;
+  } };
 }
 
 /**
@@ -72,13 +83,22 @@ interface ChannelState {
   pending: unknown[];
   timer: ReturnType<typeof setTimeout> | null;
   workspaceId?: string;         // which session this channel's current build belongs to
+  writes: Set<Promise<boolean>>;
+  writeFailed: boolean;
+  precedingClose?: Promise<boolean>;
 }
 
-class FirestoreLiveChannel implements LiveChannel {
-  private db: admin.firestore.Firestore | null = null;
+export class FirestoreLiveChannel implements LiveChannel {
+  private db: LiveChannelDb | null = null;
   private readonly channels = new Map<string, ChannelState>();
+  private readonly closing = new Map<string, Promise<boolean>>();
 
-  private getDb(): admin.firestore.Firestore | null {
+  constructor(private readonly dbProvider?: () => LiveChannelDb | null) {}
+
+  private getDb(): LiveChannelDb | null {
+    if (this.dbProvider) {
+      try { return this.dbProvider(); } catch { return null; }
+    }
     if (process.env.VITEST) return null;
     if (this.db) return this.db;
     try {
@@ -93,7 +113,10 @@ class FirestoreLiveChannel implements LiveChannel {
   publish(channelId: string, events: readonly unknown[], workspaceId?: string): void {
     if (!channelId || !Array.isArray(events) || events.length === 0) return;
     let st = this.channels.get(channelId);
-    if (!st) { st = { buf: emptyLiveBuffer(), pending: [], timer: null }; this.channels.set(channelId, st); }
+    if (!st) {
+      st = { buf: emptyLiveBuffer(), pending: [], timer: null, writes: new Set(), writeFailed: false, precedingClose: this.closing.get(channelId) };
+      this.channels.set(channelId, st);
+    }
     if (workspaceId) st.workspaceId = workspaceId;
     for (const e of events) st.pending.push(e);
     if (st.timer) return;                          // a flush is already scheduled → coalesce
@@ -109,9 +132,17 @@ class FirestoreLiveChannel implements LiveChannel {
     st.pending = [];
     const db = this.getDb();
     if (!db) return;                               // tests / no Firestore → in-memory mirror only
-    db.collection(COLLECTION).doc(channelId)
-      .set({ seq: st.buf.seq, events: st.buf.events, workspaceId: st.workspaceId ?? null, updatedAt: Date.now() }, { merge: false })
-      .catch(() => { /* best-effort — a mirror write never affects the build */ });
+    const captured = st;
+    const payload = { seq: st.buf.seq, events: st.buf.events, workspaceId: st.workspaceId ?? null, updatedAt: Date.now() };
+    // A newly published local generation cannot write ahead of an older delete already in flight.
+    // Cross-instance writers still require their own generation-aware shared transport protocol.
+    const write = (async () => {
+      if (captured.precedingClose) await captured.precedingClose;
+      await db.collection(COLLECTION).doc(channelId).set(payload, { merge: false });
+      return true;
+    })().catch(() => { captured.writeFailed = true; return false; });
+    captured.writes.add(write);
+    void write.then(() => { captured.writes.delete(write); });
   }
 
   async readSince(channelId: string, sinceSeq: number): Promise<LiveRead> {
@@ -136,19 +167,34 @@ class FirestoreLiveChannel implements LiveChannel {
     }
   }
 
-  close(channelId: string): void {
+  closeAndWait(channelId: string): Promise<boolean> {
+    if (!channelId) return Promise.resolve(false);
     const st = this.channels.get(channelId);
+    if (!st && this.closing.has(channelId)) return this.closing.get(channelId)!;
     if (st?.timer) { clearTimeout(st.timer); st.timer = null; }
     // Do NOT flush pending events on close — the build is over; writing one last batch would
     // re-create the very stale-tail doc the delete below removes. Pending events at close time are
     // throwaway by design (the durable result reaches the client via the conversation store).
-    this.channels.delete(channelId);
+    if (this.channels.get(channelId) === st) this.channels.delete(channelId);
     // Delete the shared doc so a finished/stopped build leaves NO tail for later polls to replay —
     // this (not the in-memory release) is what actually kills the "ghost chat" across instances.
-    const db = this.getDb();
-    if (!db) return;
-    db.collection(COLLECTION).doc(channelId).delete()
-      .catch(() => { /* best-effort — an undeleted doc only means the ghost lives until the next build overwrites it */ });
+    const closing = (async () => {
+      const settled = await Promise.all(st ? [...st.writes] : []);
+      // A newer local writer owns the channel now. The old closer must never delete its document.
+      const current = this.channels.get(channelId);
+      if (current && current !== st) return false;
+      const db = this.getDb();
+      if (!db) return false;
+      await db.collection(COLLECTION).doc(channelId).delete();
+      return settled.every(Boolean) && st?.writeFailed !== true && !this.channels.has(channelId);
+    })().catch(() => false);
+    this.closing.set(channelId, closing);
+    void closing.then(() => { if (this.closing.get(channelId) === closing) this.closing.delete(channelId); });
+    return closing;
+  }
+
+  close(channelId: string): void {
+    void this.closeAndWait(channelId);
   }
 }
 

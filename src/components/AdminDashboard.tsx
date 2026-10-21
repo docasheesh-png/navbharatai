@@ -1,5 +1,7 @@
 import { MaintenanceCard } from './admin/MaintenanceCard';
+import { UserBuiltApps } from './admin/UserBuiltApps';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { numberOldestFirst } from '../lib/reportNumbering';
 import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight} from 'lucide-react';
 import { effectiveDirection } from '../lib/adminUserSort';
 import { TirangaLoader } from './ui/TirangaLoader';
@@ -445,6 +447,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     }
     return [...by.values()].sort((a, b) => b.count - a.count);
   }, [buildReports]);
+
+  // Report numbers (admin 2026-10-21): oldest = 1 … newest = highest, over EVERY loaded report, so a filter or a
+  // re-sort never changes which number a report carries.
+  const reportNumbers = useMemo(
+    () => numberOldestFirst(buildReports, (r) => r.id, (r) => r.reportedAt),
+    [buildReports],
+  );
 
   const visibleBuildReports = useMemo(() => {
     const filtered = buildReports.filter((r) => rowMatches(reportFilterRow(r), reportFilters));
@@ -3486,6 +3495,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     four apps of which three were taken down read as four live apps, on the exact
                     screen used to decide whether to act on that account. The card counts what the
                     badges say, from one rule (`liveAppCount`). */}
+                {typeof account.uid === 'string' && account.uid && <UserBuiltApps uid={account.uid} headers={headers} />}
+
                 {account.publishedApps && (
                   <div className="mt-4">
                     <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">Published apps</p>
@@ -4254,6 +4265,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-raised cursor-pointer"
                             >
                               <span className={`shrink-0 w-2 h-2 rounded-full ${r.ok === true ? 'bg-emerald-400' : r.ok === false ? 'bg-rose-400' : r.inFlight ? 'bg-amber-400' : 'bg-faint'}`} />
+                              <span title="Report number: 1 is the oldest" className="shrink-0 min-w-[2.25rem] text-right text-[11px] font-black tabular-nums text-muted">#{reportNumbers.get(r.id)}</span>
                               <span className="flex-1 min-w-0">
                                 <span className="block text-[12px] font-bold text-ink truncate">{r.appLabel}</span>
                                 <span className="block text-[10px] truncate">

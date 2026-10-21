@@ -1,15 +1,27 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import { FailedReportOAuthConsent } from './FailedReportOAuthConsent';
 import { FailedReportAutopsyEditor } from './FailedReportAutopsyEditor';
-import { isFailedBuildPage, type FailedBuildPage, type FailedReportAccess } from '../../lib/failedBuildReports';
+import { isFailedBuildPage, type FailedBuildPage, type FailedBuildRow, type FailedReportAccess } from '../../lib/failedBuildReports';
+import { numberOldestFirst } from '../../lib/reportNumbering';
 
 const API = '/api/v1/failedbr';
 const ACCESS = '/api/v1/admin/failedbr/access';
 const button = 'rounded-xl border border-line bg-card px-4 py-2 text-ink disabled:opacity-50';
 
+const rowKey = (r: FailedBuildRow) => `${r.workspaceId}/${r.historyId}`;
+const mergeKnown = (prev: FailedBuildRow[], more: FailedBuildRow[]): FailedBuildRow[] => {
+  const by = new Map(prev.map((r) => [rowKey(r), r] as const));
+  for (const r of more) by.set(rowKey(r), r);
+  return [...by.values()];
+};
+
 export function FailedBuildReportsPage({ token, onLogout }: { token: string; onLogout: () => void }) {
   const [page, setPage] = useState<FailedBuildPage | null>(null);
+  // Every failure loaded since the last "Refresh from beginning" — report numbers (oldest = 1) are counted over
+  // these, so a later batch only ever ADDS older/newer numbers to the picture, never re-reads a page as the whole.
+  const [known, setKnown] = useState<FailedBuildRow[]>([]);
+  const [loadingAll, setLoadingAll] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<unknown>(null);
@@ -45,11 +57,33 @@ export function FailedBuildReportsPage({ token, onLogout }: { token: string; onL
       if (!isFailedBuildPage(data)) throw new Error('The server returned an unreadable report list.');
       if (current === epoch.current) {
         cursorRef.current = cursor; setPage(data);
+        setKnown((prev) => mergeKnown(cursor || preserveSelection ? prev : [], data.reports));
         if (!preserveSelection) { reportSequence.current++; setReport(null); setSelected(null); }
       }
     } catch (e) { if (current === epoch.current) setError(e instanceof Error ? e.message : 'Could not load reports.'); }
     finally { if (current === epoch.current) { busyRef.current = false; setBusy(false); } }
   }, [request]);
+  /** Follow the batches to the end so every report has its final number. Stops on the first error. */
+  const loadAll = useCallback(async () => {
+    if (busyRef.current) return;
+    busyRef.current = true; setBusy(true); setLoadingAll(true); setError('');
+    const current = epoch.current;
+    try {
+      let cursor: string | undefined;
+      let all: FailedBuildRow[] = [];
+      for (let guard = 0; guard < 500; guard++) {
+        const data = await request(`${API}/reports${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
+        if (!isFailedBuildPage(data)) throw new Error('The server returned an unreadable report list.');
+        if (current !== epoch.current) return;
+        all = mergeKnown(all, data.reports);
+        cursorRef.current = cursor; setPage(data); setKnown(all);
+        if (!data.nextCursor) break;
+        cursor = data.nextCursor;
+      }
+    } catch (e) { if (current === epoch.current) setError(e instanceof Error ? e.message : 'Could not load reports.'); }
+    finally { if (current === epoch.current) { busyRef.current = false; setBusy(false); setLoadingAll(false); } }
+  }, [request]);
+  const numbers = useMemo(() => numberOldestFirst(known, rowKey, (r) => r.endedAt), [known]);
   const loadAccess = useCallback(async () => {
     const current = epoch.current;
     const data = await request(ACCESS) as { access?: unknown };
@@ -100,10 +134,11 @@ export function FailedBuildReportsPage({ token, onLogout }: { token: string; onL
     {error && <p role="alert" className="rounded-xl border border-line p-4 text-danger">{error}</p>}
     {message && <p role="status" className="text-success">{message}</p>}
     <section className="rounded-2xl border border-line bg-card p-4 space-y-4" aria-label="Reports">
-      <div className="flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={() => void load()}>Refresh from beginning</button><button className={button} disabled={busy || !page?.nextCursor} onClick={() => void load(page?.nextCursor ?? undefined)}>Next batch</button><span role="status" className="self-center text-sm text-muted">{busy ? 'Loading…' : page ? `${page.reports.length} failures · ${page.scanned} records checked in this batch` : 'Waiting for reports'}</span></div>
+      <div className="flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={() => void load()}>Refresh from beginning</button><button className={button} disabled={busy || !page?.nextCursor} onClick={() => void load(page?.nextCursor ?? undefined)}>Next batch</button><button className={button} disabled={busy || !page?.nextCursor} onClick={() => void loadAll()}>Load all batches</button><span role="status" className="self-center text-sm text-muted">{busy ? (loadingAll ? `Loading every batch… ${known.length} failures so far` : 'Loading…') : page ? `${page.reports.length} failures · ${page.scanned} records checked in this batch` : 'Waiting for reports'}</span></div>
+      {page && <p className="text-sm text-muted">Numbers: 1 is the oldest failure, the newest has the highest number. {page.nextCursor ? `Counted over the ${known.length} loaded so far — press “Load all batches” for the final numbers.` : `Counted over all ${known.length} failures.`}</p>}
       {page && page.reports.length === 0 && <p>{page.nextCursor ? 'No failures in this batch. Continue to the next batch.' : 'No failures in this final batch.'}</p>}
-      <ul className="space-y-3">{page?.reports.map((r) => <li key={`${r.workspaceId}/${r.historyId}`} className="rounded-xl border border-line p-4">
-        <div className="flex flex-wrap justify-between gap-3"><div className="min-w-0"><h2 className="font-semibold text-ink break-words">{r.appLabel || 'Untitled build'}</h2><p className="text-sm text-muted">{new Date(r.endedAt).toLocaleString()} · Failed</p><p className="text-xs text-muted break-all">{r.workspaceId} / {r.buildId ?? r.historyId}</p></div><button className={button} onClick={() => void openReport(r.workspaceId, r.historyId)}>Read full report</button></div>
+      <ul className="space-y-3">{page && [...page.reports].sort((a, b) => a.endedAt - b.endedAt).map((r) => <li key={`${r.workspaceId}/${r.historyId}`} className="rounded-xl border border-line p-4">
+        <div className="flex flex-wrap justify-between gap-3"><div className="min-w-0"><h2 className="font-semibold text-ink break-words"><span className="text-muted tabular-nums" title="Report number: 1 is the oldest">#{numbers.get(rowKey(r))}</span> {r.appLabel || 'Untitled build'}</h2><p className="text-sm text-muted">{new Date(r.endedAt).toLocaleString()} · Failed</p><p className="text-xs text-muted break-all">{r.workspaceId} / {r.buildId ?? r.historyId}</p></div><button className={button} onClick={() => void openReport(r.workspaceId, r.historyId)}>Read full report</button></div>
         {r.rootCause && <p className="mt-2 text-sm break-words">{r.rootCause}</p>}
         <p className="mt-2 text-sm text-muted">Autopsy: {r.autopsy ? r.autopsy.state.replaceAll('_', ' ') : 'Status not supplied'}</p>
       </li>)}</ul>

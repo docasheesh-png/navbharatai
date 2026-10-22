@@ -4413,7 +4413,9 @@ price is not. Recorded as a queue row, not done here.
 
 ### `AGENTV3_WEAK_SCOPE_POLICY` — candidate Weak scope and two-coder policy (2026-10-20)
 
-Explicit `on` enables one bounded preflight, a three-rung default ladder (GLM `glm-4.7-flashx` → KIMI `kimi-k2.7-code` → GLM `glm-5.3`; the third rung added by the admin 2026-10-21 — it was two when the policy shipped), complex Kimi planning, one shared text-repair allowance, and no whole-build empty-result retry. Off/unset preserves existing policy for comparison/rollback. Imports retain their separate inspection pipeline. `AGENTV3_LADDER_WEAK` remains the admin's deliberate experiment override. See `docs/weak-tier-policy-comparison.md` for scope and limitations.
+Explicit `on` enables one bounded preflight, a two-model default ladder, complex Kimi planning, one shared text-repair allowance, and no whole-build empty-result retry. Off/unset preserves existing policy for comparison/rollback. Imports retain their separate inspection pipeline. `AGENTV3_LADDER_WEAK` remains the admin's deliberate experiment override. See `docs/weak-tier-policy-comparison.md` for scope and limitations.
+
+**2026-10-21 (admin):** the default ladder under this policy is now THREE rungs: `glm-4.7-flashx → kimi-k2.7-code → glm-4.7-flash` ($0, thinking disabled). A thinking rung (`glm-5.3`, tried in #3891) was removed at the admin's word: it always reasons and the provider refuses to switch it off. The third rung is the weakest GLM (DeepSWE ~46) — a last free rung, not a fix for a silent lead (Q-2248).
 
 ### `AGENTV3_WEAK_BUILD_COST_CEILING_USD`
 

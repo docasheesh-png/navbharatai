@@ -88,8 +88,10 @@ describe('the wallet mask: gifted tokens are hidden, never deleted', () => {
     expect(v.freeTrialEnded).toBe(true);
     expect(JSON.stringify(NEVER_PAID)).toBe(before);
   });
-  it('a wallet that has ever paid is shown exactly as it is', () => {
-    expect(fp.maskWalletForView({ ...PAID }, true)).toEqual(PAID);
+  it('a wallet that has ever paid is shown its OWN money only — see payAndUseOnlyWhilePaused.test.ts', () => {
+    const v = fp.maskWalletForView({ ...PAID }, true) as Record<string, unknown>;
+    expect(v.freeTrialEnded).toBeUndefined();
+    expect(v.giftTokensRemaining).toBe(0);
   });
   it('when the program is live nothing is masked', () => {
     expect(fp.maskWalletForView({ ...NEVER_PAID }, false)).toEqual(NEVER_PAID);

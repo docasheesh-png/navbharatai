@@ -22,7 +22,7 @@ export function FreeProgramCard({ adminToken }: { adminToken: string }): React.R
   }, [adminToken]);
   useEffect(() => { void load(); }, [load]);
   const save = async (paused: boolean) => {
-    if (!paused && !window.confirm('Resume the free program? New users will again earn rewards, never-paid users can build and use the free daily limits, and gifted tokens become visible again. This costs money.')) return;
+    if (!paused && !window.confirm('Resume the free program? New users will again earn rewards, never-paid users can build and use the free daily limits, and EVERY gifted token becomes visible and spendable again. This costs money.')) return;
     revision.current++;
     setBusy(true); setError('');
     try {
@@ -44,7 +44,7 @@ export function FreeProgramCard({ adminToken }: { adminToken: string }): React.R
         {busy ? 'Saving…' : state?.paused ? 'Resume free program' : 'Pause free program'}
       </button>
     </div>
-    <p className="text-sm text-muted">While paused: no new rewards or promo codes; an account that has never paid cannot build with Pro, make pictures, or use the free tools and professionals; and its old gifted tokens show as 0 with “Free trial ended” (kept safely, not deleted). Free Chat keeps working. Paying accounts are not affected.</p>
+    <p className="text-sm text-muted">While paused: no new rewards or promo codes; an account that has never paid cannot build with Pro, make pictures, or use the free tools and professionals; and its old gifted tokens show as 0 with “Free trial ended”. PAY AND USE ONLY: even after a user adds money, gifted tokens stay unspendable and hidden — only the money they paid is shown and used. Nothing is deleted; Resume gives it all back. Free Chat keeps working.</p>
     {state?.updatedAt && <p className="text-xs text-muted">Last changed: {new Date(state.updatedAt).toLocaleString()}</p>}
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}
     <button type="button" onClick={() => void load()} disabled={busy} className="min-h-10 text-sm underline">Refresh status</button>

@@ -27,6 +27,8 @@
 import { getServerDb, type Firestore } from './serverDb';
 import { hasEverPaid } from '../AgentV3/FreeTierBuildRouting';
 import { setFreeProgramPausedHint } from './freeProgramHint';
+import { giftRemaining } from './giftSpend';
+import { TOKENS_PER_RUPEE } from './payments';
 
 export const FREE_PROGRAM_COLLECTION = 'platform_settings';
 export const FREE_PROGRAM_DOCUMENT = 'free_program';
@@ -135,7 +137,21 @@ const BALANCE_FIELDS = ['remaining_balance', 'total_balance', 'tokenBalance', 'f
  * a program that is live, or an account that has ever paid, sees its real wallet.
  */
 export function maskWalletForView(data: Record<string, unknown>, paused: boolean): Record<string, unknown> {
-  if (!paused || hasEverPaid(data as never)) return data;
+  if (!paused) return data;
+  if (hasEverPaid(data as never)) {
+    // A paying account sees its OWN money only: the gift part is not spendable while the program is paused, so it is not
+    // shown either (and the debit side never touches it — walletDebit, WalletBalance). No "free trial" wording: it paid.
+    const gift = giftRemaining(data as never);
+    if (!(gift > 0)) return data;
+    const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+    return {
+      ...data,
+      tokenBalance: num(data.tokenBalance) - gift,
+      remaining_balance: Math.round((num(data.remaining_balance) - gift / TOKENS_PER_RUPEE) * 100) / 100,
+      giftTokensRemaining: 0,
+      freeGiftedTokens: 0,
+    };
+  }
   const out: Record<string, unknown> = { ...data, walletLedger: [], freeTrialEnded: true, freeTrialEndedMessage: FREE_TRIAL_ENDED_MESSAGE };
   for (const k of BALANCE_FIELDS) if (k in out) out[k] = 0;
   return out;

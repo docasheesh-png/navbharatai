@@ -132,8 +132,12 @@ export function paidSpendableTokens(w: GiftWalletView | null | undefined): numbe
  * Gift absorbs the charge first; once it is exhausted the rest comes out of paid money and the gift
  * simply stays at zero. `tokensDebited` may legitimately be 0 (a charge under one whole token).
  */
-export function giftAfterSpend(w: GiftWalletView | null | undefined, tokensDebited: number): number {
+export function giftAfterSpend(w: GiftWalletView | null | undefined, tokensDebited: number, paidFirst = false): number {
   const spent = Math.max(0, num(tokensDebited));
+  // PAID FIRST (free program paused, admin 2026-10-22: "only pay and use — free token wapas nahi aane chahiye"): the
+  // charge comes out of the user's OWN money and the gift is left alone; it only shrinks if the balance itself falls
+  // below it (a build that was allowed to start and overshot its paid money). See lib/freeProgram.ts.
+  if (paidFirst) return Math.max(0, Math.min(giftRemaining(w), Math.max(0, num((w || {}).tokenBalance)) - spent));
   return Math.max(0, giftRemaining(w) - spent);
 }
 

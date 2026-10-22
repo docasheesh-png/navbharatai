@@ -1,6 +1,7 @@
 import { doc, getDoc, runTransaction } from './serverDb'; // admin-SDK binding (bypasses rules) — see serverDb.ts
 import { inrToDebitTokens, TOKENS_PER_RUPEE } from './payments';
 import { giftAfterSpend, giftRemaining, paidSpendableTokens } from './giftSpend';
+import { freeProgramPausedHint } from './freeProgramHint';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
 import { WALLET_OPS, walletOpId } from './walletOps';
 import { withLedgerV2 } from './ledgerV2';
@@ -204,7 +205,7 @@ export function computeDebitedWallet(
   // than there is money — including on a wallet that went negative through build overdraft.
   const nextGift = tx.spends === 'paid-only'
     ? Math.max(0, Math.min(giftRemaining(w), nextBalance))
-    : Math.max(0, Math.min(giftAfterSpend(w, tokens), nextBalance));
+    : Math.max(0, Math.min(giftAfterSpend(w, tokens, freeProgramPausedHint()), nextBalance));
 
   const wallet: Record<string, any> = {
     ...w,
@@ -315,6 +316,11 @@ export function computeRolledUpDebit(
   if (tx.allOrNothing && floored.clamped) {
     return { wallet: w, tokensDebited: 0, applied: false, refused: true };
   }
+  // FREE PROGRAM PAUSED: a price taken BEFORE the work (a hold) must be covered by the user's OWN money — the gift
+  // is not spendable, so a wallet holding only gift is refused exactly like an empty one (lib/freeProgram.ts).
+  if (tx.allOrNothing && freeProgramPausedHint() && inrToDebitTokens(floored.chargedInr) > paidSpendableTokens(w) + 1e-9) {
+    return { wallet: w, tokensDebited: 0, applied: false, refused: true };
+  }
   const carriedIn = Math.min(Math.max(n(w[TOKEN_CARRY_FIELD]), 0), 1);
   const owedForThis = inrToDebitTokens(floored.chargedInr);
   const owed = owedForThis + carriedIn;
@@ -327,7 +333,7 @@ export function computeRolledUpDebit(
   const chargeInr = Math.round((tokens / TOKENS_PER_RUPEE) * 100) / 100;
 
   const rollupBalance = n(w.tokenBalance) - tokens;
-  const nextGift = Math.max(0, Math.min(giftAfterSpend(w, tokens), rollupBalance));
+  const nextGift = Math.max(0, Math.min(giftAfterSpend(w, tokens, freeProgramPausedHint()), rollupBalance));
   // Open holds ride along on EVERY rewrite of the row, a plain charge included — a row rewritten without
   // them would make an in-flight hold impossible to give back.
   const holds = tx.holdId

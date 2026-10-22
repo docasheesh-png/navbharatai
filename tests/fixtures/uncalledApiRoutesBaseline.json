@@ -32,7 +32,6 @@
   "GET /api/professionals": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "GET /api/techdebt/:userId/:projectId": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "GET /api/usage": "external: the public developer API (Settings \u2192 Developer API shows the calls)",
-  "GET /api/warm": "external: Cloud Run health and warm-up probes",
   "GET /api/workspace/traceability": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "POST /api/admin/backup/firestore": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
   "POST /api/admin/deploy-risk": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",

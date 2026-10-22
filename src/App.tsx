@@ -1,5 +1,6 @@
 import UpdateBanner from './components/UpdateBanner';
 import { usePublicFlags } from './lib/publicFlags';
+import { startWarmingBackend } from './lib/warmBackend';
 import { parseWalletIntent, type WalletIntent } from './lib/walletIntent';
 import { platformFixRequestPrompt } from './lib/platformFixRequest';
 import { EMPTY_PREVIEW_HTML } from './lib/workspaceSource';
@@ -195,6 +196,8 @@ export default function App() {
   // ── Phase 1 hooks ──────────────────────────────────────────────────────
   // Go-live PR 14: default-OFF UI flags from the server, and the wallet door a Buy/Connect tap asked for.
   const publicFlags = usePublicFlags();
+  // Wake the (scale-to-zero) server while the person is still reading the screen — see src/lib/warmBackend.ts.
+  useEffect(() => startWarmingBackend(), []);
   const [walletIntent, setWalletIntent] = useState<WalletIntent | null>(null);
   const { logs, addLog } = useDevLogs();
   const { theme, setTheme, preferredLanguage, setPreferredLanguage, mode, setMode, enabledModules, setEnabledModules, isThemePickerOpen, setIsThemePickerOpen } = useSettings();

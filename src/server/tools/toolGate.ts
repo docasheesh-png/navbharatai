@@ -32,6 +32,8 @@ import { walletTooEmptyForTurn } from '../professionals/passGate';
 import { walletEmptyBody, WALLET_EMPTY_STATUS } from '../lib/walletEmptyNotice';
 import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
 import { getServerDb } from '../lib/serverDb';
+import { freeProgramPaused, FREE_TRIAL_ENDED_MESSAGE, FREE_TRIAL_ENDED_CODE } from '../lib/freeProgram';
+import { hasEverPaid } from '../AgentV3/FreeTierBuildRouting';
 
 import { parseEnvNumber } from '../lib/envNumber';
 import type { GrantEmail } from '../AgentV3/featureFlag';
@@ -130,6 +132,18 @@ export async function gateToolAction(
     };
   }
   const freeListed = isProfessionalFreeUser(uid, email);
+  // FREE PROGRAM PAUSED (admin 2026-10-22): no free daily allowance for a signed-in account that has never paid —
+  // images and tools are pay-and-use. Free Chat's text is not gated here. See lib/freeProgram.ts.
+  if (!freeListed && await freeProgramPaused()) {
+    const pausedWallet = await firestoreWalletReader(getServerDb() as any)(uid).catch(() => null);
+    if (!hasEverPaid(pausedWallet)) {
+      return {
+        allow: false,
+        status: 402,
+        body: { error: FREE_TRIAL_ENDED_MESSAGE, code: FREE_TRIAL_ENDED_CODE, reason: 'free-trial-ended', bucket, remainingFree: 0, dailyLimit: 0 },
+      };
+    }
+  }
   const walletSpend = aiWalletSpendEnabled();
   // Read the pass at most ONCE and share it between the two gates — it answers "unlimited access?" for
   // the paywall and "already paid for, do not charge the wallet" for the spend gate.

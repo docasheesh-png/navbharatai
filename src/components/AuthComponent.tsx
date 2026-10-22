@@ -1,3 +1,4 @@
+import { fetchPublicFlags } from '../lib/publicFlags';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   signInWithEmailAndPassword,
@@ -224,6 +225,10 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       } catch { /* web */ }
       if (!alive) return;
       setPlatform(platform);
+      // FREE PROGRAM PAUSED (admin 2026-10-22): no referral box, and it is NOT marked as offered — it must still
+      // appear, once, if the program resumes. An unknown state counts as paused (fetchPublicFlags' default).
+      if ((await fetchPublicFlags()).freeProgramPaused) return;
+      if (!alive) return;
       const show = shouldOfferReferralBox({
         platform,
         alreadyOffered: referralBoxAlreadyOffered(),

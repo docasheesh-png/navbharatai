@@ -23,6 +23,7 @@ import { freeChatModeGuide, FREE_IMAGE_REQUEST_DIRECTIVE, IMAGE_STUDIO_MODE_NAME
 import { looksLikeImageEdit } from '../../lib/imageEdit';
 import { requireAccountForCostlyAi } from '../lib/costlyAiAccess';
 import { gateToolAction, burnToolAction } from '../tools/toolGate';
+import { FREE_TRIAL_ENDED_MESSAGE, FREE_TRIAL_ENDED_CODE } from '../lib/freeProgram';
 import { reserveImage } from '../lib/imageHold';
 import { chatEditFreeUsedMessage } from '../lib/imageTier';
 import { isProfessionalFreeUser } from '../professionals/professionalPaid';
@@ -531,6 +532,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         priceShown: false,
       });
       if (!reservation.ok) {
+        if (reservation.reason === 'free_trial_ended') { sendEdit(FREE_TRIAL_ENDED_MESSAGE); return; }
         sendEdit(reservation.reason === 'price_not_shown'
           ? chatEditFreeUsedMessage(message, reservation.freePerDay)
           : `Abhi picture badal nahi paayi 😔 — thodi der me dubara try karein.\n\n${imageGenGuidance()}`);
@@ -541,6 +543,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       if (!hold.counted) {
         gate = await gateToolAction(account.uid, account.email, 'image', 'picture-editing');
         if (!gate.allow) {
+          // A paused free program is not a daily limit that resets tomorrow — say what is true (lib/freeProgram.ts).
+          if (gate.body.code === FREE_TRIAL_ENDED_CODE) { sendEdit(FREE_TRIAL_ENDED_MESSAGE); return; }
           sendEdit(`Aaj ke liye aapki picture-editing limit poori ho gayi hai — kal phir se try karein.\n\n${imageGenGuidance()}`);
           return;
         }

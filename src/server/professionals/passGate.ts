@@ -22,6 +22,8 @@ import { professionalUsageStore, professionalExamUsageStore } from './Profession
 import { aiWalletSpendEnabled } from '../lib/aiTurnCharge';
 import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
 import { getServerDb } from '../lib/serverDb';
+import { freeProgramPaused, FREE_TRIAL_ENDED_MESSAGE, FREE_TRIAL_ENDED_CODE } from '../lib/freeProgram';
+import { hasEverPaid } from '../AgentV3/FreeTierBuildRouting';
 import type { GrantEmail } from '../AgentV3/featureFlag';
 import { walletEmptyBody, WALLET_EMPTY_STATUS } from '../lib/walletEmptyNotice';
 import {
@@ -70,6 +72,18 @@ async function balanceFor(uid: string): Promise<number | null> {
   return readWalletBalanceInr(firestoreWalletReader(getServerDb() as any), uid).catch(() => null);
 }
 
+/**
+ * FREE PROGRAM PAUSED (admin 2026-10-22): a signed-in account that has never paid has no free messages and no free
+ * exam questions — Professionals and Doctor AI are pay-and-use until the program resumes. Free Chat is not gated
+ * here. An unreadable wallet counts as never-paid (the pause fails safe). Returns the refusal, or null to carry on.
+ */
+async function freeTrialEndedRefusal(uid: string, freeListed: boolean): Promise<{ allow: false; status: number; body: Record<string, unknown> } | null> {
+  if (freeListed || !(await freeProgramPaused())) return null;
+  const wallet = await firestoreWalletReader(getServerDb() as any)(uid).catch(() => null);
+  if (hasEverPaid(wallet)) return null;
+  return { allow: false, status: 402, body: { error: FREE_TRIAL_ENDED_MESSAGE, code: FREE_TRIAL_ENDED_CODE, reason: 'free-trial-ended', remainingFree: 0, freeDailyLimit: 0 } };
+}
+
 /** Decide access + model tier for one professional/Doctor-AI turn. `uid`/`email` MUST be the server-
  *  verified identity (never a client-claimed body field).
  *
@@ -96,6 +110,8 @@ export async function gateProfessionalTurn(
     };
   }
   const freeListed = isProfessionalFreeUser(uid, email);
+  const endedTurn = await freeTrialEndedRefusal(uid, freeListed);
+  if (endedTurn) return endedTurn;
   const walletSpend = aiWalletSpendEnabled();
   const quotaOn = professionalFreeQuotaEnabled();
   // The pass is read at most ONCE per turn and shared by both gates below — it decides "unlimited
@@ -191,6 +207,8 @@ export async function gateProfessionalExam(uid: string | null, email: GrantEmail
     return { allow: true, uid: null, tier: anon.tier, isFreeListed: false, hasActivePass: false, freeQuestions: 0 };
   }
   const freeListed = isProfessionalFreeUser(uid, email);
+  const endedExam = await freeTrialEndedRefusal(uid, freeListed);
+  if (endedExam) return endedExam;
   const walletSpend = aiWalletSpendEnabled();
   const quotaOn = professionalFreeQuotaEnabled();
 

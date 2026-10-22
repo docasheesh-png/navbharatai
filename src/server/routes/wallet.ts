@@ -1,3 +1,4 @@
+import { maskWalletForView, freeProgramPaused } from '../lib/freeProgram';
 import type { Express, Request, Response } from 'express';
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Reads/writes user_token_wallets,
 // which navbharat-prod's rules restrict to the owner (server is unauthenticated → was denied).
@@ -81,7 +82,9 @@ export function registerWalletRoutes(app: Express): void {
 
         // Billing Phase 2 — the ₹↔token rate travels WITH the wallet (single source of truth:
         // payments.ts TOKENS_PER_RUPEE), so no client ever hardcodes its own conversion again.
-        return res.json({ ...data, tokensPerRupee: TOKENS_PER_RUPEE });
+        // FREE PROGRAM PAUSED (admin 2026-10-22): a never-paid wallet is SHOWN as 0 with "free trial ended"; the stored
+        // document is untouched, so the gifted tokens come back when the program resumes. See lib/freeProgram.ts.
+        return res.json({ ...maskWalletForView(data as Record<string, unknown>, await freeProgramPaused()), tokensPerRupee: TOKENS_PER_RUPEE });
       } else {
         // The wallet doc is missing → create it, EMPTY. Nothing is granted for opening a wallet
         // (admin 2026-09-26: "100*4 ko chor ke sab hata do") — the referral ladder is the only way
@@ -95,7 +98,7 @@ export function registerWalletRoutes(app: Express): void {
           tx.set(walletRef, initialWallet);
           return initialWallet;
         });
-        return res.json({ ...createdWallet, tokensPerRupee: TOKENS_PER_RUPEE });
+        return res.json({ ...maskWalletForView(createdWallet as Record<string, unknown>, await freeProgramPaused()), tokensPerRupee: TOKENS_PER_RUPEE });
       }
     } catch (err: any) {
       console.error('[API WALLET GET ERROR]:', err);
@@ -302,7 +305,8 @@ export function registerWalletRoutes(app: Express): void {
         // statement that looks like a wallet whose history was lost.
         return res.json({ ok: true, exists: false, rows: [], verdict: 'balanced', notes: [] });
       }
-      const statement = buildWalletStatement(snap.data() as Record<string, unknown>);
+      // A never-paid wallet's gifted history is hidden while the free program is paused (lib/freeProgram.ts).
+      const statement = buildWalletStatement(maskWalletForView(snap.data() as Record<string, unknown>, await freeProgramPaused()));
       return res.json({ ok: true, exists: true, ...statement });
     } catch (e) {
       return sendSafeError(res, 500, 'Could not build your statement.', e, 'wallet:statement');
@@ -337,6 +341,13 @@ export function registerWalletRoutes(app: Express): void {
     const db = getDb() as any;
     const { userId } = routeParams(req.params);
     try {
+      // PAUSED FREE PROGRAM: a never-paid account's only "transactions" are its gifts, which are hidden with the
+      // balance (lib/freeProgram.ts). A paying account's history is shown whole.
+      if (await freeProgramPaused()) {
+        const walletSnap = await getDoc(doc(db, 'user_token_wallets', await canonicalWalletId(db, userId)));
+        const w = (walletSnap.exists() ? walletSnap.data() : {}) as Record<string, unknown>;
+        if ((maskWalletForView(w, true) as { freeTrialEnded?: boolean }).freeTrialEnded === true) return res.json([]);
+      }
       const rows = await listEqNewestFirst(
         db.collection('payment_transactions'), [['userId', userId]], '_at', 50, 100,
         (id, data) => ({ tx: { id, ...data }, _at: epochMillis(data.createdAt) }),

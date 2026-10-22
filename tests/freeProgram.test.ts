@@ -147,12 +147,10 @@ describe('the doors: a never-paid account gets nothing free while paused; a payi
 
 describe('census: every door asks the switch', () => {
   const read = (p: string) => readFileSync(p, 'utf8');
-  it('the Pro build route refuses a never-paid account before the engine check', () => {
+  it('the Pro build route runs the pause gate as middleware — the handler itself gains no branches', () => {
     const src = read('src/server/routes/agentv3.ts');
-    const at = src.indexOf('AGENTV3_FREE_PROGRAM_PAUSED_REFUSAL');
-    expect(at).toBeGreaterThan(0);
-    expect(at).toBeLessThan(src.indexOf('if (!tierEngineAvailable(powerLevelReqEffective))'));
-    expect(src.slice(at - 600, at + 400)).toMatch(/freeProgramPaused\(\)[\s\S]*hasEverPaid/);
+    expect(src).toContain("app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), enforceFreeProgramPause(), withBuildRequestCleanup(");
+    expect(src).not.toContain('AGENTV3_FREE_PROGRAM_PAUSED_REFUSAL');
   });
   it('the referral ladder is live only while the program is not paused', () => {
     const src = read('src/server/routes/referral.ts');
@@ -204,5 +202,36 @@ describe('APPS INSTALLED BEFORE THE PAUSE (admin 2026-10-22: "bina install kiye 
   it('the referral status route still answers old apps with the disabled shape they already understand', () => {
     const src = readFileSync('src/server/routes/referral.ts', 'utf8');
     expect(src).toContain("return res.json({ ok: true, enabled: false, code: null, steps: [], earnedTokens: 0 });");
+  });
+});
+
+describe('the Pro build gate (middleware)', () => {
+  const run = async (opts: { paused?: boolean; uid?: string | null; free?: boolean; wallet?: unknown }) => {
+    const { enforceFreeProgramPause } = await import('../src/server/lib/freeProgramGate');
+    const gate = enforceFreeProgramPause({
+      paused: async () => opts.paused ?? true,
+      uid: async () => (opts.uid === undefined ? 'u1' : opts.uid),
+      email: async () => null,
+      isFreeListed: () => opts.free === true,
+      wallet: async () => (opts.wallet === undefined ? NEVER_PAID : opts.wallet),
+    });
+    let status = 0; let body: Record<string, unknown> | null = null; let nexted = false;
+    const res = { status(c: number) { status = c; return this; }, json(b: Record<string, unknown>) { body = b; return this; } };
+    await gate({} as never, res as never, () => { nexted = true; });
+    return { status, body, nexted };
+  };
+  it('refuses a never-paid account with the free-trial-ended 402 and does not reach the route', async () => {
+    const r = await run({});
+    expect(r.status).toBe(402); expect(r.nexted).toBe(false);
+    expect(r.body).toMatchObject({ code: fp.FREE_TRIAL_ENDED_CODE, error: fp.FREE_TRIAL_ENDED_MESSAGE, balanceInr: 0 });
+  });
+  it('lets a paying account, a free-list admin, a signed-out caller, or a live program through', async () => {
+    expect((await run({ wallet: PAID })).nexted).toBe(true);
+    expect((await run({ free: true })).nexted).toBe(true);
+    expect((await run({ uid: null })).nexted).toBe(true);
+    expect((await run({ paused: false })).nexted).toBe(true);
+  });
+  it('an unreadable wallet counts as never-paid (the pause fails safe)', async () => {
+    expect((await run({ wallet: null })).status).toBe(402);
   });
 });

@@ -1,4 +1,4 @@
-import { freeProgramPaused, FREE_TRIAL_ENDED_MESSAGE, FREE_TRIAL_ENDED_CODE } from '../lib/freeProgram';
+import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction } from '../AgentV3/weakBuildPreflight';
 import { toSafeClientMessage } from '../lib/httpError';
@@ -300,7 +300,7 @@ import { announceBuildFinished, announceDeploy, serverPublishOutcome } from '../
 // branch with no cooldown — five refused builds were five pushes — and the "running low" half had no
 // caller at all, so the first warning a user ever got arrived at the wall.
 import { warnAboutBalance, balanceLooksHealthy } from '../lib/balanceAlert';
-import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, hasEverPaid, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage, type FreeTierWallet } from '../AgentV3/FreeTierBuildRouting';
+import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage, type FreeTierWallet } from '../AgentV3/FreeTierBuildRouting';
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
 import { isPlatformNoticeEcho, platformNoticeEchoReply } from '../AgentV3/platformNoticeEcho';
@@ -9931,7 +9931,7 @@ async function noteBuildOutcome(
     }
   });
 
-  app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), withBuildRequestCleanup(async (req: Request, res: Response, registerCleanup) => {
+  app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), enforceFreeProgramPause(), withBuildRequestCleanup(async (req: Request, res: Response, registerCleanup) => {
     // ⏱️ THE USER'S WAIT STARTS HERE — the first statement, before every await of the preamble (autopsy 303e8a6f,
     // adversarial review): the build's event stream used to take its own construction time as the origin, up to
     // ~30 s of checks later, so "Still working — Ns so far" still undercounted. Every user-visible clock reads this.
@@ -10297,20 +10297,6 @@ async function noteBuildOutcome(
       // weak). Fail-CLOSED on purpose — a Firestore blip must never let a free account reach a paid tier.
       const isPaidForPower = !isFreeTierUser(powerWallet);
       powerLevelReqEffective = clampPowerForUser(powerLevelReq, isPaidForPower);
-    }
-    // FREE PROGRAM PAUSED (admin 2026-10-22: "navbharatai pro ka free token system band karna hoga — paise nahi hai"):
-    // while the pause is on, NavBharatAI Pro is pay-and-use only. An account that has never paid cannot start a
-    // build — whatever balance its wallet still holds from the gifts (hidden, not deleted; lib/freeProgram.ts).
-    // Refused BEFORE headers with the same 402 shape as the other paid-only refusals. Free-list admins/testers
-    // are exempt; an unreadable wallet is treated as never-paid (the pause fails SAFE, like the clamp above).
-    if (!powerFreeListUnrestricted && await freeProgramPaused()) {
-      const pausedWallet = userId ? await firestoreWalletReader(getDb())(userId).catch(() => null) : null;
-      if (!hasEverPaid(pausedWallet)) {
-        releaseBuildLock(buildKey, buildLockToken);
-        audit('AGENTV3_FREE_PROGRAM_PAUSED_REFUSAL', { userId }, 'info');
-        res.status(402).json({ error: FREE_TRIAL_ENDED_MESSAGE, code: FREE_TRIAL_ENDED_CODE, balanceInr: 0, balanceTokens: 0 });
-        return;
-      }
     }
     const powerSpecResolved = powerSpec(powerLevelReqEffective);
     const onlyOpus = powerSpecResolved.powerMode;

@@ -22,7 +22,7 @@ export function visibleKnowledgeBase(all: readonly AppFeature[], paused: boolean
 const FREE_TOPIC = /(free|reward|referr|refer\b|invite|bonus|trial|earn|gift|promo|coupon|welcome|muft|मुफ़्त|मुफ्त|free\s*token|credit|token)/i;
 
 export const FREE_PROGRAM_PAUSED_NOTE = [
-  'CURRENT FACT (do not contradict): NavBharatAI has NO free tokens, rewards, referral program, welcome bonus or free daily allowance right now.',
+  'CURRENT FACT (do not contradict): NavBharatAI has NO free tokens, rewards, referral program, sign-up bonus or free daily allowance right now.',
   'Only Free Chat is free. Everything else is pay-and-use from the wallet ("Wallet & Billing" → Buy Tokens).',
   'Never say that such free programs existed, were paused or will return. If the user asks how to get free tokens, say plainly that tokens are bought in Wallet & Billing and Free Chat needs none.',
   'If a user says their free tokens are gone or the wallet shows 0 with "Free trial ended", say their free trial has ended and adding credits lets them keep building — do not promise any refund, restoration or date.',

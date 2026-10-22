@@ -1154,7 +1154,10 @@ describe('narration classification — long analytical prose is never a fake err
     const d = new BuildDiagnostics({ now: () => 1 });
     d.ingestEvent({ type: 'narration', agent: 'architect', text: 'The dev server timed out on port 5173 — retrying.', ts: 1 } as AgentEvent);
     const r = d.report();
-    expect(r.problems.length).toBeGreaterThan(0);
+    // Raw narration keeps its warning/error severity, but a sentence is not a measured finding.
+    // The report's problems view now follows the same distinction as its error/warning/heal tallies.
+    expect(r.issues.find((i) => i.code === 'AGENT_NOTE')?.severity).toBe('error');
+    expect(r.problems).toEqual([]);
   });
 });
 

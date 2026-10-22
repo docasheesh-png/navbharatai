@@ -11,7 +11,7 @@
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
 import { audit, truncateForAudit } from '../lib/audit';
-import { capProblems, outcomeCodeOf, severityOfOutcome, appWasSeenRunning, stoppedByUser, type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { reportProblems, outcomeCodeOf, severityOfOutcome, appWasSeenRunning, stoppedByUser, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import { trimChannel, dropChannel, mergeTruncation } from './reportTruncation';
 import { compactPromptPreviews } from './promptPreviewShape';
 import { redactSecrets } from './SourceSecretRedactor';
@@ -249,7 +249,7 @@ export function trimReportForStorage(reportIn: BuildDiagnosticsReport, opts: Sto
     // RECOMPUTE from the TRIMMED issues (not a pass-through of report.problems) so `problems` can
     // never reference an entry that just fell out of the stored `issues` timeline, and can never
     // itself bypass this function's byte-budget trimming with an unbounded list of its own.
-    problems: capProblems(trimmedIssues.filter((i) => i.severity !== 'info')),
+    problems: reportProblems(trimmedIssues),
     commands: commands.list?.map((c) => ({ ...c, stdout: cap(c.stdout, 1500) ?? '', stderr: cap(c.stderr, 1500) ?? '' })),
     // Shaped AFTER the window is taken, so a "same as the previous call" marker always points at a
     // call that is still in the stored list.
@@ -304,7 +304,7 @@ export function dropHeavyChannelsForStorage(stored: BuildDiagnosticsReport): Bui
     commands: commands.list,
     llmCalls: llmCalls.list,
     issues: trimmedIssues,
-    problems: capProblems(trimmedIssues.filter((i) => i.severity !== 'info')),
+    problems: reportProblems(trimmedIssues),
     truncation: mergeTruncation(prior, {
       issues: issues.fact, commands: commands.fact, llmCalls: llmCalls.fact,
     }),
@@ -369,7 +369,7 @@ export function compactReportForRecord(reportIn: BuildDiagnosticsReport): BuildD
     counts: report.counts,
     issues,
     // RECOMPUTE from the trimmed issues so `problems` can never reference an entry that fell out.
-    problems: capProblems(issues.filter((i) => i.severity !== 'info')),
+    problems: reportProblems(issues),
     previewErrors: lastN(report.previewErrors, 10),
     providerDelivery: report.providerDelivery,
     review: cap(report.review, 4000),

@@ -1,3 +1,4 @@
+import { weakAwareEngineReady, createFreeOutputLimitRecorder, engineUnavailableReply } from '../AgentV3/strictFreeWeakPreflight';
 import { runWithInferenceScope, setInferenceScopeForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { strictFreeWeakEnabled, strictFreeText, assertStrictFreeToolAvailable } from '../AI/LiveRegistry/runtime';
 import { VerifiedFreeToolRunner } from '../AgentV3/providers/VerifiedFreeToolRunner';
@@ -10337,23 +10338,15 @@ async function noteBuildOutcome(
     // silently fall back to Claude (that is the exact free-user money leak). Refuse honestly instead.
     // Generalised to EVERY tier (2026-09-14): a tier whose ladder has no keyed rung cannot build, and
     // the honest answer is a refusal naming the tier — never a build on some other tier's model.
-    let engineReady: boolean;
-    if (powerLevelReqEffective === 'weak' && strictFreeWeakEnabled()) {
-      try { await assertStrictFreeToolAvailable(32768); engineReady = true; }
-      catch { engineReady = false; }
-    } else engineReady = tierEngineAvailable(powerLevelReqEffective);
+    const engineReady = await weakAwareEngineReady(powerLevelReqEffective, {
+      strictWeakEnabled: strictFreeWeakEnabled, assertFreeTools: assertStrictFreeToolAvailable,
+      legacyAvailable: tierEngineAvailable,
+    });
     if (!engineReady) {
       releaseBuildLock(buildKey, buildLockToken);
       audit('AGENTV3_TIER_ENGINE_UNAVAILABLE', { userId, tier: powerLevelReqEffective }, 'warn');
       const tierName = tierDisplayName(toPowerLevel(powerLevelReqEffective));
-      res.status(503).json({
-        error: tierName === 'Weak'
-          ? (strictFreeWeakEnabled()
-            ? 'The free engine is temporarily unavailable. Please try again shortly. No paid fallback was used.'
-            : 'The free engine is temporarily unavailable. Please try again shortly, or add credits to build on the full engine.')
-          : `The ${tierName} engine is temporarily unavailable. Please try again shortly, or pick another power level.`,
-        code: tierName === 'Weak' ? 'WEAK_ENGINE_UNAVAILABLE' : 'ENGINE_UNAVAILABLE',
-      });
+      res.status(503).json(engineUnavailableReply(tierName, strictFreeWeakEnabled()));
       return;
     }
 
@@ -14145,15 +14138,7 @@ async function noteBuildOutcome(
        * measuring it.
        */
       recordWeakAdmissionUsage(weakAdmission, (usage) => providerLedger.add(usage.pricingProof ? 'OPENROUTER' : 'GLM', usage, usage.pricingProof?.modelId ?? WEAK_SCOPE_MODEL));
-      let lastFreeOutputLimit: number | undefined;
-      const recordFreeOutputLimit = (usage: { selectedMaxOutputTokens?: number }): void => {
-        const limit = usage.selectedMaxOutputTokens;
-        if (!Number.isSafeInteger(limit) || !limit || limit === lastFreeOutputLimit) return;
-        lastFreeOutputLimit = limit;
-        try { buildDiag.record({ phase: 'provider', severity: 'info', code: 'FREE_OUTPUT_LIMIT', autoResolved: true,
-          message: `The verified-free endpoint selected an output ceiling of ${limit} tokens for this turn.`,
-          detail: 'The requested output budget is an upper bound. Endpoint and remaining-context limits can lower it; truncated writes retain the existing bounded recovery guards.' }); } catch { /* observation */ }
-      };
+      const recordFreeOutputLimit = createFreeOutputLimitRecorder((entry) => buildDiag.record(entry));
       const shadowFastLaneLedger = createProviderUsageLedger();
       const captureShadowUsage = (used: string, usage: { inputTokens: number; outputTokens: number; pricingProof?: VerifiedFreeProof; selectedMaxOutputTokens?: number }, model?: string, attribute = true): void => {
         recordFreeOutputLimit(usage);

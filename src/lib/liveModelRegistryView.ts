@@ -62,6 +62,6 @@ export function filterRegistryModels(models: RegistryModelView[], filters: Regis
 }
 export function registryTimestamp(value: number | null): string { return value && Number.isFinite(value) ? new Date(value).toLocaleString() : 'Not measured'; }
 export function safeRegistrySource(source: string): string | null {
-  try { const u = new URL(source); return u.protocol === 'https:' && u.hostname === 'openrouter.ai' && !u.port && !u.username && !u.password && (u.pathname.startsWith('/docs/') || u.pathname.startsWith('/api/v1/models') || u.pathname === '/models') ? u.href : null; } catch { return null; }
+  try { const u = new URL(source); return u.protocol === 'https:' && u.hostname === 'openrouter.ai' && !u.port && !u.username && !u.password && (u.pathname.startsWith('/docs/') || /^\/api\/v1\/models(?:\/|$)/.test(u.pathname) || u.pathname === '/models') ? u.href : null; } catch { return null; }
 }
 export function registryActionReason(value: string): boolean { const length = value.trim().length; return length >= 10 && length <= 500; }

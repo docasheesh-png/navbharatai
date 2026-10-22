@@ -31,6 +31,9 @@ describe('registry read and display safety', () => {
   it('does not accept script or embedded-credential source links', () => {
     expect(safeRegistrySource('javascript:alert(1)')).toBeNull(); expect(safeRegistrySource('https://attacker.example/pricing')).toBeNull(); expect(safeRegistrySource('https://openrouter.ai:444/models')).toBeNull(); expect(safeRegistrySource('https://secret@openrouter.ai')).toBeNull();
     expect(safeRegistrySource('https://openrouter.ai/models')).toBe('https://openrouter.ai/models');
+    expect(safeRegistrySource('https://openrouter.ai/api/v1/models')).toBe('https://openrouter.ai/api/v1/models');
+    expect(safeRegistrySource('https://openrouter.ai/api/v1/models/author/model/endpoints')).toBe('https://openrouter.ai/api/v1/models/author/model/endpoints');
+    expect(safeRegistrySource('https://openrouter.ai/api/v1/models-unrelated')).toBeNull();
   });
   it('requires a real bounded audit reason', () => {
     expect(registryActionReason(' ')).toBe(false); expect(registryActionReason('short')).toBe(false);

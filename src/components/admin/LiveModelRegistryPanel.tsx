@@ -56,7 +56,7 @@ export function LiveModelRegistryPanel({ adminToken }: { adminToken: string }): 
     return () => { mounted.current = false; epoch.current++; request.current?.abort(); clearInterval(timer); clearInterval(refreshTimer); };
   }, [load]);
 
-  const mutate = async (path: string, body?: Record<string, unknown>) => {
+  const mutate = async (path: `${typeof ROOT}/sync` | `${typeof ROOT}/models/action`, body?: Record<string, unknown>) => {
     if (mutationLock.current) return;
     mutationLock.current = true; setBusy(true); setNotice(''); setError('');
     const generation = ++epoch.current;
@@ -64,14 +64,14 @@ export function LiveModelRegistryPanel({ adminToken }: { adminToken: string }): 
     const controller = new AbortController();
     const deadline = setTimeout(() => controller.abort(), 30_000);
     try {
-      const response = await fetch(`${ROOT}/${path}`, { method: 'POST', headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}), signal: controller.signal });
+      const response = await fetch(path, { method: 'POST', headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}), signal: controller.signal });
       const result: unknown = await response.json();
       if (!mounted.current || generation !== epoch.current) return;
       if (!response.ok) {
         if (response.status === 409) { setPending(null); throw new Error('Registry changed since this review. Refresh and review the model again.'); }
         throw new Error(response.status === 401 || response.status === 403 ? 'Admin sign-in or authorization required.' : `Action was not confirmed (HTTP ${response.status}). Refresh to check its state before retrying.`);
       }
-      if (path === 'sync') {
+      if (path === `${ROOT}/sync`) {
         const status = result && typeof result === 'object' && 'status' in result ? result.status : null;
         if (!['synced', 'held', 'disabled'].includes(String(status))) throw new Error('Sync response was unreadable. Refresh to check status before retrying.');
         setNotice(status === 'synced' ? 'Catalog sync completed. No inference test was run.' : status === 'held' ? 'Another sync owns the lease. This request did not publish a new catalog.' : 'Synchronization is disabled by server configuration.');
@@ -103,7 +103,7 @@ export function LiveModelRegistryPanel({ adminToken }: { adminToken: string }): 
       <div className="flex flex-wrap justify-between gap-3">
         <div><h2 className="text-lg font-bold text-ink">Live Model Registry</h2><p className="text-sm text-muted">Admin-only discovery and strict-free eligibility. Catalog metadata is not proof of unlimited quota or a zero hosting bill. Status refreshes every 30 seconds while this page is open.</p></div>
         <div className="flex gap-2"><button type="button" className={button} disabled={busy || loading} onClick={() => void load()}>{loading ? 'Reading…' : 'Refresh status'}</button>
-          <button type="button" className={button} disabled={!view?.enabled || busy || loading || !!error} onClick={() => void mutate('sync')}>{busy ? 'Working…' : 'Sync catalog now'}</button></div>
+          <button type="button" className={button} disabled={!view?.enabled || busy || loading || !!error} onClick={() => void mutate(`${ROOT}/sync`)}>{busy ? 'Working…' : 'Sync catalog now'}</button></div>
       </div>
       {error && <p role="alert" className="text-sm text-danger">{error}{view ? ' Showing the last received snapshot only; controls are blocked until a successful refresh.' : ''}</p>}
       {notice && <p role="status" className="text-sm text-body">{notice}</p>}
@@ -146,7 +146,7 @@ export function LiveModelRegistryPanel({ adminToken }: { adminToken: string }): 
         </details>
       </>}
     </div>
-    {pending && <form aria-label="Review model control" onSubmit={e => { e.preventDefault(); if (validAction) void mutate('models/action', { modelId: pending.model.exactModelId, action: pending.action, registryVersion: pending.version, reason: reason.trim() }); }} className="rounded-xl border border-line bg-card p-4 space-y-3">
+    {pending && <form aria-label="Review model control" onSubmit={e => { e.preventDefault(); if (validAction) void mutate(`${ROOT}/models/action`, { modelId: pending.model.exactModelId, action: pending.action, registryVersion: pending.version, reason: reason.trim() }); }} className="rounded-xl border border-line bg-card p-4 space-y-3">
       <h3 className="font-bold text-ink">{pending.action === 'approve-terms' ? 'Record intended-use terms review' : pending.action === 'disable' ? 'Disable model' : 'Re-enable model checks'}</h3>
       <p className="break-all text-sm text-body">{pending.model.exactModelId}</p>
       {pending.version !== view?.manifest?.version && <p role="status" className="text-sm text-warn">The catalog changed during this review. Cancel and reopen the model control using the new snapshot.</p>}

@@ -1,3 +1,4 @@
+import ts from 'typescript';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -86,27 +87,41 @@ describe('the misread reaches the admin where they actually look', () => {
   const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8')
     .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 
+  // The registry and legacy ladder both have TIER_LADDER records. Select the actual
+  // legacy object structurally, not the first matching substring in the route.
+  function legacyLadderRecord(): ts.ObjectLiteralExpression {
+    const parsed = ts.createSourceFile('agentv3.ts', route, ts.ScriptTarget.Latest, true);
+    const matches: ts.ObjectLiteralExpression[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isObjectLiteralExpression(node)) {
+        const properties = node.properties.filter(ts.isPropertyAssignment);
+        const code = properties.find(p => p.name.getText(parsed) === 'code');
+        const detail = properties.find(p => p.name.getText(parsed) === 'detail');
+        if (code && ts.isStringLiteral(code.initializer) && code.initializer.text === 'TIER_LADDER'
+          && detail && ts.isCallExpression(detail.initializer)) matches.push(node);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+    expect(matches).toHaveLength(1);
+    return matches[0];
+  }
   it('the build report carries the note beside the ladder it applies to', () => {
     // ⚠️ THE FIRST VERSION OF THIS CASE WAS DEAD, and the reversion proof is what caught it. It read
     // `expect(route).toContain('nemotronConfigNote()')` — satisfied by the SEVERITY expression a few
     // lines above, so deleting the detail line entirely left all 19 cases green. A test that cannot
     // fail for the reason it was written is worse than no test: it reports a guard that is not there.
     // It now reads the `detail:` array specifically, which is the thing the admin actually sees.
-    const at = route.indexOf("code: 'TIER_LADDER'");
-    expect(at).toBeGreaterThan(-1);
-    const detailAt = route.indexOf('detail: [', at);
-    expect(detailAt, 'the TIER_LADDER record has no detail array any more').toBeGreaterThan(-1);
-    const detail = route.slice(detailAt, route.indexOf('].filter(Boolean)', detailAt));
-    expect(detail, 'the misread-flag note is not in the line the admin reads')
-      .toContain('nemotronConfigNote()');
+    const record = legacyLadderRecord();
+    const detail = record.properties.filter(ts.isPropertyAssignment).find(p => p.name.getText() === 'detail');
+    expect(detail?.initializer.getText(), 'the misread note must be in the admin detail field').toContain('nemotronConfigNote()');
   });
 
   it('and it makes that line a WARNING, not another info line nobody scans', () => {
-    const at = route.indexOf("code: 'TIER_LADDER'");
-    expect(at).toBeGreaterThan(-1);
-    const block = route.slice(Math.max(0, at - 700), at);
-    expect(block).toContain('nemotronConfigNote()');
-    expect(block).toContain("'warning'");
+    const record = legacyLadderRecord();
+    const severity = record.properties.filter(ts.isPropertyAssignment).find(p => p.name.getText() === 'severity')?.initializer.getText();
+    expect(severity).toContain('nemotronConfigNote()');
+    expect(severity).toContain("'warning'");
   });
 });
 

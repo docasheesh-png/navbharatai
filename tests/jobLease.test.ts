@@ -215,8 +215,31 @@ describe('🔒 the wiring — the job that DELETES is the one made exclusive', (
     expect(server).toContain("id: 'retention-purge', exclusive: true");
   });
 
-  it('the claim is wired from the real lease store', () => {
-    expect(server).toContain('scheduler.setClaim((jobId) => claimJobRun(getServerDb() as any, { jobId }))');
+  it('only the independently fenced registry jobs bypass the generic lease', async () => {
+    // Exercise the actual wired expression, not a duplicate test implementation. A new broad
+    // bypass must fail here: the destructive purge and every ordinary job still use claimJobRun.
+    const expression = server.match(/scheduler\.setClaim\(\(jobId\) => (.+)\);/)?.[1];
+    expect(expression).toBeDefined();
+    const calls: string[] = [];
+    const db = {};
+    const claim = new Function('claimJobRun', 'getServerDb',
+      `return (jobId) => ${expression!.replace(/ as any/g, '')}`)(
+        async (receivedDb: unknown, { jobId }: { jobId: string }) => {
+          expect(receivedDb).toBe(db); calls.push(jobId); return false;
+        }, () => db,
+      ) as (jobId: string) => Promise<boolean>;
+    for (const jobId of ['retention-purge', 'monitor-alerts', 'future-job', 'live-model-registry-extra']) {
+      expect(await claim(jobId), jobId).toBe(false);
+    }
+    expect(calls).toEqual(['retention-purge', 'monitor-alerts', 'future-job', 'live-model-registry-extra']);
+    for (const jobId of ['live-model-registry', 'live-image-model-registry']) expect(await claim(jobId)).toBe(true);
+    expect(calls).toHaveLength(4);
+    expect(server).toContain('await liveRegistry.syncLiveModels()');
+    expect(server).toContain('await liveRegistry.syncLiveImageModels()');
+    const sync = readFileSync(join(__dirname, '..', 'src/server/AI/LiveRegistry/sync.ts'), 'utf8');
+    const runtime = readFileSync(join(__dirname, '..', 'src/server/AI/LiveRegistry/runtime.ts'), 'utf8');
+    expect(sync).toContain('await this.store.claim(');
+    expect(runtime).toContain('await store.claimImages(');
   });
 
   it('🔒 THE BOOT RUN GOES THROUGH THE SCHEDULER — not straight to the handler', () => {

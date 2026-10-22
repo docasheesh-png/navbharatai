@@ -83,7 +83,6 @@ export async function liveModelRegistryView(): Promise<AdminRegistryView> {
 }
 export async function controlLiveModel(modelId: string, action: 'disable' | 'enable' | 'approve-terms', actor: string, registryVersion: string, reason: string) {
   await runtime().store.control(modelId, action, actor, Date.now(), registryVersion, reason);
-  audit('ADMIN_LIVE_MODEL_CONTROL', { modelId, action, actor, registryVersion });
 }
 
 /** Separate hourly metadata scan. Never calls image inference or changes the existing funded image pipeline. */

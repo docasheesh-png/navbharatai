@@ -1,3 +1,4 @@
+import { routeMiddlewareArguments } from './helpers/routeRegistration';
 // Forensic audit 2026-10-04 (P1) — every Doctor AI answer carries what it cost, so a paid turn is charged.
 //
 // On the paid tier the Grok × Gemini race answers first, and it returned text only: `sdaSpend` stayed
@@ -31,6 +32,10 @@ describe('census: every provider answer in sda.ts records its usage', () => {
   });
 
   it('the route is rate-limited', () => {
-    expect(src).toMatch(/app\.post\('\/api\/sda-chat', sdaLimiter,/);
+    const args = routeMiddlewareArguments(src, '/api/sda-chat');
+    const limiter = args.indexOf('sdaLimiter');
+    expect(limiter).toBeGreaterThanOrEqual(0);
+    expect(limiter).toBeLessThan(args.length - 1);
+    expect(args.at(-1)).toMatch(/^async\s*\(/);
   });
 });

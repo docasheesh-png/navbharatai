@@ -1,3 +1,4 @@
+import { routeMiddlewareArguments } from './helpers/routeRegistration';
 // Forensic audit 2026-10-04 (P1) — a free AI request is bounded before any provider is called.
 //
 // Free chat and the security scan took unbounded input from signed-in callers who are charged nothing:
@@ -62,7 +63,11 @@ describe('security scan', () => {
 
   it('the route is rate-limited and the prompt reads the bounded set', () => {
     const src = readFileSync('src/server/routes/audit.ts', 'utf8');
-    expect(src).toMatch(/app\.post\('\/api\/security\/scan', scanLimiter,/);
+    const args = routeMiddlewareArguments(src, '/api/security/scan');
+    const limiter = args.indexOf('scanLimiter');
+    expect(limiter).toBeGreaterThanOrEqual(0);
+    expect(limiter).toBeLessThan(args.length - 1);
+    expect(args.at(-1)).toMatch(/^async\s*\(/);
     expect(src).not.toMatch(/JSON\.stringify\(fileMap\)/);
   });
 });

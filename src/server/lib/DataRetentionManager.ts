@@ -811,6 +811,7 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
  * a warning nobody can ever clear is a warning nobody reads.
  */
 export const RETAINED_INDEFINITELY: readonly { collection: string; reason: string }[] = [
+  { collection: 'live_ai_registry', reason: 'server-owned provider pricing and administrator control evidence. Immutable catalog chunks and control-action history are deliberately retained for billing-policy review; control records include administrator login identities and review reasons, but no inference prompts or credentials. Sync summaries and routing audit caches are separately bounded, but the entire tree is not claimed to be bounded. No age-based deletion is authorized here' },
   { collection: 'workspace_files_v3', reason: "the user's actual app source code" },
   { collection: 'workspace_assets_v3', reason: "the user's uploaded images and files" },
   { collection: 'workspace_checkpoints_v3', reason: 'the restore points a user rolls back to' },

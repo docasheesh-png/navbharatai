@@ -163,3 +163,9 @@ describe('every authenticated admin action says WHO did it', () => {
     expect(missing).toEqual([]);
   });
 });
+
+it('registry targets survive the audit store assigning its own document id', () => {
+  const persisted = { admin: 'reviewer', modelId: 'provider/model:free', reason: 'Reviewed intended usage', result: 'ok', id: 'audit-document-uuid', event: 'ADMIN_LIVE_MODEL_CONTROL', ts: 123 };
+  expect(adminAuditRow(persisted)).toMatchObject({ actor: 'reviewer', target: 'provider/model:free', reason: 'Reviewed intended usage', result: 'ok' });
+  expect(adminAuditRow({ admin: 'reviewer', provider: 'openrouter', id: 'audit-document-uuid', event: 'ADMIN_LIVE_MODEL_SYNC' }).target).toBe('openrouter');
+});

@@ -1,3 +1,4 @@
+import { usageLogFields } from '../AI/Router/usageLogFields';
 import { freeModuleInferenceScope, runAdmittedLegacyImageEdit } from '../AI/inferencePolicy';
 import { strictFreeRequired, StrictFreeCapabilityError } from '../AI/inferencePolicy';
 import type { Express } from 'express';
@@ -767,10 +768,9 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           res.end();
         }
         // The SAME shape the non-streaming branch writes, so one collection answers for both paths and
-        // no reader has to know which one served. 🔒 `usageMeasured: false` is the honest value here:
-        // a streamed turn does not surface token counts today, and "we do not know" must never be
-        // summed as zero — the exact distinction the 2026-09-12 rewrite of the block below insisted on.
-        // `raced` records whether this turn paid for a second model to save latency (free never does).
+        // no reader has to know which one served. Missing provider usage stays unmeasured and has
+        // no token fields; verified-free streams can now report real usage, including genuine zeros.
+        // `raced` is recorded only when the routing outcome actually reports it.
         addDoc(collection(getDb() as any, 'ai_usage_logs'), {
           userId: req.body?.userId || req.body?.uid || 'anonymous',
           tier,
@@ -789,8 +789,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           ...(outcome?.reason === 'stalled'
             ? { stalled: true }
             : outcome?.reason ? { failureReason: outcome.reason } : {}),
-          usageMeasured: !!outcome?.usage,
-          ...(outcome?.usage ? { inputTokens: outcome.usage.inputTokens, outputTokens: outcome.usage.outputTokens } : {}),
+          ...usageLogFields(outcome?.usage),
           ...(outcome?.pricingProof ? { pricingProof: outcome.pricingProof } : {}),
           ok: !!outcome?.ok,
           grounded: !!groundingStatus,

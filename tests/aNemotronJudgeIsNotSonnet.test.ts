@@ -41,6 +41,7 @@ describe('every judge names itself', () => {
   it('the four engines that already worked still answer exactly as before', () => {
     // The fix must not move an existing label — the whole point is that the report stays readable
     // for the verdicts it was already getting right.
+    expect(judgeEngineLabel('openrouter')).toBe('Verified free registry');
     expect(judgeEngineLabel('grok')).toBe('Grok');
     expect(judgeEngineLabel('glm')).toBe('GLM');
     expect(judgeEngineLabel('opus')).toBe('Opus');
@@ -48,7 +49,7 @@ describe('every judge names itself', () => {
   });
 
   it('every label is distinct — two engines sharing a name is the same lie in a different shape', () => {
-    const kinds = ['grok', 'sonnet', 'opus', 'glm', 'nemotron'] as const;
+    const kinds = ['openrouter', 'grok', 'sonnet', 'opus', 'glm', 'nemotron'] as const;
     const labels = kinds.map(judgeEngineLabel);
     expect(new Set(labels).size).toBe(kinds.length);
     expect(labels.every((l) => l.trim().length > 0)).toBe(true);
@@ -77,7 +78,7 @@ describe('the union and the label cannot drift apart', () => {
 
     const judge = codeOnly(JUDGE);
     // ONE declaration, and the label takes exactly it.
-    expect(judge).toMatch(/export type JudgeKind = 'grok' \| 'sonnet' \| 'opus' \| 'glm' \| 'nemotron';/);
+    expect(judge).toMatch(/export type JudgeKind = 'openrouter' \| 'grok' \| 'sonnet' \| 'opus' \| 'glm' \| 'nemotron';/);
     expect(judge).toMatch(/export function judgeEngineLabel\(kind: JudgeKind\)/);
     // The `never` default is what turns a widened union into a compile error rather than a silent
     // fall-through to the last branch — the original defect. It must stay.

@@ -59,7 +59,10 @@ describe('census: no srcDoc frame shares our origin', () => {
   });
 
   it('the admin "Built apps" render of a user\'s app is opaque', () => {
-    const src = readFileSync('src/components/admin/BuiltAppsPanel.tsx', 'utf8');
+    // The render moved to the shared sheet (2026-10-21) so the Apps page and a user's profile open an app the same way.
+    const src = readFileSync('src/components/admin/AppPreviewSheet.tsx', 'utf8');
     expect(src).toMatch(/srcDoc=\{preview\.html\}[^>]*sandbox=\{UNTRUSTED_PREVIEW_SANDBOX\}/);
+    // …and no caller grows a private, unsandboxed copy of it.
+    for (const f of ['BuiltAppsPanel', 'UserBuiltApps']) expect(readFileSync(`src/components/admin/${f}.tsx`, 'utf8'), f).not.toMatch(/srcDoc=/);
   });
 });

@@ -36,6 +36,7 @@ interface ListResponse {
   rows?: BuiltAppRow[];
   orphaned?: BuiltAppRow[];
   nextCursor?: string | null;
+  scanLimited?: boolean;
 }
 
 export interface BuiltAppsPanelProps {
@@ -70,6 +71,7 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
   const [mode, setMode] = useState<Mode>('all');
   const [order, setOrder] = useState<'newest' | 'id'>('newest');
   const [loading, setLoading] = useState(false);
+  const [scanLimited, setScanLimited] = useState(false);
   const [error, setError] = useState('');
   const [queryInput, setQueryInput] = useState('');
   /** The query the last request was made with — the input can differ while the admin is still typing. */
@@ -104,6 +106,7 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
       }
       setError('');
       setMode(d.mode ?? 'all');
+      setScanLimited(d.scanLimited === true);
       setOrder(d.order ?? 'newest');
       setNextCursor(typeof d.nextCursor === 'string' && d.nextCursor ? d.nextCursor : null);
       if (opts.append) {
@@ -354,10 +357,11 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
         const live = ownerModerationTargets(rows, 'unpublish').length;
         const bannable = ownerModerationTargets(rows, 'ban').length;
         const more = !!nextCursor;
+        const incomplete = more || scanLimited;
         return (
           <div className="mb-3 rounded-xl border border-line bg-raised px-3 py-2.5 flex flex-wrap items-center gap-2">
             <p className="text-[12px] text-body flex-1 min-w-[200px]">
-              This person: <span className="font-bold text-ink">{rows.length}{more ? '+' : ''}</span> app{rows.length === 1 && !more ? '' : 's'}, <span className="font-bold text-ink">{live}{more ? '+' : ''}</span> live.
+              This person: <span className="font-bold text-ink">{rows.length}{incomplete ? '+' : ''}</span> app{rows.length === 1 && !incomplete ? '' : 's'}, <span className="font-bold text-ink">{live}{incomplete ? '+' : ''}</span> live.
               {more && <span className="text-faint"> The action covers the apps not loaded yet too.</span>}
             </p>
             <button onClick={() => onModerateOwner(owner, 'unpublish', live, more)} disabled={live === 0 && !more}
@@ -382,6 +386,10 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
         <p className="text-[10px] text-faint">Filtered by state from the publish registry, ordered by app id.</p>
       )}
 
+      {!error && mode === 'owner' && scanLimited && (
+        <p className="text-[11px] text-warn">Only the first 200 saved workspace records were checked. More apps may exist.</p>
+      )}
+
       {error && (
         <p className="text-[11px] text-warn">
           {error}{' '}
@@ -398,7 +406,7 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
 
       {!error && rows !== null && visible.length === 0 && (
         <p className="text-[11px] text-muted">
-          {rows.length === 0 ? (query || statusFilter ? 'Nothing matches.' : 'No built apps yet.') : 'Nothing matches that search among the loaded apps.'}
+          {rows.length === 0 ? (scanLimited ? 'No apps were found in the checked records.' : query || statusFilter ? 'Nothing matches.' : 'No built apps yet.') : 'Nothing matches that search among the loaded apps.'}
         </p>
       )}
 

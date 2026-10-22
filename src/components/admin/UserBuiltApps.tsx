@@ -4,7 +4,7 @@ import { previewPlan, publishStateView, type BuiltAppRow } from '../../lib/admin
 import { useAppPreview } from './AppPreviewSheet';
 
 /**
- * EVERY APP THIS PERSON BUILT, on their profile, each with an Open button (admin 2026-10-21: "admin jab kisi user ki
+ * SAVED APPS THIS PERSON BUILT, on their profile, each with an Open button (admin 2026-10-21: "admin jab kisi user ki
  * profile dekhta hai, to us profile me user ne jo app banayi hai, woh bhi dikhe… har user ki profile me is user ki
  * app open karne ka button").
  *
@@ -22,6 +22,7 @@ export function UserBuiltApps({ uid, headers }: { uid: string; headers: Record<s
   const [rows, setRows] = useState<BuiltAppRow[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [scanLimited, setScanLimited] = useState(false);
   const [error, setError] = useState('');
   const { openPreview, previewSheet } = useAppPreview(headers);
 
@@ -30,10 +31,11 @@ export function UserBuiltApps({ uid, headers }: { uid: string; headers: Record<s
     try {
       const qs = `q=${encodeURIComponent(uid)}&limit=${PAGE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
       const r = await fetch(`/api/admin/apps?${qs}`, { headers });
-      const d = await r.json().catch(() => null) as { ok?: boolean; mode?: string; rows?: BuiltAppRow[]; nextCursor?: string | null; error?: string } | null;
+      const d = await r.json().catch(() => null) as { ok?: boolean; mode?: string; scanLimited?: boolean; rows?: BuiltAppRow[]; nextCursor?: string | null; error?: string } | null;
       if (!r.ok || !d || d.ok === false || !Array.isArray(d.rows)) { setError(d?.error || 'This user’s apps could not be read.'); return; }
       if (d.mode !== 'owner') { setError('This account id is not one the apps list can search by, so its apps cannot be listed here.'); return; }
       setError('');
+      setScanLimited(d.scanLimited === true);
       setNext(typeof d.nextCursor === 'string' && d.nextCursor ? d.nextCursor : null);
       setRows((prev) => {
         const have = new Set((cursor ? prev ?? [] : []).map((x) => x.workspaceId));
@@ -44,17 +46,18 @@ export function UserBuiltApps({ uid, headers }: { uid: string; headers: Record<s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid, headers['x-admin-token']]);
 
-  useEffect(() => { setRows(null); setNext(null); void load(null); }, [load]);
+  useEffect(() => { setRows(null); setNext(null); setError(''); setScanLimited(false); void load(null); }, [load]);
 
   return (
     <div className="mt-4" data-testid="user-built-apps">
       <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">Apps built by this user</p>
+      {!error && scanLimited && <p className="text-[11px] text-warn">Only the first 200 saved workspace records were checked. More apps may exist.</p>}
       {error ? (
         <p role="alert" className="text-[11px] text-warn">{error}</p>
       ) : rows === null ? (
         <p className="text-[11px] text-muted">Loading apps…</p>
       ) : rows.length === 0 ? (
-        <p className="text-[11px] text-muted">This user has not built any apps.</p>
+        <p className="text-[11px] text-muted">{scanLimited ? 'No apps were found in the checked records.' : 'No saved apps were found for this user.'}</p>
       ) : (
         <div className="space-y-1.5">
           {rows.map((a) => {

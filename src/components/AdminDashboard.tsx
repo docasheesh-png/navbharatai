@@ -2,6 +2,7 @@ import { useBuildReportNumbers } from '../hooks/useBuildReportNumbers';
 import { BuildReportNumber } from './admin/BuildReportNumber';
 import type { BuildReportNumbering } from '../lib/buildReportNumbering';
 import { MaintenanceCard } from './admin/MaintenanceCard';
+import { UserBuiltApps } from './admin/UserBuiltApps';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight} from 'lucide-react';
 import { effectiveDirection } from '../lib/adminUserSort';
@@ -3506,6 +3507,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     four apps of which three were taken down read as four live apps, on the exact
                     screen used to decide whether to act on that account. The card counts what the
                     badges say, from one rule (`liveAppCount`). */}
+                {typeof account.uid === 'string' && account.uid && <UserBuiltApps uid={account.uid} headers={headers} />}
+
                 {account.publishedApps && (
                   <div className="mt-4">
                     <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">Published apps</p>

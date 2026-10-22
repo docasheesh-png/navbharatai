@@ -217,7 +217,7 @@ describe('where a snapshot lives — and why it must never look like an app', ()
     // listUserWorkspaceApps prefix-scans `agentv3-<uid>-`, and a snapshot key shares that prefix — so
     // without this the user would see their app TWICE and could open the backup by mistake.
     const store = readFileSync(join(process.cwd(), 'src/server/AgentV3/WorkspaceFileStore.ts'), 'utf8');
-    const at = store.indexOf('export async function listUserWorkspaceApps');
+    const at = store.indexOf('export async function listUserWorkspaceAppsResult');
     // Since 2026-09-27 the question is the CLASS one — every derived key (`::green`, `::attempt`,
     // `::greenmeta`), not `::green` alone, which is how the other two reached both app lists.
     expect(store.slice(at, at + 2000)).toContain('!isAppWorkspaceKey(d.id)');

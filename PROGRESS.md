@@ -99199,6 +99199,10 @@ the same fix the row already prescribed before the second occurrence arrived.
 ### Proof, by reversion
 Fourteen bugs were put back one at a time and each made a test fail: the Terms promising the refund window again, the refund policy returning money to the card, the contact page approving refunds, the Terms losing the investigate-then-credit remedy; a sign-in handler without the gate, a social button without the disabled gate, a second checkbox, a remembered tick, the marker cleared on a refusal, the server accepting a missing age confirmation, a version label that accepts anything; a quota changed without the notice, rows starting to be deleted, the exception paragraph removed.
 
+## 2026-10-21 — Admin: report numbers (oldest = 1) and a user's built apps on their profile
+- Report numbering was built in parallel by #3890 (server-side numbers); this change dropped its own copy and kept only the profile apps list.
+- **Apps on a user's profile.** The account sheet gains "Apps built by this user" (`UserBuiltApps.tsx`): the Apps page's owner-mode list (never-published apps included), 12 at a time, each with an Open button. The preview moved verbatim out of `BuiltAppsPanel` into `AppPreviewSheet.tsx` (`useAppPreview`) so both places share ONE sandboxed preview; the opaque-srcDoc census now reads that file. A failed read is shown as a failure, never as "no apps".
+- Tests: `reportNumbering.test.ts` (reverted-and-failed), `UserBuiltApps.render.test.tsx`, census updated.
 
 ## 2026-10-21 — PR #3882 pre-merge safety review and current-main integration
 
@@ -99389,6 +99393,12 @@ assertion actionable without clearing or draining any timer for it"*.
 path). That is deliberate: closing Q-2203 closes the instance, and the row that closes the class is still open
 with its fix proposed and its breakage risk named.
 
+## 2026-10-21 — PR #3894 review: an unreadable owner-app list is not an empty account
+
+- Root/class: the legacy `listUserWorkspaceApps` best-effort `[]` fallback erased store failure evidence before the admin route could report it. The new profile would consequently claim the user had never built an app during a datastore outage. Added a shared explicit-result reader; the three non-admin callers retain their previous best-effort wrapper. The authenticated admin owner branch now sends a generic 502 on read/enrichment failure, not successful empty rows. No auth, tenant, preview, provider or billing policy changed.
+- Completeness: the existing query still reads at most 200 raw workspace records. A result at the cap is conservatively marked `scanLimited`, including when all records are snapshots/empty. Both admin consumers show that more apps may exist; a successful empty read says only that no saved apps were found. Moderation action callbacks and eligibility retain their previous behavior; displayed counts no longer imply completeness at the scan cap.
+- Proof: mocked store → actual owner-response handler tests cover missing DB, rejected query, successful empty read, prefix/bound, filtered records, enrichment rejection and pagination. Rendered component-state tests cover HTTP/network/malformed/wrong-mode failures and bounded empty lists on both consumers. Reinstating swallowed failures makes three regression cases fail (including HTTP 200 instead of 502); restored targeted suite: 163/163 passed. Existing preview census now follows the shared AppPreviewSheet extraction and checks caller wiring rather than the old file location.
+- Validation boundary: tests use a credential-free environment and a hard network guard; targeted runs kept the guard log unchanged. Full final-state gates and independent review remain publication prerequisites. No live datastore/provider call or paid build was used to prove this change.
 ## 2026-10-21 — the retained failed-build reports became readable, and what mining them actually yields
 
 Report tooling (`list_failed_builds` / `get_failed_build` / `get_failed_build_autopsy`) became available to this

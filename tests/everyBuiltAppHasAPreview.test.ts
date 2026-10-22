@@ -223,6 +223,9 @@ describe('DeploymentStore never mints a record from a status', () => {
 describe('the wiring — the server pages, the preview never touches a sandbox, the dashboard renders the panel', () => {
   const route = stripComments(read('src/server/routes/admin.ts'));
   const panel = read('src/components/admin/BuiltAppsPanel.tsx');
+  // The preview itself (fetch, frames, sandbox) lives in ONE shared file since 2026-10-21, so the Apps page and a user's
+  // profile open an app the same way. The panel must still USE it.
+  const sheet = read('src/components/admin/AppPreviewSheet.tsx');
   const dashboard = read('src/components/AdminDashboard.tsx');
   const fileStore = stripComments(read('src/server/AgentV3/WorkspaceFileStore.ts'));
 
@@ -262,11 +265,12 @@ describe('the wiring — the server pages, the preview never touches a sandbox, 
     expect(panel).toContain("params.set('limit', String(PAGE_SIZE));");
     expect(panel).toContain('Load ${PAGE_SIZE} more');
     expect(panel).toContain('<Eye size={11} /> Preview');
-    expect(panel).toContain("fetch(`/api/admin/apps/${encodeURIComponent(row.workspaceId)}/preview`");
+    expect(sheet).toContain("fetch(`/api/admin/apps/${encodeURIComponent(row.workspaceId)}/preview`");
     // The saved copy is framed by URL; the render by srcDoc — both in a sandboxed frame.
-    expect(panel).toContain('src={plan.url}');
-    expect(panel).toContain('srcDoc={preview.html}');
-    expect(panel).toContain("const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups';");
+    expect(panel).toContain('useAppPreview(headers)');
+    expect(sheet).toContain('src={plan.url}');
+    expect(sheet).toContain('srcDoc={preview.html}');
+    expect(sheet).toContain("const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups';");
   });
 
   it('the dashboard renders the panel on the Security tab and refreshes ONE row after a moderation', () => {

@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { WorkspaceBuildReports } from './WorkspaceBuildReports';
-import { Globe, Search, ExternalLink, Eye, X, Ban as BanIcon, RotateCcw } from 'lucide-react';
+import { Globe, Search, ExternalLink, Eye, Ban as BanIcon, RotateCcw } from 'lucide-react';
 import {
   canBan, canUnpublish, isRestorableStatus, matchesBuiltApp, ownerModerationTargets, previewPlan, publishStateView, replaceRow, type BuiltAppRow, type ModerationAction, type OwnerAction,
 } from '../../lib/adminAppModeration';
-import { UNTRUSTED_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
+import { useAppPreview } from './AppPreviewSheet';
 
 /**
  * BUILT APPS — every user's built app, twelve at a time, each with a preview (admin 2026-09-18).
@@ -25,8 +25,6 @@ import { UNTRUSTED_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
  */
 
 const PAGE_SIZE = 12;
-const PREVIEW_IFRAME_ALLOW = 'clipboard-write; fullscreen';
-const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups';
 
 type Mode = 'all' | 'exact' | 'owner' | 'url' | 'status' | 'text';
 
@@ -38,6 +36,7 @@ interface ListResponse {
   rows?: BuiltAppRow[];
   orphaned?: BuiltAppRow[];
   nextCursor?: string | null;
+  scanLimited?: boolean;
 }
 
 export interface BuiltAppsPanelProps {
@@ -72,12 +71,13 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
   const [mode, setMode] = useState<Mode>('all');
   const [order, setOrder] = useState<'newest' | 'id'>('newest');
   const [loading, setLoading] = useState(false);
+  const [scanLimited, setScanLimited] = useState(false);
   const [error, setError] = useState('');
   const [queryInput, setQueryInput] = useState('');
   /** The query the last request was made with — the input can differ while the admin is still typing. */
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [preview, setPreview] = useState<{ row: BuiltAppRow; html: string | null; loading: boolean; error: string; kind: string } | null>(null);
+  const { openPreview, previewSheet } = useAppPreview(headers);
   /** The app whose build reports the "v" button opened (admin 2026-10-15). */
   const [reportApp, setReportApp] = useState<{ workspaceId: string; appName: string } | null>(null);
   useEffect(() => {
@@ -106,6 +106,7 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
       }
       setError('');
       setMode(d.mode ?? 'all');
+      setScanLimited(d.scanLimited === true);
       setOrder(d.order ?? 'newest');
       setNextCursor(typeof d.nextCursor === 'string' && d.nextCursor ? d.nextCursor : null);
       if (opts.append) {
@@ -174,24 +175,6 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
     return mode === 'text' ? rows.filter((r) => matchesBuiltApp(r, query)) : rows;
   }, [rows, mode, query]);
 
-  const openPreview = useCallback(async (row: BuiltAppRow) => {
-    const plan = previewPlan(row);
-    if (plan.source === 'none') { setPreview({ row, html: null, loading: false, error: plan.label, kind: '' }); return; }
-    if (plan.source === 'copy' || plan.source === 'live') { setPreview({ row, html: null, loading: false, error: '', kind: plan.source }); return; }
-    setPreview({ row, html: null, loading: true, error: '', kind: '' });
-    try {
-      const r = await fetch(`/api/admin/apps/${encodeURIComponent(row.workspaceId)}/preview`, {
-        method: 'POST', headers, body: JSON.stringify({ origin: window.location.origin }),
-      });
-      const d = await r.json();
-      if (!r.ok || d?.error) { setPreview({ row, html: null, loading: false, error: d?.error || 'Could not render this app.', kind: '' }); return; }
-      if (d?.empty || !d?.html) { setPreview({ row, html: null, loading: false, error: d?.note || 'No saved files for this app.', kind: '' }); return; }
-      setPreview({ row, html: String(d.html), loading: false, error: '', kind: String(d.kind || '') });
-    } catch (e) {
-      console.error(e);
-      setPreview({ row, html: null, loading: false, error: 'Could not render this app.', kind: '' });
-    }
-  }, [headers]);
 
   const renderRow = (d: BuiltAppRow, opts: { orphan?: boolean } = {}) => {
     const view = publishStateView(d.publish, d.heldFrom);
@@ -374,10 +357,11 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
         const live = ownerModerationTargets(rows, 'unpublish').length;
         const bannable = ownerModerationTargets(rows, 'ban').length;
         const more = !!nextCursor;
+        const incomplete = more || scanLimited;
         return (
           <div className="mb-3 rounded-xl border border-line bg-raised px-3 py-2.5 flex flex-wrap items-center gap-2">
             <p className="text-[12px] text-body flex-1 min-w-[200px]">
-              This person: <span className="font-bold text-ink">{rows.length}{more ? '+' : ''}</span> app{rows.length === 1 && !more ? '' : 's'}, <span className="font-bold text-ink">{live}{more ? '+' : ''}</span> live.
+              This person: <span className="font-bold text-ink">{rows.length}{incomplete ? '+' : ''}</span> app{rows.length === 1 && !incomplete ? '' : 's'}, <span className="font-bold text-ink">{live}{incomplete ? '+' : ''}</span> live.
               {more && <span className="text-faint"> The action covers the apps not loaded yet too.</span>}
             </p>
             <button onClick={() => onModerateOwner(owner, 'unpublish', live, more)} disabled={live === 0 && !more}
@@ -402,6 +386,10 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
         <p className="text-[10px] text-faint">Filtered by state from the publish registry, ordered by app id.</p>
       )}
 
+      {!error && mode === 'owner' && scanLimited && (
+        <p className="text-[11px] text-warn">Only the first 200 saved workspace records were checked. More apps may exist.</p>
+      )}
+
       {error && (
         <p className="text-[11px] text-warn">
           {error}{' '}
@@ -418,7 +406,7 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
 
       {!error && rows !== null && visible.length === 0 && (
         <p className="text-[11px] text-muted">
-          {rows.length === 0 ? (query || statusFilter ? 'Nothing matches.' : 'No built apps yet.') : 'Nothing matches that search among the loaded apps.'}
+          {rows.length === 0 ? (scanLimited ? 'No apps were found in the checked records.' : query || statusFilter ? 'Nothing matches.' : 'No built apps yet.') : 'Nothing matches that search among the loaded apps.'}
         </p>
       )}
 
@@ -445,71 +433,7 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
         </div>
       )}
 
-      {preview && (() => {
-        const plan = previewPlan(preview.row);
-        // THE SHEET CONTRACT (index.css), added 2026-09-22 from a measured audit. `-over-nav`
-        // because z-9998 paints above the tab bar. `p-3` is gone: a `p-*` utility beats the
-        // overlay class on source order and would zero the notch reserve (12px against a 47px
-        // notch); `sm:p-6` stays, since at ≥sm the insets and the bar are all 0 anyway.
-        // 🔒 Portalled to the body: rendered in place it sat inside the admin console, and any
-        // ancestor with a transform, a filter or a backdrop-blur becomes the containing block for a
-        // `position: fixed` child — the trap tests/theSheetOpensOverTheScreenNotInsideAFooter.test.ts
-        // exists for. A sheet that carries the contract must also be out of reach of that trap.
-        const sheet = (
-          <div className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 z-[9998] flex items-center justify-center sm:p-6 bg-scrim backdrop-blur-sm" role="presentation">
-            {/* `h-full` + `nb-sheet`, not `h-[88vh]`: a `vh` fraction is measured against the LARGE
-                viewport and against a screen that still owes space to the notch. The overlay's box
-                IS the visible area now, so "as tall as it can be" is the honest height — and the
-                iframe below is already `flex-1 min-h-0`, so it fills whatever it is given. */}
-            <div role="dialog" aria-modal="true" aria-label={`Preview of ${preview.row.appName || preview.row.workspaceId}`}
-                 className="nb-sheet w-full max-w-[1100px] h-full rounded-2xl bg-card border border-line shadow-2xl flex flex-col overflow-hidden">
-              <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-line">
-                <div className="min-w-0">
-                  <p className="text-[12px] font-bold text-ink truncate">
-                    {preview.row.appName || 'Name not recorded'}
-                    {preview.row.owner?.label ? <span className="font-normal text-muted"> · {preview.row.owner.label}</span> : null}
-                  </p>
-                  <p className="text-[10px] font-mono text-faint truncate">{preview.row.workspaceId}</p>
-                  <p className="text-[10px] text-muted truncate">{preview.error || plan.label}</p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {(plan.source === 'copy' || plan.source === 'live') && (
-                    <a href={plan.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] text-info hover:underline">
-                      <ExternalLink size={10} /> Open in a tab
-                    </a>
-                  )}
-                  <button onClick={() => setPreview(null)} aria-label="Close preview"
-                          className="w-8 h-8 rounded-lg bg-raised border border-line text-ink flex items-center justify-center hover:border-sky-500/40">
-                    <X size={14} />
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 min-h-0">
-                {(plan.source === 'copy' || plan.source === 'live') && (
-                  <iframe
-                    title={`${plan.source === 'copy' ? 'Saved copy' : 'Published app'} of ${preview.row.workspaceId}`}
-                    src={plan.url} className="w-full h-full border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={IFRAME_SANDBOX}
-                  />
-                )}
-                {/* 🔒 A STRANGER'S code rendered inside the ADMIN's session (forensic audit 2026-10-04, P0): a
-                    srcDoc frame with allow-same-origin IS this page, so any user's app could read the admin's
-                    Firebase session from localStorage. The opaque sandbox keeps it out of the platform origin. */}
-                {plan.source === 'render' && preview.html && (
-                  <iframe title={`In-browser render of ${preview.row.workspaceId}`} srcDoc={preview.html} className="w-full h-full border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={UNTRUSTED_PREVIEW_SANDBOX} />
-                )}
-                {plan.source === 'render' && preview.loading && (
-                  <p className="p-6 text-[12px] text-muted">Rendering from the saved files…</p>
-                )}
-                {(plan.source === 'none' || (!preview.loading && !preview.html && plan.source === 'render')) && (
-                  <p className="p-6 text-[12px] text-warn">{preview.error || plan.label}</p>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-        // No document ⇒ nothing to portal into (a server render), so render in place.
-        return typeof document === 'undefined' ? sheet : createPortal(sheet, document.body);
-      })()}
+      {previewSheet}
       {reportApp && onCopyBuildReport && onDownloadBuildReport && (() => {
         // THE SHEET CONTRACT again (tests/everyPopupClearsTheChrome, mobileScrollGeometry): the overlay clears the notch
         // and the tab bar, the card is capped by the room the overlay really has (never a bare `vh`), and it portals to

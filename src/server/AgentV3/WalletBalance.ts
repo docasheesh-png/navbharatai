@@ -14,6 +14,8 @@
 
 import { doc, getDoc, type Firestore } from '../lib/serverDb'; // admin-SDK binding — reads the owner-only wallet doc
 import { TOKENS_PER_RUPEE } from '../lib/payments';
+import { giftRemaining } from '../lib/giftSpend';
+import { freeProgramPausedHint } from '../lib/freeProgramHint';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
 
 /** Minimal shape we read off the wallet doc. `remaining_balance` is ₹; `tokenBalance` is the token mirror. */
@@ -56,9 +58,12 @@ export async function readWalletBalanceInr(read: WalletReader, userId: string): 
   // (both 0 → 0). The gift path is also fixed at the source (admin.ts) to keep the ₹ mirror in sync; this is
   // the defense-in-depth so ANY future drift can't strand a user's real balance.
   // FALLBACK (money-bleed fix, admin 2026-07-12): a doc with NEITHER numeric field stays null (→ fail-open).
-  if (balNum != null && tokInr != null) return Math.max(balNum, tokInr);
-  if (balNum != null) return balNum; // ₹ present, no token mirror → ₹ as-is (preserves negative overdraft read)
-  if (tokInr != null) return tokInr; // token-only wallet → derived ₹
+  // FREE PROGRAM PAUSED (admin 2026-10-22: "only pay and use"): the gift is not spendable, so every gate judges the
+  // user's OWN money only — whoever asks, a paying account included. Resuming the program restores the full balance.
+  const giftInr = freeProgramPausedHint() ? giftRemaining(data as never) / TOKENS_PER_RUPEE : 0;
+  if (balNum != null && tokInr != null) return Math.max(balNum, tokInr) - giftInr;
+  if (balNum != null) return balNum - giftInr; // ₹ present, no token mirror → ₹ as-is (preserves negative overdraft read)
+  if (tokInr != null) return tokInr - giftInr; // token-only wallet → derived ₹
   return null;
 }
 

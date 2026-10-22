@@ -184,7 +184,7 @@ export function registerImageGenRoutes(app: Express): void {
       if (!r.ok) {
         if (r.reason === 'price_not_shown') {
           res.status(429).json({ error: freeUsedUpdateMessage(userWords, r.freePerDay), code: FREE_USED_UPDATE_CODE });
-        } else if (r.reason === 'needs_credit') {
+        } else if (r.reason === 'needs_credit' || r.reason === 'free_trial_ended') {
           res.status(r.status).json(r.body);
         } else {
           res.status(503).json({ error: 'NavBharatAI could not take the payment for this image just now, so it was not made and nothing was charged. Please try again.' });

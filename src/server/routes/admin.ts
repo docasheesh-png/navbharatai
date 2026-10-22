@@ -1,5 +1,7 @@
+import { sendAdminOwnerApps } from './adminOwnerApps';
 import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
 import { registerAiMaintenanceRoutes } from './aiMaintenance';
+import { registerFreeProgramRoutes } from './freeProgram';
 import crypto from 'crypto';
 import { AggregateField } from 'firebase-admin/firestore';
 import { WALLET_SUMMARY_FIELDS, USAGE_LOG_FIELDS, revenueToday } from '../lib/adminReadFields';
@@ -123,10 +125,10 @@ import { eventStore } from '../lib/eventStore';
 import { rotateAllSecrets, getLatestKeyVersion, encrypt, decrypt } from '../lib/secrets';
 import { generateTotpSecret, verifyTotp, totpAuthUri } from '../lib/totp';
 import { deploymentStore, isLiveDeployment, type DeploymentStatus } from '../AgentV3/DeploymentStore';
-import { listWorkspaceAppsPage, getWorkspaceAppsMany, listUserWorkspaceApps, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { listWorkspaceAppsPage, getWorkspaceAppsMany, listUserWorkspaceAppsResult, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import {
   BUILT_APPS_PAGE_SIZE, clampPageSize, parseAppsQuery, joinBuiltAppRows, builtAppRow, encodeCursor, decodeCursor,
-  sliceOwnerPage, annotateBuiltAppRows, liveOrphans, type BuiltAppRow, type BuiltAppOwnerIdentity,
+  annotateBuiltAppRows, liveOrphans, type BuiltAppRow, type BuiltAppOwnerIdentity,
 } from '../AgentV3/adminBuiltApps';
 import { readConversationNamesMany } from '../AgentV3/FirestoreConversationStore';
 import {
@@ -419,6 +421,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   };
 
   registerAiMaintenanceRoutes(app, verifyAdminToken);
+  registerFreeProgramRoutes(app, verifyAdminToken);
 
   // ── P-SEC.3 — Admin MFA management (TOTP enrol / verify / disable / status) ──
   // All require a valid admin session (verifyAdminToken). Self-service enrolment
@@ -2758,13 +2761,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       }
 
       if (query.mode === 'owner') {
-        // One owner's apps are bounded (a prefix range of at most 200), so the page is a slice and the
-        // cursor is the next offset — no store-level cursor needed.
-        const all = await listUserWorkspaceApps(query.uid, 200);
-        const { page, nextOffset } = sliceOwnerPage(all, rawCursor, limit);
-        const ids = page.map((a) => a.workspaceId);
-        const { deployments, sandboxes } = await enrich(ids);
-        res.json({ ok: true, mode: 'owner', rows: await finish(joinBuiltAppRows(page, deployments, sandboxes)), nextCursor: nextOffset, pageSize: limit });
+        await sendAdminOwnerApps(res, query.uid, rawCursor, limit, {
+          read: listUserWorkspaceAppsResult,
+          rows: async (page) => {
+            const { deployments, sandboxes } = await enrich(page.map((a) => a.workspaceId));
+            return finish(joinBuiltAppRows(page, deployments, sandboxes));
+          },
+        });
         return;
       }
 

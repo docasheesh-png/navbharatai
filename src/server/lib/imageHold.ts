@@ -40,6 +40,9 @@ import {
 import { toolUsageStore } from '../tools/ToolUsageStore';
 import { getServerDb } from './serverDb';
 import { randomUUID } from 'crypto';
+import { freeProgramPaused, FREE_TRIAL_ENDED_MESSAGE, FREE_TRIAL_ENDED_CODE } from './freeProgram';
+import { hasEverPaid } from '../AgentV3/FreeTierBuildRouting';
+import { firestoreWalletReader } from '../AgentV3/WalletBalance';
 
 export interface ImageHold {
   /** True when today's count was taken for this picture (pricing on, not free-listed, counter written). */
@@ -61,7 +64,9 @@ export type ImageReservation =
   /** The wallet cannot cover the price. `status`/`body` are the wallet-empty answer every client knows. */
   | { ok: false; reason: 'needs_credit'; status: number; body: Record<string, unknown>; freePerDay: number; priceInr: number }
   /** The price could not be held (a database error). Nothing was charged and nothing will be drawn. */
-  | { ok: false; reason: 'hold_failed' };
+  | { ok: false; reason: 'hold_failed' }
+  /** The free program is paused and this account has never paid: no picture, free or priced (lib/freeProgram.ts). */
+  | { ok: false; reason: 'free_trial_ended'; status: number; body: Record<string, unknown> };
 
 export interface ImageHoldDeps {
   increment(uid: string, at: number): Promise<number>;
@@ -71,6 +76,8 @@ export interface ImageHoldDeps {
   release(uid: string, tx: WalletReleaseTx, ownerId?: string): Promise<{ ok: true; released: boolean } | { ok: false; error: string }>;
   settle(uid: string, tx: { rollupRef: string; holdId: string; feature: 'image'; billedInr: number }, ownerId?: string): Promise<unknown>;
   now(): number;
+  /** Has this account ever paid real money? Read only while the free program is paused. */
+  everPaid?(uid: string): Promise<boolean>;
   newId(): string;
 }
 
@@ -83,6 +90,7 @@ export function defaultImageHoldDeps(): ImageHoldDeps {
     release: (uid, tx, ownerId) => releaseWalletHold(getServerDb() as any, uid, tx, ownerId),
     settle: (uid, tx, ownerId) => settleWalletHold(getServerDb() as any, uid, tx, ownerId),
     now: () => Date.now(),
+    everPaid: async (uid) => hasEverPaid(await firestoreWalletReader(getServerDb() as any)(uid).catch(() => null)),
     newId: () => `img_${randomUUID()}`,
   };
 }
@@ -110,6 +118,12 @@ export async function reserveImage(
 ): Promise<ImageReservation> {
   if (!imagePricingEnabled() || input.freeListed || !input.uid) return { ok: true, hold: NOTHING_HELD };
   const deps = depsIn ?? defaultImageHoldDeps();
+  // FREE PROGRAM PAUSED (admin 2026-10-22): an account that has never paid gets no picture at all — not the free
+  // five, and not one drawn against its hidden gift balance. Checked BEFORE the slot is taken, so nothing needs
+  // giving back. An unreadable wallet counts as never-paid (the pause fails safe). See lib/freeProgram.ts.
+  if (deps.everPaid && await freeProgramPaused() && !(await deps.everPaid(input.uid).catch(() => false))) {
+    return { ok: false, reason: 'free_trial_ended', status: 402, body: { error: FREE_TRIAL_ENDED_MESSAGE, code: FREE_TRIAL_ENDED_CODE } };
+  }
   const freePerDay = imageFreePerDay();
   const priceInr = imagePriceInr();
   const at = deps.now();

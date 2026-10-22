@@ -46,6 +46,10 @@ import {
 import {
   accountCreatedAt, codeWindow, countAppOpen, readAppOpenState, type CodeWindow,
 } from '../lib/referralCodeWindow';
+import { freeProgramPausedNow } from '../lib/freeProgram';
+
+/** The referral ladder is live only when its own switch is on AND the free program is not paused (admin 2026-10-22). */
+const rewardsLive = (): boolean => referralRewardsEnabled() && !freeProgramPausedNow();
 
 /** One person's referral record. Absent until they first open the screen or redeem a code. */
 interface ReferralDoc {
@@ -169,7 +173,7 @@ export async function settleWebReferralSteps(db: any, userId: string, opts: {
   granted: number;
   phoneVerified: boolean;
 }> {
-  if (!referralRewardsEnabled() || !userId) return { granted: 0, phoneVerified: false };
+  if (!rewardsLive() || !userId) return { granted: 0, phoneVerified: false };
   const selfRef = doc(db, REFERRALS, userId);
   const steps = WEB_ELIGIBLE_STEPS.filter((s) => !opts.only || opts.only.includes(s));
 
@@ -314,7 +318,7 @@ export function registerReferralRoutes(app: Express): void {
    */
   app.get('/api/referral/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      if (!referralRewardsEnabled()) {
+      if (!rewardsLive()) {
         return res.json({ ok: true, enabled: false, code: null, steps: [], earnedTokens: 0 });
       }
       const db = getDb() as any;
@@ -395,7 +399,7 @@ export function registerReferralRoutes(app: Express): void {
    */
   app.get('/api/referral/:userId/referred', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      if (!referralRewardsEnabled()) {
+      if (!rewardsLive()) {
         return res.json({ ok: true, enabled: false, count: 0, friends: [] });
       }
       const db = getDb() as any;
@@ -442,7 +446,7 @@ export function registerReferralRoutes(app: Express): void {
    */
   app.post('/api/referral/:userId/redeem', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      if (!referralRewardsEnabled()) {
+      if (!rewardsLive()) {
         return res.json({ ok: false, message: attributionRefusalMessage('disabled') });
       }
       const db = getDb() as any;
@@ -516,7 +520,7 @@ export function registerReferralRoutes(app: Express): void {
    */
   app.post('/api/referral/:userId/claim', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      if (!referralRewardsEnabled()) {
+      if (!rewardsLive()) {
         return res.json({ ok: false, granted: 0, message: 'Referral rewards are not available right now.' });
       }
       const db = getDb() as any;
@@ -665,7 +669,7 @@ export function registerReferralRoutes(app: Express): void {
    * itself failing on the device — would be the one kind the claim counter could never see.
    */
   app.post('/api/referral/:userId/claim-failed', requireUserMatch('userId'), async (req: Request, res: Response) => {
-    if (!referralRewardsEnabled()) return res.json({ ok: true });
+    if (!rewardsLive()) return res.json({ ok: true });
     const body = (req.body ?? {}) as { reason?: unknown; message?: unknown };
     const reason = phoneCheckFailureCategory(String(body.reason ?? ''), String(body.message ?? '').slice(0, 300));
     void recordClaimOutcome(routeParam(req.params.userId), 'android', 'device-failed-on-phone', { reason });

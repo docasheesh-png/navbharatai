@@ -16,6 +16,7 @@ import { ReferralPanel } from '../panels/ReferralPanel';
 import { ReferredFriendsList } from './ReferredFriendsList';
 import type { ReferralProgress } from '../../hooks/useReferralProgress';
 import { giftPriceAtPct } from '../../lib/platformFee';
+import { usePublicFlags } from '../../lib/publicFlags';
 import { giftWhatsAppUrl, type GiftCodeRow } from '../../lib/giftCodeRow';
 
 export interface PromoRewardsTabProps {
@@ -168,11 +169,14 @@ export function PromoRewardsTab(props: PromoRewardsTabProps) {
     userId, referral, onRefreshReferral, onToast, couponCodeInput, onSetCouponCodeInput,
     isRedeemingCoupon, couponError, couponSuccess, onRedeemPromoCoupon, onCreateGiftOrder,
   } = props;
+  // FREE PROGRAM PAUSED (admin 2026-10-22): nothing here may hint that rewards ever existed. The referral card and
+  // friends list go; the code box stays, because a PURCHASED gift code is redeemed in it, and says "gift code".
+  const { freeProgramPaused } = usePublicFlags();
 
   return (
     <div className="space-y-5">
       {/* REFER A FRIEND — the code and the earned steps. Every number in it is the server's. */}
-      <ReferralPanel
+      {!freeProgramPaused && <ReferralPanel
         userId={userId}
         enabled={referral.enabled}
         code={referral.code}
@@ -191,15 +195,15 @@ export function PromoRewardsTab(props: PromoRewardsTabProps) {
         githubLinked={referral.githubLinked}
         onRefresh={onRefreshReferral}
         onToast={onToast}
-      />
+      />}
 
-      {referral.enabled && <ReferredFriendsList userId={userId} refreshKey={referral.earnedRupees} />}
+      {!freeProgramPaused && referral.enabled && <ReferredFriendsList userId={userId} refreshKey={referral.earnedRupees} />}
 
       {/* A PROMO CODE the person was given. Each code can be applied once — the server enforces it. */}
       <section aria-labelledby="promo-code-heading" className="space-y-3 rounded-2xl border border-line bg-card p-5">
         <div>
-          <h3 id="promo-code-heading" className="text-sm font-bold text-ink">Have a promo code?</h3>
-          <p className="mt-0.5 text-xs font-semibold text-muted">Each promo code can be applied once.</p>
+          <h3 id="promo-code-heading" className="text-sm font-bold text-ink">{freeProgramPaused ? 'Have a gift code?' : 'Have a promo code?'}</h3>
+          <p className="mt-0.5 text-xs font-semibold text-muted">{freeProgramPaused ? 'Each gift code can be applied once.' : 'Each promo code can be applied once.'}</p>
         </div>
         {/* The button sits UNDER the box, full width (admin 2026-09-24, phone screenshot: "apply code
             button screen se bahar ja raha hai"). Side by side, an <input> will not shrink below its

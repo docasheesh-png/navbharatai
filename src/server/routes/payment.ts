@@ -1,3 +1,4 @@
+import { freeProgramPaused } from '../lib/freeProgram';
 import crypto from 'crypto';
 import axios from 'axios';
 import type { Express, Request, Response } from 'express';
@@ -718,6 +719,12 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         console.error('[GIFT] Redemption failed:', err?.message);
         return sendSafeError(res, 500, 'That gift code could not be redeemed right now. Please try again.', err, 'gift redeem');
       }
+    }
+
+    // FREE PROGRAM PAUSED (admin 2026-10-22): marketing coupons and admin promo codes hand out free tokens, so they are
+    // paused with the rest. A PURCHASED gift code (above) is somebody's real money and still redeems.
+    if (await freeProgramPaused()) {
+      return res.status(400).json({ error: 'Invalid or expired promoter voucher card.' });
     }
 
     // THE PRICE LIST MOVED OUT OF THE SOURCE (revenue audit 2026-09-10). Five codes used to be written

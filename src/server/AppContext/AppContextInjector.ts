@@ -11,6 +11,8 @@
  */
 import { isDoseQuestion, answerDoseQuestion } from '../../lib/neonatalDosing';
 import { APP_KNOWLEDGE_BASE, AppFeature, getFeatureById } from './AppKnowledgeBase';
+import { freeProgramPausedHint } from '../lib/freeProgramHint';
+import { freeProgramNoteFor, visibleKnowledgeBase } from './freeProgramContext';
 import { withoutPurchaseTeaching, IOS_NO_PURCHASE_NOTE, type ClientPlatform } from './iosPurchaseGuard';
 
 // Signals that the user is asking about the app itself (navigation / features / how-to).
@@ -132,12 +134,15 @@ export class AppContextInjector {
   static getRelevantContext(userMessage: string, surface?: string, platform: ClientPlatform = 'web'): string {
     // On the iPhone app no AI may teach a way to pay (Q-123, iosPurchaseGuard.ts) — applied to the WHOLE
     // block every branch below returns, so no path can skip it.
-    const ctx = this.relevantContext(userMessage, surface);
+    // FREE PROGRAM PAUSED: the note rides in FRONT of whatever the knowledge base matched (and alone when nothing matched).
+    const paused = freeProgramPausedHint();
+    const ctx = [freeProgramNoteFor(userMessage, paused), this.relevantContext(userMessage, surface, paused)].filter(Boolean).join('\n\n');
     if (platform !== 'ios') return ctx;
     return [withoutPurchaseTeaching(ctx), IOS_NO_PURCHASE_NOTE].filter((part) => part.trim() !== '').join('\n\n');
   }
 
-  private static relevantContext(userMessage: string, surface?: string): string {
+  private static relevantContext(userMessage: string, surface?: string, paused = false): string {
+    const kb = visibleKnowledgeBase(APP_KNOWLEDGE_BASE, paused);
     const msg = normalize(userMessage);
     // Support offer is computed for EVERY message (independent of app-navigation matching) and appended
     // to whatever feature context we return, so every AI that calls this offers our help email when the
@@ -158,12 +163,12 @@ export class AppContextInjector {
 
     // Broad "what can this app do" questions → full summary.
     if (this.isWholeAppQuestion(msg)) {
-      return withSupport(this.formatBlock(APP_KNOWLEDGE_BASE));
+      return withSupport(this.formatBlock(kb));
     }
 
     // "What can YOU do?" directed at a specific AI surface → all entries for that surface.
     if (surface && SURFACE_CAPABILITY_PATTERNS.some(p => p.test(msg))) {
-      const surfaceFeatures = APP_KNOWLEDGE_BASE.filter(f => f.aiSurface === surface);
+      const surfaceFeatures = kb.filter(f => f.aiSurface === surface);
       if (surfaceFeatures.length > 0) return withSupport(this.formatBlock(surfaceFeatures));
     }
 
@@ -171,7 +176,7 @@ export class AppContextInjector {
     const looksLikeAppQuestion = APP_QUESTION_SIGNALS.some(sig => msg.includes(sig));
 
     // Score every feature by keyword/name overlap with the message.
-    const scored = APP_KNOWLEDGE_BASE
+    const scored = kb
       .map(f => ({ feature: f, score: this.scoreFeature(f, msg, surface) }))
       .filter(s => s.score > 0)
       .sort((a, b) => b.score - a.score);
@@ -190,7 +195,7 @@ export class AppContextInjector {
 
   /** Full app summary — used when the user explicitly asks about the whole app. */
   static getFullSummary(): string {
-    return this.formatBlock(APP_KNOWLEDGE_BASE);
+    return this.formatBlock(visibleKnowledgeBase(APP_KNOWLEDGE_BASE, freeProgramPausedHint()));
   }
 
   /**

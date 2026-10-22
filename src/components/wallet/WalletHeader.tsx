@@ -17,7 +17,7 @@ const TAB_ICON: Record<WalletTab, typeof Wallet> = { buy: ShoppingCart, promo: G
 
 export interface WalletHeaderProps {
   /** The wallet document exactly as the server returned it, or null when it has not been read. */
-  wallet: { tokenBalance?: unknown } | null | undefined;
+  wallet: { tokenBalance?: unknown; freeTrialEnded?: unknown } | null | undefined;
   loading: boolean;
   onRefresh: () => void;
   active: WalletTab;
@@ -50,6 +50,10 @@ export function WalletHeader({ wallet, loading, onRefresh, active, onSelect, nee
               <p className="break-words text-2xl font-extrabold leading-tight text-ink" data-testid="wallet-balance">
                 {balance.toLocaleString('en-IN')}
               </p>
+            )}
+            {/* The server sets this for an account that has never paid while the free program is paused. */}
+            {wallet?.freeTrialEnded === true && (
+              <p className="text-xs font-bold text-warn" data-testid="free-trial-ended">Free trial ended</p>
             )}
           </div>
         </div>

@@ -1,3 +1,4 @@
+import { LiveModelRegistryPanel } from './admin/LiveModelRegistryPanel';
 import { useBuildReportNumbers } from '../hooks/useBuildReportNumbers';
 import { BuildReportNumber } from './admin/BuildReportNumber';
 import type { BuildReportNumbering } from '../lib/buildReportNumbering';
@@ -2424,6 +2425,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </div>
               </div>
             </div>
+          )}
+
+          {activeTab === 'livemodels' && (
+            <LiveModelRegistryPanel adminToken={adminToken} />
           )}
 
           {/* ── AI ENGINES TAB ── */}

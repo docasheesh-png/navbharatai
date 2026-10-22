@@ -40,7 +40,10 @@ describe('visionProviderChain — which models may read an attachment, per tier 
 
 describe('describeVisionAttachments — weak-module no-Claude guard', () => {
   const saved = { ...process.env };
+  const unexpectedNetwork = vi.fn(() => { throw new Error('Unit test attempted real provider transport'); });
   beforeEach(() => {
+    unexpectedNetwork.mockClear();
+    vi.stubGlobal('fetch', unexpectedNetwork);
     anthropicCtor.mockClear();
     messagesCreate.mockClear();
     // No cheap vision providers → the only remaining rung would be Claude. ANTHROPIC key present so a
@@ -52,7 +55,7 @@ describe('describeVisionAttachments — weak-module no-Claude guard', () => {
     delete process.env.XAI_API_KEY;
     process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
   });
-  afterEach(() => { process.env = { ...saved }; });
+  afterEach(() => { process.env = { ...saved }; vi.unstubAllGlobals(); expect(unexpectedNetwork).not.toHaveBeenCalled(); });
 
   it('never touches Claude when noClaude:true (returns the honest "could not be read" placeholder)', async () => {
     const out = await describeVisionAttachments([IMG], { noClaude: true });
@@ -100,7 +103,8 @@ describe('describeVisionAttachments — weak-module no-Claude guard', () => {
       { type: 'image/png', name: 'b.png', base64: 'y' },
       { type: 'application/pdf', name: 'c.pdf', base64: 'z' },
     ] as any[];
-    const out = await describeVisionAttachments(imgs);
+    // This test asserts attachment ordering, not model quality; no provider is needed.
+    const out = await describeVisionAttachments(imgs, { noClaude: true });
     expect(out).toContain('a.png');
     expect(out).toContain('b.png');
     expect(out).toContain('c.pdf');

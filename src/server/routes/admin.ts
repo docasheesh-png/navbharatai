@@ -1,3 +1,4 @@
+import { registerLiveModelRegistryRoutes } from './liveModelRegistry';
 import { sendAdminOwnerApps } from './adminOwnerApps';
 import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
 import { registerAiMaintenanceRoutes } from './aiMaintenance';
@@ -173,6 +174,10 @@ import { collectionsNeedingRetention } from '../lib/DataRetentionManager';
 const GROWING_COLLECTIONS: readonly string[] = [
   'app_builds', 'build_sessions', 'build_sessions_v2', 'build_history_v2', 'user_build_history', 'user_costs', 'server_logs',
   'agentv3_build_requests',
+  // Registry root documents are fixed, but their nested chunks/actions grow with catalog changes
+  // and admin decisions; controls/health grow per model. Only history/routing are bounded rings.
+  // Inventory the entire retained tree, not a misleading count of its two root documents.
+  'live_ai_registry',
   'metrics_snapshots', 'session_error_hints', 'hosting_usage', 'site_analytics',
   // One small document per finished phone build — the only per-run half of the build counters.
   'mobile_build_counted',
@@ -420,6 +425,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     next();
   };
 
+  registerLiveModelRegistryRoutes(app, verifyAdminToken);
   registerAiMaintenanceRoutes(app, verifyAdminToken);
   registerFreeProgramRoutes(app, verifyAdminToken);
 

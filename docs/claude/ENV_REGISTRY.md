@@ -4443,3 +4443,18 @@ Lifecycle deletion retains access when new purchases are disabled. See
 separate Storage backups and the required live pilot. User-selected platform defaults supersede
 older BYO-only guidance for this rollout; existing BYO and shared apps are not migrated.
 | `ADMIN_LOGIN_GLOBAL_CEILING` | **30** failed admin logins per 15 min, across ALL addresses | The admin login's account-level ceiling (`adminLoginShared.ts`): past it, addresses the admin has never successfully logged in from are refused until the window ends. **An address the admin has logged in from is exempt, so an attacker cannot lock the real admin out.** `off` disables only this ceiling (the per-address lockout, `ADMIN_LOGIN_LOCKOUT`, is separate); a value under 5 or a non-number falls back to 30. State lives in Firestore `admin_login_guard_v1` (every doc has `expireAt` — **a Firestore TTL policy on it is an admin-console action, Q-1111**). |
+
+## Live verified-free registry (opt-in, 2026-10-22)
+
+`LIVE_MODEL_REGISTRY_ENABLED` enables the durable OpenRouter catalog job. Independent
+`STRICT_FREE_MODULES_ENABLED` and `STRICT_FREE_WEAK_ENABLED` gates select verified-free
+inference for NavBharat Free/professional modules and Pro Weak respectively; all default
+off. Normal/Strong are unchanged. `OPENROUTER_API_KEY` is server-only.
+`LIVE_MODEL_SYNC_INTERVAL_MS` defaults 300000; `LIVE_MODEL_METADATA_TTL_MS` defaults600000.
+See `docs/LIVE_FREE_MODEL_REGISTRY.md` for bounds, exact verification basis, scheduler
+setup, missing credentials, zero-cost limitations and rollback semantics. Turning a
+strict gate off restores existing potentially-paid routing, not a spending kill switch.
+No first-time/weekly/referral credits are issued by these switches.
+
+- `FREE_CHAT_HEDGE_ENABLED`: default off; opt-in two-candidate delayed strict-free chat hedge only.
+- `FREE_CHAT_HEDGE_DELAY_MS`: default 1500, bounded 100–10000 milliseconds.

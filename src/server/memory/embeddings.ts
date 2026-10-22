@@ -1,3 +1,4 @@
+import { strictFreeRequired } from '../AI/inferencePolicy';
 // Embedding client for semantic memory (admin 2026-07-17).
 //
 // Two backends, same @google/genai SDK, chosen by config:
@@ -87,6 +88,7 @@ function extractVector(res: any): number[] | null {
  * response). Bounded by a hard timeout so a slow embedding call can never delay a chat reply for long.
  */
 export async function embedText(text: string, timeoutMs = 6000): Promise<number[] | null> {
+  if (strictFreeRequired()) return null; // No verified free embedding endpoint; recall remains best effort.
   const t = (text || '').trim();
   if (!t) return null;
   const client = await getClient();

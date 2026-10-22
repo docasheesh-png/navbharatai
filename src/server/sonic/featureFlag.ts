@@ -1,3 +1,4 @@
+import { parseEnvFlag } from '../lib/envFlag';
 // Sonic Chat (Amazon Nova Sonic voice) — feature flag.
 //
 // EXPERIMENT (admin 2026-07-13): an ISOLATED, real-time speech-to-speech voice chat
@@ -19,6 +20,7 @@ export function sonicRegion(): string {
 
 /** True only when the flag is on AND real AWS credentials are present. */
 export function isSonicEnabled(): boolean {
+  if (parseEnvFlag(process.env.STRICT_FREE_MODULES_ENABLED) === true) return false; // Voice billing is not verified free.
   if (process.env.SONIC_CHAT_ENABLED !== 'true') return false;
   return !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
 }

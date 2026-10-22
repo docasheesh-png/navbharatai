@@ -1,3 +1,4 @@
+import { usageLogFields } from '../src/server/AI/Router/usageLogFields';
 import { describe, it, expect } from 'vitest';
 import { enclosingBlock, anchorOf, codeOnly } from './helpers/sourceSlice';
 import { readFileSync } from 'fs';
@@ -74,20 +75,18 @@ describe('wiring — the policy actually governs the router, and the outcome rea
     expect(after).toContain('raced: outcome.raced');
   });
 
-  it('🔒 it says "we do not know" about tokens rather than writing a zero', () => {
-    // ⚠️ THIS GUARD USED A FIXED 700-CHARACTER WINDOW AND BROKE ON CORRECT CODE (2026-09-17) — the
-    // seventh brittle fixed-window guard to do so in this repo in one day. Adding the `stalled` field
-    // to the SAME object pushed `usageMeasured: false` past character 700, so a guard about HONEST
-    // TOKEN REPORTING failed over an unrelated field's byte offset. A guard must measure the claim it
-    // is named for; `usageMeasured` lives in this object however many fields the object grows, so the
-    // OBJECT is what to read. Same reasoning `tests/helpers/sourceSlice.ts` exists for.
-    // ⚠️ `enclosingBlock` ALREADY EXISTED and I did not look for it (2026-09-17). #3037 added a local
-    // `objectLiteralAround` doing exactly this — a second copy of a rule, free to disagree with the
-    // first — because I wrote the helper instead of searching `tests/helpers/`. That is safeguard #6's
-    // own failure mode, and the duplicate is deleted rather than kept.
+  it('logs reported stream usage without inventing counts when usage is missing', () => {
     const row = enclosingBlock(chat, 'streamed: true');
-    expect(row).toContain('usageMeasured: false');
+    expect(row).toContain('...usageLogFields(outcome?.usage)');
     expect(row).not.toContain('inputTokens: 0');
+    expect(usageLogFields(undefined)).toEqual({ usageMeasured: false });
+    expect(usageLogFields({ inputTokens: 120, outputTokens: 45 })).toEqual({
+      usageMeasured: true, inputTokens: 120, outputTokens: 45,
+    });
+    // Reported zero is different from missing usage, and must not be discarded.
+    expect(usageLogFields({ inputTokens: 0, outputTokens: 0 })).toEqual({
+      usageMeasured: true, inputTokens: 0, outputTokens: 0,
+    });
   });
 
   it('🔴 a STALL is logged under its own field, never as a failureReason', () => {

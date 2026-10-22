@@ -1,3 +1,5 @@
+import { freeModuleInferenceScope } from '../AI/inferencePolicy';
+import { strictFreeRequired, StrictFreeCapabilityError } from '../AI/inferencePolicy';
 import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, verifyFirebaseIdentity, enforceNotBanned } from '../lib/authMiddleware';
 import { getProfessional, listProfessionals } from '../professionals/registry';
@@ -93,7 +95,7 @@ export function registerProfessionalsRoutes(app: Express): void {
     });
   });
 
-  app.post('/api/professional/:id/chat', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/professional/:id/chat', freeModuleInferenceScope, buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     const config = getProfessional(routeParam(req.params.id));
     if (!config) {
       res.status(404).json({ error: `Unknown professional: ${routeParam(req.params.id)}` });
@@ -130,6 +132,11 @@ export function registerProfessionalsRoutes(app: Express): void {
     if (!gate.allow) {
       res.status(gate.status).json(gate.body);
       return;
+    }
+
+    if (strictFreeRequired() && rawAttachments.some(a => isVisionAttachment(a.type, a.name))) {
+      const error = new StrictFreeCapabilityError('professional-vision');
+      res.status(error.status).json({ error: error.message, code: error.code }); return;
     }
 
     // Turn files into text the (text-only) professional engine can actually read.
@@ -244,7 +251,7 @@ export function registerProfessionalsRoutes(app: Express): void {
    * gate, the persona (so the paper is pitched at THIS student, from the memory the engine already
    * loads) and the ONE-WALLET charge — so exam mode cannot become a second, ungoverned way to spend.
    */
-  app.post('/api/professional/:id/exam', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/professional/:id/exam', freeModuleInferenceScope, buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     const config = getProfessional(routeParam(req.params.id));
     if (!config) {
       res.status(404).json({ error: `Unknown professional: ${routeParam(req.params.id)}` });
@@ -278,7 +285,7 @@ export function registerProfessionalsRoutes(app: Express): void {
       // real cost. A paper that came back empty spends nothing and is charged nothing — before
       // 2026-09-23 the charge ran BEFORE this check, so an unusable paper was billed.
       const { freeUsed, billableFraction } = examPaperCharge(paper.questions.length, gate.freeQuestions);
-      if (freeUsed > 0 && verifiedUserId) {
+      if (!strictFreeRequired() && freeUsed > 0 && verifiedUserId) {
         void professionalExamUsageStore.increment(verifiedUserId, Date.now(), freeUsed);
       }
       if (paper.questions.length > 0) {

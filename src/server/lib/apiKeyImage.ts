@@ -1,3 +1,4 @@
+import { strictFreeRequired, StrictFreeCapabilityError } from '../AI/inferencePolicy';
 // ONE PICTURE FOR A NAVBHARATAI API KEY — shared by the Developer API's `POST /api/v1/images/generations`
 // and by an app whose owner saved a NavBharatAI key as its image key (admin 2026-10-04: "user ko navbhatai
 // api keys ka offer den"). One function, so a key cannot buy a picture through one door that another door
@@ -46,6 +47,7 @@ export async function imageForApiKey(
   surface: 'api' | 'app',
   now: number = Date.now(),
 ): Promise<ApiKeyImageResult> {
+  if (strictFreeRequired()) { const error = new StrictFreeCapabilityError('image-generation'); return { ok: false, status: error.status, code: 'engine_unavailable', message: error.message }; }
   if (!hasScope(auth.scopes, IMAGES_SCOPE)) {
     return {
       ok: false, status: 403, code: 'missing_scope',

@@ -1,3 +1,4 @@
+import { freeModuleInferenceScope, runAdmittedLegacyImageEdit } from '../AI/inferencePolicy';
 import type { Express, Request, Response } from 'express';
 import { rateLimiter } from '../lib/authMiddleware';
 import { gateToolAction, burnToolAction } from '../tools/toolGate';
@@ -92,7 +93,7 @@ const enhanceLimiter = () => rateLimiter({
 });
 
 export function registerImageGenRoutes(app: Express): void {
-  app.post('/api/image/generate', imageGenLimiter(), validateBody(schema), async (req: Request, res: Response) => {
+  app.post('/api/image/generate', freeModuleInferenceScope, imageGenLimiter(), validateBody(schema), async (req: Request, res: Response) => {
     if (!isValidImageGenRequest(req.body)) {
       res.status(400).json({ error: 'Describe the image you want, or attach a picture to change.' });
       return;
@@ -323,7 +324,7 @@ export function registerImageGenRoutes(app: Express): void {
       // it passes the same allowance check every other paid rung does — before a rupee is spent.
       if (editing) {
         if (!(await allowPaidRung())) return;
-        const out = await runImageEdit(rawInit, editWords, { timeoutMs: ROUTE_TIMEOUT_MS });
+        const out = await runAdmittedLegacyImageEdit(() => runImageEdit(rawInit, editWords, { timeoutMs: ROUTE_TIMEOUT_MS }));
         if (out.blocked) { res.status(422).json({ error: POLLINATIONS_BLOCK_MESSAGE, code: 'blocked' }); return; }
         if (out.image) { await deliver(out.image, true, 'edit'); return; }
         if (out.refusal) { res.status(422).json({ error: IMAGE_REFUSAL_MESSAGE }); return; }
@@ -550,7 +551,7 @@ export function registerImageGenRoutes(app: Express): void {
     },
   );
 
-  app.post('/api/image/enhance-prompt', enhanceLimiter(), validateBody(enhanceSchema), async (req: Request, res: Response) => {
+  app.post('/api/image/enhance-prompt', freeModuleInferenceScope, enhanceLimiter(), validateBody(enhanceSchema), async (req: Request, res: Response) => {
     const body = (req.body || {}) as Record<string, unknown>;
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
     if (!prompt) {

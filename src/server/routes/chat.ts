@@ -1,3 +1,6 @@
+import { usageLogFields } from '../AI/Router/usageLogFields';
+import { freeModuleInferenceScope, runAdmittedLegacyImageEdit } from '../AI/inferencePolicy';
+import { strictFreeRequired, StrictFreeCapabilityError } from '../AI/inferencePolicy';
 import type { Express } from 'express';
 import { onClientGone, onStreamClosed } from '../lib/clientDisconnect';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
@@ -552,7 +555,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       console.log(`[CHAT/IMAGE-EDIT] tier=${tier} editing an attached picture`);
       let delivered = false;
       try {
-        const out = await runImageEdit(dataUrl, message);
+        const out = await runAdmittedLegacyImageEdit(() => runImageEdit(dataUrl, message));
         if (out.blocked) {
           sendEdit(POLLINATIONS_BLOCK_MESSAGE);
         } else if (out.image) {
@@ -571,6 +574,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       return;
     }
 
+    if (visionAttachments.length > 0 && strictFreeRequired()) { const error = new StrictFreeCapabilityError('vision'); return res.status(error.status).json({ reply: error.message, code: error.code }); }
     if (visionAttachments.length > 0) {
       const visionResult = await runVisionChain(visionAttachments, {
         prompt: contextualMessage,
@@ -726,7 +730,18 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
               }
             },
             controller.signal,
+            true, // Server-owned: only ordinary chat may hedge two verified-free models.
           );
+        } catch (error) {
+          if (!strictFreeRequired()) throw error;
+          // Headers are already sent. Finish with an explicit failure, never restart a partial reply.
+          if (!res.writableEnded && !res.destroyed) {
+            const notice = streamedText ? '\n\nThis reply was interrupted. Please retry when the service is available.' : 'No verified free model is currently available. Please try again later.';
+            res.write(`data: ${JSON.stringify({ c: notice })}\n\n`);
+            res.write(`data: ${JSON.stringify({ error: 'No paid fallback was used.', code: 'STRICT_FREE_INTERRUPTED', partial: !!streamedText })}\n\n`);
+            res.end();
+          }
+          return;
         } finally {
           clearInterval(heartbeat);
         }
@@ -753,10 +768,9 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           res.end();
         }
         // The SAME shape the non-streaming branch writes, so one collection answers for both paths and
-        // no reader has to know which one served. 🔒 `usageMeasured: false` is the honest value here:
-        // a streamed turn does not surface token counts today, and "we do not know" must never be
-        // summed as zero — the exact distinction the 2026-09-12 rewrite of the block below insisted on.
-        // `raced` records whether this turn paid for a second model to save latency (free never does).
+        // no reader has to know which one served. Missing provider usage stays unmeasured and has
+        // no token fields; verified-free streams can now report real usage, including genuine zeros.
+        // `raced` is recorded only when the routing outcome actually reports it.
         addDoc(collection(getDb() as any, 'ai_usage_logs'), {
           userId: req.body?.userId || req.body?.uid || 'anonymous',
           tier,
@@ -775,13 +789,16 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           ...(outcome?.reason === 'stalled'
             ? { stalled: true }
             : outcome?.reason ? { failureReason: outcome.reason } : {}),
-          usageMeasured: false,
+          ...usageLogFields(outcome?.usage),
+          ...(outcome?.pricingProof ? { pricingProof: outcome.pricingProof } : {}),
           ok: !!outcome?.ok,
           grounded: !!groundingStatus,
           createdAt: new Date().toISOString(),
         }).catch(() => {});
       } else {
-        const routed = await aiRouter.routeDetailed(contextualMessage, history, tier, undefined, systemPrompt);
+        const controller = new AbortController();
+        onClientGone(res, () => controller.abort());
+        const routed = await aiRouter.routeDetailed(contextualMessage, history, tier, undefined, systemPrompt, true, controller.signal);
         // USAGE LOGGING — what actually happened, and nothing else (2026-09-12).
         //
         // 🔴 THIS BLOCK USED TO INVENT EVERY FIELD IT WROTE: `providerName: 'auto'`, `modelName: 'auto'`,
@@ -804,6 +821,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           modelName: routed.model,
           providerName: routed.provider,
           usageMeasured: !!routed.usage,
+          ...(routed.pricingProof ? { pricingProof: routed.pricingProof } : {}),
           ...(routed.usage
             ? { inputTokens: routed.usage.inputTokens, outputTokens: routed.usage.outputTokens }
             : {}),
@@ -817,11 +835,12 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       console.error(`Error for tier ${tier}:`, e.message);
       if (!res.headersSent) {
         // Never leak the raw inference error (may name a provider/model) to the client.
+        if (strictFreeRequired()) return res.status(503).json({ code: 'STRICT_FREE_UNAVAILABLE', reply: 'No verified free model is currently available. Please try again later.', error: 'No paid fallback was used.' });
         res.status(500).json({ reply: 'Backend AI inference failed', error: toSafeClientMessage(e, 'Backend AI inference failed') });
       }
     }
   };
 
-  app.post('/api/chat/navbharat',       chatLimiter, guestDailyQuota('chat'), (req, res) => chatHandler(req, res, 'navbharat'));
-  app.post('/api/chat/navbharatai',     chatLimiter, guestDailyQuota('chat'), (req, res) => chatHandler(req, res, 'navbharat'));
+  app.post('/api/chat/navbharat', freeModuleInferenceScope,       chatLimiter, guestDailyQuota('chat'), (req, res) => chatHandler(req, res, 'navbharat'));
+  app.post('/api/chat/navbharatai', freeModuleInferenceScope,     chatLimiter, guestDailyQuota('chat'), (req, res) => chatHandler(req, res, 'navbharat'));
 }

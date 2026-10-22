@@ -1,7 +1,10 @@
+import { strictFreeRequired } from '../AI/inferencePolicy';
+import { strictFreeText } from '../AI/LiveRegistry/runtime';
 import { getGemini, getGroq, getClaude, resolveApiKey } from './aiClients';
 import { getBharatContext } from './prompts';
 
 export async function callGemini(message: string, key?: string, history: any[] = [], systemInstruction?: string): Promise<string> {
+  if (strictFreeRequired()) return (await strictFreeText({ prompt: [...history.map(m => `${m.sender || m.role}: ${m.text || m.content || ''}`), message].join('\n'), systemPrompt: systemInstruction || getBharatContext(), maxOutputTokens: 8192 })).content;
   const ai = getGemini(key);
 
   if (!ai) {
@@ -42,6 +45,7 @@ export async function callGemini(message: string, key?: string, history: any[] =
 }
 
 export async function callGroq(message: string, key?: string, history: any[] = []): Promise<string> {
+  if (strictFreeRequired()) return (await strictFreeText({ prompt: [...history.map(m => `${m.sender || m.role}: ${m.text || m.content || ''}`), message].join('\n'), systemPrompt: getBharatContext(), maxOutputTokens: 8192 })).content;
   const client = getGroq(key);
   if (!client) throw new Error('Groq API Key not available');
 
@@ -60,6 +64,7 @@ export async function callGroq(message: string, key?: string, history: any[] = [
 }
 
 export async function callClaude(message: string, key?: string, history: any[] = [], systemInstruction?: string): Promise<string> {
+  if (strictFreeRequired()) return (await strictFreeText({ prompt: [...history.map(m => `${m.sender || m.role}: ${m.text || m.content || ''}`), message].join('\n'), systemPrompt: systemInstruction || getBharatContext(), maxOutputTokens: 8192 })).content;
   const { key: resolvedKey } = resolveApiKey('claude', key);
   if (!resolvedKey) {
     throw new Error('Claude API Key not available');

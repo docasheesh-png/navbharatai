@@ -1,5 +1,8 @@
+import { strictFreeChat } from './LiveRegistry/runtime';
+import { strictFreeRequired } from './inferencePolicy';
 import { AIRouterManager } from './AIRouterManager';
 import type { TraceContext } from '../../../server';
+import type { FreeTextResult } from './LiveRegistry/dispatcher';
 import type { ProviderUsage } from './Router/ProviderTypes';
 import type { StreamOutcome } from './Router/AIRouter';
 
@@ -33,6 +36,7 @@ export interface RoutedCall {
   latencyMs: number;
   /** Tokens the provider reported. Absent = it reported none. */
   usage?: ProviderUsage;
+  pricingProof?: FreeTextResult['pricingProof'];
   /** False when nothing answered and `content` is the apology, not an answer. */
   ok: boolean;
 }
@@ -62,16 +66,22 @@ export class UniversalAIRouter {
     tier: 'navbharat' | 'free' | 'sda' | 'doctor' | 'professional' = 'navbharat',
     _traceContext?: TraceContext,
     systemPrompt?: string,
+    allowFreeChatHedge = false,
+    signal?: AbortSignal,
   ): Promise<RoutedCall> {
     const ns = this.namespaceFor(tier);
-    const router = AIRouterManager.getRouter(ns);
     const fullPrompt = this.buildPrompt(message, history);
     console.log(`[UNIVERSAL_ROUTER] tier=${tier} ns=${ns} promptLen=${fullPrompt.length}`);
+    if (strictFreeRequired() && allowFreeChatHedge) {
+      const result = await strictFreeChat({ prompt: fullPrompt, systemPrompt, signal });
+      return { ...result, ok: true };
+    }
+    const router = AIRouterManager.getRouter(ns);
     try {
-      const timeout = new Promise<never>((_, reject) =>
+      const timeout = strictFreeRequired() ? undefined : new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('timeout')), this.TIMEOUT_MS)
       );
-      const { response, telemetry } = await Promise.race([router.route(fullPrompt, systemPrompt), timeout]);
+      const { response, telemetry } = await (timeout ? Promise.race([router.route(fullPrompt, systemPrompt), timeout]) : router.route(fullPrompt, systemPrompt));
       // 🔒 THE PROVIDER NAME COMES FROM TELEMETRY, NOT FROM THE RESPONSE. When every provider fails,
       // AIRouter still returns a response object stamped `provider: 'GEMINI', model: 'fallback'` so the
       // caller has a shape to read — but nothing from Gemini ran. Its telemetry says `provider: 'NONE'`
@@ -83,9 +93,11 @@ export class UniversalAIRouter {
         model: ok ? response.model : 'none',
         latencyMs: Number.isFinite(telemetry?.latency) ? Number(telemetry.latency) : Number(response.latencyMs) || 0,
         usage: ok ? response.usage : undefined,
+        pricingProof: ok ? response.pricingProof : undefined,
         ok,
       };
     } catch (e: any) {
+      if (strictFreeRequired()) throw e;
       console.error('[UNIVERSAL_ROUTER] exhausted:', e.message);
       // Nothing answered, so nothing is claimed: no provider, no model, no tokens.
       return {
@@ -102,7 +114,12 @@ export class UniversalAIRouter {
     systemPrompt: string | undefined,
     onChunk: (text: string) => void,
     signal?: AbortSignal,
+    allowFreeChatHedge = false,
   ): Promise<StreamOutcome> {
+    if (strictFreeRequired() && allowFreeChatHedge) {
+      const result = await strictFreeChat({ prompt: this.buildPrompt(message, history), systemPrompt, onChunk, signal });
+      return { ...result, ok: true }; // Actual hedge attempts are audited by the dispatcher, not guessed here.
+    }
     const ns = this.namespaceFor(tier);
     const router = AIRouterManager.getRouter(ns);
     const fullPrompt = this.buildPrompt(message, history);

@@ -1,3 +1,4 @@
+import { strictFreeRequired } from './inferencePolicy';
 import { AnthropicProvider } from './Router/providers/AnthropicProvider';
 import { GeminiProvider } from './Router/providers/GeminiProvider';
 import { VertexProvider } from './Router/providers/VertexProvider';
@@ -38,6 +39,9 @@ export class AIRouterManager {
   private static instanceProfessionalFreeFallback: AIRouter | null = null;
 
   static getRouter(namespace: 'free' | 'pro' | 'professional' | 'professional-free' | 'professional-free-fallback'): AIRouter {
+    // A strict request must not require or construct any legacy paid-provider client.
+    // Do not cache this scoped choice: Normal/Strong may request the same namespace.
+    if (strictFreeRequired()) return new AIRouter(namespace);
     if (namespace === 'pro') {
       if (!this.instancePro) this.instancePro = this.buildPro();
       return this.instancePro;

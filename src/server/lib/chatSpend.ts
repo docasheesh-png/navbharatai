@@ -1,3 +1,5 @@
+import { isVerifiedFreeProof } from '../AI/LiveRegistry/proof';
+import type { FreeTextResult } from '../AI/LiveRegistry/dispatcher';
 // What one AI turn OUTSIDE the v5 builder actually costs — and what it should be billed at.
 //
 // THE GAP THIS CLOSES. The wallet only ever moved for v5 builds. The 70+ professionals, Doctor AI and
@@ -27,6 +29,7 @@ export interface ChatTurnUsage {
   model?: string;
   inputTokens?: number;
   outputTokens?: number;
+  pricingProof?: FreeTextResult['pricingProof'];
 }
 
 export interface ChatTurnCost {
@@ -65,7 +68,14 @@ export function chatTurnCost(usage: ChatTurnUsage | null | undefined, usdInr: nu
   const outputTokens = clean(usage.outputTokens);
   if (inputTokens === 0 && outputTokens === 0) return ZERO;
 
-  const rate = realRateFor(String(usage.provider ?? ''), usage.model ? String(usage.model) : undefined);
+  if (usage.provider === 'OPENROUTER' && isVerifiedFreeProof(usage.pricingProof, usage.model)
+    && typeof usage.pricingProof.inputTokens === 'number' && Number.isFinite(usage.pricingProof.inputTokens)
+    && typeof usage.pricingProof.outputTokens === 'number' && Number.isFinite(usage.pricingProof.outputTokens)
+    && inputTokens <= usage.pricingProof.inputTokens && outputTokens <= usage.pricingProof.outputTokens) {
+    return { ...ZERO, measured: true, inputTokens, outputTokens };
+  }
+  // An unverified OpenRouter ID must not inherit a direct provider's promotional zero rate.
+  const rate = realRateFor(String(usage.provider ?? ''), usage.provider === 'OPENROUTER' ? undefined : usage.model ? String(usage.model) : undefined);
   const realUsd = usageCostUsd({ inputTokens, outputTokens }, rate);
   const billedUsd = tieredMarkupUsd(realUsd);
   const rupees = Number.isFinite(usdInr) && usdInr > 0 ? usdInr : 0;

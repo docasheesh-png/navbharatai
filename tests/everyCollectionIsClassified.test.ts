@@ -109,6 +109,7 @@ const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; wh
 };
 
 const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
+  live_ai_registry: { kind: 'forever', why: 'server-owned model price/control evidence, including administrator login identities and review reasons, not inference prompts; immutable catalog chunks and administrator actions are deliberately retained, while sync/routing caches are bounded. RETAINED_INDEFINITELY records this choice rather than calling the entire tree bounded' },
   admin_failed_report_autopsies: { kind: 'retained', why: 'admin-authored report-linked review notes, keyed by a hash of workspace/history, NOT system configuration; 180 days after updatedAt like admin_build_triage, with transaction-fenced children-first expiry of revisions and mutation receipts; does not claim synchronous diagnostic or account erasure' },
   agentv3_build_requests: { kind: 'user', why: 'bounded digest/status request replay tombstones, no raw inputs; explicit verified ownerId account erasure, account-lifetime retention prevents old UUID replay' },
   admin_failed_report_oauth_clients: { kind: 'platform', why: 'OAuth dynamic client registrations for the owner-only failed-report connector (failedReportOAuth.ts): client name, redirect URLs and a HASHED secret, capped at 100 in a transaction, 30-day expiry, expired rows swept on the next registration — no customer data' },

@@ -1,3 +1,4 @@
+import { isVerifiedFreeProof, type VerifiedFreeProof } from '../AI/LiveRegistry/proof';
 // Billing Phase 3 — per-provider token attribution for one v5.0 build (admin plan 2026-07-10).
 //
 // WHY: the build-level UsageSink (billing accounting fix, #1174) knows the GRAND TOTAL of tokens a
@@ -31,6 +32,7 @@ import {
 } from './pricing';
 
 export interface ProviderTokens {
+  pricingProof?: VerifiedFreeProof;
   inputTokens: number;
   outputTokens: number;
   /** Fix 66 — the share of inputTokens the provider served from its prefix cache (already INCLUDED in
@@ -44,6 +46,7 @@ export interface ProviderTokens {
 
 /** A per-(provider, model) attributed slice — feeds the REAL-cost billing (providerRates.ts). */
 export interface ProviderModelEntry {
+  pricingProof?: VerifiedFreeProof;
   provider: string;
   /** The actual model id that answered (TurnResult.model), when the runner reported it. */
   model?: string;
@@ -153,6 +156,7 @@ function sliceKey(provider: string, model: string | undefined, phase: string | u
 export function createProviderUsageLedger(): ProviderUsageLedger {
   const buckets = new Map<string, ProviderTokens>();
   const calls = new Map<string, number>();
+  let receiptSequence = 0;
   // Model-granular slices, keyed `${provider} ${model}` so provider+model are exact and can't
   // collide with a provider label that happens to contain the separator.
   const modelBuckets = new Map<string, ProviderModelEntry>();
@@ -175,9 +179,12 @@ export function createProviderUsageLedger(): ProviderUsageLedger {
     // provider + model + PHASE, still NUL-separated — the separator is a byte that can appear in
     // none of the three, which is what makes the key exact. A phase SPLITS a slice rather than
     // relabelling it, and every consumer of `entries()` sums, so more rows change no total.
-    const key = sliceKey(provider, model, phase);
+    // Each verified dispatch receipt stays in its own slice. Never merge verified-free and
+    // unverified/paid tokens, even when the provider/model/phase labels happen to match.
+    const proof = provider === 'OPENROUTER' && isVerifiedFreeProof(u.pricingProof, model) ? u.pricingProof : undefined;
+    const key = sliceKey(provider, model, phase) + (proof ? `\0receipt:${++receiptSequence}` : '');
     const cur = modelBuckets.get(key)
-      ?? { provider, model, ...(phase ? { phase } : {}), usage: { inputTokens: 0, outputTokens: 0 } };
+      ?? { provider, model, ...(proof ? { pricingProof: proof } : {}), ...(phase ? { phase } : {}), usage: { inputTokens: 0, outputTokens: 0 } };
     if (Number.isFinite(u.inputTokens) && u.inputTokens > 0) cur.usage.inputTokens += u.inputTokens;
     if (Number.isFinite(u.outputTokens) && u.outputTokens > 0) cur.usage.outputTokens += u.outputTokens;
     addCache(cur.usage, u);
@@ -214,8 +221,23 @@ export function createProviderUsageLedger(): ProviderUsageLedger {
       const phase = opts?.phase && opts.phase.trim() ? opts.phase.trim() : undefined;
       const key = sliceKey(p, m, phase);
       const cur = modelBuckets.get(key);
-      // No slice means no tokens were ever added for this call — there is nothing to leave out.
-      if (!cur) return;
+      // Proof-carrying turns stay split. Attribute a later discard to the most recent
+      // matching receipts, bounded by their remaining output; never invent a new slice.
+      if (!cur) {
+        let remaining = out;
+        for (const [receiptKey, receipt] of [...modelBuckets.entries()].reverse()) {
+          if (!receiptKey.startsWith(`${key}\0receipt:`)) continue;
+          const available = Math.max(0, receipt.usage.outputTokens - (receipt.unbilled?.outputTokens ?? 0));
+          const discarded = Math.min(remaining, available);
+          if (discarded <= 0) continue;
+          const unbilled = receipt.unbilled ?? { inputTokens: 0, outputTokens: 0 };
+          addUnbilled(unbilled, { inputTokens: 0, outputTokens: discarded, discardedOutputTokens: discarded });
+          receipt.unbilled = unbilled;
+          remaining -= discarded;
+          if (remaining <= 0) break;
+        }
+        return;
+      }
       const unbilled = cur.unbilled ?? { inputTokens: 0, outputTokens: 0 };
       addUnbilled(unbilled, { inputTokens: 0, outputTokens: out, discardedOutputTokens: out });
       cur.unbilled = unbilled;
@@ -232,6 +254,7 @@ export function createProviderUsageLedger(): ProviderUsageLedger {
       return [...modelBuckets.values()].map((e) => ({
         provider: e.provider,
         model: e.model,
+        ...(e.pricingProof ? { pricingProof: e.pricingProof } : {}),
         ...(e.phase ? { phase: e.phase } : {}),
         usage: { ...e.usage },
         ...(e.unbilled ? { unbilled: { ...e.unbilled } } : {}),

@@ -1,3 +1,6 @@
+import { strictFreeRequired, StrictFreeCapabilityError } from '../inferencePolicy';
+import { strictFreeText } from '../LiveRegistry/runtime';
+import type { FreeTextResult } from '../LiveRegistry/dispatcher';
 import { assertAiAvailable } from '../../lib/aiMaintenance';
 
 import { AIProvider, AIProviderResponse, ProviderTelemetry } from './ProviderTypes';
@@ -28,6 +31,8 @@ export interface StreamOutcome {
   latencyMs?: number;
   /** Did this turn pay for a second model to save latency? */
   raced?: boolean;
+  usage?: AIProviderResponse['usage'];
+  pricingProof?: FreeTextResult['pricingProof'];
   /**
    * ⚠️ `stalled` is NOT a failure of the answer the user received. It means the provider went silent
    * mid-stream and we stopped waiting, so `ok` stays true and whatever was delivered stands. A reader
@@ -173,6 +178,13 @@ export class AIRouter {
   private release(name: string): void { releaseSlot(this.slotKey(name)); }
   private inFlightCount(name: string): number { return inFlight.get(this.slotKey(name)) || 0; }
 
+  private async routeVerifiedFree(prompt: string, systemPrompt?: string, schema?: unknown, images?: string[], modelOverride?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+    await assertAiAvailable();
+    if (schema || images?.length || modelOverride) throw new StrictFreeCapabilityError('unsupported-schema-image-or-model-override');
+    const response = await strictFreeText({ prompt, systemPrompt });
+    return { response, telemetry: { provider: response.provider, retries: 0, latency: response.latencyMs, success: true } };
+  }
+
   registerProvider(provider: AIProvider) {
     this.providers.push(provider);
     this.providers.sort((a, b) => a.priority - b.priority);
@@ -199,6 +211,7 @@ export class AIRouter {
    * keeping Claude strictly as the final safety net (Grok-primary/Claude-last law).
    */
   async routeRaced(prompt: string, systemPrompt?: string, images?: string[]): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+    if (strictFreeRequired()) return this.routeVerifiedFree(prompt, systemPrompt, undefined, images);
     await assertAiAvailable();
     const racers = this.providers.filter(p => !p.lastResort);
     const fallbacks = this.providers.filter(p => p.lastResort);
@@ -376,6 +389,11 @@ export class AIRouter {
     onChunk: (text: string) => void,
     signal?: AbortSignal,
   ): Promise<StreamOutcome> {
+    if (strictFreeRequired()) {
+      await assertAiAvailable();
+      const response = await strictFreeText({ prompt, systemPrompt, onChunk, signal });
+      return { ok: true, provider: response.provider, model: response.model, latencyMs: response.latencyMs, usage: response.usage, pricingProof: response.pricingProof, raced: false };
+    }
     const outcome = await this.routeStreamInner(prompt, systemPrompt, onChunk, signal);
     if (!(outcome.ok === false && outcome.reason === 'aborted')) recordRouterOutcome(outcome.ok === true);
     return outcome;
@@ -482,6 +500,7 @@ export class AIRouter {
   }
 
   private async execute(prompt: string, schema?: any, systemPrompt?: string, images?: string[], modelOverride?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+    if (strictFreeRequired()) return this.routeVerifiedFree(prompt, systemPrompt, schema, images, modelOverride);
     await assertAiAvailable();
     const targetSchema = schema?.type === 'OBJECT' ? schema : undefined;
     const errors: string[] = [];

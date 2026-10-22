@@ -213,3 +213,13 @@ describe('burnToolAction', () => {
     expect(state.incremented).toHaveLength(0);
   });
 });
+
+describe('strict-free text does not grant the separate owner-funded image allowance', () => {
+  it('still refuses an image after its existing allowance is exhausted', async () => {
+    const { runWithInferenceScope } = await import('../src/server/AI/inferencePolicy');
+    process.env.STRICT_FREE_MODULES_ENABLED = 'true';
+    state.usedToday = imageFreeDailyLimit();
+    const result = await runWithInferenceScope('free-modules', () => gateToolAction(UID, EMAIL, 'image', 'image-generation'));
+    expect(result.allow).toBe(false);
+  });
+});

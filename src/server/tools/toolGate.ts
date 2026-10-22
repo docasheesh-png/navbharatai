@@ -1,3 +1,4 @@
+import { strictFreeRequired } from '../AI/inferencePolicy';
 // The Other AI tools' pass/quota gate (admin 2026-07-27).
 //
 // WHY: the LLM-backed tools under "Other AI" — App Debugger, AI Debugger, Design suggest/palette,
@@ -131,6 +132,7 @@ export async function gateToolAction(
       },
     };
   }
+  if (strictFreeRequired() && bucket === 'ai_tool') return { allow: true, countsAgainstFree: false, uid, tier: 'free', isFreeListed: false, hasActivePass: false };
   const freeListed = isProfessionalFreeUser(uid, email);
   // FREE PROGRAM PAUSED (admin 2026-10-22): no free daily allowance for a signed-in account that has never paid —
   // images and tools are pay-and-use. Free Chat's text is not gated here. See lib/freeProgram.ts.

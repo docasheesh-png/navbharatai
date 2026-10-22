@@ -80,6 +80,20 @@ describe('census: every /api route has a caller, or a written reason it has none
     expect(stripComments("const u = 'https://x.dev/a'; // note")).toBe("const u = 'https://x.dev/a'; ");
   });
 
+  it('official provider metadata links do not invent a local developer API caller', () => {
+    expect(now).toContain('GET /api/models');
+    expect(BASELINE['GET /api/models']).toMatch(/^external:/);
+  });
+
+  it('the registry read and both mutations have explicit real UI callers', () => {
+    const panel = expandBaseConstants(stripComments(readFileSync('src/components/admin/LiveModelRegistryPanel.tsx', 'utf8')));
+    for (const path of ['/api/admin/live-model-registry', '/api/admin/live-model-registry/sync', '/api/admin/live-model-registry/models/action']) {
+      expect(isCalled(path, panel), path).toBe(true);
+    }
+    expect(now).not.toContain('POST /api/admin/live-model-registry/sync');
+    expect(now).not.toContain('POST /api/admin/live-model-registry/models/action');
+  });
+
   it('the two dead client halves are wired', () => {
     for (const r of ['GET /api/gallery/admin/:id/source', 'POST /api/gallery/admin/:id/review', 'GET /api/gallery/admin/pending', 'POST /api/agentv3/version-preview/stop']) {
       expect(now, r).not.toContain(r);

@@ -1,3 +1,5 @@
+import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
+import type { VerifiedFreeProof } from '../AI/LiveRegistry/proof';
 import { assertAiAvailable } from '../lib/aiMaintenance';
 import Anthropic from '@anthropic-ai/sdk';
 import { modelSupportsAdaptiveThinking } from './models';
@@ -66,6 +68,10 @@ export interface ToolUse {
  * the type has ONE meaning and every bill prices the shares at their own rates (`tokenCostUsd`).
  */
 export interface TurnUsage {
+  /** Actual output ceiling selected by a verified registry endpoint, not a usage count. */
+  selectedMaxOutputTokens?: number;
+  /** Server-issued zero-inference price receipt; never reconstructed from user JSON. */
+  pricingProof?: VerifiedFreeProof;
   inputTokens: number;
   outputTokens: number;
   cacheCreationInputTokens: number;
@@ -90,6 +96,7 @@ export interface TurnUsage {
 }
 
 export interface TurnResult {
+  selectedMaxOutputTokens?: number;
   /** Concatenated text blocks (assistant's visible message / thinking). */
   text: string;
   /** Tool calls the agent requested this turn (possibly several = parallel). */
@@ -436,6 +443,7 @@ export class ClaudeClient implements TurnRunner {
 
   /** Run one assistant turn with optional native tools. */
   async runTurn(params: RunTurnParams): Promise<TurnResult> {
+    assertLegacyInferenceAllowed('builder-claude');
     await assertAiAvailable();
     // UNBREAKABLE WEAK-MODULE GUARD (admin absolute rule, 2026-07-13). This is the ONE chokepoint where
     // every Claude call — builder, judge, plan, any heal gate, whether or not the call site remembered to

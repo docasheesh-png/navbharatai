@@ -1,3 +1,4 @@
+import { assertLegacyInferenceAllowed } from '../../inferencePolicy';
 import OpenAI from 'openai';
 import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
 import { grokVisionModels } from '../../../lib/visionModels';
@@ -23,6 +24,7 @@ export class GrokProvider implements AIProvider {
   }
 
   async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[]): Promise<AIProviderResponse> {
+    assertLegacyInferenceAllowed('direct-text-provider');
     const startTime = Date.now();
     const hasImages = Array.isArray(images) && images.length > 0;
     // Use a CURRENT vision-capable model when images are supplied (grok-2-vision-1212 is
@@ -63,6 +65,7 @@ export class GrokProvider implements AIProvider {
   }
 
   async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal): Promise<string> {
+    assertLegacyInferenceAllowed('direct-text-provider');
     const messages: any[] = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
     messages.push({ role: 'user', content: prompt });

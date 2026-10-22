@@ -1,3 +1,6 @@
+import { freeModuleInferenceScope } from '../AI/inferencePolicy';
+import { strictFreeRequired, StrictFreeCapabilityError } from '../AI/inferencePolicy';
+import { strictFreeText } from '../AI/LiveRegistry/runtime';
 import { placePlatformContext, platformContextInSystemEnabled } from '../lib/platformContext';
 import { cleanTurns } from '../../lib/platformTags';
 import crypto from 'crypto';
@@ -76,6 +79,11 @@ async function auditSdaReply(
   // the SAME image/PDF and re-reads it — a text-only audit was checking a reading it could not see.
   reportFile?: AuditReportFile | null,
 ): Promise<string | null> {
+  if (strictFreeRequired()) {
+    if (reportFile?.fileData) throw new StrictFreeCapabilityError('medical-report-audit');
+    const result = await strictFreeText({ prompt: buildAuditPrompt(caseContext, reply, false) });
+    return isAuditReplyClean(result.content) ? null : result.content;
+  }
   if (!geminiKey) return null;
   const auditPrompt = buildAuditPrompt(caseContext, reply, !!(reportFile?.fileData));
   try {
@@ -113,7 +121,7 @@ export function registerSdaRoutes(app: Express): void {
   // An hourly per-account bound (forensic audit 2026-10-04): the route had none, and a turn the wallet did
   // not see (see the racers below) had no other limit. Sized far above a clinician's real use.
   const sdaLimiter = rateLimiter({ name: 'sda-chat', authed: 240, anon: 20, noun: 'messages' });
-  app.post('/api/sda-chat', sdaLimiter, async (req: any, res: any) => {
+  app.post('/api/sda-chat', freeModuleInferenceScope, sdaLimiter, async (req: any, res: any) => {
     try {
       let { message, history = [], teachingMode = false, userId, sessionId, fileData, fileType, fileName } = req.body;
       if (!message && !fileData) return res.status(400).json({ error: 'Message required' });
@@ -476,6 +484,8 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         ...cleanTurns(recentMsgs.map(m => ({ role: m.role, content: m.content }))),
       ];
 
+      const strictFree = strictFreeRequired();
+      if (strictFree && reportFiles.length > 0) { const error = new StrictFreeCapabilityError('medical-report-vision'); return res.status(error.status).json({ error: error.message, code: error.code }); }
       let reply = '';
 
       // ── Shared helpers ───────────────────────────────────────────────────────
@@ -519,7 +529,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // Grok supports images via vision models but NOT PDFs — skip Grok for PDF files.
       // TIER: Grok is a premium provider — PAID tier only. A free-tier turn uses the cheap providers
       // (Gemini/Vertex) just like every other professional's free tier (admin 2026-07-15).
-      if (sdaGrokKey && !isPDF && sdaTier === 'paid') sdaRacers.push(async (signal) => {
+      if (!strictFree && sdaGrokKey && !isPDF && sdaTier === 'paid') sdaRacers.push(async (signal) => {
         const { default: OpenAI } = await import('openai');
         const c = new OpenAI({ apiKey: sdaGrokKey, baseURL: 'https://api.x.ai/v1' });
 
@@ -547,7 +557,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // TIER: for a FREE text turn, GLM leads (via the professional-free universe below), exactly like
       // every other professional — so the Gemini-direct racer is PAID-only for text. Vision (image/PDF)
       // still needs Gemini/Vertex on any tier (GLM can't read attachments), so keep it there.
-      if (sdaGeminiKey && (sdaTier === 'paid' || isImage || isPDF)) sdaRacers.push(async (signal) => {
+      if (!strictFree && sdaGeminiKey && (sdaTier === 'paid' || isImage || isPDF)) sdaRacers.push(async (signal) => {
         const { GoogleGenAI } = await import('@google/genai');
         const contents = buildGeminiContents();
         for (const m of geminiVisionModels()) {
@@ -601,6 +611,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
             // below) do not report usage, so a turn answered by one of those stays UNMEASURED and is
             // therefore not charged — we never invent a number to bill (see chatSpend.ts).
             sdaSpend = {
+              pricingProof: response.pricingProof,
               provider: response.provider,
               model: response.model,
               inputTokens: response.usage?.inputTokens,
@@ -612,7 +623,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       }
 
       // ── Sequential fallback: Vertex → Claude (multimodal-capable safety net) ──
-      if (!reply) {
+      if (!reply && !strictFree) {
         try {
           // The one Vertex client (lib/vertexGenAI.ts, Q-769) — the old SDK is past its end-of-life date.
           const vertexAI = vertexGenAI();
@@ -638,7 +649,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // (GLM/Kimi → Vertex/Gemini → …), so add DIRECT Gemini as a sequential free fallback. It fires
       // ONLY when the cheap chain produced nothing, so a normal free turn that GLM answers costs nothing
       // extra. Never Grok/Claude on free. (Image/PDF already reach Gemini via the racer above.)
-      if (!reply && sdaTier === 'free' && sdaGeminiKey && !isImage && !isPDF) {
+      if (!strictFree && !reply && sdaTier === 'free' && sdaGeminiKey && !isImage && !isPDF) {
         try {
           const { GoogleGenAI } = await import('@google/genai');
           const contents = buildGeminiContents();
@@ -659,7 +670,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
 
       // TIER: Claude is the premium last resort — PAID tier only. A free-tier turn that got no reply
       // from the cheap providers (Gemini/Vertex) fails honestly rather than escalating to a paid model.
-      if (!reply && sdaTier === 'paid') {
+      if (!strictFree && !reply && sdaTier === 'paid') {
         const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
         if (anthropicKey) {
           try {

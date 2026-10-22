@@ -1,3 +1,5 @@
+import { freeModuleInferenceScope } from '../AI/inferencePolicy';
+import { strictFreeRequired, StrictFreeCapabilityError } from '../AI/inferencePolicy';
 import type { Express, Request, Response } from 'express';
 import { inAiSpendZone } from '../lib/aiSpendZone';
 import { rateLimiter } from '../lib/authMiddleware';
@@ -95,7 +97,8 @@ const s2pLimiter = () => rateLimiter({
 });
 
 export function registerScreenshotToPromptRoutes(app: Express): void {
-  app.post('/api/screenshot/to-prompt', s2pLimiter(), validateBody(schema), inAiSpendZone(async (req: Request, res: Response) => {
+  app.post('/api/screenshot/to-prompt', freeModuleInferenceScope, s2pLimiter(), validateBody(schema), inAiSpendZone(async (req: Request, res: Response) => {
+    if (strictFreeRequired()) { const error = new StrictFreeCapabilityError('screenshot-vision'); res.status(error.status).json({ code: error.code, error: error.message }); return; }
     const body = req.body as { image?: string; imageType?: string; style?: string; framework?: string; includeJs?: boolean };
     const image = typeof body.image === 'string' ? body.image.trim() : '';
     if (!image) { res.status(400).json({ error: 'A screenshot image is required.' }); return; }

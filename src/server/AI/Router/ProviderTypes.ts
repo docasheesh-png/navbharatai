@@ -1,3 +1,4 @@
+import type { FreeTextResult } from '../LiveRegistry/dispatcher';
 import { anthropicTotalInput, type AnthropicUsageLike } from '../../lib/anthropicUsage';
 
 /**
@@ -22,10 +23,11 @@ export interface AIProviderResponse {
   // `AIProvider.name` (what a REGISTERED provider is called). They are not the same declaration, and
   // adding a provider to only one compiles fine on the FRONTEND tsconfig and fails on the server's.
   // Adding OPENAI here was missed on the first pass and `npm run typecheck:server` is what caught it.
-  provider: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM' | 'OPENAI';
+  provider: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM' | 'OPENAI' | 'OPENROUTER';
   model: string;
   /** What this call really cost in tokens, as reported by the provider. Absent = unreported. */
   usage?: ProviderUsage;
+  pricingProof?: FreeTextResult['pricingProof'];
 }
 
 /**
@@ -62,7 +64,7 @@ export interface ProviderTelemetry {
 }
 
 export interface AIProvider {
-  name: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM' | 'OPENAI';
+  name: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM' | 'OPENAI' | 'OPENROUTER';
   priority: number;
   /**
    * When true, this provider is a LAST-RESORT fallback: in a raced router

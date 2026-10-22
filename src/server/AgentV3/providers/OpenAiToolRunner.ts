@@ -1,3 +1,4 @@
+import { assertLegacyInferenceAllowed } from '../../AI/inferencePolicy';
 import { assertAiAvailable, aiMaintenanceStore } from '../../lib/aiMaintenance';
 // AgentV3 — OpenAI-compatible tool-use TurnRunner (multi-provider cost routing, phase 2).
 //
@@ -360,6 +361,7 @@ export class OpenAiToolRunner implements TurnRunner {
   ) {}
 
   async runTurn(params: RunTurnParams): Promise<TurnResult> {
+    assertLegacyInferenceAllowed('builder-OpenAiToolRunner');
     await assertAiAvailable();
     try { return await this.runAvailableTurn(params); }
     catch (error) {

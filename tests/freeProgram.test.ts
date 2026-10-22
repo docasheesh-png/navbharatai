@@ -174,3 +174,33 @@ describe('census: every door asks the switch', () => {
     expect(parsePublicFlags({ freeProgramPaused: false }).freeProgramPaused).toBe(false);
   });
 });
+
+describe('APPS INSTALLED BEFORE THE PAUSE (admin 2026-10-22: "bina install kiye old app me bhi free trial band ho jaye")', () => {
+  // The phone apps are bundled: an old install cannot be given new screens, only new ANSWERS. So the pause is
+  // enforced and spoken by the server in the shapes those old bundles already read.
+  it('the masked wallet keeps every key an old wallet screen reads, as numbers, so nothing renders as NaN or blank', () => {
+    const v = fp.maskWalletForView({ ...NEVER_PAID }, true) as Record<string, unknown>;
+    for (const k of ['tokenBalance', 'remaining_balance', 'total_balance', 'totalMoneySpent', 'userId']) expect(k in v, k).toBe(true);
+    expect(typeof v.tokenBalance).toBe('number');
+    expect(Array.isArray(v.walletLedger)).toBe(true);
+  });
+  it('the refusal carries a plain `error` sentence, which is all an old build screen prints', async () => {
+    const g = await gateToolAction('u1', null, 'ai_tool', 'image-generation');
+    expect(!g.allow && typeof g.body.error === 'string' && g.body.error.length > 10).toBe(true);
+  });
+  it('the notification row has exactly the fields an old notifications panel draws, is read, and names no money or program', () => {
+    const n = fp.freeTrialEndedNotification(1_700_000_000_000);
+    expect(Object.keys(n).sort()).toEqual(['action', 'createdAt', 'id', 'message', 'read']);
+    expect(n.read).toBe(true);
+    expect(n.message).toBe(fp.FREE_TRIAL_ENDED_MESSAGE);
+    expect(n.message).not.toMatch(/referral|reward|bonus|gift|paused|pause/i);
+  });
+  it('the notifications route adds the row only for a never-paid account while paused', () => {
+    const src = readFileSync('src/server/routes/notifications.ts', 'utf8');
+    expect(src).toMatch(/freeProgramPaused\(\)[\s\S]*hasEverPaid\(wallet\)[\s\S]*freeTrialEndedNotification/);
+  });
+  it('the referral status route still answers old apps with the disabled shape they already understand', () => {
+    const src = readFileSync('src/server/routes/referral.ts', 'utf8');
+    expect(src).toContain("return res.json({ ok: true, enabled: false, code: null, steps: [], earnedTokens: 0 });");
+  });
+});

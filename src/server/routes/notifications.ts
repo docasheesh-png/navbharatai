@@ -3,6 +3,10 @@ import { verifyFirebaseToken, resolveVerifiedEmail } from '../lib/authMiddleware
 import { listNotificationsForUser, markNotificationsRead, dismissNotifications } from '../lib/AdminNotificationStore';
 import { listSocialInbox, updateSocialInbox } from '../lib/appMartSocialStore';
 import { isSocialInboxId } from '../lib/appMartSocialRules';
+import { freeProgramPaused, freeTrialEndedNotification } from '../lib/freeProgram';
+import { hasEverPaid } from '../AgentV3/FreeTierBuildRouting';
+import { firestoreWalletReader } from '../AgentV3/WalletBalance';
+import { getServerDb } from '../lib/serverDb';
 
 /**
  * App Mart notifications ("Ravi liked your app", "Asha commented …") are delivered through THIS inbox,
@@ -41,6 +45,14 @@ export function registerNotificationRoutes(app: Express): void {
       listSocialInbox(uid).catch(() => []),
     ]);
     const notifications = [...broadcasts, ...social].sort((a, b) => b.createdAt - a.createdAt);
+    // FREE PROGRAM PAUSED: an app installed before the pause cannot learn new screens, but it draws this panel — so a
+    // never-paid account is told here that its free trial has ended (lib/freeProgram.ts). Never blocks the inbox.
+    try {
+      if (await freeProgramPaused()) {
+        const wallet = await firestoreWalletReader(getServerDb() as never)(uid).catch(() => null);
+        if (!hasEverPaid(wallet)) notifications.unshift(freeTrialEndedNotification(Date.now()) as never);
+      }
+    } catch { /* the inbox still answers */ }
     res.json({ notifications, unread: notifications.filter((n) => !n.read).length });
   });
 

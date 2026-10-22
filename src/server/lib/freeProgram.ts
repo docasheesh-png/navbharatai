@@ -140,3 +140,15 @@ export function maskWalletForView(data: Record<string, unknown>, paused: boolean
   for (const k of BALANCE_FIELDS) if (k in out) out[k] = 0;
   return out;
 }
+
+/**
+ * The inbox row that tells a never-paid account its free trial has ended (admin 2026-10-22).
+ *
+ * WHY IT EXISTS: the phone apps are BUNDLED, so an app installed before this change cannot be given new screens — only
+ * the SERVER can speak to it. The notifications bell is a panel every installed version already draws, so the message
+ * rides there. It is built on the fly (no write per user), is always `read` (a permanent unread dot would be a nag, not a
+ * notice) and points at billing for builds that know that action; older ones show it as plain text. PURE.
+ */
+export function freeTrialEndedNotification(nowMs: number): { id: string; message: string; createdAt: number; read: boolean; action: 'open-billing' } {
+  return { id: 'free-trial-ended', message: FREE_TRIAL_ENDED_MESSAGE, createdAt: nowMs, read: true, action: 'open-billing' };
+}

@@ -64,6 +64,21 @@ describe('Q-767 — the Load board can see every store that is on a clock', () =
       .toEqual([]);
   });
 
+  it('the live model registry inventories its growing descendants, not just two fixed root documents', () => {
+    const writer = readFileSync(resolve(__dirname, '../src/server/AI/LiveRegistry/store.ts'), 'utf8');
+    const root = writer.match(/const ROOT = '([^']+)'/)?.[1];
+    expect(root).toBe('live_ai_registry');
+    expect(growingInventory()).toContain(root);
+    // Read the writer's real child collections: a new child requires an explicit storage review.
+    const children = [...new Set([...writer.matchAll(/\.collection\('([^']+)'\)/g)].map(m => m[1]))].sort();
+    expect(children).toEqual(['actions', 'chunks', 'controls', 'health', 'history', 'routing']);
+    const reason = RETAINED_INDEFINITELY.find(r => r.collection === root)?.reason;
+    expect(reason).toBeDefined();
+    for (const child of children) expect(reason, `${child} must have a documented lifetime`).toContain(child);
+    expect(reason).toContain('not as a measured document or byte count');
+    expect(RETENTION_POLICIES.some(p => p.collection === root)).toBe(false);
+  });
+
   it('so the board now reports ZERO undecided stores, and would report any new one', () => {
     // The number the screen actually shows. It must be 0 — every growing store is now decided — and the
     // check is written so that a NEW collection added to the inventory without a decision makes it 1.

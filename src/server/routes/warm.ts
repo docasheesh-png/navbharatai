@@ -24,6 +24,7 @@ import { providerStateStore } from '../AgentV3/ProviderStateStore';
 import { logStore } from '../lib/logStore';
 import { metricsStore } from '../lib/metricsStore';
 import { isServerReady } from './health';
+import { aiMaintenanceStore } from '../lib/aiMaintenance';
 
 export interface WarmStep { step: string; ok: boolean; ms: number; error?: string }
 export interface WarmReport {
@@ -72,6 +73,14 @@ export async function runWarmup(): Promise<WarmReport> {
     warmStep('appContext:sda', () => AppContextInjector.getRelevantContext('warmup', 'sda_chat')),
     // Gemini SDK singleton (module-cached client; no network at construction).
     warmStep('gemini:singleton', () => getGemini()),
+    // FREE CHAT'S FIRST MESSAGE (admin 2026-10-22: "free chat ko super fast kar do"). These are the things the first chat
+    // turn after a cold start used to pay for in front of the user, none of which is a model call:
+    //   • the maintenance setting that every AI call checks before it starts (a Firestore read, 1.5 s bound on a cold read);
+    //   • the lazily imported safety and auth modules the chat handler loads on its first message.
+    warmStep('chat:maintenanceSetting', () => aiMaintenanceStore.read()),
+    warmStep('chat:lazyModules', () => Promise.all([
+      import('../lib/promptSafety'), import('../lib/authMiddleware'), import('../lib/audit'),
+    ])),
     // Firestore singletons — one read pays the admin client init; the rest come back warm.
     // Cost: 4 Firestore reads per ACTUAL run. The 30s throttle (getWarmReport) caps this to
     // ~4 reads / 30s no matter the request rate, so a flood costs ~nothing (cached report).

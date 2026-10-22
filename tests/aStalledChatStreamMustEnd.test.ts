@@ -229,6 +229,6 @@ describe('both streaming paths are bounded, and "stalled" is not reported as a f
   });
 
   it('the kill switch reaches BOTH paths', () => {
-    expect((code.match(/watchdogLimits\(\)/g) ?? []).length).toBe(2);
+    expect((code.match(/watchdogLimits\(/g) ?? []).length).toBe(2);
   });
 });

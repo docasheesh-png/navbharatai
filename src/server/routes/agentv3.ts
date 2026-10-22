@@ -1,3 +1,7 @@
+import { runWithInferenceScope, setInferenceScopeForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
+import { strictFreeWeakEnabled, strictFreeText, assertStrictFreeToolAvailable } from '../AI/LiveRegistry/runtime';
+import { VerifiedFreeToolRunner } from '../AgentV3/providers/VerifiedFreeToolRunner';
+import type { VerifiedFreeProof } from '../AI/LiveRegistry/proof';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction } from '../AgentV3/weakBuildPreflight';
@@ -1886,7 +1890,7 @@ export function decideBuildBilledUsd(
   let effectiveBilledUsd: number;
   if (isOpusTier) {
     effectiveBilledUsd = flatBilledUsd; // real Opus × 2 — unchanged
-  } else if (realCostBillingEnabled()) {
+  } else if (realCostBillingEnabled() || (powerLevel === 'weak' && strictFreeWeakEnabled())) {
     effectiveBilledUsd = tieredMarkupUsd(billableTokenCost + vmCost);
   } else {
     effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
@@ -2908,6 +2912,7 @@ function openAiJudgeCandidate(
     // The judge chain owns fallback. SDK retries would hide a second deterministic billing HTTP 429.
     const client = new OpenAI({ apiKey, baseURL, timeout, maxRetries: 0 });
     const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
+      assertLegacyInferenceAllowed('builder-review-judge');
       const r = await client.chat.completions.create({
         model,
         messages: [{ role: 'system', content: system }, ...messages.map((m) => ({ role: 'user' as const, content: m.content }))],
@@ -2944,14 +2949,28 @@ function openAiJudgeCandidate(
  * weak build's async context at CALL time. Under the chain that refusal is simply recorded as that
  * candidate's failure instead of being invisible — the guard is untouched and still decides.
  */
-function selectReviewJudge(
+export function selectReviewJudge(
   mode: 'free' | 'paid' | 'power' = 'paid',
   // The tier the BUILD is running on, for the Nemotron flag's per-tier allowlist. `mode` cannot
   // answer that: it is 'paid' for Weak, Normal AND Strong alike (only the Opus toggle makes it
   // 'power'), so scoping a rollout by mode would switch three tiers on at once. Optional and
   // defaulting to 'off' (Normal) so a caller that does not pass it can never widen the rollout.
   tier: PowerLevel | string | boolean | null | undefined = 'off',
+  onFreeUsage?: (usage: { inputTokens: number; outputTokens: number; pricingProof?: VerifiedFreeProof; selectedMaxOutputTokens?: number }, model: string) => void,
 ): { runTurn: JudgeRunTurn; modelId: string; kind: JudgeKind; chain: JudgeChain } {
+  if (toPowerLevel(tier) === 'weak' && strictFreeWeakEnabled()) {
+    const candidate: JudgeCandidate = { kind: 'openrouter', modelId: 'VERIFIED_FREE_REGISTRY',
+      runTurn: async ({ system, messages, maxTokens }) => {
+        const result = await strictFreeText({ systemPrompt: system, prompt: messages.map(m => m.content).join('\n\n'), maxOutputTokens: Math.min(maxTokens ?? 2048, 8192) });
+        candidate.modelId = result.model;
+        try { if (result.usage) onFreeUsage?.({ ...result.usage, pricingProof: result.pricingProof }, result.model); }
+        catch { /* observation cannot turn a completed free review into another model call */ }
+        return { text: result.content };
+      },
+    };
+    const chain = composeJudgeChain([candidate]);
+    return { runTurn: chain.runTurn, modelId: 'VERIFIED_FREE_REGISTRY', kind: 'openrouter', chain };
+  }
   const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
   const glmKey = parseKeyPool(process.env.GLM_API_KEY)[0];
   const nemotronOk = nemotronTierAllowed(toPowerLevel(tier as PowerLevel | boolean | string | undefined | null));
@@ -3446,7 +3465,7 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
  * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
  */
-export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; plan?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void; onAttemptWasted?: (family: string, kind: WasteKind, ms: number) => void;
+export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; plan?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean; pricingProof?: VerifiedFreeProof; selectedMaxOutputTokens?: number }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void; onAttemptWasted?: (family: string, kind: WasteKind, ms: number) => void;
   /** Retired-rung memory owned by the CALLER, so it can span several runner instances — the fast
    *  lane's per-file runners share ONE build's map. Omitted ⇒ each runner keeps its own, as before.
    *  See MultiProviderOptions.deadRungs for why this is caller-owned and never a singleton. */
@@ -3458,6 +3477,10 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
   sticky?: { remember: boolean };
 }): TurnRunner {
   const level = toPowerLevel(opts.tier as PowerLevel | boolean | string | undefined | null);
+  if (level === 'weak' && strictFreeWeakEnabled()) {
+    try { opts.onChain?.([{ name: 'OPENROUTER', modelId: 'VERIFIED_FREE_REGISTRY' }]); } catch { /* observation */ }
+    return new VerifiedFreeToolRunner({ onProviderUsed: opts.onProviderUsed, onTurnComplete: opts.onTurnComplete });
+  }
   const parsed = tierLadder(level);
   if (parsed.rejected) console.warn(`[AGENTV3] ${parsed.rejected}`);
   // `heal` and `complex` are different questions with the same answer: skip the cheap flash opener.
@@ -9931,7 +9954,7 @@ async function noteBuildOutcome(
     }
   });
 
-  app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), enforceFreeProgramPause(), withBuildRequestCleanup(async (req: Request, res: Response, registerCleanup) => {
+  app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), enforceFreeProgramPause(), withBuildRequestCleanup(async (req: Request, res: Response, registerCleanup) => runWithInferenceScope('paid-builder', async () => {
     // ⏱️ THE USER'S WAIT STARTS HERE — the first statement, before every await of the preamble (autopsy 303e8a6f,
     // adversarial review): the build's event stream used to take its own construction time as the origin, up to
     // ~30 s of checks later, so "Still working — Ns so far" still undercounted. Every user-visible clock reads this.
@@ -10097,6 +10120,29 @@ async function noteBuildOutcome(
       });
       return;
     }
+
+    // Power level (admin tier→model redefinition 2026-07-13): 'weak' (GLM/Kimi, never Claude) |
+    // 'off' (Normal, adaptive) | 'mini' (Strong → Sonnet 100%) | 'medium' (Powerful → Opus medium
+    // effort) | 'max' (Full Team → Opus max/ultracode). Accepts the new `powerLevel` field; falls
+    // back to the legacy `onlyOpus` boolean (→ 'mini').
+    const powerLevelReq = toPowerLevel(req.body?.powerLevel ?? (req.body?.onlyOpus === true));
+    // POWER-TIER GATING (admin 2026-07-12): a FREE user (logged in, never purchased, NOT free-list) may use
+    // ONLY the cheap 'weak' tier (GLM/Kimi, never Claude). Clamp it SERVER-SIDE — the UI only shows 'weak'
+    // to free users, but the server enforces it so a UI bypass (a hand-crafted request with power:'max')
+    // can never spend NavBharatAI's Claude/Opus budget. Free-list admins/testers + paying users keep all
+    // five tiers. The wallet is read here ONLY when a non-free-list user asks for a NON-weak tier (so the
+    // common free→weak path costs no extra Firestore read).
+    const powerFreeListUnrestricted = isAgentV3FreeUser(userId, email);
+    let powerLevelReqEffective = powerLevelReq;
+    if (!powerFreeListUnrestricted && powerLevelReq !== 'weak') {
+      const powerWallet = userId ? await firestoreWalletReader(getDb())(userId).catch(() => null) : null;
+      // isFreeTierUser(null) → true (conservative: an unreadable wallet is treated as free → clamped to
+      // weak). Fail-CLOSED on purpose — a Firestore blip must never let a free account reach a paid tier.
+      const isPaidForPower = !isFreeTierUser(powerWallet);
+      powerLevelReqEffective = clampPowerForUser(powerLevelReq, isPaidForPower);
+    }
+    const powerSpecResolved = powerSpec(powerLevelReqEffective);
+    setInferenceScopeForCurrentRequest(powerLevelReqEffective === 'weak' ? 'weak' : 'paid-builder');
 
     // ── ROLE CHAT LANE (FIX #5 — the 3-role model's PLANNER + ADVISOR) ─────────────────────────────
     // A read-only turn: NO tools at all (structurally nothing to write with), grounded in the REAL
@@ -10278,27 +10324,7 @@ async function noteBuildOutcome(
     // This build's claim on the key — cleanup releases it only while it is still ours (releaseBuildLock).
     const buildLockToken = randomUUID();
     activeBuildOwner.set(buildKey, buildLockToken);
-    // Power level (admin tier→model redefinition 2026-07-13): 'weak' (GLM/Kimi, never Claude) |
-    // 'off' (Normal, adaptive) | 'mini' (Strong → Sonnet 100%) | 'medium' (Powerful → Opus medium
-    // effort) | 'max' (Full Team → Opus max/ultracode). Accepts the new `powerLevel` field; falls
-    // back to the legacy `onlyOpus` boolean (→ 'mini').
-    const powerLevelReq = toPowerLevel(req.body?.powerLevel ?? (req.body?.onlyOpus === true));
-    // POWER-TIER GATING (admin 2026-07-12): a FREE user (logged in, never purchased, NOT free-list) may use
-    // ONLY the cheap 'weak' tier (GLM/Kimi, never Claude). Clamp it SERVER-SIDE — the UI only shows 'weak'
-    // to free users, but the server enforces it so a UI bypass (a hand-crafted request with power:'max')
-    // can never spend NavBharatAI's Claude/Opus budget. Free-list admins/testers + paying users keep all
-    // five tiers. The wallet is read here ONLY when a non-free-list user asks for a NON-weak tier (so the
-    // common free→weak path costs no extra Firestore read).
-    const powerFreeListUnrestricted = isAgentV3FreeUser(userId, email);
-    let powerLevelReqEffective = powerLevelReq;
-    if (!powerFreeListUnrestricted && powerLevelReq !== 'weak') {
-      const powerWallet = userId ? await firestoreWalletReader(getDb())(userId).catch(() => null) : null;
-      // isFreeTierUser(null) → true (conservative: an unreadable wallet is treated as free → clamped to
-      // weak). Fail-CLOSED on purpose — a Firestore blip must never let a free account reach a paid tier.
-      const isPaidForPower = !isFreeTierUser(powerWallet);
-      powerLevelReqEffective = clampPowerForUser(powerLevelReq, isPaidForPower);
-    }
-    const powerSpecResolved = powerSpec(powerLevelReqEffective);
+
     const onlyOpus = powerSpecResolved.powerMode;
     // Admin tier→model redefinition (2026-07-13): `onlyOpus` (kept name for the ~30 existing call
     // sites) now means "a PAID PINNED tier is selected" (mini/medium/max) — gating, no cheap floor,
@@ -10311,13 +10337,20 @@ async function noteBuildOutcome(
     // silently fall back to Claude (that is the exact free-user money leak). Refuse honestly instead.
     // Generalised to EVERY tier (2026-09-14): a tier whose ladder has no keyed rung cannot build, and
     // the honest answer is a refusal naming the tier — never a build on some other tier's model.
-    if (!tierEngineAvailable(powerLevelReqEffective)) {
+    let engineReady: boolean;
+    if (powerLevelReqEffective === 'weak' && strictFreeWeakEnabled()) {
+      try { await assertStrictFreeToolAvailable(32768); engineReady = true; }
+      catch { engineReady = false; }
+    } else engineReady = tierEngineAvailable(powerLevelReqEffective);
+    if (!engineReady) {
       releaseBuildLock(buildKey, buildLockToken);
       audit('AGENTV3_TIER_ENGINE_UNAVAILABLE', { userId, tier: powerLevelReqEffective }, 'warn');
       const tierName = tierDisplayName(toPowerLevel(powerLevelReqEffective));
       res.status(503).json({
         error: tierName === 'Weak'
-          ? 'The free engine is temporarily unavailable. Please try again shortly, or add credits to build on the full engine.'
+          ? (strictFreeWeakEnabled()
+            ? 'The free engine is temporarily unavailable. Please try again shortly. No paid fallback was used.'
+            : 'The free engine is temporarily unavailable. Please try again shortly, or add credits to build on the full engine.')
           : `The ${tierName} engine is temporarily unavailable. Please try again shortly, or pick another power level.`,
         code: tierName === 'Weak' ? 'WEAK_ENGINE_UNAVAILABLE' : 'ENGINE_UNAVAILABLE',
       });
@@ -14111,10 +14144,22 @@ async function noteBuildOutcome(
        * would CHANGE THE BILL — which is the decision being measured, so it cannot be a side effect of
        * measuring it.
        */
-      recordWeakAdmissionUsage(weakAdmission, (usage) => providerLedger.add('GLM', usage, WEAK_SCOPE_MODEL));
+      recordWeakAdmissionUsage(weakAdmission, (usage) => providerLedger.add(usage.pricingProof ? 'OPENROUTER' : 'GLM', usage, usage.pricingProof?.modelId ?? WEAK_SCOPE_MODEL));
+      let lastFreeOutputLimit: number | undefined;
+      const recordFreeOutputLimit = (usage: { selectedMaxOutputTokens?: number }): void => {
+        const limit = usage.selectedMaxOutputTokens;
+        if (!Number.isSafeInteger(limit) || !limit || limit === lastFreeOutputLimit) return;
+        lastFreeOutputLimit = limit;
+        try { buildDiag.record({ phase: 'provider', severity: 'info', code: 'FREE_OUTPUT_LIMIT', autoResolved: true,
+          message: `The verified-free endpoint selected an output ceiling of ${limit} tokens for this turn.`,
+          detail: 'The requested output budget is an upper bound. Endpoint and remaining-context limits can lower it; truncated writes retain the existing bounded recovery guards.' }); } catch { /* observation */ }
+      };
       const shadowFastLaneLedger = createProviderUsageLedger();
-      const captureShadowUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string): void => {
+      const captureShadowUsage = (used: string, usage: { inputTokens: number; outputTokens: number; pricingProof?: VerifiedFreeProof; selectedMaxOutputTokens?: number }, model?: string, attribute = true): void => {
+        recordFreeOutputLimit(usage);
         shadowFastLaneLedger.add(used, usage, model);
+        // Strict-free fast turns must not fall into the legacy Sonnet-priced remainder.
+        if (attribute && powerLevelReqEffective === 'weak' && strictFreeWeakEnabled()) providerLedger.add(used, usage, model);
       };
       billingCtx.providerLedger = providerLedger; // Fix 67 — expose to the wall-clock/advisory finalizer
       // THE LIVE ₹ FIGURE (admin 2026-09-28 — liveBuildCost.ts). Decided once per build: will this bill
@@ -14131,7 +14176,8 @@ async function noteBuildOutcome(
           () => { liveCostDiscountPct = 0; }, // unreadable ⇒ 0% — the ordinary price, as at settle
         );
       }
-      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
+      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean; pricingProof?: VerifiedFreeProof; selectedMaxOutputTokens?: number }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
+        recordFreeOutputLimit(usage);
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
         // exact misreading autopsy f04421ef already paid for once, arriving here through a different
@@ -14265,6 +14311,11 @@ async function noteBuildOutcome(
       // ladder, so the report states the ladder, which rungs have a key here, and whether an env
       // override was refused — "1st call kaun tha aur kyun" is answered by the report, never guessed.
       try {
+        if (powerLevelReqEffective === 'weak' && strictFreeWeakEnabled()) {
+          buildDiag.record({ phase: 'provider', severity: 'info', code: 'TIER_LADDER', autoResolved: true,
+            message: 'Weak uses the live verified-free registry, not the legacy paid ladder.',
+            detail: 'Candidates must satisfy current zero-price, tool, context and output limits. No paid fallback. Actual model IDs are recorded after each response.' });
+        } else {
         const parsedLadder = tierLadder(powerLevelReqEffective);
         const keyless = parsedLadder.rungs.filter((r) => !(process.env[keyEnvFor(r.provider)] && String(process.env[keyEnvFor(r.provider)]).trim()));
         buildDiag.record({
@@ -14293,6 +14344,7 @@ async function noteBuildOutcome(
             : `Complexity: simple (score ${complexityDecision.score}, ${complexityDecision.source}) — the build opens on the ladder's first rung.`,
           detail: complexityDecision.reason,
         });
+        }
       } catch { /* diagnostics are best-effort — never blocks a build */ }
       // The bench is a FACT ABOUT THE ENGINE and must appear in the timeline as one — otherwise the only
       // trace of "KIMI was reached" is the absence of further GLM lines, which nobody can read.
@@ -14401,7 +14453,8 @@ async function noteBuildOutcome(
         onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
         // OBSERVATION ONLY — captureShadowUsage feeds the shadow ledger, never the billing one. This is
         // what makes the fast-lane billing question answerable without answering it by accident.
-        onTurnComplete: !manualUsage && heal && weakCandidateActive(powerLevelReqEffective) ? captureTurnUsage : captureShadowUsage,
+        onTurnComplete: !manualUsage && heal && weakCandidateActive(powerLevelReqEffective) ? captureTurnUsage
+          : (used, usage, model) => captureShadowUsage(used, usage, model, !manualUsage),
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
@@ -14417,7 +14470,7 @@ async function noteBuildOutcome(
         deadRungs: fastLaneDeadRungs,
         bench: buildBench,
         onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
-        onTurnComplete: captureShadowUsage,
+        onTurnComplete: (used, usage, model) => captureShadowUsage(used, usage, model, false),
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
@@ -14638,7 +14691,7 @@ async function noteBuildOutcome(
             // bill for a call we knew the vendor of. `recordLlmCall` two lines up already names it. The
             // heal runners were fixed for this exact shape in 2026-08-10 (see healRunnerOpts); the three
             // planner calls were the siblings never hunted. Same ledger the fast lane feeds.
-            captureTurnUsage(rmProvider, { inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0, rmT.usage.cacheCreationInputTokens ?? 0);
+            captureTurnUsage(rmProvider, rmT.usage, rmT.model, rmT.usage.cacheReadInputTokens ?? 0, rmT.usage.cacheCreationInputTokens ?? 0);
 
             const rmParsed = parseMegaRoadmap(rmT.text, scope.famousApp);
             const { roadmap, rejected } = roadmapGuardrail(rmParsed, scope.famousApp);
@@ -16814,7 +16867,7 @@ async function noteBuildOutcome(
             buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, cacheReadInputTokens: t.usage.cacheReadInputTokens, cacheCreationInputTokens: t.usage.cacheCreationInputTokens });
             // Attributed to the vendor that answered, never swept into the Sonnet-priced remainder —
             // see the roadmap planner above (autopsy Study-Racer, 2026-09-25).
-            captureTurnUsage(bpProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
+            captureTurnUsage(bpProvider, t.usage, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
             return t.text;
           };
           const scaffold = (await actuator.listFiles(workspaceId).catch(() => [])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
@@ -18021,7 +18074,7 @@ async function noteBuildOutcome(
             buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, cacheReadInputTokens: t.usage.cacheReadInputTokens, cacheCreationInputTokens: t.usage.cacheCreationInputTokens });
             // Attributed to the vendor that answered, never swept into the Sonnet-priced remainder —
             // see the roadmap planner above (autopsy Study-Racer, 2026-09-25).
-            captureTurnUsage(ppProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
+            captureTurnUsage(ppProvider, t.usage, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
             ppLast.stopReason = t.stopReason ?? null;
             ppLast.chars = t.text.length;
             ppLast.latencyMs = Date.now() - startedAt;
@@ -18621,7 +18674,7 @@ async function noteBuildOutcome(
           // REAL-cost billing (Fix 65): attribute this fast-lane call to the provider/model that ACTUALLY
           // delivered, so a cheap GLM/Kimi fast-lane build is priced at the cheap rate — not swept into
           // the Sonnet-rate "unattributed remainder". Mirrors the agentic chain's onTurnComplete.
-          captureTurnUsage(usedProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
+          captureTurnUsage(usedProvider, t.usage, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
           return { text: t.text, stopReason: t.stopReason ?? null, billedAs: { provider: usedProvider, model: t.model, outputTokens: t.usage.outputTokens } };
         };
         // TRUNCATION CONTINUATION (admin report 858f6d7b). Every fast-lane generation now runs to
@@ -19303,7 +19356,9 @@ async function noteBuildOutcome(
             // Grok — BEFORE we ever spend Sonnet. Claude is touched only for the FINAL repair below.
             // This escalation loop only runs for a paid, non-power build (free/power skip escalation),
             // so the mode is 'paid' here; passed explicitly so the judge selection is mode-correct.
-            const judge = selectReviewJudge(onlyOpus ? 'power' : 'paid', powerLevelReqEffective);
+            const judge = selectReviewJudge(onlyOpus ? 'power' : 'paid', powerLevelReqEffective, (usage, model) => {
+              buildUsage.add(usage); captureTurnUsage('OPENROUTER', usage, model);
+            });
             // ADMIN-ONLY label for the verdict record. It must never reach the user: the two narration
             // lines below used to print it ("🔎 Grok is reviewing…") — a White-Label Law breach fixed 2026-09-14.
             // EXHAUSTIVE, via the shared label. The ternary this replaces had no `nemotron` branch and
@@ -27847,5 +27902,5 @@ async function noteBuildOutcome(
       markBuildExited(rb);
     }
 
-  }));
+  })));
 }

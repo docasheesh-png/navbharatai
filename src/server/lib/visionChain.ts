@@ -1,3 +1,4 @@
+import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 // Vision chain — reads images + PDFs for the chat handler across ALL provider
 // universes, honestly and with correct isolation.
 //
@@ -224,9 +225,11 @@ export function visionProviderOrder(allowClaude: boolean): VisionResult['provide
  * Try each allowed provider in order and return the first non-empty reply, or null
  * when every allowed provider failed (missing creds or errors). NEVER throws — a
  * provider error is logged and the chain moves on, so one bad key can't kill vision.
+ * Strict-free policy is the exception: unsupported vision throws before any provider call.
  */
 export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions): Promise<VisionResult | null> {
   if (!atts || atts.length === 0) return null;
+  assertLegacyInferenceAllowed('vision');
   const runners: Record<VisionResult['provider'], (a: VisionAttachment[], opt: VisionOptions) => Promise<string | null>> = {
     GLM: tryGlm,
     VERTEX: tryVertex,

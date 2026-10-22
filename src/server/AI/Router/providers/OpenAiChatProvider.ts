@@ -1,3 +1,4 @@
+import { assertLegacyInferenceAllowed } from '../../inferencePolicy';
 import OpenAI from 'openai';
 import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
 
@@ -97,6 +98,7 @@ export class OpenAiChatProvider implements AIProvider {
   }
 
   async execute(prompt: string, _schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[]): Promise<AIProviderResponse> {
+    assertLegacyInferenceAllowed('direct-text-provider');
     // Text-only — defer an image turn instead of sending pixels to a model that cannot read them.
     if (Array.isArray(images) && images.length > 0) {
       throw new Error('GPT Nano is text-only — deferring this vision turn to the next provider');
@@ -124,6 +126,7 @@ export class OpenAiChatProvider implements AIProvider {
   }
 
   async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal): Promise<string> {
+    assertLegacyInferenceAllowed('direct-text-provider');
     // THE MODEL MUST RIDE THE STREAM. Chat streams, so a rung that ignores its pinned model streams
     // on the provider default — the exact bug that made every Vertex rung run gemini-2.5-pro.
     const pinned = OpenAiChatProvider.model(model);

@@ -1,3 +1,4 @@
+import { freeModuleInferenceScope } from '../AI/inferencePolicy';
 import type { Express, Request, Response } from 'express';
 import { inAiSpendZone } from '../lib/aiSpendZone';
 import { callProfessionalAI } from '../lib/professionalRouting';
@@ -32,7 +33,7 @@ const schema = vobject({
 });
 
 export function registerDebugRoutes(app: Express): void {
-  app.post('/api/debug', workspaceRateLimiter(), guestDailyQuota('debug'), validateBody(schema), inAiSpendZone(async (req: Request, res: Response) => {
+  app.post('/api/debug', freeModuleInferenceScope, workspaceRateLimiter(), guestDailyQuota('debug'), validateBody(schema), inAiSpendZone(async (req: Request, res: Response) => {
     if (!isValidDebugRequest(req.body)) {
       res.status(400).json({ error: 'A non-empty "error" text is required.' });
       return;

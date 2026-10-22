@@ -1,3 +1,6 @@
+import { strictFreeRequired } from '../AI/inferencePolicy';
+import { strictFreeText } from '../AI/LiveRegistry/runtime';
+import type { AIProviderResponse } from '../AI/Router/ProviderTypes';
 // Shared Professional-AI model routing (admin 2026-07-24: "Other AI ki API call = Professional AI").
 //
 // WHY THIS EXISTS: the 70+ config-driven professionals (Doctor AI, Lawyer AI, …) answer through one
@@ -50,8 +53,9 @@ export async function callProfessionalAIWithUsage(
   prompt: string,
   tier: ProfessionalTier = 'free',
 ): Promise<ProfessionalAnswer> {
-  const answer = (response: { content: string; provider?: string; model?: string; usage?: { inputTokens: number; outputTokens: number } }): ProfessionalAnswer => {
+  const answer = (response: Pick<AIProviderResponse, 'content' | 'provider' | 'model' | 'usage' | 'pricingProof'>): ProfessionalAnswer => {
     const spend: ChatTurnUsage = {
+      pricingProof: response.pricingProof,
       provider: response.provider,
       model: response.model,
       inputTokens: response.usage?.inputTokens,
@@ -75,6 +79,9 @@ export async function callProfessionalAIWithUsage(
     });
     return { content: response.content, spend };
   };
+
+  // Strict policy has one bounded dispatcher; never repeat its exhausted fallback chain.
+  if (strictFreeRequired()) return answer(await strictFreeText({ prompt, systemPrompt }));
 
   // Tier-1 leader (both tiers) — GLM-flash. Any failure/rate-limit/empty reply falls through silently.
   try {

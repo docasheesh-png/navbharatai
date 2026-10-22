@@ -1,3 +1,4 @@
+import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 // NAVBHARATAI'S OWN IMAGE ENGINE, FOR SOMEBODY ELSE'S CALLER — an app built on NavBharatAI, or a
 // developer holding a NavBharatAI API key (admin 2026-10-04).
 //
@@ -59,6 +60,7 @@ export async function drawWithNavBharat(
   px: ImagePixels,
   opts: { fetchImpl?: typeof fetch; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
 ): Promise<DrawResult> {
+  assertLegacyInferenceAllowed('image-generation');
   const env = opts.env ?? process.env;
   if (!scanPollinationsPrompt(prompt).ok) return { ok: false, reason: 'blocked', detail: 'word ban' };
   const fetchImpl = opts.fetchImpl ?? fetch;

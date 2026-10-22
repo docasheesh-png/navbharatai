@@ -1,3 +1,4 @@
+import { strictFreeRequired } from '../AI/inferencePolicy';
 // AN APP'S AI ON THE OWNER'S OWN KEY — server-side, never in the browser (admin 2026-10-04).
 //
 // Admin, verbatim: "user apni api keys jab chahe use kar sakta hai … navbharatai api browser me na jaye,
@@ -77,6 +78,7 @@ export async function askWithOwnKey(
   prompt: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<OwnKeyAnswer> {
+  if (strictFreeRequired()) return { ok: false, reason: 'refused' }; // An owner key does not establish zero cost.
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), CALL_TIMEOUT_MS);
   try {

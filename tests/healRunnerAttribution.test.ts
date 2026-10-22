@@ -151,17 +151,23 @@ describe('the fast-lane shadow ledger is observational, by construction', () => 
   it('the fast-lane runner now reports its usage somewhere', () => {
     // Before this, four of the seven call sites recorded nothing anywhere at all.
     expect(agentv3).toContain('const shadowFastLaneLedger = createProviderUsageLedger()');
-    expect(agentv3).toContain('onTurnComplete: captureShadowUsage');
+    expect(agentv3).toContain('captureShadowUsage(used, usage, model, !manualUsage)');
+    expect(agentv3).toContain('onTurnComplete: (used, usage, model) => captureShadowUsage(used, usage, model, false)');
   });
 
-  it('it feeds the SHADOW ledger, never the billing one', () => {
-    // Adding these turns to providerLedger would change the bill — which is the decision being
-    // measured, so it must not be a side effect of measuring it.
-    const at = agentv3.indexOf('const captureShadowUsage =');
-    expect(at).toBeGreaterThan(-1);
-    const fn = agentv3.slice(at, at + 260);
-    expect(fn).toContain('shadowFastLaneLedger.add(');
-    expect(fn).not.toContain('providerLedger.add(');
+  it('legacy shadow attribution stays observational; only strict Weak gets proven-free pricing', () => {
+    const parsed = ts.createSourceFile('agentv3.ts', agentv3, ts.ScriptTarget.Latest, true);
+    let fn: string | undefined;
+    const visit = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'captureShadowUsage') fn = node.initializer?.getText(parsed);
+      ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+    expect(fn).toContain('shadowFastLaneLedger.add(used, usage, model)');
+    // Verified-free tokens must not fall into the Sonnet-priced remainder. No legacy tier changes,
+    // and manual callers attribute separately so the callback must not count those turns twice.
+    expect(fn).toContain("if (attribute && powerLevelReqEffective === 'weak' && strictFreeWeakEnabled()) providerLedger.add(used, usage, model)");
+    expect(fn?.match(/providerLedger\.add\(/g)).toHaveLength(1);
   });
 
   it('the diagnostics setter is SEPARATE from the billing one', () => {

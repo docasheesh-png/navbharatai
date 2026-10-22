@@ -1,3 +1,4 @@
+import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 // ONE SEARCH CLIENT, AND THE THREE THINGS THAT KEEP ITS BILL SMALL.
 //
 // ── WHY THIS FILE EXISTS AT ALL (the root cause, not the symptom) ─────────────────────────────────
@@ -293,6 +294,7 @@ async function requestBrave(query: string, count: number, apiKey: string): Promi
  * nothing", and swallowing an outage into it would silently remove the free fallback.
  */
 export async function braveSearch(query: string, count: number, apiKey: string): Promise<BraveResult[]> {
+  assertLegacyInferenceAllowed('paid-web-search');
   const key = cacheKey(query, count);
   const now = Date.now();
   const caching = braveCacheEnabled();

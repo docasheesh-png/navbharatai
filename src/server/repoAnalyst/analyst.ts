@@ -1,3 +1,4 @@
+import { strictFreeRequired } from '../AI/inferencePolicy';
 import { callGemini, callGroq } from '../lib/aiCalls';
 import { parseRepoRef, fetchPublicRepo, type RepoSnapshot } from './githubFetch';
 
@@ -69,6 +70,8 @@ export function buildRepoContext(s: RepoSnapshot): string {
 }
 
 async function resilientCall(systemPrompt: string, prompt: string): Promise<string> {
+  // One centrally bounded free chain; never restart it through the legacy Groq wrapper.
+  if (strictFreeRequired()) return callGemini(prompt, undefined, [], systemPrompt);
   try { const t = await callGemini(prompt, undefined, [], systemPrompt); if (t && t.trim()) return t; } catch { /* fall through */ }
   // No Claude rung (forensic audit 2026-10-04, P1): this surface is free and unbilled, guests included, and
   // any Gemini failure — a deliberate safety block too — used to fall through to Sonnet on our bill. The

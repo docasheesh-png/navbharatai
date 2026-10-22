@@ -1,3 +1,4 @@
+import { isVerifiedFreeProof, type VerifiedFreeProof } from '../AI/LiveRegistry/proof';
 // AgentV3 — REAL provider rate cards + tiered-markup billing (admin model, 2026-07-14).
 //
 // WHY THIS EXISTS: the original billing (pricing.ts) prices EVERY non-Opus build against Sonnet
@@ -321,6 +322,7 @@ export function usageCostUsd(usage: BilledUsage, rate: TokenRate): number {
 
 /** One attributed slice of a build's token spend: which provider/model, and how many tokens. */
 export interface ProviderCostEntry {
+  pricingProof?: VerifiedFreeProof;
   provider: string;
   model?: string;
   usage: BilledUsage;
@@ -334,7 +336,17 @@ export interface ProviderCostEntry {
  */
 export function realProviderCostUsd(entries: ProviderCostEntry[], remainder: BilledUsage = { inputTokens: 0, outputTokens: 0 }): number {
   let total = 0;
-  for (const e of entries) total += usageCostUsd(e.usage, realRateFor(e.provider, e.model));
+  for (const e of entries) {
+    const proof = e.pricingProof;
+    const covered = e.provider === 'OPENROUTER' && isVerifiedFreeProof(proof, e.model)
+      && Number.isSafeInteger(proof.inputTokens) && (proof.inputTokens ?? -1) >= 0
+      && Number.isSafeInteger(proof.outputTokens) && (proof.outputTokens ?? -1) >= 0
+      && Number.isFinite(e.usage.inputTokens) && e.usage.inputTokens >= 0 && e.usage.inputTokens <= (proof.inputTokens ?? -1)
+      && Number.isFinite(e.usage.outputTokens) && e.usage.outputTokens >= 0 && e.usage.outputTokens <= (proof.outputTokens ?? -1);
+    // A suffix, provider label, serialized receipt, or receipt covering fewer tokens is NOT zero pricing.
+    if (!covered) total += usageCostUsd(e.usage, e.provider.toUpperCase() === 'OPENROUTER'
+      ? sonnetRate() : realRateFor(e.provider, e.model));
+  }
   total += usageCostUsd(remainder, sonnetRate()); // conservative: aux calls at Sonnet rate
   return total;
 }

@@ -1,3 +1,4 @@
+import { strictFreeRequired } from '../AI/inferencePolicy';
 // THE KEY THAT MAKES AN APP'S PICTURES (admin 2026-10-04).
 //
 // Admin, verbatim: "1. user ko saaf saaf bolo ki API keys chahiye. 2. user ko navbhatai api keys ka offer
@@ -105,6 +106,7 @@ export async function drawWithOwnImageKey(
   px: ImagePixels,
   opts: { fetchImpl?: typeof fetch; timeoutMs?: number; seed?: number } = {},
 ): Promise<OwnImageResult> {
+  if (strictFreeRequired()) return { ok: false, reason: 'refused' };
   if (own.provider === 'navbharatai') return { ok: false, reason: 'failed' };
   // An image model draws, it does not refuse — the platform's word ban runs before ANY engine.
   if (!scanPollinationsPrompt(prompt).ok) return { ok: false, reason: 'blocked' };

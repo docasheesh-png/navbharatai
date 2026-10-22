@@ -106,10 +106,10 @@ export function billableEntries(
   if (!Array.isArray(entries)) return [];
   return entries.map((e) => {
     if (e.phase && barrenPhases.has(e.phase)) {
-      return { provider: e.provider, ...(e.model ? { model: e.model } : {}), usage: { inputTokens: 0, outputTokens: 0 } };
+      return { provider: e.provider, ...(e.model ? { model: e.model } : {}), ...(e.pricingProof ? { pricingProof: e.pricingProof } : {}), usage: { inputTokens: 0, outputTokens: 0 } };
     }
     const u = e.unbilled;
-    if (!u) return { provider: e.provider, ...(e.model ? { model: e.model } : {}), usage: { ...e.usage } };
+    if (!u) return { provider: e.provider, ...(e.model ? { model: e.model } : {}), ...(e.pricingProof ? { pricingProof: e.pricingProof } : {}), usage: { ...e.usage } };
     const inputTokens = Math.max(0, clean(e.usage.inputTokens) - clean(u.inputTokens));
     const outputTokens = Math.max(0, clean(e.usage.outputTokens) - clean(u.outputTokens));
     const cacheRead = Math.max(0, clean(e.usage.cacheReadInputTokens) - clean(u.cacheReadInputTokens));
@@ -118,6 +118,7 @@ export function billableEntries(
     return {
       provider: e.provider,
       ...(e.model ? { model: e.model } : {}),
+      ...(e.pricingProof ? { pricingProof: e.pricingProof } : {}),
       // The cache shares can never exceed the input they are shares OF — `tokenCostUsd` clamps this
       // too, but a slice that leaves here already coherent cannot be misread by a future caller.
       usage: {

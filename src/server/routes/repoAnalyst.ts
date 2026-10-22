@@ -1,3 +1,4 @@
+import { freeModuleInferenceScope } from '../AI/inferencePolicy';
 import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, enforceNotBanned } from '../lib/authMiddleware';
 import { runRepoAnalystChat, type AnalystTurn } from '../repoAnalyst/analyst';
@@ -15,7 +16,7 @@ import { githubTokenFromRequest } from '../lib/mobileShipAuth';
  *    repos; the feature works fully on public repos without one.
  */
 export function registerRepoAnalystRoutes(app: Express): void {
-  app.post('/api/repo-analyst/chat', buildRateLimiter(), enforceNotBanned(), guestDailyQuota('repo-analyst'), async (req: Request, res: Response) => {
+  app.post('/api/repo-analyst/chat', freeModuleInferenceScope, buildRateLimiter(), enforceNotBanned(), guestDailyQuota('repo-analyst'), async (req: Request, res: Response) => {
     const { message, history } = req.body || {};
     if (typeof message !== 'string' || !message.trim()) {
       res.status(400).json({ error: 'message is required.' });
@@ -38,7 +39,7 @@ export function registerRepoAnalystRoutes(app: Express): void {
   });
 
   // "Improver" — generate concrete improvement files for the referenced repo.
-  app.post('/api/repo-analyst/generate', buildRateLimiter(), enforceNotBanned(), guestDailyQuota('repo-analyst'), async (req: Request, res: Response) => {
+  app.post('/api/repo-analyst/generate', freeModuleInferenceScope, buildRateLimiter(), enforceNotBanned(), guestDailyQuota('repo-analyst'), async (req: Request, res: Response) => {
     const { message, history } = req.body || {};
     // A GitHub token only — never the caller's Firebase session token, which this used to forward to
     // api.github.com (forensic audit 2026-10-04). The shared reader refuses a JWT-shaped value.

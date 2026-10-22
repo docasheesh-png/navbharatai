@@ -1,3 +1,4 @@
+import { freeModuleInferenceScope } from '../AI/inferencePolicy';
 import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, enforceNotBanned } from '../lib/authMiddleware';
 import { validateBody, vobject, vrecord } from '../lib/validate';
@@ -53,7 +54,7 @@ const schema = vobject({
 const reviewModelCall: ModelCall = (system, user) => aiRouter.route(user, [], 'navbharat', undefined, system);
 
 export function registerAppReviewRoutes(app: Express): void {
-  app.post('/api/app-review/review', buildRateLimiter(), enforceNotBanned(), guestDailyQuota('app-review'), validateBody(schema), async (req: Request, res: Response) => {
+  app.post('/api/app-review/review', freeModuleInferenceScope, buildRateLimiter(), enforceNotBanned(), guestDailyQuota('app-review'), validateBody(schema), async (req: Request, res: Response) => {
     const files = filesForReview((req.body as { files?: Record<string, unknown> }).files);
     if (Object.keys(files).length === 0) {
       return res.status(400).json({ error: 'No source files to review. Pick an app that actually contains code.' });

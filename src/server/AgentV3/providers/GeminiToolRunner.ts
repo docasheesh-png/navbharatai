@@ -1,3 +1,4 @@
+import { assertLegacyInferenceAllowed } from '../../AI/inferencePolicy';
 import { assertAiAvailable } from '../../lib/aiMaintenance';
 // AgentV3 — Gemini/Vertex tool-use TurnRunner (multi-provider cost routing, phase 1).
 //
@@ -69,6 +70,7 @@ export class GeminiToolRunner implements TurnRunner {
   ) {}
 
   async runTurn(params: RunTurnParams): Promise<TurnResult> {
+    assertLegacyInferenceAllowed('builder-GeminiToolRunner');
     await assertAiAvailable();
     const { systemInstruction, contents } = transcriptToGemini(params.messages, params.system);
     const tools = toolDefsToGemini(params.tools);

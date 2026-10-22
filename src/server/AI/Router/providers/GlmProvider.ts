@@ -1,3 +1,4 @@
+import { assertLegacyInferenceAllowed } from '../../inferencePolicy';
 import OpenAI from 'openai';
 import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
 import { nextPoolKey, parseKeyPool } from '../../../lib/keyPool';
@@ -61,6 +62,7 @@ export class GlmProvider implements AIProvider {
   }
 
   async execute(prompt: string, _schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[]): Promise<AIProviderResponse> {
+    assertLegacyInferenceAllowed('direct-text-provider');
     // The free GLM-flash model is text-only. Defer any image turn to the next
     // (vision-capable) provider instead of sending images it cannot read.
     if (Array.isArray(images) && images.length > 0) {
@@ -92,6 +94,7 @@ export class GlmProvider implements AIProvider {
   }
 
   async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal): Promise<string> {
+    assertLegacyInferenceAllowed('direct-text-provider');
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
     messages.push({ role: 'user', content: prompt });

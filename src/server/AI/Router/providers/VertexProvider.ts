@@ -1,3 +1,4 @@
+import { assertLegacyInferenceAllowed } from '../../inferencePolicy';
 import 'dotenv/config';
 import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
 import { vertexGenAI, vertexProjectId, vertexLocation } from '../../../lib/vertexGenAI';
@@ -24,6 +25,7 @@ export class VertexProvider implements AIProvider {
     }
 
     async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string): Promise<AIProviderResponse> {
+    assertLegacyInferenceAllowed('direct-text-provider');
         const ai = vertexGenAI();
         if (!ai) {
             throw new Error("Vertex AI not configured");
@@ -84,6 +86,7 @@ export class VertexProvider implements AIProvider {
      * a refund of what Google already generated. See `lib/vertexGenAI.ts`.
      */
     async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, modelName?: string, signal?: AbortSignal): Promise<string> {
+    assertLegacyInferenceAllowed('direct-text-provider');
         const ai = vertexGenAI();
         if (!ai) throw new Error('Vertex AI not configured');
         const request = { model: modelName || this.modelPro, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: {} as Record<string, unknown> };

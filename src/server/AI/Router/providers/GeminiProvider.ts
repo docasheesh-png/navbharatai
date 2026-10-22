@@ -1,3 +1,4 @@
+import { assertLegacyInferenceAllowed } from '../../inferencePolicy';
 import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
 import { GoogleGenAI } from "@google/genai";
 
@@ -6,6 +7,7 @@ export class GeminiProvider implements AIProvider {
   priority = 2;
 
   async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string): Promise<AIProviderResponse> {
+    assertLegacyInferenceAllowed('direct-text-provider');
     console.log(`[GeminiProvider] Entry. Key present: ${!!process.env.GEMINI_API_KEY}, Length: ${process.env.GEMINI_API_KEY?.length}`);
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
     const startTime = Date.now();
@@ -35,6 +37,7 @@ export class GeminiProvider implements AIProvider {
   }
 
   async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal): Promise<string> {
+    assertLegacyInferenceAllowed('direct-text-provider');
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
     const streamModel = model || 'gemini-2.5-flash';
     const config: any = {};

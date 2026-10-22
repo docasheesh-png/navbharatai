@@ -1,3 +1,4 @@
+import { registerLiveModelRegistryRoutes } from './liveModelRegistry';
 import { sendAdminOwnerApps } from './adminOwnerApps';
 import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
 import { registerAiMaintenanceRoutes } from './aiMaintenance';
@@ -420,6 +421,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     next();
   };
 
+  registerLiveModelRegistryRoutes(app, verifyAdminToken);
   registerAiMaintenanceRoutes(app, verifyAdminToken);
   registerFreeProgramRoutes(app, verifyAdminToken);
 

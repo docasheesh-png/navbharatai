@@ -59,3 +59,19 @@ describe('AIRouterManager', () => {
     expect(chain.filter((p) => p.lastResort).map((p) => p.name)).toEqual(['ANTHROPIC']);
   });
 });
+
+it('strict request routers never construct or contaminate a cached paid namespace', async () => {
+  const { runWithInferenceScope } = await import('../src/server/AI/inferencePolicy');
+  const old = process.env.STRICT_FREE_MODULES_ENABLED;
+  try {
+    process.env.STRICT_FREE_MODULES_ENABLED = 'true';
+    const paid = runWithInferenceScope('paid-builder', () => AIRouterManager.getRouter('professional'));
+    const strict = runWithInferenceScope('free-modules', () => AIRouterManager.getRouter('professional'));
+    expect(strict.getProviderChain()).toEqual([]);
+    expect(strict).not.toBe(paid);
+    expect(runWithInferenceScope('paid-builder', () => AIRouterManager.getRouter('professional'))).toBe(paid);
+  } finally {
+    if (old === undefined) delete process.env.STRICT_FREE_MODULES_ENABLED; else process.env.STRICT_FREE_MODULES_ENABLED = old;
+    AIRouterManager.reset();
+  }
+});

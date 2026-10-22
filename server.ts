@@ -892,7 +892,7 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
       // it (instead of hand-rolled setInterval timers). Runs while this instance is alive; a guaranteed
       // cron surviving scale-to-0 needs Cloud Scheduler (honest follow-up).
       import('./src/server/lib/ScheduledJobs')
-        .then(({ scheduler }) => {
+        .then(async ({ scheduler }) => {
           /** Set only when the purge is enabled; fired once the cross-instance claim is in place. */
           let bootRun: (() => void) | null = null;
           // P-DATA.4 — TTL retention purge, OPT-IN (DATA_RETENTION_PURGE_ENABLED) so no automated
@@ -1188,12 +1188,23 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
             .then(({ claimJobRun }) => import('./src/server/lib/serverDb').then(({ getServerDb }) => {
               // Resolved per CALL, not at wiring time: the db may not be set yet at boot, and a null
               // store means the job runs — never that it is silently cancelled.
-              scheduler.setClaim((jobId) => claimJobRun(getServerDb() as any, { jobId }));
+              scheduler.setClaim((jobId) => ['live-model-registry', 'live-image-model-registry'].includes(jobId) ? Promise.resolve(true) : claimJobRun(getServerDb() as any, { jobId }));
             }))
             .catch(() => { /* no claim wired ⇒ every job runs, exactly as before */ })
             // Either way the boot run happens — a claim that could not be wired must delay the purge,
             // never cancel it.
             .finally(() => { bootRun?.(); });
+          // Registry sync uses its own fail-closed, fenced transaction. Scheduler's generic lease is fail-open.
+          try {
+          const liveRegistry = await import('./src/server/AI/LiveRegistry/runtime');
+          if (liveRegistry.registryConfig().enabled) {
+            scheduler.register({ id: 'live-image-model-registry', schedule: { kind: 'everyMs', ms: 3600000 }, exclusive: true, handler: async () => { await liveRegistry.syncLiveImageModels(); } });
+            void liveRegistry.syncLiveImageModels().catch(() => {});
+            scheduler.register({ id: 'live-model-registry', schedule: { kind: 'everyMs', ms: liveRegistry.registryConfig().syncIntervalMs }, exclusive: true,
+              handler: async () => { await liveRegistry.syncLiveModels(); } });
+            void liveRegistry.syncLiveModels().catch(() => { /* audited; stale metadata never enables inference */ });
+          }
+          } catch { console.warn('[LIVE_MODEL_REGISTRY] Scheduler integration unavailable; existing jobs still start.'); }
           scheduler.start();
         })
         .catch(() => { /* best-effort — the scheduler must never affect boot */ });

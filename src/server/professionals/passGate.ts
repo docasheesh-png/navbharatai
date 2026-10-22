@@ -1,3 +1,4 @@
+import { strictFreeRequired } from '../AI/inferencePolicy';
 // Shared Professional gate — the ONE place both the config-driven professional route and the bespoke
 // Doctor AI (SDA) route decide a turn, so "Doctor AI = same as all professionals" (admin 2026-07-15) can
 // never drift between the two. Since 2026-09-23: the first professionalFreeDailyLimit() answers a day
@@ -109,6 +110,7 @@ export async function gateProfessionalTurn(
       isFreeListed: false, hasActivePass: false, billableFraction: 0,
     };
   }
+  if (strictFreeRequired()) return { allow: true, countsAgainstFree: false, uid, tier: 'free', isFreeListed: false, hasActivePass: false, billableFraction: 0 };
   const freeListed = isProfessionalFreeUser(uid, email);
   const endedTurn = await freeTrialEndedRefusal(uid, freeListed);
   if (endedTurn) return endedTurn;
@@ -206,6 +208,7 @@ export async function gateProfessionalExam(uid: string | null, email: GrantEmail
     if (!anon.allow) return anon;
     return { allow: true, uid: null, tier: anon.tier, isFreeListed: false, hasActivePass: false, freeQuestions: 0 };
   }
+  if (strictFreeRequired()) return { allow: true, uid, tier: 'free', isFreeListed: false, hasActivePass: false, freeQuestions: Math.max(0, Math.floor(requested)) };
   const freeListed = isProfessionalFreeUser(uid, email);
   const endedExam = await freeTrialEndedRefusal(uid, freeListed);
   if (endedExam) return endedExam;

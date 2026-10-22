@@ -227,7 +227,7 @@ export function describeJudgeVerdict(v: JudgeVerdict): {
  * engine added here fails `npm run typecheck:server` on `judgeEngineLabel`'s `never` default, at the
  * one place somebody has to think about what to call it.
  */
-export type JudgeKind = 'grok' | 'sonnet' | 'opus' | 'glm' | 'nemotron';
+export type JudgeKind = 'openrouter' | 'grok' | 'sonnet' | 'opus' | 'glm' | 'nemotron';
 
 /**
  * The ADMIN-ONLY name of the engine that judged this build. Exhaustive by construction.
@@ -253,6 +253,7 @@ export type JudgeKind = 'grok' | 'sonnet' | 'opus' | 'glm' | 'nemotron';
  */
 export function judgeEngineLabel(kind: JudgeKind): string {
   switch (kind) {
+    case 'openrouter': return 'Verified free registry';
     case 'grok': return 'Grok';
     case 'glm': return 'GLM';
     case 'opus': return 'Opus';

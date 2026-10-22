@@ -1,6 +1,7 @@
+import type { VerifiedFreeProof } from '../AI/LiveRegistry/proof';
 /** Weak-tier preflight: one bounded classification, before sandbox work. No fallback chain. */
 export type WeakScope = 'simple' | 'complex' | 'strong';
-export interface AdmissionUsage { inputTokens: number; outputTokens: number; }
+export interface AdmissionUsage { pricingProof?: VerifiedFreeProof; inputTokens: number; outputTokens: number; }
 export interface WeakAdmission {
   scope: WeakScope | null;
   source: 'template' | 'model' | 'unavailable';

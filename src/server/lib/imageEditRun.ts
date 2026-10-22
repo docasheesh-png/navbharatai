@@ -1,3 +1,4 @@
+import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 // Running ONE edit of a picture the user supplied — the single implementation, for every surface.
 //
 // 🔴 WHY IT IS ITS OWN MODULE. Two surfaces do this now: the image generator's route and FREE CHAT,
@@ -71,6 +72,7 @@ export async function runImageEdit(
   words: string,
   opts: { timeoutMs?: number } = {},
 ): Promise<ImageEditOutcome> {
+  assertLegacyInferenceAllowed('image-edit');
   const said = String(words || '').trim();
   // The word scan runs FIRST, so a banned request is always answered as banned — never as
   // "unavailable" or "bad picture", which would invite trying again.

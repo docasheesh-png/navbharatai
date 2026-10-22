@@ -3144,7 +3144,7 @@ Backend: GET /api/admin/monitor (one composed call) over the 5-minute time-serie
     name: 'Admin panel navigation (where the tabs are)',
     path: 'Admin Dashboard \u2014 on a phone the tabs are the BOTTOM bar; on a computer they are the row under the title',
     description: `Where the admin console's nine pages live, which is different on a phone and on a computer (admin 2026-09-20).
-\u2022 THE NINE TABS (admin panel audit PR 2, 2026-10-04): Home, Users (All users | Complaints), Apps (All apps | Publishing | Review | Bots), Builds (Reports | Phone builds | Engine health), AI Engines, Money, Safety, Messages, Settings. A tab with several pages shows a second row of page buttons under the tabs, on a phone and on a computer.
+\u2022 THE NINE TABS (admin panel audit PR 2, 2026-10-04): Home, Users (All users | Complaints), Apps (All apps | Publishing | Review | Bots), Builds (Reports | Phone builds | Engine health), AI Engines (AI Engines | Live Model Registry), Money, Safety, Messages, Settings. A tab with several pages shows a second row of page buttons under the tabs, on a phone and on a computer.
 \u2022 ON A PHONE \u2014 the nine tabs are the BOTTOM bar. Nine do not fit a phone's width, so the bar SWIPES left and right, and the page you are on scrolls itself back into view whenever you switch. The app's ordinary bottom bar (Home / AI / Preview / Studio / More) is replaced while the admin panel is open and comes straight back when you leave it or log out.
 \u2022 WHY \u2014 the bottom row is the one a thumb can always reach, and inside the admin console the pages of the console are what you want there, not five buttons that lead out of it.
 \u2022 EACH PAGE CARRIES ITS OWN COUNTER when there is a real number behind it (for example active users over total, or unread reports), and a page whose number could not be measured shows NO counter rather than a zero \u2014 a 0 would read as "I looked, there is nothing", which is a different claim.
@@ -3153,6 +3153,15 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Money") stil
     howToUse: 'Admin login required. On a phone: open the Admin Dashboard and use the bottom bar \u2014 swipe it sideways to reach Money, Builds, Safety and the rest, then use the page row under the tabs. On a computer: use the tab row under the NAVBHARATAI ADMIN title.',
     relatedFeatures: [],
     keywords: ['admin tabs', 'admin navigation', 'admin footer', 'admin panel footer', 'bottom bar', 'admin bottom bar', 'swipe tabs', 'monitor users revenue tab', 'admin panel me tab kaha hai', 'footer', 'tab kaise badle', 'admin menu'],
+  },
+  {
+    id: 'admin-live-model-registry',
+    name: 'Live Model Registry (admin only)',
+    path: 'Admin Dashboard → AI Engines → Live Model Registry',
+    description: 'An administrator-only view of the server-synchronized model catalog, current eligibility, decimal prices, metadata age, capabilities, account verification, cooldown and measured health. Unknown and stale prices are not free. Refresh status reads the saved view; Sync catalog now asks the server to refresh metadata, never to run an inference test. The page explicitly shows when synchronization, the Free + professional modules flag, or the separate Pro Weak Builder flag is not enabled. Disable model blocks new registry-routed requests, not legacy paths or in-flight work. Re-enable removes only that manual block. Record terms review requires the administrator to confirm an actual intended-use review with an audit reason and does not accept an external agreement, override pricing or establish account access. Full-platform zero-cost enforcement, unlimited quota and zero hosting/tool costs must not be inferred from a free catalog entry. Pro Normal and Strong are not changed by these flags. This screen does not activate a credit allowance or change Cloud Run flags.',
+    howToUse: 'Sign in as admin, open AI Engines → Live Model Registry, then filter by provider, eligibility, capabilities, context and measured health. Expand a model for source price fields and verification details. Review the displayed limitations and stale status before taking a control action. If a read or action fails, refresh to reconcile the real state rather than assuming nothing happened.',
+    relatedFeatures: ['admin-tab-navigation'],
+    keywords: ['live model registry', 'free models', 'model sync', 'model prices', 'verified free', 'strict free', 'catalog age'],
   },
   {
     id: 'admin-bot-ledger',

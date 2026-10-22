@@ -1,3 +1,4 @@
+import { assertLegacyInferenceAllowed } from '../../inferencePolicy';
 import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -34,6 +35,7 @@ export class AnthropicProvider implements AIProvider {
   }
 
   async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[]): Promise<AIProviderResponse> {
+    assertLegacyInferenceAllowed('direct-text-provider');
     const startTime = Date.now();
     const model = modelOverride || this.modelId;
 
@@ -85,6 +87,7 @@ export class AnthropicProvider implements AIProvider {
   }
 
   async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal): Promise<string> {
+    assertLegacyInferenceAllowed('direct-text-provider');
     const params: any = {
       model: model || this.modelId,
       max_tokens: this.enableThinking ? this.thinkingBudget + 16_000 : 8_000,

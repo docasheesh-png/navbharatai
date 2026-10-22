@@ -1,3 +1,4 @@
+import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 // Server-side vision description — turns an uploaded image or PDF into TEXT that
 // any downstream text model (or the v5.0 build loop) can use, WITHOUT making the
 // expensive model read it. Used by Pro v5.0 so file reading stays cheap: the
@@ -149,7 +150,7 @@ export function resolveVisionInstruction(
 /**
  * Describe all image/PDF attachments as text. The provider order comes from
  * visionProviderChain() (see its doc for the per-tier rules). Never throws;
- * returns '' when nothing could be described.
+ * returns '' when nothing could be described. Strict-free rejects nonempty vision before dispatch.
  */
 export async function describeVisionAttachments(
   atts: RawAttachment[],
@@ -157,6 +158,7 @@ export async function describeVisionAttachments(
 ): Promise<string> {
   const vision = (atts || []).filter((a) => a && a.base64 && isVisionAttachment(a.type, a.name));
   if (vision.length === 0) return '';
+  assertLegacyInferenceAllowed('vision-description');
 
   // The rung order comes from visionProviderChain (pure, tested): a weak/free (noClaude) build never
   // even lists the Claude rung. Belt & braces: the noClaudeZone check inside describeWithClaude is the

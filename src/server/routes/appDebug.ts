@@ -1,3 +1,4 @@
+import { freeModuleInferenceScope } from '../AI/inferencePolicy';
 import type { Express, Request, Response } from 'express';
 import { onClientGone } from '../lib/clientDisconnect';
 import { inAiSpendZone } from '../lib/aiSpendZone';
@@ -92,7 +93,7 @@ export function registerAppDebugRoutes(app: Express): void {
   });
 
   // ── Run a whole-app scan (NDJSON stream) ────────────────────────────────────────────────────────
-  app.post('/api/app-debug/run', workspaceRateLimiter(), guestDailyQuota('app-debug'), inAiSpendZone(async (req: Request, res: Response) => {
+  app.post('/api/app-debug/run', freeModuleInferenceScope, workspaceRateLimiter(), guestDailyQuota('app-debug'), inAiSpendZone(async (req: Request, res: Response) => {
     // Daily allowance / Professional Pass (flag-off = no-op). Checked BEFORE anything is loaded or
     // streamed, so a blocked caller gets a clean JSON paywall rather than a half-open stream.
     const identity = await verifyFirebaseIdentity(req);
@@ -236,7 +237,7 @@ export function registerAppDebugRoutes(app: Express): void {
   }));
 
   // ── Deep-dive: investigate ONE finding → root cause + full fix (interactive) ────────────────────
-  app.post('/api/app-debug/investigate', workspaceRateLimiter(), guestDailyQuota('app-debug'), inAiSpendZone(async (req: Request, res: Response) => {
+  app.post('/api/app-debug/investigate', freeModuleInferenceScope, workspaceRateLimiter(), guestDailyQuota('app-debug'), inAiSpendZone(async (req: Request, res: Response) => {
     const investigateIdentity = await verifyFirebaseIdentity(req);
     const investigateGate = await gateToolAction(investigateIdentity?.uid || null, identityGrantEmail(investigateIdentity), 'ai_tool', 'app-debug');
     if (!investigateGate.allow) {

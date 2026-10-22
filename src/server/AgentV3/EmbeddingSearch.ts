@@ -1,3 +1,4 @@
+import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 // AgentV3 — Semantic embedding-based file search (Level 3).
 //
 // Vector-similarity search over the project's source files: when the agent looks
@@ -135,6 +136,8 @@ export class EmbeddingStore {
    * Never throws.
    */
   async embed(text: string): Promise<number[] | null> {
+    // Optional retrieval enhancement must never buy an embedding in strict-free builds.
+    try { assertLegacyInferenceAllowed('builder-file-embeddings'); } catch { return null; }
     const client = await this.getClient();
     if (!client) return null;
     try {

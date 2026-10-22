@@ -1,3 +1,4 @@
+import { freeModuleInferenceScope } from '../AI/inferencePolicy';
 import type { Express, Request, Response } from 'express';
 import { callGemini } from '../lib/aiCalls';
 import { getSecurityContext } from '../lib/prompts';
@@ -54,7 +55,7 @@ export function filesForAiReview(fileMap: Record<string, unknown>): { files: Rec
 export function registerAuditRoutes(app: Express): void {
   // A per-account (per-address for a guest) hourly bound — the route had none for a signed-in caller.
   const scanLimiter = rateLimiter({ name: 'security-scan', authed: 30, anon: 10, noun: 'scans' });
-  app.post('/api/security/scan', scanLimiter, guestDailyQuota('security-scan'), async (req: Request, res: Response) => {
+  app.post('/api/security/scan', freeModuleInferenceScope, scanLimiter, guestDailyQuota('security-scan'), async (req: Request, res: Response) => {
     const { target, files } = req.body ?? {};
     const geminiKey = req.headers['x-gemini-key'] as string | undefined;
 

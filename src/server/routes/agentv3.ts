@@ -1,3 +1,4 @@
+import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction } from '../AgentV3/weakBuildPreflight';
 import { toSafeClientMessage } from '../lib/httpError';
@@ -9930,7 +9931,7 @@ async function noteBuildOutcome(
     }
   });
 
-  app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), withBuildRequestCleanup(async (req: Request, res: Response, registerCleanup) => {
+  app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), enforceFreeProgramPause(), withBuildRequestCleanup(async (req: Request, res: Response, registerCleanup) => {
     // ⏱️ THE USER'S WAIT STARTS HERE — the first statement, before every await of the preamble (autopsy 303e8a6f,
     // adversarial review): the build's event stream used to take its own construction time as the origin, up to
     // ~30 s of checks later, so "Still working — Ns so far" still undercounted. Every user-visible clock reads this.
@@ -12970,12 +12971,6 @@ async function noteBuildOutcome(
             awaitingShell: awaitsShellNow(),
           });
           watchdogBilledUsd = wdMarkup.billedUsd;
-          if (!wdMarkup.markupApplied) {
-            buildDiagRef?.record({
-              phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW',
-              message: wdMarkup.reason, autoResolved: true,
-            });
-          }
           // 🔴 A USER STOP IS BILLED BY THE STOP RULES ON THIS PATH TOO (pre-deploy review round 4). This
           // finalizer used to bill every `ok` build in full. A typed "stop" or a Stop pressed on another
           // instance aborts the build without ending its stream, so this cap could settle that build first
@@ -13078,6 +13073,13 @@ async function noteBuildOutcome(
             powerLevel: powerLevelReqEffective,
             noClaude: noClaudeBuild,
           });
+          // As at the normal settle, explain the waiver only after Stop/discount rules settled the bill.
+          if (!wdMarkup.markupApplied) {
+            buildDiagRef?.record({
+              phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW',
+              message: markupWaiverSettledLine(wdMarkup.reason, watchdogBilledUsd), autoResolved: true,
+            });
+          }
           // Same explanation as the normal settle records — the watchdog path bills through the SAME
           // `decideBuildBilledUsd`, so it must say the same thing about the same number. CLAUDE.md's
           // Fix 67 is what this finalizer drifting from the settle once already cost.

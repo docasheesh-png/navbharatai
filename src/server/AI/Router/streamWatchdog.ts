@@ -31,6 +31,16 @@
 
 /** Nothing has arrived yet: how long to wait for the FIRST token before the rung counts as failed. */
 export const DEFAULT_FIRST_TOKEN_MS = 30_000;
+/**
+ * FREE CHAT waits less for a first word (admin 2026-10-22: "free chat ko super fast kar do").
+ *
+ * The free universe walks its ladder one rung at a time, so a rung that accepts the request and never speaks costs the
+ * user the WHOLE wait before the next rung even starts — 30 s of an empty chat. The free rungs are small fast models whose
+ * first token normally arrives in about a second or two, so ten seconds already means "this rung is not answering", and the
+ * next rung (a different provider) can have the answer in seconds. A healthy slow rung is not harmed twice: a rung that
+ * times out is benched, so the next turn does not wait on it again. `CHAT_STREAM_FIRST_TOKEN_MS` still overrides this.
+ */
+export const DEFAULT_FREE_FIRST_TOKEN_MS = 10_000;
 /** Text is already flowing: how long a total silence may last before the turn is closed. */
 export const DEFAULT_IDLE_MS = 30_000;
 /** Absolute ceiling on one rung, however steadily it dribbles. */
@@ -61,10 +71,10 @@ function ms(raw: string | undefined, fallback: number, floor: number): number {
 }
 
 /** The configured limits. `CHAT_STREAM_WATCHDOG=off` restores the pre-2026-09-17 behaviour exactly. */
-export function watchdogLimits(env: NodeJS.ProcessEnv = process.env): WatchdogLimits | null {
+export function watchdogLimits(env: NodeJS.ProcessEnv = process.env, universe?: string): WatchdogLimits | null {
   if (String(env.CHAT_STREAM_WATCHDOG ?? '').trim().toLowerCase() === 'off') return null;
   return {
-    firstTokenMs: ms(env.CHAT_STREAM_FIRST_TOKEN_MS, DEFAULT_FIRST_TOKEN_MS, MIN_FIRST_TOKEN_MS),
+    firstTokenMs: ms(env.CHAT_STREAM_FIRST_TOKEN_MS, universe === 'free' ? DEFAULT_FREE_FIRST_TOKEN_MS : DEFAULT_FIRST_TOKEN_MS, MIN_FIRST_TOKEN_MS),
     idleMs: ms(env.CHAT_STREAM_IDLE_MS, DEFAULT_IDLE_MS, MIN_IDLE_MS),
     hardCapMs: ms(env.CHAT_STREAM_HARD_CAP_MS, DEFAULT_HARD_CAP_MS, MIN_HARD_CAP_MS),
   };

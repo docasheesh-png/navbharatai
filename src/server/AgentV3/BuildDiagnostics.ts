@@ -880,8 +880,8 @@ export interface BuildDiagnosticsReport {
   /** The post-build quality reviewer's FULL findings (every small problem it listed) — not the
    *  400-char timeline snippet. This is what makes the report's "all problems" list complete. */
   review?: string;
-  /** ONLY the timeline entries that are a real problem (severity warning/error) — every "▶ write_file"
-   *  / heartbeat / progress-narration info line excluded. This is the noise-free "problems only" view;
+  /** ONLY warning/error findings, excluding narration even when its raw severity is warning/error.
+   *  Tool calls, heartbeats and progress narration stay outside this "problems only" view;
    *  `issues` (above) remains the full raw timeline for anyone who wants it. Always present (may be
    *  empty on a clean build). */
   problems: BuildIssue[];
@@ -1009,6 +1009,20 @@ function capHead(s: string | undefined, cap: number): string {
  */
 export function capProblems(problems: readonly BuildIssue[]): BuildIssue[] {
   return problems.length <= MAX_PROBLEMS ? [...problems] : problems.slice(problems.length - MAX_PROBLEMS);
+}
+
+/**
+ * A repeated sentence is not a measured finding, even when the narration classifier gave it a loud
+ * severity. Use the same distinction as the recorder's tallies, without changing the raw timeline.
+ * Resolved findings, provider struggles and observations remain report problems: none is narration.
+ */
+export function isReportProblem(issue: Pick<BuildIssue, 'severity' | 'code'>): boolean {
+  return issue.severity !== 'info' && !isNarrationEntry(issue);
+}
+
+/** One projection for live, stored and rendered reports. Filter BEFORE the cap so notes spend no slots. */
+export function reportProblems(issues: readonly BuildIssue[]): BuildIssue[] {
+  return capProblems(issues.filter(isReportProblem));
 }
 
 export class BuildDiagnostics {
@@ -2990,7 +3004,7 @@ export class BuildDiagnostics {
       issues: this.todoOnlyTally
         ? [...this.issues, { ts: this.endedAt ?? this.now(), ...todoOnlyTurnsLine(this.todoOnlyTally) }]
         : [...this.issues],
-      problems: capProblems(this.issues.filter((i) => i.severity !== 'info')),
+      problems: reportProblems(this.issues),
       rootCause: deriveRootCause({
         issues: this.issues, errors: this.errors, review: this.reviewText, ok: this.ok, commands: this.commands,
         endedAt: this.endedAt,
@@ -4252,8 +4266,8 @@ export function deriveRootCause(input: {
     // 🔴 "NO PROBLEMS RECORDED" BESIDE FOUR RECORDED PROBLEMS (autopsy db07e0af). Every one of them was resolved
     // or advisory, so none was a CANDIDATE — the same "not a candidate ≠ does not exist" conflation the note
     // above was written for, in the last sentence still making it. The report's own `problems` list is what
-    // the reader sees beside this line, so it is counted from the same rule (every non-info finding).
-    const listed = issues.filter((i) => i.severity !== 'info');
+    // the reader sees beside this line, so it uses the same eligibility rule: narration is not a finding.
+    const listed = issues.filter(isReportProblem);
     if (listed.length === 0) return 'Build completed successfully with no problems recorded.';
     const named = (items: readonly BuildIssue[]) => {
       const codes = [...new Set(items.map((i) => i.code))];
@@ -4448,12 +4462,15 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
     lines.push(`  ${r.rootCause}`);
     lines.push('');
   }
-  const problems = r.problems ?? r.issues.filter((i) => i.severity !== 'info');
-  const infoCount = r.issues.length - problems.length;
+  // Respect the supplied projection (it may have its own retained window); only fall back when absent.
+  const problems = reportProblems(r.problems ?? r.issues);
+  const infoCount = r.issues.filter((i) => i.severity === 'info').length;
+  // Valid report projections are subsets of their retained timeline; clamp inconsistent legacy shapes.
+  const otherOmittedCount = Math.max(0, r.issues.length - problems.length - infoCount);
   if (problems.length === 0) {
-    lines.push('No problems recorded — the build ran clean. 🎉');
+    lines.push('No problems recorded in this view. This does not establish whether the build succeeded.');
   } else {
-    lines.push(`Problems (${problems.length}, in order — the noise-free view: warnings + errors only):`);
+    lines.push(`Problems (${problems.length}, in order — warning/error findings, excluding narration):`);
     problems.forEach((i, n) => {
       const rep = i.repeatCount && i.repeatCount > 1 ? ` ×${i.repeatCount}` : '';
       lines.push(`${n + 1}. [${i.severity.toUpperCase()}] (${i.phase}/${i.code})${rep} ${i.autoResolved ? 'auto-resolved' : 'UNRESOLVED'}`);
@@ -4465,6 +4482,11 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
     lines.push('');
     lines.push(`(+${infoCount} informational timeline entries — progress narration, tool calls, heartbeats —`);
     lines.push(`  omitted from this view. See the "issues" array in the downloaded JSON for the full timeline.)`);
+  }
+  if (otherOmittedCount > 0) {
+    lines.push('');
+    lines.push(`(+${otherOmittedCount} other timeline entries — narration or findings outside this bounded view —`);
+    lines.push('  omitted from this view. See the "issues" array in the downloaded JSON for the retained timeline.)');
   }
   // ── AI Diagnosis Bundle — full raw signals (the detail the timeline summarizes). ──
   if (r.errors?.length) {

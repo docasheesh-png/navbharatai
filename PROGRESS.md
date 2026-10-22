@@ -99199,6 +99199,10 @@ the same fix the row already prescribed before the second occurrence arrived.
 ### Proof, by reversion
 Fourteen bugs were put back one at a time and each made a test fail: the Terms promising the refund window again, the refund policy returning money to the card, the contact page approving refunds, the Terms losing the investigate-then-credit remedy; a sign-in handler without the gate, a social button without the disabled gate, a second checkbox, a remembered tick, the marker cleared on a refusal, the server accepting a missing age confirmation, a version label that accepts anything; a quota changed without the notice, rows starting to be deleted, the exception paragraph removed.
 
+## 2026-10-21 — Admin: report numbers (oldest = 1) and a user's built apps on their profile
+- Report numbering was built in parallel by #3890 (server-side numbers); this change dropped its own copy and kept only the profile apps list.
+- **Apps on a user's profile.** The account sheet gains "Apps built by this user" (`UserBuiltApps.tsx`): the Apps page's owner-mode list (never-published apps included), 12 at a time, each with an Open button. The preview moved verbatim out of `BuiltAppsPanel` into `AppPreviewSheet.tsx` (`useAppPreview`) so both places share ONE sandboxed preview; the opaque-srcDoc census now reads that file. A failed read is shown as a failure, never as "no apps".
+- Tests: `reportNumbering.test.ts` (reverted-and-failed), `UserBuiltApps.render.test.tsx`, census updated.
 
 ## 2026-10-21 — PR #3882 pre-merge safety review and current-main integration
 
@@ -99392,3 +99396,61 @@ with its fix proposed and its breakage risk named.
 ## 2026-10-21 — newest failed reports (a75153ab, c48bba70, d693ecdc)
 
 Full connector list read to exhaustion; 3 reports newer than the previous cut. Two were user stops within 8–14 s (clean). a75153ab: stop billed as "app not running" although the app rendered at 261 s of 380 s. Root cause and class in BUILD_REPORT_QUEUE.md Q-2253; fix `earliestRenderProof()` in `cancelledBuildBilling.ts`, wired at the in-build green producer and both billing points; test `aRenderSeenInBuildCountsForTheStopBill.test.ts` (reversion-proven).
+## 2026-10-21 — PR #3894 review: an unreadable owner-app list is not an empty account
+
+- Root/class: the legacy `listUserWorkspaceApps` best-effort `[]` fallback erased store failure evidence before the admin route could report it. The new profile would consequently claim the user had never built an app during a datastore outage. Added a shared explicit-result reader; the three non-admin callers retain their previous best-effort wrapper. The authenticated admin owner branch now sends a generic 502 on read/enrichment failure, not successful empty rows. No auth, tenant, preview, provider or billing policy changed.
+- Completeness: the existing query still reads at most 200 raw workspace records. A result at the cap is conservatively marked `scanLimited`, including when all records are snapshots/empty. Both admin consumers show that more apps may exist; a successful empty read says only that no saved apps were found. Moderation action callbacks and eligibility retain their previous behavior; displayed counts no longer imply completeness at the scan cap.
+- Proof: mocked store → actual owner-response handler tests cover missing DB, rejected query, successful empty read, prefix/bound, filtered records, enrichment rejection and pagination. Rendered component-state tests cover HTTP/network/malformed/wrong-mode failures and bounded empty lists on both consumers. Reinstating swallowed failures makes three regression cases fail (including HTTP 200 instead of 502); restored targeted suite: 163/163 passed. Existing preview census now follows the shared AppPreviewSheet extraction and checks caller wiring rather than the old file location.
+- Validation boundary: tests use a credential-free environment and a hard network guard; targeted runs kept the guard log unchanged. Full final-state gates and independent review remain publication prerequisites. No live datastore/provider call or paid build was used to prove this change.
+## 2026-10-21 — the retained failed-build reports became readable, and what mining them actually yields
+
+Report tooling (`list_failed_builds` / `get_failed_build` / `get_failed_build_autopsy`) became available to this
+session. **That lifts the blocker this session had reported on the Q-1300+ rows**, whose recorded next action
+needed the historical build's own report — previously unrecoverable from here.
+
+### The honest yield: three leads chased, three already fixed
+
+| lead, from a retained report | verdict |
+|---|---|
+| `"Can you generate images?"` → a 29-minute, 16-file image app, `ok:false`, 12 unresolved (`5abad374`, 2026-09-12) | **already fixed.** `buildConfirmation.ts` landed 2026-10-05 and refuses all three real prompts (`{confirmed:false, reason:'question'}`), and `tests/capabilityQuestion.test.ts` pins the exact prompt — its header cites autopsy `5abad374`, the same build id |
+| `rootCause` claiming *"NO unresolved problem was recorded"* against its own `counts.unresolved: 1` (`52c214ac`) | **already fixed** by #3538 (2026-10-05); today's `deriveRootCause`, fed the real problems, names the item instead |
+| `summary` *"Stopped, as you asked."* on a build the user never stopped (same report) | **already fixed** by autopsy b89ba6f8 (2026-09-17), whose comment in `agentv3.ts:19419` quotes that exact three-way disagreement |
+
+**The reason is dates, and it is the method lesson:** of 15 reports sampled, **10 are September**, 4 October, 1
+August — and the engine was heavily autopsied in late September and October. The listing is in workspace/history
+order, **not** date order (the tool says so), so a naive cursor walk reads the oldest and least useful reports
+first. **Mine the newest.** Recorded here because the next session will otherwise spend the same hour proving the
+same three fixes exist.
+
+### What survived verification: Q-2254
+
+A build cut off by its **own** time budget has no name in the abort taxonomy. `buildAbortCause.ts`'s `AbortCause`
+union has 13 members and none is the build's own budget — `review-budget`, `recheck-budget` and `repair-budget`
+are each annotated *"a pass's signal, never the build's"* — while `BUDGET_REACHED_MESSAGE` is imported into that
+same module. So `52c214ac`'s three honest `info` entries (`LLM_CALL_BUDGET_ENDED`, `SIMPLE_BUILD_FALLBACK`,
+`ONESHOT_SKIPPED`) cannot reach the verdict, because `deriveRootCause` only weighs non-`info` unresolved items —
+and the admin is told "why it failed is not known from this report".
+
+**Verified on current code, not inferred:** today's `deriveRootCause` fed those real problems still says the
+cause is unknown; the union genuinely lacks the member. **Not established, and the row says so:** whether another
+current path records a terminal cause for this shape. In that report `abortBuild` was never called — the fast
+lane was cut off, handed to the full builder, and the build ended — so the 2026-09-17 back-fill through
+`abortBuild` does not cover it. The next step is a trace, not a reproduction: a 2026-09-14 build cannot be re-run
+on today's code.
+
+**No autopsy metadata was written.** That tool requires explicit write consent, which this session does not have.
+
+## 2026-10-22 — Free Chat: wake the server while the person types, and stop waiting 30 s on a silent free rung
+- **Measured first, not assumed:** the app-context lookup each chat message pays is ~1–2 ms (not the problem). What a person feels is (1) a cold server — `--min-instances 0` keeps idle cost at zero but the first request after a quiet period meets a cold start — and (2) a free rung that accepts the request and never speaks: the free ladder is sequential, so that rung cost the full 30 s first-token wait before the next rung even started.
+- **Fix 1 — warm on open:** `src/lib/warmBackend.ts` calls `GET /api/warm` when the app opens and when the person returns to the tab (at most once per 4 min; fire-and-forget; never shows an error). `/api/warm` makes no model call. It now also pre-reads the maintenance setting every AI call checks and pre-loads the chat handler's lazily imported modules. Reaches the website at once and phone apps only through a new bundle; the existing Cloud Scheduler keep-warm (docs/SCALABILITY.md) helps every version.
+- **Fix 2 — 10 s, not 30 s, for a free rung's first word:** `DEFAULT_FREE_FIRST_TOKEN_MS` (the free universe only; `CHAT_STREAM_FIRST_TOKEN_MS` still overrides; other ladders keep 30 s).
+- **Not done, needs a decision:** `--min-instances 1` removes the cold start for good but bills an always-on instance (a real monthly cost) — admin's call.
+- Tests: `tests/freeChatIsWarmAndFast.test.ts`.
+## 2026-10-22 — Free program PAUSE (admin: "pro ka free token system band karo — paise nahi hai; free chat chalne do")
+- **One admin switch**: Admin → Home → *Free program* card (`platform_settings/free_program`, `lib/freeProgram.ts`). **Default and fail-safe = PAUSED** (absent, unreadable or unknown all read as paused), so it is in force the moment this deploys.
+- **While paused:** no referral/reward grants (`rewardsLive()` in `routes/referral.ts`); marketing coupons + admin promo codes refused (a PURCHASED gift code still redeems); a never-paid account cannot start a Pro build (402 `free_trial_ended`, before headers), make a picture, use the free tools, or use Professionals/Doctor AI; **the old gift balance is hidden, never deleted** — a never-paid wallet is returned as 0 with `freeTrialEnded` (balance, statement, transactions masked at the wallet routes), and the wallet shows "Free trial ended"; the browser hides the reward/referral surfaces (public flag `freeProgramPaused`, default true) and the one-time referral box at sign-in is neither shown nor marked offered; every AI is told the plain fact and the referral entry is dropped from the knowledge base and /guide. Free Chat is untouched. Paying accounts are untouched.
+- **To resume** (when money allows): press *Resume free program* — the gifted tokens come back exactly as stored.
+- Admin rulings used: old tokens "hide kar do… free trial ended… baad me wapas"; daily limits (images/tools/professionals) paused too.
+- Tests: `tests/freeProgram.test.ts` (reverted-and-failed for Professionals, tools/images, picture), `tests/freeProgramContext.test.ts`. Open: Q-2260 (doors not yet confirmed closed).
+- **2026-10-22, later — PAY AND USE ONLY (admin: "free token wapas nahi aane chahiye").** The first cut hid the gift only for an account that had NEVER paid, so a ₹10 top-up would have unmasked up to ₹400 of gift (the debit eats gift first). While paused the gift is now unspendable for EVERYONE: `readWalletBalanceInr` subtracts it (every gate), `giftAfterSpend(..., paidFirst)` makes every charge come out of the user's own money first (`walletDebit`), a hold needs their own money, and a paying account is shown only its own balance (statement stays whole). Resume restores everything. Known bounded edge: the TAIL of a build already running when its paid money ran out can still dip into the gift (the pre-start gate uses paid money only). Spenders outside `walletDebit` (hosting daily bill, plan purchases already `paid-only`) are listed in Q-2260. Tests: `tests/payAndUseOnlyWhilePaused.test.ts` (7 of 12 fail when the logic is put back).
+

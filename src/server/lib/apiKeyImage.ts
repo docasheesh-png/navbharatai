@@ -84,6 +84,9 @@ export async function imageForApiKey(
         message: `Today's ${reserved.freePerDay} free pictures are used, and the NavBharatAI wallet needs at least ₹${reserved.priceInr} for the next one. Add balance in the NavBharatAI app.`,
       };
     }
+    if (reserved.reason === 'free_trial_ended') {
+      return { ok: false, status: 402, code: 'insufficient_balance', message: 'Your free trial has ended. Add balance in the NavBharatAI app to make pictures.' };
+    }
     return {
       // The existing "try again" code: a developer's client already retries on it, and the words say what happened.
       ok: false, status: 503, code: 'engine_unavailable',

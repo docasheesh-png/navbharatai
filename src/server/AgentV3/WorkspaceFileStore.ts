@@ -697,11 +697,25 @@ export interface UserWorkspaceApp {
  * absent / no Firestore. Never throws — a listing failure must never break the tool.
  */
 export async function listUserWorkspaceApps(uid: string, limit = 50): Promise<UserWorkspaceApp[]> {
-  const db = getDb();
-  if (!db || !uid || !/^[A-Za-z0-9_-]{1,64}$/.test(uid)) return [];
+  const result = await listUserWorkspaceAppsResult(uid, limit);
+  return result.ok ? result.apps : [];
+}
+
+export type UserWorkspaceAppsResult =
+  | { ok: true; apps: UserWorkspaceApp[]; scanLimited: boolean }
+  | { ok: false; apps: []; scanLimited: false };
+
+/** Admin reads must distinguish an unavailable store from an empty list. The legacy wrapper above
+ * retains its best-effort contract. At the raw-document cap, completeness is unknown: snapshots and
+ * empty workspaces count toward that cap too. No extra query is made to guess whether more exist. */
+export async function listUserWorkspaceAppsResult(
+  uid: string, limit = 50, db = getDb(),
+): Promise<UserWorkspaceAppsResult> {
+  if (!db || !uid || !/^[A-Za-z0-9_-]{1,64}$/.test(uid)) return { ok: false, apps: [], scanLimited: false };
+  const scanLimit = Math.max(1, Math.min(limit, 200));
   try {
     const prefix = workspacePrefixFor(uid);
-    if (!prefix) return [];
+    if (!prefix) return { ok: false, apps: [], scanLimited: false };
     // U+F8FF is a very high code point, so [prefix, prefix+U+F8FF] is exactly the prefix range.
     const prefixEnd = `${prefix}${String.fromCharCode(0xf8ff)}`;
     const byId = admin.firestore.FieldPath.documentId();
@@ -709,7 +723,7 @@ export async function listUserWorkspaceApps(uid: string, limit = 50): Promise<Us
       .orderBy(byId)
       .startAt(prefix)
       .endAt(prefixEnd)
-      .limit(Math.max(1, Math.min(limit, 200)))
+      .limit(scanLimit)
       .get();
     const apps: UserWorkspaceApp[] = [];
     for (const d of snap.docs) {
@@ -728,9 +742,9 @@ export async function listUserWorkspaceApps(uid: string, limit = 50): Promise<Us
       apps.push({ workspaceId: d.id, fileCount, savedAt: typeof data.savedAt === 'number' ? data.savedAt : 0 });
     }
     apps.sort((a, b) => b.savedAt - a.savedAt);
-    return apps;
+    return { ok: true, apps, scanLimited: snap.docs.length >= scanLimit };
   } catch {
-    return [];
+    return { ok: false, apps: [], scanLimited: false };
   }
 }
 

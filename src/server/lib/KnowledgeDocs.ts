@@ -12,6 +12,8 @@
 
 import type { Express, Request, Response } from 'express';
 import { APP_KNOWLEDGE_BASE, type AppFeature } from '../AppContext/AppKnowledgeBase';
+import { freeProgramPausedNow } from './freeProgram';
+import { visibleKnowledgeBase } from '../AppContext/freeProgramContext';
 
 export interface DocsGroup {
   key: string;
@@ -97,18 +99,25 @@ function featureHtml(f: AppFeature): string {
 }
 
 // The knowledge base is static, so build the model + HTML once and reuse across requests.
+// FREE PROGRAM PAUSED: the referral entry is hidden from the guide too, so the cache is kept per state.
 let _model: DocsModel | null = null;
 let _html: string | null = null;
+let _builtFor: boolean | null = null;
+function freshFor(paused: boolean): void {
+  if (_builtFor !== paused) { _model = null; _html = null; _builtFor = paused; }
+}
 
 export function registerKnowledgeDocsRoutes(app: Express): void {
   // Machine-readable grouped docs model.
   app.get('/api/knowledge-base', (_req: Request, res: Response) => {
-    if (!_model) _model = buildDocsModel(APP_KNOWLEDGE_BASE);
+    const paused = freeProgramPausedNow(); freshFor(paused);
+    if (!_model) _model = buildDocsModel(visibleKnowledgeBase(APP_KNOWLEDGE_BASE, paused));
     res.json(_model);
   });
   // Human-facing docs site.
   app.get('/guide', (_req: Request, res: Response) => {
-    if (!_html) _html = renderDocsHtml(buildDocsModel(APP_KNOWLEDGE_BASE));
+    const paused = freeProgramPausedNow(); freshFor(paused);
+    if (!_html) _html = renderDocsHtml(buildDocsModel(visibleKnowledgeBase(APP_KNOWLEDGE_BASE, paused)));
     res.type('html').send(_html);
   });
 }

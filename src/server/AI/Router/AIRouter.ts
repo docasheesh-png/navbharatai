@@ -321,7 +321,7 @@ export class AIRouter {
         // was threaded through here, this method only checked `signal.aborted` BETWEEN rungs: the
         // request already in flight ran to completion and was billed in full, so a user who closed
         // the tab after one word still paid for the whole answer.
-        const limits = watchdogLimits();
+        const limits = watchdogLimits(process.env, this.universe);
         if (!limits) {
           await p.executeStream(prompt, systemPrompt, onChunk, undefined, signal);
         } else {

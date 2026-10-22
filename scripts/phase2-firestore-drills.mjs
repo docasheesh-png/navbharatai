@@ -190,6 +190,33 @@ async function worker() {
   process.send?.({ ready: true });
 }
 
+// This is observation only: an unconfirmed SDK response is not a rejected transaction.
+// Preserve raw fixture responses and never derive a pass/fail verdict from this classifier.
+function describeDrillAcknowledgment(response) {
+  const acknowledgment = response?.ok === true ? 'acknowledged'
+    : response?.ok !== false ? 'unknown'
+      : response.error?.code === 'QUEUE_STORE_UNAVAILABLE' ? 'unconfirmed'
+        : response.error?.code === 'QUEUE_CLAIM_CONFLICT' ? 'rejected'
+          : 'error';
+  return { acknowledgment, raw: response };
+}
+
+async function captureDrillAcknowledgments(control, { name, order, workspaceId, operations }) {
+  const startedAt = new Date().toISOString();
+  const read = async (action, data) => {
+    try { return await control.ask(action, data); }
+    catch (error) { return { ok: false, error: { code: error?.code ?? error?.name ?? 'Error', message: String(error?.message ?? error) } }; }
+  };
+  const queue = await read('load', { workspaceId });
+  const lease = await read('durable', { workspaceId, collection: 'agentv3_build_leases' });
+  const observation = { type: 'queue-acknowledgment-observation', name, order,
+    operations: Object.fromEntries(Object.entries(operations).map(([key, response]) => [key, describeDrillAcknowledgment(response)])),
+    snapshot: { startedAt, finishedAt: new Date().toISOString(), queue, lease },
+    limit: 'Read-only non-atomic snapshots, not a final transaction verdict. An unconfirmed operation may still commit later. No recovery performed.' };
+  console.log(JSON.stringify(observation));
+  return observation;
+}
+
 async function coordinator() {
   const workers = new Set();
   const records = [];
@@ -466,6 +493,12 @@ async function coordinator() {
         // Both processes deliberately replay the same already-authorized attempt; the ticket CAS is
         // still one-use independently of the separate lease-race result above.
         const consumers = await Promise.all([a.ask('bind', request), b.ask('bind', request)]);
+        // Capture durable evidence before the original exactly-one-ACK assertion can throw.
+        // Keep that assertion: an observation must not silently convert UNKNOWN into success.
+        if (consumers.filter((value) => value.ok).length !== 1 || consumers.some((value) => !value.ok && value.error?.code !== 'QUEUE_CLAIM_CONFLICT')) {
+          await captureDrillAcknowledgments(control, { name: 'handoff-consume-race', order: 'concurrent', workspaceId: f.workspaceId,
+            operations: { consumerA: consumers[0], consumerB: consumers[1] } });
+        }
         assert.equal(consumers.filter((value) => value.ok).length, 1);
         assert.equal(consumers.find((value) => !value.ok).error.code, 'QUEUE_CLAIM_CONFLICT');
         const current = await control.ok('load', { workspaceId: f.workspaceId });
@@ -522,10 +555,22 @@ async function coordinator() {
         for (const order of ['stop-first', 'consume-first', 'concurrent']) {
           const f = await readyFixture(`handoff-stop-consume-${order}`); const attemptId = randomUUID();
           assert.equal((await control.ok('lease-claim', { workspaceId: f.workspaceId, token: attemptId, owner: 'successor-before-stop' })).ok, true);
-          const request = transfer(f, attemptId); let consumed;
-          if (order === 'stop-first') { await b.ok('continuation-stop', { workspaceId: f.workspaceId }); consumed = await a.ask('bind', request); }
-          else if (order === 'consume-first') { consumed = await a.ask('bind', request); await b.ok('continuation-stop', { workspaceId: f.workspaceId }); }
-          else [consumed] = await Promise.all([a.ask('bind', request), b.ok('continuation-stop', { workspaceId: f.workspaceId })]);
+          const request = transfer(f, attemptId); let consumed; let stopped;
+          const requireStoppedAcknowledgment = async () => {
+            if (!stopped.ok) {
+              await captureDrillAcknowledgments(control, { name: 'handoff-stop-consume', order, workspaceId: f.workspaceId,
+                operations: { stop: stopped, consumer: consumed } });
+            }
+            // Same assertion as worker.ok: stop-first still cannot proceed to bind after an unconfirmed Stop.
+            assert.equal(stopped.ok, true, `continuation-stop: ${stopped.error?.message}`);
+          };
+          if (order === 'stop-first') { stopped = await b.ask('continuation-stop', { workspaceId: f.workspaceId }); await requireStoppedAcknowledgment(); consumed = await a.ask('bind', request); }
+          else if (order === 'consume-first') { consumed = await a.ask('bind', request); stopped = await b.ask('continuation-stop', { workspaceId: f.workspaceId }); await requireStoppedAcknowledgment(); }
+          else { [consumed, stopped] = await Promise.all([a.ask('bind', request), b.ask('continuation-stop', { workspaceId: f.workspaceId })]); await requireStoppedAcknowledgment(); }
+          if (!consumed.ok && consumed.error?.code !== 'QUEUE_CLAIM_CONFLICT') {
+            await captureDrillAcknowledgments(control, { name: 'handoff-stop-consume', order, workspaceId: f.workspaceId,
+              operations: { stop: stopped, consumer: consumed } });
+          }
           const current = await control.ok('load', { workspaceId: f.workspaceId });
           const lease = await control.ok('durable', { workspaceId: f.workspaceId, collection: 'agentv3_build_leases' });
           assert.equal(current.paused, true); assert.equal(current.items[0].continuation, undefined);
@@ -547,6 +592,9 @@ async function coordinator() {
         const f = await moduleFixture('handoff-retire-ack'); const handoff = await propose(f);
         const uncertain = await startWorker(endpoint);
         const lost = await uncertain.ask('continuation-retire', { workspaceId: f.workspaceId, binding: f.binding, nonce: handoff.nonce, fault: 'ack-loss' });
+        const lostObservation = await captureDrillAcknowledgments(control, { name: 'retirement-committed-ack-loss', order: 'injected-after-commit', workspaceId: f.workspaceId,
+          operations: { original: lost } });
+        assert.equal(lostObservation.operations.original.acknowledgment, 'unconfirmed');
         assert.equal(lost.ok, false); assert.equal(lost.error.code, 'QUEUE_STORE_UNAVAILABLE');
         await uncertain.kill();
         const fresh = await startWorker(endpoint);
@@ -570,6 +618,9 @@ async function coordinator() {
         assert.equal((await control.ok('lease-claim', { workspaceId: f.workspaceId, token: attemptId, owner: 'consume-ack-owner' })).ok, true);
         const request = transfer(f, attemptId); const uncertain = await startWorker(endpoint);
         const lost = await uncertain.ask('bind', { ...request, fault: 'ack-loss' });
+        const lostObservation = await captureDrillAcknowledgments(control, { name: 'consumption-committed-ack-loss', order: 'injected-after-commit', workspaceId: f.workspaceId,
+          operations: { original: lost } });
+        assert.equal(lostObservation.operations.original.acknowledgment, 'unconfirmed');
         assert.equal(lost.ok, false); assert.equal(lost.error.code, 'QUEUE_STORE_UNAVAILABLE');
         await uncertain.kill();
         const fresh = await startWorker(endpoint);

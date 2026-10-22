@@ -2,6 +2,7 @@ import { useBuildReportNumbers } from '../hooks/useBuildReportNumbers';
 import { BuildReportNumber } from './admin/BuildReportNumber';
 import type { BuildReportNumbering } from '../lib/buildReportNumbering';
 import { MaintenanceCard } from './admin/MaintenanceCard';
+import { FreeProgramCard } from './admin/FreeProgramCard';
 import { UserBuiltApps } from './admin/UserBuiltApps';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight} from 'lucide-react';
@@ -2022,6 +2023,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   it for weeks with nothing rendering it. It sits ABOVE the live monitor because a
                   ceiling that stops the whole platform outranks a chart of what it is doing now. */}
               <MaintenanceCard adminToken={adminToken} />
+              <FreeProgramCard adminToken={adminToken} />
               <LoadBoard adminToken={adminToken} />
 
               {/* LIVE MONITOR — real time-series from the platform's own telemetry. Everything below it

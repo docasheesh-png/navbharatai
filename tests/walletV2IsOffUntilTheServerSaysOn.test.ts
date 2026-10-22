@@ -8,7 +8,7 @@ import { WalletHeader } from '../src/components/wallet/WalletHeader';
 describe('WALLET_V2_UI wiring', () => {
   afterEach(() => { delete process.env.WALLET_V2_UI; delete process.env.PLAN_MODEL_PRO; delete process.env.BYO_LIFECYCLE_V1; });
   it('server flags default off', () => {
-    expect(publicFlags()).toEqual({ walletV2Ui: false, planModelPro: false, byoLifecycle: false });
+    expect(publicFlags()).toEqual({ walletV2Ui: false, planModelPro: false, byoLifecycle: false, freeProgramPaused: false });
     process.env.WALLET_V2_UI = 'on';
     expect(publicFlags().walletV2Ui).toBe(true);
   });

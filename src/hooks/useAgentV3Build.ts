@@ -1481,7 +1481,7 @@ export function useAgentV3Build(): UseAgentV3Build {
           // to top up. Only reachable when AGENTV3_PAID_PUBLIC is on and the user is a paying (non-free) one.
           // POWER_MODE_PAID_ONLY (Slice F): power mode requested by a not-yet-paying account — same
           // actionable add-credits card, with the server's specific power-mode message as the notice.
-          if (res.status === 402 && (body.code === 'INSUFFICIENT_CREDITS' || body.code === 'POWER_MODE_PAID_ONLY')) {
+          if (res.status === 402 && (body.code === 'INSUFFICIENT_CREDITS' || body.code === 'POWER_MODE_PAID_ONLY' || body.code === 'free_trial_ended')) {
             setBillingBlock({
               notice: msg,
               balanceInr: typeof body.balanceInr === 'number' ? body.balanceInr : undefined,

@@ -4,12 +4,14 @@
  */
 import { useEffect, useState } from 'react';
 
-export interface PublicFlags { walletV2Ui: boolean; planModelPro: boolean; byoLifecycle: boolean }
-export const PUBLIC_FLAGS_OFF: PublicFlags = Object.freeze({ walletV2Ui: false, planModelPro: false, byoLifecycle: false });
+export interface PublicFlags { walletV2Ui: boolean; planModelPro: boolean; byoLifecycle: boolean;
+  /** TRUE until the server says literally `false` — an unknown free program is a hidden one. */
+  freeProgramPaused: boolean }
+export const PUBLIC_FLAGS_OFF: PublicFlags = Object.freeze({ walletV2Ui: false, planModelPro: false, byoLifecycle: false, freeProgramPaused: true });
 
 export function parsePublicFlags(raw: unknown): PublicFlags {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  return { walletV2Ui: o.walletV2Ui === true, planModelPro: o.planModelPro === true, byoLifecycle: o.byoLifecycle === true };
+  return { walletV2Ui: o.walletV2Ui === true, planModelPro: o.planModelPro === true, byoLifecycle: o.byoLifecycle === true, freeProgramPaused: o.freeProgramPaused !== false };
 }
 
 let cached: Promise<PublicFlags> | null = null;

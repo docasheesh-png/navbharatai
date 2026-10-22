@@ -25,6 +25,8 @@ import {
   FAILED_BUILD_RULE, STOPPED_BUILD_RULE, FAILED_BUILD_RULE_PLAIN, STOPPED_BUILD_RULE_PLAIN,
 } from '../src/content/marketing';
 import { APP_KNOWLEDGE_BASE } from '../src/server/AppContext/AppKnowledgeBase';
+import { decideMarkupOnProof, markupWaiverSettledLine } from '../src/server/AgentV3/previewEarnsMarkup';
+import { buildBillingLabel } from '../src/server/AgentV3/buildBillingLabel';
 
 const ROUTE = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
 const ROUTE_CODE = ROUTE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -262,6 +264,255 @@ describe('2 — every in-app AI quotes the public billing rules, word for word',
     expect(entry('apk_builder')).toMatch(/a failed or stopped build costs nothing/);
     for (const e of APP_KNOWLEDGE_BASE.filter((x) => x.id !== 'apk_builder')) {
       expect(JSON.stringify(e), e.id).not.toMatch(/stopped build (costs|charges) nothing/i);
+    }
+  });
+});
+
+
+/**
+ * The watchdog's waiver is a SETTLED diagnostic, just like the normal settle's line. The old
+ * caller recorded its at-cost decision BEFORE Stop rules could make the final bill zero.
+ * Execute the real enrichment block and debit guard, not another implementation of billing.
+ * Every I/O port below is synthetic; the route/provider graph is never imported or called.
+ */
+const ENRICH_START = 'if (ok && billingCtx.providerLedger) {';
+const ENRICH_END = '// A VERSION THE USER CAN GO BACK TO';
+const DEBIT_START = 'if (ok && buildResultRef) {';
+const DEBIT_END = 'const billedInr = Math.round(watchdogBilledUsd * usdInrRate() * 100) / 100;';
+function sourceSpan(source: string, start: string, end: string): string {
+  const a = source.indexOf(start);
+  const b = source.indexOf(end, a);
+  if (a < 0 || b <= a || source.indexOf(start, a + start.length) !== -1) throw new Error(`ambiguous or missing source span: ${start}`);
+  return source.slice(a, b);
+}
+const enrichment = sourceSpan(ROUTE, ENRICH_START, ENRICH_END);
+const debitGuard = sourceSpan(ROUTE, DEBIT_START, DEBIT_END) + '}';
+// buildDiscount.ts also owns a Firestore store. Extract its PURE exported prefix rather than
+// importing any database/provider graph. The production functions (including normalization) run.
+const discountSource = readFileSync(join(__dirname, '..', 'src/server/lib/buildDiscount.ts'), 'utf8');
+const discountPure = sourceSpan(discountSource, 'export const BUILD_DISCOUNT_MAX_PCT =', '/** How long one instance trusts its copy');
+const discountModule = { exports: {} as { applyBuildDiscount: typeof import('../src/server/lib/buildDiscount').applyBuildDiscount } };
+new Function('module', 'exports', transformSync(discountPure, { loader: 'ts', format: 'cjs' }).code)(discountModule, discountModule.exports);
+const applyBuildDiscount = discountModule.exports.applyBuildDiscount;
+
+type WaiverCase = Partial<Case> & {
+  cause?: AbortCause | null; ok?: boolean; cost?: number; sandbox?: number; decided?: number;
+  pct?: number; expectsArtifacts?: boolean; markupEnabled?: boolean; ledgerRendered?: boolean;
+  observer?: boolean; throwOnWaiver?: boolean; user?: boolean; billingActive?: boolean; startedAt?: number | null;
+};
+type Recorded = { code: string; message: string };
+function compileEnrichment(source: string) {
+  const body = `return async function (ports) {
+    const { decideMarkupOnProof, markupNeedsPreview, markupWaiverSettledLine, stopBillingSwitches,
+      settleStopOrFailure, preseededUnchangedCount, freeCancellationMessage, abortCauseOf, abortRequestedAtOf,
+      stopFellInWindow, applyBuildDiscount, buildBillingLabel, renderProvenInLedger, billableSandboxDetail,
+      decideBuildBilledUsd, buildDiscountStore, recordBuildTelemetryOnce, buildDiagRef, billingCtx,
+      buildObs, buildUsage, writtenFiles, abort, stylePassWindow, isEditMode, ok, awaitsShellNow,
+      powerLevelReqEffective, userId, email, actuator, workspaceId, barrenPhases, usdInrRate,
+      isAgentV3FreeUser, freeTierBuildActive, billingAppliesTo, onlyOpus, noClaudeBuild, absorbedWorkDetail,
+      Date, buildResultRef, userCostStore, debitWalletForBuild, getDb, coordination } = ports;
+    let watchdogBilledUsd = 0;
+    let watchdogLivePreview = { seconds: 0, usd: 0, measuredSeconds: 0 };
+    let watchdogDiscount = null;
+    let watchdogStopNote = null;
+    ${source}
+    ${debitGuard}
+    return { billed: watchdogBilledUsd, livePreview: watchdogLivePreview, discount: watchdogDiscount, note: watchdogStopNote };
+  }`;
+  return new Function(transformSync(body, { loader: 'ts' }).code)() as (
+    ports: Record<string, unknown>,
+  ) => Promise<{ billed: number; livePreview: { seconds: number; usd: number; measuredSeconds: number }; discount: unknown; note: string | null }>;
+}
+const runEnrichment = compileEnrichment(enrichment);
+async function watchdogWithWaiver(c: WaiverCase, run = runEnrichment) {
+  const records: Recorded[] = [];
+  const order: string[] = [];
+  const snapshots: Record<string, unknown>[] = [];
+  const telemetry: unknown[] = [];
+  const debits: unknown[] = [];
+  const costRecords: unknown[] = [];
+  const measured: unknown[] = [];
+  const pricing: unknown[] = [];
+  const providerTokens: unknown[] = [];
+  const cacheTokens: unknown[] = [];
+  const usage = { inputTokens: 100, outputTokens: 20 };
+  const entries = [{ synthetic: true }];
+  const calls = { synthetic: 1 };
+  const ledger = { entries: () => entries, callsByProvider: () => calls };
+  const startedAt = c.startedAt === null ? undefined : c.startedAt ?? STOP_AT - 10_000;
+  const decided = { effectiveBilledUsd: c.decided ?? DECIDED, realCostUsd: c.cost ?? COST,
+    sandboxUsd: c.sandbox ?? 0, reconciledProviderUsage: usage, absorbedUnbilledUsd: 0 };
+  const result = await run({
+    decideMarkupOnProof, markupNeedsPreview: () => c.markupEnabled !== false, markupWaiverSettledLine,
+    stopBillingSwitches, settleStopOrFailure, preseededUnchangedCount, freeCancellationMessage, abortCauseOf,
+    abortRequestedAtOf, stopFellInWindow, applyBuildDiscount, buildBillingLabel,
+    renderProvenInLedger: () => c.ledgerRendered === true,
+    billableSandboxDetail: (...args: unknown[]) => { measured.push(args); return { seconds: 20, usd: c.sandbox ?? 0, measuredSeconds: 25 }; },
+    decideBuildBilledUsd: (...args: unknown[]) => { pricing.push(args); return decided; },
+    buildDiscountStore: { readWithin: async () => { order.push('discount-read'); return { pct: c.pct ?? 0 }; } },
+    recordBuildTelemetryOnce: (value: unknown) => { order.push('telemetry'); telemetry.push(value); },
+    buildDiagRef: c.observer === false ? undefined : {
+      evidenceLedger: () => [],
+      record: (entry: Recorded) => {
+        order.push(entry.code);
+        if (c.throwOnWaiver && entry.code === 'MARKUP_WAIVED_NO_PREVIEW') throw new Error('synthetic recorder failure');
+        records.push(entry);
+      },
+      setProviderTokens: (value: unknown) => providerTokens.push(value),
+      setCacheReadInputTokens: (value: unknown) => cacheTokens.push(value),
+      setBilling: (value: Record<string, unknown>) => { order.push('billing'); snapshots.push(value); },
+    },
+    billingCtx: { providerLedger: ledger, buildStartedAt: startedAt, preseededGolden: files(c.preseeded ?? 0),
+      expectsArtifacts: c.expectsArtifacts !== false, appFirstRenderedAt: renderedAt(c), cacheReadInputTokens: 12 },
+    buildObs: { previewRendered: c.rendered === true }, buildUsage: { total: () => usage },
+    writtenFiles: files(c.written ?? 9), abort: signal(c.cause === undefined ? 'user-stop' : c.cause),
+    stylePassWindow: styleWindow(c), isEditMode: c.edit === true, ok: c.ok !== false,
+    awaitsShellNow: () => null, powerLevelReqEffective: 'normal', userId: c.user === false ? undefined : 'synthetic-user',
+    email: 'synthetic@example.invalid', actuator: 'synthetic-actuator', workspaceId: 'synthetic-workspace',
+    barrenPhases: [], usdInrRate: () => 100, isAgentV3FreeUser: () => false, freeTierBuildActive: false,
+    billingAppliesTo: () => c.billingActive !== false, onlyOpus: false, noClaudeBuild: false,
+    absorbedWorkDetail: () => 'synthetic', Date: { now: () => STOP_AT }, buildResultRef: { ok: c.ok !== false },
+    userCostStore: { record: async (...args: unknown[]) => { costRecords.push(args); } },
+    debitWalletForBuild: async (...args: unknown[]) => { order.push('debit'); debits.push(args); return { ok: true, tokensDebited: 1, tokenBalance: 2 }; },
+    getDb: () => 'synthetic-db', coordination: { billingRef: (value: string) => value },
+  });
+  return { ...result, records, order, snapshots, telemetry, debits, costRecords, measured, pricing, providerTokens, cacheTokens };
+}
+function expectSettledZero(result: Awaited<ReturnType<typeof watchdogWithWaiver>>) {
+  expect(result.billed).toBe(0);
+  expect(result.snapshots[0].billedUsd).toBe(0);
+  const waiver = result.records.filter((entry) => entry.code === 'MARKUP_WAIVED_NO_PREVIEW');
+  expect(waiver).toHaveLength(1);
+  expect(waiver[0].message).toContain('Superseded: the final bill is ₹0.');
+  expect(result.order.indexOf('MARKUP_WAIVED_NO_PREVIEW')).toBeGreaterThan(result.order.indexOf('billing'));
+  expect(result.debits).toEqual([]);
+}
+
+describe('3 — the watchdog waiver describes the final settled bill, not an intermediate amount', () => {
+  afterEach(() => { delete process.env.AGENTV3_BILL_LATE_STOP_RULES; delete process.env.AGENTV3_BILL_CANCELLED; });
+
+  it.each([
+    { name: 'no files', written: 0 },
+    { name: 'only the unchanged starter', written: 12, preseeded: 12 },
+    { name: 'unverified edit', written: 4, edit: true },
+  ])('$name: a positive at-cost waiver is superseded by the actual zero bill', async (c) => {
+    const result = await watchdogWithWaiver(c);
+    expectSettledZero(result);
+    expect(result.records.find((entry) => entry.code === 'MARKUP_WAIVED_NO_PREVIEW')?.message).toContain('$0.4000 instead of $2.0000');
+    expect(result.order).toContain('LATE_STOP_NOT_CHARGED');
+    expect(result.order).not.toContain('discount-read');
+  });
+
+  it('saved files retain their positive real-cost floor and the original waiver wording', async () => {
+    const result = await watchdogWithWaiver({ written: 9, pct: 50, sandbox: 0.1 });
+    expect(result.billed).toBe(0.5);
+    expect(result.discount).toBeNull();
+    expect(result.records.find((entry) => entry.code === 'MARKUP_WAIVED_NO_PREVIEW')?.message)
+      .toBe(decideMarkupOnProof({ decidedBilledUsd: 2, realCostUsd: 0.4, sandboxUsd: 0.1, previewProven: false, expectsArtifacts: true }).reason);
+    expect(result.order.indexOf('MARKUP_WAIVED_NO_PREVIEW')).toBeGreaterThan(result.order.indexOf('billing'));
+    expect(result.debits).toEqual([['synthetic-db', 'synthetic-user', {
+      billedInr: 50, buildRef: `synthetic-workspace_${STOP_AT - 10_000}`, feature: 'build', description: 'NavBharatAI Pro build (time-capped)',
+    }]]);
+  });
+
+  it.each(['watchdog', 'advisory-cap', 'unknown', null] as const)('%s is not rewritten as user Stop', async (cause) => {
+    const result = await watchdogWithWaiver({ cause, written: 0 });
+    expect(result.billed).toBe(COST);
+    expect(result.records.map((entry) => entry.code)).toEqual(['MARKUP_WAIVED_NO_PREVIEW']);
+    expect(result.records[0].message).not.toContain('Superseded');
+  });
+
+  it.each(['AGENTV3_BILL_LATE_STOP_RULES', 'AGENTV3_BILL_CANCELLED'])('%s=off preserves its existing positive bill', async (key) => {
+    process.env[key] = 'off';
+    const result = await watchdogWithWaiver({ written: 0 });
+    expect(result.billed).toBe(COST);
+    expect(result.records[0].message).not.toContain('Superseded');
+  });
+
+  it.each([
+    { name: 'real render flag', rendered: true },
+    { name: 'real ledger render', ledgerRendered: true, rendered: false },
+    { name: 'markup rule disabled', markupEnabled: false },
+    { name: 'non-artifact turn', expectsArtifacts: false },
+  ])('$name: no invented waiver and the normal discount still applies', async (c) => {
+    const result = await watchdogWithWaiver({ ...c, cause: null, pct: 25 });
+    expect(result.billed).toBe(1.5);
+    expect(result.records.some((entry) => entry.code === 'MARKUP_WAIVED_NO_PREVIEW')).toBe(false);
+    expect(result.debits).toHaveLength(1);
+  });
+
+  it('zero real cost remains zero without inventing a Stop reason', async () => {
+    const result = await watchdogWithWaiver({ cause: null, cost: 0 });
+    expectSettledZero(result);
+    expect(result.records[0].message).toContain('$0.0000 instead of $2.0000');
+    expect(result.records[0].message).not.toMatch(/stopped|cancelled/);
+  });
+
+  it('the diagnostic does not re-measure or change the existing pricing, telemetry, or billing snapshot', async () => {
+    const result = await watchdogWithWaiver({ cause: null, sandbox: 0.1 });
+    expect(result.measured).toEqual([['synthetic-actuator', 'synthetic-workspace', STOP_AT - 10_000]]);
+    expect(result.pricing).toHaveLength(1);
+    expect(result.pricing[0]).toEqual([expect.any(Object), { inputTokens: 100, outputTokens: 20 }, 'normal',
+      'synthetic-user', 'synthetic@example.invalid', 0.1, []]);
+    expect(result.telemetry).toEqual([{ ok: true, previewAllowed: false, isEdit: false, ms: 10_000,
+      providerUsage: { inputTokens: 100, outputTokens: 20 }, providerEntries: [{ synthetic: true }],
+      providerCalls: { synthetic: 1 }, sandboxSeconds: 25 }]);
+    expect(result.providerTokens).toEqual([{ inputTokens: 100, outputTokens: 20 }]);
+    expect(result.cacheTokens).toEqual([12]);
+    expect(result.snapshots).toEqual([{
+      userTier: 'paid', charged: true, billedButNotDebited: false, billedUsd: 0.5, billedInr: 50,
+      realCostUsd: 0.4, sandboxCostUsd: 0.1, powerMode: false, powerLevel: 'normal', noClaude: false,
+    }]);
+  });
+
+  it.each([0, 9])('an absent diagnostic observer does not affect the bill (files=%s)', async (written) => {
+    const result = await watchdogWithWaiver({ written, observer: false });
+    expect(result.billed).toBe(written === 0 ? 0 : COST);
+    expect(result.records).toEqual([]);
+    expect(result.snapshots).toEqual([]);
+    expect(result.debits).toHaveLength(written === 0 ? 0 : 1);
+  });
+
+  it.each([0, 9])('a waiver recorder exception occurs AFTER settlement and cannot bypass it (files=%s)', async (written) => {
+    const result = await watchdogWithWaiver({ written, throwOnWaiver: true });
+    expect(result.billed).toBe(written === 0 ? 0 : COST);
+    expect(result.snapshots[0].billedUsd).toBe(result.billed);
+    expect(result.order.indexOf('MARKUP_WAIVED_NO_PREVIEW')).toBeGreaterThan(result.order.indexOf('billing'));
+    expect(result.debits).toHaveLength(written === 0 ? 0 : 1);
+  });
+
+  it.each([
+    { name: 'failed build', ok: false, expected: 0 },
+    { name: 'no user identity', user: false, expected: COST },
+    { name: 'billing disabled', billingActive: false, expected: COST },
+    { name: 'missing idempotency timestamp', startedAt: null, expected: COST },
+  ])('$name: the real debit guard is preserved', async ({ expected, ...c }) => {
+    const result = await watchdogWithWaiver({ ...c, cause: null });
+    expect(result.billed).toBe(expected);
+    expect(result.debits).toEqual([]);
+  });
+
+  it('both waiver producers use settled values; a newly raw sibling fails this census', () => {
+    expect(ROUTE_CODE.match(/code: 'MARKUP_WAIVED_NO_PREVIEW'/g)).toHaveLength(2);
+    expect(ROUTE_CODE.match(/message: markupWaiverSettledLine\(/g)).toHaveLength(2);
+    expect(enrichment).toContain('markupWaiverSettledLine(wdMarkup.reason, watchdogBilledUsd)');
+    expect(ROUTE).toContain('markupWaiverSettledLine(markupDecision.reason, effectiveBilledUsd, zeroBillReason)');
+  });
+
+  it('reverting either the final-value wording or placement fails the same zero-bill regression', async () => {
+    const start = enrichment.indexOf('if (!wdMarkup.markupApplied) {');
+    const end = enrichment.indexOf('\n          // Same explanation', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const statement = enrichment.slice(start, end);
+    const without = enrichment.slice(0, start) + enrichment.slice(end);
+    const beforeStop = without.replace('watchdogBilledUsd = wdMarkup.billedUsd;', `watchdogBilledUsd = wdMarkup.billedUsd;\n${statement}`);
+    const rawReason = enrichment.replace('markupWaiverSettledLine(wdMarkup.reason, watchdogBilledUsd)', 'wdMarkup.reason');
+    const original = beforeStop.replace('markupWaiverSettledLine(wdMarkup.reason, watchdogBilledUsd)', 'wdMarkup.reason');
+    for (const mutant of [beforeStop, rawReason, original]) {
+      expect(mutant).not.toBe(enrichment);
+      const result = await watchdogWithWaiver({ written: 0 }, compileEnrichment(mutant));
+      expect(() => expectSettledZero(result)).toThrow();
     }
   });
 });

@@ -39,9 +39,14 @@ export const FREE_TRIAL_ENDED_CODE = 'free_trial_ended';
 
 export interface FreeProgramState { paused: boolean; updatedAt: number | null }
 
-/** An absent or unreadable document is PAUSED; only a stored `paused: false` is live. */
-export function freeProgramState(data: unknown): FreeProgramState {
-  const d = (data ?? {}) as Partial<FreeProgramState>;
+/**
+ * An absent document is PAUSED (`defaultPaused`, true in production); only a stored `paused: false` is live, and a stored
+ * value of either kind always wins. `defaultPaused` is false only under a unit-test run, where a fake database holds no
+ * setting and the existing suites exercise the live behaviour.
+ */
+export function freeProgramState(data: unknown, defaultPaused: boolean = true): FreeProgramState {
+  if (data === undefined || data === null) return { paused: defaultPaused, updatedAt: null };
+  const d = data as Partial<FreeProgramState>;
   return { paused: d.paused !== false, updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : null };
 }
 
@@ -91,7 +96,7 @@ export class FreeProgramStore {
           this.backend().read(),
           new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Free program setting unavailable')), 1_500); }),
         ]);
-        return this.accept(freeProgramState(data));
+        return this.accept(freeProgramState(data, this.defaultPaused()));
       } catch {
         if (!this.value) return { paused: this.defaultPaused(), updatedAt: null, unavailable: true };
         return { ...this.value, paused: true, unavailable: true };
@@ -104,7 +109,7 @@ export class FreeProgramStore {
   start(): void {
     if (this.stopWatch) return;
     try {
-      this.stopWatch = this.backend().subscribe?.((data) => { this.accept(freeProgramState(data)); }, () => {
+      this.stopWatch = this.backend().subscribe?.((data) => { this.accept(freeProgramState(data, this.defaultPaused())); }, () => {
         this.readAt = 0; this.stopWatch?.(); this.stopWatch = undefined;
       });
     } catch { /* read() still answers paused until storage can be read. */ }

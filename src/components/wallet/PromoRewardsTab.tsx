@@ -212,7 +212,7 @@ export function PromoRewardsTab(props: PromoRewardsTabProps) {
         <div className="flex flex-col gap-3">
           <input
             type="text"
-            placeholder={freeProgramPaused ? 'Enter your gift code' : 'Enter your promo code'}
+            placeholder="Enter your promo code"
             value={couponCodeInput}
             onChange={(e) => onSetCouponCodeInput(e.target.value)}
             className="w-full min-w-0 rounded-xl border border-line bg-surface px-4 py-3 font-mono text-sm font-bold uppercase tracking-widest text-ink focus:border-accent focus:outline-none"

@@ -20,6 +20,6 @@ describe('the chat turn is gated before it spends', () => {
   });
 
   it('a free-tier turn never lists the Claude vision rung', () => {
-    expect(chat).toMatch(/gate\.tier === 'free' \? \{ noClaude: true \} : \{\}/);
+    expect(chat).toMatch(/gate\.tier === 'free' \? \{ noClaude: true(, freeTier: true)? \} : \{\}/); // freeTier: Gemini-only + Free cap (2026-10-23)
   });
 });

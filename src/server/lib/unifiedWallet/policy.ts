@@ -8,6 +8,7 @@
 // file is an INTEGER number of milli-credits and must be a multiple of 10 so it maps to whole tokens
 // (paise). No floats ever reach the wallet from here.
 import { TOKENS_PER_RUPEE } from '../../../lib/walletPricing';
+import { parseEnvFlag } from '../envFlag';
 
 export const MILLI_PER_CREDIT = 1000;
 const MILLI_PER_TOKEN = MILLI_PER_CREDIT / TOKENS_PER_RUPEE; // 10
@@ -22,7 +23,8 @@ const num = (v: string | undefined, d: number, min: number, max: number): number
   return Number.isFinite(n) && n >= min && n <= max ? n : d;
 };
 
-const truthy = (v: string | undefined) => v === '1' || v === 'true' || v === 'on';
+/** The repo's one flag dialect (envFlag.ts). */
+export const truthy = (v: string | undefined): boolean => parseEnvFlag(v) === true;
 
 /**
  * FOUR INDEPENDENT SWITCHES (review 2026-10-23), all default OFF — any one can be turned on alone:

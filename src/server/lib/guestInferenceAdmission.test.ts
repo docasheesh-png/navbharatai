@@ -7,7 +7,7 @@ import { guestDailyQuota, takeGuestInferenceAdmission, isGuestInferenceAdmission
 
 const NOW = Date.parse('2026-10-23T10:00:00Z');
 const DEVICE = '1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed';
-const ENABLED = { INFERENCE_GATEWAY_ENABLED: 'on', INFERENCE_GATEWAY_SURFACES: 'chat' };
+const ENABLED = { INFERENCE_GATEWAY_ENABLED: 'on', INFERENCE_GATEWAY_ROLLOUT_MODE: 'all', INFERENCE_GATEWAY_SURFACES: 'chat' };
 /** Two application instances share this transactional database, never a process-local counter. */
 function database() {
   const docs = new Map<string, any>(); const reads: string[] = []; const writes: string[] = [];
@@ -214,4 +214,11 @@ describe('durable admission failures cannot become legacy dispatch authority', (
     expect(state.docs.get(path).guestPrincipalId).toBe(guestPrincipalId);
     expect(result.next).not.toHaveBeenCalled(); expect(state.writes).toHaveLength(0);
   });
+});
+
+it.each(['canary', 'invalid', undefined])('does not mint Gateway guest identity in %s rollout and preserves legacy quota semantics', async mode => {
+  const consume = vi.fn(async () => ({ allow: true as const, remaining: 9 }));
+  const { request, next } = await send(middleware({ env: { ...ENABLED, INFERENCE_GATEWAY_ROLLOUT_MODE: mode, INFERENCE_GATEWAY_CANARY_UIDS: 'victim' }, store: { consume } }));
+  expect(next).toHaveBeenCalledOnce(); expect(consume.mock.calls[0]?.[4]).toBeUndefined();
+  expect(wasGatewayGuestSelected(request)).toBe(false); expect(takeGuestInferenceAdmission(request)).toBeNull();
 });

@@ -12,7 +12,7 @@ import { freeChainAdmissionQueue } from '../FreeChain/admissionQueue';
 const route = (operation: 'chat' | 'generate') => captureRoutes(registerRepoAnalystRoutes).get(`POST /api/repo-analyst/${operation}`)!;
 const snapshot = { ref: { owner: 'acme', repo: 'widget' }, url: 'https://github.com/acme/widget', defaultBranch: 'main', stars: 1, forks: 0, openIssues: 0,
   license: 'MIT', languages: ['TypeScript'], topics: [], tree: ['src/index.ts'], readme: 'Real fetched fixture content', keyFiles: [], notes: [] };
-beforeEach(() => {
+beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
   vi.clearAllMocks(); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'on'); vi.stubEnv('INFERENCE_GATEWAY_SURFACES', 'professional');
   vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'off'); vi.stubEnv('NODE_ENV', 'production');
   m.verify.mockResolvedValue('verified-user'); m.fetchRepo.mockResolvedValue(snapshot); m.summary.mockResolvedValue(undefined);
@@ -72,4 +72,13 @@ describe('Free Mode Repo Analyst reaches the real text chokepoint', () => {
     expect(res.body.reply).toBe('legacy rescue'); expect(m.fetchRepo).toHaveBeenCalledWith({ owner: 'acme', repo: 'widget' }, undefined);
     expect(m.verify).not.toHaveBeenCalled(); expect(m.routed).not.toHaveBeenCalled(); expect(m.gemini).toHaveBeenCalledOnce(); expect(m.groq).toHaveBeenCalledOnce();
   });
+});
+
+it.each(['chat', 'generate'] as const)('non-canary %s preserves legacy repo fetch and direct-model arguments', async operation => {
+  vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'canary'); vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', 'other-owner');
+  const admission = vi.spyOn(freeChainAdmissionQueue, 'acquire');
+  m.gemini.mockImplementationOnce(async () => { expect(currentInferenceGatewayContext()).toBeUndefined(); return operation === 'chat' ? 'legacy answer' : 'One improvement\n=== FILE: tests/check.ts ===\nexport const checked = true;\n=== END FILE ==='; });
+  const res = mockRes(); await route(operation)(mockReq({ body: { message: 'analyse acme/widget', uid: 'other-owner' } }), res);
+  expect(res.statusCode).toBe(200); expect(m.fetchRepo).toHaveBeenCalledWith({ owner: 'acme', repo: 'widget' }, undefined);
+  expect(m.gemini).toHaveBeenCalledOnce(); expect(m.routed).not.toHaveBeenCalled(); expect(admission).not.toHaveBeenCalled();
 });

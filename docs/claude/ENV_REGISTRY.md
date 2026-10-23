@@ -4672,6 +4672,8 @@ production or inferred to satisfy a particular load SLA by this documentation.
 
 - `INFERENCE_GATEWAY_ENABLED`: boolean feature switch, absent/OFF by default. Enables only
   the new authenticated Free-product gateway; no account allowance or approval is implied.
+- `INFERENCE_GATEWAY_ROLLOUT_MODE`: exact `canary` (default) or explicit `all`. Invalid modes select nobody; master OFF still wins. Canary affects only verified Firebase identities; all preserves the existing durable guest path. Unselected legacy traffic is outside the Gateway's $10 pool.
+- `INFERENCE_GATEWAY_CANARY_UIDS`: up to 32 unique comma-separated exact verified Firebase UIDs, 1–128 ASCII alphanumeric/colon/underscore/hyphen characters each. Empty/unset selects nobody in canary mode; malformed lists reject the whole cohort. Never use client UID/header/guest input as proof. Server-only configuration, no raw UID logging/admin display. Owner trial still requires separate reviewed provider setup and explicit activation; no production settings are changed by deployment.
 - `INFERENCE_GATEWAY_SURFACES`: optional comma-separated allowlist, intersected with exactly
   `chat,professional`. Empty selects these Free surfaces. Builder, paid Doctor/SDA, developer-api,
   published-app, image-generation and image-enhancement remain excluded even if listed.

@@ -7,7 +7,7 @@ import { sendSafeError } from '../lib/httpError';
 import { guestDailyQuota } from '../lib/guestDailyQuota';
 import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 import { strictFreeRequired } from '../AI/inferencePolicy';
-import { inferenceGatewayEnabled, runWithAuthenticatedInferenceGatewayRequest, runWithInferenceGatewayContext, runWithInferenceGatewayEntryAdmission } from '../AI/InferenceGateway/runtime';
+import { inferenceGatewayEnabled, isGatewayRouteSelected, runWithAuthenticatedInferenceGatewayRequest, runWithInferenceGatewayContext, runWithInferenceGatewayEntryAdmission } from '../AI/InferenceGateway/runtime';
 import { onClientGone } from '../lib/clientDisconnect';
 
 /** This route is a Free Mode, not the developer API or the Pro app builder. */
@@ -23,7 +23,7 @@ async function withRepoAnalystGateway<T>(req: Request, res: Response, operation:
       policyKey: `mode:repo-analyst:${operation}`, qualityTier: 'professional', dataClass: 'confidential',
       funding: 'platform-free-fallback', mode: strictFreeRequired() ? 'strict-free' : 'free-first-authorized-paid',
       deadlineAtMs, signal: controller.signal,
-    }, () => runWithInferenceGatewayEntryAdmission(() => run(controller.signal))));
+    }, () => isGatewayRouteSelected() ? runWithInferenceGatewayEntryAdmission(() => run(controller.signal)) : run()));
   } finally { clearTimeout(timer); }
 }
 

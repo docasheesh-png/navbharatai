@@ -1,3 +1,4 @@
+import { gatewayRollout } from './rollout';
 /** Authenticated administrative review only. Never calls a provider, changes activation,
  * provisions credentials, certifies a healthcheck, or creates spending authority. */
 import { createHash } from 'node:crypto';
@@ -33,7 +34,7 @@ const keys = (value: unknown, allowed: string[], required = allowed): value is R
   && Object.keys(value as Raw).every(k => allowed.includes(k)) && required.every(k => Object.hasOwn(value as Raw, k));
 const strings = (v: unknown, max = 8): v is string[] => Array.isArray(v) && v.length > 0 && v.length <= max && v.every(token) && new Set(v).size === v.length;
 const envName = (v: unknown): v is string => typeof v === 'string' && /^INFERENCE_GATEWAY_[A-Z0-9_]{1,61}$/.test(v)
-  && !['INFERENCE_GATEWAY_ENABLED', 'INFERENCE_GATEWAY_SURFACES'].includes(v);
+  && !['INFERENCE_GATEWAY_ENABLED', 'INFERENCE_GATEWAY_SURFACES', 'INFERENCE_GATEWAY_ROLLOUT_MODE', 'INFERENCE_GATEWAY_CANARY_UIDS'].includes(v);
 const current = (a: unknown, b: unknown, now: number) => count(a) && count(b) && a <= now && now < b && b - a <= DAY;
 export class GatewaySetupError extends Error {
   constructor(readonly code: 'invalid-review' | 'conflict' | 'credential-unavailable' | 'state-unavailable' | 'preview-changed') { super(code); }
@@ -173,7 +174,8 @@ export class GatewayAdminSetup {
           reviewState: !associated ? 'invalid' : p.expiresAtMs <= now ? 'expired' : reviewed ? 'current' : 'invalid', credentialAssociated: associated,
           billing: p.profile.charging === 'metered' ? 'metered' : ['intrinsic-zero', 'provider-hard-stop'].includes(p.freeBillingSafety?.kind ?? '') ? p.freeBillingSafety!.kind : 'unreviewed' });
       }
-      return { kind: 'gateway_setup_status', version: 1, observedAtMs: now, deploymentEnabled: this.options.deploymentEnabled(),
+      const rollout = gatewayRollout(this.options.environment());
+      return { rollout: { mode: rollout.mode, canaryCount: rollout.uids.length }, kind: 'gateway_setup_status', version: 1, observedAtMs: now, deploymentEnabled: this.options.deploymentEnabled(),
         catalogRevision: c?.revision ?? null, expiresAtMs: c?.expiresAtMs ?? null,
         reviewState: invalid ? 'invalid' : !c ? 'missing' : c.expiresAtMs <= now ? 'expired' : profiles.some(p => p.reviewState === 'current') ? 'current' : 'invalid',
         credentialEnvironments: Object.keys(this.options.environment()).filter(k => envName(k) && !!this.options.environment()[k]).sort().slice(0, 64),
@@ -347,7 +349,7 @@ export class GatewayAdminSetup {
       const finalNow = this.options.now(); readGatewaySetupSubmission(v, finalNow);
       requireValue(this.credential(v) === generation && same(gatewayQuotaWindow(rule, finalNow), window), 'preview-changed');
       const deploymentEnabled = this.options.deploymentEnabled();
-      const previewBinding = hash({ submission: v, credentialGeneration: generation, account: oldAccount ?? null, policy: oldPolicy ?? null, rule: oldRule ?? null, deploymentEnabled, ...(v.recoverHealth ? { healthRecords } : {}) });
+      const previewBinding = hash({ submission: v, credentialGeneration: generation, account: oldAccount ?? null, policy: oldPolicy ?? null, rule: oldRule ?? null, deploymentEnabled, rollout: gatewayRollout(this.options.environment()), ...(v.recoverHealth ? { healthRecords } : {}) });
       const preview: GatewaySetupPreview = { kind: 'gateway_setup_preview', version: 1, previewBinding, ...(v.recoverHealth ? { healthRecoveryRecords: healthRecords.length } : {}), profileId: v.profileId,
         canonicalAccountId: v.canonicalAccountId, policyKeys: Object.keys(proposedPolicies), operationKind: v.operation?.kind ?? 'text', quotaMeter: dimension.meter as 'tokens/minute' | 'requests/minute', maximumOperationNanoUsd: v.billing !== 'metered' ? 0 : v.operation?.kind === 'vision-pdf' ? maximumCostNanoUsd(1048576, v.maxOutputTokens, v.inputNanoUsdPerMillion!, v.outputNanoUsdPerMillion!) : Math.max(...Object.values(proposedPolicies).map(p => p.logicalLimitNanoUsd)), billing: v.billing, expiresAtMs: v.expiresAtMs,
         localTokensPerMinute: v.localTokensPerMinute, reviewedPriority: reviewedPriority(v), credentialAssociated: true, paidAuthority: readPaidPolicy(paidRaw) ? 'existing' : 'missing', activationFlagChanged: false, deploymentEnabled };

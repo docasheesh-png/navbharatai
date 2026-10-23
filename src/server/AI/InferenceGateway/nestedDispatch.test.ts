@@ -19,7 +19,7 @@ import { EmbeddingStore } from '../../AgentV3/EmbeddingSearch';
 import { runProfessionalChatWithUsage } from '../../professionals/engine';
 import { webFetchUrl } from '../../AgentV3/webFetch';
 let network: ReturnType<typeof vi.spyOn<typeof globalThis, 'fetch'>>;
-beforeEach(() => {
+beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
   vi.clearAllMocks(); m.verify.mockResolvedValue('verified-user'); m.profileLoad.mockResolvedValue(null); __resetBraveSearch(); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'off'); vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'off');
   vi.stubEnv('SEMANTIC_MEMORY', 'on'); vi.stubEnv('SEMANTIC_MEMORY_PROVIDER', 'gemini'); vi.stubEnv('GEMINI_API_KEY', 'non-secret-fixture');
   vi.stubEnv('AGENTV3_FILE_EMBEDDINGS', 'on'); vi.stubEnv('BRAVE_API_KEY', 'non-secret-fixture');

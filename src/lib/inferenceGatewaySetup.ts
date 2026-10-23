@@ -27,6 +27,7 @@ export interface GatewaySetupSubmission {
 }
 export interface GatewaySetupStatus {
   kind: 'gateway_setup_status'; version: 1; observedAtMs: number;
+  rollout?: { mode: 'canary' | 'all' | 'invalid'; canaryCount: number };
   deploymentEnabled: boolean; catalogRevision: string | null;
   reviewState: 'missing' | 'current' | 'expired' | 'invalid'; expiresAtMs: number | null;
   credentialEnvironments: string[];
@@ -48,6 +49,7 @@ export function isGatewaySetupStatus(value: unknown): value is GatewaySetupStatu
   const str = (s: unknown) => typeof s === 'string' && s.length > 0 && s.length <= 256;
   const n = (x: unknown) => typeof x === 'number' && Number.isSafeInteger(x) && x >= 0;
   return v.kind === 'gateway_setup_status' && v.version === 1 && n(v.observedAtMs)
+    && (v.rollout === undefined || (v.rollout !== null && typeof v.rollout === 'object' && ['canary', 'all', 'invalid'].includes(v.rollout.mode) && n(v.rollout.canaryCount) && v.rollout.canaryCount <= 32))
     && typeof v.deploymentEnabled === 'boolean' && (v.catalogRevision === null || str(v.catalogRevision))
     && ['missing', 'current', 'expired', 'invalid'].includes(v.reviewState) && (v.expiresAtMs === null || n(v.expiresAtMs))
     && Array.isArray(v.credentialEnvironments) && v.credentialEnvironments.length <= 64 && v.credentialEnvironments.every(str)

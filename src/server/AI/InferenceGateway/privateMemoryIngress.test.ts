@@ -13,7 +13,7 @@ vi.mock('../../lib/serverDb', async original => ({ ...await original<typeof impo
 import { registerProfessionalsRoutes } from '../../routes/professionals';
 const route = () => captureRoutes(registerProfessionalsRoutes).get('POST /api/professional/:id/chat')!;
 const request = () => mockReq({ params: { id: 'teacher_ai' }, headers: { authorization: 'Bearer synthetic-token' }, body: { message: 'hello', userId: 'victim-user', uid: 'victim-user' } });
-beforeEach(() => {
+beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
   vi.clearAllMocks(); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'on'); vi.stubEnv('INFERENCE_GATEWAY_SURFACES', 'professional'); vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'off');
   vi.stubEnv('SEMANTIC_MEMORY', 'on'); vi.stubEnv('SEMANTIC_MEMORY_PROVIDER', 'gemini'); vi.stubEnv('GEMINI_API_KEY', 'synthetic-offline');
   m.verify.mockResolvedValue('verified-owner'); m.identity.mockResolvedValue({ uid: 'verified-owner', email: null });

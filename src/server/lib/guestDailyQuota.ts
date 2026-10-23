@@ -36,6 +36,7 @@ import { doc, getServerDb, runTransaction } from './serverDb';
 import { verifyFirebaseIdentity } from './authMiddleware';
 import { anonymousCallerTier, type GuestSurface } from './anonymousCapabilities';
 import { parseEnvFlag } from './envFlag';
+import { gatewayRolloutAllowsGuest } from '../AI/InferenceGateway/rollout';
 
 /** The header the app sends with its anonymous device id. */
 export const GUEST_ID_HEADER = 'x-nb-guest';
@@ -85,7 +86,7 @@ function issueGuestInferenceAdmission(req: Request, res: Response, principalId: 
   res.once('finish', revoke); res.once('close', revoke);
 }
 function gatewayGuestSelected(surface: GuestSurface, env: NodeJS.ProcessEnv): boolean {
-  return surface === 'chat' && parseEnvFlag(env.INFERENCE_GATEWAY_ENABLED) === true
+  return surface === 'chat' && gatewayRolloutAllowsGuest(env) && parseEnvFlag(env.INFERENCE_GATEWAY_ENABLED) === true
     && (!env.INFERENCE_GATEWAY_SURFACES?.trim() || env.INFERENCE_GATEWAY_SURFACES.split(',').map(s => s.trim()).includes('chat'));
 }
 function guestStoreUnavailable(res: Response): void {

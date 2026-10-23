@@ -16,7 +16,7 @@ vi.mock('./store', () => ({ FirestoreRegistryStore: class {
   async record() {}
   async updateHealth() {}
 } }));
-beforeEach(() => {
+beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
   vi.resetModules(); vi.clearAllMocks(); mock.sync.mockResolvedValue({ status: 'synced', version: 'version' }); mock.refresh.mockResolvedValue({ status: 'updated', updatedProfiles: 1 });
   const now = Date.now(); const id = 'test/model:free'; const key = 'synthetic-account-key';
   vi.stubEnv('LIVE_MODEL_REGISTRY_ENABLED', 'true'); vi.stubEnv('OPENROUTER_API_KEY', key);

@@ -188,7 +188,7 @@ export function registerProfessionalsRoutes(app: Express): void {
             ...(countedFree ? { signal, beforeDispatch: () => assertFreeAnswerActive(req) } : {}),
             ...(config.visionInstruction ? { instruction: config.visionInstruction } : {}),
             // The free tier never runs Claude (ROUTING_AND_BILLING: weak never runs Sonnet/Opus).
-            ...(gate.tier === 'free' ? { noClaude: true } : {}),
+            ...(gate.tier === 'free' ? { noClaude: true, freeTier: true } : {}),
             onGatewayResult: result => {
               if (!result.inferenceGateway) return;
               // Keep child media calls separate from the existing text-turn wallet formula.

@@ -123,7 +123,7 @@ export function registerScreenshotToPromptRoutes(app: Express): void {
     try {
       const result = await runVisionChain(
         [{ name: 'screenshot', type, base64: image }],
-        { prompt: buildScreenshotPrompt(body.style, body.framework, body.includeJs), allowClaude: false },
+        { prompt: buildScreenshotPrompt(body.style, body.framework, body.includeJs), allowClaude: false, tier: 'free' },
       );
       const visionSpec = result?.text?.trim();
       if (!visionSpec) {

@@ -14,10 +14,13 @@ vi.mock('../../AppContext/AppContextInjector', () => ({ AppContextInjector: { ge
 import { registerSdaRoutes } from '../../routes/sda';
 import { currentInferenceGatewayContext } from './runtime';
 import { readFileSync } from 'node:fs';
+import { setFreeTierPaidStoreForTests } from '../../lib/freeTierPaidCap';
 const route = () => captureRoutes(registerSdaRoutes as any).get('POST /api/sda-chat')!;
 let sequence = 0;
 const request = (body: Record<string, unknown> = {}) => mockReq({ body: { message: 'Discuss assessment of fever', sessionId: `gateway-case-${++sequence}`, ...body } });
 beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
+  // Free-tier paid rungs need the shared daily cap's authority; an always-open fake keeps this suite about routing.
+  setFreeTierPaidStoreForTests({ reservePaid: async i => ({ id: 'a'.repeat(64), day: '2026-10-23', uidHash: 'b'.repeat(64), maxCostNanoUsd: i.maxCostNanoUsd, createdAt: 0, mayDispatch: true }), settlePaid: async () => true });
   vi.clearAllMocks(); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'on'); vi.stubEnv('INFERENCE_GATEWAY_SURFACES', 'doctor');
   vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'on'); vi.stubEnv('DOSE_DIRECT_ANSWER', 'off'); vi.stubEnv('SDA_VERIFY', '1');
   for (const key of ['GROK_API_KEY', 'XAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY']) vi.stubEnv(key, '');
@@ -28,7 +31,7 @@ beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
   m.vertex.mockResolvedValue({ text: 'Legacy report question?' }); m.document.mockResolvedValue('Extracted text'); m.context.mockReturnValue(''); m.charge.mockResolvedValue(undefined);
   vi.spyOn(console, 'log').mockImplementation(() => {}); vi.spyOn(console, 'error').mockImplementation(() => {});
 });
-afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); setFreeTierPaidStoreForTests(undefined); });
 describe('Doctor AI retains its original routing, audit and billing', () => {
   it.each(['free', 'paid'])('both free-system flags never select direct SDA ingress for the existing %s tier', async tier => {
     m.gate.mockResolvedValue({ allow: true, tier, uid: 'verified-doctor', countsAgainstFree: tier === 'free', billableFraction: tier === 'free' ? 0 : 1 });

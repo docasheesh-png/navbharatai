@@ -66,7 +66,7 @@ export function avatarVerdict(reply: string | null | undefined): 'safe' | 'unsaf
 export async function checkAvatar(mime: string, bytes: Buffer): Promise<'safe' | 'unsafe' | 'unknown'> {
   if (process.env.VITEST || process.env.NODE_ENV === 'test') return 'unknown';
   const r = await runVisionChain([{ name: 'avatar', type: mime, base64: bytes.toString('base64') }], {
-    prompt: AVATAR_CHECK_PROMPT, allowClaude: false, timeoutMs: 15_000,
+    prompt: AVATAR_CHECK_PROMPT, allowClaude: false, tier: 'free', timeoutMs: 15_000,
   }).catch(() => null);
   return avatarVerdict(r?.text);
 }

@@ -19,12 +19,22 @@ describe('a live env file never becomes a durable project file (TD-1)', () => {
   });
 
   it('writes the vault into the sandbox and never tells the durable callback', async () => {
-    const spy = vi.fn();
-    const { act, d } = makeDispatcher({ onFileWrite: spy });
-    d.setUserSecrets({ OPENAI_API_KEY: 'sk-FAKE' });
-    await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
-    expect(act.files.get('.env') ?? '').toContain('OPENAI_API_KEY=sk-FAKE');
-    expect(spy.mock.calls.some((c) => String(c[0]).split('/').pop() === '.env')).toBe(false);
+    // This exercises durable-write isolation, not the provider's network availability.
+    const probe = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+    try {
+      const spy = vi.fn();
+      const { act, d } = makeDispatcher({ onFileWrite: spy });
+      d.setUserSecrets({ OPENAI_API_KEY: 'sk-FAKE' });
+      await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+      expect(act.files.get('.env') ?? '').toContain('OPENAI_API_KEY=sk-FAKE');
+      expect(spy.mock.calls.some((c) => String(c[0]).split('/').pop() === '.env')).toBe(false);
+      expect(probe).toHaveBeenCalledExactlyOnceWith(
+        'https://api.openai.com/v1/models',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    } finally {
+      probe.mockRestore();
+    }
   });
 
   it('recordingActuator notes source files and skips a vault env file', async () => {

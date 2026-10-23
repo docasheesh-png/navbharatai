@@ -553,7 +553,7 @@ export function EngineReportsPanel({ adminToken, onStatus, only, heading }: Engi
                   <Stat label="Free share (today)" value={pct(verdict?.freeShare)} tone="text-success" />
                   <Stat label="Turns (today)" value={num(today?.turns)} />
                   <Stat label="Real cost (today)" value={usd(today?.realUsd)} />
-                  <Stat label="Unmeasured turns" value={num(today?.unmeasuredTurns)} tone="text-warn" />
+                  <Stat label="Unknown-cost turns" value={num(today?.unmeasuredTurns)} tone="text-warn" />
                 </div>
                 {verdict?.message ? (
                   <p className="text-[12px] text-accent-text font-bold leading-relaxed">{verdict.message}</p>

@@ -23,6 +23,7 @@ import { parseVialTeaching } from '../lib/neonatalDosing';
 import { loadVials, saveVial } from '../lib/vialMemory';
 import { chatBuildMeta } from '../lib/chatBuildMeta';
 import { platformHeader } from '../lib/platformHeader';
+import { consumeChatResponseStream, ChatStreamTerminalError, gatewayChatFailure } from '../lib/chatResponseStream';
 export interface ChatEngineDeps {
   // values read
   input: string;
@@ -98,7 +99,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
     let endpoint = '/api/chat/navbharatai';
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    abortRef.current = controller;
+    const timeoutId = setTimeout(() => controller.abort(), 95000);
 
     try {
       const response = await axios.post(endpoint, {
@@ -132,20 +134,26 @@ export function useChatEngine(deps: ChatEngineDeps) {
       });
       
       clearTimeout(timeoutId);
+      if (controller.signal.aborted || stoppedRef.current) throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The reply was stopped.', partial: false });
       return response.data.reply;
     } catch (error: any) {
       clearTimeout(timeoutId);
       console.error("AI REQUEST FAILURE", error);
 
-      if (axios.isCancel(error)) {
-        throw new Error("AI response timeout. Server or AI may be overloaded.");
+      const terminal = gatewayChatFailure(error.response?.data);
+      if (terminal) throw new ChatStreamTerminalError(terminal);
+      if (axios.isCancel(error) || !error.response || error.response.status >= 500) {
+        // An aborted request may already have generated/billed. Never create a second logical request.
+        throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The AI service could not confirm the reply. Please retry when the service is available.', partial: false });
       }
       
       let errMsg = "AI request failed.";
       // A signed-out visitor who has used today's free messages: open sign-in and say so plainly.
       if (error.response?.status === 403 && error.response?.data?.code === GUEST_LIMIT_CODE) {
         openSignIn();
-        throw new Error(String(error.response.data.error || 'Please sign in to keep chatting.'));
+        const notice = String(error.response.data.error || 'Please sign in to keep chatting.');
+        setMessages(prev => [...prev, { id: `guest-limit-${Date.now()}`, text: notice, sender: 'ai', timestamp: new Date() }]);
+        throw Object.assign(new Error(notice), { guestLimit: true });
       }
 
       if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') errMsg = "Network connection failed. Please check your internet or the backend availability.";
@@ -408,7 +416,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
         // A fresh controller per attempt, exposed via abortRef so the Stop button can cancel this fetch.
         const userAbort = new AbortController();
         abortRef.current = userAbort;
-        const response = await fetch(endpoint, {
+        let response: Response;
+        try { response = await fetch(endpoint, {
           method: 'POST',
           headers,
           body: JSON.stringify({
@@ -437,7 +446,11 @@ export function useChatEngine(deps: ChatEngineDeps) {
           }),
           // The user can Stop this (abortRef) OR it self-cancels after 90s — whichever fires first.
           signal: AbortSignal.any([userAbort.signal, AbortSignal.timeout(90000)]),
-        });
+        }); } catch (error) {
+          if (userAbort.signal.aborted) throw error;
+          // No response is not proof of non-dispatch. Do not issue a new logical request.
+          throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The connection ended before the reply was confirmed. Please retry when the service is available.', partial: false });
+        }
 
         if (!response.ok) {
           // A signed-out visitor who has used today's free messages (checked BEFORE the 401 branch below,
@@ -448,6 +461,9 @@ export function useChatEngine(deps: ChatEngineDeps) {
             throw Object.assign(new Error(guestLimit), { guestLimit: true });
           }
           const errData = await response.json().catch(() => ({}));
+          const terminal = gatewayChatFailure(errData);
+          if (terminal) throw new ChatStreamTerminalError(terminal);
+          if (response.status >= 500) throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The AI service could not confirm the reply. Please retry when the service is available.', partial: false });
           if (errData?.maintenance === true && typeof errData.reply === 'string') {
             setMessagesForTab(prev => [...prev, { id: `maintenance-${Date.now()}`, text: errData.reply, sender: 'ai', timestamp: new Date() }]);
             return;
@@ -477,66 +493,22 @@ export function useChatEngine(deps: ChatEngineDeps) {
             timestamp: new Date(),
           }]);
 
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let accumulated = '';
-          /** What the server says it is doing while the answer does not exist yet. Never part of the reply. */
-          let status = '';
           let lastUpdate = 0;
-          let sseBuffer = '';
-
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              const raw = decoder.decode(value, { stream: true });
-
-              if (isSSE) {
-                // Parse SSE: lines like "data: {...}\n\n" and ": ping\n\n" (heartbeat, ignored)
-                sseBuffer += raw;
-                const events = sseBuffer.split('\n\n');
-                sseBuffer = events.pop() ?? '';
-                for (const event of events) {
-                  for (const line of event.split('\n')) {
-                    if (!line.startsWith('data: ')) continue;
-                    const payload = line.slice(6).trim();
-                    if (payload === '[DONE]') break;
-                    try {
-                      const parsed = JSON.parse(payload);
-                      if (parsed.c) accumulated += parsed.c;
-                      // A STATUS, NOT AN ANSWER (chatGrounding.ts). A question about today's price,
-                      // score or weather is answered from a live lookup, and that lookup runs BEFORE
-                      // the first word can exist — up to several seconds in which this bubble used to
-                      // show nothing but a cursor. The server now says what it is doing the moment it
-                      // starts; this shows that line until the real answer's first character arrives.
-                      //
-                      // It is deliberately NOT added to `accumulated`: the status must never reach the
-                      // saved message, be copied with the answer, or survive into history. An older
-                      // server never sends `s`, and then this is dead code and the bubble behaves
-                      // exactly as before.
-                      else if (typeof parsed.s === 'string' && parsed.s && !accumulated) status = parsed.s;
-                    } catch { /* malformed chunk, skip */ }
-                  }
-                }
-              } else {
-                accumulated += raw;
-              }
-
-              const now = Date.now();
-              if (now - lastUpdate > 40) {
-                // The answer the moment there is one; until then the status, so the wait has a visible
-                // reason. `accumulated` wins outright — a status can never sit above real text.
-                const snap = accumulated || status;
-                setMessagesForTab(prev => prev.map(m => m.id === streamingMsgId ? { ...m, text: snap + '▋' } : m));
-                lastUpdate = now;
-              }
+          const streamed = await consumeChatResponseStream(response.body, isSSE, snapshot => {
+            if (stoppedRef.current) return;
+            const now = Date.now();
+            if (now - lastUpdate > 40) {
+              setMessagesForTab(prev => prev.map(m => m.id === streamingMsgId ? { ...m, text: snapshot + '▋' } : m));
+              lastUpdate = now;
             }
-          } finally {
-            reader.releaseLock();
-          }
-          // Final update — remove cursor
-          setMessagesForTab(prev => prev.map(m => m.id === streamingMsgId ? { ...m, text: accumulated } : m));
-          return { reply: accumulated, model: 'streaming' };
+          });
+          // Keep genuine partial text/notice, remove the cursor, and never log an error frame as AI success.
+          if (stoppedRef.current) throw new DOMException('Stopped', 'AbortError');
+          const finalText = streamed.failure?.code === 'STREAM_INTERRUPTED' && streamed.text
+            ? `${streamed.text}\n\n${streamed.failure.message}` : streamed.text || streamed.failure?.message || '';
+          setMessagesForTab(prev => prev.map(m => m.id === streamingMsgId ? { ...m, text: finalText } : m));
+          if (streamed.failure) throw new ChatStreamTerminalError(streamed.failure, true);
+          return { reply: streamed.text, model: 'streaming' };
         }
 
         // Fallback: JSON response
@@ -549,7 +521,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
           try {
             return await performStreamingBackendCall();
           } catch (err: any) {
-            const isHardError = err.message?.includes('Session expired')
+            const isHardError = err?.guestLimit === true || stoppedRef.current || err?.name === 'AbortError' || err instanceof ChatStreamTerminalError || err.message?.includes('Session expired')
               || err.message?.includes('Too many requests')
               || streamingMsgId !== null; // streaming already started — don't retry mid-stream
             if (isHardError || attempt >= 3) throw err;
@@ -579,6 +551,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
 
           data = await runFrontendPipeline(messageToSend, isRealTime || detectedIntent === 'security', historyForAPI, detectedIntent, potentialTarget, currentAgent, currentMode);
         } catch (frontendErr: any) {
+          if (frontendErr instanceof ChatStreamTerminalError || frontendErr?.guestLimit === true) throw frontendErr;
           console.warn('Frontend Gemini failed, trying backend fallback...', frontendErr.message);
           data = await callWithRetry();
         }
@@ -586,6 +559,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
         data = await callWithRetry();
       }
       
+      if (stoppedRef.current) throw new DOMException('Stopped', 'AbortError');
       // The bubble this reply lives in — the streamed one, or the one added just below. A successful code
       // sync marks THIS bubble as a build (Q-781), so its View preview / deploy row appear under it.
       let replyMsgId: string | null = streamingMsgId;
@@ -672,6 +646,14 @@ export function useChatEngine(deps: ChatEngineDeps) {
           return prev.map((m, i) => (i === prev.length - 1 ? { ...m, text: cleaned } : m));
         });
         return; // finally still clears the loading state
+      }
+      if (error instanceof ChatStreamTerminalError) {
+        // The server's honest unavailable/interrupted notice already lives in the stream bubble.
+        // Streaming has started, so callWithRetry cannot issue another provider request.
+        if (!error.displayed) setMessagesForTab(prev => [...prev, { id: `terminal-${Date.now()}`, text: error.message, sender: 'ai', timestamp: new Date() }]);
+        setErrorContext({ type: classifyError(error), message: error.message, lastInput: messageToSend });
+        addLog(`AI Error: ${error.message}`, 'error');
+        return; // finally clears loading; do not append a misleading second answer.
       }
       // Today's guest messages are used up: the reply is already in the chat and sign-in is open.
       if (error?.guestLimit) return;

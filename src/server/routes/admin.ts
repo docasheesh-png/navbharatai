@@ -1,3 +1,5 @@
+import { registerInferenceGatewayAdminRoutes } from './inferenceGatewayAdmin';
+import { registerFreeChatChainRoutes } from './freeChatChainAdmin';
 import { registerLiveModelRegistryRoutes } from './liveModelRegistry';
 import { sendAdminOwnerApps } from './adminOwnerApps';
 import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
@@ -178,6 +180,8 @@ const GROWING_COLLECTIONS: readonly string[] = [
   // and admin decisions; controls/health grow per model. Only history/routing are bounded rings.
   // Inventory the entire retained tree, not a misleading count of its two root documents.
   'live_ai_registry',
+  // Shared quota windows, paid reservations and routing samples for Free Chat.
+  'free_chat_chain',
   'metrics_snapshots', 'session_error_hints', 'hosting_usage', 'site_analytics',
   // One small document per finished phone build — the only per-run half of the build counters.
   'mobile_build_counted',
@@ -426,6 +430,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   };
 
   registerLiveModelRegistryRoutes(app, verifyAdminToken);
+  registerFreeChatChainRoutes(app, verifyAdminToken);
+  registerInferenceGatewayAdminRoutes(app, verifyAdminToken);
   registerAiMaintenanceRoutes(app, verifyAdminToken);
   registerFreeProgramRoutes(app, verifyAdminToken);
 
@@ -1857,6 +1863,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           // How many of these calls carried real token counts — so a bar of 888 requests with 0 tokens
           // reads as "unmeasured", which is what it is, rather than as a free provider.
           measuredCalls: r.measured,
+          pricedCalls: r.priced,
+          unpricedCalls: r.unpriced,
         }))
         .sort((a, b) => b.requests - a.requests);
 
@@ -1904,8 +1912,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         // HOW SURE ARE WE? `providerCostComplete` false ⇒ the cost above is a FLOOR (some calls could
         // not be priced), so the profit below is an UPPER BOUND and the screen must say "at most".
         providerCostComplete: usage.complete,
-        pricedCalls: usage.measuredCalls,
-        unpricedCalls: usage.unmeasuredCalls,
+        measuredCalls: usage.measuredCalls,
+        pricedCalls: usage.pricedCalls,
+        unpricedCalls: usage.unpricedCalls,
         estimatedProfit: marginInr(totalRevenue, totalProviderCost, usage.complete).valueInr,
         failedRequests: serverStats.failedLogins,
         expensiveUsers, modelWise, providerWise, cashfreeStatus, burnRate: totalProviderCost / Math.max(1, logs.length),

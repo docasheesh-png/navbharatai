@@ -1,3 +1,5 @@
+import type { AIProviderResponse } from '../AI/Router/ProviderTypes';
+import { maybeGatewayVision, isGatewayRouteSelected, InferenceGatewayTerminalError } from '../AI/InferenceGateway/runtime';
 import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 // Server-side vision description — turns an uploaded image or PDF into TEXT that
 // any downstream text model (or the v5.0 build loop) can use, WITHOUT making the
@@ -140,7 +142,7 @@ export function visionProviderChain(opts: { useClaude?: boolean; noClaude?: bool
  * instruction wins outright rather than being concatenated.
  */
 export function resolveVisionInstruction(
-  opts: { designContract?: boolean; instruction?: string } = {},
+  opts: { designContract?: boolean; instruction?: string; onGatewayResult?: (result: AIProviderResponse) => void } = {},
 ): string {
   const custom = opts.instruction?.trim();
   if (custom) return custom;
@@ -154,10 +156,24 @@ export function resolveVisionInstruction(
  */
 export async function describeVisionAttachments(
   atts: RawAttachment[],
-  opts: { useClaude?: boolean; noClaude?: boolean; designContract?: boolean; instruction?: string } = {},
+  opts: { useClaude?: boolean; noClaude?: boolean; designContract?: boolean; instruction?: string; onGatewayResult?: (result: AIProviderResponse) => void } = {},
 ): Promise<string> {
   const vision = (atts || []).filter((a) => a && a.base64 && isVisionAttachment(a.type, a.name));
   if (vision.length === 0) return '';
+  if (isGatewayRouteSelected()) {
+    if (opts.useClaude || opts.designContract || vision.some(att => !['image/png', 'image/jpeg', 'application/pdf'].includes(att.type))) {
+      throw new InferenceGatewayTerminalError('unsupported-vision-capability');
+    }
+    const blocks: string[] = [];
+    for (const att of vision) {
+      const result = await maybeGatewayVision({ kind: 'vision-pdf', prompt: resolveVisionInstruction(opts),
+        attachments: [{ mimeType: att.type as 'image/png' | 'image/jpeg' | 'application/pdf', data: att.base64 }], streaming: false });
+      if (!result?.ok || !result.content.trim()) throw new InferenceGatewayTerminalError('vision-unavailable');
+      opts.onGatewayResult?.(result);
+      blocks.push(`[${att.type === 'application/pdf' ? 'PDF' : 'Image'}: ${att.name}]\n${clamp(result.content)}`);
+    }
+    return blocks.join('\n\n');
+  }
   assertLegacyInferenceAllowed('vision-description');
 
   // The rung order comes from visionProviderChain (pure, tested): a weak/free (noClaude) build never

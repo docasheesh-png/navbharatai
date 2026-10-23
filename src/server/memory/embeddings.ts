@@ -1,3 +1,5 @@
+import { assertNoUnclaimedGatewayDispatch } from '../AI/InferenceGateway/dispatchBoundary';
+import { isGatewayRouteSelected, maybeGatewayEmbedding, currentInferenceGatewayContext, InferenceGatewayTerminalError } from '../AI/InferenceGateway/runtime';
 import { strictFreeRequired } from '../AI/inferencePolicy';
 // Embedding client for semantic memory (admin 2026-07-17).
 //
@@ -10,7 +12,8 @@ import { strictFreeRequired } from '../AI/inferencePolicy';
 //
 // Override with SEMANTIC_MEMORY_PROVIDER = 'vertex' | 'gemini'. Best-effort by construction: no usable
 // backend, an SDK failure, or a malformed response → returns null (the caller skips memory for that
-// turn). It NEVER throws, so a chat is never broken by it.
+// turn). That unselected legacy path never throws. Selected gateway calls use a separate claimed Vertex transport with the same model
+// identity and shared Free-product budget; unsupported configured spaces fail explicitly.
 
 import { memoryEmbedModel } from './semanticMemory';
 
@@ -88,6 +91,20 @@ function extractVector(res: any): number[] | null {
  * response). Bounded by a hard timeout so a slow embedding call can never delay a chat reply for long.
  */
 export async function embedText(text: string, timeoutMs = 6000): Promise<number[] | null> {
+  if (isGatewayRouteSelected()) {
+    const t = (text || '').trim(); if (!t) return null;
+    // Vector spaces are not interchangeable just because dimensions match. Preserve
+    // the existing configured model/backend instead of silently re-embedding it.
+    if (selectBackend() !== 'vertex' || memoryEmbedModel() !== 'text-embedding-004') {
+      throw new InferenceGatewayTerminalError('embedding-space-unavailable');
+    }
+    const result = await maybeGatewayEmbedding(t, { signal: currentInferenceGatewayContext()?.signal });
+    if (!result || result.model !== memoryEmbedModel() || result.dimensions !== 768 || result.values.length !== 768) {
+      throw new InferenceGatewayTerminalError('embedding-space-unavailable');
+    }
+    return [...result.values];
+  }
+  assertNoUnclaimedGatewayDispatch('embedding');
   if (strictFreeRequired()) return null; // No verified free embedding endpoint; recall remains best effort.
   const t = (text || '').trim();
   if (!t) return null;

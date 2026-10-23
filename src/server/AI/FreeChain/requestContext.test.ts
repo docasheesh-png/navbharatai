@@ -1,0 +1,17 @@
+import { beforeEach, afterEach, it, expect, vi } from 'vitest';
+const { verify }=vi.hoisted(()=>({verify:vi.fn()}));
+vi.mock('../../lib/authMiddleware',()=>({verifyFirebaseToken:verify}));
+import { freeChainRequestContext } from './requestContext';
+import type { Request } from 'express';
+const request=(body:unknown={})=>({body}) as Request;
+const data=()=>({tier:'navbharat',message:'hello',history:[],attachments:0,hasProfile:false,hasMemory:false,grounded:false});
+beforeEach(()=>{verify.mockReset();verify.mockResolvedValue('verified-owner');vi.stubEnv('FREE_CHAIN_ENABLED','on');});
+afterEach(()=>vi.unstubAllEnvs());
+it('flag OFF is inert, does not reauthenticate or trust body identity',async()=>{vi.stubEnv('FREE_CHAIN_ENABLED','off');expect(await freeChainRequestContext(request({uid:'fake'}),data())).toBeUndefined();expect(verify).not.toHaveBeenCalled();});
+it.each(['free','pro','doctor','professional','sda'])('excludes %s before authentication',async tier=>{expect(await freeChainRequestContext(request(),{...data(),tier})).toBeUndefined();expect(verify).not.toHaveBeenCalled();});
+it('excludes attachments and anonymous requests',async()=>{expect(await freeChainRequestContext(request(),{...data(),attachments:1})).toBeUndefined();verify.mockResolvedValue(null);expect(await freeChainRequestContext(request({uid:'attacker'}),data())).toBeUndefined();});
+it('never uses body uid and hashes conversation identity',async()=>{const result=await freeChainRequestContext(request({uid:'attacker',conversationId:'private conversation'}),data());expect(result?.uid).toBe('verified-owner');expect(result?.conversationKey).toMatch(/^[a-f0-9]{64}$/);expect(JSON.stringify(result)).not.toContain('private conversation');});
+it.each([{hasProfile:true},{hasMemory:true}])('profile and memory exclude public cache',async flags=>{const result=await freeChainRequestContext(request(),{...data(),...flags});expect(result?.privateTurn).toBe(true);expect(result?.cacheEligible).toBe(false);});
+it.each(['What dose of medicine should I take?','मुझे दवा चाहिए'])('marks health turns private to restricted rungs',async message=>{const result=await freeChainRequestContext(request(),{...data(),message});expect(result?.healthTurn).toBe(true);expect(result?.cacheEligible).toBe(false);});
+it('grounding excludes cache; explicit private excludes it too',async()=>{expect((await freeChainRequestContext(request(),{...data(),grounded:true}))?.cacheEligible).toBe(false);expect((await freeChainRequestContext(request({private:true}),data()))?.privateTurn).toBe(true);});
+it('authentication failure stays on old path without pretending authenticated',async()=>{verify.mockRejectedValue(new Error('unavailable'));expect(await freeChainRequestContext(request(),data())).toBeUndefined();});

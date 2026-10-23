@@ -2,6 +2,7 @@ import { strictFreeRequired, StrictFreeCapabilityError } from '../inferencePolic
 import { strictFreeText } from '../LiveRegistry/runtime';
 import type { FreeTextResult } from '../LiveRegistry/dispatcher';
 import { assertAiAvailable } from '../../lib/aiMaintenance';
+import { maybeGatewayText } from '../InferenceGateway/runtime';
 
 import { AIProvider, AIProviderResponse, ProviderTelemetry } from './ProviderTypes';
 import { providerCooldownStore } from '../../lib/ProviderCooldownStore';
@@ -31,6 +32,9 @@ export interface StreamOutcome {
   latencyMs?: number;
   /** Did this turn pay for a second model to save latency? */
   raced?: boolean;
+  freeChain?: import('../FreeChain/telemetry').FreeChainTelemetry;
+  inferenceGateway?: AIProviderResponse['inferenceGateway'];
+  gatewayPricingProof?: AIProviderResponse['gatewayPricingProof'];
   usage?: AIProviderResponse['usage'];
   pricingProof?: FreeTextResult['pricingProof'];
   /**
@@ -99,14 +103,14 @@ function mergeRemoteCooldowns(remote: Record<string, number>) {
 // Start the cross-instance cooldown sync once at module load (no-op under tests).
 providerCooldownStore.startSync(mergeRemoteCooldowns);
 
-function acquireSlot(name: string): boolean {
+export function acquireSlot(name: string): boolean {
   const count = inFlight.get(name) || 0;
   if (count >= MAX_IN_FLIGHT) return false;
   inFlight.set(name, count + 1);
   return true;
 }
 
-function releaseSlot(name: string) {
+export function releaseSlot(name: string) {
   inFlight.set(name, Math.max(0, (inFlight.get(name) || 1) - 1));
 }
 
@@ -199,8 +203,8 @@ export class AIRouter {
     return this.providers.map(p => ({ name: p.name, priority: p.priority, lastResort: !!p.lastResort }));
   }
 
-  async route(prompt: string, systemPrompt?: string, images?: string[], modelOverride?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
-    return this.execute(prompt, undefined, systemPrompt, images, modelOverride);
+  async route(prompt: string, systemPrompt?: string, images?: string[], modelOverride?: string, signal?: AbortSignal): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+    return this.execute(prompt, undefined, systemPrompt, images, modelOverride, signal);
   }
 
   /**
@@ -211,6 +215,10 @@ export class AIRouter {
    * keeping Claude strictly as the final safety net (Grok-primary/Claude-last law).
    */
   async routeRaced(prompt: string, systemPrompt?: string, images?: string[]): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+    // Selected gateway turns own their complete sequential fallback chain. They
+    // must never enter this legacy speculative race, including on refusal/error.
+    const gateway = await maybeGatewayText({ prompt, systemPrompt, images });
+    if (gateway) return { response: gateway, telemetry: { provider: gateway.provider, retries: 0, latency: gateway.latencyMs, success: gateway.ok } };
     if (strictFreeRequired()) return this.routeVerifiedFree(prompt, systemPrompt, undefined, images);
     await assertAiAvailable();
     const racers = this.providers.filter(p => !p.lastResort);
@@ -389,6 +397,8 @@ export class AIRouter {
     onChunk: (text: string) => void,
     signal?: AbortSignal,
   ): Promise<StreamOutcome> {
+    const gateway = await maybeGatewayText({ prompt, systemPrompt, onChunk, signal });
+    if (gateway) return { ...gateway, raced: false };
     if (strictFreeRequired()) {
       await assertAiAvailable();
       const response = await strictFreeText({ prompt, systemPrompt, onChunk, signal });
@@ -499,7 +509,11 @@ export class AIRouter {
     };
   }
 
-  private async execute(prompt: string, schema?: any, systemPrompt?: string, images?: string[], modelOverride?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+  private async execute(prompt: string, schema?: any, systemPrompt?: string, images?: string[], modelOverride?: string, signal?: AbortSignal): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+    // Keep the complete capability envelope. A schema, image or pinned model is
+    // never silently downgraded to plain text when a selected route cannot serve it.
+    const gateway = await maybeGatewayText({ prompt, systemPrompt, schema, images, modelOverride, signal });
+    if (gateway) return { response: gateway, telemetry: { provider: gateway.provider, retries: 0, latency: gateway.latencyMs, success: gateway.ok } };
     if (strictFreeRequired()) return this.routeVerifiedFree(prompt, systemPrompt, schema, images, modelOverride);
     await assertAiAvailable();
     const targetSchema = schema?.type === 'OBJECT' ? schema : undefined;

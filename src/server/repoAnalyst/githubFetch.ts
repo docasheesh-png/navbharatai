@@ -106,14 +106,16 @@ function ghHeaders(token?: string): Record<string, string> {
  * on not-found / rate-limit / network problems. `token` is optional (only to
  * raise rate limits or read accessible repos).
  */
-export async function fetchPublicRepo(ref: RepoRef, token?: string): Promise<RepoSnapshot> {
+export async function fetchPublicRepo(ref: RepoRef, token?: string, signal?: AbortSignal): Promise<RepoSnapshot> {
+  signal?.throwIfAborted();
   const { owner, repo } = ref;
   const headers = ghHeaders(token);
+  const cancellation = signal ? { signal } : {};
   const notes: string[] = [];
 
   let meta: any;
   try {
-    const r = await axios.get(`${GH_API}/repos/${owner}/${repo}`, { headers, timeout: 15000 });
+    const r = await axios.get(`${GH_API}/repos/${owner}/${repo}`, { headers, timeout: 15000, ...cancellation });
     meta = r.data;
   } catch (err: any) {
     const status = err?.response?.status;
@@ -122,35 +124,39 @@ export async function fetchPublicRepo(ref: RepoRef, token?: string): Promise<Rep
     throw new Error(`Could not reach GitHub for "${owner}/${repo}": ${err?.message || 'network error'}.`);
   }
 
+  signal?.throwIfAborted();
   const defaultBranch = meta.default_branch || 'main';
 
   // README (best-effort)
   let readme: string | null = null;
   try {
-    const r = await axios.get(`${GH_API}/repos/${owner}/${repo}/readme`, { headers, timeout: 15000 });
+    const r = await axios.get(`${GH_API}/repos/${owner}/${repo}/readme`, { headers, timeout: 15000, ...cancellation });
     if (r.data?.content) {
       const decoded = Buffer.from(r.data.content, 'base64').toString('utf-8');
       readme = decoded.length > README_MAX ? decoded.slice(0, README_MAX) : decoded;
       if (decoded.length > README_MAX) notes.push('README was truncated for length.');
     }
   } catch { notes.push('No README found (or it could not be read).'); }
+  signal?.throwIfAborted();
 
   // Languages (best-effort)
   let languages: string[] = [];
   try {
-    const r = await axios.get(`${GH_API}/repos/${owner}/${repo}/languages`, { headers, timeout: 15000 });
+    const r = await axios.get(`${GH_API}/repos/${owner}/${repo}/languages`, { headers, timeout: 15000, ...cancellation });
     languages = Object.entries(r.data || {}).sort((a: any, b: any) => b[1] - a[1]).map(([k]) => k);
   } catch { /* ignore */ }
+  signal?.throwIfAborted();
 
   // File tree (best-effort, truncated)
   let tree: string[] = [];
   let treeTruncated = false;
   try {
-    const r = await axios.get(`${GH_API}/repos/${owner}/${repo}/git/trees/${encodeURIComponent(defaultBranch)}?recursive=1`, { headers, timeout: 20000 });
+    const r = await axios.get(`${GH_API}/repos/${owner}/${repo}/git/trees/${encodeURIComponent(defaultBranch)}?recursive=1`, { headers, timeout: 20000, ...cancellation });
     const blobs = (r.data?.tree || []).filter((t: any) => t.type === 'blob').map((t: any) => t.path as string);
     if (r.data?.truncated || blobs.length > TREE_MAX) { treeTruncated = true; notes.push('The file tree was large and has been truncated.'); }
     tree = blobs.slice(0, TREE_MAX);
   } catch { notes.push('The file tree could not be fully read.'); }
+  signal?.throwIfAborted();
 
   // Key files (only those that exist in the tree), content fetched & truncated
   const keyFiles: RepoFile[] = [];
@@ -158,13 +164,14 @@ export async function fetchPublicRepo(ref: RepoRef, token?: string): Promise<Rep
   const wanted = KEY_FILE_CANDIDATES.filter((p) => present.has(p)).slice(0, MAX_KEY_FILES);
   for (const p of wanted) {
     try {
-      const r = await axios.get(`${GH_API}/repos/${owner}/${repo}/contents/${encodeURIComponent(p)}?ref=${encodeURIComponent(defaultBranch)}`, { headers, timeout: 15000 });
+      const r = await axios.get(`${GH_API}/repos/${owner}/${repo}/contents/${encodeURIComponent(p)}?ref=${encodeURIComponent(defaultBranch)}`, { headers, timeout: 15000, ...cancellation });
       if (r.data?.content) {
         const decoded = Buffer.from(r.data.content, 'base64').toString('utf-8');
         const truncated = decoded.length > FILE_MAX;
         keyFiles.push({ path: p, content: truncated ? decoded.slice(0, FILE_MAX) : decoded, truncated });
       }
     } catch { /* skip unreadable file */ }
+    signal?.throwIfAborted();
   }
 
   return {

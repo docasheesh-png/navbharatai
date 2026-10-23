@@ -17,6 +17,7 @@ export const WALLET_SUMMARY_FIELDS = [
 /** Every `ai_usage_logs` field the analytics rollup (`summariseUsage` + the page) reads. */
 export const USAGE_LOG_FIELDS = [
   'userId', 'createdAt', 'providerName', 'modelName', 'inputTokens', 'outputTokens', 'latencyMs', 'usageMeasured',
+  'freeChain', 'inferenceGateway',
 ] as const;
 
 /** A document reduced to the listed fields — what a `select(...)` returns. PURE (tests use it). */

@@ -108,7 +108,7 @@ export function platformMarginWindow(input: PlatformMarginInput): PlatformMargin
     unmeasuredTurns += num(d.unmeasuredTurns);
   }
 
-  const chat = { costInr: round2(input.usdToInr(chatUsage.costUsd)), complete: chatUsage.complete, calls: chatUsage.calls, unpricedCalls: chatUsage.unmeasuredCalls };
+  const chat = { costInr: round2(input.usdToInr(chatUsage.costUsd)), complete: chatUsage.complete, calls: chatUsage.calls, unpricedCalls: chatUsage.unpricedCalls };
   const buildsPart = { costInr: round2(input.usdToInr(buildUsd)), complete: buildsWithRealCost >= builds, builds, buildsWithRealCost };
   const assistants = { costInr: round2(input.usdToInr(assistantUsd)), complete: unmeasuredTurns === 0, turns, unmeasuredTurns };
   const costInr = round2(chat.costInr + buildsPart.costInr + assistants.costInr);

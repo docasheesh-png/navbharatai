@@ -45,5 +45,8 @@
   "src/server/runtime/PreviewDepWarmup.ts::inFlight": "lifecycle: a warmup in flight, removed when it settles",
   "src/server/lib/appMartSignals.ts::pendingApps": "For You signal buffer: capped at MAX_PENDING_APPS (5,000) and cleared on every 30 s flush",
   "src/server/lib/appMartSignals.ts::pendingAff": "For You per-viewer affinity buffer: capped at MAX_PENDING_USERS (1,000) and cleared on every 30 s flush",
-  "src/server/AgentV3/WorkspaceFileStore.ts::indexQueues": "One entry per workspace with an index update IN FLIGHT on this instance; each entry deletes itself when its queue drains (withIndexQueue), so it is bounded by concurrent saves, not by traffic."
+  "src/server/AgentV3/WorkspaceFileStore.ts::indexQueues": "One entry per workspace with an index update IN FLIGHT on this instance; each entry deletes itself when its queue drains (withIndexQueue), so it is bounded by concurrent saves, not by traffic.",
+  "src/server/AI/FreeChain/config.ts::validatedTimezones": "bounded in code at 32 entries: caches only deployment timezone-identifier validity; eviction never changes a quota window, permission or counter",
+  "src/server/AI/FreeChain/quota.ts::formatters": "bounded in code at 32 entries: reusable Intl formatters only; current DST windows and quota decisions are computed afresh",
+  "src/server/AI/FreeChain/runtime.ts::warned": "closed deployment-defined key set: fixed provider credential-environment authentication warnings and the deterministic configuration-error message; no request ids, users, prompts or mutable admin control values enter this set"
 }

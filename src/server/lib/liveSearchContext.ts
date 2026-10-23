@@ -1,3 +1,5 @@
+import { assertNoUnclaimedGatewayDispatch } from '../AI/InferenceGateway/dispatchBoundary';
+import { isGatewayRouteSelected, maybeGatewayGrounding, currentInferenceGatewayContext, InferenceGatewayTerminalError } from '../AI/InferenceGateway/runtime';
 // Live web-search grounding for the chat surfaces (admin 2026-07-12: "hamesha latest response de").
 //
 // The recencyDirective() already stops the AI from stating stale data as current. THIS goes one step
@@ -14,7 +16,7 @@
 //    DuckDuckGo as the free rescue; DuckDuckGo alone when there is no key), so it
 //    works out of the box and improves automatically when a key is added.
 
-import { WebSearch, formatSearchResults } from '../AgentV3/WebSearch';
+import { WebSearch, formatSearchResults, type SearchResult } from '../AgentV3/WebSearch';
 import { webFetchUrl, capText } from '../AgentV3/webFetch';
 import { liveDataContext, liveTopicCovered } from './liveDataSources';
 
@@ -160,10 +162,21 @@ export const PAGE_CONTEXT_MAX_CHARS = 3_500;
 
 /**
  * Returns a ready-to-inject "LIVE WEB RESULTS" block for a message that needs current facts, or ''
- * when the message doesn't need it / the search found nothing / it timed out. Never throws.
+ * when the message doesn't need it / the search found nothing / it timed out.
+ * Selected unsupported gateway grounding is terminal, never silently ungrounded.
  */
 export async function liveSearchContext(message: string, opts: LiveSearchOptions = {}): Promise<string> {
   if (!needsLiveSearch(message)) return '';
+  if (isGatewayRouteSelected()) {
+    const limit = Math.max(1, Math.min(opts.limit ?? 5, 10));
+    const query = shapeSearchQuery(message, opts.now ?? new Date());
+    const result = await maybeGatewayGrounding(query, { maxResults: limit, signal: currentInferenceGatewayContext()?.signal });
+    if (!result) throw new InferenceGatewayTerminalError('grounding-unavailable');
+    // Only reviewed, budgeted search is used here. Legacy HTML scraping and direct
+    // feeds are not silently certified as commercially free by the new policy.
+    return renderSearchBlock(query, result.results.map(r => ({ title: r.title, url: r.url, snippet: r.description })), opts);
+  }
+  assertNoUnclaimedGatewayDispatch('grounding-search');
 
   // REAL LIVE DATA FIRST (admin 2026-08-25: "train ki live location bhi bata de"). When the message
   // matches a live source (train/PNR/flight, weather, AQI, currency, PIN code, movies), its data outranks anything a search
@@ -211,6 +224,10 @@ async function searchBlock(message: string, opts: LiveSearchOptions): Promise<st
     opts.timeoutMs ?? 6000,
     [],
   );
+  return renderSearchBlock(query, results, opts);
+}
+
+async function renderSearchBlock(query: string, results: readonly SearchResult[], opts: LiveSearchOptions): Promise<string> {
   if (!results || results.length === 0) return '';
 
   // READ THE TOP RESULTS so the model has the words, not just two snippet lines. Best-effort:
@@ -228,9 +245,14 @@ async function searchBlock(message: string, opts: LiveSearchOptions): Promise<st
   //    listicle or a paywall; two rarely both are. So this is accuracy for free — the one trade this
   //    priority actually allows.
   let pageBlock = '';
-  if (opts.readTopResult !== false && results[0]?.url) {
+  const selectedContext = isGatewayRouteSelected() ? currentInferenceGatewayContext() : undefined;
+  const parentClosed = () => !!selectedContext && (selectedContext.signal?.aborted || Date.now() >= selectedContext.deadlineAtMs);
+  if (opts.readTopResult !== false && results[0]?.url && !parentClosed()) {
     const fetchPage = opts.fetchPage ?? (async (url: string) => {
-      const r = await webFetchUrl(url);
+      const r = await webFetchUrl(url, selectedContext ? {
+        signal: selectedContext.signal,
+        deadlineAtMs: Math.min(selectedContext.deadlineAtMs, Date.now() + (opts.pageTimeoutMs ?? 4000)),
+      } : undefined);
       return { ok: r.ok, text: r.text };
     });
     // `Math.trunc(x) || DEFAULT` was wrong and a test caught it: 0 is falsy, so asking for zero pages
@@ -242,7 +264,7 @@ async function searchBlock(message: string, opts: LiveSearchOptions): Promise<st
       : DEFAULT_PAGES_READ;
     const targets = results.slice(0, want).map((r) => r.url).filter((u): u is string => typeof u === 'string' && !!u);
     const pages = await Promise.all(targets.map((url) => withTimeout(
-      fetchPage(url).catch(() => ({ ok: false, text: '' })),
+      (parentClosed() ? Promise.resolve({ ok: false, text: '' }) : fetchPage(url)).catch(() => ({ ok: false, text: '' })),
       opts.pageTimeoutMs ?? 4000,
       { ok: false, text: '' },
     ).then((p) => ({ url, ...p }))));
@@ -255,7 +277,7 @@ async function searchBlock(message: string, opts: LiveSearchOptions): Promise<st
 
   const when = (opts.now ?? new Date()).toISOString().slice(0, 10);
   return `LIVE WEB RESULTS (fetched just now, ${when}):
-${formatSearchResults(query, results)}${pageBlock}
+${formatSearchResults(query, [...results])}${pageBlock}
 
 Use these CURRENT results as your PRIMARY source for anything time-sensitive in your answer — they are more up to date than your training data and override it on facts they cover. If they don't answer the question, say what you reliably know and that it may be dated.
 

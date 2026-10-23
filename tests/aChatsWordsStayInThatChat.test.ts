@@ -122,8 +122,8 @@ describe('🔒 source-level guards — what tsc and vitest cannot see', () => {
   it('the route keys attachment recall by the conversation and passes the id to the engine', () => {
     const src = codeOnly(read('src/server/routes/professionals.ts'));
     expect(src).toContain('attachmentRecallKey(verifiedUserId, config.id, conversationId)');
-    // (the options also carry the client's platform since Q-123 — the conversation id is what is guarded)
-    expect(src).toContain("verifiedUserId || undefined, gate.tier, { conversationId, platform: clientPlatform(req.headers['x-nbai-platform']) })");
+    // Additional lifecycle options may follow; verified identity and conversation ownership remain mandatory.
+    expect(src).toContain("verifiedUserId || undefined, gate.tier, { conversationId, platform: clientPlatform(req.headers['x-nbai-platform'])");
     // The old per-professional key must be gone — it was the second leak.
     expect(src).not.toContain('`${verifiedUserId}:${config.id}`');
   });

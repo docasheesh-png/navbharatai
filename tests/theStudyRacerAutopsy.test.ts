@@ -25,6 +25,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import ts from 'typescript';
 import { analyzeAppScope, namesAsProduct } from '../src/server/lib/appScopeAnalyzer';
 import { scanSecurity, callSpanAt } from '../src/server/AgentV3/SecurityAnalysis';
 import { enclosingTag } from '../src/server/AgentV3/jsxTags';
@@ -68,10 +69,32 @@ describe('1 · "youtube video ka link dalunga" is not a request to clone YouTube
 describe('2 · the three planner calls are attributed to the provider that answered', () => {
   const route = strip(src('src/server/routes/agentv3.ts'));
   it('the mega-roadmap, blueprint and project planners each feed the provider ledger', () => {
-    // Preserve the complete usage object, including verified pricing receipts, not only counts.
-    expect(route).toContain('captureTurnUsage(rmProvider, rmT.usage, rmT.model, rmT.usage.cacheReadInputTokens ?? 0, rmT.usage.cacheCreationInputTokens ?? 0);');
-    expect(route).toContain('captureTurnUsage(bpProvider, t.usage, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);');
-    expect(route).toContain('captureTurnUsage(ppProvider, t.usage, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);');
+    const parsed = ts.createSourceFile('agentv3.ts', route, ts.ScriptTarget.Latest, true);
+    const captures: ts.CallExpression[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'captureTurnUsage') captures.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+    for (const [provider, turn] of [['rmProvider', 'rmT'], ['bpProvider', 't'], ['ppProvider', 't']]) {
+      const calls = captures.filter(call => call.arguments[0]?.getText(parsed) === provider);
+      expect(calls, `${provider} must be attributed exactly once`).toHaveLength(1);
+      const args = calls[0].arguments;
+      expect(args).toHaveLength(5);
+      const usage = args[1];
+      expect(ts.isObjectLiteralExpression(usage)).toBe(true);
+      if (!ts.isObjectLiteralExpression(usage)) throw new Error('Missing measured planner usage');
+      const fields = Object.fromEntries(usage.properties.map(property => {
+        if (!ts.isPropertyAssignment(property)) throw new Error('Unexpected planner usage field');
+        return [property.name.getText(parsed), property.initializer.getText(parsed)];
+      }));
+      // Preserve original paid Builder attribution: exact measured input/output, model and cache
+      // counters. Retired Strict Weak pricing receipts must not change this billing contract.
+      expect(fields).toEqual({ inputTokens: `${turn}.usage.inputTokens`, outputTokens: `${turn}.usage.outputTokens` });
+      expect(args.slice(2).map(argument => argument.getText(parsed))).toEqual([
+        `${turn}.model`, `${turn}.usage.cacheReadInputTokens ?? 0`, `${turn}.usage.cacheCreationInputTokens ?? 0`,
+      ]);
+    }
   });
   it('🔒 no planner adds to the build total without also attributing it', () => {
     // Every `blueprintUsage.outputTokens +=` must be followed, within the same block, by a

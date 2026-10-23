@@ -40,6 +40,9 @@ export interface WebFetchResult {
 export interface WebFetchOptions {
   /** Also return the raw HTML (see WebFetchResult.html). Off by default — the model wants words. */
   keepHtml?: boolean;
+  /** Optional parent lifecycle, used by selected Free grounding. */
+  signal?: AbortSignal;
+  deadlineAtMs?: number;
 }
 
 /**
@@ -105,18 +108,25 @@ export function capText(text: string, maxChars = WEB_FETCH_MAX_CHARS): { text: s
  * separate, larger change and should not be claimed here.
  */
 export async function webFetchUrl(rawUrl: string, opts: WebFetchOptions = {}): Promise<WebFetchResult> {
-  const check = await assertPublicHttpUrl(rawUrl);
-  if (!check.ok) return { ok: false, text: '', reason: check.reason ?? 'This URL is not allowed.' };
-
+  const inherited = opts.signal !== undefined || opts.deadlineAtMs !== undefined;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), WEB_FETCH_TIMEOUT_MS);
+  const abort = () => controller.abort();
+  opts.signal?.addEventListener('abort', abort, { once: true });
+  const remaining = opts.deadlineAtMs === undefined ? WEB_FETCH_TIMEOUT_MS : opts.deadlineAtMs - Date.now();
+  if (opts.signal?.aborted || !Number.isFinite(remaining) || remaining <= 0) abort();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (inherited) timer = setTimeout(abort, Math.max(0, Math.min(WEB_FETCH_TIMEOUT_MS, remaining)));
+  const wait = <T>(operation: () => Promise<T>): Promise<T> => inherited ? observeUntilAbort(operation, controller.signal) : operation();
   try {
-    const res = await fetch(rawUrl, publicOnlyInit({
+    const check = await wait(() => assertPublicHttpUrl(rawUrl));
+    if (!check.ok) return { ok: false, text: '', reason: check.reason ?? 'This URL is not allowed.' };
+    if (!inherited) timer = setTimeout(abort, WEB_FETCH_TIMEOUT_MS);
+    const res = await wait(() => fetch(rawUrl, publicOnlyInit({
       method: 'GET',
       redirect: 'error',
       signal: controller.signal,
       headers: { 'user-agent': 'NavBharatAI/1.0 (+https://navbharatai.com)', accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.5' },
-    }));
+    })));
 
     const contentType = res.headers.get('content-type');
     if (!res.ok) {
@@ -126,7 +136,7 @@ export async function webFetchUrl(rawUrl: string, opts: WebFetchOptions = {}): P
       return { ok: false, text: '', status: res.status, contentType: contentType ?? undefined, reason: `That URL is ${contentType} — not text this tool can read. Use the screenshot tool for an image, or link to a text/HTML page.` };
     }
 
-    const raw = await readCapped(res, WEB_FETCH_MAX_BYTES);
+    const raw = await readCapped(res, WEB_FETCH_MAX_BYTES, inherited ? controller.signal : undefined);
     const looksHtml = /html|xml/i.test(String(contentType ?? '')) || /^\s*<(?:!doctype|html)\b/i.test(raw);
     const extracted = looksHtml ? htmlToText(raw) : raw.trim();
     if (!extracted) {
@@ -143,12 +153,15 @@ export async function webFetchUrl(rawUrl: string, opts: WebFetchOptions = {}): P
     return out;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    if (inherited && controller.signal.aborted) return { ok: false, text: '', reason: 'The parent request ended or its page-read deadline expired.' };
     if (/abort/i.test(msg)) return { ok: false, text: '', reason: `The site did not respond within ${Math.round(WEB_FETCH_TIMEOUT_MS / 1000)}s.` };
     // fetch() rejects on a redirect when redirect:'error' — say what to do about it, not just what broke.
     if (/redirect/i.test(msg)) return { ok: false, text: '', reason: 'That URL redirects elsewhere, which is refused for safety. Pass the final URL directly.' };
     return { ok: false, text: '', reason: `Could not fetch that URL: ${msg}` };
   } finally {
     clearTimeout(timer);
+    if (inherited) controller.abort();
+    opts.signal?.removeEventListener('abort', abort);
   }
 }
 
@@ -156,10 +169,10 @@ export async function webFetchUrl(rawUrl: string, opts: WebFetchOptions = {}): P
  * Read a response body, stopping at `maxBytes`. Streams so an oversized or length-lying body can never be
  * fully buffered. Falls back to `res.text()` only when the body is not a stream (some fetch polyfills).
  */
-async function readCapped(res: Response, maxBytes: number): Promise<string> {
+async function readCapped(res: Response, maxBytes: number, signal?: AbortSignal): Promise<string> {
   const body = res.body as ReadableStream<Uint8Array> | null | undefined;
   if (!body || typeof body.getReader !== 'function') {
-    const t = await res.text();
+    const t = await (signal ? observeUntilAbort(() => res.text(), signal) : res.text());
     return t.length > maxBytes ? t.slice(0, maxBytes) : t;
   }
   const reader = body.getReader();
@@ -167,7 +180,7 @@ async function readCapped(res: Response, maxBytes: number): Promise<string> {
   let total = 0;
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value } = await (signal ? observeUntilAbort(() => reader.read(), signal) : reader.read());
       if (done) break;
       if (!value) continue;
       chunks.push(value);
@@ -175,7 +188,7 @@ async function readCapped(res: Response, maxBytes: number): Promise<string> {
       if (total >= maxBytes) break; // cap reached — keep what we have, stop pulling
     }
   } finally {
-    try { await reader.cancel(); } catch { /* already closed */ }
+    try { if (signal) void reader.cancel().catch(() => undefined); else await reader.cancel(); } catch { /* already closed */ }
   }
   const merged = new Uint8Array(total);
   let at = 0;
@@ -189,4 +202,18 @@ export function formatWebFetchResult(url: string, r: WebFetchResult): string {
   const head = `Fetched ${url}${r.status ? ` (HTTP ${r.status})` : ''}:`;
   const tail = r.truncated ? `\n\n[Truncated at ${WEB_FETCH_MAX_CHARS} characters — this is the start of the page, not all of it.]` : '';
   return `${head}\n\n${r.text}${tail}`;
+}
+
+/** Observe late failures while bounding DNS/body implementations that ignore cancellation. */
+function observeUntilAbort<T>(operation: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error('Aborted'));
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new Error('Aborted'));
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) { abort(); signal.removeEventListener('abort', abort); return; }
+    Promise.resolve().then(() => {
+      if (signal.aborted) throw new Error('Aborted');
+      return operation();
+    }).then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
 }

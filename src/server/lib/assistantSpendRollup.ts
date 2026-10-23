@@ -53,6 +53,8 @@ export interface AssistantSpendDay {
   paidTurns: number;
   /** Turns the provider reported no usage for — unknown, deliberately not counted either way. */
   unmeasuredTurns: number;
+  /** Subset of unknown-cost turns with measured usage but separate gateway liability. */
+  unpricedGatewayTurns?: number;
   realUsd: number;
   billedUsd: number;
   /** Per model id, so a shift shows WHICH rung absorbed it, not just that one happened. */
@@ -92,6 +94,7 @@ export function foldAssistantTurn(
 ): AssistantSpendDay {
   const base = day && day.date === date ? day : emptyAssistantSpendDay(date);
   const measured = !!turn.cost?.measured;
+  const complete = measured && !turn.cost?.costIncomplete;
   const realUsd = measured ? num(turn.cost.realUsd) : 0;
   const billedUsd = measured ? num(turn.cost.billedUsd) : 0;
 
@@ -101,9 +104,11 @@ export function foldAssistantTurn(
   return {
     date,
     turns: base.turns + 1,
-    freeTurns: base.freeTurns + (measured && realUsd === 0 ? 1 : 0),
-    paidTurns: base.paidTurns + (measured && realUsd > 0 ? 1 : 0),
-    unmeasuredTurns: base.unmeasuredTurns + (measured ? 0 : 1),
+    freeTurns: base.freeTurns + (complete && realUsd === 0 ? 1 : 0),
+    paidTurns: base.paidTurns + (complete && realUsd > 0 ? 1 : 0),
+    unmeasuredTurns: base.unmeasuredTurns + (complete ? 0 : 1),
+    ...((base.unpricedGatewayTurns || turn.cost?.costBasis === 'unpriced-gateway')
+      ? { unpricedGatewayTurns: num(base.unpricedGatewayTurns) + (turn.cost?.costBasis === 'unpriced-gateway' ? 1 : 0) } : {}),
     realUsd: round6(base.realUsd + realUsd),
     billedUsd: round6(base.billedUsd + billedUsd),
     perModel: {

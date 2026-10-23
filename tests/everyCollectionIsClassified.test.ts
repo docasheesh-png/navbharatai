@@ -109,6 +109,7 @@ const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; wh
 };
 
 const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
+  free_chat_chain: { kind: 'retained', why: 'mixed server-owned safety records: only immutable date-scoped counters and fully settled days expire by their explicit deadline. Pending paid holds and request replay tombstones never expire; reused quota/cooldown authorities are bounded live-window documents. State cache/sticky expire separately and administrator actions retain 180 days; no prompts or raw customer uid are stored in quota/spend records' },
   live_ai_registry: { kind: 'forever', why: 'server-owned model price/control evidence, including administrator login identities and review reasons, not inference prompts; immutable catalog chunks and administrator actions are deliberately retained, while sync/routing caches are bounded. RETAINED_INDEFINITELY records this choice rather than calling the entire tree bounded' },
   admin_failed_report_autopsies: { kind: 'retained', why: 'admin-authored report-linked review notes, keyed by a hash of workspace/history, NOT system configuration; 180 days after updatedAt like admin_build_triage, with transaction-fenced children-first expiry of revisions and mutation receipts; does not claim synchronous diagnostic or account erasure' },
   agentv3_build_requests: { kind: 'user', why: 'bounded digest/status request replay tombstones, no raw inputs; explicit verified ownerId account erasure, account-lifetime retention prevents old UUID replay' },
@@ -390,6 +391,10 @@ const UNREADABLE_RECEIVERS: Record<string, string> = {
 
 /** A new document-ref alias is excused only in its verified file, never everywhere named `ref`. */
 const SCOPED_DOCUMENT_RECEIVERS: Record<string, Record<string, { why: string; assignment: RegExp }>> = {
+  'src/server/AI/FreeChain/control.ts': {
+    ref: { why: 'controlRef returns the fixed free_chat_chain/state document; its actions child has an explicit 180-day subcollection retention policy',
+      assignment: /const ref = controlRef\(db\)/ },
+  },
   'src/server/lib/buildReportNumbering.ts': {
     ref: {
       why: 'parent is a workspace_diagnostics_v3 query document snapshot; its history is the existing workspace subcollection, read-only here',

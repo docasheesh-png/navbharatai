@@ -1,16 +1,19 @@
 import type { RequestHandler } from 'express';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { parseEnvFlag } from '../lib/envFlag';
+import { assertNoUnclaimedGatewayDispatch } from './InferenceGateway/dispatchBoundary';
 
-export type InferenceScope = 'free-modules' | 'weak' | 'paid-builder';
+export type InferenceScope = 'free-modules' | 'weak' | 'paid-builder' | 'paid-professional';
 const admittedImageEdit = new AsyncLocalStorage<boolean>();
 const scopes = new AsyncLocalStorage<{ scope: InferenceScope }>();
 /** Server-owned scope only. Never derive this from a user's prompt or arbitrary request field. */
 export function runWithInferenceScope<T>(scope: InferenceScope, fn: () => T): T { return scopes.run({ scope }, fn); }
 export function strictFreeRequired(env: NodeJS.ProcessEnv = process.env): boolean {
   const scope = scopes.getStore()?.scope;
-  if (!scope || scope === 'paid-builder') return false;
-  return parseEnvFlag(scope === 'weak' ? env.STRICT_FREE_WEAK_ENABLED : env.STRICT_FREE_MODULES_ENABLED) === true;
+  // Pro App Builder, including Weak, retains its pre-registry routing.
+  // The retired Weak flag cannot re-enable the removed free-builder option.
+  if (scope !== 'free-modules') return false;
+  return parseEnvFlag(env.STRICT_FREE_MODULES_ENABLED) === true;
 }
 export class StrictFreeCapabilityError extends Error {
   readonly code = 'STRICT_FREE_CAPABILITY_UNAVAILABLE';
@@ -19,6 +22,7 @@ export class StrictFreeCapabilityError extends Error {
 }
 /** Every legacy network path must opt out before dispatch, not after provider billing. */
 export function assertLegacyInferenceAllowed(capability: string): void {
+  assertNoUnclaimedGatewayDispatch(capability);
   if (capability === 'image-edit' && scopes.getStore()?.scope === 'free-modules' && admittedImageEdit.getStore() === true) return;
   if (strictFreeRequired()) throw new StrictFreeCapabilityError(capability);
 }

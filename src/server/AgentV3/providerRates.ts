@@ -29,7 +29,8 @@ import { isVerifiedFreeProof, type VerifiedFreeProof } from '../AI/LiveRegistry/
 // AGENTV3_BILL_SANDBOX=on and E2B_USD_PER_HOUR is explicitly set (sandboxCost.ts → sandboxBillableUsd,
 // docs/claude/ENV_REGISTRY.md); otherwise it is absorbed and shown to the admin only. Unknown models fall
 // back to a conservative rate (Sonnet, without its cache lines) so an untracked model never under-bills.
-// All rates are USD per 1,000,000 tokens and env-overridable (track live prices without a deploy).
+// All rates are USD per 1,000,000 tokens. Existing env overrides remain supported; the narrowly
+// verified direct DeepSeek profile below is pinned to its documented peak admission rates.
 
 import { sonnetRate, opusRate, withClaudeCacheLines, tokenCostUsd, type TokenRate, type BilledUsage } from './pricing';
 
@@ -195,6 +196,13 @@ export function realRateCard(): Record<string, TokenRate> {
     // the admin's own brief says Nano is for classification/extraction, never an app-generation
     // engine — but if a helper role ever uses it, it must not be billed at the full-GPT bound above.
     'gpt-nano': { inputPerMTok: envRate('RATE_GPT_NANO_IN', 0.2), outputPerMTok: envRate('RATE_GPT_NANO_OUT', 1.25) },
+    // Direct DeepSeek only, verified 2026-10-23 against its official price page:
+    // https://api-docs.deepseek.com/quick_start/pricing/
+    // deepseek-flash: peak input $0.30/M, cache hit $0.006/M, output $1.20/M. Off-peak is
+    // cheaper; use the peak upper bound for admission rather than guessing a billing clock or
+    // holidays. This is NOT a zero-cost plan or an invoice settlement. FreeChain's reservation
+    // profile may be more conservative, but cannot lower this tariff or raise the existing free ceiling.
+    'deepseek-flash': { inputPerMTok: 0.3, outputPerMTok: 1.2, cacheReadPerMTok: 0.006 },
     // ── NVIDIA Nemotron 3 (added 2026-09-19) ──────────────────────────────────────────────────────
     // 🔴 NO CACHE LINE, AND THAT IS THE TRUTH RATHER THAN AN OMISSION. The route these are bought
     // through does not honour prompt-cache markers (the OpenRouter path goes via DeepInfra, whose
@@ -228,6 +236,14 @@ export function realRateFor(provider: string, model?: string): TokenRate {
   const card = realRateCard();
   const m = (model ?? '').toLowerCase();
   const p = (provider ?? '').toUpperCase();
+
+  // A direct provider's tariff is not transferable to a third-party host, and an unverified
+  // DeepSeek SKU must not inherit another family's cheap/free rate from its name. Keep this
+  // exact pair ahead of legacy model-first matching; unknown IDs retain the conservative default.
+  if (p === 'DEEPSEEK' || m.startsWith('deepseek')) {
+    if (p === 'DEEPSEEK' && m === 'deepseek-flash') return card['deepseek-flash'];
+    return { inputPerMTok: card.sonnet.inputPerMTok, outputPerMTok: card.sonnet.outputPerMTok };
+  }
 
   // Model-id first — the exact rung that ran.
   if (m) {

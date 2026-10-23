@@ -1205,6 +1205,19 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
             void liveRegistry.syncLiveModels().catch(() => { /* audited; stale metadata never enables inference */ });
           }
           } catch { console.warn('[LIVE_MODEL_REGISTRY] Scheduler integration unavailable; existing jobs still start.'); }
+          try {
+            const gateway = await import('./src/server/AI/InferenceGateway/runtime');
+            if (gateway.inferenceGatewayEnabled()) {
+              const maintain = async () => {
+                const { getServerDb } = await import('./src/server/lib/serverDb');
+                const db = getServerDb();
+                if (!db) throw new Error('Gateway quota maintenance store unavailable');
+                await gateway.maintainGatewayQuotaWindows(db);
+              };
+              scheduler.register({ id: 'free-gateway-quota-maintenance', schedule: { kind: 'everyMs', ms: 30000 }, exclusive: true, handler: maintain });
+              void maintain().catch(() => { console.warn('[INFERENCE_GATEWAY] Quota maintenance unavailable; dispatch remains fail-closed.'); });
+            }
+          } catch { console.warn('[INFERENCE_GATEWAY] Scheduler integration unavailable; dispatch remains fail-closed.'); }
           scheduler.start();
         })
         .catch(() => { /* best-effort — the scheduler must never affect boot */ });

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { decimal, zero, perMillion, parseCatalog, normalizeModel, eligibility, endpointUrl } from './eligibility';
-import { RegistrySynchronizer, retryAfterMs, type RegistryConfig } from './sync';
+import { RegistrySynchronizer, registryCredentialBinding, retryAfterMs, type RegistryConfig } from './sync';
 import { StrictFreeDispatcher } from './dispatcher';
 import { isVerifiedFreeProof, issueVerifiedFreeProof } from './proof';
 import type { RegistryStore, RegistryState, LiveModelRecord, ModelControl } from './types';
@@ -41,7 +41,7 @@ describe('exact zero fee eligibility', () => {
 describe('live sync atomic lifecycle', () => {
   it('publishes complete verified metadata after public, account and exact endpoint reads', async () => {
     const { api, state } = store(); const fetcher = vi.fn(async (url: any) => String(url).endsWith('/endpoints') ? json(endpoints()) : json({ data: [raw()], total_count: 1 }));
-    await new RegistrySynchronizer(api, () => cfg, fetcher, () => NOW).sync(); expect(api.publish).toHaveBeenCalledOnce(); expect(state.models[0].eligibilityStatus).toBe('VERIFIED_FREE'); expect(fetcher.mock.calls.some(([url]) => String(url).includes('%3Afree/endpoints'))).toBe(true);
+    await new RegistrySynchronizer(api, () => cfg, fetcher, () => NOW).sync(); expect(state.manifest?.accountCredentialBinding).toBe(registryCredentialBinding(cfg.apiKey)); expect(api.publish).toHaveBeenCalledOnce(); expect(state.models[0].eligibilityStatus).toBe('VERIFIED_FREE'); expect(fetcher.mock.calls.some(([url]) => String(url).includes('%3Afree/endpoints'))).toBe(true);
   });
   it('does not query account or endpoints without a key', async () => { const { api, state } = store(); const fetcher = vi.fn(async () => json({ data: [raw()] })); await new RegistrySynchronizer(api, () => ({ ...cfg, apiKey: '' }), fetcher, () => NOW).sync(); expect(fetcher).toHaveBeenCalledOnce(); expect(state.models[0].eligibilityStatus).toBe('UNKNOWN'); });
   it('failed catalog retains prior active generation', async () => { const { api, state } = store(); const fetcher = vi.fn(async () => json({}, 500)); await expect(new RegistrySynchronizer(api, () => cfg, fetcher, () => NOW).sync()).rejects.toThrow(); expect(api.publish).not.toHaveBeenCalled(); expect(state.manifest?.version).toBe('version'); expect(api.fail).toHaveBeenCalledOnce(); });
@@ -95,5 +95,228 @@ describe('reviewed safety regressions', () => {
   it('blocks expiry that occurs while asynchronous admission completes', async () => {
     const { api } = store(); let now = NOW; vi.mocked(api.recheck).mockImplementation(async () => { now += 600001; return true; }); const fetcher = vi.fn();
     await expect(new StrictFreeDispatcher(api, () => cfg, fetcher, () => now).text({ prompt: 'hello' })).rejects.toThrow(); expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe('Free Chat Chain exact model allowlist and conversation preference', () => {
+  const FIRST = 'test/a-approved:free';
+  const STICKY = 'test/z-approved:free';
+  const OUTSIDE = 'test/outside:free';
+  function selectionFixture() {
+    const fixture = store([model(FIRST), model(STICKY), model(OUTSIDE)]);
+    const called: string[] = [];
+    const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const selected = JSON.parse(String(init?.body)).model as string;
+      called.push(selected);
+      return json(completion({ model: selected }));
+    });
+    return { ...fixture, fetcher, called, dispatcher: new StrictFreeDispatcher(fixture.api, () => cfg, fetcher, () => NOW) };
+  }
+
+  it('keeps normal legacy scoring when both new controls are omitted', async () => {
+    const fixture = selectionFixture();
+    fixture.state.health[OUTSIDE] = { attempts: 10, successes: 10, latencyMs: 1, cooldownUntil: 0, status: null, lastErrorCode: null };
+    expect((await fixture.dispatcher.text({ prompt: 'hello' })).model).toBe(OUTSIDE);
+    expect(fixture.called).toEqual([OUTSIDE]);
+  });
+
+  it('an allowlist excludes a healthier, faster unapproved model', async () => {
+    const fixture = selectionFixture();
+    fixture.state.health[OUTSIDE] = { attempts: 10, successes: 10, latencyMs: 1, cooldownUntil: 0, status: null, lastErrorCode: null };
+    expect((await fixture.dispatcher.text({ prompt: 'hello', allowedModelIds: [FIRST] })).model).toBe(FIRST);
+    expect(fixture.called).toEqual([FIRST]);
+  });
+
+  it.each([{ allowedModelIds: [] }, { allowedModelIds: ['test/not-present:free'] }, { allowedModelIds: ['test/a-approved'] }])('an empty, unavailable or nonexact allowlist fails before dispatch: %j', async ({ allowedModelIds }) => {
+    const fixture = selectionFixture();
+    await expect(fixture.dispatcher.text({ prompt: 'hello', allowedModelIds })).rejects.toMatchObject({ code: 'NO_VERIFIED_FREE_MODEL' });
+    expect(fixture.fetcher).not.toHaveBeenCalled();
+    expect(fixture.api.record).not.toHaveBeenCalled();
+  });
+
+  it('prefers the admitted conversation model ahead of ordinary score ordering', async () => {
+    const fixture = selectionFixture();
+    fixture.state.health[FIRST] = { attempts: 10, successes: 10, latencyMs: 1, cooldownUntil: 0, status: null, lastErrorCode: null };
+    expect((await fixture.dispatcher.text({ prompt: 'hello', allowedModelIds: [FIRST, STICKY], preferredModelId: STICKY })).model).toBe(STICKY);
+    expect(fixture.called).toEqual([STICKY]);
+  });
+
+  it('a preferred model outside the approved exact allowlist cannot escape the filter', async () => {
+    const fixture = selectionFixture();
+    expect((await fixture.dispatcher.text({ prompt: 'hello', allowedModelIds: [FIRST], preferredModelId: OUTSIDE })).model).toBe(FIRST);
+    expect(fixture.called).toEqual([FIRST]);
+  });
+
+  it.each(['PAID', 'UNKNOWN', 'STALE', 'DISABLED'] as const)('preference cannot revive a %s model', async (status) => {
+    const fixture = selectionFixture();
+    fixture.state.models.find(m => m.exactModelId === STICKY)!.eligibilityStatus = status;
+    expect((await fixture.dispatcher.text({ prompt: 'hello', allowedModelIds: [FIRST, STICKY], preferredModelId: STICKY })).model).toBe(FIRST);
+    expect(fixture.called).toEqual([FIRST]);
+  });
+
+  it('preference cannot revive disabled controls or current provider cooldown', async () => {
+    for (const mode of ['disabled', 'cooldown']) {
+      const fixture = selectionFixture();
+      if (mode === 'disabled') fixture.state.controls[STICKY].disabled = true;
+      else fixture.state.health[STICKY] = { attempts: 1, successes: 0, latencyMs: null, cooldownUntil: NOW + 60000, status: 'RATE_LIMITED', lastErrorCode: 'HTTP_429' };
+      expect((await fixture.dispatcher.text({ prompt: 'hello', allowedModelIds: [FIRST, STICKY], preferredModelId: STICKY })).model).toBe(FIRST);
+      expect(fixture.called).toEqual([FIRST]);
+    }
+  });
+
+  it('exclusions still win over a preferred approved model', async () => {
+    const fixture = selectionFixture();
+    const excluded = new Set([STICKY]);
+    expect((await fixture.dispatcher.text({ prompt: 'hello', allowedModelIds: [FIRST, STICKY], preferredModelId: STICKY, excludeModelIds: excluded })).model).toBe(FIRST);
+    expect(fixture.called).toEqual([FIRST]);
+    expect(excluded).toEqual(new Set([STICKY, FIRST]));
+  });
+
+  it('failed preferred model retries only another approved model, never an outsider', async () => {
+    const fixture = selectionFixture();
+    fixture.fetcher.mockImplementation(async (_url, init) => {
+      const selected = JSON.parse(String(init?.body)).model as string;
+      fixture.called.push(selected);
+      return selected === STICKY ? json({}, 429, { 'retry-after': '60' }) : json(completion({ model: selected }));
+    });
+    const result = await fixture.dispatcher.text({ prompt: 'hello', allowedModelIds: [FIRST, STICKY], preferredModelId: STICKY });
+    expect(result.model).toBe(FIRST);
+    expect(fixture.called).toEqual([STICKY, FIRST]);
+    expect(fixture.api.updateHealth).toHaveBeenCalledWith(STICKY, expect.objectContaining({ cooldownUntil: NOW + 60000, status: 'RATE_LIMITED' }));
+  });
+
+  it('one-attempt mode does not expand the allowlist after preferred failure', async () => {
+    const fixture = selectionFixture();
+    fixture.fetcher.mockImplementation(async (_url, init) => { fixture.called.push(JSON.parse(String(init?.body)).model); return json({}, 503); });
+    await expect(fixture.dispatcher.text({ prompt: 'hello', allowedModelIds: [FIRST, STICKY], preferredModelId: STICKY, maxAttempts: 1 })).rejects.toMatchObject({ code: 'ALL_FREE_MODELS_FAILED' });
+    expect(fixture.called).toEqual([STICKY]);
+  });
+
+  it('rechecks a preferred model immediately before dispatch and skips it when revoked', async () => {
+    const fixture = selectionFixture();
+    vi.mocked(fixture.api.recheck).mockImplementation(async selected => selected.exactModelId !== STICKY);
+    expect((await fixture.dispatcher.text({ prompt: 'hello', allowedModelIds: [FIRST, STICKY], preferredModelId: STICKY })).model).toBe(FIRST);
+    expect(fixture.called).toEqual([FIRST]);
+    expect(fixture.api.recheck).toHaveBeenCalledTimes(2);
+  });
+
+  it('stream selection honors the same allowlist and preference without losing chunks', async () => {
+    const fixture = selectionFixture();
+    fixture.fetcher.mockImplementation(async (_url, init) => {
+      const selected = JSON.parse(String(init?.body)).model as string;
+      fixture.called.push(selected);
+      return new Response(`data: ${JSON.stringify({ ...completion({ model: selected }), choices: [{ delta: { content: 'Hello' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } });
+    });
+    const onChunk = vi.fn();
+    const result = await fixture.dispatcher.text({ prompt: 'hello', allowedModelIds: [FIRST, STICKY], preferredModelId: STICKY, onChunk });
+    expect(result).toMatchObject({ content: 'Hello', model: STICKY });
+    expect(onChunk.mock.calls).toEqual([['Hello']]);
+    expect(fixture.called).toEqual([STICKY]);
+  });
+});
+
+describe('registry safety refusals are terminal across approved fallback models', () => {
+  it.each([
+    { delta: { refusal: 'Provider refusal' }, finish_reason: null },
+    { delta: {}, finish_reason: 'content_filter' },
+  ])('a refusal after visible text keeps its safety classification and never falls through', async choice => {
+    const first = 'test/first-approved:free'; const second = 'test/second-approved:free';
+    const { api } = store([model(first), model(second)]);
+    const chunks = [{ id: 'test', model: first, choices: [{ delta: { content: 'Partial answer' }, finish_reason: null }] }, { id: 'test', model: first, choices: [choice] }];
+    const fetcher = vi.fn(async () => new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n'));
+    const onChunk = vi.fn();
+    await expect(new StrictFreeDispatcher(api, () => cfg, fetcher, () => NOW).text({ prompt: 'hello', allowedModelIds: [first, second], preferredModelId: first, onChunk })).rejects.toMatchObject({ code: 'SAFETY_REFUSAL' });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(onChunk.mock.calls).toEqual([['Partial answer']]);
+  });
+
+  it.each([
+    { label: 'message refusal', envelope: { choices: [{ message: { content: null, refusal: 'Provider refusal' }, finish_reason: 'stop' }] } },
+    { label: 'content filter finish', envelope: { choices: [{ message: { content: null }, finish_reason: 'content_filter' }] } },
+    { label: 'structured safety error', envelope: { error: { code: 'content_policy_violation', message: 'Provider refusal' } } },
+  ])('nonstream $label never requests a second model', async ({ envelope }) => {
+    const first = 'test/first-approved:free'; const second = 'test/second-approved:free';
+    const { api } = store([model(first), model(second)]);
+    const fetcher = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const selected = JSON.parse(String(init?.body)).model;
+      return json(selected === first ? { id: 'test', model: first, ...envelope } : completion({ model: second }));
+    });
+    await expect(new StrictFreeDispatcher(api, () => cfg, fetcher, () => NOW).text({ prompt: 'hello', allowedModelIds: [first, second], preferredModelId: first })).rejects.toMatchObject({ code: 'SAFETY_REFUSAL' });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { delta: { content: null, refusal: 'Provider refusal' }, finish_reason: null },
+    { delta: {}, finish_reason: 'content_filter' },
+  ])('stream refusal never emits content or requests another approved model', async choice => {
+    const first = 'test/first-approved:free'; const second = 'test/second-approved:free';
+    const { api } = store([model(first), model(second)]);
+    const fetcher = vi.fn(async () => new Response(`data: ${JSON.stringify({ id: 'test', model: first, choices: [choice] })}\n\ndata: [DONE]\n\n`));
+    const onChunk = vi.fn();
+    await expect(new StrictFreeDispatcher(api, () => cfg, fetcher, () => NOW).text({ prompt: 'hello', allowedModelIds: [first, second], preferredModelId: first, onChunk })).rejects.toMatchObject({ code: 'SAFETY_REFUSAL' });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(onChunk).not.toHaveBeenCalled();
+  });
+});
+
+describe('registry whitespace-only streams are not committed answers', () => {
+  it('a throwing consumer cannot start another model after receiving its first real text', async () => {
+    const first = 'test/first-approved:free'; const second = 'test/second-approved:free';
+    const { api } = store([model(first), model(second)]);
+    const fetcher = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const selected = JSON.parse(String(init?.body)).model;
+      const frame = { id: 'test', model: selected, choices: [{ delta: { content: 'Visible answer' }, finish_reason: 'stop' }] };
+      return new Response(`data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`);
+    });
+    const onChunk = vi.fn(() => { throw new Error('Consumer failed after receiving the text'); });
+    await expect(new StrictFreeDispatcher(api, () => cfg, fetcher, () => NOW).text({ prompt: 'hello', allowedModelIds: [first, second], preferredModelId: first, onChunk })).rejects.toMatchObject({ code: 'PARTIAL_RESPONSE_INTERRUPTED' });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(onChunk.mock.calls).toHaveLength(1);
+  });
+
+  it('does not emit an empty rung and leaves outer fallback available after its one allowed attempt', async () => {
+    const selected = 'test/first-approved:free';
+    const { api } = store([model(selected)]);
+    const frame = { id: 'test', model: selected, choices: [{ delta: { content: '  \n\t' }, finish_reason: 'stop' }] };
+    const fetcher = vi.fn(async () => new Response(`data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`));
+    const onChunk = vi.fn();
+    await expect(new StrictFreeDispatcher(api, () => cfg, fetcher, () => NOW).text({ prompt: 'hello', allowedModelIds: [selected], maxAttempts: 1, onChunk })).rejects.toMatchObject({ code: 'ALL_FREE_MODELS_FAILED' });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(onChunk).not.toHaveBeenCalled();
+  });
+
+  it('preserves buffered whitespace exactly once when actual text arrives', async () => {
+    const selected = 'test/first-approved:free';
+    const { api } = store([model(selected)]);
+    const frames = [
+      { id: 'test', model: selected, choices: [{ delta: { content: '  ' }, finish_reason: null }] },
+      { id: 'test', model: selected, choices: [{ delta: { content: 'Hello' }, finish_reason: null }] },
+      { id: 'test', model: selected, choices: [{ delta: { content: ' again' }, finish_reason: 'stop' }] },
+    ];
+    const fetcher = vi.fn(async () => new Response(frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join('') + 'data: [DONE]\n\n'));
+    const onChunk = vi.fn();
+    expect(await new StrictFreeDispatcher(api, () => cfg, fetcher, () => NOW).text({ prompt: 'hello', allowedModelIds: [selected], maxAttempts: 1, onChunk })).toMatchObject({ content: '  Hello again' });
+    expect(onChunk.mock.calls).toEqual([['  Hello'], [' again']]);
+  });
+});
+
+describe('optional gateway hooks preserve legacy registry semantics', () => {
+  it('legacy calls have no async gateway requirement and still emit verified proof', async () => {
+    const { api } = store(); const fetcher = vi.fn(async () => json(completion()));
+    const result = await new StrictFreeDispatcher(api, () => cfg, fetcher, () => NOW).text({ prompt: 'Hello' });
+    expect(fetcher).toHaveBeenCalledOnce(); expect(isVerifiedFreeProof(result.pricingProof)).toBe(true);
+  });
+  it('gateway hooks cannot enable inner retries', async () => {
+    const { api } = store(); const fetcher = vi.fn();
+    await expect(new StrictFreeDispatcher(api, () => cfg, fetcher, () => NOW).text({ prompt: 'Hello', gateway: {
+      modelId: 'test/model:free', endpointTag: 'test/endpoint', registryVersion: 'version',
+      authorizeDispatch: async () => true, assertDispatchPolicy: () => {}, beforeVisibleOutput: async () => {},
+    } })).rejects.toMatchObject({ code: 'GATEWAY_AUTHORIZATION_REQUIRED' }); expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('legacy still uses three-attempt fallback when hooks are absent', async () => {
+    const { api } = store([model('test/a:free'), model('test/b:free'), model('test/c:free')]);
+    const fetcher = vi.fn(async () => json({}, 500));
+    await expect(new StrictFreeDispatcher(api, () => cfg, fetcher, () => NOW).text({ prompt: 'Hello' })).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledTimes(3);
   });
 });

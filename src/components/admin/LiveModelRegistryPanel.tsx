@@ -113,7 +113,7 @@ export function LiveModelRegistryPanel({ adminToken }: { adminToken: string }): 
           <div><dt className="font-bold">Catalog service</dt><dd>{view.enabled ? 'Enabled' : 'Disabled by server configuration'}</dd></div>
           <div><dt className="font-bold">Account configuration</dt><dd>{view.configured ? 'Configured; per-model access still required' : 'Not configured'}</dd></div>
           <div><dt className="font-bold">Free + professional modules flag</dt><dd>{view.strictFreeModulesEnabled ? 'Enabled; unverified capabilities fail closed' : 'Not enabled; existing routing is unchanged'}</dd></div>
-          <div><dt className="font-bold">Pro Weak Builder flag</dt><dd>{view.strictFreeWeakEnabled ? 'Enabled; verified-free compatible models only' : 'Not enabled; existing Weak routing is unchanged'}</dd></div>
+          <div><dt className="font-bold">Pro App Builder</dt><dd>Outside this rollout; all tiers retain their original routing</dd></div>
           <div><dt className="font-bold">Pro Normal / Strong</dt><dd>Not changed by these strict-free flags</dd></div>
           <div><dt className="font-bold">Sync interval target</dt><dd>{view.syncIntervalMs / 1000} seconds; not instantaneous</dd></div>
           <div><dt className="font-bold">Last successful catalog</dt><dd>{registryTimestamp(view.manifest?.fetchedAt ?? null)}</dd></div>

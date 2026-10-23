@@ -50,7 +50,7 @@ export interface AdminAuditRow {
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '');
 
-const TARGET_KEYS = ['workspaceId', 'userId', 'targetUid', 'modelId', 'provider', 'id', 'commentId', 'channelId', 'reportId', 'appKey'] as const;
+const TARGET_KEYS = ['workspaceId', 'userId', 'targetUid', 'modelId', 'provider', 'controlTarget', 'id', 'commentId', 'channelId', 'reportId', 'appKey'] as const;
 
 export function adminAuditRow(entry: { ts?: unknown; event?: unknown } & Record<string, unknown>): AdminAuditRow {
   const target = TARGET_KEYS.map((k) => str(entry[k])).find(Boolean) || '';

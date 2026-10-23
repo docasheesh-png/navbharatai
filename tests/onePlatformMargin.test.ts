@@ -76,6 +76,26 @@ describe('🔒 a cost we could not fully measure makes the margin "at most"', ()
     expect(v?.costSub).toContain('not fully measured: chat');
     expect(platformMarginView(undefined)).toBeNull(); // an older server — no invented ₹0
   });
+
+  it('counts chain calls and unknown legacy prices as unpriced, rather than calling measured tokens a known cost', () => {
+    const m = platformMarginWindow({
+      ...base,
+      transactions: [paid(1000, '2026-10-01T10:00:00Z')],
+      chatLogs: [
+        chat('2026-10-05T00:00:00Z'),
+        { ...chat('2026-10-05T00:00:00Z'), freeChain: { costUsdEstimate: 0 } },
+        { ...chat('2026-10-05T00:00:00Z', false), freeChain: { costUsdEstimate: null } },
+        { ...chat('2026-10-05T00:00:00Z'), providerName: 'UNKNOWN_RATE' },
+        { ...chat('2026-07-01T00:00:00Z'), freeChain: { costUsdEstimate: 500 } },
+      ],
+      priceUsage: (provider) => provider === 'UNKNOWN_RATE' ? Number.NaN : 1,
+      buildDays: [], assistantDays: [],
+    });
+    expect(m.chat).toEqual({ costInr: RATE, complete: false, calls: 4, unpricedCalls: 3 });
+    expect(m.costInr).toBe(RATE);
+    expect(m.marginInr).toBe(1000 - RATE);
+    expect(m.complete).toBe(false);
+  });
 });
 
 describe('🔒 the wiring', () => {

@@ -24,6 +24,8 @@ import { retrieveMemoryBlock, rememberTurn } from '../memory/conversationMemory'
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import type { ClientPlatform } from '../AppContext/iosPurchaseGuard';
 import type { ProfessionalConfig } from './types';
+import { currentInferenceGatewayContext, runWithInferenceGatewayContext, isGatewayTerminalError, assertGatewayAccountAccess } from '../AI/InferenceGateway/runtime';
+import { strictFreeRequired } from '../AI/inferencePolicy';
 
 export interface ProfessionalTurn { role: 'user' | 'assistant'; content: string; }
 
@@ -100,7 +102,8 @@ export type ProfessionalTier = 'free' | 'paid';
 async function resilientCall(systemPrompt: string, prompt: string, tier: ProfessionalTier): Promise<ProfessionalAnswer> {
   try {
     return await callProfessionalAIWithUsage(systemPrompt, prompt, tier);
-  } catch {
+  } catch (error) {
+    if (isGatewayTerminalError(error)) throw error;
     throw new Error('All AI providers failed for this professional.');
   }
 }
@@ -130,6 +133,8 @@ export async function runProfessionalChat(
 
 /** Per-turn options that are neither the message nor the identity. */
 export interface ProfessionalChatOptions {
+  /** Server-only Free product ingress opt-in, never copied from request payloads or API model tiers. */
+  freeProductGateway?: boolean;
   /**
    * The conversation this turn belongs to (admin 2026-09-21: five chats at once, and *"ek chat ki
    * baat/memory 2nd me na jaye"*). Semantic memory recalls and writes ONLY this conversation's chunks.
@@ -139,10 +144,15 @@ export interface ProfessionalChatOptions {
   conversationId?: string;
   /** The client's platform (`X-NBAI-Platform`) — on the iPhone app no answer teaches a way to pay (Q-123). */
   platform?: ClientPlatform;
+  /** Server-owned connection cancellation and absolute request deadline, never body fields. */
+  signal?: AbortSignal;
+  deadlineAtMs?: number;
 }
 
 /** One professional turn, with what the model call cost — see ProfessionalAnswer / chatSpend.ts. */
 export interface ProfessionalChatResult {
+  /** A completed answer remains deliverable when optional semantic memory cannot be stored. */
+  memoryStatus?: 'not-saved';
   reply: string;
   spend: ChatTurnUsage;
 }
@@ -162,7 +172,38 @@ export async function runProfessionalChatWithUsage(
   tier: ProfessionalTier = 'paid',
   opts: ProfessionalChatOptions = {},
 ): Promise<ProfessionalChatResult> {
+  const inherited = currentInferenceGatewayContext();
+  const run = () => runProfessionalChatInContext(config, message, history, verifiedUserId, tier, opts);
+  // Direct internal calls without authenticated identity are not enrolled by
+  // guessing a principal. Paid professionals are outside the Free product rollout.
+  // A nested already-selected Free call must retain its boundary, never escape it.
+  if (!inherited && (!verifiedUserId || tier !== 'free' || opts.freeProductGateway !== true)) return run();
+  return runWithInferenceGatewayContext({
+    principalId: inherited?.principalId ?? verifiedUserId!,
+    tenantId: inherited?.tenantId ?? verifiedUserId!,
+    surface: inherited?.surface ?? 'professional',
+    policyKey: `professional:${config.id}`,
+    // The registry has no reviewed domain/privacy classification yet. Do not
+    // infer public/nonclinical from an expert's display name or the user's words.
+    qualityTier: 'clinical',
+    dataClass: 'health',
+    funding: inherited?.funding ?? 'platform-free-fallback',
+    mode: strictFreeRequired() || inherited?.mode === 'strict-free' ? 'strict-free' : 'free-first-authorized-paid',
+    deadlineAtMs: Math.min(inherited?.deadlineAtMs ?? Infinity, opts.deadlineAtMs ?? Date.now() + 90_000),
+    signal: inherited?.signal && opts.signal ? AbortSignal.any([inherited.signal, opts.signal]) : inherited?.signal ?? opts.signal,
+  }, run);
+}
+
+async function runProfessionalChatInContext(
+  config: ProfessionalConfig,
+  message: string,
+  history: ProfessionalTurn[],
+  verifiedUserId: string | undefined,
+  tier: ProfessionalTier,
+  opts: ProfessionalChatOptions,
+): Promise<ProfessionalChatResult> {
   const { conversationId, platform } = opts;
+  if (verifiedUserId) assertGatewayAccountAccess(verifiedUserId);
   // Per-user memory (memory-enabled professionals): load what we remember about this
   // user and inject it + the memory behaviour layer. Anonymous users still get the
   // introduction behaviour, but with an honest "cannot remember you" constraint.
@@ -236,7 +277,7 @@ export async function runProfessionalChatWithUsage(
     // Through the one door (lib/platformContext.ts): recall goes to the SYSTEM prompt, never in front of
     // the user's words — a model quotes what it finds in the user turn (admin 2026-10-17).
     if (recalled) ({ system: systemPrompt, user: prompt } = placePlatformContext({ system: systemPrompt, user: prompt, blocks: [{ label: 'Recalled from earlier in this conversation', body: recalled }] }));
-  } catch { /* semantic recall is best-effort */ }
+  } catch (error) { if (isGatewayTerminalError(error)) throw error; /* legacy recall is best-effort */ }
 
   // Live web grounding: when the user's question needs current facts (latest rules/rates/results),
   // fold in real search results so the professional answers from today's data, not its training
@@ -244,7 +285,7 @@ export async function runProfessionalChatWithUsage(
   try {
     const liveBlock = await liveSearchContext(message, { cheap: tier === 'free' });
     if (liveBlock) ({ system: systemPrompt, user: prompt } = placePlatformContext({ system: systemPrompt, user: prompt, blocks: [{ label: 'Live web results', body: liveBlock }] }));
-  } catch { /* live search is best-effort */ }
+  } catch (error) { if (isGatewayTerminalError(error)) throw error; /* legacy search is best-effort */ }
 
   const { content: raw, spend } = await resilientCall(systemPrompt, prompt, tier);
 
@@ -273,11 +314,16 @@ export async function runProfessionalChatWithUsage(
   // future, semantically-related question recalls it even after it leaves the recent window. Gated +
   // best-effort; awaited so a serverless instance isn't torn down mid-write, but it never throws.
   // Stamped with THIS conversation's id, so only this conversation can recall it (see above).
+  let memoryStatus: 'not-saved' | undefined;
   try {
     await rememberTurn(verifiedUserId, memoryScope, message, reply, conversationId);
-  } catch { /* best-effort */ }
+  } catch (error) {
+    // No second provider or legacy embedding attempt: keep the completed answer,
+    // but report that this optional post-answer write did not finish.
+    if (isGatewayTerminalError(error)) memoryStatus = 'not-saved';
+  }
 
   // reply is empty only when the model's ENTIRE output was machine blocks — never
   // fall back to raw there (that would leak the block into the chat).
-  return { reply: reply || 'Noted! What would you like to learn next?', spend };
+  return { reply: reply || 'Noted! What would you like to learn next?', spend, ...(memoryStatus ? { memoryStatus } : {}) };
 }

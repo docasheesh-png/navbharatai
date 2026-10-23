@@ -4446,10 +4446,10 @@ older BYO-only guidance for this rollout; existing BYO and shared apps are not m
 
 ## Live verified-free registry (opt-in, 2026-10-22)
 
-`LIVE_MODEL_REGISTRY_ENABLED` enables the durable OpenRouter catalog job. Independent
-`STRICT_FREE_MODULES_ENABLED` and `STRICT_FREE_WEAK_ENABLED` gates select verified-free
-inference for NavBharat Free/professional modules and Pro Weak respectively; all default
-off. Normal/Strong are unchanged. `OPENROUTER_API_KEY` is server-only.
+`LIVE_MODEL_REGISTRY_ENABLED` enables the durable OpenRouter catalog job.
+`STRICT_FREE_MODULES_ENABLED` selects verified-free inference for NavBharat Free modules;
+both default off. `STRICT_FREE_WEAK_ENABLED` is retired and ignored as of 2026-10-23.
+All Pro App Builder tiers, including Weak, retain their original routing and billing. `OPENROUTER_API_KEY` is server-only.
 `LIVE_MODEL_SYNC_INTERVAL_MS` defaults 300000; `LIVE_MODEL_METADATA_TTL_MS` defaults600000.
 See `docs/LIVE_FREE_MODEL_REGISTRY.md` for bounds, exact verification basis, scheduler
 setup, missing credentials, zero-cost limitations and rollback semantics. Turning a
@@ -4458,3 +4458,233 @@ No first-time/weekly/referral credits are issued by these switches.
 
 - `FREE_CHAT_HEDGE_ENABLED`: default off; opt-in two-candidate delayed strict-free chat hedge only.
 - `FREE_CHAT_HEDGE_DELAY_MS`: default 1500, bounded 100–10000 milliseconds.
+
+
+## Free Chat Chain keys (implemented 2026-10-22; NOT confirmed deployed)
+
+This section inventories code-supported names and code defaults, not observed
+Cloud Run values. No keys were created or configured. See
+[Free Chat Chain](../FREE_CHAT_CHAIN.md) for scope, strict-policy precedence,
+owner-only setup and unresolved acceptance. Secret values must never be recorded
+here. The feature is OFF and rollout is 0 by default. Existing
+`STRICT_FREE_MODULES_ENABLED` takes precedence. Malformed enabled-chain settings
+fail closed; account-review declarations do not automatically verify a free plan
+or protect against upgrades/external account traffic.
+
+### General routing, privacy, cache and paid-policy settings
+
+| Name | Code default / interpretation |
+| --- | --- |
+| `FREE_CHAIN_ENABLED` | OFF. Deployment gate; saved admin controls cannot override OFF. |
+| `FREE_CHAIN_ROLLOUT_PERCENT` | 0; whole integer 0–100. Used when no saved admin override exists. |
+| `FREE_CHAIN_ALLOW_UIDS` | Empty comma-separated verified UID allowlist. Allowlisted users can be selected even at 0%. Never include secrets. |
+| `FREE_CHAIN_ORDER` | `glm47,glm45,groq,openrouter,cloudflare,gemini,deepseek`; unique known IDs, omitted rungs allowed, paid rung must remain last when present. Empty/unset uses default, not an empty chain. |
+| `FREE_CHAIN_SKIP_GEMINI` | ON. Leave on pending current account/privacy/audience/geography review. |
+| `FREE_CHAIN_GEMINI_PRIVACY_APPROVED` | OFF. Does not expand runtime beyond the exact public-safe corpus or authorize ordinary private conversations. |
+| `FREE_CHAIN_TTFT_MS` | 6000; integer 1000–30000. Time-to-first-content watchdog, not a provider SLA. |
+| `FREE_CHAIN_CACHE_ENABLED` | OFF. Only the curated non-sensitive exact public corpus is cache-eligible. |
+| `FREE_CHAIN_CACHE_TTL_S` | 86400; integer 60–86400. Read expiry is enforced; cloud TTL deployment is a separate check. |
+| `FREE_CHAIN_QUOTA_MARGIN` | 0.9; decimal 0.1–0.95. Applied to raw local quota ceilings before dispatch. |
+| `FREE_CHAIN_PAID_DAILY_CAP_USD` | 10; exact decimal USD 0–10 (owner-authorized hard maximum). Process-configured ceiling for the TOTAL shared reservation budget across all paid fallback providers in this Free Chat chain per IST day, not a per-provider allowance or an all-inclusive provider invoice cap. Configuration observation initializes or only lowers the non-expiring shared `paid_budget_policy`, including 0; a more permissive revision never raises it. Separate from existing funded builder wallet budgets; does not fund or change them. 0 blocks new paid reservations, not already-dispatched work. |
+| `FREE_CHAIN_PAID_PER_USER_DAILY` | 20; integer 0–1000. Paid attempts per verified UID per IST day. |
+| `FREE_CHAIN_DEEPSEEK_PRICE_IN_PER_MTOK` | 0.30; decimal 0.30–1000 USD/million input tokens. Peak/cache-miss reservation rate; not a billing-owner rate-card override. |
+| `FREE_CHAIN_DEEPSEEK_PRICE_OUT_PER_MTOK` | 1.20; decimal 1.20–1000 USD/million output tokens. |
+| `FREE_CHAIN_DEEPSEEK_PRICE_CACHED_IN_PER_MTOK` | 0.006; decimal 0.006–1000 USD/million cached input tokens. Parsed for the profile; current settlement remains conservatively cache-miss priced and does not apply this discount. Reservation never assumes a cache hit. |
+| `FREE_CHAIN_OPENROUTER_MODELS` | Empty. At most four reviewed exact model IDs. The existing registry must still independently admit a fresh, verified-zero-price candidate. |
+
+### Durable shared paid-budget authority and admin control
+
+The non-expiring `paid_budget_policy` holds the authoritative cap and revision;
+IST midnight resets daily usage, not that authority. A stricter validated
+configuration observation lowers the shared policy even when paid routing is
+disabled. A more permissive old deployment cannot restore a higher cap. Status
+GET is read-only and must not initialize or re-lower the policy. The admin view
+shows the configured process cap, effective shared cap and revision separately,
+alongside held upper bounds and settled recorded cost, not invoice cost.
+
+A successful snapshot that verifies absence explicitly reports
+`paid.policyState: "uninitialized"`, with null `capUsd` and `policyRevision`;
+an existing valid policy reports `"initialized"`. Only verified absence offers
+`Review budget initialization`, an explicit audited action using
+`expectedRevision: 0`. This permits a $0 shared cap before the first enabled
+chat, under the same configured ceiling, authentication, validation and reason
+requirements. Errors or malformed authority remain unavailable (503), never an
+initialization opportunity. GET and panel loading never write automatically.
+
+`POST /api/v1/admin/free-chat-chain/budget` is the explicit authenticated,
+audited path to set a cap in cents-precision USD from 0 to 10, never above that
+process's configured ceiling. It requires the expected policy revision and a
+reviewed reason; stale revisions are rejected, and the actor comes from the
+verified server principal. It preserves prior holds and settled amounts; a lower
+cap never refunds spending, clears a hold or cancels already-dispatched work.
+Before an intentional raise, align serving deployment configurations and retire
+inconsistent stricter revisions. Increasing the environment ceiling alone does
+not raise the shared cap; any stale stricter process can reapply a lower cap on
+its next observation. This is an operator procedure, not a change performed by
+this registry. Secrets, rate cards, deployment flags and funded builder budgets
+remain outside the budget control.
+
+### Server credentials and existing reused account identifiers
+
+| Name | Purpose |
+| --- | --- |
+| `FREE_CHAIN_GEMINI_API_KEY` | Dedicated server-side Gemini key, one key only. No automatic provisioning. |
+| `FREE_CHAIN_GROQ_API_KEY` | Dedicated server-side Groq key, one key only. |
+| `FREE_CHAIN_CF_API_TOKEN` | Dedicated Cloudflare token restricted to the intended account, with Workers AI Read AND Workers AI Edit per official REST setup. Owner-controlled provisioning. |
+| `FREE_CHAIN_DEEPSEEK_API_KEY` | Dedicated server-side paid-rung key; key presence does not override verified-rate, privacy, quota, shared-budget or rollout gates. |
+| `OPENROUTER_API_KEY` | Existing registry credential reused by the registry rung; not a new second pool or paid fallback. |
+| `CLOUDFLARE_ACCOUNT_ID` | Existing 32-hex account identifier reused to construct the fixed official endpoint. Not a credential and never a client-supplied URL. |
+
+### All per-rung setting names
+
+Defaults below are application admission policy, NOT a claim that any account
+has that entitlement. RPM/RPD/TPM/TPD accept nonnegative whole integers with
+maximums 100000/10000000/100000000/1000000000 respectively. A zero limit blocks
+admission; changing a limit does not erase used quota. `LANGS` accepts a
+comma-separated subset of `hi,hinglish,en,other` (all when unset/empty).
+`TIME_ZONE` accepts a validated IANA zone or `rolling24h`; override only from
+verified reset evidence. An active ledger does not silently reset on zone changes.
+`MAX_INPUT_TOKENS` accepts 256–100000 and `MAX_OUTPUT_TOKENS` accepts 64–8192;
+provider context/output caps still apply. The local size estimate is not a
+provider-certified tokenizer or billed usage measurement.
+
+| Name | Code default / restriction |
+| --- | --- |
+| `FREE_CHAIN_GEMINI_MODEL` | gemini-2.5-flash; only this, gemini-2.5-flash-lite, gemini-3.5-flash-lite and gemini-3.8-flash profiles are accepted; account access still required. |
+| `FREE_CHAIN_GEMINI_FREE_VERIFIED_UNTIL` | Missing/expired skips rung. Future ISO date/time is an operator free-plan review expiry, not an automated account assertion. |
+| `FREE_CHAIN_GEMINI_LANGS` | hi,hinglish,en,other; language allowlist, not quality certification. |
+| `FREE_CHAIN_GEMINI_TIME_ZONE` | America/Los_Angeles; provider-local quota clock only, not the IST paid-budget clock. |
+| `FREE_CHAIN_GEMINI_MAX_INPUT_TOKENS` | 16000. |
+| `FREE_CHAIN_GEMINI_MAX_OUTPUT_TOKENS` | 1024. |
+| `FREE_CHAIN_GEMINI_RPM` | 0. |
+| `FREE_CHAIN_GEMINI_RPD` | 0. |
+| `FREE_CHAIN_GEMINI_TPM` | 0. |
+| `FREE_CHAIN_GEMINI_TPD` | 0. |
+| `FREE_CHAIN_GROQ_MODEL` | openai/gpt-oss-120b; only this verified profile is accepted. |
+| `FREE_CHAIN_GROQ_FREE_VERIFIED_UNTIL` | Missing/expired skips rung. Future ISO date/time is an operator free-plan review expiry, not an automated account assertion. |
+| `FREE_CHAIN_GROQ_LANGS` | hi,hinglish,en,other; language allowlist, not quality certification. |
+| `FREE_CHAIN_GROQ_TIME_ZONE` | rolling24h; provider-local quota clock only, not the IST paid-budget clock. |
+| `FREE_CHAIN_GROQ_MAX_INPUT_TOKENS` | 6000. |
+| `FREE_CHAIN_GROQ_MAX_OUTPUT_TOKENS` | 1024. |
+| `FREE_CHAIN_GROQ_RPM` | 30. |
+| `FREE_CHAIN_GROQ_RPD` | 1000. |
+| `FREE_CHAIN_GROQ_TPM` | 8000. |
+| `FREE_CHAIN_GROQ_TPD` | 200000. |
+| `FREE_CHAIN_CF_MODEL` | @cf/meta/llama-3.3-70b-instruct-fp8-fast; only this verified profile is accepted. |
+| `FREE_CHAIN_CF_FREE_VERIFIED_UNTIL` | Missing/expired skips rung. Future ISO date/time is an operator free-plan review expiry, not an automated account assertion. |
+| `FREE_CHAIN_CF_LANGS` | hi,hinglish,en,other; language allowlist, not quality certification. |
+| `FREE_CHAIN_CF_TIME_ZONE` | UTC; provider-local quota clock only, not the IST paid-budget clock. |
+| `FREE_CHAIN_CF_MAX_INPUT_TOKENS` | 16000. |
+| `FREE_CHAIN_CF_MAX_OUTPUT_TOKENS` | 1024. |
+| `FREE_CHAIN_CF_RPM` | 60. |
+| `FREE_CHAIN_CF_RPD` | 10000. |
+| `FREE_CHAIN_CF_TPM` | 24000. |
+| `FREE_CHAIN_CF_TPD` | 1000000. |
+| `FREE_CHAIN_OPENROUTER_MODEL` | Must remain unset/empty; actual candidates come from FREE_CHAIN_OPENROUTER_MODELS. |
+| `FREE_CHAIN_OPENROUTER_FREE_VERIFIED_UNTIL` | Parsed but not an admission proof for this rung; the registry or paid-policy gates apply instead. |
+| `FREE_CHAIN_OPENROUTER_LANGS` | hi,hinglish,en,other; language allowlist, not quality certification. |
+| `FREE_CHAIN_OPENROUTER_TIME_ZONE` | UTC; provider-local quota clock only, not the IST paid-budget clock. |
+| `FREE_CHAIN_OPENROUTER_MAX_INPUT_TOKENS` | 16000. |
+| `FREE_CHAIN_OPENROUTER_MAX_OUTPUT_TOKENS` | 1024. |
+| `FREE_CHAIN_OPENROUTER_RPM` | 20. |
+| `FREE_CHAIN_OPENROUTER_RPD` | 50. |
+| `FREE_CHAIN_OPENROUTER_TPM` | 100000. |
+| `FREE_CHAIN_OPENROUTER_TPD` | 1000000. |
+| `FREE_CHAIN_DEEPSEEK_MODEL` | deepseek-flash; only this verified profile is accepted. |
+| `FREE_CHAIN_DEEPSEEK_FREE_VERIFIED_UNTIL` | Parsed but not an admission proof for this rung; the registry or paid-policy gates apply instead. |
+| `FREE_CHAIN_DEEPSEEK_LANGS` | hi,hinglish,en,other; language allowlist, not quality certification. |
+| `FREE_CHAIN_DEEPSEEK_TIME_ZONE` | UTC; provider-local quota clock only, not the IST paid-budget clock. |
+| `FREE_CHAIN_DEEPSEEK_MAX_INPUT_TOKENS` | 16000. |
+| `FREE_CHAIN_DEEPSEEK_MAX_OUTPUT_TOKENS` | 1024. |
+| `FREE_CHAIN_DEEPSEEK_RPM` | 30. |
+| `FREE_CHAIN_DEEPSEEK_RPD` | 1000. |
+| `FREE_CHAIN_DEEPSEEK_TPM` | 2000000. |
+| `FREE_CHAIN_DEEPSEEK_TPD` | 10000000. |
+
+The Cloudflare neuron allowance is separately fixed at 10000 raw neurons/day
+for the approved model, multiplied by `FREE_CHAIN_QUOTA_MARGIN`; there is no
+secret or arbitrary endpoint override. Groq defaults derive from the published
+free profile, Gemini deliberately has no guessed numerical quota, and other
+request/token ceilings include conservative local policy. Reconfirm the actual
+account limits before activation. Only exact direct `DEEPSEEK` / `deepseek-flash`
+is recognized. Configured input/output reservation rates must be at least the
+verified peak card rates and within the unchanged free-tier blended ceiling.
+Underpriced, malformed, unknown-model and over-ceiling settings fail closed.
+
+Deployment source note: `cloudbuild.yaml` uses `--update-env-vars` rather than
+replacing the environment, so this command preserves unmentioned chain settings.
+No deployment-source or live environment modification accompanied this registry.
+
+
+### GLM Flash additions (same preview; not configured or verified live)
+
+The owner-specified order starts with two exact GLM Flash models sharing ONE
+credential, account quota, bulkhead and auth/rate/quota cooldowns. Model circuits
+remain separate so model-unavailable can fall from 4.7 to 4.5. These are not two
+allowances and there is no key-pool rotation. Unknown quota limits are zero until owner review.
+
+| Name | Code default / restriction |
+| --- | --- |
+| `FREE_CHAIN_GLM_API_KEY` | One dedicated server-side key shared by both Flash rungs. |
+| `FREE_CHAIN_GLM47_MODEL` | Pinned `glm-4.7-flash` only. |
+| `FREE_CHAIN_GLM45_MODEL` | Pinned `glm-4.5-flash` only. |
+| `FREE_CHAIN_GLM_FREE_VERIFIED_UNTIL` | Unset; unexpired owner account/model/free-plan review required. Not an automated tier check. |
+| `FREE_CHAIN_GLM_LANGS` | All supported detector languages; shared by both Flash rungs. |
+| `FREE_CHAIN_GLM_TIME_ZONE` | `rolling24h`; no unverified provider-midnight assumption. |
+| `FREE_CHAIN_GLM_MAX_INPUT_TOKENS` | 16000; shared local context admission bound, 256–100000. |
+| `FREE_CHAIN_GLM_MAX_OUTPUT_TOKENS` | 1024; shared output cap, 64–8192. |
+| `FREE_CHAIN_GLM_RPM` | 0 until owner-verified account limit is set. |
+| `FREE_CHAIN_GLM_RPD` | 0 until owner-verified account limit is set. |
+| `FREE_CHAIN_GLM_TPM` | 0 until owner-verified account limit is set. |
+| `FREE_CHAIN_GLM_TPD` | 0 until owner-verified account limit is set. |
+
+### Local evaluation-only acknowledgements (never production activation)
+
+- `FREE_CHAIN_EVAL_CONFIRM`: explicit approval to transmit only the script's public
+  synthetic corpus. Exact acknowledgement is documented in the script header.
+- `FREE_CHAIN_EVAL_ACCOUNT_SCOPE`: explicit exclusive non-production provider
+  account acknowledgement. An emulator ledger cannot account for production usage.
+- Existing `FIRESTORE_EMULATOR_HOST`: loopback-only emulator with a valid port;
+  the harness uses the fixed demo project and never seeds account approvals.
+- Existing `NODE_ENV`: development required for live harness use; tests and
+  production are refused. Paid cap must be 0, DeepSeek absent, cache disabled and
+  strict-free policy explicitly OFF. No credential or setup commands were run.
+
+
+### Bounded local queue and per-UID fairness (same preview)
+
+| Name | Code default / bounds |
+| --- | --- |
+| `FREE_CHAIN_MAX_ACTIVE` | 8 active chain turns per process; integer 1–64. Separate from provider/account bulkheads. |
+| `FREE_CHAIN_MAX_QUEUED` | 64 waiting turns per process; integer 0–1000. 0 disables waiting, not active dispatch. |
+| `FREE_CHAIN_MAX_WAIT_MS` | 5000 ms maximum local wait; integer 100–10000. Expiry returns busy, not an ETA. |
+| `FREE_CHAIN_PER_USER_ACTIVE` | 1 active turn per verified UID per process; integer 1–8. |
+| `FREE_CHAIN_PER_USER_QUEUED` | 1 waiting turn per verified UID per process; integer 0–16. |
+
+Local slots/fairness are not a cross-replica queue. Provider/account concurrency,
+durable quotas and paid reservations remain separate gates. Selection-only
+controls caching is bounded to one second with single-flight reads; every physical
+attempt still rechecks fresh controls and shared quota. No queue was enabled in
+production or inferred to satisfy a particular load SLA by this documentation.
+
+
+### Reviewed Free-product inference gateway (default OFF)
+
+- `INFERENCE_GATEWAY_ENABLED`: boolean feature switch, absent/OFF by default. Enables only
+  the new authenticated Free-product gateway; no account allowance or approval is implied.
+- `INFERENCE_GATEWAY_SURFACES`: optional comma-separated allowlist, intersected with exactly
+  `chat,professional`. Empty selects these Free surfaces. Builder, paid Doctor/SDA, developer-api,
+  published-app, image-generation and image-enhancement remain excluded even if listed.
+- `INFERENCE_GATEWAY_VERTEX_PRINCIPAL`: non-secret reviewed ADC service-account principal identifier, paired with existing `GOOGLE_CLOUD_PROJECT` by embedding setup. This is not a credential or quota identity; actual ADC principal/project are independently checked before dispatch. No service account or persistent access is created.
+- `INFERENCE_GATEWAY_*`: dedicated per-profile credential **reference namespace** in the
+  reviewed server catalog. Never store secret values in this registry or catalog. Direct profiles
+  bind the reviewed credential generation with a non-secret domain-separated fingerprint;
+  OpenRouter additionally requires the current live registry credential-generation binding.
+  A distinct key/fingerprint is not proof of an independent provider account or free quota.
+
+Enabling requires current independently reviewed account/terms/quality/privacy/capability/rate
+records, canonical-account/credential-generation associations, explicitly local quota counters and
+unresolved holds plus intrinsic-zero/provider-hard-stop protection for unknown upstream quota, and the existing shared platform USD 10/day fallback policy. No automatic
+account enrollment, inferred zero usage, new paid pool, user-wallet change or production
+activation occurs. See `docs/INFERENCE_GATEWAY_RUNTIME_SETUP.md` for exact policies, retained
+maximum paid-hold utilization limits, registry-vs-catalog boundaries and release prerequisites.

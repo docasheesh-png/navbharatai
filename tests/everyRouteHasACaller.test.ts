@@ -45,6 +45,14 @@ describe('🔒 a caller that builds its path from a base is still a caller (Q-81
 describe('census: every /api route has a caller, or a written reason it has none', () => {
   const now = uncalledRoutes();
 
+  it('the reviewed gateway setup UI really calls status, preview and review', () => {
+    const client = stripComments(readFileSync('src/components/admin/InferenceGatewaySetupPanel.tsx', 'utf8'));
+    for (const path of ['/api/admin/inference-gateway/setup', '/api/admin/inference-gateway/setup/preview', '/api/admin/inference-gateway/setup/review']) {
+      expect(isCalled(path, client), path).toBe(true);
+    }
+    for (const action of ['status', 'preview', 'review']) expect(client).toContain(`run(ENDPOINTS.${action}`);
+  });
+
   it('no NEW route without a caller', () => {
     const fresh = now.filter((r) => !(r in BASELINE));
     expect(fresh, 'Wire a caller, or add the route to tests/fixtures/uncalledApiRoutesBaseline.json with who calls it').toEqual([]);
@@ -92,6 +100,15 @@ describe('census: every /api route has a caller, or a written reason it has none
     }
     expect(now).not.toContain('POST /api/admin/live-model-registry/sync');
     expect(now).not.toContain('POST /api/admin/live-model-registry/models/action');
+  });
+
+  it('Free Chat Chain status and controls have real versioned UI callers', () => {
+    const panel = expandBaseConstants(stripComments(readFileSync('src/components/admin/FreeChatChainPanel.tsx', 'utf8')));
+    for (const path of ['/api/admin/free-chat-chain', '/api/admin/free-chat-chain/control', '/api/admin/free-chat-chain/budget', '/api/admin/free-chat-chain/metrics']) expect(isCalled(path, panel), path).toBe(true);
+    expect(now).not.toContain('GET /api/admin/free-chat-chain');
+    expect(now).not.toContain('POST /api/admin/free-chat-chain/control');
+    expect(now).not.toContain('POST /api/admin/free-chat-chain/budget');
+    expect(now).not.toContain('GET /api/admin/free-chat-chain/metrics');
   });
 
   it('the two dead client halves are wired', () => {

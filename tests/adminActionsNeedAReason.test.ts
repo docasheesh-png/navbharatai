@@ -191,6 +191,7 @@ describe('D1 — the fake controls are gone, with their state and handlers', () 
 // Every route that CHANGES something under /api/admin must write an audit line. The exemptions are the
 // routes that change nothing durable — each with its reason, so adding to this list is a decision.
 const NO_AUDIT_NEEDED: Record<string, string> = {
+  'post /api/admin/inference-gateway/setup/preview': 'read-only bounded review preview; prepare returns before transaction writes, with zero-write regression; the separate review commit remains audited',
   'post /api/admin/all-builds/numbers': 'read-only chronological metadata projection; no report, account or triage mutation',
   'post /api/admin/insights/query': 'computes an answer from live metrics; changes nothing',
   'post /api/admin/deploy-risk': 'computes a risk score from the request; changes nothing',

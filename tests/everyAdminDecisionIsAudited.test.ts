@@ -20,6 +20,7 @@ const root = join(__dirname, '..');
 
 /** method + path → why it needs no audit line. Kept in step with adminActionsNeedAReason.test.ts. */
 const NO_AUDIT_NEEDED: Record<string, string> = {
+  'post /api/admin/inference-gateway/setup/preview': 'read-only bounded review preview; prepare returns before transaction writes, with zero-write regression; the separate review commit remains audited',
   'post /api/admin/all-builds/numbers': 'read-only chronological metadata projection; no report, account or triage mutation',
   'post /api/admin/insights/query': 'computes an answer from live metrics; changes nothing',
   'post /api/admin/deploy-risk': 'computes a risk score from the request; changes nothing',

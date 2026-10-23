@@ -1,9 +1,13 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { endpointUrl, normalizeModel, parseCatalog, zero } from './eligibility';
 import type { CatalogManifest, RegistryStore } from './types';
 export const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 export interface RegistryConfig {
   enabled: boolean; strictFreeModulesEnabled: boolean; strictFreeWeakEnabled: boolean; apiKey: string; syncIntervalMs: number; metadataTtlMs: number;
+}
+/** Binds a catalog to the credential generation used for account discovery; not an account identity proof. */
+export function registryCredentialBinding(apiKey: string): string {
+  return createHash('sha256').update('navbharatai-registry-account-v1\0').update(apiKey).digest('hex');
 }
 export type FetchLike = typeof fetch;
 
@@ -87,7 +91,7 @@ export class RegistrySynchronizer {
         if (model.eligibilityStatus === 'VERIFIED_FREE' && before?.eligibilityStatus !== 'VERIFIED_FREE') transitions.becameFree++;
         if (model.eligibilityStatus === 'PAID' && before?.eligibilityStatus === 'VERIFIED_FREE') transitions.becamePaid++;
       }
-      const manifest: CatalogManifest = { version, count: models.length, fetchedAt, expiresAt: fetchedAt + cfg.metadataTtlMs, accountVerified: !!cfg.apiKey, transitions };
+      const manifest: CatalogManifest = { version, count: models.length, fetchedAt, expiresAt: fetchedAt + cfg.metadataTtlMs, accountVerified: !!cfg.apiKey, ...(cfg.apiKey ? { accountCredentialBinding: registryCredentialBinding(cfg.apiKey) } : {}), transitions };
       await this.store.publish(lease, models, manifest);
       return { status: 'synced', version };
     } catch (error) {

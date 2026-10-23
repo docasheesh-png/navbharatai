@@ -1,6 +1,7 @@
 import { strictFreeRequired } from '../AI/inferencePolicy';
 import { strictFreeText } from '../AI/LiveRegistry/runtime';
 import type { AIProviderResponse } from '../AI/Router/ProviderTypes';
+import { isGatewayRouteSelected, isGatewayTerminalError } from '../AI/InferenceGateway/runtime';
 // Shared Professional-AI model routing (admin 2026-07-24: "Other AI ki API call = Professional AI").
 //
 // WHY THIS EXISTS: the 70+ config-driven professionals (Doctor AI, Lawyer AI, …) answer through one
@@ -53,9 +54,12 @@ export async function callProfessionalAIWithUsage(
   prompt: string,
   tier: ProfessionalTier = 'free',
 ): Promise<ProfessionalAnswer> {
-  const answer = (response: Pick<AIProviderResponse, 'content' | 'provider' | 'model' | 'usage' | 'pricingProof'>): ProfessionalAnswer => {
+  const gatewaySelected = isGatewayRouteSelected();
+  const answer = (response: Pick<AIProviderResponse, 'content' | 'provider' | 'model' | 'usage' | 'pricingProof' | 'inferenceGateway' | 'gatewayPricingProof'>): ProfessionalAnswer => {
     const spend: ChatTurnUsage = {
       pricingProof: response.pricingProof,
+      inferenceGateway: response.inferenceGateway,
+      gatewayPricingProof: response.gatewayPricingProof,
       provider: response.provider,
       model: response.model,
       inputTokens: response.usage?.inputTokens,
@@ -81,14 +85,24 @@ export async function callProfessionalAIWithUsage(
   };
 
   // Strict policy has one bounded dispatcher; never repeat its exhausted fallback chain.
-  if (strictFreeRequired()) return answer(await strictFreeText({ prompt, systemPrompt }));
+  if (!gatewaySelected && strictFreeRequired()) return answer(await strictFreeText({ prompt, systemPrompt }));
 
   // Tier-1 leader (both tiers) — GLM-flash. Any failure/rate-limit/empty reply falls through silently.
   try {
     const leader = AIRouterManager.getRouter('professional-free');
     const { response, telemetry } = await leader.routeRaced(prompt, systemPrompt);
     if (telemetry.success && response.content?.trim()) return answer(response);
-  } catch { /* fall through to the tier's fallback universe */ }
+  } catch (error) {
+    // A selected gateway already owns its entire candidate chain. A refusal,
+    // cancellation, partial answer or missing authority is final, not a reason to
+    // start a second logical request through the legacy professional fallback.
+    if (gatewaySelected || isGatewayTerminalError(error)) throw error;
+    /* Unselected turns retain the tier's existing fallback universe. */
+  }
+
+  // Defensive contract guard: a selected runtime must throw rather than return
+  // an unsuccessful/empty result. Even a malformed result cannot reopen legacy.
+  if (gatewaySelected) throw new Error('The selected AI route did not return an answer.');
 
   const fallbackNs = tier === 'free' ? 'professional-free-fallback' : 'professional';
   const router = AIRouterManager.getRouter(fallbackNs);

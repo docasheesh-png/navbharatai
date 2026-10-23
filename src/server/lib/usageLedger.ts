@@ -17,10 +17,13 @@
  *
  * ═══ WHAT THIS DOES INSTEAD ═══
  *
- * It prices the tokens a provider REALLY reported, with the SAME rate card a build is priced by
- * (`providerRates.ts`), and counts separately the calls it could not price.
+ * It prices legacy rows' reported tokens with the SAME rate card a build is priced by
+ * (`providerRates.ts`), and counts separately the calls it could not price. Free-chain rows keep
+ * their measured tokens, but remain unpriced here: routing estimates and zero-cost telemetry are
+ * not invoice evidence, and the legacy rate lookup can fall back to an unrelated model's price.
  *
- * 🔒 THE ONE RULE: an unmeasured call is NOT a free call. It is added to `unmeasuredCalls` and changes
+ * 🔒 THE ONE RULE: an unmeasured call is NOT a free call. It is added to `unmeasuredCalls` and
+ * `unpricedCalls` and changes
  * `complete` to false, so the caller must present the total as a FLOOR ("at least ₹X from N priced
  * calls; M could not be priced") rather than as the answer. Summing an unknown as zero is precisely
  * how a cost panel comes to read ₹0 while money is going out of the door, and doing it a second time —
@@ -42,12 +45,17 @@ export interface UsageLogRow {
   outputTokens?: unknown;
   usageMeasured?: unknown;
   latencyMs?: unknown;
+  /** A present chain marker is enough to exclude legacy rate fallback; its estimates are not invoices. */
+  freeChain?: unknown;
+  inferenceGateway?: unknown;
 }
 
 export interface ProviderUsageRollup {
   requests: number;
   /** Calls whose tokens the provider actually reported. */
   measured: number;
+  priced: number;
+  unpriced: number;
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
@@ -59,6 +67,9 @@ export interface UsageSummary {
   calls: number;
   measuredCalls: number;
   unmeasuredCalls: number;
+  pricedCalls: number;
+  /** Calls missing either measured usage or a trustworthy price, counted once per row. */
+  unpricedCalls: number;
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
@@ -105,7 +116,7 @@ export function summariseUsage(
   priceUsage: PriceUsage,
 ): UsageSummary {
   const out: UsageSummary = {
-    calls: 0, measuredCalls: 0, unmeasuredCalls: 0,
+    calls: 0, measuredCalls: 0, unmeasuredCalls: 0, pricedCalls: 0, unpricedCalls: 0,
     inputTokens: 0, outputTokens: 0, costUsd: 0,
     complete: true, byProvider: {},
   };
@@ -116,7 +127,8 @@ export function summariseUsage(
     out.calls++;
     const key = providerKey(r.providerName);
     const p = out.byProvider[key] || (out.byProvider[key] = {
-      requests: 0, measured: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, avgLatencyMs: null,
+      requests: 0, measured: 0, priced: 0, unpriced: 0,
+      inputTokens: 0, outputTokens: 0, costUsd: 0, avgLatencyMs: null,
     });
     p.requests++;
 
@@ -138,6 +150,8 @@ export function summariseUsage(
       && (typeof inTok === 'number' || typeof outTok === 'number');
     if (!measured) {
       out.unmeasuredCalls++;
+      out.unpricedCalls++;
+      p.unpriced++;
       out.complete = false;
       continue;
     }
@@ -153,6 +167,16 @@ export function summariseUsage(
     p.inputTokens += usage.inputTokens;
     p.outputTokens += usage.outputTokens;
 
+    // Admin observability only: a chain marker must survive the database projection. Do not send
+    // these rows through the legacy callback, whose default price is unrelated to new providers.
+    // No verified invoice/rate evidence is consumed here, even when telemetry estimates say zero.
+    if ((r.freeChain !== undefined && r.freeChain !== null) || (r.inferenceGateway !== undefined && r.inferenceGateway !== null)) {
+      out.unpricedCalls++;
+      p.unpriced++;
+      out.complete = false;
+      continue;
+    }
+
     // NaN is the sentinel for "could not price", and a THROW must produce it too — catching into 0
     // would silently turn a pricing failure into a free call, which is the exact bug being fixed.
     let usd = Number.NaN;
@@ -161,12 +185,16 @@ export function summariseUsage(
     } catch {
       usd = Number.NaN;
     }
-    // A price we could not compute is not a free call either — it goes back to the unmeasured side so
-    // the total stays a floor rather than silently absorbing a zero.
+    // A missing price does not erase real measured tokens. Count it as unpriced, not unmeasured,
+    // so the total stays a floor rather than silently absorbing a zero.
     if (!Number.isFinite(usd) || usd < 0) {
+      out.unpricedCalls++;
+      p.unpriced++;
       out.complete = false;
       continue;
     }
+    out.pricedCalls++;
+    p.priced++;
     out.costUsd += usd;
     p.costUsd += usd;
   }

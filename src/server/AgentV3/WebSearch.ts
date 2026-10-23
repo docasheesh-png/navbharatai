@@ -1,3 +1,5 @@
+import { assertNoUnclaimedGatewayDispatch } from '../AI/InferenceGateway/dispatchBoundary';
+import { isGatewayRouteSelected, maybeGatewayGrounding, currentInferenceGatewayContext, InferenceGatewayTerminalError } from '../AI/InferenceGateway/runtime';
 // AgentV3 — Web Search tool (ported from Engineer AI's WebSearchClient, made self-contained and
 // strict-typed so v5.0 owns it and it survives deletion of the old engines).
 //
@@ -16,7 +18,8 @@
 // npm registry is queried for package-name lookups regardless of provider.
 //
 // Everything degrades gracefully: on any network/parse failure it returns an empty list rather
-// than throwing, so the agent simply learns "no results" and moves on.
+// than throwing, so the agent simply learns "no results" and moves on. Selected gateway searches
+// are the exception: they use the claimed shared-budget search adapter and propagate failures.
 
 import { braveSearch, braveApiKey, searchOrder, noteFreeServed, noteRescue, type SearchIntent } from '../lib/braveSearch';
 
@@ -45,6 +48,12 @@ export class WebSearch {
    * only as a last-resort rescue on a genuinely empty DuckDuckGo result.
    */
   async search(query: string, limit = 5, intent: SearchIntent = 'reference', cheap = false): Promise<SearchResult[]> {
+    if (isGatewayRouteSelected()) {
+      const result = await maybeGatewayGrounding(query, { maxResults: Math.max(1, Math.min(limit || 5, 10)), signal: currentInferenceGatewayContext()?.signal });
+      if (!result) throw new InferenceGatewayTerminalError('grounding-unavailable');
+      return result.results.map(r => ({ title: r.title, url: r.url, snippet: r.description }));
+    }
+    assertNoUnclaimedGatewayDispatch('grounding-search');
     const results: SearchResult[] = [];
 
     // 1. Package-style queries get authoritative npm metadata.
@@ -100,6 +109,7 @@ export class WebSearch {
   }
 
   async npmInfo(pkg: string): Promise<SearchResult | null> {
+    assertNoUnclaimedGatewayDispatch('grounding-search');
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), NPM_TIMEOUT_MS);
     try {
@@ -132,6 +142,7 @@ export class WebSearch {
 
   /** Scrape DuckDuckGo's HTML endpoint (no key, no JS). */
   private async duckDuckGo(query: string, limit: number): Promise<SearchResult[]> {
+    assertNoUnclaimedGatewayDispatch('grounding-search');
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);

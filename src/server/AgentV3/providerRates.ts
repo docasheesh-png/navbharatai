@@ -32,6 +32,7 @@ import { isVerifiedFreeProof, type VerifiedFreeProof } from '../AI/LiveRegistry/
 // All rates are USD per 1,000,000 tokens. Existing env overrides remain supported; the narrowly
 // verified direct DeepSeek profile below is pinned to its documented peak admission rates.
 
+import { unifiedMarginEnabled, unifiedMargin, type MarginService } from '../lib/unifiedWallet/policy';
 import { sonnetRate, opusRate, withClaudeCacheLines, tokenCostUsd, type TokenRate, type BilledUsage } from './pricing';
 
 function envRate(name: string, fallback: number): number {
@@ -390,8 +391,11 @@ export function markupThresholdUsd(): number {
  *                            (default: first $1 × 4, the excess × 3)
  * Monotonic and continuous at the threshold. Pure; negative input clamps to 0.
  */
-export function tieredMarkupUsd(realCostUsd: number): number {
+export function tieredMarkupUsd(realCostUsd: number, service: MarginService = 'ai'): number {
   const c = Math.max(0, realCostUsd);
+  // UNIFIED WALLET (flag, default OFF): one central margin replaces the tiered curve for every AI-metered
+  // charge — builds, assistants, Doctor/SDA/vision, tools, developer API. Off = the curve below, unchanged.
+  if (unifiedMarginEnabled()) return c * unifiedMargin(service);
   const t = markupThresholdUsd();
   const small = markupSmall();
   const large = markupLarge();
@@ -428,7 +432,7 @@ export function explainRealCostBuild(
   const remCost = usageCostUsd(remainder, sonnetRate());
   if (remCost > 0) perProviderMap.set('other', (perProviderMap.get('other') ?? 0) + remCost);
   const realCostUsd = realProviderCostUsd(entries, remainder);
-  const billedUsd = tieredMarkupUsd(realCostUsd);
+  const billedUsd = tieredMarkupUsd(realCostUsd, 'build');
   const rate = Math.max(0, usdInrRate);
   return {
     realCostUsd,

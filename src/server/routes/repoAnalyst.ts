@@ -67,7 +67,7 @@ export function registerRepoAnalystRoutes(app: Express): void {
       sendSafeError(res, 503, 'The analyst is busy. Please try again.', err, 'repo analyst chat');
     }
     };
-    if (uid) return withFreeAnswerQuota(req, res, dispatch, { uid });
+    if (uid) return withFreeAnswerQuota(req, res, dispatch, { uid, surface: 'repo-analyst' });
     return dispatch();
   });
 
@@ -97,7 +97,7 @@ export function registerRepoAnalystRoutes(app: Express): void {
       sendSafeError(res, 503, 'The analyst is busy. Please try again.', err, 'repo analyst generate');
     }
     };
-    if (uid) return withFreeAnswerQuota(req, res, dispatch, { uid });
+    if (uid) return withFreeAnswerQuota(req, res, dispatch, { uid, surface: 'repo-analyst' });
     return dispatch();
   });
 }

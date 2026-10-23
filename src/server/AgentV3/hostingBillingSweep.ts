@@ -41,7 +41,7 @@ import { deploymentStore, type DeploymentRecord } from './DeploymentStore';
 import { NAVBHARAT_CLOUD_PROVIDER } from './hostedDeploymentRecord';
 import { appsProject, serviceNameFor } from './cloudRunHosting';
 import { readHostingUsage, usageGapNote } from './hostingUsage';
-import { hostingCostUsd, hostingBillableUsd, hostingBillingEnabled, hostingCostNote } from './hostingCost';
+import { hostingCostUsd, hostingBillableUsd, hostingBillingEnabled, hostingCostNote, hostingOverageInrPerGb } from './hostingCost';
 import {
   lastCompleteDay, hostingLedgerRef, HOSTING_LEDGER_LABEL,
   type BillingWindow,
@@ -57,7 +57,8 @@ import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
 import { sumFrontendBytes, judgeFrontendUsage } from './frontendUsage';
 import { edgeMeterEnabled, readEdgeBytesForDay, subForUrl } from './edgeTrafficMeter';
 import { decideUsageWarning, type UsageMeterKind } from '../lib/hostingUsageWarning';
-import { HOSTING_OVERAGE_INR_PER_GB } from '../../lib/hostingTiers';
+/** Overage ₹/GB — ₹20 on main; real egress × central margin when the unified wallet is on. */
+const overageRate = (): number => hostingOverageInrPerGb(process.env, usdInrRate());
 import { readWalletBalanceInr, firestoreWalletReader } from './WalletBalance';
 import { saveNotification } from '../lib/AdminNotificationStore';
 import { deploymentStore as deployments } from './DeploymentStore';
@@ -262,7 +263,7 @@ export async function runHostingBillingSweep(opts?: {
         // reads a Cloud Run metric — so this sweep has only ever measured server apps, whatever the old
         // field name suggested. The frontend allowance is a separate number with a separate meter.
         includedGb: tier.includedBackendGb,
-        ratePerGb: HOSTING_OVERAGE_INR_PER_GB,
+        ratePerGb: overageRate(),
         hasPlan: true,
         agreed,
       });
@@ -379,7 +380,7 @@ export function decideFrontendCharge(o: {
     gbToday: o.gbToday,
     usage: { gbBefore: Math.max(0, Number(o.record.frontendGb) || 0), gbBilled: Math.max(0, Number(o.record.frontendGbBilled) || 0) } as never,
     includedGb: o.includedGb,
-    ratePerGb: HOSTING_OVERAGE_INR_PER_GB,
+    ratePerGb: overageRate(),
     hasPlan: true,
     agreed: o.agreed,
   });
@@ -459,7 +460,7 @@ async function reportFrontendTraffic(
           feature: 'hosting',
           billedInr: fe.inr,
           rollupRef: `${hostingLedgerRef(day)}_frontend`,
-          description: `Visitor traffic above your plan — ${fe.billableGb.toFixed(3)} GB at ₹${HOSTING_OVERAGE_INR_PER_GB}/GB`,
+          description: `Visitor traffic above your plan — ${fe.billableGb.toFixed(3)} GB at ₹${overageRate()}/GB`,
         }).catch(() => ({ ok: false as const, error: 'debit threw' }));
         if (res.ok) {
           addInr = fe.inr;
@@ -519,7 +520,7 @@ async function warnOnUsage(o: {
       meter: o.meter,
       periodStart: o.periodStart,
       warnedFor: o.warnedFor,
-      overageInrPerGb: HOSTING_OVERAGE_INR_PER_GB,
+      overageInrPerGb: overageRate(),
     });
     if (!decision.warn) return;
     const sent = await saveNotification({

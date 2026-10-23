@@ -1887,7 +1887,9 @@ export function decideBuildBilledUsd(
   if (isOpusTier) {
     effectiveBilledUsd = flatBilledUsd; // real Opus × 2 — unchanged
   } else if (realCostBillingEnabled()) {
-    effectiveBilledUsd = tieredMarkupUsd(billableTokenCost + vmCost);
+    // UNIFIED WALLET (flag, default OFF): tieredMarkupUsd applies the central margin (UNIFIED_WALLET_MARGIN,
+    // default 2.5, override _BUILD) instead of the ×4/×3 curve. Cancelled-build rules downstream unchanged.
+    effectiveBilledUsd = tieredMarkupUsd(billableTokenCost + vmCost, 'build');
   } else {
     effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
       ? perTierBilledUsd(reconciledProviderUsage, powerLevel)

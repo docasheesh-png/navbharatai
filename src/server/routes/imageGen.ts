@@ -1,4 +1,5 @@
 import { freeModuleInferenceScope, runAdmittedLegacyImageEdit } from '../AI/inferencePolicy';
+import { countDeliveredFreeImage } from '../lib/unifiedWallet/imageTextQuota';
 import type { Express, Request, Response } from 'express';
 import { rateLimiter } from '../lib/authMiddleware';
 import { gateToolAction, burnToolAction } from '../tools/toolGate';
@@ -194,6 +195,8 @@ export function registerImageGenRoutes(app: Express): void {
       }
       reservation = r.hold;
     }
+    // UNIFIED WALLET: a free image also uses one daily free text message — counted only AFTER delivery.
+    const freeImage = !!reservation && reservation.counted && reservation.feeInr === 0;
     let delivered = false;
 
     let gate: Awaited<ReturnType<typeof gateToolAction>> | null = null;
@@ -308,6 +311,7 @@ export function registerImageGenRoutes(app: Express): void {
         });
         delivered = true;
         await reservation?.settle();
+        if (freeImage) await countDeliveredFreeImage(account.uid);
       };
       // Track WHY every rung failed so the final error is HONEST (rule 5): a content refusal (the model
       // declined a real brand / public figure / copyrighted character — e.g. "spiderman") must tell the

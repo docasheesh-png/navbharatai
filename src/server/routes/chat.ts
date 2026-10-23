@@ -64,7 +64,7 @@ async function withChatDailyQuota(req: Request, res: Response, run: () => Promis
     await guestDailyQuota('chat',{identify:async()=>uid ? {uid} : null})(req,res,()=>{work=run();});
     return await work;
   };
-  return isChatImageEditRequest(req) ? admitted() : withFreeAnswerQuota(req,res,admitted,{uid});
+  return isChatImageEditRequest(req) ? admitted() : withFreeAnswerQuota(req,res,admitted,{uid,surface:'chat'});
 }
 function chatAnswerSignal(req: Request, signal: AbortSignal): AbortSignal {
   const quota=freeAnswerSignal(req); return quota ? AbortSignal.any([signal,quota]) : signal;

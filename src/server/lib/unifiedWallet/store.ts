@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import { getServerDb } from '../serverDb';
-import { featureRollupRef } from '../walletFeature';
+import { featureRollupRef, type WalletFeature } from '../walletFeature';
 import {
   holdWalletRolledUp, releaseWalletHold, settleWalletHold, type WalletHoldResult,
 } from '../walletDebit';
@@ -56,44 +56,50 @@ export interface WalletMoneyOps {
 }
 const defaultOps: WalletMoneyOps = { hold: holdWalletRolledUp, release: releaseWalletHold, settle: settleWalletHold };
 
-export interface ChatCharge {
-  holdId: string;
-  rollupRef: string;
-  billedInr: number;
-  ownerId: string;
-  balanceTokens: number;
-}
-export type ChatChargeResult =
-  | { ok: true; charge: ChatCharge }
-  | { ok: false; insufficient: boolean; error: string };
-
 /**
- * Take ONE Free chat message's price from the unified wallet BEFORE the provider is called.
- * All-or-nothing, never overdraws (the existing hold contract, floor 0). Feature 'free-chat' so the
- * admin's spend-by-feature shows chat and builds side by side from the same wallet.
+ * GENERIC SERVICE DEBIT — one entry point any paid feature can plug into (chat today; hosting, database,
+ * APK, App Mart, API usage later). Service key → existing WalletFeature, amount in integer milli-credits,
+ * caller-supplied idempotency key. Hold first (all-or-nothing, never overdraws), then settle or release.
  */
-export async function holdChatMessage(
-  db: unknown, uid: string, requestId: string, cfg: UnifiedWalletConfig, now = Date.now(), ops: WalletMoneyOps = defaultOps,
-): Promise<ChatChargeResult> {
-  const billedInr = milliToInr(cfg.chatMessageMilli);
-  const rollupRef = featureRollupRef('free-chat', now);
-  const holdId = `uwchat_${requestId}`;
-  const r: WalletHoldResult = await ops.hold(db, uid, {
-    feature: 'free-chat', billedInr, rollupRef, holdId, description: 'NavBharatAI Free chat (after daily free messages)',
-  });
+export const SERVICE_FEATURE = {
+  chat: 'free-chat', build: 'build', image: 'image', hosting: 'hosting', database: 'database',
+  apk: 'mobile-build', appmart: 'remix', api: 'api',
+} as const satisfies Record<string, WalletFeature>;
+export type ServiceKey = keyof typeof SERVICE_FEATURE;
+
+export interface ServiceCharge { service: ServiceKey; holdId: string; rollupRef: string; billedInr: number; ownerId: string; balanceTokens: number; description: string }
+export type ServiceChargeResult = { ok: true; charge: ServiceCharge } | { ok: false; insufficient: boolean; error: string };
+
+export async function holdService(
+  db: unknown, uid: string,
+  req: { service: ServiceKey; amountMilli: number; idempotencyKey: string; description: string },
+  now = Date.now(), ops: WalletMoneyOps = defaultOps,
+): Promise<ServiceChargeResult> {
+  const feature = SERVICE_FEATURE[req.service];
+  if (!feature) return { ok: false, insufficient: false, error: 'Unknown service' };
+  if (!/^[A-Za-z0-9_:-]{8,120}$/.test(req.idempotencyKey)) return { ok: false, insufficient: false, error: 'Bad idempotency key' };
+  let billedInr: number;
+  try { billedInr = milliToInr(req.amountMilli); } catch (e: any) { return { ok: false, insufficient: false, error: e.message }; }
+  const rollupRef = featureRollupRef(feature, now);
+  const holdId = `uw_${req.service}_${req.idempotencyKey}`;
+  const r: WalletHoldResult = await ops.hold(db, uid, { feature, billedInr, rollupRef, holdId, description: req.description });
   if (!r.ok) return { ok: false, insufficient: r.insufficient === true, error: r.error };
-  return { ok: true, charge: { holdId, rollupRef, billedInr, ownerId: r.ownerId, balanceTokens: r.tokenBalance } };
+  return { ok: true, charge: { service: req.service, holdId, rollupRef, billedInr, ownerId: r.ownerId, balanceTokens: r.tokenBalance, description: req.description } };
 }
 
-/** Delivered → keep the money. Failed with no output → give it back exactly once (idempotent release). */
-export async function finishChatMessage(
-  db: unknown, uid: string, charge: ChatCharge, outcome: 'answered' | 'provider-failed' | 'uncertain', ops: WalletMoneyOps = defaultOps,
-): Promise<void> {
-  // Same rule as the Free allowance store: only a PROVEN no-output failure refunds; uncertain stays charged.
-  if (outcome === 'provider-failed') {
-    await ops.release(db, uid, { rollupRef: charge.rollupRef, holdId: charge.holdId, description: 'NavBharatAI Free chat (after daily free messages)' }, charge.ownerId);
-  } else {
-    await ops.settle(db, uid, { rollupRef: charge.rollupRef, holdId: charge.holdId, feature: 'free-chat', billedInr: charge.billedInr }, charge.ownerId);
-  }
+/** Delivered (or uncertain) → keep; proven no-output failure → give back exactly once. */
+export async function finishService(db: unknown, uid: string, c: ServiceCharge, outcome: 'answered' | 'provider-failed' | 'uncertain', ops: WalletMoneyOps = defaultOps): Promise<void> {
+  if (outcome === 'provider-failed') await ops.release(db, uid, { rollupRef: c.rollupRef, holdId: c.holdId, description: c.description }, c.ownerId);
+  else await ops.settle(db, uid, { rollupRef: c.rollupRef, holdId: c.holdId, feature: SERVICE_FEATURE[c.service], billedInr: c.billedInr }, c.ownerId);
 }
 
+export const CHAT_LEDGER_LABEL = 'NavBharatAI Chat (after daily free messages)';
+export type ChatCharge = ServiceCharge;
+export type ChatChargeResult = ServiceChargeResult;
+/** NavBharatAI Chat past the daily allowance: 0.1 credit (config) via the generic service debit. */
+export function holdChatMessage(db: unknown, uid: string, requestId: string, cfg: UnifiedWalletConfig, now = Date.now(), ops: WalletMoneyOps = defaultOps) {
+  return holdService(db, uid, { service: 'chat', amountMilli: cfg.chatMessageMilli, idempotencyKey: requestId, description: CHAT_LEDGER_LABEL }, now, ops);
+}
+export function finishChatMessage(db: unknown, uid: string, charge: ChatCharge, outcome: 'answered' | 'provider-failed' | 'uncertain', ops: WalletMoneyOps = defaultOps) {
+  return finishService(db, uid, charge, outcome, ops);
+}

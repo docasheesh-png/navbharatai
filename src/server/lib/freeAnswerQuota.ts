@@ -119,7 +119,7 @@ async function runWalletPaidTurn<T>(req: Request, res: Response, run: () => Prom
   const db=getServerDb();
   const held=await holdChatMessage(db,uid,requestId,cfg);
   if (!held.ok) {
-    if (held.insufficient) { if (!res.headersSent) res.status(402).json({code:'WALLET_INSUFFICIENT',error:insufficientBalanceMessage(lang,cfg),reply:insufficientBalanceMessage(lang,cfg),minRechargeInr:cfg.minRechargeInr}); return; }
+    if (held.insufficient) { if (!res.headersSent) res.status(402).json({code:'WALLET_INSUFFICIENT',error:insufficientBalanceMessage(lang,cfg),reply:insufficientBalanceMessage(lang,cfg)}); return; }
     reject(res,'unavailable'); return;
   }
   const notice=lowBalanceNotice(lang,held.charge.balanceTokens,cfg);

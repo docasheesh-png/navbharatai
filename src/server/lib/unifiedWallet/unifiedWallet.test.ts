@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Firestore } from 'firebase-admin/firestore';
 import {
   unifiedWalletConfig, unifiedWalletEnabled, dailyAllowance, milliToTokens, milliToInr, gstBreakdown,
-  unifiedBuildBilledUsd, isValidRecharge, detectLang, insufficientBalanceMessage, lowBalanceNotice, rechargePackView,
+  unifiedBuildBilledUsd, detectLang, insufficientBalanceMessage, lowBalanceNotice, rechargePackView,
 } from './policy';
-import { UnifiedWalletGate, holdChatMessage, finishChatMessage, type WalletMoneyOps } from './store';
+import { UnifiedWalletGate, holdChatMessage, finishChatMessage, holdService, finishService, SERVICE_FEATURE, type WalletMoneyOps } from './store';
+import { takeTextSlotForFreeImage, imageCountsAgainstText } from './imageTextQuota';
 import { computeRolledUpDebit, computeRolledUpRelease, computeDebitedWallet } from '../walletDebit';
 import { FreeAnswerQuotaStore } from '../freeAnswerQuotaStore';
 
@@ -36,9 +37,10 @@ describe('unified wallet policy', () => {
   it('is OFF by default and owner defaults are config-driven', () => {
     expect(unifiedWalletEnabled({})).toBe(false);
     const c = unifiedWalletConfig({});
-    expect(c).toMatchObject({ enabled: false, chatMessageMilli: 100, guestDailyMessages: 5, signedInDailyMessages: 25, buildMargin: 2, minRechargeInr: 20 });
+    expect(c).toMatchObject({ enabled: false, chatMessageMilli: 100, guestDailyMessages: 5, signedInDailyMessages: 25, buildMargin: 2 });
+    expect('minRechargeInr' in c).toBe(false); // existing ₹1 minimum stays; no new minimum
     expect(c.rechargePacksInr).toEqual([20, 50, 100, 500]);
-    expect(unifiedWalletConfig({ UNIFIED_WALLET_RECHARGE_PACKS: '500, 10, 50,50' }).rechargePacksInr).toEqual([50, 500]); // below min dropped
+    expect(unifiedWalletConfig({ UNIFIED_WALLET_RECHARGE_PACKS: '500, 10, 50,50' }).rechargePacksInr).toEqual([10, 50, 500]); // any ₹ ≥ 1, deduped, sorted
     expect('plans' in c).toBe(false); // owner: no subscriptions
     expect(unifiedWalletConfig({ UNIFIED_WALLET_ENABLED: '1', UNIFIED_WALLET_BUILD_MARGIN: '2.5' })).toMatchObject({ enabled: true, buildMargin: 2.5 });
   });
@@ -66,13 +68,11 @@ describe('unified wallet policy', () => {
   it('build margin, min recharge, language messages', () => {
     expect(unifiedBuildBilledUsd(0.5, { buildMargin: 2 })).toBe(1);
     expect(unifiedBuildBilledUsd(-1, { buildMargin: 2 })).toBe(0);
-    expect(isValidRecharge(19, { minRechargeInr: 20 })).toBe(false);
-    expect(isValidRecharge(20, { minRechargeInr: 20 })).toBe(true);
     expect(detectLang('GST क्या है')).toBe('hi');
     expect(detectLang('mujhe GST samjhao')).toBe('hinglish');
     expect(detectLang('Explain GST')).toBe('en');
     const c = unifiedWalletConfig({});
-    expect(insufficientBalanceMessage('hi', c)).toContain('₹20');
+    expect(insufficientBalanceMessage('hi', c)).toContain('recharge');
     expect(insufficientBalanceMessage('en', c)).toContain('₹1 = 10 messages');
     expect(lowBalanceNotice('en', 400, c)).toContain('4.00 credits');
     expect(lowBalanceNotice('en', 600, c)).toBe('');
@@ -140,7 +140,7 @@ describe('chat charge orchestration', () => {
     const o = ops();
     const r = await holdChatMessage(null, 'u1', uuid(1), cfg, Date.parse(NOW), o);
     expect(r.ok).toBe(true);
-    expect(o.hold).toHaveBeenCalledWith(null, 'u1', expect.objectContaining({ billedInr: 0.1, holdId: `uwchat_${uuid(1)}`, feature: 'free-chat' }));
+    expect(o.hold).toHaveBeenCalledWith(null, 'u1', expect.objectContaining({ billedInr: 0.1, holdId: `uw_chat_${uuid(1)}`, feature: 'free-chat', description: expect.stringContaining('NavBharatAI Chat') }));
     if (r.ok) await finishChatMessage(null, 'u1', r.charge, 'answered', o);
     expect(o.settle).toHaveBeenCalled(); expect(o.release).not.toHaveBeenCalled();
   });
@@ -177,5 +177,49 @@ describe('allowance reset at midnight IST (existing Free answer store, configure
     const { db } = fixture(); const store = new FreeAnswerQuotaStore(db as any);
     const r = await store.reserve({ key: 'guest-device:d1', limit: 5, ipKey: '1.2.3.0', guest: true }, uuid(1), Date.parse(NOW));
     expect(r.allowed).toBe(true);
+  });
+});
+
+describe('generic service debit (hosting, database, APK, App Mart, API can plug in)', () => {
+  const ops = (): WalletMoneyOps => ({
+    hold: vi.fn(async () => ({ ok: true as const, ownerId: 'u1', tokensDebited: 500, tokenBalance: 0 })),
+    release: vi.fn(async () => ({ ok: true as const, released: true, tokensReturned: 500 })),
+    settle: vi.fn(async () => ({ ok: true as const, settled: true })),
+  });
+  it('maps every service to an existing wallet feature', () => {
+    expect(Object.keys(SERVICE_FEATURE).sort()).toEqual(['api', 'apk', 'appmart', 'build', 'chat', 'database', 'hosting', 'image']);
+  });
+  it('debits integer milli-credits with the caller idempotency key', async () => {
+    const o = ops();
+    const r = await holdService(null, 'u1', { service: 'database', amountMilli: 5000, idempotencyKey: 'db_2026-10-23_app1', description: 'App database' }, Date.parse(NOW), o);
+    expect(r.ok).toBe(true);
+    expect(o.hold).toHaveBeenCalledWith(null, 'u1', expect.objectContaining({ billedInr: 5, feature: 'database', holdId: 'uw_database_db_2026-10-23_app1' }));
+    if (r.ok) await finishService(null, 'u1', r.charge, 'provider-failed', o);
+    expect(o.release).toHaveBeenCalledTimes(1);
+  });
+  it('rejects fractional-paise amounts and bad keys before touching money', async () => {
+    const o = ops();
+    expect(await holdService(null, 'u1', { service: 'api', amountMilli: 15, idempotencyKey: 'abcdefgh1', description: 'x' }, 0, o)).toMatchObject({ ok: false });
+    expect(await holdService(null, 'u1', { service: 'api', amountMilli: 10, idempotencyKey: 'bad key', description: 'x' }, 0, o)).toMatchObject({ ok: false });
+    expect(o.hold).not.toHaveBeenCalled();
+  });
+});
+
+describe('free image also uses a daily text message (config)', () => {
+  const on = { UNIFIED_WALLET_ENABLED: '1' };
+  it('is off with the flag off, and can be switched off by config', () => {
+    expect(imageCountsAgainstText({})).toBe(false);
+    expect(imageCountsAgainstText(on)).toBe(true);
+    expect(imageCountsAgainstText({ ...on, UNIFIED_WALLET_IMAGE_COUNTS_TEXT: '0' })).toBe(false);
+  });
+  it('consumes one of the 25 text messages on delivery and gives it back if the image failed', async () => {
+    const { db } = fixture(); const store = new FreeAnswerQuotaStore(db as any);
+    const t = Date.parse(NOW);
+    const slot = await takeTextSlotForFreeImage('u1', on, store, () => t);
+    await slot.settle(true);
+    expect(await store.status({ key: 'user:u1', limit: 25 }, t + 1)).toMatchObject({ used: 1, remaining: 24 });
+    const failed = await takeTextSlotForFreeImage('u1', on, store, () => t + 2);
+    await failed.settle(false);
+    expect(await store.status({ key: 'user:u1', limit: 25 }, t + 3)).toMatchObject({ used: 1, remaining: 24 });
   });
 });

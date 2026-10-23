@@ -58,10 +58,10 @@ describe('Free Chat Chain real rendered state and controls', () => {
     await mount(vi.fn(async () => response(freeChainViewFixture({ enabled: true, allowListConfigured: true }))));
     expect(renderToStaticMarkup(root())).toContain('Routing enabled for selected eligible requests');
   });
-  it('renders both distinct Flash rungs in the configured seven-rung order', async () => {
+  it('renders both distinct Flash rungs in the configured rung order', async () => {
     await mount(vi.fn(async () => response(freeChainViewFixture())));
     const cards = elements(root()).filter(e => e.type === FreeChainProviderCard);
-    expect(cards.map(c => c.props.provider.id)).toEqual(['glm47', 'glm45', 'groq', 'openrouter', 'cloudflare', 'gemini', 'deepseek']);
+    expect(cards.map(c => c.props.provider.id)).toEqual(['glm47', 'glm45', 'groq', 'gemini', 'cloudflare', 'nvidia', 'openrouter', 'modelscope', 'bluesminds', 'requesty', 'llm7', 'glmflashx', 'nemotron', 'gpt5nano', 'deepseek']);
     const html = renderToStaticMarkup(root());
     expect(html).toContain('GLM 4.7 Flash'); expect(html).toContain('GLM 4.5 Flash');
     expect(html).toContain('not a second allowance');
@@ -69,8 +69,8 @@ describe('Free Chat Chain real rendered state and controls', () => {
   it('displays actual configured routing order and labels omitted providers outside the chain', async () => {
     await mount(vi.fn(async () => response(freeChainViewFixture({ order: ['groq', 'openrouter'] }))));
     const cards = elements(root()).filter(e => e.type === FreeChainProviderCard);
-    expect(cards.map(c => c.props.provider.id)).toEqual(['groq', 'openrouter', 'glm47', 'glm45', 'cloudflare', 'gemini', 'deepseek']);
-    expect(cards.map(c => c.props.position)).toEqual([1, 2, null, null, null, null, null]);
+    expect(cards.map(c => c.props.provider.id)).toEqual(['groq', 'openrouter', 'glm47', 'glm45', 'gemini', 'cloudflare', 'nvidia', 'modelscope', 'bluesminds', 'requesty', 'llm7', 'glmflashx', 'nemotron', 'gpt5nano', 'deepseek']);
+    expect(cards.map(c => c.props.position)).toEqual([1, 2, ...Array(13).fill(null)]);
     const html = renderToStaticMarkup(root()); expect(html).toContain('Not in configured routing order');
   });
   it('global stop requires a reason, confirms the consequence and carries the prior snapshot', async () => {

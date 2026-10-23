@@ -4476,6 +4476,16 @@ or protect against upgrades/external account traffic.
 | Name | Code default / interpretation |
 | --- | --- |
 | `FREE_CHAIN_ENABLED` | OFF. Deployment gate; saved admin controls cannot override OFF. |
+| `FREE_CHAIN_MAX_ATTEMPTS` | 4; integer 1–6. Max physical provider calls per Free chat turn; skipped rungs do not count. See `docs/FREE_CHAT_TIERS.md`. |
+| `FREE_CHAIN_STICKY_SPREAD` | OFF. Rotates equal-cost free Tier-1 rungs by a stable uid hash (continuity + load spread). Never moves a paid rung. |
+| `FREE_CHAIN_GLMX_API_KEY` / `FREE_CHAIN_DEEPINFRA_API_KEY` / `FREE_CHAIN_OPENAI_API_KEY` | Secret, unset. One key each for paid Tier-3 rungs GLM-4.7-FlashX, Nemotron 3 Nano (DeepInfra), GPT-5 Nano. Comma lists rejected. |
+| `FREE_CHAIN_GLMX_RATE_VERIFIED_UNTIL` / `FREE_CHAIN_DEEPINFRA_RATE_VERIFIED_UNTIL` / `FREE_CHAIN_OPENAI_RATE_VERIFIED_UNTIL` | Unset ⇒ rung skipped (`rate-card-unverified`). Owner attestation date after checking the official price page. |
+| `FREE_CHAIN_GLMX_PRICE_IN_PER_MTOK` / `_PRICE_OUT_PER_MTOK` (also `DEEPINFRA_`, `OPENAI_`) | Official list price default (0.07/0.40, 0.05/0.20, 0.05/0.40). May be raised, never lowered below list. |
+| `FREE_CHAIN_GLMX_MODEL` / `FREE_CHAIN_DEEPINFRA_MODEL` / `FREE_CHAIN_OPENAI_MODEL` | Pinned ids `glm-4.7-flashx`, `nvidia/Nemotron-3-Nano-30B-A3B`, `gpt-5-nano`; any other value is rejected. |
+| `FREE_CHAIN_NVIDIA_API_KEY` / `FREE_CHAIN_MODELSCOPE_API_KEY` / `FREE_CHAIN_LLM7_API_KEY` | Secret, unset. Registered rungs blocked by provider terms (non-production). Dispatch also needs `FREE_CHAIN_<P>_WRITTEN_APPROVAL=on`. |
+| `FREE_CHAIN_BLUESMINDS_API_KEY` / `FREE_CHAIN_REQUESTY_API_KEY` | Secret, unset. Terms/free tier unverified; blocked unless `FREE_CHAIN_<P>_WRITTEN_APPROVAL=on`. |
+| `FREE_CHAIN_<NVIDIA\|MODELSCOPE\|LLM7\|BLUESMINDS\|REQUESTY>_WRITTEN_APPROVAL` | OFF. Set only when the owner holds written commercial permission from that provider. |
+| `FREE_CHAIN_LLM7_FREE_VERIFIED_UNTIL` | Unset. Free-plan attestation for LLM7 (also requires written approval). |
 | `FREE_CHAIN_ROLLOUT_PERCENT` | 0; whole integer 0–100. Used when no saved admin override exists. |
 | `FREE_CHAIN_ALLOW_UIDS` | Empty comma-separated verified UID allowlist. Allowlisted users can be selected even at 0%. Never include secrets. |
 | `FREE_CHAIN_ORDER` | `glm47,glm45,groq,openrouter,cloudflare,gemini,deepseek`; unique known IDs, omitted rungs allowed, paid rung must remain last when present. Empty/unset uses default, not an empty chain. |

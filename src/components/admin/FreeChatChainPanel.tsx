@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import {
-  freeChainBudgetFingerprint, freeChainControlFingerprint, freeChainControls, freeChainPercent, freeChainProviderLabel, freeChainTimestamp, freeChainUsd,
+  freeChainBudgetFingerprint, freeChainControlFingerprint, freeChainControls, freeChainPercent, freeChainProviderLabel, freeChainProviderTier, freeChainTimestamp, freeChainUsd,
   FREE_CHAIN_METRICS_SCAN_LIMIT, FREE_CHAIN_MAX_PAID_CAP_USD, isFreeChainBudgetResponse, validFreeChainBudgetUsd, isFreeChainAdminMetrics, isFreeChainAdminView, validFreeChainReason, type FreeChainAdminMetrics, type FreeChainAdminView, type FreeChainControlAction,
 } from '../../lib/freeChatChainView';
 
@@ -251,7 +251,9 @@ export function FreeChainProviderCard({ provider: p, position, now, trusted, con
   const resetSeconds = p.nextResetAt == null ? null : Math.max(0, Math.ceil((p.nextResetAt - now) / 1000));
   return <article className="rounded-lg border border-line p-4 space-y-2">
     <h4 className="font-bold text-ink">{position === null ? 'Outside configured chain' : `${position}.`} {freeChainProviderLabel(p.id)}</h4>
+    <p className="text-xs text-muted">Tier {freeChainProviderTier(p.id)} · {freeChainProviderTier(p.id) === 3 ? 'paid, shared daily budget' : freeChainProviderTier(p.id) === 2 ? 'limited free gateway' : 'true free'}</p>
     <p className="text-xs font-mono text-muted break-all">{p.model || 'Model not configured'}</p>
+    {(p.reason === 'terms-non-production' || p.reason === 'terms-unverified') && <p className="text-sm text-muted">Blocked by provider terms (non-production / unverified). Needs written commercial permission; see docs/FREE_CHAT_CHAIN.md.</p>}
     {(p.id === 'glm47' || p.id === 'glm45') && <p className="text-sm text-muted">Shared account quota and auth/rate/quota cooldown with the other Flash rung; not a second allowance. Model circuits remain separate.</p>}
     <p className="text-sm text-body">{!trusted ? 'Unconfirmed snapshot' : position === null ? 'Not in configured routing order' : p.disabled ? 'Disabled by admin' : !p.configured ? 'Not configured' : 'Configured; eligibility checked at dispatch'}</p>
     {p.reason && <p className="text-sm text-muted">{p.reason}</p>}

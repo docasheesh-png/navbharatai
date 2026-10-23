@@ -1,12 +1,12 @@
 /** Shared, credential-free contract for the admin Free Chat Chain screen and runtime. */
-export const FREE_CHAIN_PROVIDER_IDS = ['glm47', 'glm45', 'groq', 'gemini', 'cloudflare', 'nvidia', 'openrouter', 'modelscope', 'bluesminds', 'requesty', 'llm7', 'glmflashx', 'nemotron', 'gpt5nano', 'deepseek'] as const;
+export const FREE_CHAIN_PROVIDER_IDS = ['glm47', 'glm45', 'groq', 'gemini', 'cloudflare', 'nvidia', 'openrouter', 'modelscope', 'bluesminds', 'requesty', 'llm7', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid', 'deepseek'] as const;
 /** Owner tier of each rung, for the admin screen. */
 export function freeChainProviderTier(id: FreeChainProviderId): 1 | 2 | 3 {
-  return (['glmflashx', 'nemotron', 'gpt5nano', 'deepseek'] as string[]).includes(id) ? 3 : (['openrouter', 'modelscope', 'bluesminds', 'requesty', 'llm7'] as string[]).includes(id) ? 2 : 1;
+  return (['llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid', 'deepseek'] as string[]).includes(id) ? 3 : (['openrouter', 'modelscope', 'bluesminds', 'requesty', 'llm7'] as string[]).includes(id) ? 2 : 1;
 }
 export type FreeChainProviderId = typeof FREE_CHAIN_PROVIDER_IDS[number];
 export function freeChainProviderLabel(id: FreeChainProviderId): string {
-  const labels: Partial<Record<FreeChainProviderId, string>> = { glm47: 'GLM 4.7 Flash', glm45: 'GLM 4.5 Flash', nvidia: 'NVIDIA NIM', modelscope: 'ModelScope', bluesminds: 'BluesMinds', requesty: 'Requesty', llm7: 'LLM7', glmflashx: 'GLM 4.7 FlashX (paid)', nemotron: 'Nemotron 3 Nano · DeepInfra (paid)', gpt5nano: 'GPT-5 Nano (paid)', deepseek: 'DeepSeek Flash (paid)' };
+  const labels: Partial<Record<FreeChainProviderId, string>> = { glm47: 'GLM 4.7 Flash', glm45: 'GLM 4.5 Flash', nvidia: 'NVIDIA NIM', modelscope: 'ModelScope', bluesminds: 'BluesMinds', requesty: 'Requesty', llm7: 'LLM7', glmflashx: 'GLM 4.7 FlashX (paid)', llama8b: 'Llama 3.1 8B Turbo · DeepInfra (paid)', dsv4flash: 'DeepSeek V4 Flash 0731 · DeepInfra (paid)', geminipaid: 'Gemini 2.5 Flash-Lite (paid)', gpt5nano: 'GPT-5 Nano (paid)', deepseek: 'DeepSeek Flash (paid)' };
   return labels[id] ?? id;
 }
 export interface FreeChainControls {

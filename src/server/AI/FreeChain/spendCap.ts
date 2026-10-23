@@ -2,8 +2,9 @@
 import { checkedAdd, nonnegativeInteger, type DayWindow } from './quota';
 export const NANO_USD = 1_000_000_000;
 /** Owner-authorized maximum TOTAL per IST day, shared by every paid provider and key. */
-export const OWNER_PAID_DAILY_CEILING_NANO_USD = 10 * NANO_USD;
-export const DEFAULT_PAID_CAP_NANO_USD = OWNER_PAID_DAILY_CEILING_NANO_USD;
+/** Raised $10 → $17 by the owner's Final Master Plan (₹50k/month ≈ $17/day). The default stays $10. */
+export const OWNER_PAID_DAILY_CEILING_NANO_USD = 17 * NANO_USD;
+export const DEFAULT_PAID_CAP_NANO_USD = 10 * NANO_USD;
 export const DEFAULT_PAID_PER_USER_DAILY_LIMIT = 20;
 export const PAID_BUDGET_TIME_ZONE = 'Asia/Kolkata';
 export const SPEND_ALERT_THRESHOLDS = [50, 80, 100] as const;

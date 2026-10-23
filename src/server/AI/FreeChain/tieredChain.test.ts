@@ -45,14 +45,15 @@ function tiered(order: string, extra: Record<string, string> = {}) {
   FREE_CHAIN_CF_API_TOKEN: 'fake-local-key', FREE_CHAIN_CF_FREE_VERIFIED_UNTIL: VERIFIED, CLOUDFLARE_ACCOUNT_ID: 'a'.repeat(32),
   FREE_CHAIN_GLMX_API_KEY: 'fake-local-key', FREE_CHAIN_GLMX_RATE_VERIFIED_UNTIL: VERIFIED,
   FREE_CHAIN_DEEPINFRA_API_KEY: 'fake-local-key', FREE_CHAIN_DEEPINFRA_RATE_VERIFIED_UNTIL: VERIFIED,
-  FREE_CHAIN_OPENAI_API_KEY: 'fake-local-key', FREE_CHAIN_OPENAI_RATE_VERIFIED_UNTIL: VERIFIED, ...extra });
+  FREE_CHAIN_OPENAI_API_KEY: 'fake-local-key', FREE_CHAIN_OPENAI_RATE_VERIFIED_UNTIL: VERIFIED,
+  FREE_CHAIN_DI_LLAMA8B_RATE_VERIFIED_UNTIL: VERIFIED, FREE_CHAIN_DI_DSV4_RATE_VERIFIED_UNTIL: VERIFIED, FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off', ...extra });
 }
 describe('owner tiered free chat module (Tier 1 → Tier 2 → Tier 3)', () => {
  it('default order is free-first and every paid rung sits after every free rung', () => {
   const cfg = freeChainConfig({});
-  const firstPaid = cfg.order.findIndex(id => ['glmflashx', 'nemotron', 'gpt5nano', 'deepseek'].includes(id));
-  expect(cfg.order.slice(0, firstPaid)).toEqual(['glm47', 'glm45', 'groq', 'gemini', 'cloudflare', 'openrouter']);
-  expect(cfg.order.slice(firstPaid)).toEqual(['glmflashx', 'nemotron', 'gpt5nano', 'deepseek']);
+  const firstPaid = cfg.order.findIndex(id => ['llama8b', 'dsv4flash', 'glmflashx', 'gpt5nano', 'geminipaid', 'deepseek'].includes(id));
+  expect(cfg.order.slice(0, firstPaid)).toEqual(['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter']);
+  expect(cfg.order.slice(firstPaid)).toEqual(['llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
   expect(cfg.maxAttempts).toBe(4); expect(cfg.stickySpread).toBe(false);
   expect(cfg.rungs.find(r => r.id === 'gemini')?.model).toBe('gemini-2.5-flash-lite');
  });
@@ -83,20 +84,20 @@ describe('owner tiered free chat module (Tier 1 → Tier 2 → Tier 3)', () => {
  it('falls to the cheapest paid rung only after free rungs fail, reserving the shared budget first', async () => {
   m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true }); m.settle.mockResolvedValue(undefined);
   m.execute.mockRejectedValueOnce(new FreeChainProviderError('RATE_LIMIT')).mockRejectedValueOnce(new FreeChainProviderError('SERVER')).mockImplementation(successful('paid answer'));
-  const result = await buildFreeChainRouter(db, tiered('groq,cloudflare,glmflashx,nemotron')).route(input());
+  const result = await buildFreeChainRouter(db, tiered('groq,cloudflare,glmflashx,llama8b')).route(input());
   expect(result).toMatchObject({ ok: true, provider: 'GLM', model: 'glm-4.7-flashx' });
   expect(m.paid).toHaveBeenCalledTimes(1); expect(m.paid.mock.calls[0][0].requestId).toMatch(/:glmflashx$/);
   expect(m.settle).toHaveBeenCalledTimes(1); expect(result.freeChain?.costUsdEstimate).toBeGreaterThan(0);
  });
  it('a refused paid reservation (daily cap reached) skips the rung without dispatch', async () => {
   m.paid.mockResolvedValue(null);
-  const result = await buildFreeChainRouter(db, tiered('nemotron,gpt5nano')).route(input());
+  const result = await buildFreeChainRouter(db, tiered('llama8b,gpt5nano')).route(input());
   expect(m.execute).not.toHaveBeenCalled(); expect(result.freeChain?.attempts.map(a => a.reason)).toEqual(['budget', 'budget']);
  });
  it('caps physical attempts per turn at FREE_CHAIN_MAX_ATTEMPTS', async () => {
   m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
   m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
-  const cfg = tiered('glm47,groq,cloudflare,glmflashx,nemotron', { FREE_CHAIN_MAX_ATTEMPTS: '3' });
+  const cfg = tiered('glm47,groq,cloudflare,glmflashx,llama8b', { FREE_CHAIN_MAX_ATTEMPTS: '3' });
   const result = await buildFreeChainRouter(db, cfg).route(input());
   expect(m.execute).toHaveBeenCalledTimes(3); expect(result.freeChain?.attempts.at(-1)?.reason).toBe('max-attempts');
  });
@@ -125,5 +126,31 @@ describe('owner tiered free chat module (Tier 1 → Tier 2 → Tier 3)', () => {
   m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
   const r = await buildFreeChainRouter(db, tiered('gpt5nano')).route({ ...input(), context: { ...input().context, healthTurn: true } });
   expect(m.execute).not.toHaveBeenCalled(); expect(r.freeChain?.attempts[0].reason).toBe('privacy');
+ });
+});
+
+describe('master plan routing through the live chain', () => {
+ beforeEach(() => { m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true }); m.settle.mockResolvedValue(undefined); });
+ it('a teaching question goes straight to DeepInfra DeepSeek', async () => {
+  const result = await buildFreeChainRouter(db, tiered('groq,llama8b,dsv4flash')).route({ ...input(), message: 'NEET exam ka syllabus samjhao' });
+  expect(result.freeChain?.route).toBe('quality'); expect(result.freeChain?.rung).toBe('dsv4flash'); expect(m.paid).toHaveBeenCalledOnce();
+ });
+ it('without the DeepInfra key the quality route falls back to the normal free order (no breakage)', async () => {
+  const result = await buildFreeChainRouter(db, tiered('groq,llama8b,dsv4flash', { FREE_CHAIN_DEEPINFRA_API_KEY: '' })).route({ ...input(), message: 'NEET exam ka syllabus samjhao' });
+  expect(result).toMatchObject({ ok: true }); expect(result.freeChain?.rung).toBe('groq'); expect(result.freeChain?.route).toBe('normal');
+ });
+ it('monthly cap reached skips paid rungs without dispatch', async () => {
+  const fail = { collection: () => { throw new Error('down'); } } as unknown as typeof db;
+  m.execute.mockRejectedValueOnce(new FreeChainProviderError('RATE_LIMIT'));
+  const result = await buildFreeChainRouter(fail, tiered('groq,llama8b', { FREE_CHAIN_MONTHLY_CAP_ENABLED: 'on' })).route(input());
+  expect(result.freeChain?.attempts.map(a => a.reason)).toEqual(['rate_limit', 'monthly-budget']); expect(m.paid).not.toHaveBeenCalled();
+ });
+ it('reply cap sends max 250 output tokens to the 8B rung and disables GLM thinking', async () => {
+  await buildFreeChainRouter(db, tiered('llama8b')).route({ ...input(), message: 'tell me about indian history' });
+  expect(m.execute.mock.calls[0][1]).toMatchObject({ maxOutputTokens: 250 });
+  m.execute.mockClear(); await buildFreeChainRouter(db, tiered('llama8b')).route(input());
+  expect(m.execute.mock.calls[0][1]).toMatchObject({ maxOutputTokens: 80 });
+  m.execute.mockClear(); await buildFreeChainRouter(db, tiered('glm45')).route(input());
+  expect(m.execute.mock.calls[0][1]).toMatchObject({ extraBody: { thinking: { type: 'disabled' } } });
  });
 });

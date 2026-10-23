@@ -16,7 +16,7 @@
 // language) — never a raw error, never an unbudgeted bill.
 import { randomUUID } from 'node:crypto';
 import { FreeChainStore } from '../AI/FreeChain/store';
-import { NANO_USD, OWNER_PAID_DAILY_CEILING_NANO_USD, maximumCostNanoUsd, type PaidReservation } from '../AI/FreeChain/spendCap';
+import { NANO_USD, OWNER_PAID_DAILY_CEILING_NANO_USD, DEFAULT_PAID_CAP_NANO_USD, maximumCostNanoUsd, type PaidReservation } from '../AI/FreeChain/spendCap';
 import { realRateFor } from '../AgentV3/providerRates';
 import type { AIProvider, AIProviderResponse } from '../AI/Router/ProviderTypes';
 
@@ -40,10 +40,10 @@ export function isFreeTierPaidModelAllowed(model: string): boolean {
   return FREE_TIER_PAID_MODEL_ALLOWLIST.includes(String(model ?? '').trim()) && !isForbiddenOnFreeTier(model);
 }
 
-/** `FREE_TIER_PAID_DAILY_CAP_USD`, default 10, clamped to the owner ceiling ($10). Invalid → 0 (closed). */
+/** `FREE_TIER_PAID_DAILY_CAP_USD`, default 10, clamped to the owner ceiling ($17). Invalid → 0 (closed). */
 export function freeTierPaidCapNanoUsd(env: NodeJS.ProcessEnv = process.env): number {
   const raw = String(env.FREE_TIER_PAID_DAILY_CAP_USD ?? '').trim();
-  if (!raw) return OWNER_PAID_DAILY_CEILING_NANO_USD;
+  if (!raw) return DEFAULT_PAID_CAP_NANO_USD;
   if (!/^\d+(?:\.\d{1,9})?$/.test(raw)) return 0;
   const nano = Math.round(Number(raw) * NANO_USD);
   if (!Number.isFinite(nano) || nano < 0) return 0;

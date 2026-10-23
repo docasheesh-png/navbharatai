@@ -147,3 +147,28 @@ Key conclusions:
 - At 5 messages/user/day, halve all paid figures (~$76/day). Prompt caching of the system prompt can
   cut input cost a further 50–80 %. Nemotron is a reasoning model; hidden reasoning tokens can raise
   output cost — measure on the canary before trusting these numbers.
+
+## Final Master Plan (owner, 2026-10-24)
+
+Default order: `glm45` (max 2 in flight) → `glm47` (max 1) → `groq` → `cloudflare` → `openrouter` (:free) →
+paid `llama8b` (DeepInfra Llama-3.1-8B Turbo) → `dsv4flash` (DeepInfra DeepSeek-V4-Flash-0731) →
+backups `gpt5nano` → `glmflashx` → `geminipaid` (Gemini 2.5 Flash-Lite, paid tier). Nemotron Nano removed;
+free-tier Gemini is out of the default order. Both DeepInfra rungs use ONE key: `FREE_CHAIN_DEEPINFRA_API_KEY`.
+
+All features below are **default ON** and individually killable with `=off`. The master switch
+`FREE_CHAIN_ENABLED` + rollout still decide who uses the chain; any rung without its key/attestation is skipped.
+
+| Feature | Kill switch | Knobs |
+|---|---|---|
+| Per-rung concurrency (in-process, per instance) | `FREE_CHAIN_CONCURRENCY_ENABLED` | `FREE_CHAIN_GLM45_MAX_CONCURRENT=2`, `FREE_CHAIN_GLM47_MAX_CONCURRENT=1` |
+| Rule router (teaching/exam/medical/long/code/repeat → DeepSeek; short → fast path) | `FREE_CHAIN_ROUTER_ENABLED` | — |
+| Stable prompt prefix (profile, greeting state, date moved last) | `FREE_CHAIN_STABLE_PREFIX_ENABLED` | cached tokens logged as `cachedInputTokens` |
+| Compact ~1k core prompt (safety rules kept) | `FREE_CHAIN_COMPACT_PROMPT_ENABLED` | — |
+| Reply cap (not on reasoning rungs groq/gpt5nano/openrouter; GLM thinking disabled) | `FREE_CHAIN_OUTPUT_CAP_ENABLED` | `FREE_CHAIN_REPLY_MAX_TOKENS=250`, `FREE_CHAIN_FAST_MAX_TOKENS=80` |
+| History trim | `FREE_CHAIN_HISTORY_TRIM_ENABLED` | `FREE_CHAIN_HISTORY_TURNS=6` |
+| Response cache / FAQ (exact normalized, no personal or dated text) | `FREE_CHAIN_CACHE_ENABLED`, `FREE_CHAIN_FAQ_CACHE_ENABLED` | `FREE_CHAIN_CACHE_TTL_S` |
+| Monthly paid cap (IST month) | `FREE_CHAIN_MONTHLY_CAP_ENABLED` | `FREE_CHAIN_MONTHLY_CAP_USD=520` (max 520) |
+| Auto-throttle | `FREE_CHAIN_THROTTLE_ENABLED` | `FREE_CHAIN_THROTTLE_PERCENT=80` |
+
+Daily owner ceiling raised to $17 (`FREE_CHAIN_PAID_DAILY_CAP_USD=17`); the default stays $10.
+Health/private turns still never reach paid rungs (privacy gate wins over the router).

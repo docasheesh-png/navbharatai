@@ -6,6 +6,8 @@ export interface FreeChainTelemetry {
   attempts: FreeChainAttempt[]; fallbacks: number; cacheHit: boolean;
   admissionReason?: 'capacity' | 'queue-full' | 'timeout' | 'aborted' | 'user-limit'; queueWaitMs?: number;
   costUsdEstimate: number | null; ttftMs: number | null; latencyMs: number; rolloutBucket: number;
+  /** Master-plan router decision and provider-reported prompt-cache hits (counts only). */
+  route?: 'fast' | 'quality' | 'normal'; routeReason?: string; cachedInputTokens?: number;
 }
 /** Fixed-field logs only. Never include prompts, keys, SDK objects, URLs, headers or raw errors. */
 export function logFreeChain(value: FreeChainTelemetry): void {

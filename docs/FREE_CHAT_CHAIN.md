@@ -6,6 +6,10 @@ credential creation, provider inference, live multilingual evaluation, purchase,
 or deployment was performed for this change. Offline tests are not evidence that
 an existing account is free, a model is available, or the launch acceptance bar is met.
 
+> **2026-10-23:** the owner's Tier 1 → Tier 2 → Tier 3 module (new providers, paid Tier 3,
+> max attempts, sticky spread, localized busy line, cost estimate) is documented in
+> [`FREE_CHAT_TIERS.md`](./FREE_CHAT_TIERS.md). Default order changed accordingly.
+
 ## Scope and policy precedence
 
 Only authenticated, text-only NavBharat Free Chat requests admitted by the existing

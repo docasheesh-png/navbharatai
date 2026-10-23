@@ -5,7 +5,7 @@ import { sanitizeText } from '../../../lib/observability/sanitize';
 import { isEntryAdmission } from './entryAdmission';
 import { freeChainAdmissionQueue } from './admissionQueue';
 import { randomUUID } from 'node:crypto';
-import { freeChainConfig, type FreeChainConfig, type ProviderId, type RungConfig } from './config';
+import { freeChainConfig, isPaidRung, type FreeChainConfig, type ProviderId, type RungConfig } from './config';
 import { selectedForFreeChain, rolloutBucket, type FreeChainContext } from './rollout';
 import { readControls, readControlsForSelection, writeControls, controlRef } from './control';
 import { FreeChainStore } from './store';
@@ -31,8 +31,38 @@ import { readFreeChainBudgetAction, type FreeChainBudgetAction, type FreeChainBu
 export interface FreeChainInput { message: string; history: unknown[]; systemPrompt?: string; signal?: AbortSignal; onChunk?: (text: string, source?: 'notice') => void; context: FreeChainContext }
 export type FreeChainResult = RoutedCall & { reason?: 'aborted' | 'no-provider' | 'all-failed' | 'stalled'; freeChain?: FreeChainTelemetry };
 const BUSY = 'The AI service is temporarily busy. Please try again in 1-2 minutes. 🙏';
-const names: Record<ProviderId, AIProviderResponse['provider']> = { glm47: 'GLM', glm45: 'GLM', gemini: 'GEMINI', groq: 'GROQ', cloudflare: 'CLOUDFLARE', openrouter: 'OPENROUTER', deepseek: 'DEEPSEEK' };
-function empty(reason: FreeChainResult['reason'] = 'all-failed'): FreeChainResult { return { content: BUSY, provider: 'NONE', model: 'none', latencyMs: 0, ok: false, reason }; }
+/** The one friendly final line after silent fallback is exhausted, in the user's own language. */
+export function busyMessage(message?: string): string {
+  const lang = message ? detectReplyLanguage(message) : 'en';
+  if (lang === 'hi') return 'अभी AI थोड़ा व्यस्त है, कृपया 1-2 मिनट बाद फिर कोशिश करें। 🙏';
+  if (lang === 'hinglish') return 'Abhi AI thoda busy hai, thodi der (1-2 minute) baad try karein. 🙏';
+  return BUSY;
+}
+const names: Record<ProviderId, AIProviderResponse['provider']> = { glm47: 'GLM', glm45: 'GLM', gemini: 'GEMINI', groq: 'GROQ', cloudflare: 'CLOUDFLARE', openrouter: 'OPENROUTER', deepseek: 'DEEPSEEK',
+  nvidia: 'NVIDIA', modelscope: 'MODELSCOPE', llm7: 'LLM7', bluesminds: 'BLUESMINDS', requesty: 'REQUESTY', glmflashx: 'GLM', nemotron: 'DEEPINFRA', gpt5nano: 'OPENAI' };
+function empty(reason: FreeChainResult['reason'] = 'all-failed', message?: string): FreeChainResult { return { content: busyMessage(message), provider: 'NONE', model: 'none', latencyMs: 0, ok: false, reason }; }
+/** Does a non-DeepSeek paid rung's reservation profile stay under the unchanged kimi-k2.7 free ceiling? */
+function verifiedPaidReservationRate(rung: RungConfig): boolean {
+  if (!(rung.priceIn > 0) || !(rung.priceOut > 0)) return false;
+  try {
+    const ceiling = realRateFor('KIMI', 'kimi-k2.7');
+    return maximumCostNanoUsd(CHAT_INPUT_WEIGHT * 1_000_000, 1_000_000, usdToNanoUsd(rung.priceIn), usdToNanoUsd(rung.priceOut))
+      <= maximumCostNanoUsd(CHAT_INPUT_WEIGHT * 1_000_000, 1_000_000, usdToNanoUsd(ceiling.inputPerMTok), usdToNanoUsd(ceiling.outputPerMTok));
+  } catch { return false; }
+}
+/**
+ * Owner spec "user_id grouping": with one key per provider, continuity means a user keeps landing on
+ * the same equal-cost free rung. Only the leading run of zero-cost Tier-1 rungs is rotated, so a paid
+ * rung can never move up and the cheapest-first invariant holds.
+ */
+export function orderForUser(cfg: FreeChainConfig, uid: string): ProviderId[] {
+  if (!cfg.stickySpread) return cfg.order;
+  const lead: ProviderId[] = [];
+  for (const id of cfg.order) { if (isPaidRung(id) || id === 'openrouter') break; lead.push(id); }
+  if (lead.length < 2) return cfg.order;
+  const k = rolloutBucket(uid) % lead.length;
+  return [...lead.slice(k), ...lead.slice(0, k), ...cfg.order.slice(lead.length)];
+}
 const warned = new Set<string>();
 function warnOnce(code: string) { if (!warned.has(code)) { warned.add(code); console.warn('[FREE_CHAT_CHAIN]', code); } }
 function verifiedDeepseekReservationRate(rung: RungConfig, cfg: FreeChainConfig): boolean {
@@ -55,10 +85,11 @@ function rungReason(rung: RungConfig, cfg: FreeChainConfig, input?: FreeChainInp
   if (rung.reason) return rung.reason;
   if (['glm47', 'glm45', 'gemini', 'groq', 'cloudflare'].includes(rung.id) && rung.verifiedUntil <= Date.now()) return 'free-plan-review-required';
   if (rung.id === 'deepseek' && !verifiedDeepseekReservationRate(rung, cfg)) return 'rate-card-unverified';
+  if (isPaidRung(rung.id) && rung.id !== 'deepseek' && !verifiedPaidReservationRate(rung)) return 'rate-card-unverified';
   if (rung.id === 'openrouter' && !cfg.openRouterModels.length) return 'quality-allowlist-required';
   if (input && rung.id === 'gemini' && (!input.context.cacheEligible || !safeCacheKey({ message: input.message, history: input.history, eligible: true, language: 'public', systemPrompt: '', modelFamily: '' }))) return 'privacy-public-corpus-only';
   if (input && !rung.languages.includes(detectReplyLanguage(input.message))) return 'language';
-  if (input && (rung.id === 'gemini' || rung.id === 'deepseek') && (input.context.privateTurn || input.context.healthTurn)) return 'privacy';
+  if (input && (rung.id === 'gemini' || isPaidRung(rung.id)) && (input.context.privateTurn || input.context.healthTurn)) return 'privacy';
   return undefined;
 }
 function accountId(id: ProviderId): string { return id === 'glm47' || id === 'glm45' ? 'glm' : id; }
@@ -68,7 +99,10 @@ function quotaInput(rung: RungConfig, cfg: FreeChainConfig, inputTokens: number)
     limits: { rpm: rung.rpm, rpd: rung.rpd, tpm: rung.tpm, tpd: rung.tpd,
       ...(rung.id === 'cloudflare' ? { neuronsPerDay: 10000, neuronsPerRequest: Math.ceil((24000 * 26668 + rung.maxOutputTokens * 204805) / 1000000) } : {}) } };
 }
-function quote(cfg: FreeChainConfig, input: number, output: number): number { return maximumCostNanoUsd(input, output, usdToNanoUsd(cfg.deepseekPrices.input), usdToNanoUsd(cfg.deepseekPrices.output)); }
+function quote(cfg: FreeChainConfig, input: number, output: number, rung?: RungConfig): number {
+  if (rung && rung.id !== 'deepseek') return maximumCostNanoUsd(input, output, usdToNanoUsd(rung.priceIn), usdToNanoUsd(rung.priceOut));
+  return maximumCostNanoUsd(input, output, usdToNanoUsd(cfg.deepseekPrices.input), usdToNanoUsd(cfg.deepseekPrices.output));
+}
 /** This namespace is not installed in AIRouterManager: other consumers of 'free' stay untouched. */
 export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeChainConfig(), refreshConfig?: () => FreeChainConfig) {
   const store = new FreeChainStore(db);
@@ -84,7 +118,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       return { ...result, latencyMs: trace.latencyMs, freeChain: trace };
     };
     try { await publishDeploymentPaidLimit(db, cfg.paidCapNanoUsd, () => store.observePaidBudgetPolicy(cfg.paidCapNanoUsd)); }
-    catch { return done(empty()); }
+    catch { return done(empty('all-failed', input.message)); }
     const language = detectReplyLanguage(input.message);
     const languageInstruction = { hi: 'Reply in Hindi using Devanagari script.', hinglish: 'Reply in Hinglish using Roman script.', en: 'Reply in English.', other: 'Reply in the same language and script as the user.' }[language];
     const system = `${input.systemPrompt ?? ''}\n\n${languageInstruction}`;
@@ -95,10 +129,12 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       const hitRung = hit ? cfg.rungs.find(r => names[r.id] === hit.provider && r.model === hit.model && cfg.order.includes(r.id)) : undefined;
       if (hit && hit.provider !== 'OPENROUTER' && cacheControls?.enabled && hitRung && !cacheControls.disabledProviders.includes(hitRung.id) && !rungReason(hitRung, cfg, input) && !input.signal?.aborted) { trace.cacheHit = true; trace.costUsdEstimate = 0; input.onChunk?.(hit.content); return done({ ...hit, latencyMs: 0, ok: true }); }
     }
-    for (const id of cfg.order) {
+    for (const id of orderForUser(cfg, input.context.uid)) {
       if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
       const rung = cfg.rungs.find(r => r.id === id)!;
       const attempt = { provider: id, model: rung.model, reason: 'pending', entered: false }; trace.attempts.push(attempt);
+      // Bounded latency: at most cfg.maxAttempts PHYSICAL calls per turn; skipped rungs are free.
+      if (trace.attempts.filter(a => a.entered).length >= cfg.maxAttempts) { attempt.reason = 'max-attempts'; break; }
       const reason = rungReason(rung, cfg, input); if (reason) { attempt.reason = reason; continue; }
       const prepared = trimForRung(input.message, input.history, system, rung.maxInputTokens);
       if (!prepared) { attempt.reason = 'context-capacity'; continue; }
@@ -117,9 +153,11 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       if (control.disabledProviders.includes(id)) { attempt.reason = 'disabled'; continue; }
         const admission = await store.reserveQuota(quotaInput(rung, cfg, prepared.inputTokens));
         if (!admission.allowed) { attempt.reason = admission.reason; if (typeof admission.resetAt === 'number' && admission.resetAt > Date.now()) breaker.honorRemoteOpenUntil(admission.resetAt); continue; }
-        if (id === 'deepseek') {
+        if (isPaidRung(id)) {
           // The complete model context is reserved, not an unverified character/token approximation.
-          reservation = await store.reservePaid({ requestId, uid: input.context.uid, maxCostNanoUsd: quote(cfg, 1048576, rung.maxOutputTokens), capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
+          // One requestId may hold at most one paid reservation, so a second paid rung in the same
+          // turn gets a derived id rather than being rejected as a duplicate.
+          reservation = await store.reservePaid({ requestId: id === 'deepseek' ? requestId : `${requestId}:${id}`, uid: input.context.uid, maxCostNanoUsd: quote(cfg, 1048576, rung.maxOutputTokens, rung), capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
           if (!reservation?.mayDispatch) { attempt.reason = 'budget'; continue; }
         }
         if (controller.signal.aborted) { attempt.reason = 'aborted'; break; }
@@ -132,8 +170,8 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
             completeUsage = !!response.usage;
             await stickyRef.set({ model: response.model, expiresAt: Date.now() + 86400000, expireAt: new Date(Date.now() + 86400000) });
           } else {
-            const provider = new OpenAiCompatProvider({ provider: names[id] as 'GLM' | 'GEMINI' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK', key: rung.key, envName: rung.keyEnv, model: rung.model, baseURL: rung.baseURL, priority: cfg.order.indexOf(id), maxOutputTokens: rung.maxOutputTokens, timeoutMs: 90000, streamUsage: rung.streamUsage,
-              ...(id === 'gemini' ? { extraBody: { reasoning_effort: 'none' } } : {}) });
+            const provider = new OpenAiCompatProvider({ provider: names[id] as ConstructorParameters<typeof OpenAiCompatProvider>[0]['provider'], key: rung.key, envName: rung.keyEnv, model: rung.model, baseURL: rung.baseURL, priority: cfg.order.indexOf(id), maxOutputTokens: rung.maxOutputTokens, timeoutMs: 90000, streamUsage: rung.streamUsage,
+              ...(id === 'gemini' ? { extraBody: { reasoning_effort: 'none' } } : id === 'gpt5nano' ? { extraBody: { reasoning_effort: 'minimal' } } : {}) });
             const result = await provider.executeTurn({ ...prepared, signal: controller.signal, onChunk: chunk }); response = result; completeUsage = result.completeUsage;
             const remaining = Number(result.rateLimitHeaders['x-ratelimit-remaining-requests']);
             if (id === 'groq' && remaining === 0) await store.cooldown(accountId(id), Date.now() + durationMs(result.rateLimitHeaders['x-ratelimit-reset-requests'], 86400000));
@@ -143,9 +181,9 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           { ...(watchdogLimits(undefined, 'free') ?? { firstTokenMs: cfg.ttftMs, idleMs: 30000, hardCapMs: 120000 }), firstTokenMs: cfg.ttftMs });
         if (watch.verdict !== 'completed') { controller.abort(); partial = watch.delivered; if (watch.error) throw watch.error; throw new FreeChainProviderError(watch.verdict === 'first-token-timeout' ? 'TIMEOUT' : 'NETWORK'); }
         if (!response || !content.trim()) throw new FreeChainProviderError('EMPTY_RESPONSE');
-        if (reservation && completeUsage && response.usage) await store.settlePaid(reservation, quote(cfg, response.usage.inputTokens, response.usage.outputTokens));
+        if (reservation && completeUsage && response.usage) await store.settlePaid(reservation, quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung));
         breaker.recordSuccess(); recordProviderLatency(breakerName, Date.now() - attemptStarted, false);
-        attempt.reason = 'served'; trace.rung = id; trace.costUsdEstimate = id === 'deepseek' ? (completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens) / 1e9 : null) : 0;
+        attempt.reason = 'served'; trace.rung = id; trace.costUsdEstimate = isPaidRung(id) ? (completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) / 1e9 : null) : 0;
         if (cacheKey && id !== 'openrouter') await new FreeChainCache(db).put(cacheKey, { content, provider: response.provider, model: response.model }, cfg.cacheTtlS).catch(() => {});
         return done({ ...response, content, ok: true });
       } catch (error) {
@@ -163,7 +201,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         if (safe?.code === 'SAFETY_REFUSAL' || safe?.code === 'INVALID_REQUEST' || safe?.code === 'POLICY_BLOCKED' || safe?.code === 'ABORTED' || input.signal?.aborted) break;
       } finally { controller.abort(); input.signal?.removeEventListener('abort', abort); releaseSlot(capacityName); }
     }
-    const result = empty(); input.onChunk?.(result.content, 'notice'); return done(result);
+    const result = empty('all-failed', input.message); input.onChunk?.(result.content, 'notice'); return done(result);
   }
   return { async route(input: FreeChainInput): Promise<FreeChainResult> {
     const entry = input.context.entryAdmission;

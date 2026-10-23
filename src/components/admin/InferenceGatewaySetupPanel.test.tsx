@@ -25,7 +25,7 @@ const preview = () => ({ kind: 'gateway_setup_preview', version: 1, previewBindi
 function fields(): Record<string, string> {
   return { profileId: 'glm47', provider: 'GLM', modelId: 'glm-4.7-flash', modelRevision: 'v1', canonicalModelId: 'glm47flash', canonicalAccountId: 'canonical-account', credentialEnv: 'INFERENCE_GATEWAY_TEST_KEY', platformOwnerId: 'platform-owner',
     policyKeys: 'chat:text', termsPolicyId: 'terms-v1', qualityGateId: 'clinical-v1', qualityGateVersion: 'v1', privacyPolicyId: 'privacy-v1', processingRegions: 'reviewed-region', retentionHours: '0',
-    maxInputTokens: '4096', maxOutputTokens: '512', maxContextTokens: '8192', localTokensPerMinute: '100000', billing: 'intrinsic-zero', expiresAt: new Date(START + 60_000).toISOString(), reason: 'Independent evidence checked',
+    maxConcurrentCalls: '1', gatewayOccupancyReviewed: 'on', maxInputTokens: '4096', maxOutputTokens: '512', maxContextTokens: '8192', localTokensPerMinute: '100000', billing: 'intrinsic-zero', expiresAt: new Date(START + 60_000).toISOString(), reason: 'Independent evidence checked',
     ...Object.fromEntries(GATEWAY_REVIEW_FIELDS.map(k => [`evidence.${k}`, `review:${k}-review`])), ...Object.fromEntries(GATEWAY_ATTESTATIONS.map(k => [`attest.${k}`, 'on'])) };
 }
 async function mount(f: ReturnType<typeof vi.fn>) { vi.stubGlobal('fetch', f); root(); for (const effect of hooks.effects.splice(0)) { const dispose = effect(); if (dispose) cleanup.push(dispose); } await settle(); }

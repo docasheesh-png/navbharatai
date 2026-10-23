@@ -1,3 +1,4 @@
+import { InferenceGatewaySlotRecoveryPanel } from './InferenceGatewaySlotRecoveryPanel';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import { GATEWAY_ATTESTATIONS, GATEWAY_REVIEW_FIELDS, GATEWAY_SETUP_PROVIDERS, isGatewaySetupPreview, isGatewaySetupStatus,
@@ -70,6 +71,7 @@ export function InferenceGatewaySetupPanel({ adminToken }: { adminToken: string 
       canonicalAccountId: text('canonicalAccountId'), credentialEnv: text('credentialEnv'), platformOwnerId: text('platformOwnerId'),
       policyKeys: fields.getAll('policyKeys').map(String), termsPolicyId: text('termsPolicyId'), qualityGateId: text('qualityGateId'), qualityGateVersion: text('qualityGateVersion'), privacyPolicyId: text('privacyPolicyId'),
       processingRegions: text('processingRegions').split(',').map(s => s.trim()).filter(Boolean), retentionHours: number('retentionHours'), maxInputTokens: number('maxInputTokens'), maxOutputTokens: number('maxOutputTokens'),
+      ...(provider === 'GLM' ? { maxConcurrentCalls: number('maxConcurrentCalls'), gatewayOccupancyReviewed: text('gatewayOccupancyReviewed') === 'on' } : {}),
       maxContextTokens: number('maxContextTokens'), localTokensPerMinute: number('localTokensPerMinute'), billing: text('billing') as GatewaySetupSubmission['billing'],
       ...(text('reviewedPriority') ? { reviewedPriority: number('reviewedPriority') } : {}),
       ...(billing === 'metered' && (operation === 'text' || operation === 'vision-pdf') ? { inputNanoUsdPerMillion: number('inputNanoUsdPerMillion'), outputNanoUsdPerMillion: number('outputNanoUsdPerMillion') } : {}),
@@ -118,7 +120,7 @@ export function InferenceGatewaySetupPanel({ adminToken }: { adminToken: string 
       <p>Master switch: {status.deploymentEnabled ? 'ON (not changed here)' : 'OFF'}. Saved review: {status.reviewState}. Revision: {status.catalogRevision ?? 'none'}.</p>
       <p>Gateway audience: {status.rollout?.mode === 'all' ? 'All eligible Free users, including admitted guests' : status.rollout?.mode === 'canary' ? `${status.rollout.canaryCount} verified accounts configured for canary; zero means nobody selected` : 'Invalid or unavailable; no audience confirmed'}. Other users retain legacy routing outside this trial budget. The Free Chat Chain rollout controls above do not control this gateway.</p>
       <p>Catalog expiry: {status.expiresAtMs === null ? 'no review' : new Date(status.expiresAtMs).toISOString()}. Paid authority: {status.paidAuthority === 'missing' ? 'missing; no paid spending authorized' : `existing shared cap USD ${status.paidCapUsd?.toFixed(2)} per IST day`}.</p>
-      {status.profiles.map(p => <p key={p.id}>{p.id}: {p.provider} / {p.modelId}, {p.operationKind ?? 'text'}, {p.expiresAtMs <= now ? 'expired' : p.reviewState}, {p.billing}; credential {p.credentialAssociated ? 'associated' : 'missing or changed'}. Expires {new Date(p.expiresAtMs).toISOString()}.</p>)}
+      {status.profiles.map(p => <p key={p.id}>{p.id}: {p.provider} / {p.modelId}, {p.operationKind ?? 'text'}, {p.expiresAtMs <= now ? 'expired' : p.reviewState}, {p.billing}; {p.modelConcurrency ? `Gateway model occupancy ${p.modelConcurrency.occupied}/${p.modelConcurrency.limit}; account ${p.modelConcurrency.canonicalAccountId}; occupied attempt IDs: ${p.modelConcurrency.attemptIds.join(', ') || 'none'}. Legacy consumers excluded. ` : ''}credential {p.credentialAssociated ? 'associated' : 'missing or changed'}. Expires {new Date(p.expiresAtMs).toISOString()}.</p>)}
     </div>}
     <form ref={form} onSubmit={review} onChange={clearPreview} className="space-y-4">
       <fieldset disabled={busy || !status} className="space-y-4">
@@ -149,6 +151,8 @@ export function InferenceGatewaySetupPanel({ adminToken }: { adminToken: string 
           {field('termsPolicyId', 'Terms policy ID')}{field('qualityGateId', 'Quality gate ID')}{field('qualityGateVersion', 'Quality gate version')}{field('privacyPolicyId', 'Privacy policy ID')}
           {field('processingRegions', 'Reviewed processing regions, comma-separated')}{field('retentionHours', 'Maximum retention hours', 'number')}
           {field('maxInputTokens', 'Reviewed maximum input tokens', 'number')}{field('maxOutputTokens', 'Reviewed maximum output tokens (up to 8192)', 'number')}{field('maxContextTokens', 'Reviewed full context limit', 'number')}
+          {provider === 'GLM' && <label><input type="checkbox" name="gatewayOccupancyReviewed" required />I verified the exact account/model concurrency limit and that older unguarded Gateway revisions are drained. Existing uncertain slots are not cleared; legacy account consumers remain outside this bound.</label>}
+          {provider === 'GLM' && field('maxConcurrentCalls', 'Reviewed account limit for this exact model (concurrent calls, not daily quota)', 'number')}
           {field('localTokensPerMinute', operation === 'grounding-search' ? 'Local account request cap per fixed UTC minute' : 'Local account token cap per fixed UTC minute', 'number')}{field('expiresAt', 'Review expires (within 24 hours; your local time)', 'datetime-local')}
         </div>
         {operation === 'vision-pdf' && provider === 'GEMINI' && <label>Reviewed media policy<select name="mediaRequestKind" className={input} defaultValue="pdf"><option value="pdf">PDF-containing requests</option><option value="image">Image-only paid fallback</option></select><span className="text-sm">For images, enter the same reviewed request input and media limits as the free image policy. Gemini always reserves its full 1,048,576-token input maximum, plus bounded output, for money and account pressure; context and local token allowance must cover that full amount.</span></label>}
@@ -165,6 +169,7 @@ export function InferenceGatewaySetupPanel({ adminToken }: { adminToken: string 
     </form>
     {preview && <div className="space-y-2 rounded border border-line p-3" aria-label="Exact review preview">
       <p>{preview.profileId} / account {preview.canonicalAccountId}: {preview.billing}. Reviewed priority {preview.reviewedPriority} (lower preferred). Local cap {preview.localTokensPerMinute} {preview.quotaMeter ?? 'tokens/minute'}. Capability {preview.operationKind ?? 'text'}. Expiry {new Date(preview.expiresAtMs).toISOString()}.</p>
+      {preview.modelConcurrency && <p>Gateway-owned model slots: {preview.modelConcurrency.occupied} occupied / reviewed limit {preview.modelConcurrency.limit}. Legacy account consumers are not covered. Lowering a limit does not erase active or uncertain calls.</p>}
       <p>Conservative maximum operation reservation: {preview.maximumOperationNanoUsd === undefined ? 'not supplied' : `USD ${(preview.maximumOperationNanoUsd / 1_000_000_000).toFixed(6)}`}. This is not an invoice or expected daily spend, and shares the existing total cap.</p>
       {preview.healthRecoveryRecords !== undefined && <p>Explicit health recovery: {preview.healthRecoveryRecords} account/credential records will be reset only if this exact preview remains current.</p>}
       <p>Scopes: {preview.policyKeys.join(', ')}. Credential generation associated. No live inference or upstream quota check performed.</p>
@@ -173,5 +178,6 @@ export function InferenceGatewaySetupPanel({ adminToken }: { adminToken: string 
       <button className={button} type="button" onClick={() => void save()} disabled={busy || stale}>Save this reviewed configuration</button>
       <button className={button} type="button" disabled={busy} onClick={clearPreview}>Cancel review</button>
     </div>}
+    <InferenceGatewaySlotRecoveryPanel adminToken={adminToken} onRecovered={() => { void load(); }} />
   </section>;
 }

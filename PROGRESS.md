@@ -99529,3 +99529,17 @@ Focused offline Node24 diagnostic suites have passed for the earlier frozen text
 ## 2026-10-23 — Owner-only Free Gateway canary readiness
 
 The merged master/surface switches could select an entire Free surface and had no owner-only trial boundary. Added a default-empty verified-Firebase canary cohort, explicit all-user mode, private ingress selection provenance, and fresh admission/dispatch revocation checks. Guest quota receipts remain available only in explicit all-user mode; non-canary legacy routing and product exclusions are unchanged. Setup reports cohort mode/count without UIDs and excludes the new configuration names from credential choices. Existing full-rollout fixtures now explicitly request all mode; new tests cover malformed configuration, spoofing, auth/queue/dispatch races, retained holds, nested calls and exact legacy parity. Provider privacy/quality/account eligibility remains a manual operational prerequisite; no credentials, production flags or live API calls were changed. Validation receipts and PR status are reported separately, not inferred from code.
+
+### 2026-10-23 — Reviewed Gateway-only GLM model occupancy
+
+- Added canonical account + exact-model shared occupancy to the existing atomic
+  admission/claim boundary, with reviewed typed setup limits and visible counts.
+- Preserved uncertain jobs without TTL/day/key resets; protocol-terminal physical
+  completion releases slots independently from unresolved money/quota usage.
+- Added optimistic multi-instance, replay/lost-response, own-hold, limit renewal,
+  alias, incomplete-stream and terminal-refusal regressions. Legacy Builder,
+  Doctor and image generation routing remain unchanged; activation stays OFF.
+- Validation is recorded separately; offline mocks do not establish upstream
+  account capacity or live Firestore contention. Uncertain-job recovery requires independently reviewed exact-provider completion
+  evidence, an authenticated preview/CAS and durable audit; it never refunds money
+  or clears quota holds. No elapsed-time automatic reset exists.

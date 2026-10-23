@@ -1,9 +1,10 @@
+import { emptyModelSlotState, modelSlotIdentity, modelSlotPath, readModelSlotPolicy, readModelSlotState, readHeldModelSlot, modelSlotBinding, type GatewayModelSlotPolicy } from './modelConcurrency';
 import { gatewayRollout } from './rollout';
 /** Authenticated administrative review only. Never calls a provider, changes activation,
  * provisions credentials, certifies a healthcheck, or creates spending authority. */
 import { createHash } from 'node:crypto';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
-import { GATEWAY_ATTESTATIONS, GATEWAY_REVIEW_FIELDS, GATEWAY_SETUP_PROVIDERS, type GatewaySetupSubmission, type GatewaySetupStatus, type GatewaySetupPreview } from '../../../lib/inferenceGatewaySetup';
+import { GATEWAY_ATTESTATIONS, GATEWAY_REVIEW_FIELDS, GATEWAY_SETUP_PROVIDERS, type GatewaySetupSubmission, type GatewaySetupStatus, type GatewaySetupPreview, type GatewaySlotRecoverySubmission, type GatewaySlotRecoveryPreview } from '../../../lib/inferenceGatewaySetup';
 import { sanitizeText } from '../../../lib/observability/sanitize';
 import { listProfessionals } from '../../professionals/registry';
 import { realRateFor } from '../../AgentV3/providerRates';
@@ -12,7 +13,7 @@ import { maximumCostNanoUsd, usdToNanoUsd } from '../FreeChain/spendCap';
 import { CHAT_INPUT_WEIGHT } from '../freeTierCostCeiling';
 import { GATEWAY_CATALOG_PATH, type GatewayCatalog, type GatewayCatalogEntry, type GatewaySurfacePolicy, type GatewayRuntimeTransport } from './authorityStore';
 import { gatewayAccountFencePath, gatewayAccountCooldownPath, gatewayCredentialHealthPath, readGatewayAccountAuthority, type GatewayAccountFence } from './accountMigration';
-import { gatewayLedgerPath } from './firestoreLedger';
+import { gatewayLedgerPath, readGatewayAttempt } from './firestoreLedger';
 import { gatewayQuotaRulePath, gatewayQuotaWindow, reviewedGatewayQuotaRule, type GatewayQuotaRule, type GatewayRolloverPolicy } from './quotaRollover';
 import { evidenceBinding, quotaLedgerKey } from './profiles';
 import { gatewayTextCredentialBinding } from './textTransport';
@@ -27,6 +28,9 @@ const same = (a: unknown, b: unknown) => evidenceBinding(a) === evidenceBinding(
 const count = (x: unknown): x is number => typeof x === 'number' && Number.isSafeInteger(x) && x >= 0;
 const token = (x: unknown): x is string => typeof x === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:/@-]{0,119}$/.test(x)
   && !/^(sk-|sk_|AIza|gh[pousr]_|Bearer|eyJ)/i.test(x) && sanitizeText(x, 200) === x;
+// UUID request IDs are protocol identifiers, not free text. PII heuristics can
+// mistake an all-digit UUID segment for a phone number. Other fields stay strict.
+const requestId = (v: unknown): v is string => typeof v === 'string' && (/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v) || token(v));
 const ref = (x: unknown): x is string => token(x) && /^review:[a-zA-Z0-9_.:-]{1,100}$/.test(x);
 const object = (value: unknown): Raw | undefined => value && typeof value === 'object' && !Array.isArray(value)
   && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null) ? value as Raw : undefined;
@@ -50,11 +54,12 @@ export function gatewaySetupScopes(): GatewaySetupStatus['scopes'] {
 const inputKeys = ['operationId', 'expectedCatalogRevision', 'profileId', 'provider', 'modelId', 'modelRevision', 'canonicalModelId', 'canonicalAccountId', 'credentialEnv', 'platformOwnerId', 'policyKeys', 'termsPolicyId', 'qualityGateId', 'qualityGateVersion', 'privacyPolicyId', 'processingRegions', 'retentionHours', 'maxInputTokens', 'maxOutputTokens', 'maxContextTokens', 'localTokensPerMinute', 'billing', 'reviewedAtMs', 'expiresAtMs', 'evidence', 'attestations', 'reason'];
 /** Invalid requests are never reflected, partially saved, or coerced into a free profile. */
 export function readGatewaySetupSubmission(value: unknown, now: number): GatewaySetupSubmission {
-  requireValue(keys(value, [...inputKeys, 'operation', 'reviewedPriority', 'recoverHealth', 'inputNanoUsdPerMillion', 'outputNanoUsdPerMillion', 'endpointTag', 'registryVersion'], inputKeys));
+  requireValue(keys(value, [...inputKeys, 'operation', 'gatewayOccupancyReviewed', 'maxConcurrentCalls', 'reviewedPriority', 'recoverHealth', 'inputNanoUsdPerMillion', 'outputNanoUsdPerMillion', 'endpointTag', 'registryVersion'], inputKeys));
   const v = value as GatewaySetupSubmission;
+  requireValue(v.provider === 'GLM' ? count(v.maxConcurrentCalls) && v.maxConcurrentCalls >= 1 && v.maxConcurrentCalls <= 64 && v.gatewayOccupancyReviewed === true : v.maxConcurrentCalls === undefined && v.gatewayOccupancyReviewed === undefined);
   requireValue(v.recoverHealth === undefined || typeof v.recoverHealth === 'boolean');
   requireValue(Buffer.byteLength(evidenceBinding(v)) <= 16_384 && count(now));
-  requireValue(['operationId', 'profileId', 'modelId', 'modelRevision', 'canonicalModelId', 'canonicalAccountId', 'platformOwnerId', 'termsPolicyId', 'qualityGateId', 'qualityGateVersion', 'privacyPolicyId'].every(k => token((v as unknown as Raw)[k]))
+  requireValue(requestId(v.operationId) && ['profileId', 'modelId', 'modelRevision', 'canonicalModelId', 'canonicalAccountId', 'platformOwnerId', 'termsPolicyId', 'qualityGateId', 'qualityGateVersion', 'privacyPolicyId'].every(k => token((v as unknown as Raw)[k]))
     && (v.expectedCatalogRevision === null || token(v.expectedCatalogRevision)) && GATEWAY_SETUP_PROVIDERS.includes(v.provider) && (v.provider === 'VERTEX' ? v.credentialEnv === 'ADC' : envName(v.credentialEnv)));
   requireValue(strings(v.policyKeys) && v.policyKeys.every(k => gatewaySetupScopes().some(s => s.key === k)) && strings(v.processingRegions)
     && count(v.retentionHours) && v.retentionHours <= 8760 && [v.maxInputTokens, v.maxOutputTokens, v.maxContextTokens, v.localTokensPerMinute].every(n => count(n) && n > 0)
@@ -161,16 +166,24 @@ export class GatewayAdminSetup {
           ? this.options.environment().GOOGLE_CLOUD_PROJECT === embedding.project && this.options.environment().INFERENCE_GATEWAY_VERTEX_PRINCIPAL === embedding.credentialPrincipal
             && p.accountCredentialBinding === gatewayEmbeddingCredentialBinding({ project: embedding.project, credentialPrincipal: embedding.credentialPrincipal })
           : !!credential && p.accountCredentialBinding === gatewayTextCredentialBinding(credential);
-        let reviewed = false;
+        let reviewed = false; let modelConcurrency: GatewaySetupStatus['profiles'][number]['modelConcurrency'];
         try {
           const dimensions = p.profile.quotaDimensions;
+          const identity = modelSlotIdentity(p.profile);
+          if (identity) {
+            const raw = await this.get(tx, modelSlotPath('policy', identity));
+            const policy = readModelSlotPolicy(raw, identity, raw?.reviewedAtMs);
+            const state = readModelSlotState(await this.get(tx, modelSlotPath('state', identity)), identity);
+            modelConcurrency = { limit: policy.limit, occupied: Object.keys(state.occupants).length, scope: 'gateway-only', canonicalAccountId: identity.accountScopeIds[0], attemptIds: Object.keys(state.occupants) };
+            requireValue(same(policy, p.modelConcurrency) && policy.expiresAtMs > now, 'state-unavailable');
+          }
           const account = readGatewayAccountAuthority(await this.get(tx, gatewayAccountFencePath(p.legacyProvider, dimensions.filter(d => d.scope.kind !== 'model').map(d => d.scope.id))), dimensions, now);
           reviewed = account.credentialBindings.includes(p.accountCredentialBinding) && current(p.reviewedAtMs, p.expiresAtMs, now)
             && p.review && Object.values(p.review).length === 6 && Object.values(p.review).every(ref)
             && (p.profile.charging === 'metered' || (p.profile.charging === 'verified-free-no-overage' && !!p.freeBillingSafety
               && ['intrinsic-zero', 'provider-hard-stop'].includes(p.freeBillingSafety.kind) && ref(p.freeBillingSafety.evidenceRef) && current(p.freeBillingSafety.reviewedAtMs, p.freeBillingSafety.expiresAtMs, now)));
         } catch { reviewed = false; }
-        profiles.push({ id: p.profile.id, provider: p.profile.providerId, modelId: p.profile.modelId, operationKind: transport.kind ?? 'text', expiresAtMs: p.expiresAtMs,
+        profiles.push({ id: p.profile.id, provider: p.profile.providerId, modelId: p.profile.modelId, operationKind: transport.kind ?? 'text', ...(modelConcurrency ? { modelConcurrency } : {}), expiresAtMs: p.expiresAtMs,
           reviewState: !associated ? 'invalid' : p.expiresAtMs <= now ? 'expired' : reviewed ? 'current' : 'invalid', credentialAssociated: associated,
           billing: p.profile.charging === 'metered' ? 'metered' : ['intrinsic-zero', 'provider-hard-stop'].includes(p.freeBillingSafety?.kind ?? '') ? p.freeBillingSafety!.kind : 'unreviewed' });
       }
@@ -238,11 +251,69 @@ export class GatewayAdminSetup {
       availability: { coolingUntilMs: 0, predictedQueueMs: 0, predictedFirstOutputMs: 20_000, predictedCompletionMs: 60_000 },
       legacyProvider: v.provider.toLowerCase(), migrationId, review, reviewedAtMs: v.reviewedAtMs, expiresAtMs: v.expiresAtMs };
   }
-  async preview(value: unknown): Promise<GatewaySetupPreview> { return this.prepare(value); }
+  async preview(value: GatewaySlotRecoverySubmission): Promise<GatewaySlotRecoveryPreview>;
+  async preview(value: unknown): Promise<GatewaySetupPreview>;
+  async preview(value: unknown): Promise<GatewaySetupPreview | GatewaySlotRecoveryPreview> {
+    if (object(value)?.kind === 'model-slot-recovery') return this.recoverSlot(value); return this.prepare(value); }
   async submit(value: unknown, previewBinding: string, actor: string): Promise<{ ok: true; catalogRevision: string; operationId: string }> {
     requireValue(typeof actor === 'string' && actor.trim().length > 0 && actor.length <= 200 && sanitizeText(actor, 200) === actor);
     requireValue(typeof previewBinding === 'string' && /^[a-f0-9]{64}$/.test(previewBinding));
+    if (object(value)?.kind === 'model-slot-recovery') return this.recoverSlot(value, { previewBinding, actor });
     return this.prepare(value, { previewBinding, actor }) as Promise<any>;
+  }
+  /** Only the exact concurrency occupant and its immutable audit receipts are written. */
+  private async recoverSlot(value: unknown, commit?: { previewBinding: string; actor: string }): Promise<any> {
+    const fields = ['kind', 'reason', 'operationId', 'canonicalAccountId', 'modelId', 'physicalAttemptId', 'providerRequestId', 'evidenceRef', 'providerCompletedAtMs', 'reviewedAtMs', 'providerRecordVerified', 'exactAttemptMatched', 'upstreamFinished'];
+    requireValue(keys(value, fields)); const v = value as GatewaySlotRecoverySubmission;
+    requireValue(requestId(v.operationId) && requestId(v.physicalAttemptId) && [v.canonicalAccountId, v.providerRequestId].every(token)
+      && ref(v.evidenceRef) && count(v.providerCompletedAtMs) && count(v.reviewedAtMs)
+      && v.providerRecordVerified === true && v.exactAttemptMatched === true && v.upstreamFinished === true);
+    requireValue(typeof v.reason === 'string' && v.reason.trim().length >= 10 && v.reason.length <= 500 && sanitizeText(v.reason, 500) === v.reason);
+    const identity = { provider: 'GLM' as const, accountScopeIds: [v.canonicalAccountId], modelId: v.modelId };
+    requireValue(['glm-4.7-flash', 'glm-4.5-flash', 'glm-4.6v-flash'].includes(v.modelId));
+    const auditPath = gatewaySetupAuditPath(v.operationId);
+    const evidencePath = `free_chat_chain/gateway_model_slot_evidence_${hash([identity.provider, identity.accountScopeIds, v.providerRequestId])}`;
+    const releasePath = modelSlotPath('release', v.physicalAttemptId);
+    return this.db.runTransaction(async tx => {
+      const [catalogRaw, attemptRaw, stateRaw, receipt, usedEvidence, released] = await Promise.all([
+        this.get(tx, GATEWAY_CATALOG_PATH), this.get(tx, gatewayLedgerPath('attempt', v.physicalAttemptId)),
+        this.get(tx, modelSlotPath('state', identity)), this.get(tx, auditPath), this.get(tx, evidencePath), this.get(tx, releasePath),
+      ]);
+      const catalog = this.catalog(catalogRaw); requireValue(catalog, 'state-unavailable');
+      if (receipt !== undefined && commit) {
+        requireValue(receipt.kind === 'gateway_model_slot_recovery_audit' && receipt.submissionBinding === hash(v)
+          && receipt.previewBinding === commit.previewBinding && receipt.actor === commit.actor, 'conflict');
+        return { ok: true, recovery: true, operationId: v.operationId, catalogRevision: receipt.catalogRevision };
+      }
+      const now = this.options.now();
+      requireValue(v.reviewedAtMs <= now && now - v.reviewedAtMs <= 15 * 60000 && v.providerCompletedAtMs <= v.reviewedAtMs);
+      const attempt = readGatewayAttempt(attemptRaw); requireValue(['claimed', 'pending', 'settled'].includes(attempt.phase), 'state-unavailable');
+      const dispatchAuthorizedAtMs = object(attemptRaw)?.dispatchAuthorizedAtMs;
+      const held = readHeldModelSlot(attempt.heldModelSlot); const claim = attempt.claim;
+      requireValue(same(held.identity, identity) && claim?.binding?.physicalAttemptId === v.physicalAttemptId
+        && claim.binding.providerId === 'GLM' && claim.binding.modelId === v.modelId
+        && count(dispatchAuthorizedAtMs) && v.providerCompletedAtMs >= dispatchAuthorizedAtMs, 'conflict');
+      const state = readModelSlotState(stateRaw, identity); const occupant = state.occupants[v.physicalAttemptId];
+      const claimBinding = modelSlotBinding(claim);
+      requireValue(occupant?.claimBinding === claimBinding && occupant.intentBinding === held.intentBinding && usedEvidence === undefined && released === undefined, 'conflict');
+      const previewBinding = hash({ submission: v, identity, occupant, claimBinding, dispatchAuthorizedAtMs });
+      const preview: GatewaySlotRecoveryPreview = { kind: 'gateway_slot_recovery_preview', version: 1, previewBinding,
+        physicalAttemptId: v.physicalAttemptId, canonicalAccountId: v.canonicalAccountId, modelId: v.modelId,
+        occupied: Object.keys(state.occupants).length, scope: 'gateway-only', financialWrites: false, evidenceBasis: 'admin-reviewed-provider-record' };
+      if (!commit) return preview;
+      requireValue(commit.previewBinding === previewBinding, 'preview-changed');
+      const finalNow = this.options.now(); requireValue(finalNow >= now && finalNow - v.reviewedAtMs <= 15 * 60000, 'preview-changed');
+      const occupants = { ...state.occupants }; delete occupants[v.physicalAttemptId];
+      tx.set(this.db.doc(modelSlotPath('state', identity)), { ...state, occupants });
+      tx.create(this.db.doc(releasePath), { kind: 'gateway_model_slot_release', version: 1, claimBinding, identity,
+        proof: 'admin-reviewed-provider-record', atMs: v.providerCompletedAtMs, recoveryOperationId: v.operationId });
+      tx.create(this.db.doc(evidencePath), { kind: 'gateway_model_slot_evidence', version: 1, claimBinding, operationId: v.operationId, evidenceRef: v.evidenceRef });
+      tx.create(this.db.doc(auditPath), { kind: 'gateway_model_slot_recovery_audit', version: 1, actor: commit.actor,
+        submissionBinding: hash(v), previewBinding, catalogRevision: catalog.revision, atMs: finalNow, identity, physicalAttemptId: v.physicalAttemptId,
+        providerRequestId: v.providerRequestId, evidenceRef: v.evidenceRef, providerCompletedAtMs: v.providerCompletedAtMs,
+        reviewedAtMs: v.reviewedAtMs, reason: v.reason, evidenceBasis: 'admin-reviewed-provider-record', concurrencyOnly: true });
+      return { ok: true, recovery: true, operationId: v.operationId, catalogRevision: catalog.revision };
+    });
   }
   private async prepare(value: unknown, commit?: { previewBinding: string; actor: string }): Promise<any> {
     const v = readGatewaySetupSubmission(value, this.options.now()); const generation = this.credential(v);
@@ -340,7 +411,28 @@ export class GatewayAdminSetup {
       const proposedPolicies = this.policies(v);
       for (const [key, p] of Object.entries(proposedPolicies)) if (c?.policies[key]) requireValue(same(c.policies[key], p), 'conflict');
       const entry = this.entry(v, generation, migrationId, dimension);
-      const profiles = [...(c?.profiles.filter(p => p.profile.id !== v.profileId) ?? []), entry];
+      const slotIdentity = modelSlotIdentity(entry.profile);
+      let oldSlotPolicy: GatewayModelSlotPolicy | undefined;
+      let slotState: ReturnType<typeof emptyModelSlotState> | undefined;
+      if (slotIdentity) {
+        const rawPolicy = await this.get(tx, modelSlotPath('policy', slotIdentity));
+        const rawState = await this.get(tx, modelSlotPath('state', slotIdentity));
+        requireValue((rawPolicy === undefined) === (rawState === undefined), 'state-unavailable');
+        if (rawPolicy !== undefined) {
+          // Renewal validates the original review at its own start, not as fresh authority.
+          oldSlotPolicy = readModelSlotPolicy(rawPolicy, slotIdentity, rawPolicy.reviewedAtMs);
+          slotState = readModelSlotState(rawState, slotIdentity);
+        } else slotState = emptyModelSlotState(slotIdentity);
+        entry.modelConcurrency = { ...slotIdentity, kind: 'gateway_model_slot_policy', version: 1,
+          revision: v.operationId, limit: v.maxConcurrentCalls!, accountReviewRef: v.evidence.account,
+          reviewedAtMs: v.reviewedAtMs, expiresAtMs: v.expiresAtMs };
+        readModelSlotPolicy(entry.modelConcurrency, slotIdentity, now);
+      }
+      const profiles = [...(c?.profiles.filter(p => p.profile.id !== v.profileId) ?? []), entry].map(p => {
+        // Alias profiles share one policy without extending their separate human reviews.
+        const identity = modelSlotIdentity(p.profile);
+        return slotIdentity && identity && same(identity, slotIdentity) ? { ...p, modelConcurrency: entry.modelConcurrency } : p;
+      });
       const catalog: GatewayCatalog = { kind: 'gateway_catalog', version: 1, enabled: true, revision: v.operationId,
         issuedAtMs: now, expiresAtMs: Math.max(...profiles.map(p => p.expiresAtMs)),
         platformScope: c?.platformScope ?? { id: 'platform-free-fallback', ownerId: v.platformOwnerId },
@@ -349,14 +441,18 @@ export class GatewayAdminSetup {
       const finalNow = this.options.now(); readGatewaySetupSubmission(v, finalNow);
       requireValue(this.credential(v) === generation && same(gatewayQuotaWindow(rule, finalNow), window), 'preview-changed');
       const deploymentEnabled = this.options.deploymentEnabled();
-      const previewBinding = hash({ submission: v, credentialGeneration: generation, account: oldAccount ?? null, policy: oldPolicy ?? null, rule: oldRule ?? null, deploymentEnabled, rollout: gatewayRollout(this.options.environment()), ...(v.recoverHealth ? { healthRecords } : {}) });
-      const preview: GatewaySetupPreview = { kind: 'gateway_setup_preview', version: 1, previewBinding, ...(v.recoverHealth ? { healthRecoveryRecords: healthRecords.length } : {}), profileId: v.profileId,
+      const previewBinding = hash({ submission: v, credentialGeneration: generation, account: oldAccount ?? null, modelSlotPolicy: oldSlotPolicy ?? null, policy: oldPolicy ?? null, rule: oldRule ?? null, deploymentEnabled, rollout: gatewayRollout(this.options.environment()), ...(v.recoverHealth ? { healthRecords } : {}) });
+      const preview: GatewaySetupPreview = { kind: 'gateway_setup_preview', version: 1, previewBinding, ...(entry.modelConcurrency ? { modelConcurrency: { limit: entry.modelConcurrency.limit, occupied: Object.keys(slotState!.occupants).length, scope: 'gateway-only' as const } } : {}), ...(v.recoverHealth ? { healthRecoveryRecords: healthRecords.length } : {}), profileId: v.profileId,
         canonicalAccountId: v.canonicalAccountId, policyKeys: Object.keys(proposedPolicies), operationKind: v.operation?.kind ?? 'text', quotaMeter: dimension.meter as 'tokens/minute' | 'requests/minute', maximumOperationNanoUsd: v.billing !== 'metered' ? 0 : v.operation?.kind === 'vision-pdf' ? maximumCostNanoUsd(1048576, v.maxOutputTokens, v.inputNanoUsdPerMillion!, v.outputNanoUsdPerMillion!) : Math.max(...Object.values(proposedPolicies).map(p => p.logicalLimitNanoUsd)), billing: v.billing, expiresAtMs: v.expiresAtMs,
         localTokensPerMinute: v.localTokensPerMinute, reviewedPriority: reviewedPriority(v), credentialAssociated: true, paidAuthority: readPaidPolicy(paidRaw) ? 'existing' : 'missing', activationFlagChanged: false, deploymentEnabled };
       if (!commit) return preview;
       requireValue(commit.previewBinding === previewBinding, 'preview-changed');
       for (const [binding, previous] of associations) if (previous === undefined) tx.create(this.db.doc(gatewayCredentialAccountPath(binding)), { kind: 'gateway_credential_account', version: 1,
         credentialBinding: binding, provider: v.provider, canonicalAccountId: v.canonicalAccountId, accountReviewRef: v.evidence.account, createdAtMs: now });
+      if (slotIdentity && entry.modelConcurrency) {
+        tx.set(this.db.doc(modelSlotPath('policy', slotIdentity)), entry.modelConcurrency);
+        if (!oldSlotPolicy) tx.create(this.db.doc(modelSlotPath('state', slotIdentity)), slotState!);
+      }
       tx.set(this.db.doc(accountPath), account); tx.set(this.db.doc(gatewayQuotaRulePath(ledgerKey)), rule);
       tx.set(this.db.doc(gatewayLedgerPath('quota-policy', ledgerKey)), policy);
       if (allAbsent) tx.create(this.db.doc(gatewayLedgerPath('quota-state', ledgerKey)), { kind: 'gateway_quota_state', version: 1, ledgerKey, migrationId, held: 0, quarantined: false });

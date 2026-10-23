@@ -288,6 +288,7 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
               : await executeGatewayText({ ...adapterInput, ...input, signal: dispatchSignal, transport,
                   ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; onChunk(chunk); } } : {}) })
             : (() => { throw new InferenceGatewayTerminalError('capability-transport-mismatch'); })();
+          await store.releaseTrustedModelSlot(result, claim);
           const gatewayPricingProof = 'content' in result ? createGatewayFreePricingProof(result, claim) : undefined;
           response = gatewayPricingProof && 'content' in result ? { ...result, gatewayPricingProof } : result;
           const usageEvidenceRef = await store.recordTrustedUsage(result, claim);
@@ -296,6 +297,7 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
         } catch (error) {
           await store.recordTrustedCostAnomaly(error, claim);
           await store.recordTrustedHealth(error, claim);
+          await store.releaseTrustedModelSlot(error, claim);
           const rejectionEvidenceRef = await store.recordTrustedRejection(error, claim);
           if (rejectionEvidenceRef) return { binding: claim.binding, outcome: { kind: 'definite-failure' as const,
             failureClass: 'retryable-provider-failure' as const }, outputVisible: false, rejectionEvidenceRef };

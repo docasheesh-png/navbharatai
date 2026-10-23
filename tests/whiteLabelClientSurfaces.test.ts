@@ -101,6 +101,7 @@ const ALLOWED: Record<string, string> = {
   // the admin dashboard, build diagnostics, server logs, the deliveredVia / per-provider telemetry."
   'src/components/AdminDashboard.tsx': 'admin-only dashboard — vendor identity is permitted and needed',
   'src/lib/agentV3CostSummary.ts': 'feeds AdminDashboard only — per-tier cost rows for the admin',
+  'src/components/admin/InferenceGatewaySlotRecoveryPanel.tsx': 'mounted only within authenticated admin setup; recovery must identify the exact reviewed provider model and account',
   'src/components/admin/InferenceGatewaySetupPanel.tsx': 'mounted only inside the admin dashboard; authorized administrators must review exact provider/model/account identities, not public chat labels',
   'src/lib/inferenceGatewaySetup.ts': 'shared schema/validation consumed by the admin-only reviewed capability setup form and server; provider names are not ordinary chat labels',
   'src/lib/freeChatChainView.ts': 'shared schema/validation for the admin-only Free Chat Chain panel and server controls; no ordinary chat labels',

@@ -1,3 +1,5 @@
+import { modelSlotPath, modelSlotBinding } from './modelConcurrency';
+import type { GatewaySlotRecoverySubmission } from '../../../lib/inferenceGatewaySetup';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { sessionGreetingRule } from '../../lib/sessionGreeting';
@@ -31,8 +33,8 @@ function actualSystemPrompt() {
  return `${base}\n\n${freeChatModeGuide()}`.replace(/APP BUILDING — LEAD WITH NavBharatAI Pro[\s\S]*?(?=\nHARD LIMITS:)/,`${FREE_ANSWER_ALL_RULES}\n`).replace('(guide them to NavBharatAI Pro instead, per the rule above)','(for an app request, explain the idea instead, per the rule above)')+`\n\n${CREATOR_IDENTITY}\n\n${INDIA_TERRITORIAL_INTEGRITY}\n\n${recencyDirective()}\n\n${LINK_POLICY}\n\nReply in English.`;
 }
 const START = 1_800_000_010_000;
-export function gatewayReviewFixture(): GatewaySetupSubmission {
-  return { operationId: 'operation-one', expectedCatalogRevision: null, profileId: 'glm-flash-profile', provider: 'GLM', modelId: 'glm-4.7-flash', modelRevision: '2026-10', canonicalModelId: 'glm47flash',
+export function gatewayReviewFixture(provider: GatewaySetupSubmission['provider'] = 'GLM'): GatewaySetupSubmission {
+  return { operationId: 'operation-one', expectedCatalogRevision: null, profileId: 'glm-flash-profile', provider, ...(provider === 'GLM' ? { maxConcurrentCalls: 1, gatewayOccupancyReviewed: true } : {}), modelId: 'glm-4.7-flash', modelRevision: '2026-10', canonicalModelId: 'glm47flash',
     canonicalAccountId: 'canonical-account-one', credentialEnv: 'INFERENCE_GATEWAY_TEST_KEY', platformOwnerId: 'platform-owner', policyKeys: ['chat:text'],
     termsPolicyId: 'terms-v1', qualityGateId: 'clinical-review', qualityGateVersion: 'v1', privacyPolicyId: 'private-v1', processingRegions: ['reviewed-region'], retentionHours: 0,
     maxInputTokens: 4096, maxOutputTokens: 512, maxContextTokens: 8192, localTokensPerMinute: 100_000, billing: 'intrinsic-zero', reviewedAtMs: START - 1, expiresAtMs: START + 60_000,
@@ -69,7 +71,7 @@ describe('bounded administrative gateway setup', () => {
     expect(f.docs.get(GATEWAY_CATALOG_PATH).profiles[0]).toMatchObject({ accountCredentialBinding: gatewayTextCredentialBinding('synthetic-never-live-secret'), freeBillingSafety: { kind: 'intrinsic-zero', evidenceRef: v.evidence.pricing } });
     expect(f.docs.get(gatewayLedgerPath('quota-policy', ledgerKey))).toMatchObject({ authority: 'gateway-local-capacity', accountingBasis: 'gateway-local-only', limit: 100_000 });
     expect(f.docs.get(gatewaySetupAuditPath(v.operationId))).toMatchObject({ actor: 'verified-admin', paidAuthorityChanged: false, activationChanged: false });
-    expect(f.writes).toHaveLength(8); expect(f.docs.has('free_chat_chain/paid_budget_policy')).toBe(false);
+    expect(f.writes).toHaveLength(10); expect(f.docs.has('free_chat_chain/paid_budget_policy')).toBe(false);
     expect(JSON.stringify([...f.docs.values()])).not.toContain('synthetic-never-live-secret');
   });
   it('the real authority issuer and planner admit the complete ordinary-chat prompt from typed admin enrollment', async () => {
@@ -111,7 +113,7 @@ describe('bounded administrative gateway setup', () => {
     await expect(f.setup.preview({ ...gatewayReviewFixture(), accountCredentialBinding: 'a'.repeat(64) })).rejects.toMatchObject({ code: 'invalid-review' }); expect(f.writes).toEqual([]);
   });
   it('validates exact metered rates but never creates or increases paid authority', async () => {
-    const f = fixture(); const v = { ...gatewayReviewFixture(), provider: 'DEEPSEEK' as const, modelId: 'deepseek-flash', billing: 'metered' as const, inputNanoUsdPerMillion: 300_000_000, outputNanoUsdPerMillion: 1_200_000_000 };
+    const f = fixture(); const v = { ...gatewayReviewFixture('DEEPSEEK'), provider: 'DEEPSEEK' as const, modelId: 'deepseek-flash', billing: 'metered' as const, inputNanoUsdPerMillion: 300_000_000, outputNanoUsdPerMillion: 1_200_000_000 };
     await f.submit(v); expect(f.docs.has('free_chat_chain/paid_budget_policy')).toBe(false);
     expect(f.docs.get(GATEWAY_CATALOG_PATH).profiles[0].profile.charging).toBe('metered');
     await expect(f.setup.preview({ ...v, inputNanoUsdPerMillion: 0 })).rejects.toMatchObject({ code: 'invalid-review' });
@@ -209,13 +211,13 @@ describe('bounded administrative gateway setup', () => {
 
 describe('reviewed capability operation enrollment', () => {
   function embedding(): GatewaySetupSubmission {
-    return { ...gatewayReviewFixture(), provider: 'VERTEX', modelId: 'text-embedding-004', canonicalModelId: 'vertex004', profileId: 'embedding-profile',
+    return { ...gatewayReviewFixture('VERTEX'), provider: 'VERTEX', modelId: 'text-embedding-004', canonicalModelId: 'vertex004', profileId: 'embedding-profile',
       canonicalAccountId: 'my-project', credentialEnv: 'ADC', billing: 'metered', policyKeys: ['professional:teacher_ai'], processingRegions: ['us-central1'],
       maxInputTokens: 2048, maxOutputTokens: 1, maxContextTokens: 2049,
       operation: { kind: 'embedding', project: 'my-project', location: 'us-central1', credentialPrincipal: 'runtime@my-project.iam.gserviceaccount.com', maxInputBytes: 4096, maxNanoUsdPerCharacter: 25 } };
   }
   function grounding(): GatewaySetupSubmission {
-    return { ...gatewayReviewFixture(), provider: 'BRAVE', modelId: 'brave-search-v1', canonicalModelId: 'brave-search', profileId: 'grounding-profile',
+    return { ...gatewayReviewFixture('BRAVE'), provider: 'BRAVE', modelId: 'brave-search-v1', canonicalModelId: 'brave-search', profileId: 'grounding-profile',
       billing: 'metered', maxInputTokens: 1, maxOutputTokens: 1, maxContextTokens: 2, localTokensPerMinute: 30,
       operation: { kind: 'grounding-search', maxQueryBytes: 1000, maxResults: 5, requestNanoUsd: 5_000_000 } };
   }
@@ -302,7 +304,7 @@ it('keeps non-text operation evidence out of text routing policy and forbids ope
 
 describe('reviewed paid Gemini PDF maximum reservation', () => {
  function pdf(pro = false): GatewaySetupSubmission {
-   return { ...gatewayReviewFixture(), provider: 'GEMINI', modelId: pro ? 'gemini-2.5-pro' : 'gemini-2.5-flash', canonicalModelId: pro ? 'gemini25pro' : 'gemini25flash',
+   return { ...gatewayReviewFixture('GEMINI'), provider: 'GEMINI', modelId: pro ? 'gemini-2.5-pro' : 'gemini-2.5-flash', canonicalModelId: pro ? 'gemini25pro' : 'gemini25flash',
      billing: 'metered', maxInputTokens: 1048576, maxOutputTokens: 8192, maxContextTokens: 1056768, localTokensPerMinute: 2_000_000,
      inputNanoUsdPerMillion: pro ? 2_500_000_000 : 300_000_000, outputNanoUsdPerMillion: pro ? 15_000_000_000 : 2_500_000_000,
      operation: { kind: 'vision-pdf', maxImages: 2, maxPdfPages: 1000, maxAttachmentBytes: 5_000_000, maxImageDimension: 6000 } };
@@ -429,4 +431,133 @@ it.each(['all', 'other-owner'])('rejects a setup preview when audience changes t
 });
 it.each([null, {}, [], { mode: 'all', canaryCount: -1 }, { mode: 'unknown', canaryCount: 0 }])('malformed cohort status returns false without throwing', async rollout => {
   const f = fixture(); expect(isGatewaySetupStatus({ ...await f.setup.status(), rollout })).toBe(false);
+});
+
+describe('reviewed exact-model concurrency enrollment', () => {
+  it.each([undefined, 0, -1, 65, 1.5, '1'])('rejects an absent or invalid concurrency limit %s', async limit => {
+    const f = fixture(); const submission: any = gatewayReviewFixture();
+    if (limit === undefined) delete submission.maxConcurrentCalls; else submission.maxConcurrentCalls = limit;
+    await expect(f.setup.preview(submission)).rejects.toThrow(); expect(f.writes).toEqual([]);
+  });
+  it('requires explicit review of old unguarded Gateway activity before establishing the local bound', async () => {
+    const f = fixture(); const submission = gatewayReviewFixture(); delete submission.gatewayOccupancyReviewed;
+    await expect(f.setup.preview(submission)).rejects.toThrow(); expect(f.writes).toEqual([]);
+  });
+  it('preserves every uncertain occupant across lower limits, renewal, credential rotation and day rollover', async () => {
+    const f = fixture(); await f.submit({ ...gatewayReviewFixture(), maxConcurrentCalls: 2 });
+    const stateKey = [...f.docs.keys()].find(k => k.includes('gateway_model_slot_state_'))!;
+    const original = { ...f.docs.get(stateKey), occupants: { one: { intentBinding: 'a'.repeat(64), claimBinding: 'b'.repeat(64), acquiredAtMs: START }, two: { intentBinding: 'c'.repeat(64), acquiredAtMs: START } } };
+    f.docs.set(stateKey, original);
+    f.setNow(START + 86400000); f.setEnv({ INFERENCE_GATEWAY_TEST_KEY: 'rotated-synthetic-secret' });
+    const renewal = { ...gatewayReviewFixture(), operationId: 'next-day', expectedCatalogRevision: 'operation-one', reviewedAtMs: START + 86400000, expiresAtMs: START + 86460000, maxConcurrentCalls: 1 };
+    const p = await f.setup.preview(renewal); expect(p.modelConcurrency).toEqual({ limit: 1, occupied: 2, scope: 'gateway-only' });
+    await f.setup.submit(renewal, p.previewBinding, 'verified-admin'); expect(f.docs.get(stateKey)).toEqual(original);
+    expect((await f.setup.status()).profiles[0].modelConcurrency).toEqual({ limit: 1, occupied: 2, scope: 'gateway-only', canonicalAccountId: 'canonical-account-one', attemptIds: ['one', 'two'] });
+  });
+  it('does not let alias profiles create independent occupancy or silently restore an old higher limit', async () => {
+    const f = fixture(); await f.submit();
+    await f.submit({ ...gatewayReviewFixture(), operationId: 'alias-review', expectedCatalogRevision: 'operation-one', profileId: 'alias', maxConcurrentCalls: 2 });
+    expect([...f.docs.keys()].filter(k => k.includes('gateway_model_slot_state_'))).toHaveLength(1);
+    const catalog = f.docs.get(GATEWAY_CATALOG_PATH); expect(catalog.profiles).toHaveLength(2);
+    expect(catalog.profiles.every((p: any) => p.modelConcurrency.revision === 'alias-review' && p.modelConcurrency.limit === 2)).toBe(true);
+  });
+  it('binds preview to the reviewed concurrency policy, while occupancy churn is never overwritten', async () => {
+    const f = fixture(); await f.submit();
+    const v = { ...gatewayReviewFixture(), operationId: 'changed-review', expectedCatalogRevision: 'operation-one', maxConcurrentCalls: 2 };
+    const p = await f.setup.preview(v); const key = [...f.docs.keys()].find(k => k.includes('gateway_model_slot_policy_'))!;
+    f.docs.set(key, { ...f.docs.get(key), revision: 'concurrent-review', limit: 3 });
+    await expect(f.setup.submit(v, p.previewBinding, 'verified-admin')).rejects.toMatchObject({ code: 'preview-changed' });
+  });
+});
+
+describe('audited exact-attempt provider-record slot recovery', () => {
+  async function held() {
+    const f = fixture(); await f.submit();
+    const identity = { provider: 'GLM' as const, accountScopeIds: ['canonical-account-one'], modelId: 'glm-4.7-flash' };
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(START);
+    vi.stubEnv('INFERENCE_GATEWAY_TEST_KEY', 'synthetic-never-live-secret');
+    let claim: import('./executor').DispatchClaim;
+    try {
+      const payload = { prompt: 'Synthetic public test', systemPrompt: 'System', streaming: false };
+      const key = { principalId: 'verified-user', tenantId: 'verified-user', logicalRequestId: 'recovery-logical', payloadDigest: gatewayTextPayloadDigest(payload) };
+      const context = { principalId: key.principalId, tenantId: key.tenantId, surface: 'chat' as const, policyKey: 'chat:text', qualityTier: 'clinical' as const,
+        dataClass: 'health' as const, funding: 'platform-free-fallback' as const, mode: 'strict-free' as const, deadlineAtMs: START + 90_000 };
+      const issuer = new GatewayAuthorityStore(f.db, context, key, payload, true); await issuer.issue();
+      const snapshot = await issuer.readTrusted(key); const plan = planInference({ ...snapshot, authority: issuer.evidence, nowMs: START });
+      if (plan.kind !== 'plan') throw new Error('Review ineligible');
+      const ledger = new FirestoreInferenceLedger(f.db, { now: () => START, principal: key, platformScope: { id: 'platform-free-fallback', ownerId: 'platform-owner' }, adminEmails: () => [], requireConfigurationBinding: true });
+      const intent = admissionIntentFor(key, snapshot, plan); const held = await ledger.reserve(intent);
+      if (held.kind !== 'held') throw new Error('No hold');
+      const claimed = await ledger.claim(held.reservation, intent, 0); if (claimed.kind !== 'claimed') throw new Error('No claim'); claim = claimed.claim;
+      expect(await issuer.authorizeClaim(claim)).toBe(true);
+      await ledger.retain(claim, { physicalAttemptId: claim.binding.physicalAttemptId, profileId: claim.binding.profileId, outcome: 'uncertain', outputVisible: false }, 'connection-lost');
+    } finally { clock.mockRestore(); vi.unstubAllEnvs(); }
+    const attemptId = claim.binding.physicalAttemptId;
+    const occupant = f.docs.get(modelSlotPath('state', identity)).occupants[attemptId];
+    const attempt = f.docs.get(gatewayLedgerPath('attempt', attemptId));
+    const submission: GatewaySlotRecoverySubmission = { kind: 'model-slot-recovery', operationId: 'slot-recovery-one', reason: 'Provider terminal record independently reviewed', canonicalAccountId: 'canonical-account-one', modelId: 'glm-4.7-flash', physicalAttemptId: attemptId, providerRequestId: 'provider-request-one', evidenceRef: 'review:provider-terminal-record', providerCompletedAtMs: START, reviewedAtMs: START, providerRecordVerified: true, exactAttemptMatched: true, upstreamFinished: true };
+    return { ...f, identity, claim, occupant, attempt, submission };
+  }
+  it('previews without writes and commits only exact concurrency state and three audit/evidence receipts', async () => {
+    const f = await held(); const baseline = new Map([...f.docs].map(([k, v]) => [k, structuredClone(v)])); const writes = f.writes.length;
+    const p = await f.setup.preview(f.submission); expect(f.writes).toHaveLength(writes); expect(p).toMatchObject({ occupied: 1, financialWrites: false, evidenceBasis: 'admin-reviewed-provider-record' });
+    await f.setup.submit(f.submission, p.previewBinding, 'verified-admin');
+    const paths = f.writes.slice(writes); expect(paths).toHaveLength(4); expect(paths.every(k => /gateway_model_slot_|gateway_setup_audit_/.test(k))).toBe(true);
+    for (const [k, v] of baseline) if (k !== modelSlotPath('state', f.identity)) expect(f.docs.get(k)).toEqual(v);
+    expect(f.docs.get(modelSlotPath('state', f.identity)).occupants).toEqual({});
+    expect(f.docs.get(gatewaySetupAuditPath(f.submission.operationId))).toMatchObject({ actor: 'verified-admin', concurrencyOnly: true, reason: f.submission.reason });
+  });
+  it('replays a lost-response submit idempotently without deleting a later occupied slot', async () => {
+    const f = await held(); const p = await f.setup.preview(f.submission);
+    const first = await f.setup.submit(f.submission, p.previewBinding, 'verified-admin'); const writes = f.writes.length;
+    f.docs.set(modelSlotPath('state', f.identity), { kind: 'gateway_model_slot_state', version: 1, identity: f.identity, occupants: { later: f.occupant } });
+    await expect(f.setup.submit(f.submission, p.previewBinding, 'verified-admin')).resolves.toEqual(first);
+    expect(f.writes).toHaveLength(writes); expect(f.docs.get(modelSlotPath('state', f.identity)).occupants).toEqual({ later: f.occupant });
+  });
+  it.each(['providerRecordVerified', 'exactAttemptMatched', 'upstreamFinished'] as const)('rejects absent independent attestation %s', async field => {
+    const f = await held(); await expect(f.setup.preview({ ...f.submission, [field]: false })).rejects.toThrow();
+    expect(f.docs.get(modelSlotPath('state', f.identity)).occupants).toHaveProperty(f.submission.physicalAttemptId);
+  });
+  it.each(['wrong-account', 'wrong-model', 'pre-dispatch', 'future', 'stale'])('rejects contradictory evidence %s', async kind => {
+    const f = await held(); const v = { ...f.submission };
+    if (kind === 'wrong-account') v.canonicalAccountId = 'other';
+    if (kind === 'wrong-model') v.modelId = 'glm-4.5-flash';
+    if (kind === 'pre-dispatch') v.providerCompletedAtMs = START - 100;
+    if (kind === 'future') v.providerCompletedAtMs = START + 1;
+    if (kind === 'stale') f.setNow(START + 16 * 60000);
+    await expect(f.setup.preview(v)).rejects.toThrow(); expect(f.docs.get(modelSlotPath('state', f.identity)).occupants).toHaveProperty(f.submission.physicalAttemptId);
+  });
+  it('CAS rejects a changed exact claim and never reuses a provider record for another attempt', async () => {
+    const f = await held(); const p = await f.setup.preview(f.submission);
+    const path = modelSlotPath('state', f.identity); f.docs.set(path, { ...f.docs.get(path), occupants: { [f.submission.physicalAttemptId]: { ...f.occupant, claimBinding: 'b'.repeat(64) } } });
+    await expect(f.setup.submit(f.submission, p.previewBinding, 'verified-admin')).rejects.toThrow();
+    f.docs.set(path, { ...f.docs.get(path), occupants: { [f.submission.physicalAttemptId]: f.occupant } });
+    await f.setup.submit(f.submission, p.previewBinding, 'verified-admin');
+    f.docs.set(path, { ...f.docs.get(path), occupants: { [f.submission.physicalAttemptId]: f.occupant } });
+    await expect(f.setup.preview({ ...f.submission, operationId: 'reused-evidence' })).rejects.toThrow();
+  });
+  it.each(['version', 'reservation', 'intent', 'claim', 'heldQuota'])('rejects corrupt stored attempt %s without clearing occupancy', async field => {
+    const f = await held(); const path = gatewayLedgerPath('attempt', f.submission.physicalAttemptId);
+    const corrupt = { ...f.docs.get(path) }; delete corrupt[field]; f.docs.set(path, corrupt); const writes = f.writes.length;
+    await expect(f.setup.preview(f.submission)).rejects.toThrow(); expect(f.writes).toHaveLength(writes);
+    expect(f.docs.get(modelSlotPath('state', f.identity)).occupants).toHaveProperty(f.submission.physicalAttemptId);
+  });
+  it('fails closed when evidence review expires during final datastore reads', async () => {
+    const f = await held(); const p = await f.setup.preview(f.submission); const writes = f.writes.length;
+    f.afterRead(path => { if (path === modelSlotPath('release', f.submission.physicalAttemptId)) f.setNow(START + 16 * 60000); });
+    await expect(f.setup.submit(f.submission, p.previewBinding, 'verified-admin')).rejects.toThrow(); expect(f.writes).toHaveLength(writes);
+  });
+
+  it('rejects matching corrupt held and occupant digests against the immutable admitted intent', async () => {
+    const f = await held(); const path = gatewayLedgerPath('attempt', f.submission.physicalAttemptId);
+    const attempt = f.docs.get(path); f.docs.set(path, { ...attempt, heldModelSlot: { ...attempt.heldModelSlot, intentBinding: 'e'.repeat(64) } });
+    const statePath = modelSlotPath('state', f.identity); const state = f.docs.get(statePath);
+    f.docs.set(statePath, { ...state, occupants: { [f.submission.physicalAttemptId]: { ...f.occupant, intentBinding: 'e'.repeat(64) } } });
+    const writes = f.writes.length; await expect(f.setup.preview(f.submission)).rejects.toThrow(); expect(f.writes).toHaveLength(writes);
+  });
+  it('accepts exact UUID operation IDs even when PII heuristics resemble a phone segment', async () => {
+    const f = await held(); const v = { ...f.submission, operationId: '12345678-1234-4234-8234-123456789012' };
+    const p = await f.setup.preview(v); await expect(f.setup.submit(v, p.previewBinding, 'verified-admin')).resolves.toMatchObject({ operationId: v.operationId });
+  });
+
 });

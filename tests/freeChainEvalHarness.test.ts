@@ -18,7 +18,7 @@ const authorizedEnv = (): NodeJS.ProcessEnv => ({
   NODE_ENV: 'development', FREE_CHAIN_EVAL_CONFIRM: EVAL_CONFIRMATION,
   FREE_CHAIN_EVAL_ACCOUNT_SCOPE: 'exclusive-non-production', FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
   FREE_CHAIN_ENABLED: 'true', FREE_CHAIN_ORDER: 'groq,cloudflare,openrouter',
-  FREE_CHAIN_PAID_DAILY_CAP_USD: '0', STRICT_FREE_MODULES_ENABLED: 'false',
+  FREE_CHAIN_PAID_DAILY_CAP_USD: '0', STRICT_FREE_MODULES_ENABLED: 'false', FREE_CHAIN_CACHE_ENABLED: 'false',
 });
 const answer = (over: Partial<FreeChainResult> = {}): FreeChainResult => ({
   ok: true, content: 'A public synthetic answer.', provider: 'GROQ', model: 'openai/gpt-oss-120b', latencyMs: 12, ...over,

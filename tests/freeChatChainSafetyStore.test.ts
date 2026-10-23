@@ -208,8 +208,9 @@ describe('paid fallback reservations', () => {
     expect(await b.reservePaid({ ...paid('blocked'), capNanoUsd: 2 * NANO_USD }, NOW)).toBeNull();
   });
   it('defaults to the single owner-authorized $10 ceiling across concurrent paid providers, keys and instances', async () => {
-    expect(OWNER_PAID_DAILY_CEILING_NANO_USD).toBe(10_000_000_000);
-    expect(DEFAULT_PAID_CAP_NANO_USD).toBe(OWNER_PAID_DAILY_CEILING_NANO_USD);
+    // Owner Final Master Plan (2026-10-24): ceiling $17/day; the default deployment cap stays $10.
+    expect(OWNER_PAID_DAILY_CEILING_NANO_USD).toBe(17_000_000_000);
+    expect(DEFAULT_PAID_CAP_NANO_USD).toBe(10_000_000_000);
     const db = new FakeFirestore(), stores = [db.store(), db.store(), db.store(), db.store()];
     await stores[0].observePaidBudgetPolicy(undefined, NOW);
     expect(await stores[0].spendSnapshot(NOW)).toMatchObject({ capNanoUsd: 10 * NANO_USD, remainingNanoUsd: 10 * NANO_USD });
@@ -438,7 +439,7 @@ describe('durable paid-budget authority', () => {
     expect(db.docs.get(path)).toEqual(historical);
   });
   it('fails closed for malformed authority and never repairs or overwrites it incidentally', async () => {
-    for (const bad of [{ capNanoUsd: 10 * NANO_USD + 1 }, { capNanoUsd: -1 }, { revision: 0 }, { revision: NaN },
+    for (const bad of [{ capNanoUsd: 17 * NANO_USD + 1 }, { capNanoUsd: -1 }, { revision: 0 }, { revision: NaN },
       { version: 2 }, { kind: 'wrong' }, { source: 'unknown' }, { updatedAt: Infinity }, { expiresAt: new Date(NOW) }]) {
       const db = new FakeFirestore(), store = db.store();
       const held = (await store.reservePaid(paid('held-before-malformed'), NOW))!;
@@ -491,7 +492,7 @@ describe('durable paid-budget authority', () => {
   });
   it('never lets admin requests exceed the owner ceiling or bypass malformed input checks', async () => {
     const db = new FakeFirestore(), store = db.store();
-    for (const patch of [{ capNanoUsd: 10 * NANO_USD + 1 }, { capNanoUsd: NaN }, { capNanoUsd: 0.5 },
+    for (const patch of [{ capNanoUsd: 17 * NANO_USD + 1 }, { capNanoUsd: NaN }, { capNanoUsd: 0.5 },
       { expectedRevision: -1 }, { expectedRevision: 0.5 }, { actorUid: '' }, { reason: '  ' }, { reason: 'x'.repeat(501) }]) {
       expect(await store.setPaidBudgetPolicy({ ...admin(10 * NANO_USD, 0), ...patch }, NOW)).toEqual({ ok: false, reason: 'invalid_input' });
     }

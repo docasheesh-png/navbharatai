@@ -58,7 +58,7 @@ describe('shared Free-tier daily $ cap', () => {
   it('FREE_TIER_PAID_DAILY_CAP_USD defaults to $10, clamps to the owner ceiling, invalid closes', () => {
     expect(freeTierPaidCapNanoUsd({})).toBe(10e9);
     expect(freeTierPaidCapNanoUsd({ FREE_TIER_PAID_DAILY_CAP_USD: '2.5' })).toBe(2.5e9);
-    expect(freeTierPaidCapNanoUsd({ FREE_TIER_PAID_DAILY_CAP_USD: '500' })).toBe(10e9);
+    expect(freeTierPaidCapNanoUsd({ FREE_TIER_PAID_DAILY_CAP_USD: '500' })).toBe(17e9);
     expect(freeTierPaidCapNanoUsd({ FREE_TIER_PAID_DAILY_CAP_USD: 'lots' })).toBe(0);
   });
   it('only allowlisted cheap models can be priced; pro/grok are refused before dispatch', () => {

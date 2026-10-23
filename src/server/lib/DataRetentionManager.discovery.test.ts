@@ -67,7 +67,7 @@ describe('opt-in mixed-store child discovery', () => {
   it('is enabled only for the FREE chain and declares every actual state child', () => {
     expect(RETENTION_POLICIES.filter(p => p.discoverSubcollections).map(p => p.collection)).toEqual(['free_chat_chain']);
     expect(POLICY).toMatchObject({ timestampField: 'expiresAt', timestampKind: 'date', ttlDays: 0,
-      subs: ['cache', 'sticky', 'actions', 'events'], discoverSubcollections: true });
+      subs: ['cache', 'sticky', 'actions', 'events', 'paid_month'], discoverSubcollections: true });
   });
   it('deletes an expired accounting leaf with one discovery and no child-document queries', async () => {
     const db = new DiscoveryFirestore(); db.seed('paid_user_old', { expiresAt: EXPIRED });

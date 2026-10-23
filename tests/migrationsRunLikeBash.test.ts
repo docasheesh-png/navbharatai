@@ -1,4 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// These dispatcher fixtures test env writes, ordering and redaction, not live credential checks.
+// Real classification/probe behaviour is covered by secretPreflight, credentialProbe and wiring tests.
+const externalChecks = vi.hoisted(() => ({
+  verify: vi.fn(async () => []),
+  probe: vi.fn(async () => []),
+}));
+vi.mock('../src/server/AgentV3/secretPreflight', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../src/server/AgentV3/secretPreflight')>(),
+  verifyInjectedSecrets: externalChecks.verify,
+}));
+vi.mock('../src/server/AgentV3/credentialProbe', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../src/server/AgentV3/credentialProbe')>(),
+  probeCredentials: externalChecks.probe,
+}));
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
 import { ToolDispatcher } from '../src/server/AgentV3/ToolDispatcher';
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
@@ -30,6 +45,8 @@ describe('migrations run like bash (TD-15)', () => {
     d.setUserSecrets({ DATABASE_URL: 'postgres://u:FAKEPASS@h/db' });
 
     const res = await d.dispatch(toolCall('run_migrations', {}), 'backend');
+    expect(externalChecks.verify).toHaveBeenCalledWith({ DATABASE_URL: 'postgres://u:FAKEPASS@h/db' });
+    expect(externalChecks.probe).toHaveBeenCalledWith({ DATABASE_URL: 'postgres://u:FAKEPASS@h/db' }, expect.any(Function));
     expect(String(res.content)).not.toContain('FAKEPASS');
     const envAt = order.indexOf('write:.env');
     const migAt = order.findIndex((s) => s.startsWith('run:') && s.includes('prisma'));

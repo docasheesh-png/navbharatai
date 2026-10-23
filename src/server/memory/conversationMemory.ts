@@ -1,3 +1,5 @@
+import { InferenceGatewayTerminalError } from '../AI/InferenceGateway/dispatchBoundary';
+import { assertGatewayAccountAccess } from '../AI/InferenceGateway/runtime';
 // Semantic conversation memory — orchestration (admin 2026-07-17).
 //
 // Ties the pure core + Gemini embeddings + Firestore store into the two calls a chat surface needs:
@@ -6,7 +8,8 @@
 //
 // BOTH are fully gated and best-effort: they do nothing unless SEMANTIC_MEMORY is on, an embedding key
 // exists, and a verified user id is present; and every failure is swallowed. So enabling this can never
-// break or slow a chat beyond the bounded embed timeout — worst case it silently adds/recalls nothing.
+// break or slow an unselected chat beyond the bounded embed timeout. Selected gateway capability
+// denials are propagated instead: silently dropping requested memory would hide an unsupported route.
 
 import {
   semanticMemoryEnabled,
@@ -41,6 +44,7 @@ export async function retrieveMemoryBlock(
   conversationId?: string,
 ): Promise<string> {
   if (!active(userId) || !scope || !query.trim()) return '';
+  assertGatewayAccountAccess(userId);
   try {
     const chunks = await loadMemory(userId, scope);
     if (chunks.length === 0) return '';
@@ -48,7 +52,8 @@ export async function retrieveMemoryBlock(
     if (!queryVec) return '';
     const relevant = selectRelevant(queryVec, chunks, { excludeTexts, conversationId });
     return formatMemoryBlock(relevant);
-  } catch {
+  } catch (error) {
+    if (error instanceof InferenceGatewayTerminalError) throw error;
     return '';
   }
 }
@@ -70,6 +75,7 @@ export async function rememberTurn(
   conversationId?: string,
 ): Promise<void> {
   if (!active(userId) || !scope) return;
+  assertGatewayAccountAccess(userId);
   try {
     const now = Date.now();
     const pending: Array<{ role: 'user' | 'assistant'; text: string; ts: number }> = [];
@@ -87,8 +93,9 @@ export async function rememberTurn(
         });
       }
     }
-    if (chunks.length > 0) await appendMemory(userId, scope, chunks, memoryMaxChunks());
-  } catch {
-    /* best-effort */
+    if (chunks.length > 0) { assertGatewayAccountAccess(userId); await appendMemory(userId, scope, chunks, memoryMaxChunks()); }
+  } catch (error) {
+    if (error instanceof InferenceGatewayTerminalError) throw error;
+    /* Unselected legacy memory stays best-effort. */
   }
 }

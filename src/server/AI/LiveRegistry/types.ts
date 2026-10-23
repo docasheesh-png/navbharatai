@@ -49,6 +49,8 @@ export interface CatalogManifest {
   fetchedAt: number;
   expiresAt: number;
   accountVerified: boolean;
+  /** Internal credential-generation binding. Never expose through admin views. */
+  accountCredentialBinding?: string;
   transitions: Record<string, number>;
   chunks?: string[];
 }

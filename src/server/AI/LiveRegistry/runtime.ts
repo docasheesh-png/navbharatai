@@ -1,3 +1,4 @@
+import { refreshGatewayCatalog } from '../InferenceGateway/catalogRefresh';
 import { assertAiAvailable } from '../../lib/aiMaintenance';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { getServerDb } from '../../lib/serverDb';
@@ -14,7 +15,8 @@ function bounded(value: string | undefined, fallback: number, min: number, max: 
 export function registryConfig(env: NodeJS.ProcessEnv = process.env): RegistryConfig {
   return { enabled: parseEnvFlag(env.LIVE_MODEL_REGISTRY_ENABLED) === true,
     strictFreeModulesEnabled: parseEnvFlag(env.STRICT_FREE_MODULES_ENABLED) === true,
-    strictFreeWeakEnabled: parseEnvFlag(env.STRICT_FREE_WEAK_ENABLED) === true,
+    // Retired: Pro App Builder is not part of the Free product rollout.
+    strictFreeWeakEnabled: false,
     apiKey: (env.OPENROUTER_API_KEY ?? '').trim(),
     syncIntervalMs: bounded(env.LIVE_MODEL_SYNC_INTERVAL_MS, 300000, 60000, 3600000),
     metadataTtlMs: bounded(env.LIVE_MODEL_METADATA_TTL_MS, 600000, 60000, 3600000) };
@@ -54,13 +56,29 @@ export async function assertStrictFreeToolAvailable(maxOutputTokens = 8192): Pro
 
 export async function syncLiveModels() {
   if (!registryConfig().enabled) return { status: 'disabled' as const };
-  try { const result = await runtime().sync.sync(); audit('LIVE_MODEL_SYNC', { status: result.status, version: result.version ?? null }); return result; }
+  try {
+    const result = await runtime().sync.sync();
+    audit('LIVE_MODEL_SYNC', { status: result.status, version: result.version ?? null });
+    if (parseEnvFlag(process.env.INFERENCE_GATEWAY_ENABLED) === true) {
+      // The existing startup/admin/scheduled sync also refreshes already reviewed gateway entries.
+      // A failed refresh never renews approvals or authorizes the old registry generation.
+      try {
+        const db = getServerDb();
+        if (db && (await db.doc('free_chat_chain/gateway_catalog').get()).exists) {
+          const refreshed = await refreshGatewayCatalog(db, await runtime().store.read(), registryConfig().apiKey);
+          audit('GATEWAY_CATALOG_REFRESH', { status: refreshed.status, updatedProfiles: refreshed.updatedProfiles });
+        }
+      } catch { audit('GATEWAY_CATALOG_REFRESH_FAILED', { reason: 'Reviewed gateway metadata was not refreshed.' }); }
+    }
+    return result;
+  }
   catch (error) { audit('LIVE_MODEL_SYNC_FAILED', { reason: 'Catalog unavailable or invalid; strict freshness gate enforced.' }); throw error; }
 }
 export async function liveModelRegistryView(): Promise<AdminRegistryView> {
   const state = await runtime().store.read(); const history = await runtime().store.adminHistory(); const cfg = registryConfig(); const now = Date.now();
   const imageDiscovery = await runtime().store.imageState();
-  return { ...state, ...history, imageDiscovery, enabled: cfg.enabled, strictFreeModulesEnabled: cfg.strictFreeModulesEnabled, strictFreeWeakEnabled: cfg.strictFreeWeakEnabled, configured: !!cfg.apiKey,
+  const manifest = state.manifest ? (({ accountCredentialBinding: _private, ...publicManifest }) => publicManifest)(state.manifest) : null;
+  return { ...state, manifest, ...history, imageDiscovery, enabled: cfg.enabled, strictFreeModulesEnabled: cfg.strictFreeModulesEnabled, strictFreeWeakEnabled: cfg.strictFreeWeakEnabled, configured: !!cfg.apiKey,
     syncIntervalMs: cfg.syncIntervalMs,
     limitations: [
       'Five-minute polling is not instantaneous provider price-change notification.',
@@ -69,7 +87,7 @@ export async function liveModelRegistryView(): Promise<AdminRegistryView> {
       'The free-variant fee basis is OpenRouter’s documented free-endpoint contract, not an invented missing-price value.',
       'Other provider catalogs remain unverified; only the documented OpenRouter adapter can authorize free inference.',
       'History is bounded: 288 sync summaries and up to 4096 sampled routing audit slots; this view shows the latest 30 of each.',
-      'Free modules and Weak Builder have independent rollout flags; Normal and Strong remain unchanged. Existing owner-funded daily image generation is an explicit exception.',
+      'Only Free modules use this rollout. Pro App Builder, including Weak, retains its legacy routing. Existing owner-funded daily image generation is an explicit exception.',
       'Terms approval records an administrator review only; it does not accept an external agreement.',
     ],
     models: state.models.map(model => {

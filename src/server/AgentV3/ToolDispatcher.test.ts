@@ -1,4 +1,19 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+// These dispatcher fixtures test env writes, ordering and redaction, not live credential checks.
+// Real classification/probe behaviour is covered by secretPreflight, credentialProbe and wiring tests.
+const externalChecks = vi.hoisted(() => ({
+  verify: vi.fn(async () => []),
+  probe: vi.fn(async () => []),
+}));
+vi.mock('./secretPreflight', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./secretPreflight')>(),
+  verifyInjectedSecrets: externalChecks.verify,
+}));
+vi.mock('./credentialProbe', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./credentialProbe')>(),
+  probeCredentials: externalChecks.probe,
+}));
 import { ToolDispatcher, applyEdit, boundedWholeFileDiff, nearestEditRegion, type ActuatorPort, ALWAYS_WRITE_SECRETS } from './ToolDispatcher';
 import { defaultToolCatalog, CATALOG_TOOL_NAMES } from './ToolCatalog';
 import { WorkspaceState } from './WorkspaceState';
@@ -1936,6 +1951,8 @@ describe('user vault keys reach the app the build produces', () => {
   let d: ToolDispatcher;
 
   beforeEach(() => {
+    externalChecks.verify.mockClear();
+    externalChecks.probe.mockClear();
     act = new FakeActuator();
     const stream = new AgentEventStream();
     d = new ToolDispatcher(act, 'ws-keys', new WorkspaceState(stream), stream);
@@ -1945,6 +1962,8 @@ describe('user vault keys reach the app the build produces', () => {
     d.setUserSecrets({ STRIPE_SECRET_KEY: 'sk_live_realvalue', DATABASE_URL: 'postgres://u:p@host/db' });
     await d.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
 
+    expect(externalChecks.verify).toHaveBeenCalledWith({ STRIPE_SECRET_KEY: 'sk_live_realvalue', DATABASE_URL: 'postgres://u:p@host/db' });
+    expect(externalChecks.probe).toHaveBeenCalledWith({ STRIPE_SECRET_KEY: 'sk_live_realvalue', DATABASE_URL: 'postgres://u:p@host/db' }, expect.any(Function));
     const env = act.files.get('.env');
     expect(env).toBeTruthy();
     expect(env).toContain('STRIPE_SECRET_KEY=sk_live_realvalue');

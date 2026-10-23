@@ -1,7 +1,9 @@
 import { strictFreeRequired } from '../AI/inferencePolicy';
 import { callGemini, callGroq } from '../lib/aiCalls';
 import { fetchPublicRepo, type RepoSnapshot } from './githubFetch';
-import { buildRepoContext, findRepoRef, type AnalystTurn } from './analyst';
+import { buildRepoContext, findRepoRef, type AnalystTurn, type AnalystOptions } from './analyst';
+import { isGatewayRouteSelected, InferenceGatewayTerminalError } from '../AI/InferenceGateway/runtime';
+import { callProfessionalAI } from '../lib/professionalRouting';
 
 /**
  * GitHub Repo Analyst — "Improver" file generator.
@@ -80,6 +82,7 @@ RULES (non-negotiable):
 - These are suggestions for the user's own fork; you cannot and do not push to any repository.`;
 
 async function resilientCall(systemPrompt: string, prompt: string): Promise<string> {
+  if (isGatewayRouteSelected()) return callProfessionalAI(systemPrompt, prompt, 'free');
   // One centrally bounded free chain; never restart it through the legacy Groq wrapper.
   if (strictFreeRequired()) return callGemini(prompt, undefined, [], systemPrompt);
   try { const t = await callGemini(prompt, undefined, [], systemPrompt); if (t && t.trim()) return t; } catch { /* fall through */ }
@@ -99,6 +102,7 @@ export async function runRepoImprovementGen(
   message: string,
   history: AnalystTurn[] = [],
   token?: string,
+  opts: AnalystOptions = {},
 ): Promise<GenerateResult> {
   const ref = findRepoRef(message, history);
   if (!ref) {
@@ -107,8 +111,9 @@ export async function runRepoImprovementGen(
 
   let snapshot: RepoSnapshot;
   try {
-    snapshot = await fetchPublicRepo(ref, token);
+    snapshot = opts.signal ? await fetchPublicRepo(ref, token, opts.signal) : await fetchPublicRepo(ref, token);
   } catch (err: any) {
+    if (opts.signal?.aborted && isGatewayRouteSelected()) throw new InferenceGatewayTerminalError('cancelled');
     return { summary: `⚠️ ${err?.message || `Could not fetch ${ref.owner}/${ref.repo}.`}`, files: [] };
   }
 

@@ -29,6 +29,10 @@ const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
  * is on neither list.
  */
 const REVIEWED_SMALL: Record<string, string> = {
+  '/api/admin/inference-gateway/setup/preview': 'strict typed review metadata capped at 16 KiB canonical serialization, bounded fields and reason, no files/prompts/credentials; standard 1 MB parser cap unchanged',
+  '/api/admin/inference-gateway/setup/review': 'same strictly capped 16 KiB review metadata plus one 64-character preview binding; no media/file payload and standard 1 MB parser cap unchanged',
+  '/api/admin/free-chat-chain/budget': 'strict allowlist of 0..10 USD numeric cap in cents, safe integer expected revision and 500-character audit reason; readFreeChainBudgetAction rejects other fields, standard 1 MB parser cap unchanged',
+  '/api/admin/free-chat-chain/control': 'strict allowlist of booleans, integer rollout, two lists of at most seven known provider ids and a 500-character audit reason; readFreeChainControlAction rejects other fields, no file/blob payload, standard 1 MB parser cap unchanged',
   '/api/failedbr/oauth/register': 'OAuth metadata only: at most five 512-character redirect URLs, 60-character name; 16 KB JSON limit',
   '/api/failedbr/oauth/token': 'OAuth code/verifier or refresh token and client authentication; 16 KB JSON/form limits',
   '/api/failedbr/oauth/revoke': 'one token plus client authentication; 16 KB JSON/form limits',

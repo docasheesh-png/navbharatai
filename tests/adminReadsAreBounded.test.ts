@@ -4,7 +4,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { WALLET_SUMMARY_FIELDS, project, revenueToday } from '../src/server/lib/adminReadFields';
+import { WALLET_SUMMARY_FIELDS, USAGE_LOG_FIELDS, project, revenueToday } from '../src/server/lib/adminReadFields';
+import { summariseUsage } from '../src/server/lib/usageLedger';
 import { lifetimeMoneySpentInr, lifetimeTokensUsed, lifetimeTokensPurchased } from '../src/server/lib/walletLifetime';
 import { walletPassesPaidFilter } from '../src/server/lib/adminUserListQuery';
 
@@ -56,6 +57,24 @@ describe('the revenue badge counts today (it showed ₹0: ISO times parsed with 
   });
   it('the old parse is gone', () => {
     expect(ADMIN).not.toMatch(/Number\(tx\.createdAt \?\? tx\.created_at \?\? 0\)/);
+  });
+});
+
+describe('chat usage projection preserves pricing uncertainty', () => {
+  it('retains the chain marker so projected measured rows cannot acquire a legacy fallback price', () => {
+    const rows = [
+      { providerName: 'NEW_PROVIDER', modelName: 'new-model', usageMeasured: true, inputTokens: 100,
+        outputTokens: 200, latencyMs: 20, freeChain: { costUsdEstimate: 0 }, prompt: 'must not be read' },
+      { providerName: 'LEGACY', modelName: 'legacy-model', usageMeasured: true, inputTokens: 10,
+        outputTokens: 20, latencyMs: 30, prompt: 'must not be read' },
+    ];
+    const projected = rows.map((row) => project(row, USAGE_LOG_FIELDS));
+    const legacyPrice = () => 10;
+    const summary = summariseUsage(projected, legacyPrice);
+    expect(projected[0]).toHaveProperty('freeChain', { costUsdEstimate: 0 });
+    for (const row of projected) expect(row).not.toHaveProperty('prompt');
+    expect(summary).toEqual(summariseUsage(rows, legacyPrice));
+    expect(summary).toMatchObject({ measuredCalls: 2, pricedCalls: 1, unpricedCalls: 1, costUsd: 10, outputTokens: 220, complete: false });
   });
 });
 

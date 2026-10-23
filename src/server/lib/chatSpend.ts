@@ -1,3 +1,5 @@
+import { isGatewayFreePricingProof } from '../AI/InferenceGateway/pricingEvidence';
+import type { AIProviderResponse } from '../AI/Router/ProviderTypes';
 import { isVerifiedFreeProof } from '../AI/LiveRegistry/proof';
 import type { FreeTextResult } from '../AI/LiveRegistry/dispatcher';
 // What one AI turn OUTSIDE the v5 builder actually costs — and what it should be billed at.
@@ -30,10 +32,17 @@ export interface ChatTurnUsage {
   inputTokens?: number;
   outputTokens?: number;
   pricingProof?: FreeTextResult['pricingProof'];
+  inferenceGateway?: AIProviderResponse['inferenceGateway'];
+  gatewayPricingProof?: AIProviderResponse['gatewayPricingProof'];
 }
 
 export interface ChatTurnCost {
-  /** True only when the provider actually reported tokens. False ⇒ every figure below is 0. */
+  /** Gateway liability lives in its separate ledger; unknown is never an invoice cost. */
+  costBasis?: 'verified-free' | 'unpriced-gateway';
+  tokensMeasured?: boolean;
+  /** Some gateway turns have no exact cost; known legacy amounts remain additive. */
+  costIncomplete?: boolean;
+  /** True when usage has a usable cost basis. Unpriced gateway usage keeps tokens but no money. */
   measured: boolean;
   /** What the turn really cost NavBharatAI, in USD. ADMIN-ONLY — never shown to a user. */
   realUsd: number;
@@ -68,6 +77,15 @@ export function chatTurnCost(usage: ChatTurnUsage | null | undefined, usdInr: nu
   const outputTokens = clean(usage.outputTokens);
   if (inputTokens === 0 && outputTokens === 0) return ZERO;
 
+  if (isGatewayFreePricingProof(usage.gatewayPricingProof, { provider: usage.provider, model: usage.model,
+    logicalRequestId: usage.inferenceGateway?.logicalRequestId, usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } })) {
+    return { ...ZERO, measured: true, inputTokens, outputTokens, costBasis: 'verified-free', tokensMeasured: true };
+  }
+  if (usage.inferenceGateway !== undefined || usage.gatewayPricingProof !== undefined) {
+    // A conservative reservation/ceiling is not actual invoice spend. Preserve tokens,
+    // exclude this turn from legacy tariff guesses and leave reconciliation to its ledger.
+    return { ...ZERO, inputTokens, outputTokens, costBasis: 'unpriced-gateway', tokensMeasured: true, costIncomplete: true };
+  }
   if (usage.provider === 'OPENROUTER' && isVerifiedFreeProof(usage.pricingProof, usage.model)
     && typeof usage.pricingProof.inputTokens === 'number' && Number.isFinite(usage.pricingProof.inputTokens)
     && typeof usage.pricingProof.outputTokens === 'number' && Number.isFinite(usage.pricingProof.outputTokens)
@@ -124,12 +142,15 @@ export function sumChatTurnCosts(costs: ChatTurnCost[], usdInr: number): ChatTur
     inputTokens += Number(c.inputTokens) || 0;
     outputTokens += Number(c.outputTokens) || 0;
   }
-  if (!measured) return ZERO;
+  if (!measured) return list.some(c => c.costBasis === 'unpriced-gateway')
+    ? { ...ZERO, inputTokens, outputTokens, tokensMeasured: true, costBasis: 'unpriced-gateway', costIncomplete: true } : ZERO;
 
   const billedUsd = tieredMarkupUsd(realUsd);
   const rupees = Number.isFinite(usdInr) && usdInr > 0 ? usdInr : 0;
   return {
     measured: true,
+    ...(list.some(c => c.costBasis === 'unpriced-gateway' || c.costIncomplete)
+      ? { costIncomplete: true, costBasis: 'unpriced-gateway' as const, tokensMeasured: true } : {}),
     realUsd,
     billedUsd,
     billedInr: Math.round(billedUsd * rupees * 100) / 100,

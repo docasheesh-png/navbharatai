@@ -1,3 +1,5 @@
+import type { AIProviderResponse } from '../AI/Router/ProviderTypes';
+import { maybeGatewayVision, isGatewayRouteSelected, InferenceGatewayTerminalError } from '../AI/InferenceGateway/runtime';
 import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 // Vision chain — reads images + PDFs for the chat handler across ALL provider
 // universes, honestly and with correct isolation.
@@ -31,6 +33,10 @@ export interface VisionAttachment {
 export interface VisionResult {
   text: string;
   provider: 'GLM' | 'VERTEX' | 'GEMINI' | 'GROK' | 'CLAUDE';
+  model?: string;
+  usage?: AIProviderResponse['usage'];
+  inferenceGateway?: AIProviderResponse['inferenceGateway'];
+  gatewayPricingProof?: AIProviderResponse['gatewayPricingProof'];
 }
 
 export interface VisionOptions {
@@ -229,6 +235,20 @@ export function visionProviderOrder(allowClaude: boolean): VisionResult['provide
  */
 export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions): Promise<VisionResult | null> {
   if (!atts || atts.length === 0) return null;
+  if (isGatewayRouteSelected()) {
+    if (o.allowClaude || atts.some(att => !['image/png', 'image/jpeg', 'application/pdf'].includes(att.type))) {
+      throw new InferenceGatewayTerminalError('unsupported-vision-capability');
+    }
+    const selected = await maybeGatewayVision({ kind: 'vision-pdf', prompt: o.prompt, systemPrompt: o.systemPrompt,
+      attachments: atts.map(att => ({ mimeType: att.type as 'image/png' | 'image/jpeg' | 'application/pdf', data: att.base64 })), streaming: false });
+    if (!selected || !selected.ok || !selected.content.trim() || !['GLM', 'GEMINI'].includes(selected.provider)) {
+      throw new InferenceGatewayTerminalError('vision-unavailable');
+    }
+    return { text: selected.content, provider: selected.provider as 'GLM' | 'GEMINI', model: selected.model,
+      ...(selected.usage ? { usage: selected.usage } : {}),
+      ...(selected.inferenceGateway ? { inferenceGateway: selected.inferenceGateway } : {}),
+      ...(selected.gatewayPricingProof ? { gatewayPricingProof: selected.gatewayPricingProof } : {}) };
+  }
   assertLegacyInferenceAllowed('vision');
   const runners: Record<VisionResult['provider'], (a: VisionAttachment[], opt: VisionOptions) => Promise<string | null>> = {
     GLM: tryGlm,

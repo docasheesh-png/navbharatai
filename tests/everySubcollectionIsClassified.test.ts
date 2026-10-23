@@ -51,11 +51,15 @@ type Kind =
    * the record rather than outliving it (Q-767: `user_reports/{id}/shot`).
    */
   | { kind: 'retained-parent'; parent: string }
+  /** Independently clocked child, including audit history not bounded by a count. */
+  | { kind: 'retained'; parent: string; why: string }
   /** Neither erased nor bounded yet: an OPEN queue row owns the decision. */
   | { kind: 'open'; row: string; why: string };
 
 /** "file › sub" → what it is. `clock` adds the second obligation: a SUBCOLLECTION_RETENTION_POLICIES entry. */
 const CLASSIFICATION: Record<string, Kind & { clock?: true; erasedBy?: string; foreignParent?: true }> = {
+  'src/server/AI/FreeChain/cache.ts › cache': { kind: 'retained', parent: 'free_chat_chain', clock: true, why: 'allowlisted public FAQ responses, expiry at most 24 hours; fixed state parent is swept even when virtual' },
+  'src/server/AI/FreeChain/control.ts › actions': { kind: 'retained', parent: 'free_chat_chain', clock: true, why: 'administrator control-change evidence with verified actor and reason, same 180-day retention as admin_audit_log' },
   'src/server/AgentV3/WorkspaceFileStore.ts › files': { kind: 'workspace', parent: 'workspace_files_v3' },
   // Written through the client SDK's path form until 2026-10-11 (audit F9), which this census could not see.
   'src/server/routes/sbom.ts › builds': { kind: 'workspace', parent: 'sboms' },
@@ -216,6 +220,7 @@ describe('every subcollection is classified', () => {
 
   it('a clocked subcollection has its retention policy', () => {
     for (const [key, c] of Object.entries(CLASSIFICATION)) {
+      if (c.kind === 'retained') expect(c.clock, `${key} must have an explicit clock`).toBe(true);
       if (!c.clock || !('parent' in c)) continue;
       expect(SUBCOLLECTION_RETENTION_POLICIES.some((p) => p.parent === c.parent && p.subcollection === key.split(' › ')[1]), key).toBe(true);
     }

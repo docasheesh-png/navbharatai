@@ -1,8 +1,8 @@
 # Live free inference registry
 
 This is an additive, opt-in server feature. It is not a claim that every feature,
-sandbox, database, hosting service, or third-party tool is free. Normal and Strong
-builder behavior remains outside this free-only policy.
+sandbox, database, hosting service, or third-party tool is free. All Pro App Builder tiers, including Weak, remain outside this free-only policy.
+The formerly merged Weak option was retired at the owner’s request on 2026-10-23.
 
 ## Operator switches (Cloud Run environment variables)
 
@@ -11,9 +11,9 @@ builder behavior remains outside this free-only policy.
   scoped NavBharat Free and professional routes. Unsupported media/voice/search
   capabilities fail closed or use documented deterministic guidance; they never
   silently invoke a paid fallback. The existing owner-funded image-generation daily allowance is an explicit exception requested by the owner; it keeps its existing provider chain and quota.
-- `STRICT_FREE_WEAK_ENABLED=on`: use verified free inference for Weak builder
-  paths. Registry readiness is checked before sandbox allocation. Sandbox and
-  hosting costs are separate; this switch does not grant wallet credits.
+- `STRICT_FREE_WEAK_ENABLED`: retired and ignored, even if an older Cloud Run
+  revision configuration still supplies `on`. Weak uses its original builder ladder,
+  judges, admission and billing behavior; no free registry option remains.
 - `OPENROUTER_API_KEY`: existing server secret for account catalog and inference.
   Do not put it in the frontend. Provisioning or expanding credentials is a
   separate operator-authorized setup action.
@@ -210,3 +210,28 @@ Professional free-access gating is scoped to the new feature; existing broad gif
 and referral pause is not removed. Weak zero-balance/prepaid infrastructure gates
 remain, so the flag alone does not make a funded sandbox available to an unfunded
 account. The deferred credit program is separate work.
+
+
+## Optional Free Chat Chain precedence (2026-10-22)
+
+The separate [Free Chat Chain](FREE_CHAT_CHAIN.md) is OFF by default and applies
+only to authenticated, admitted text turns on the explicit NavBharat Free Chat
+aliases. It is not a replacement for this registry or a widening of its scoped
+policy. When `STRICT_FREE_MODULES_ENABLED` applies, strict registry routing wins
+and the new direct-provider chain, including its paid safety net, is bypassed.
+Turning `FREE_CHAIN_ENABLED` off restores the applicable prior routing, which
+can be paid when strict policy is off; neither flag is a platform-wide spend stop.
+
+When strict policy is off and an owner explicitly enables a Free Chat canary,
+the chain's OpenRouter rung still reuses this registry's fresh account/price/
+endpoint/terms gates. It selects from an owner-reviewed exact-model allowlist,
+keeps a bounded sticky preference, and makes at most one registry attempt for
+that rung. It does not run the optional hedge or create a second unbounded
+fallback loop. Unknown/stale/ineligible metadata still refuses dispatch.
+Normal/Strong, Weak and professional helpers retain their existing scopes.
+
+The proposed direct DeepSeek fallback remains blocked by the existing billing
+rate-card/free-tier ceiling. No paid fallback was activated, no Gemini private
+chat expansion was authorized, and no live benchmark or account-tier evidence
+was produced by the offline implementation. See the chain runbook for the
+remaining privacy, quota, invoice and activation gates.

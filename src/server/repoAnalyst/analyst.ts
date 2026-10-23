@@ -1,6 +1,8 @@
 import { strictFreeRequired } from '../AI/inferencePolicy';
 import { callGemini, callGroq } from '../lib/aiCalls';
 import { parseRepoRef, fetchPublicRepo, type RepoSnapshot } from './githubFetch';
+import { isGatewayRouteSelected, InferenceGatewayTerminalError } from '../AI/InferenceGateway/runtime';
+import { callProfessionalAI } from '../lib/professionalRouting';
 
 /**
  * GitHub Repo Analyst & Improver — engine.
@@ -12,6 +14,7 @@ import { parseRepoRef, fetchPublicRepo, type RepoSnapshot } from './githubFetch'
  */
 
 export interface AnalystTurn { role: 'user' | 'assistant'; content: string; }
+export interface AnalystOptions { signal?: AbortSignal }
 
 const PERSONA = `You are GitHub Repo Analyst & Improver inside NavBharatAI — an expert software engineer who analyses PUBLIC GitHub repositories and gives honest, practical, actionable feedback and improvement plans. You work ONLY from the real repository content provided to you below; you never invent files, code, or facts about the repo.
 
@@ -70,6 +73,9 @@ export function buildRepoContext(s: RepoSnapshot): string {
 }
 
 async function resilientCall(systemPrompt: string, prompt: string): Promise<string> {
+  // The selected gateway owns the whole chain. Never catch its terminal result
+  // and restart it through either direct SDK helper below.
+  if (isGatewayRouteSelected()) return callProfessionalAI(systemPrompt, prompt, 'free');
   // One centrally bounded free chain; never restart it through the legacy Groq wrapper.
   if (strictFreeRequired()) return callGemini(prompt, undefined, [], systemPrompt);
   try { const t = await callGemini(prompt, undefined, [], systemPrompt); if (t && t.trim()) return t; } catch { /* fall through */ }
@@ -103,6 +109,7 @@ export async function runRepoAnalystChat(
   message: string,
   history: AnalystTurn[] = [],
   token?: string,
+  opts: AnalystOptions = {},
 ): Promise<string> {
   const ref = findRepoRef(message, history);
 
@@ -115,8 +122,9 @@ export async function runRepoAnalystChat(
 
   let snapshot: RepoSnapshot;
   try {
-    snapshot = await fetchPublicRepo(ref, token);
+    snapshot = opts.signal ? await fetchPublicRepo(ref, token, opts.signal) : await fetchPublicRepo(ref, token);
   } catch (err: any) {
+    if (opts.signal?.aborted && isGatewayRouteSelected()) throw new InferenceGatewayTerminalError('cancelled');
     // Surface the friendly fetch error directly to the user.
     return `⚠️ ${err?.message || `Could not fetch ${ref.owner}/${ref.repo}.`}`;
   }

@@ -1,7 +1,10 @@
+import { withFreeChainEntryAdmission } from '../AI/FreeChain/entryAdmission';
+import { freeChainRequestContext } from '../AI/FreeChain/requestContext';
 import { usageLogFields } from '../AI/Router/usageLogFields';
 import { freeModuleInferenceScope, runAdmittedLegacyImageEdit } from '../AI/inferencePolicy';
 import { strictFreeRequired, StrictFreeCapabilityError } from '../AI/inferencePolicy';
-import type { Express } from 'express';
+import type { Express, Request, Response } from 'express';
+import { currentInferenceGatewayContext, inferenceGatewayEnabled, isGatewayRouteSelected, isGatewayTerminalError, runWithAuthenticatedInferenceGatewayRequest, runWithInferenceGatewayContext, runWithInferenceGatewayEntryAdmission } from '../AI/InferenceGateway/runtime';
 import { onClientGone, onStreamClosed } from '../lib/clientDisconnect';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Writes ai_usage_logs (server-only).
@@ -30,13 +33,63 @@ import { FREE_TRIAL_ENDED_MESSAGE, FREE_TRIAL_ENDED_CODE } from '../lib/freeProg
 import { reserveImage } from '../lib/imageHold';
 import { chatEditFreeUsedMessage } from '../lib/imageTier';
 import { isProfessionalFreeUser } from '../professionals/professionalPaid';
-import { guestDailyQuota } from '../lib/guestDailyQuota';
+import { guestDailyQuota, wasGatewayGuestSelected } from '../lib/guestDailyQuota';
 import { POLLINATIONS_BLOCK_MESSAGE } from '../lib/pollinationsGuard';
 import { checkChatInput } from '../lib/chatInputLimits';
 import {
   freeChatAnswerAllEnabled, FREE_ANSWER_ALL_RULES, isAppBuildRequest, detectReplyLanguage,
   appRequestDirective, missingProLine, isAboutNavBharatAI,
 } from '../lib/freeChatReplies';
+
+/** Verified Free ingress. Image generation/edit retains its separate admitted pipeline. */
+async function withChatTextGateway<T>(req: Request, res: Response, handler: () => Promise<T>): Promise<T | void> {
+  // A client mode label cannot select the paid clinical product or bypass Free budgets.
+  // Genuine Doctor/SDA traffic uses its existing authenticated paid route.
+  if (req.body?.mode === 'doctor' || req.body?.mode === 'sda') {
+    if (!res.headersSent && !res.writableEnded) res.status(400).json({ code: 'DOCTOR_ROUTE_REQUIRED', error: 'Please use the Doctor AI service for this mode.' });
+    return;
+  }
+  const legacy = () => withFreeChainEntryAdmission(req, res, handler);
+  if (!inferenceGatewayEnabled('chat') && !wasGatewayGuestSelected(req)) return legacy();
+  const body = req.body;
+  if (!body || (!body.message && !Array.isArray(body.fileAttachments))) return legacy();
+  if (res.destroyed || res.writableEnded) return;
+  const deadlineAtMs = Date.now() + 90_000;
+  const controller = new AbortController();
+  onClientGone(res, () => controller.abort());
+  try {
+    return await runWithAuthenticatedInferenceGatewayRequest(req, (uid, guest) => {
+      if (controller.signal.aborted) return;
+      return runWithInferenceGatewayContext({
+        principalId: uid ?? guest?.principalId ?? 'unauthenticated', tenantId: uid ?? guest?.principalId ?? 'unauthenticated',
+        surface: 'chat', policyKey: 'chat:text', funding: 'platform-free-fallback',
+        // General chat accepts health questions, private memory and attachments. No
+        // reviewed classifier exists, so public-only providers cannot be inferred safe.
+        qualityTier: 'clinical', dataClass: 'health',
+        mode: strictFreeRequired() ? 'strict-free' : 'free-first-authorized-paid',
+        deadlineAtMs: guest ? Math.min(deadlineAtMs, guest.expiresAtMs) : deadlineAtMs, signal: controller.signal,
+      // Bound active/queued turns BEFORE prompt, profile, document and grounding work.
+      // Runtime reuses the private live lease, not a second queue or the old rollout's grant.
+      }, () => isGatewayRouteSelected() ? runWithInferenceGatewayEntryAdmission(handler) : legacy());
+    });
+  } catch (error) {
+    if (!isGatewayTerminalError(error)) throw error;
+    if (controller.signal.aborted || res.destroyed || res.writableEnded) return;
+    const reply = strictFreeRequired() ? 'No verified free model is currently available. Please try again later.' : 'The AI service is temporarily unavailable. Please try again later.';
+    const code = strictFreeRequired() ? 'STRICT_FREE_UNAVAILABLE' : 'INFERENCE_GATEWAY_UNAVAILABLE';
+    if (req.body.stream === true) {
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders();
+      }
+      res.write(`data: ${JSON.stringify({ c: reply, error: reply, code })}\n\n`);
+      res.end();
+    } else if (!res.headersSent) res.status(503).json({ code, reply });
+  }
+}
 
 /**
  * Chat routes (the general/FREE chat) extracted from the server.ts monolith
@@ -574,7 +627,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       return;
     }
 
-    if (visionAttachments.length > 0 && strictFreeRequired()) { const error = new StrictFreeCapabilityError('vision'); return res.status(error.status).json({ reply: error.message, code: error.code }); }
+    if (visionAttachments.length > 0 && strictFreeRequired() && !isGatewayRouteSelected()) { const error = new StrictFreeCapabilityError('vision'); return res.status(error.status).json({ reply: error.message, code: error.code }); }
     if (visionAttachments.length > 0) {
       const visionResult = await runVisionChain(visionAttachments, {
         prompt: contextualMessage,
@@ -585,6 +638,15 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         console.log(`[CHAT/VISION] tier=${tier} provider=${visionResult.provider} files=${visionAttachments.length}`);
       } else {
         console.error(`[CHAT/VISION] tier=${tier} — every allowed provider failed for ${visionAttachments.length} file(s)`);
+      }
+      if (visionResult?.inferenceGateway) {
+        // Child vision usage is measured independently; the gateway marker prevents legacy tariff guesses.
+        void addDoc(collection(getDb() as any, 'ai_usage_logs'), {
+          userId: currentInferenceGatewayContext()?.principalId || 'anonymous', tier, capability: 'vision-pdf',
+          providerName: visionResult.provider, modelName: visionResult.model,
+          ...usageLogFields(visionResult.usage), inferenceGateway: visionResult.inferenceGateway,
+          ok: true, streamed: false, createdAt: new Date().toISOString(),
+        }).catch(() => {});
       }
       const replyText = visionResult?.text
         || 'Sorry, I could not read your image/file right now. Please try again in a moment, or paste the text directly.';
@@ -666,16 +728,18 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       if (!res.writableEnded) res.write(`data: ${JSON.stringify({ s: groundingStatus })}\n\n`);
     }
     try {
-      const liveBlock = await liveSearchContext(message, { cheap: isFree });
-      // Same door as memory above: the results go to the system prompt, never in front of the message.
-      if (liveBlock) {
-        const placed = placePlatformContext({ system: systemPrompt, user: contextualMessage, blocks: [{ label: 'Live web results', body: liveBlock }] });
-        systemPrompt = placed.system;
-        contextualMessage = placed.user;
-      }
-    } catch { /* live search is best-effort */ }
+      try {
+        const liveBlock = await liveSearchContext(message, { cheap: isFree });
+        // Same door as memory above: the results go to the system prompt, never in front of the message.
+        if (liveBlock) {
+          const placed = placePlatformContext({ system: systemPrompt, user: contextualMessage, blocks: [{ label: 'Live web results', body: liveBlock }] });
+          systemPrompt = placed.system;
+          contextualMessage = placed.user;
+        }
+      } catch (error) { if (isGatewayTerminalError(error)) throw error; /* legacy search is best-effort */ }
 
-    try {
+      const freeChainContext = isGatewayRouteSelected() ? undefined : await freeChainRequestContext(req, { tier, message: contextualMessage, history, attachments: attachments.length, hasProfile: !!userProfile, hasMemory, grounded: !!groundingStatus });
+
       if (req.body.stream === true) {
         // SSE stream — proper format so proxies/load balancers don't drop idle connections.
         // Guarded because the grounding status above may already have opened the stream; setting a
@@ -731,14 +795,15 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
             },
             controller.signal,
             true, // Server-owned: only ordinary chat may hedge two verified-free models.
+            freeChainContext,
           );
         } catch (error) {
-          if (!strictFreeRequired()) throw error;
+          if (!strictFreeRequired() && !isGatewayTerminalError(error)) throw error;
           // Headers are already sent. Finish with an explicit failure, never restart a partial reply.
           if (!res.writableEnded && !res.destroyed) {
-            const notice = streamedText ? '\n\nThis reply was interrupted. Please retry when the service is available.' : 'No verified free model is currently available. Please try again later.';
+            const notice = streamedText ? '\n\nThis reply was interrupted. Please retry when the service is available.' : strictFreeRequired() ? 'No verified free model is currently available. Please try again later.' : 'The AI service is temporarily unavailable. Please try again later.';
             res.write(`data: ${JSON.stringify({ c: notice })}\n\n`);
-            res.write(`data: ${JSON.stringify({ error: 'No paid fallback was used.', code: 'STRICT_FREE_INTERRUPTED', partial: !!streamedText })}\n\n`);
+            res.write(`data: ${JSON.stringify({ error: strictFreeRequired() ? 'No paid fallback was used.' : 'The selected AI route stopped.', code: strictFreeRequired() ? 'STRICT_FREE_INTERRUPTED' : 'INFERENCE_GATEWAY_INTERRUPTED', partial: !!streamedText })}\n\n`);
             res.end();
           }
           return;
@@ -772,7 +837,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         // no token fields; verified-free streams can now report real usage, including genuine zeros.
         // `raced` is recorded only when the routing outcome actually reports it.
         addDoc(collection(getDb() as any, 'ai_usage_logs'), {
-          userId: req.body?.userId || req.body?.uid || 'anonymous',
+          userId: currentInferenceGatewayContext()?.principalId ?? (req.body?.userId || req.body?.uid || 'anonymous'),
           tier,
           streamed: true,
           ...(outcome?.latencyMs !== undefined ? { latencyMs: outcome.latencyMs } : {}),
@@ -790,6 +855,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
             ? { stalled: true }
             : outcome?.reason ? { failureReason: outcome.reason } : {}),
           ...usageLogFields(outcome?.usage),
+          ...(outcome?.freeChain ? { freeChain: outcome.freeChain } : {}),
+          ...(outcome?.inferenceGateway ? { inferenceGateway: outcome.inferenceGateway } : {}),
           ...(outcome?.pricingProof ? { pricingProof: outcome.pricingProof } : {}),
           ok: !!outcome?.ok,
           grounded: !!groundingStatus,
@@ -798,7 +865,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       } else {
         const controller = new AbortController();
         onClientGone(res, () => controller.abort());
-        const routed = await aiRouter.routeDetailed(contextualMessage, history, tier, undefined, systemPrompt, true, controller.signal);
+        const routed = await aiRouter.routeDetailed(contextualMessage, history, tier, undefined, systemPrompt, true, controller.signal, freeChainContext);
         // USAGE LOGGING — what actually happened, and nothing else (2026-09-12).
         //
         // 🔴 THIS BLOCK USED TO INVENT EVERY FIELD IT WROTE: `providerName: 'auto'`, `modelName: 'auto'`,
@@ -813,7 +880,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         // a field whose only value was a lie is not worth keeping, and its absence makes any old reader
         // fail loudly instead of quietly adding 0. Cost is DERIVED from these real numbers where they
         // exist (see admin analytics), which is the same rate card a build is priced with.
-        const userId2 = req.body?.userId || req.body?.uid || 'anonymous';
+        const userId2 = currentInferenceGatewayContext()?.principalId ?? (req.body?.userId || req.body?.uid || 'anonymous');
         addDoc(collection(getDb() as any, 'ai_usage_logs'), {
           userId: userId2,
           tier,
@@ -821,6 +888,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           modelName: routed.model,
           providerName: routed.provider,
           usageMeasured: !!routed.usage,
+          ...(routed.freeChain ? { freeChain: routed.freeChain } : {}),
+          ...(routed.inferenceGateway ? { inferenceGateway: routed.inferenceGateway } : {}),
           ...(routed.pricingProof ? { pricingProof: routed.pricingProof } : {}),
           ...(routed.usage
             ? { inputTokens: routed.usage.inputTokens, outputTokens: routed.usage.outputTokens }
@@ -833,14 +902,19 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       }
     } catch(e: any) {
       console.error(`Error for tier ${tier}:`, e.message);
+      if (res.headersSent && isGatewayTerminalError(e) && !res.writableEnded && !res.destroyed) {
+        res.write(`data: ${JSON.stringify({ c: 'The AI service is temporarily unavailable. Please try again later.', code: 'INFERENCE_GATEWAY_UNAVAILABLE' })}\n\n`);
+        res.end();
+      }
       if (!res.headersSent) {
         // Never leak the raw inference error (may name a provider/model) to the client.
         if (strictFreeRequired()) return res.status(503).json({ code: 'STRICT_FREE_UNAVAILABLE', reply: 'No verified free model is currently available. Please try again later.', error: 'No paid fallback was used.' });
+        if (isGatewayTerminalError(e)) return res.status(503).json({ code: 'INFERENCE_GATEWAY_UNAVAILABLE', reply: 'The AI service is temporarily unavailable. Please try again later.' });
         res.status(500).json({ reply: 'Backend AI inference failed', error: toSafeClientMessage(e, 'Backend AI inference failed') });
       }
     }
   };
 
-  app.post('/api/chat/navbharat', freeModuleInferenceScope,       chatLimiter, guestDailyQuota('chat'), (req, res) => chatHandler(req, res, 'navbharat'));
-  app.post('/api/chat/navbharatai', freeModuleInferenceScope,     chatLimiter, guestDailyQuota('chat'), (req, res) => chatHandler(req, res, 'navbharat'));
+  app.post('/api/chat/navbharat', freeModuleInferenceScope,       chatLimiter, guestDailyQuota('chat'), (req, res) => withChatTextGateway(req, res, () => chatHandler(req, res, 'navbharat')));
+  app.post('/api/chat/navbharatai', freeModuleInferenceScope,     chatLimiter, guestDailyQuota('chat'), (req, res) => withChatTextGateway(req, res, () => chatHandler(req, res, 'navbharat')));
 }

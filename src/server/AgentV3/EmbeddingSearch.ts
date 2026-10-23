@@ -1,3 +1,4 @@
+import { assertNoUnclaimedGatewayDispatch } from '../AI/InferenceGateway/dispatchBoundary';
 import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 // AgentV3 — Semantic embedding-based file search (Level 3).
 //
@@ -133,9 +134,10 @@ export class EmbeddingStore {
 
   /**
    * Embed a text via OpenAI ada-002. Returns null when the API is unavailable.
-   * Never throws.
+   * Legacy failures are best-effort; selected unsupported gateway calls are terminal.
    */
   async embed(text: string): Promise<number[] | null> {
+    assertNoUnclaimedGatewayDispatch('builder-file-embeddings');
     // Optional retrieval enhancement must never buy an embedding in strict-free builds.
     try { assertLegacyInferenceAllowed('builder-file-embeddings'); } catch { return null; }
     const client = await this.getClient();
@@ -177,6 +179,7 @@ export class EmbeddingStore {
    * Returns [] when no embeddings exist or the API is unavailable.
    */
   async search(query: string, topK = 5): Promise<string[]> {
+    assertNoUnclaimedGatewayDispatch('builder-file-embeddings');
     await this.hydrate(); // P-DATA.3 — pull the durable index in on a cold start before searching.
     if (this.entries.size === 0) return [];
     const queryEmb = await this.embed(query);

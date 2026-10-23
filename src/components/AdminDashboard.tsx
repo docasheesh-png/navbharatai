@@ -1,3 +1,5 @@
+import { InferenceGatewaySetupPanel } from './admin/InferenceGatewaySetupPanel';
+import { FreeChatChainPanel } from './admin/FreeChatChainPanel';
 import { LiveModelRegistryPanel } from './admin/LiveModelRegistryPanel';
 import { useBuildReportNumbers } from '../hooks/useBuildReportNumbers';
 import { BuildReportNumber } from './admin/BuildReportNumber';
@@ -2427,6 +2429,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
             </div>
           )}
 
+          {activeTab === 'free-chat-chain' && (
+            <>
+              <FreeChatChainPanel adminToken={adminToken} />
+              <InferenceGatewaySetupPanel adminToken={adminToken} />
+            </>
+          )}
+
           {activeTab === 'livemodels' && (
             <LiveModelRegistryPanel adminToken={adminToken} />
           )}
@@ -2685,7 +2694,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <div className="w-full bg-well h-2 rounded-full overflow-hidden">
                           <div className={`${col} h-full transition-all duration-700`} style={{ width: `${pct}%` }} />
                         </div>
-                        <div className="text-[9px] text-muted mt-0.5">{pct}% of requests · {typeof p.measuredCalls === 'number' && p.measuredCalls === 0 ? 'tokens not measured' : `${(p.tokensUsed || 0).toLocaleString()} tokens`}</div>
+                        <div className="text-[9px] text-muted mt-0.5">{pct}% of requests · {typeof p.measuredCalls === 'number' && p.measuredCalls === 0 ? 'tokens not measured' : `${(p.tokensUsed || 0).toLocaleString()} tokens`}{p.unpricedCalls > 0 ? ` · ${p.unpricedCalls} calls unpriced` : ''}</div>
                       </div>
                     );
                   })}
@@ -3102,8 +3111,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       {/* chat providers only — this panel is the chat burn; the whole platform is the margin card (Q-114) */}
                       {analytics?.providerCostComplete === false ? 'Chat provider cost (at least)' : 'Chat provider cost'}
                     </span>
-                    <span className="text-warn font-black">₹{(analytics?.totalProviderCost || 0).toFixed(4)}</span>
+                    <span className="text-warn font-black">{analytics?.pricedCalls === 0 && analytics?.unpricedCalls > 0 ? 'Unpriced' : `₹${(analytics?.totalProviderCost || 0).toFixed(4)}`}</span>
                   </div>
+                  {analytics?.unpricedCalls > 0 && <div className="text-warn">{analytics.unpricedCalls} calls could not be priced</div>}
                   <div className="flex justify-between"><span className="text-muted">Cashfree Gateway</span><span className="text-success">{analytics?.cashfreeStatus?.clientId || '–'}</span></div>
                 </div>
               </div>

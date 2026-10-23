@@ -23,11 +23,14 @@ export interface AIProviderResponse {
   // `AIProvider.name` (what a REGISTERED provider is called). They are not the same declaration, and
   // adding a provider to only one compiles fine on the FRONTEND tsconfig and fails on the server's.
   // Adding OPENAI here was missed on the first pass and `npm run typecheck:server` is what caught it.
-  provider: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM' | 'OPENAI' | 'OPENROUTER';
+  provider: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM' | 'OPENAI' | 'OPENROUTER' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK';
   model: string;
   /** What this call really cost in tokens, as reported by the provider. Absent = unreported. */
   usage?: ProviderUsage;
   pricingProof?: FreeTextResult['pricingProof'];
+  /** Provenance only. Monetary liability is reconciled in the gateway ledger, not an invoice here. */
+  inferenceGateway?: { version: 1; logicalRequestId: string; accounting: 'separate-ledger' };
+  gatewayPricingProof?: import('../InferenceGateway/pricingEvidence').GatewayFreePricingProof;
 }
 
 /**
@@ -64,7 +67,7 @@ export interface ProviderTelemetry {
 }
 
 export interface AIProvider {
-  name: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM' | 'OPENAI' | 'OPENROUTER';
+  name: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM' | 'OPENAI' | 'OPENROUTER' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK';
   priority: number;
   /**
    * When true, this provider is a LAST-RESORT fallback: in a raced router

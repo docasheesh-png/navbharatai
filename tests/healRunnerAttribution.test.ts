@@ -29,6 +29,38 @@ import ts from 'typescript';
  * test fails if anyone reintroduces the raw form.
  */
 const src = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
+const parsedRoute = ts.createSourceFile('agentv3.ts', src, ts.ScriptTarget.Latest, true);
+
+/** Inspect the actual initializer, not a nearby comment or an arbitrary text window. */
+function initializer(name: string): ts.Expression {
+  const found: ts.Expression[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name && node.initializer) found.push(node.initializer);
+    ts.forEachChild(node, visit);
+  };
+  visit(parsedRoute);
+  expect(found, `${name} must have one initializer`).toHaveLength(1);
+  return found[0];
+}
+
+function runnerCompletion(name: string): ts.Expression {
+  const completions: ts.Expression[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'buildTurnRunner') {
+      const options = node.arguments[0];
+      if (options && ts.isObjectLiteralExpression(options)) {
+        for (const property of options.properties) {
+          if (ts.isPropertyAssignment(property) && property.name.getText(parsedRoute) === 'onTurnComplete') completions.push(property.initializer);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(initializer(name));
+  expect(completions, `${name} must attribute its actual runner`).toHaveLength(1);
+  return completions[0];
+}
+
 
 /**
  * The ONE documented exemption. makeFastTextRunner deliberately omits onTurnComplete because the fast
@@ -148,26 +180,31 @@ describe('the fast-lane shadow ledger is observational, by construction', () => 
   const agentv3 = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
   const diag = readFileSync(join(__dirname, '../src/server/AgentV3/BuildDiagnostics.ts'), 'utf8');
 
-  it('the fast-lane runner now reports its usage somewhere', () => {
-    // Before this, four of the seven call sites recorded nothing anywhere at all.
-    expect(agentv3).toContain('const shadowFastLaneLedger = createProviderUsageLedger()');
-    expect(agentv3).toContain('captureShadowUsage(used, usage, model, !manualUsage)');
-    expect(agentv3).toContain('onTurnComplete: (used, usage, model) => captureShadowUsage(used, usage, model, false)');
+  it('fast-lane and planner callbacks retain their original attribution boundaries', () => {
+    expect(initializer('shadowFastLaneLedger').getText(parsedRoute)).toBe('createProviderUsageLedger()');
+    const fast = runnerCompletion('makeFastTextRunner');
+    expect(ts.isConditionalExpression(fast)).toBe(true);
+    if (!ts.isConditionalExpression(fast)) throw new Error('Missing conditional fast-lane attribution');
+    // Only the existing admitted repair path uses the real ledger; manual usage must not double count.
+    expect(fast.condition.getText(parsedRoute).replace(/\s+/g, '')).toBe('!manualUsage&&heal&&weakCandidateActive(powerLevelReqEffective)');
+    expect(fast.whenTrue.getText(parsedRoute)).toBe('captureTurnUsage');
+    expect(fast.whenFalse.getText(parsedRoute)).toBe('captureShadowUsage');
+    expect(runnerCompletion('makePlanTextRunner').getText(parsedRoute)).toBe('captureShadowUsage');
   });
 
-  it('legacy shadow attribution stays observational; only strict Weak gets proven-free pricing', () => {
-    const parsed = ts.createSourceFile('agentv3.ts', agentv3, ts.ScriptTarget.Latest, true);
-    let fn: string | undefined;
-    const visit = (node: ts.Node): void => {
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'captureShadowUsage') fn = node.initializer?.getText(parsed);
-      ts.forEachChild(node, visit);
-    };
-    visit(parsed);
-    expect(fn).toContain('shadowFastLaneLedger.add(used, usage, model)');
-    // Verified-free tokens must not fall into the Sonnet-priced remainder. No legacy tier changes,
-    // and manual callers attribute separately so the callback must not count those turns twice.
-    expect(fn).toContain("if (attribute && powerLevelReqEffective === 'weak' && strictFreeWeakEnabled()) providerLedger.add(used, usage, model)");
-    expect(fn?.match(/providerLedger\.add\(/g)).toHaveLength(1);
+  it('shadow attribution writes only the observational ledger, never the billing ledger', () => {
+    const fn = initializer('captureShadowUsage');
+    expect(ts.isArrowFunction(fn) && ts.isBlock(fn.body)).toBe(true);
+    if (!ts.isArrowFunction(fn) || !ts.isBlock(fn.body)) throw new Error('Missing shadow callback');
+    expect(fn.parameters.map(parameter => parameter.name.getText(parsedRoute))).toEqual(['used', 'usage', 'model']);
+    expect(fn.body.statements).toHaveLength(1);
+    const statement = fn.body.statements[0];
+    if (!ts.isExpressionStatement(statement) || !ts.isCallExpression(statement.expression)) throw new Error('Unexpected shadow callback effect');
+    expect(statement.expression.expression.getText(parsedRoute)).toBe('shadowFastLaneLedger.add');
+    expect(statement.expression.arguments.map(argument => argument.getText(parsedRoute))).toEqual(['used', 'usage', 'model']);
+    // No Strict Weak exception: the retired option must not move observational usage into a bill.
+    expect(fn.getText(parsedRoute)).not.toContain('providerLedger');
+    expect(fn.getText(parsedRoute)).not.toContain('captureTurnUsage');
   });
 
   it('the diagnostics setter is SEPARATE from the billing one', () => {

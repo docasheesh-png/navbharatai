@@ -116,3 +116,84 @@ describe('the hosting-plan entry quotes HOSTING_TIERS, never a remembered price'
     expect(allText()).toMatch(/real server/i);
   });
 });
+
+
+describe('the Free Chat Chain admin explanation does not promise activation or free invoices', () => {
+  it('points to the implemented nested page and states the operational limits', () => {
+    const entry = getFeatureById('admin-free-chat-chain');
+    expect(entry?.path).toBe('Admin Dashboard → AI Engines → Free Chat Chain');
+    const text = `${entry?.description} ${entry?.howToUse}`;
+    for (const fact of ['OFF by default', 'strict-free policy takes precedence', '0% does not remove allowlisted', 'not provider account balances', 'not a platform-wide spending stop', 'Stale concurrent controls are rejected', 'refresh']) {
+      expect(text).toContain(fact);
+    }
+    expect(getFeatureById('admin-tab-navigation')?.description).toContain('AI Engines | Live Model Registry | Free Chat Chain');
+    for (const related of entry?.relatedFeatures ?? []) expect(getFeatureById(related)).toBeTruthy();
+  });
+
+  it('explains the durable shared budget and the exact authority of its audited admin action', () => {
+    const entry = getFeatureById('admin-free-chat-chain');
+    expect(entry).not.toBeNull();
+    const text = `${entry?.description} ${entry?.howToUse}`;
+    for (const fact of [
+      'POST /api/v1/admin/free-chat-chain/budget',
+      'from $0 to $10 with cents precision',
+      '$10 TOTAL per IST day across all paid Free Chat chain providers, not per provider',
+      'separate from funded builder wallet budgets',
+      "cannot exceed its serving process's configured cap",
+      'expected policy revision',
+      '10–500-character reviewed reason',
+      'verified server-authenticated admin principal, not a client-provided identity',
+      'policy update and its durable audit record are atomic',
+      'stale policy revisions are rejected',
+      'Lowering the cap never clears existing holds, refunds earlier spending or cancels already-dispatched work',
+    ]) expect(text).toContain(fact);
+    // The old blanket prohibition would conceal the now-real, narrowly scoped budget action.
+    expect(text).not.toContain('cannot change secrets, prices, paid caps');
+  });
+
+  it('distinguishes persistent policy from per-day usage and warns about mixed deployment revisions', () => {
+    const entry = getFeatureById('admin-free-chat-chain');
+    const text = `${entry?.description} ${entry?.howToUse}`;
+    for (const fact of [
+      'non-expiring and survive IST midnight; only daily usage resets',
+      'stricter deployment configuration observation can lower the shared cap, including to $0',
+      'more permissive old deployment cannot raise it',
+      'retire inconsistent stricter deployment revisions',
+      'stale stricter revision can reapply a lower cap on its next observation',
+      'Increasing environment configuration alone does not raise the saved policy',
+      'never reads event history or initializes, lowers or otherwise changes the shared paid policy',
+      'verify the saved cap, policy revision and controls before retrying',
+    ]) expect(text).toContain(fact);
+  });
+
+  it('permits explicit first-use initialization only after verified absence, never on a failed read', () => {
+    const entry = getFeatureById('admin-free-chat-chain');
+    const text = `${entry?.description} ${entry?.howToUse}`;
+    for (const fact of [
+      'successful read that verifies no saved policy reports the policy state as uninitialized, with null cap and revision',
+      'Only that verified uninitialized state offers “Review budget initialization”',
+      'explicit audited action using expected revision 0',
+      'set a $0 shared cap before the first enabled chat',
+      'Initialized policy changes use the displayed revision',
+      'Unavailable reads or corrupt policy return 503 and never enable initialization',
+      'null alone is not evidence of absence',
+      'Opening the panel or refreshing status never writes the policy automatically',
+      'all normal budget limits, authenticated identity and audit requirements still apply',
+    ]) expect(text).toContain(fact);
+    expect(text).not.toContain('missing policy revision makes budget editing unavailable');
+  });
+
+  it('keeps status read cost, usage uncertainty and manual-only metrics honest', () => {
+    const text = getFeatureById('admin-free-chat-chain')?.description ?? '';
+    for (const fact of [
+      'configured process cap, effective shared cap, policy revision, held upper bounds and settled recorded cost',
+      'reported token usage and configured prices, not provider invoice reconciliation',
+      'missing or incomplete usage keeps the full reservation held',
+      'plus controls, paid-budget-policy and paid-day reads',
+      'nominally 21 document lookups',
+      'Metrics never load on mount, a timer, a control action or focus',
+      'no live budget or production setting was changed',
+    ]) expect(text).toContain(fact);
+    expect(text).not.toContain('nominally 20 document lookups');
+  });
+});

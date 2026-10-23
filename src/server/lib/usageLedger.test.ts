@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { summariseUsage, marginInr, type UsageLogRow } from './usageLedger';
@@ -28,6 +28,8 @@ describe('summariseUsage', () => {
     expect(s.costUsd).toBeCloseTo(3);
     expect(s.outputTokens).toBe(3000);
     expect(s.measuredCalls).toBe(2);
+    expect(s.pricedCalls).toBe(2);
+    expect(s.unpricedCalls).toBe(0);
     expect(s.complete).toBe(true);
   });
 
@@ -35,6 +37,7 @@ describe('summariseUsage', () => {
     const s = summariseUsage([measured('KIMI', 1000), { providerName: 'KIMI', usageMeasured: false }], price);
     expect(s.measuredCalls).toBe(1);
     expect(s.unmeasuredCalls).toBe(1);
+    expect(s.unpricedCalls).toBe(1);
     expect(s.costUsd).toBeCloseTo(1);
     // The important one: the total is now a FLOOR, and the caller must say so.
     expect(s.complete).toBe(false);
@@ -60,12 +63,69 @@ describe('summariseUsage', () => {
     const s = summariseUsage([measured('KIMI', 1000)], () => NaN);
     expect(s.complete).toBe(false);
     expect(s.costUsd).toBe(0);
+    expect(s).toMatchObject({ measuredCalls: 1, unmeasuredCalls: 0, pricedCalls: 0, unpricedCalls: 1, outputTokens: 1000 });
+    expect(s.byProvider.KIMI).toMatchObject({ measured: 1, priced: 0, unpriced: 1, outputTokens: 1000 });
   });
 
   it('a throwing price function never takes the dashboard down', () => {
     const s = summariseUsage([measured('KIMI', 1000)], () => { throw new Error('no rate'); });
     expect(s.calls).toBe(1);
     expect(s.complete).toBe(false);
+    expect(s.unpricedCalls).toBe(1);
+    expect(s.unmeasuredCalls).toBe(0);
+  });
+
+  it.each([0, 0.01, null])('never treats a free-chain estimate %s as billed cost or invokes the legacy price fallback', (costUsdEstimate) => {
+    const fallbackPrice = vi.fn(() => 99);
+    const s = summariseUsage([measured('NEW_PROVIDER', 2000, {
+      inputTokens: 700, latencyMs: 80, freeChain: { costUsdEstimate },
+    })], fallbackPrice);
+    expect(fallbackPrice).not.toHaveBeenCalled();
+    expect(s).toMatchObject({
+      calls: 1, measuredCalls: 1, unmeasuredCalls: 0, pricedCalls: 0, unpricedCalls: 1,
+      inputTokens: 700, outputTokens: 2000, costUsd: 0, complete: false,
+    });
+    expect(s.byProvider.NEW_PROVIDER).toEqual({
+      requests: 1, measured: 1, priced: 0, unpriced: 1,
+      inputTokens: 700, outputTokens: 2000, costUsd: 0, avgLatencyMs: 80,
+    });
+  });
+
+  it('counts overlapping missing-usage and chain-price uncertainty once, without erasing legacy costs', () => {
+    const fallbackPrice = vi.fn(price);
+    const s = summariseUsage([
+      measured('MIXED', 1000),
+      measured('MIXED', 500, { freeChain: { costUsdEstimate: 0 } }),
+      { providerName: 'MIXED', usageMeasured: false, freeChain: { costUsdEstimate: null } },
+      measured('MIXED', -1, { freeChain: { costUsdEstimate: 0 } }),
+    ], fallbackPrice);
+    expect(fallbackPrice).toHaveBeenCalledTimes(1);
+    expect(fallbackPrice).toHaveBeenCalledWith('MIXED', 'm1', { inputTokens: 0, outputTokens: 1000 });
+    expect(s).toMatchObject({
+      calls: 4, measuredCalls: 2, unmeasuredCalls: 2, pricedCalls: 1, unpricedCalls: 3,
+      outputTokens: 1500, costUsd: 1, complete: false,
+    });
+    expect(s.byProvider.MIXED).toMatchObject({ requests: 4, measured: 2, priced: 1, unpriced: 3, costUsd: 1 });
+    expect(s.pricedCalls + s.unpricedCalls).toBe(s.calls);
+  });
+
+  it.each([{}, false, 0, 'invalid-metadata'])('fails closed on a present chain marker %j', (freeChain) => {
+    const fallbackPrice = vi.fn(() => 99);
+    const s = summariseUsage([measured('NEW_PROVIDER', 0, { freeChain })], fallbackPrice);
+    expect(fallbackPrice).not.toHaveBeenCalled();
+    expect(s).toMatchObject({ measuredCalls: 1, unmeasuredCalls: 0, pricedCalls: 0, unpricedCalls: 1, complete: false });
+  });
+
+  it.each([undefined, null])('preserves unmarked legacy callback behavior, including a genuine zero rate (%s)', (freeChain) => {
+    const legacyPrice = vi.fn(() => 0);
+    const s = summariseUsage([measured('LEGACY', 1000, { freeChain })], legacyPrice);
+    expect(legacyPrice).toHaveBeenCalledWith('LEGACY', 'm1', { inputTokens: 0, outputTokens: 1000 });
+    expect(s).toMatchObject({ calls: 1, measuredCalls: 1, unmeasuredCalls: 0, pricedCalls: 1, unpricedCalls: 0, costUsd: 0, complete: true });
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])('counts invalid legacy price %s as unpriced without losing its tokens', (invalidPrice) => {
+    const s = summariseUsage([measured('LEGACY', 1000)], () => invalidPrice);
+    expect(s).toMatchObject({ measuredCalls: 1, unmeasuredCalls: 0, pricedCalls: 0, unpricedCalls: 1, outputTokens: 1000, complete: false });
   });
 
   it('groups per provider with its own tokens and cost', () => {
@@ -140,10 +200,19 @@ describe('🔒 the wiring — the old fabrications must be gone, not merely unus
    * this repo has already been bitten by twice. Lines are stripped of `//` comments before matching.
    */
   const logWriteCode = (() => {
-    const at = chat.indexOf("addDoc(collection(getDb() as any, 'ai_usage_logs')");
-    expect(at).toBeGreaterThan(-1);
-    return chat.slice(at, chat.indexOf('res.json({ reply:', at))
-      .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+    const marker = "addDoc(collection(getDb() as any, 'ai_usage_logs')";
+    // Text and media now have separate writes. Inspect every write rather than stopping
+    // at the first (vision) response and accidentally excluding the original text contract.
+    const blocks = [...chat.matchAll(/addDoc\(collection\(getDb\(\) as any, 'ai_usage_logs'\)/g)]
+      .map(match => {
+        const at = match.index!;
+        expect(chat.slice(at, at + marker.length)).toBe(marker);
+        const end = chat.indexOf('}).catch(', at);
+        expect(end).toBeGreaterThan(at);
+        return chat.slice(at, end);
+      });
+    expect(blocks.length).toBeGreaterThanOrEqual(2);
+    return blocks.join('\n').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
   })();
 
   it('the chat route no longer invents a token count from string length', () => {
@@ -176,6 +245,14 @@ describe('🔒 the wiring — the old fabrications must be gone, not merely unus
   it('🔒 the margin carries its own certainty, so a floor cannot read as a fact', () => {
     expect(admin).toContain('providerCostComplete');
     expect(admin).toContain('marginInr(');
+    expect(admin).toContain('pricedCalls: usage.pricedCalls');
+    expect(admin).toContain('unpricedCalls: usage.unpricedCalls');
+    expect(admin).toContain('pricedCalls: r.priced');
+    expect(admin).toContain('unpricedCalls: r.unpriced');
+    const dashboard = codeOf('../../components/AdminDashboard.tsx');
+    expect(dashboard).toContain("analytics?.pricedCalls === 0 && analytics?.unpricedCalls > 0 ? 'Unpriced'");
+    expect(dashboard).toContain('calls could not be priced');
+    expect(dashboard).toContain('p.unpricedCalls');
   });
 
   it('🔒 health no longer scores deploy recency as uptime — at EITHER endpoint', () => {
@@ -188,4 +265,10 @@ describe('🔒 the wiring — the old fabrications must be gone, not merely unus
     const healthScore = readFileSync(resolve(__dirname, 'HealthScore.ts'), 'utf8');
     expect(healthScore).toMatch(/export function platformHealthInputs[\s\S]*uptimeSeconds: null/);
   });
+});
+
+it.each([{}, { version: 1, accounting: 'separate-ledger' }, false])('never prices a gateway provenance row as a legacy provider invoice (%j)', inferenceGateway => {
+ const price = vi.fn(() => 99);
+ const summary = summariseUsage([{ providerName: 'GROQ', modelName: 'example', inputTokens: 10, outputTokens: 20, usageMeasured: true, inferenceGateway }], price);
+ expect(price).not.toHaveBeenCalled(); expect(summary).toMatchObject({ measuredCalls: 1, unpricedCalls: 1, inputTokens: 10, outputTokens: 20, complete: false });
 });

@@ -1,6 +1,9 @@
-import { freeModuleInferenceScope } from '../AI/inferencePolicy';
+import { usageLogFields } from '../AI/Router/usageLogFields';
+import { runWithInferenceScope } from '../AI/inferencePolicy';
 import { strictFreeRequired, StrictFreeCapabilityError } from '../AI/inferencePolicy';
 import type { Express, Request, Response } from 'express';
+import { inferenceGatewayEnabled, isGatewayRouteSelected, runWithAuthenticatedInferenceGatewayRequest, runWithInferenceGatewayContext, runWithInferenceGatewayEntryAdmission } from '../AI/InferenceGateway/runtime';
+import { onClientGone } from '../lib/clientDisconnect';
 import { buildRateLimiter, verifyFirebaseIdentity, enforceNotBanned } from '../lib/authMiddleware';
 import { getProfessional, listProfessionals } from '../professionals/registry';
 import { runProfessionalChatWithUsage, type ProfessionalTurn } from '../professionals/engine';
@@ -38,6 +41,17 @@ const MAX_PROFESSIONAL_ATTACHMENTS = 4;
 // answered blind. Text only — the description was already paid for on the turn that produced it.
 const professionalRecall = new AttachmentRecallStore();
 setInterval(() => professionalRecall.sweep(Date.now()), 60 * 60 * 1000);
+
+/** The authenticated Free product gate, not a namespace or client-supplied tier, enrolls a turn. */
+async function withFreeProfessionalGateway<T>(req: Request, input: { selected: boolean; uid: string | null; professionalId: string; deadlineAtMs: number; signal: AbortSignal }, run: () => Promise<T>): Promise<T> {
+  if (!input.selected || !inferenceGatewayEnabled('professional')) return run();
+  return runWithAuthenticatedInferenceGatewayRequest(req, () => runWithInferenceGatewayContext({
+    principalId: input.uid ?? 'unauthenticated', tenantId: input.uid ?? 'unauthenticated', surface: 'professional',
+    policyKey: `professional:${input.professionalId}`, qualityTier: 'clinical', dataClass: 'health',
+    funding: 'platform-free-fallback', mode: strictFreeRequired() ? 'strict-free' : 'free-first-authorized-paid',
+    deadlineAtMs: input.deadlineAtMs, signal: input.signal,
+  }, () => runWithInferenceGatewayEntryAdmission(run)));
+}
 
 /**
  * Generic config-driven professional chat (Teacher, and future Lawyer/CA/etc.).
@@ -95,7 +109,10 @@ export function registerProfessionalsRoutes(app: Express): void {
     });
   });
 
-  app.post('/api/professional/:id/chat', freeModuleInferenceScope, buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/professional/:id/chat', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+    const deadlineAtMs = Date.now() + 90_000;
+    const controller = new AbortController();
+    onClientGone(res, () => controller.abort());
     const config = getProfessional(routeParam(req.params.id));
     if (!config) {
       res.status(404).json({ error: `Unknown professional: ${routeParam(req.params.id)}` });
@@ -134,7 +151,12 @@ export function registerProfessionalsRoutes(app: Express): void {
       return;
     }
 
-    if (strictFreeRequired() && rawAttachments.some(a => isVisionAttachment(a.type, a.name))) {
+    const visionRequested = rawAttachments.some(a => isVisionAttachment(a.type, a.name));
+    // Image-generation guidance retains its existing pipeline. Selected vision uses
+    // its own claimed operation policy, never a text-only provider substitution.
+    const imageGuidance = typeof message === 'string' && !visionRequested && detectImageIntent(message).wants;
+    const run = async () => {
+    if (strictFreeRequired() && visionRequested && !isGatewayRouteSelected()) {
       const error = new StrictFreeCapabilityError('professional-vision');
       res.status(error.status).json({ error: error.message, code: error.code }); return;
     }
@@ -160,10 +182,25 @@ export function registerProfessionalsRoutes(app: Express): void {
             ...(config.visionInstruction ? { instruction: config.visionInstruction } : {}),
             // The free tier never runs Claude (ROUTING_AND_BILLING: weak never runs Sonnet/Opus).
             ...(gate.tier === 'free' ? { noClaude: true } : {}),
+            onGatewayResult: result => {
+              if (!result.inferenceGateway) return;
+              // Keep child media calls separate from the existing text-turn wallet formula.
+              const db = getServerDb();
+              if (!db) return;
+              void db.collection('ai_usage_logs').add({
+                userId: verifiedUserId || 'anonymous', tier: 'professional-free', professionalId: config.id,
+                capability: 'vision-pdf', providerName: result.provider, modelName: result.model,
+                ...usageLogFields(result.usage), inferenceGateway: result.inferenceGateway,
+                ok: true, streamed: false, createdAt: new Date().toISOString(),
+              }).catch(() => {});
+            },
           });
           if (visionBlock) parts.push(visionBlock);
         }
-      } catch { /* best-effort — a bad image never blocks the turn */ }
+      } catch (error) {
+        if (isGatewayRouteSelected()) throw error; // Selected capability failures cannot silently become text-only answers.
+        /* Unselected legacy image handling remains best effort. */
+      }
       if (parts.length > 0) {
         attachmentBlock = parts.join('\n\n');
         effectiveMessage = `${attachmentBlock}\n\n---\n${effectiveMessage || 'Please review the attached file(s) above and respond.'}`;
@@ -205,7 +242,7 @@ export function registerProfessionalsRoutes(app: Express): void {
     }
 
     try {
-      const { reply, spend } = await runProfessionalChatWithUsage(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier, { conversationId, platform: clientPlatform(req.headers['x-nbai-platform']) });
+      const { reply, spend, memoryStatus } = await runProfessionalChatWithUsage(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier, { conversationId, platform: clientPlatform(req.headers['x-nbai-platform']), signal: controller.signal, deadlineAtMs, freeProductGateway: gate.tier === 'free' });
       // Only a genuinely-answered FREE turn burns a daily message (never on a paywall block or an error).
       if (gate.countsAgainstFree && verifiedUserId) {
         void professionalUsageStore.increment(verifiedUserId);
@@ -225,9 +262,19 @@ export function registerProfessionalsRoutes(app: Express): void {
         usdInrRate(),
         Date.now(),
       );
-      res.json({ reply, professionalId: config.id });
+      res.json({ reply, professionalId: config.id, ...(memoryStatus ? { memoryStatus } : {}) });
     } catch (err: any) {
       sendSafeError(res, 503, 'The assistant is busy. Please try again.', err, 'professional chat');
+    }
+    };
+    try {
+      // Resolve entitlements BEFORE installing Free policy: the access gate itself
+      // consults strictFreeRequired(), so pre-gate Free middleware would reclassify
+      // a paid/pass-funded turn as free and suppress its original billing.
+      await runWithInferenceScope(gate.tier === 'free' ? 'free-modules' : 'paid-professional', () =>
+        withFreeProfessionalGateway(req, { selected: gate.tier === 'free' && !imageGuidance, uid: verifiedUserId, professionalId: config.id, deadlineAtMs, signal: controller.signal }, run));
+    } catch (err: any) {
+      if (!res.destroyed && !res.writableEnded) sendSafeError(res, 503, 'The assistant is busy. Please try again.', err, 'professional admission');
     }
   });
 
@@ -251,7 +298,10 @@ export function registerProfessionalsRoutes(app: Express): void {
    * gate, the persona (so the paper is pitched at THIS student, from the memory the engine already
    * loads) and the ONE-WALLET charge — so exam mode cannot become a second, ungoverned way to spend.
    */
-  app.post('/api/professional/:id/exam', freeModuleInferenceScope, buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/professional/:id/exam', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+    const deadlineAtMs = Date.now() + 90_000;
+    const controller = new AbortController();
+    onClientGone(res, () => controller.abort());
     const config = getProfessional(routeParam(req.params.id));
     if (!config) {
       res.status(404).json({ error: `Unknown professional: ${routeParam(req.params.id)}` });
@@ -271,15 +321,17 @@ export function registerProfessionalsRoutes(app: Express): void {
       res.status(gate.status).json(gate.body);
       return;
     }
+    return runWithInferenceScope(gate.tier === 'free' ? 'free-modules' : 'paid-professional', async () => {
     try {
-      const { reply, spend } = await runProfessionalChatWithUsage(
+      const generate = () => runProfessionalChatWithUsage(
         config,
         examPaperInstruction(spec),
         [],
         verifiedUserId || undefined,
         gate.tier,
-        { conversationId: conversationIdFromBody(req.body?.conversationId), platform: clientPlatform(req.headers['x-nbai-platform']) },
+        { conversationId: conversationIdFromBody(req.body?.conversationId), platform: clientPlatform(req.headers['x-nbai-platform']), signal: controller.signal, deadlineAtMs, freeProductGateway: gate.tier === 'free' },
       );
+      const { reply, spend, memoryStatus } = await withFreeProfessionalGateway(req, { selected: gate.tier === 'free', uid: verifiedUserId, professionalId: config.id, deadlineAtMs, signal: controller.signal }, generate);
       const paper = parseExamPaper(reply, Math.min(spec.count, EXAM_MAX_QUESTIONS));
       // Priced on what was DELIVERED: the free questions this paper used, and the paid share of its
       // real cost. A paper that came back empty spends nothing and is charged nothing — before
@@ -308,9 +360,10 @@ export function registerProfessionalsRoutes(app: Express): void {
       // instead of quietly renumbering the test the student chose. `read` travels beside `spec` and
       // never replaces it: what the student typed stays what they typed, and `read` is what the
       // paper was actually set on — the surface shows the difference when there is one.
-      res.json({ professionalId: config.id, spec, read: paper.read, questions: paper.questions, asked: spec.count, dropped: paper.dropped });
+      res.json({ professionalId: config.id, spec, read: paper.read, questions: paper.questions, asked: spec.count, dropped: paper.dropped, ...(memoryStatus ? { memoryStatus } : {}) });
     } catch (err: any) {
       sendSafeError(res, 503, 'Could not set the paper right now. Please try again.', err, 'professional exam');
     }
+    });
   });
 }

@@ -225,7 +225,11 @@ describe('registry sanity', () => {
   });
   it('default retention policies are well-formed', () => {
     for (const p of RETENTION_POLICIES) {
-      expect(p.ttlDays).toBeGreaterThan(0);
+      if (p.ttlDays === 0) {
+        expect(p.collection).toBe('free_chat_chain');
+        expect(p.timestampField).toBe('expiresAt');
+        expect(p.timestampKind).toBe('date');
+      } else expect(p.ttlDays).toBeGreaterThan(0);
       expect(p.collection.length).toBeGreaterThan(0);
       expect(p.timestampField.length).toBeGreaterThan(0);
     }
@@ -352,7 +356,11 @@ describe('🔒 what is deliberately kept forever, and what is merely undecided',
     for (const p of RETENTION_POLICIES) {
       expect(p.timestampField).toBeTruthy();
       expect(['date', 'epochMs', 'iso']).toContain(p.timestampKind);
-      expect(p.ttlDays).toBeGreaterThan(0);
+      if (p.ttlDays === 0) {
+        expect(p.collection).toBe('free_chat_chain');
+        expect(p.timestampField).toBe('expiresAt');
+        expect(p.timestampKind).toBe('date');
+      } else expect(p.ttlDays).toBeGreaterThan(0);
     }
   });
 });

@@ -39,6 +39,8 @@ export interface RetentionDocRef {
 export interface RetentionQueryDoc {
   ref: {
     delete(): Promise<unknown>;
+    /** Direct child collection references; required only by opt-in discovery policies. */
+    listCollections?(): Promise<Array<{ id: string }>>;
     /** A subcollection under this matched document (`UserScopedCollection.subs`). */
     collection?(name: string): { limit(n: number): { get(): Promise<{ docs: Array<{ ref: { delete(): Promise<unknown> } }> }> } };
   };
@@ -493,6 +495,13 @@ export interface RetentionPolicy {
    */
   subs?: readonly string[];
   /**
+   * Opt-in discovery for mixed leaf/parent stores: list actual direct child collections once instead
+   * of querying every declared child under every leaf. Unknown children or unavailable discovery
+   * retain the parent with an error. The SDK may paginate collection IDs; this is not a free/local
+   * metadata check. Use only where expired records have no concurrent child writers.
+   */
+  discoverSubcollections?: true;
+  /**
    * Cooperating writers refuse a transactionally claimed parent. Each child batch and the final
    * parent deletion revalidate that generation's token. Only numeric timestamps are supported.
    * maxPerRun counts CHILDREN AND PARENTS, so a partial sweep leaves its fence for the next run.
@@ -526,6 +535,11 @@ export function retentionBound(cutoffMs: number, kind: TimestampKind): Date | nu
  * See RETAINED_INDEFINITELY below for the collections that must never be on a timer, and why.
  */
 export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
+  /** FREE chat: only immutable-date user counters and fully settled spend days have this field.
+   * Pending holds, replay tombstones, reused quota/cooldown authority and state controls NEVER expire.
+   * expiresAt is the deletion deadline itself, not a creation timestamp, hence ttlDays:0. */
+  { collection: 'free_chat_chain', ttlDays: 0, timestampField: 'expiresAt', timestampKind: 'date',
+    subs: ['cache', 'sticky', 'actions', 'events'], discoverSubcollections: true },
   /**
    * Removal records — the OTHER half of the 180-day duty (IT Rules, 2021 Rule 3(1)(g)).
    *
@@ -901,6 +915,8 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
  */
 export interface SubcollectionRetentionPolicy {
   parent: string;
+  /** Fixed parents, including virtual parents with no document. Avoid scanning unrelated authority/tombstone docs. */
+  parentIds?: readonly string[];
   subcollection: string;
   ttlDays: number;
   timestampField: string;
@@ -937,6 +953,11 @@ export const SUBCOLLECTION_RETENTION_POLICIES: readonly SubcollectionRetentionPo
    * `at: Date.now()` ⇒ `epochMs`.
    */
   { parent: 'nav_store_web_apps', subcollection: 'reports', ttlDays: 180, timestampField: 'at', timestampKind: 'epochMs' },
+  // Fixed state parent may be virtual until the first admin change. Never scan all reservation tombstones.
+  { parent: 'free_chat_chain', parentIds: ['state'], subcollection: 'cache', ttlDays: 0, timestampField: 'expireAt', timestampKind: 'date' },
+  { parent: 'free_chat_chain', parentIds: ['state'], subcollection: 'sticky', ttlDays: 0, timestampField: 'expireAt', timestampKind: 'date' },
+  // Same 180-day administrator-audit window as admin_audit_log. The 4096-slot event ring is already bounded.
+  { parent: 'free_chat_chain', parentIds: ['state'], subcollection: 'actions', ttlDays: 180, timestampField: 'at', timestampKind: 'epochMs' },
 ];
 
 /** The two operations a subcollection purge needs. Satisfied by `adminSubcollectionSource` and by test fakes. */
@@ -971,7 +992,9 @@ export async function purgeExpiredSubcollections(
       let after: string | null = null;
       let scanned = 0;
       while (deleted < cap && scanned < MAX_PARENTS_PER_RUN) {
-        const ids = await src.parentIds(policy.parent, after, PARENT_PAGE);
+        const ids: string[] = policy.parentIds
+          ? [...new Set(policy.parentIds)].sort().filter(id => after === null || id > after).slice(0, PARENT_PAGE)
+          : await src.parentIds(policy.parent, after, PARENT_PAGE);
         if (ids.length === 0) break;
         for (const id of ids) {
           if (deleted >= cap) break;
@@ -1305,6 +1328,10 @@ export async function purgeExpired(
   const collections: PurgeResult[] = [];
   for (const policy of policies) {
     const cutoffMs = retentionCutoffMs(nowMs, policy.ttlDays);
+    if (policy.fenced && policy.discoverSubcollections) {
+      collections.push({ collection: policy.collection, deleted: 0, cutoffMs, error: 'Discovery is not supported by fenced retention.' });
+      continue;
+    }
     if (policy.fenced) {
       collections.push(await purgeFencedExpired(db, policy, cutoffMs));
       continue;
@@ -1319,19 +1346,36 @@ export async function purgeExpired(
       if (typeof q.limit === 'function') q = q.limit(cap);
       const snap = await q.get();
       for (const d of snap.docs) {
+        let subs = policy.subs ?? [];
+        if (policy.discoverSubcollections) {
+          if (typeof d.ref.listCollections !== 'function') {
+            throw new Error(`${policy.collection}: this database handle cannot discover subcollections`);
+          }
+          const discovered = await d.ref.listCollections();
+          if (!Array.isArray(discovered) || discovered.some(child => !child || typeof child.id !== 'string' || !subs.includes(child.id))) {
+            // Validate the ENTIRE discovery before deleting any child, including already-known ones.
+            throw new Error(`${policy.collection}: unknown or malformed subcollection; parent retained`);
+          }
+          const present = new Set(discovered.map(child => child.id));
+          subs = subs.filter(sub => present.has(sub));
+        }
         // CHILDREN FIRST, then the document — see RetentionPolicy.subs. Firestore does not cascade, so
         // the other order leaves the children alive with no path to them. A handle that cannot reach
         // subcollections is a REAL failure for a policy that declares them, not something to shrug at:
         // it would report an expiry that left the heaviest half of the record behind.
-        for (const sub of policy.subs ?? []) {
+        for (const sub of subs) {
           if (typeof d.ref.collection !== 'function') {
             throw new Error(`${policy.collection}: this database handle cannot reach the '${sub}' subcollection`);
           }
+          let drained = false;
           for (let page = 0; page < MAX_ERASE_PAGES; page++) {
             const kids = await d.ref.collection(sub).limit(ERASE_PAGE).get();
-            if (kids.docs.length === 0) break;
+            if (kids.docs.length === 0) { drained = true; break; }
             for (const kd of kids.docs) { await kd.ref.delete(); deleted++; }
-            if (kids.docs.length < ERASE_PAGE) break;
+            if (kids.docs.length < ERASE_PAGE) { drained = true; break; }
+          }
+          if (policy.discoverSubcollections && !drained) {
+            throw new Error(`${policy.collection}: subcollection drain incomplete; parent retained`);
           }
         }
         await d.ref.delete();

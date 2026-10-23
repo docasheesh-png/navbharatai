@@ -59,7 +59,7 @@ describe('the nine tabs, in the order the admin accepted', () => {
 });
 
 describe('🔒 every page renders, and every rendered block is a page', () => {
-  const blocks = [...DASH.matchAll(/\{activeTab === '(\w+)' && \(/g)].map((m) => m[1]);
+  const blocks = [...DASH.matchAll(/\{activeTab === '([\w-]+)' && \(/g)].map((m) => m[1]);
 
   it.each([...ADMIN_PAGE_IDS])('page %s has its own block', (page) => {
     expect(blocks).toContain(page);
@@ -134,6 +134,7 @@ const FEATURE_HOME: Record<string, string | string[]> = {
   'onClick={fetchAppleDiag}': 'health',
   'only={ENGINE_REPORTS_ON.health}': 'health',
   // AI Engines
+  '<FreeChatChainPanel': 'free-chat-chain',
   '>Build Engines</h3>': 'engines',
   '>Chat Router — Live</h3>': 'engines',
   '>Latency Anomaly Watch</h3>': 'engines',

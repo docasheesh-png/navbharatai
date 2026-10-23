@@ -29,7 +29,7 @@
   "GET /api/observability/traces": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
   "GET /api/openapi.json": "external: the published API contract for developers",
   "GET /api/payment/verify-redirect": "external: the provider redirects the browser here after sign-in or payment",
-  "GET /api/professionals": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
+  "GET /api/professionals": "external: public expert discovery for the documented Developer API and its standard chat-completions clients (GET /api/v1/professionals)",
   "GET /api/techdebt/:userId/:projectId": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "GET /api/usage": "external: the public developer API (Settings \u2192 Developer API shows the calls)",
   "GET /api/workspace/traceability": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",

@@ -131,7 +131,10 @@ describe('Q-767 — an expired report does not leave its screenshot behind', () 
   it('the registry declares `subs` exactly where a collection really owns children', () => {
     // Every new parent must deliberately register all children and an appropriate deletion mechanism.
     const withSubs = RETENTION_POLICIES.filter((p) => (p.subs?.length ?? 0) > 0).map((p) => p.collection);
-    expect(withSubs).toEqual(['user_reports', 'admin_failed_report_autopsies']);
+    expect(withSubs).toEqual(['free_chat_chain', 'user_reports', 'admin_failed_report_autopsies']);
+    expect(RETENTION_POLICIES.find((p) => p.collection === 'free_chat_chain')).toMatchObject({
+      subs: ['cache', 'sticky', 'actions', 'events'], discoverSubcollections: true,
+    });
     expect(RETENTION_POLICIES.find((p) => p.collection === 'user_reports')!.subs).toEqual(['shot']);
     expect(RETENTION_POLICIES.find((p) => p.collection === 'admin_failed_report_autopsies')).toMatchObject({
       subs: ['revisions', 'mutations'], fenced: true,

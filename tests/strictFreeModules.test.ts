@@ -21,10 +21,10 @@ describe('strict-free server policy scopes', () => {
       runWithInferenceScope('free-modules', async () => { await Promise.resolve(); return strictFreeRequired(); }),
     ])).toEqual([false, false, true]);
   });
-  it('weak flag is independent of free modules flag', () => {
+  it('retired Weak flag cannot select free builder routing', () => {
     process.env.STRICT_FREE_MODULES_ENABLED = 'false'; process.env.STRICT_FREE_WEAK_ENABLED = 'true';
     expect(strictFreeRequired()).toBe(false);
-    expect(runWithInferenceScope('weak', strictFreeRequired)).toBe(true);
+    expect(runWithInferenceScope('weak', strictFreeRequired)).toBe(false);
     expect(runWithInferenceScope('paid-builder', strictFreeRequired)).toBe(false);
   });
   it('cannot install a mutable scope outside a server-created request', () => {
@@ -34,8 +34,8 @@ describe('strict-free server policy scopes', () => {
     process.env.STRICT_FREE_WEAK_ENABLED = 'true';
     runWithInferenceScope('paid-builder', () => {
       setInferenceScopeForCurrentRequest('weak');
-      expect(strictFreeRequired()).toBe(true);
-      expect(() => assertLegacyInferenceAllowed('vision')).toThrow('No paid fallback');
+      expect(strictFreeRequired()).toBe(false);
+      expect(() => assertLegacyInferenceAllowed('vision')).not.toThrow();
     });
   });
   it('strict flag remains closed even when registry master is off', () => {

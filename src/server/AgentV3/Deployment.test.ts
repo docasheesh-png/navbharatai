@@ -61,11 +61,23 @@ describe('deploy is gated on the USER asking — the agent cannot publish by its
 
   it('the same dispatcher publishes once consent is granted', async () => {
     // Proves the refusal is the GATE and not some unrelated failure in the harness.
-    const act = new DistActuator(new Map([['index.html', Buffer.from('<html>real app</html>')]]));
-    const d = ungrantedDispatcher(act, okDeploy);
-    expect((await d.dispatch(call())).content).toMatch(/not requested/i);
-    d.setPublishConsent(true);
-    expect((await d.dispatch(call())).content).toContain('https://');
+    // Consent is the subject here, not live hosting: keep the post-deploy liveness GET local.
+    const liveness = vi.fn(async () => ({ status: 200 }));
+    vi.stubGlobal('fetch', liveness);
+    try {
+      const act = new DistActuator(new Map([['index.html', Buffer.from('<html>real app</html>')]]));
+      const d = ungrantedDispatcher(act, okDeploy);
+      expect((await d.dispatch(call())).content).toMatch(/not requested/i);
+      expect(liveness).not.toHaveBeenCalled();
+      d.setPublishConsent(true);
+      expect((await d.dispatch(call())).content).toContain('https://');
+      expect(liveness).toHaveBeenCalledExactlyOnceWith(
+        'https://gen-lang-client-0866594388--v3-ws-1.web.app',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

@@ -107,12 +107,12 @@ describe('wiring — the stream opens BEFORE the lookup, and the status can neve
   });
 
   it('🔒 the client never lets a status reach the saved message', () => {
-    expect(engine).toContain('let status = ');
-    expect(engine).toContain("else if (typeof parsed.s === 'string' && parsed.s && !accumulated) status = parsed.s;");
-    // Rendered only while there is no answer; `accumulated` wins outright.
-    expect(engine).toContain('const snap = accumulated || status;');
-    // And it is never concatenated into the text that gets stored.
-    expect(engine).not.toContain('accumulated += parsed.s');
+    const consumer = readFileSync(join(process.cwd(), 'src/lib/chatResponseStream.ts'), 'utf8');
+    expect(engine).toContain('consumeChatResponseStream(response.body, isSSE');
+    expect(consumer).toContain("let status = ''");
+    expect(consumer).toContain("else if (typeof frame.s === 'string' && frame.s && !text) status = frame.s;");
+    expect(consumer).toContain('update(text || status)');
+    expect(consumer).not.toContain('text += frame.s');
   });
 
   it('the first-token measurement starts at the REQUEST, not at the model call', () => {

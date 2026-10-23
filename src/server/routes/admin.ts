@@ -2458,6 +2458,22 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
+  // Unified wallet SWEEPER: closes paid-chat holds still open after 10 minutes (answered → settle, else release).
+  // Idempotent; call from Cloud Scheduler every few minutes. Needs the composite index (state, at) on unified_wallet_gate.
+  app.post('/api/admin/unified-wallet/sweep-holds', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const { UnifiedWalletGate, listOpenHolds, sweepStuckHolds } = await import('../lib/unifiedWallet/store');
+      const db = getDb() as any;
+      const records = await listOpenHolds(db);
+      const out = await sweepStuckHolds(db, new UnifiedWalletGate(), records);
+      audit('ADMIN_UNIFIED_HOLD_SWEEP', { admin: adminUsername(), found: records.length, ...out, ip: req.ip });
+      res.json({ ok: true, found: records.length, ...out });
+    } catch (e: any) {
+      console.error('[ADMIN] unified wallet sweep failed:', e?.message);
+      res.status(500).json({ error: 'Internal server error.' });
+    }
+  });
+
   // ── User token adjustment ─────────────────────────────────────────────────
   app.post('/api/admin/users/:userId/tokens', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;

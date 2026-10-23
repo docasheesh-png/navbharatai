@@ -1,4 +1,5 @@
 {
+  "POST /api/admin/unified-wallet/sweep-holds": "admin-url: Cloud Scheduler job that closes stuck unified-wallet chat holds (docs/UNIFIED_WALLET.md)",
   "GET /api/admin/unified-wallet/:userId": "admin-url: unified wallet view (docs/UNIFIED_WALLET.md), opened by URL until the admin panel screen is added",
   "GET /api/admin/health-score": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
   "GET /api/agentv3/decision-trace": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",

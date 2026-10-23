@@ -22,9 +22,37 @@ const num = (v: string | undefined, d: number, min: number, max: number): number
   return Number.isFinite(n) && n >= min && n <= max ? n : d;
 };
 
-/** Feature flag. Default OFF: with it off every code path behaves exactly as on main. */
+const truthy = (v: string | undefined) => v === '1' || v === 'true' || v === 'on';
+
+/**
+ * FOUR INDEPENDENT SWITCHES (review 2026-10-23), all default OFF — any one can be turned on alone:
+ *   UNIFIED_WALLET_ENABLED          paid chat past the free quota (0.1 credit) + per-minute gate
+ *   UNIFIED_WALLET_FREE_LIMIT       signed-in free quota 20 → 25/day (guests stay 5)
+ *   UNIFIED_WALLET_MARGIN           real cost × 2.5 (or the number given) for every metered service
+ *   UNIFIED_WALLET_IMAGE_COUNTS_TEXT  a delivered free image also uses one daily text message
+ */
 export function unifiedWalletEnabled(env: Env = process.env): boolean {
-  return env.UNIFIED_WALLET_ENABLED === '1' || env.UNIFIED_WALLET_ENABLED === 'true';
+  return truthy(env.UNIFIED_WALLET_ENABLED);
+}
+export function freeLimitEnabled(env: Env = process.env): boolean { return truthy(env.UNIFIED_WALLET_FREE_LIMIT); }
+/** Signed-in daily free messages: main's 20, or the owner's 25 (UNIFIED_WALLET_SIGNED_IN_DAILY) when FREE_LIMIT is on. */
+export function signedInDailyLimit(env: Env = process.env): number {
+  return freeLimitEnabled(env) ? int(env.UNIFIED_WALLET_SIGNED_IN_DAILY, 25, 0, 100_000) : 20;
+}
+
+/**
+ * Surfaces whose Free answers may be PAID from the wallet once the quota is used. Explicit allow-list,
+ * default only plain NavBharatAI Chat. Free professionals / exam / Teacher AI ('professionals') and
+ * Repo Analyst ('repo-analyst') keep main's refusal until the owner adds them here.
+ */
+export const KNOWN_SURFACES = ['chat', 'professionals', 'repo-analyst'] as const;
+export type ChatSurface = typeof KNOWN_SURFACES[number];
+export function chargedSurfaces(env: Env = process.env): ChatSurface[] {
+  const raw = (env.UNIFIED_WALLET_CHARGED_SURFACES ?? 'chat').split(',').map((s) => s.trim());
+  return KNOWN_SURFACES.filter((s) => raw.includes(s));
+}
+export function surfaceIsCharged(surface: string | undefined, env: Env = process.env): boolean {
+  return !!surface && unifiedWalletEnabled(env) && (chargedSurfaces(env) as string[]).includes(surface);
 }
 
 /**
@@ -65,7 +93,7 @@ export function unifiedWalletConfig(env: Env = process.env): UnifiedWalletConfig
     enabled: unifiedWalletEnabled(env),
     chatMessageMilli: chat % MILLI_PER_TOKEN === 0 ? chat : 100,
     guestDailyMessages: int(env.UNIFIED_WALLET_GUEST_DAILY, 5, 0, 1000),
-    signedInDailyMessages: int(env.UNIFIED_WALLET_SIGNED_IN_DAILY, 25, 0, 100_000),
+    signedInDailyMessages: signedInDailyLimit(env),
     buildMargin: unifiedMargin('build', env),
     perMinuteSignedIn: int(env.UNIFIED_WALLET_PER_MINUTE, 20, 1, 10_000),
     perMinuteGuest: int(env.UNIFIED_WALLET_GUEST_PER_MINUTE, 6, 1, 10_000),
@@ -95,8 +123,16 @@ export function dailyAllowance(cfg: UnifiedWalletConfig, who: { signedIn: boolea
  */
 export const DEFAULT_UNIFIED_MARGIN = 2.5;
 export type MarginService = 'ai' | 'build' | 'hosting' | 'database' | 'image' | 'apk' | 'voice' | 'vision' | 'search' | 'api';
+/** UNIFIED_WALLET_MARGIN: unset/0/off = OFF (main pricing); on/true/1 = 2.5; a number 1.01–10 = that margin. */
+export function unifiedMarginEnabled(env: Env = process.env): boolean {
+  const v = (env.UNIFIED_WALLET_MARGIN ?? '').trim();
+  if (truthy(v)) return true;
+  const n = Number(v);
+  return v !== '' && Number.isFinite(n) && n > 1 && n <= 10;
+}
 export function unifiedMargin(service: MarginService | string = 'ai', env: Env = process.env): number {
-  const base = num(env.UNIFIED_WALLET_MARGIN, DEFAULT_UNIFIED_MARGIN, 1, 10);
+  const v = (env.UNIFIED_WALLET_MARGIN ?? '').trim();
+  const base = truthy(v) ? DEFAULT_UNIFIED_MARGIN : num(v || undefined, DEFAULT_UNIFIED_MARGIN, 1.01, 10);
   const key = `UNIFIED_WALLET_MARGIN_${String(service).toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
   return num(env[key], base, 1, 10);
 }

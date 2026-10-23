@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { unifiedMargin, derivedPricePaise, unifiedWalletConfig, DEFAULT_UNIFIED_MARGIN } from './policy';
+import { unifiedMargin, unifiedMarginEnabled, derivedPricePaise, unifiedWalletConfig, DEFAULT_UNIFIED_MARGIN } from './policy';
 import { tieredMarkupUsd } from '../../AgentV3/providerRates';
 import { hostingMarkupPct, hostingOverageInrPerGb } from '../../AgentV3/hostingCost';
 
@@ -14,6 +14,10 @@ describe('one central margin (owner: real cost × 2.5 everywhere)', () => {
     expect(unifiedMargin('build', { UNIFIED_WALLET_MARGIN_BUILD: '2' })).toBe(2);
     expect(unifiedMargin('hosting', { UNIFIED_WALLET_MARGIN_BUILD: '2' })).toBe(2.5);
     expect(unifiedMargin('ai', { UNIFIED_WALLET_MARGIN: '0.5' })).toBe(2.5); // below cost refused
+    expect(unifiedMarginEnabled({})).toBe(false);
+    expect(unifiedMarginEnabled({ UNIFIED_WALLET_MARGIN: 'off' })).toBe(false);
+    expect(unifiedMarginEnabled({ UNIFIED_WALLET_MARGIN: '2.5' })).toBe(true);
+    expect(unifiedMargin('ai', { UNIFIED_WALLET_MARGIN: 'on' })).toBe(2.5);
     expect(unifiedWalletConfig({}).buildMargin).toBe(2.5);
   });
   it('derived fixed prices are ceil(real × margin) in whole paise', () => {
@@ -31,9 +35,11 @@ describe('one central margin (owner: real cost × 2.5 everywhere)', () => {
   });
   it('flag ON: builds/assistants/API = real × 2.5; hosting +150% and derived ₹/GB', () => {
     process.env.UNIFIED_WALLET_ENABLED = '1';
+    expect(tieredMarkupUsd(0.5)).toBe(2); // wallet switch alone does NOT change prices
+    process.env.UNIFIED_WALLET_MARGIN = 'on';
     expect(tieredMarkupUsd(0.5)).toBe(1.25);
     expect(tieredMarkupUsd(2, 'build')).toBe(5);
-    const on = { UNIFIED_WALLET_ENABLED: '1' };
+    const on = { UNIFIED_WALLET_MARGIN: 'on' };
     expect(hostingMarkupPct(on)).toBe(150);
     expect(hostingOverageInrPerGb({ ...on, NAVBHARAT_RATE_EGRESS_GIB: '0.12' }, 85)).toBe(25.5); // 0.12×85×2.5
     expect(hostingOverageInrPerGb(on, 85)).toBe(20); // no egress meter → keep ₹20

@@ -47,7 +47,61 @@ export class UnifiedWalletGate {
       return { ok: true } as const;
     });
   }
+
+  /**
+   * ONE PAID REPLY AT A TIME PER USER (review fix). The free path gets this from FreeAnswerQuotaStore's
+   * active lease; the paid fallback runs after that store said "daily-limit", so it needs its own lock.
+   * A crashed owner's lock expires after `ttlMs`.
+   */
+  async acquireInflight(principalKey: string, owner: string, now = Date.now(), ttlMs = INFLIGHT_TTL_MS): Promise<boolean> {
+    const ref = this.ref(`inflight_${hash(principalKey)}`);
+    return this.db!.runTransaction(async (tx) => {
+      const s = await tx.get(ref);
+      const d = s.exists ? (s.data() as { owner?: string; until?: number }) : null;
+      if (d && typeof d.until === 'number' && d.until > now && d.owner !== owner) return false;
+      tx.set(ref, { owner, until: now + ttlMs, expireAt: new Date(now + DAY_MS) });
+      return true;
+    });
+  }
+  async releaseInflight(principalKey: string, owner: string): Promise<void> {
+    const ref = this.ref(`inflight_${hash(principalKey)}`);
+    await this.db!.runTransaction(async (tx) => {
+      const s = await tx.get(ref);
+      const d = s.exists ? (s.data() as { owner?: string }) : null;
+      if (d && d.owner === owner) tx.set(ref, { owner: null, until: 0, expireAt: new Date(Date.now() + DAY_MS) });
+    });
+  }
+
+  // ── durable hold records: what the sweeper reads so no hold can be left stuck ──────────────────────
+  async recordHold(c: ServiceCharge, uid: string, now = Date.now()): Promise<void> {
+    await this.db!.runTransaction(async (tx) => {
+      tx.set(this.ref(`hold_${hash(c.holdId)}`), { state: 'held', uid, charge: c, at: now, expireAt: new Date(now + 8 * DAY_MS) });
+    });
+  }
+  async markHold(holdId: string, state: HoldState, now = Date.now()): Promise<void> {
+    const ref = this.ref(`hold_${hash(holdId)}`);
+    await this.db!.runTransaction(async (tx) => {
+      const s = await tx.get(ref);
+      if (!s.exists) return;
+      const d = s.data() as HoldRecord;
+      if (d.state === 'settled' || d.state === 'released') return; // terminal
+      tx.set(ref, { ...d, state, updatedAt: now });
+    });
+  }
+  async readHold(holdId: string): Promise<HoldRecord | null> {
+    let out: HoldRecord | null = null;
+    await this.db!.runTransaction(async (tx) => {
+      const s = await tx.get(this.ref(`hold_${hash(holdId)}`));
+      out = s.exists ? (s.data() as HoldRecord) : null;
+    });
+    return out;
+  }
 }
+
+export const INFLIGHT_TTL_MS = 120_000;
+/** held → (answered → settled) | released. 'answered' means output was delivered; only settle may follow. */
+export type HoldState = 'held' | 'answered' | 'settled' | 'released';
+export interface HoldRecord { state: HoldState; uid: string; charge: ServiceCharge; at: number; updatedAt?: number }
 
 export interface WalletMoneyOps {
   hold: typeof holdWalletRolledUp;
@@ -100,6 +154,56 @@ export type ChatChargeResult = ServiceChargeResult;
 export function holdChatMessage(db: unknown, uid: string, requestId: string, cfg: UnifiedWalletConfig, now = Date.now(), ops: WalletMoneyOps = defaultOps) {
   return holdService(db, uid, { service: 'chat', amountMilli: cfg.chatMessageMilli, idempotencyKey: requestId, description: CHAT_LEDGER_LABEL }, now, ops);
 }
-export function finishChatMessage(db: unknown, uid: string, charge: ChatCharge, outcome: 'answered' | 'provider-failed' | 'uncertain', ops: WalletMoneyOps = defaultOps) {
-  return finishService(db, uid, charge, outcome, ops);
+
+/** Retry an idempotent money call (release / settle are both idempotent by hold id). */
+export async function withRetry<T extends { ok: boolean }>(fn: () => Promise<T>, attempts = 3, baseMs = 200, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))): Promise<T | { ok: false; error: string }> {
+  let last: T | { ok: false; error: string } = { ok: false, error: 'not attempted' };
+  for (let i = 0; i < attempts; i++) {
+    try { last = await fn(); if (last.ok) return last; } catch (e: any) { last = { ok: false, error: e?.message || 'threw' }; }
+    if (i < attempts - 1) await sleep(baseMs * 2 ** i);
+  }
+  return last;
+}
+
+/**
+ * Close a paid chat hold. Rule (review fix): the 0.1 credit is KEPT only if output was delivered; any
+ * other end — cancel/abort before the first token, provider failure, timeout — RELEASES it.
+ * Every money call is retried idempotently; a final failure is logged as an ALERT and left in the durable
+ * record for `sweepStuckHolds`. Never throws.
+ */
+export async function closeChatHold(db: unknown, uid: string, charge: ServiceCharge, delivered: boolean, gate: UnifiedWalletGate | null, ops: WalletMoneyOps = defaultOps, sleep?: (ms: number) => Promise<void>): Promise<'settled' | 'released' | 'stuck'> {
+  try { if (delivered) await gate?.markHold(charge.holdId, 'answered'); } catch { /* the sweeper treats a missing mark as no output */ }
+  const r = await withRetry(async () => delivered
+    ? await ops.settle(db, uid, { rollupRef: charge.rollupRef, holdId: charge.holdId, feature: SERVICE_FEATURE[charge.service], billedInr: charge.billedInr }, charge.ownerId)
+    : await ops.release(db, uid, { rollupRef: charge.rollupRef, holdId: charge.holdId, description: charge.description }, charge.ownerId), 3, 200, sleep);
+  if (!r.ok) {
+    console.error(`[UNIFIED WALLET] ALERT ${delivered ? 'settle' : 'release'} failed for hold ${charge.holdId} — left for the sweeper: ${(r as any).error}`);
+    return 'stuck';
+  }
+  try { await gate?.markHold(charge.holdId, delivered ? 'settled' : 'released'); } catch { /* idempotent; sweeper re-runs safely */ }
+  return delivered ? 'settled' : 'released';
+}
+
+/**
+ * SWEEPER: every hold record still open after `maxAgeMs` is closed — 'answered' ones settled, everything else
+ * released (no proof of output → the user is not charged). Idempotent: release/settle are no-ops on a hold
+ * already closed. Run from the existing scheduler (Cloud Scheduler → admin route) every few minutes.
+ */
+export async function sweepStuckHolds(
+  db: unknown, gate: UnifiedWalletGate, records: Array<{ holdId: string } & HoldRecord>, now = Date.now(), maxAgeMs = 10 * 60_000, ops: WalletMoneyOps = defaultOps,
+): Promise<{ settled: number; released: number; stuck: number }> {
+  const out = { settled: 0, released: 0, stuck: 0 };
+  for (const rec of records) {
+    if (rec.state === 'settled' || rec.state === 'released' || now - rec.at < maxAgeMs) continue;
+    const r = await closeChatHold(db, rec.uid, rec.charge, rec.state === 'answered', gate, ops, async () => {});
+    out[r]++;
+  }
+  return out;
+}
+
+/** Open hold records older than `maxAgeMs` (admin-SDK query). */
+export async function listOpenHolds(db: any, now = Date.now(), maxAgeMs = 10 * 60_000, limit = 200): Promise<Array<{ holdId: string } & HoldRecord>> {
+  if (!db?.collection) return [];
+  const snap = await db.collection(COLLECTION).where('state', 'in', ['held', 'answered']).where('at', '<', now - maxAgeMs).limit(limit).get();
+  return snap.docs.map((d: any) => ({ holdId: d.data().charge?.holdId, ...d.data() }));
 }

@@ -7,8 +7,8 @@ import { addressRateKey } from './clientAddress';
 import { GUEST_ID_HEADER, readGuestId } from './guestDailyQuota';
 import { FreeAnswerQuotaStore, type FreeAnswerQuotaSubject } from './freeAnswerQuotaStore';
 import { getServerDb } from './serverDb';
-import { unifiedWalletConfig, dailyAllowance, detectLang, insufficientBalanceMessage, lowBalanceNotice, rateLimitedMessage } from './unifiedWallet/policy';
-import { UnifiedWalletGate, holdChatMessage, finishChatMessage } from './unifiedWallet/store';
+import { unifiedWalletConfig, signedInDailyLimit, surfaceIsCharged, type ChatSurface, detectLang, insufficientBalanceMessage, lowBalanceNotice, rateLimitedMessage } from './unifiedWallet/policy';
+import { UnifiedWalletGate, holdChatMessage, closeChatHold } from './unifiedWallet/store';
 
 const leases = new WeakMap<Request, { controller: AbortController; leaseUntil: number; answered: boolean; failed: boolean; disconnected: boolean }>();
 const codes: Record<string, string> = { 'daily-limit': 'DAILY_LIMIT', busy: 'BUSY', duplicate: 'DUPLICATE', 'attempt-limit': 'ATTEMPT_LIMIT' };
@@ -25,15 +25,11 @@ function reject(res: Response, reason: string): void {
 }
 async function subjectFor(req: Request, options: {uid?: string | null}): Promise<FreeAnswerQuotaSubject> {
   const uid = Object.prototype.hasOwnProperty.call(options, 'uid') ? options.uid : await verifyFirebaseToken(req);
-  const cfg = unifiedWalletConfig();
-  if (uid) {
-    // Flag OFF: exactly main's 20. Flag ON: the owner's signed-in allowance (25, config).
-    if (!cfg.enabled) return {key: `user:${uid}`, limit:20};
-    return {key: `user:${uid}`, limit: dailyAllowance(cfg, {signedIn:true})};
-  }
+  // 20 on main; 25 only while UNIFIED_WALLET_FREE_LIMIT is on (its own switch). Guests stay 5.
+  if (uid) return {key: `user:${uid}`, limit: signedInDailyLimit()};
   const ip = addressRateKey(req);
   const device = readGuestId(req.headers[GUEST_ID_HEADER]);
-  return {key: device ? `guest-device:${device}` : `guest-address:${ip}`, ...(cfg.enabled ? {limit: cfg.guestDailyMessages, guest: true} : {limit: 5}), ipKey:ip};
+  return {key: device ? `guest-device:${device}` : `guest-address:${ip}`, limit:5, ipKey:ip};
 }
 export function freeAnswerSignal(req: Request): AbortSignal | undefined { return leases.get(req)?.controller.signal; }
 export function assertFreeAnswerActive(req: Request): void {
@@ -46,7 +42,7 @@ export function markFreeAnswer(req: Request): void { assertFreeAnswerActive(req)
 /** A proven no-output provider failure can refund even after a disconnect. */
 export function markFreeAnswerProviderFailure(req: Request): void { const lease=leases.get(req); if (lease && !lease.answered) lease.failed=true; }
 
-export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: () => Promise<T>, options: {uid?: string | null} = {}): Promise<T | void> {
+export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: () => Promise<T>, options: {uid?: string | null; surface?: ChatSurface} = {}): Promise<T | void> {
   // Internal nested wrappers reuse the exact live request, never a client-supplied proof.
   if (leases.has(req)) { assertFreeAnswerActive(req); return run(); }
   const store = new FreeAnswerQuotaStore();
@@ -64,7 +60,7 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
     const lang=detectLang((req.body as any)?.message ?? (req.body as any)?.prompt);
     if (cfg.enabled) {
       // Per-minute abuse gate + once-only request id, BEFORE any allowance or money is touched.
-      const gate=await new UnifiedWalletGate().admit(subject.key,requestId,subject.guest?cfg.perMinuteGuest:cfg.perMinuteSignedIn,Date.now());
+      const gate=await new UnifiedWalletGate().admit(subject.key,requestId,subject.key.startsWith('user:')?cfg.perMinuteSignedIn:cfg.perMinuteGuest,Date.now());
       if (!gate.ok) {
         if (gate.reason==='rate-limited') { if (!res.headersSent) res.status(429).json({code:'FREE_ANSWER_RATE_LIMIT',error:rateLimitedMessage(lang),reply:rateLimitedMessage(lang)}); return; }
         reject(res,'duplicate'); return;
@@ -74,7 +70,8 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
     if (!reserved.allowed) {
       // UNIFIED WALLET: a signed-in user past today's free messages pays 0.1 credit from the ONE wallet
       // that also pays for Pro builds. Guests have no wallet — they get main's refusal.
-      if (cfg.enabled && reserved.reason==='daily-limit' && subject.key.startsWith('user:')) {
+      // Only allow-listed surfaces (default: plain NavBharatAI Chat) may be paid; every other caller keeps main's refusal.
+      if (surfaceIsCharged(options.surface) && reserved.reason==='daily-limit' && subject.key.startsWith('user:')) {
         return await runWalletPaidTurn(req,res,run,subject.key.slice(5),requestId,lang,controller,()=>disconnected);
       }
       reject(res,reserved.reason); return;
@@ -113,28 +110,40 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
   } finally {res.removeListener('close',close);}
 }
 
-/** One Free chat turn paid from the unified wallet: hold → run → settle, or release on a proven no-output failure. */
+/**
+ * One NavBharatAI Chat turn paid from the unified wallet: one-at-a-time lock → hold → run → keep the 0.1 credit
+ * only if output was delivered, otherwise release (cancel before first token, failure, timeout). Release/settle
+ * are retried idempotently; a hold that still cannot be closed is recorded for the sweeper.
+ */
 async function runWalletPaidTurn<T>(req: Request, res: Response, run: () => Promise<T>, uid: string, requestId: string, lang: ReturnType<typeof detectLang>, controller: AbortController, isDisconnected: () => boolean): Promise<T | void> {
   const cfg=unifiedWalletConfig();
   const db=getServerDb();
-  const held=await holdChatMessage(db,uid,requestId,cfg);
-  if (!held.ok) {
-    if (held.insufficient) { if (!res.headersSent) res.status(402).json({code:'WALLET_INSUFFICIENT',error:insufficientBalanceMessage(lang,cfg),reply:insufficientBalanceMessage(lang,cfg)}); return; }
-    reject(res,'unavailable'); return;
-  }
-  const notice=lowBalanceNotice(lang,held.charge.balanceTokens,cfg);
-  if (notice && !res.headersSent) res.setHeader('X-NB-Wallet-Notice',encodeURIComponent(notice));
-  const lease={controller,leaseUntil:Date.now()+90_000,answered:false,failed:false,disconnected:isDisconnected()};
-  leases.set(req,lease);
-  const timer=setTimeout(()=>controller.abort(),90_000);
-  let finished=false;
+  const gate=new UnifiedWalletGate();
+  const principal=`user:${uid}`;
+  const owner=randomUUID();
+  if (!(await gate.acquireInflight(principal,owner))) { reject(res,'busy'); return; }
   try {
-    return await runWithFreeAnswerContext({signal:controller.signal,assertActive:()=>{if(finished||controller.signal.aborted){controller.abort();throw new Error('Paid Free answer expired');}}},run);
+    const held=await holdChatMessage(db,uid,requestId,cfg);
+    if (!held.ok) {
+      if (held.insufficient) { if (!res.headersSent) res.status(402).json({code:'WALLET_INSUFFICIENT',error:insufficientBalanceMessage(lang,cfg),reply:insufficientBalanceMessage(lang,cfg)}); return; }
+      reject(res,'unavailable'); return;
+    }
+    try { await gate.recordHold(held.charge,uid); } catch { console.error(`[UNIFIED WALLET] ALERT hold record not written for ${held.charge.holdId}`); }
+    const notice=lowBalanceNotice(lang,held.charge.balanceTokens,cfg);
+    if (notice && !res.headersSent) res.setHeader('X-NB-Wallet-Notice',encodeURIComponent(notice));
+    const lease={controller,leaseUntil:Date.now()+90_000,answered:false,failed:false,disconnected:isDisconnected()};
+    leases.set(req,lease);
+    const timer=setTimeout(()=>controller.abort(),90_000);
+    let finished=false;
+    try {
+      return await runWithFreeAnswerContext({signal:controller.signal,assertActive:()=>{if(finished||controller.signal.aborted){controller.abort();throw new Error('Paid chat answer expired');}}},run);
+    } finally {
+      finished=true; clearTimeout(timer);
+      leases.delete(req);
+      await closeChatHold(db,uid,held.charge,lease.answered,gate);
+    }
   } finally {
-    finished=true; clearTimeout(timer);
-    const outcome=lease.answered ? 'answered' : lease.failed || (!lease.disconnected && !controller.signal.aborted) ? 'provider-failed' : 'uncertain';
-    try { await finishChatMessage(db,uid,held.charge,outcome); } catch { console.warn('[UNIFIED WALLET] settle/release unavailable; hold retained'); }
-    leases.delete(req);
+    await gate.releaseInflight(principal,owner).catch(()=>{});
   }
 }
 

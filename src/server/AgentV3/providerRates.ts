@@ -32,7 +32,7 @@ import { isVerifiedFreeProof, type VerifiedFreeProof } from '../AI/LiveRegistry/
 // All rates are USD per 1,000,000 tokens. Existing env overrides remain supported; the narrowly
 // verified direct DeepSeek profile below is pinned to its documented peak admission rates.
 
-import { unifiedWalletEnabled, unifiedMargin, type MarginService } from '../lib/unifiedWallet/policy';
+import { unifiedMarginEnabled, unifiedMargin, type MarginService } from '../lib/unifiedWallet/policy';
 import { sonnetRate, opusRate, withClaudeCacheLines, tokenCostUsd, type TokenRate, type BilledUsage } from './pricing';
 
 function envRate(name: string, fallback: number): number {
@@ -395,7 +395,7 @@ export function tieredMarkupUsd(realCostUsd: number, service: MarginService = 'a
   const c = Math.max(0, realCostUsd);
   // UNIFIED WALLET (flag, default OFF): one central margin replaces the tiered curve for every AI-metered
   // charge — builds, assistants, Doctor/SDA/vision, tools, developer API. Off = the curve below, unchanged.
-  if (unifiedWalletEnabled()) return c * unifiedMargin(service);
+  if (unifiedMarginEnabled()) return c * unifiedMargin(service);
   const t = markupThresholdUsd();
   const small = markupSmall();
   const large = markupLarge();

@@ -2433,14 +2433,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
-  // ── Unified credit wallet (flag UNIFIED_WALLET_ENABLED) — read-only view + audited plan grant ──────
+  // ── Unified credit wallet (flag UNIFIED_WALLET_ENABLED) — read-only view ──────
   // Manual balance changes stay on the existing audited POST /api/admin/users/:userId/tokens below.
   app.get('/api/admin/unified-wallet/:userId', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
     const { userId } = routeParams(req.params);
     try {
       const { unifiedWalletConfig } = await import('../lib/unifiedWallet/policy');
-      const { activePlanId } = await import('../lib/unifiedWallet/store');
       const { spendByFeature } = await import('../lib/walletFeature');
       const cfg = unifiedWalletConfig();
       const snap = await getDoc(doc(db, 'user_token_wallets', userId));
@@ -2450,7 +2449,6 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         enabled: cfg.enabled,
         config: { ...cfg },
         wallet: w ? { tokenBalance: w.tokenBalance ?? 0, credits: (Number(w.tokenBalance) || 0) / 100, remaining_balance: w.remaining_balance ?? 0 } : null,
-        planId: await activePlanId(userId),
         spendByFeature: spendByFeature(ledger),
         ledgerTail: ledger.slice(-50).reverse(),
       });
@@ -2458,19 +2456,6 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       console.error('[ADMIN] unified wallet view failed:', e?.message);
       res.status(500).json({ error: 'Internal server error.' });
     }
-  });
-  app.post('/api/admin/unified-wallet/:userId/plan-grant', verifyAdminToken, async (req: Request, res: Response) => {
-    const { userId } = routeParams(req.params);
-    const planId = typeof req.body?.planId === 'string' ? req.body.planId : '';
-    const periodKey = typeof req.body?.periodKey === 'string' ? req.body.periodKey : '';
-    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 300) : '';
-    if (!reason) return res.status(400).json({ error: 'A reason is required.' });
-    const { unifiedWalletConfig } = await import('../lib/unifiedWallet/policy');
-    const { grantPlanCredits } = await import('../lib/unifiedWallet/store');
-    const out = await grantPlanCredits(userId, planId, periodKey, unifiedWalletConfig());
-    audit('ADMIN_UNIFIED_PLAN_GRANT', { admin: adminUsername(), userId, planId, periodKey, reason, result: out.ok ? (out.granted ? 'ok' : 'already-granted') : 'failed', ip: req.ip });
-    if (!out.ok) return res.status(400).json({ error: out.error });
-    res.json(out);
   });
 
   // ── User token adjustment ─────────────────────────────────────────────────

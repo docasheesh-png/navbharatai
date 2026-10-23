@@ -8,7 +8,7 @@ import { GUEST_ID_HEADER, readGuestId } from './guestDailyQuota';
 import { FreeAnswerQuotaStore, type FreeAnswerQuotaSubject } from './freeAnswerQuotaStore';
 import { getServerDb } from './serverDb';
 import { unifiedWalletConfig, dailyAllowance, detectLang, insufficientBalanceMessage, lowBalanceNotice, rateLimitedMessage } from './unifiedWallet/policy';
-import { UnifiedWalletGate, activePlanId, holdChatMessage, finishChatMessage } from './unifiedWallet/store';
+import { UnifiedWalletGate, holdChatMessage, finishChatMessage } from './unifiedWallet/store';
 
 const leases = new WeakMap<Request, { controller: AbortController; leaseUntil: number; answered: boolean; failed: boolean; disconnected: boolean }>();
 const codes: Record<string, string> = { 'daily-limit': 'DAILY_LIMIT', busy: 'BUSY', duplicate: 'DUPLICATE', 'attempt-limit': 'ATTEMPT_LIMIT' };
@@ -27,9 +27,9 @@ async function subjectFor(req: Request, options: {uid?: string | null}): Promise
   const uid = Object.prototype.hasOwnProperty.call(options, 'uid') ? options.uid : await verifyFirebaseToken(req);
   const cfg = unifiedWalletConfig();
   if (uid) {
-    // Flag OFF: exactly main's 20. Flag ON: the owner's signed-in default (25) or a plan's higher allowance.
+    // Flag OFF: exactly main's 20. Flag ON: the owner's signed-in allowance (25, config).
     if (!cfg.enabled) return {key: `user:${uid}`, limit:20};
-    return {key: `user:${uid}`, limit: dailyAllowance(cfg, {signedIn:true, planId: await activePlanId(uid)})};
+    return {key: `user:${uid}`, limit: dailyAllowance(cfg, {signedIn:true})};
   }
   const ip = addressRateKey(req);
   const device = readGuestId(req.headers[GUEST_ID_HEADER]);

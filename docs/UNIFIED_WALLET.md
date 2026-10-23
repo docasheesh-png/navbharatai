@@ -10,7 +10,7 @@ milli-credits, multiples of 10 (whole tokens = paise). No floats are introduced 
 ```
 request ─► per-minute gate + once-only request id (unified_wallet_gate, Firestore txn)
         ─► daily allowance (existing free_answer_quota store, IST midnight reset)
-             guest 5 · signed-in 25 · plan.dailyMessages if higher
+             guest 5 · signed-in 25 (config)
         ├─ allowance left ─► answer (failed reply restores the allowance, existing rule)
         └─ used up ─► guest: existing refusal
                       signed-in: HOLD 0.1 credit on user_token_wallets (all-or-nothing, never overdraws)
@@ -24,14 +24,11 @@ Unchanged debit path (`debitWalletForBuild`, same wallet). When enabled the bill
 `billable real cost × UNIFIED_WALLET_BUILD_MARGIN` (default 2) instead of the tiered ×4/×3 curve.
 Opus flat billing, per-tier billing and all `cancelledBuildBilling` rules are untouched.
 
-## Plans (owner decision pending)
-Config-driven (`UNIFIED_WALLET_PLANS`); prices are GST-inclusive (`gstBreakdown` gives the paise split).
-A plan can grant **monthly credits** into the wallet and/or a **daily message allowance**.
-Defaults: ₹99 → 99 credits, ₹999 → 999 credits (usable for chat OR builds). Alternative from the owner:
-₹99 → 125 msgs/day, ₹999 → 1500 msgs/day — set `dailyMessages` (and `monthlyCredits: 0`).
-Entitlement is read from `unified_wallet_plans/{uid}` `{planId, periodEndMs}`; credits are granted with
-`grantPlanCredits(uid, planId, 'YYYY-MM')` (idempotent via `wallet_ops`). Purchase wiring belongs to the
-payments flow and is **not** part of this change.
+## Pay-and-use only (owner decision 2026-10-23: no subscriptions)
+No monthly plans. The user recharges the wallet; 1 credit = ₹1. Packs are config (`UNIFIED_WALLET_RECHARGE_PACKS`,
+default ₹20 / ₹50 / ₹100 / ₹500, minimum `UNIFIED_WALLET_MIN_RECHARGE_INR` = ₹20), shown GST-inclusive
+(`rechargePackView` gives the paise GST split, credits and Free chat messages per pack: ₹20 → 200 messages).
+The existing payment/credit path (`computeCreditedWallet`, platform fee) mints the credits — unchanged here.
 
 ## Reused (not duplicated)
 `holdWalletRolledUp` / `releaseWalletHold` / `settleWalletHold` / `debitWalletForBuild` (walletDebit.ts),
@@ -40,8 +37,7 @@ wallet resolution, `spendByFeature` (new feature id `free-chat`), `FreeAnswerQuo
 reset, idempotency, failure refund), the overdraft floor and the existing audited admin adjust.
 
 ## Admin
-- `GET /api/admin/unified-wallet/:userId` — config, balance, plan, spend by feature, last 50 ledger rows.
-- `POST /api/admin/unified-wallet/:userId/plan-grant` `{planId, periodKey, reason}` — audited (`ADMIN_UNIFIED_PLAN_GRANT`).
+- `GET /api/admin/unified-wallet/:userId` — config, balance, spend by feature, last 50 ledger rows.
 - Manual balance change: existing `POST /api/admin/users/:userId/tokens` (reason required, audited).
 
 ## Setup

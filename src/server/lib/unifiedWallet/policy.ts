@@ -27,34 +27,12 @@ export function unifiedWalletEnabled(env: Env = process.env): boolean {
   return env.UNIFIED_WALLET_ENABLED === '1' || env.UNIFIED_WALLET_ENABLED === 'true';
 }
 
-export interface UnifiedPlan {
-  id: string;
-  label: string;
-  /** Shown price, GST INCLUSIVE (what the user pays). */
-  priceInrInclGst: number;
-  /** Credits (₹) granted into the ONE wallet per billing month. 0 = none. */
-  monthlyCredits: number;
-  /** Free chat messages per IST day before the wallet is debited. 0 = use the signed-in default. */
-  dailyMessages: number;
-}
-
 /**
- * Owner decision PENDING (2026-10-23): a plan can grant monthly wallet credits, a daily message
- * allowance, or both. Defaults follow the latest instruction (₹99 → 99 credits, ₹999 → 999 credits,
- * spendable on chat OR builds). The daily-allowance variant (125 / 1500 a day) is one env line away:
- * UNIFIED_WALLET_PLANS='[{"id":"plus99",...,"monthlyCredits":0,"dailyMessages":125}, ...]'.
+ * Owner decision (2026-10-23): NO subscriptions. Pure pay-and-use: the user recharges the wallet in packs,
+ * every paid use (Free chat past the daily allowance, Pro builds) debits the same wallet.
+ * Suggested packs ₹20 / ₹50 / ₹100 / ₹500, GST-inclusive; override with UNIFIED_WALLET_RECHARGE_PACKS="20,50,100,500".
  */
-export const DEFAULT_PLANS: readonly UnifiedPlan[] = [
-  { id: 'plus99', label: 'NavBharatAI Plus', priceInrInclGst: 99, monthlyCredits: 99, dailyMessages: 0 },
-  { id: 'pro999', label: 'NavBharatAI Pro', priceInrInclGst: 999, monthlyCredits: 999, dailyMessages: 0 },
-];
-
-function validPlan(p: any): p is UnifiedPlan {
-  return !!p && typeof p.id === 'string' && /^[a-z0-9_-]{1,32}$/.test(p.id) && typeof p.label === 'string'
-    && Number.isSafeInteger(p.priceInrInclGst) && p.priceInrInclGst > 0
-    && Number.isSafeInteger(p.monthlyCredits) && p.monthlyCredits >= 0
-    && Number.isSafeInteger(p.dailyMessages) && p.dailyMessages >= 0 && p.dailyMessages <= 100_000;
-}
+export const DEFAULT_RECHARGE_PACKS_INR: readonly number[] = [20, 50, 100, 500];
 
 export interface UnifiedWalletConfig {
   enabled: boolean;
@@ -70,17 +48,18 @@ export interface UnifiedWalletConfig {
   /** Low-balance warning threshold, in credits. */
   lowBalanceCredits: number;
   gstPercent: number;
-  plans: UnifiedPlan[];
+  /** Recharge packs (₹, GST-inclusive), ascending; every pack ≥ minRechargeInr. */
+  rechargePacksInr: number[];
+}
+
+function rechargePacks(raw: string | undefined, min: number): number[] {
+  const parsed = (raw ?? '').split(',').map((x) => Number(x.trim())).filter((n) => Number.isSafeInteger(n) && n >= min && n <= 100_000);
+  const packs = parsed.length ? parsed : DEFAULT_RECHARGE_PACKS_INR.filter((n) => n >= min);
+  return [...new Set(packs)].sort((x, y) => x - y);
 }
 
 export function unifiedWalletConfig(env: Env = process.env): UnifiedWalletConfig {
-  let plans: UnifiedPlan[] = [...DEFAULT_PLANS];
-  if (env.UNIFIED_WALLET_PLANS) {
-    try {
-      const parsed = JSON.parse(env.UNIFIED_WALLET_PLANS);
-      if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(validPlan)) plans = parsed;
-    } catch { /* malformed → defaults; never throw from config */ }
-  }
+  const minRecharge = int(env.UNIFIED_WALLET_MIN_RECHARGE_INR, 20, 1, 100_000);
   const chat = int(env.UNIFIED_WALLET_CHAT_MESSAGE_MILLI, 100, 10, 100_000);
   return {
     enabled: unifiedWalletEnabled(env),
@@ -88,12 +67,12 @@ export function unifiedWalletConfig(env: Env = process.env): UnifiedWalletConfig
     guestDailyMessages: int(env.UNIFIED_WALLET_GUEST_DAILY, 5, 0, 1000),
     signedInDailyMessages: int(env.UNIFIED_WALLET_SIGNED_IN_DAILY, 25, 0, 100_000),
     buildMargin: num(env.UNIFIED_WALLET_BUILD_MARGIN, 2, 1, 10),
-    minRechargeInr: int(env.UNIFIED_WALLET_MIN_RECHARGE_INR, 20, 1, 100_000),
+    minRechargeInr: minRecharge,
     perMinuteSignedIn: int(env.UNIFIED_WALLET_PER_MINUTE, 20, 1, 10_000),
     perMinuteGuest: int(env.UNIFIED_WALLET_GUEST_PER_MINUTE, 6, 1, 10_000),
     lowBalanceCredits: int(env.UNIFIED_WALLET_LOW_BALANCE_CREDITS, 5, 0, 100_000),
     gstPercent: int(env.UNIFIED_WALLET_GST_PERCENT, 18, 0, 100),
-    plans,
+    rechargePacksInr: rechargePacks(env.UNIFIED_WALLET_RECHARGE_PACKS, minRecharge),
   };
 }
 
@@ -104,11 +83,9 @@ export function milliToTokens(milli: number): number {
 /** ₹ for the existing wallet API (which takes ₹). Exact: tokens/100 is a 2-dp value. */
 export function milliToInr(milli: number): number { return milliToTokens(milli) / TOKENS_PER_RUPEE; }
 
-/** Daily free-message allowance for one requester. Plan allowance only ever RAISES the default. */
-export function dailyAllowance(cfg: UnifiedWalletConfig, who: { signedIn: boolean; planId?: string | null }): number {
-  if (!who.signedIn) return cfg.guestDailyMessages;
-  const plan = who.planId ? cfg.plans.find((p) => p.id === who.planId) : undefined;
-  return Math.max(cfg.signedInDailyMessages, plan?.dailyMessages ?? 0);
+/** Daily free-message allowance before the wallet is debited: guest 5, signed-in 25 (config). */
+export function dailyAllowance(cfg: UnifiedWalletConfig, who: { signedIn: boolean }): number {
+  return who.signedIn ? cfg.signedInDailyMessages : cfg.guestDailyMessages;
 }
 
 /** Build bill (USD) when the unified wallet is on: real cost × configured margin. */
@@ -126,6 +103,14 @@ export function gstBreakdown(priceInrInclGst: number, gstPercent: number): { tot
 
 export function isValidRecharge(inr: number, cfg: Pick<UnifiedWalletConfig, 'minRechargeInr'>): boolean {
   return Number.isSafeInteger(inr) && inr >= cfg.minRechargeInr;
+}
+
+/** What each pack shows: GST-inclusive price, its split, and what it buys (credits / Free chat messages). */
+export function rechargePackView(cfg: Pick<UnifiedWalletConfig, 'rechargePacksInr' | 'gstPercent' | 'chatMessageMilli'>) {
+  return cfg.rechargePacksInr.map((inr) => ({
+    priceInrInclGst: inr, ...gstBreakdown(inr, cfg.gstPercent),
+    credits: inr, chatMessages: Math.floor((inr * MILLI_PER_CREDIT) / cfg.chatMessageMilli),
+  }));
 }
 
 export type ReplyLang = 'hi' | 'hinglish' | 'en';

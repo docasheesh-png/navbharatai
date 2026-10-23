@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Firestore } from 'firebase-admin/firestore';
 import {
   unifiedWalletConfig, unifiedWalletEnabled, dailyAllowance, milliToTokens, milliToInr, gstBreakdown,
-  unifiedBuildBilledUsd, isValidRecharge, detectLang, insufficientBalanceMessage, lowBalanceNotice, DEFAULT_PLANS,
+  unifiedBuildBilledUsd, isValidRecharge, detectLang, insufficientBalanceMessage, lowBalanceNotice, rechargePackView,
 } from './policy';
 import { UnifiedWalletGate, holdChatMessage, finishChatMessage, type WalletMoneyOps } from './store';
 import { computeRolledUpDebit, computeRolledUpRelease, computeDebitedWallet } from '../walletDebit';
@@ -37,7 +37,9 @@ describe('unified wallet policy', () => {
     expect(unifiedWalletEnabled({})).toBe(false);
     const c = unifiedWalletConfig({});
     expect(c).toMatchObject({ enabled: false, chatMessageMilli: 100, guestDailyMessages: 5, signedInDailyMessages: 25, buildMargin: 2, minRechargeInr: 20 });
-    expect(DEFAULT_PLANS.map((p) => [p.priceInrInclGst, p.monthlyCredits])).toEqual([[99, 99], [999, 999]]);
+    expect(c.rechargePacksInr).toEqual([20, 50, 100, 500]);
+    expect(unifiedWalletConfig({ UNIFIED_WALLET_RECHARGE_PACKS: '500, 10, 50,50' }).rechargePacksInr).toEqual([50, 500]); // below min dropped
+    expect('plans' in c).toBe(false); // owner: no subscriptions
     expect(unifiedWalletConfig({ UNIFIED_WALLET_ENABLED: '1', UNIFIED_WALLET_BUILD_MARGIN: '2.5' })).toMatchObject({ enabled: true, buildMargin: 2.5 });
   });
   it('uses integer milli-credits: ₹1 = 10 messages = 100 tokens', () => {
@@ -47,17 +49,15 @@ describe('unified wallet policy', () => {
     expect(() => milliToTokens(0)).toThrow();
     expect(unifiedWalletConfig({ UNIFIED_WALLET_CHAT_MESSAGE_MILLI: '105' }).chatMessageMilli).toBe(100);
   });
-  it('allowances: guest 5, signed-in 25, plan daily allowance only raises it (both plan modes supported)', () => {
+  it('allowances: guest 5, signed-in 25, then pay-and-use', () => {
     const c = unifiedWalletConfig({});
     expect(dailyAllowance(c, { signedIn: false })).toBe(5);
     expect(dailyAllowance(c, { signedIn: true })).toBe(25);
-    expect(dailyAllowance(c, { signedIn: true, planId: 'plus99' })).toBe(25); // credits-mode default
-    const daily = unifiedWalletConfig({ UNIFIED_WALLET_PLANS: JSON.stringify([
-      { id: 'plus99', label: 'Plus', priceInrInclGst: 99, monthlyCredits: 0, dailyMessages: 125 },
-      { id: 'pro999', label: 'Pro', priceInrInclGst: 999, monthlyCredits: 0, dailyMessages: 1500 }]) });
-    expect(dailyAllowance(daily, { signedIn: true, planId: 'plus99' })).toBe(125);
-    expect(dailyAllowance(daily, { signedIn: true, planId: 'pro999' })).toBe(1500);
-    expect(unifiedWalletConfig({ UNIFIED_WALLET_PLANS: '{bad' }).plans).toEqual(DEFAULT_PLANS);
+  });
+  it('recharge packs show GST-inclusive price and what they buy', () => {
+    const v = rechargePackView(unifiedWalletConfig({}));
+    expect(v[0]).toMatchObject({ priceInrInclGst: 20, totalPaise: 2000, credits: 20, chatMessages: 200 });
+    expect(v.every((p) => p.basePaise + p.gstPaise === p.totalPaise)).toBe(true);
   });
   it('shows GST-inclusive prices with an exact paise split', () => {
     expect(gstBreakdown(99, 18)).toEqual({ totalPaise: 9900, basePaise: 8390, gstPaise: 1510 });

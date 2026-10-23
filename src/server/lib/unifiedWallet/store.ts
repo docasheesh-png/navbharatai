@@ -1,6 +1,5 @@
 // UNIFIED CREDIT WALLET — I/O. Reuses the existing wallet money path; adds only:
 //   • a per-minute abuse gate + per-request idempotency record (`unified_wallet_gate/*`), and
-//   • plan entitlement read (`unified_wallet_plans/{uid}`), written by the plan purchase flow.
 // The wallet itself is ONLY touched through walletDebit.ts (hold / release / settle, all transactional,
 // all on the canonical merged wallet) and the shared ledger appender. See docs/UNIFIED_WALLET.md.
 import { createHash } from 'node:crypto';
@@ -8,7 +7,7 @@ import type { Firestore } from 'firebase-admin/firestore';
 import { getServerDb } from '../serverDb';
 import { featureRollupRef } from '../walletFeature';
 import {
-  holdWalletRolledUp, releaseWalletHold, settleWalletHold, walletOwnerId, type WalletHoldResult,
+  holdWalletRolledUp, releaseWalletHold, settleWalletHold, type WalletHoldResult,
 } from '../walletDebit';
 import { milliToInr, type UnifiedWalletConfig } from './policy';
 
@@ -48,16 +47,6 @@ export class UnifiedWalletGate {
       return { ok: true } as const;
     });
   }
-}
-
-/** The plan a signed-in user currently holds, or null. Never throws (a failed read = no plan). */
-export async function activePlanId(uid: string, now = Date.now(), db: Db | null = getServerDb()): Promise<string | null> {
-  if (!db || !uid) return null;
-  try {
-    const snap = await db.doc(`unified_wallet_plans/${uid}`).get();
-    const d = snap.exists ? (snap.data() as { planId?: unknown; periodEndMs?: unknown }) : null;
-    return d && typeof d.planId === 'string' && typeof d.periodEndMs === 'number' && d.periodEndMs > now ? d.planId : null;
-  } catch { return null; }
 }
 
 export interface WalletMoneyOps {
@@ -108,45 +97,3 @@ export async function finishChatMessage(
   }
 }
 
-/**
- * Grant a plan's monthly credits into the ONE wallet, exactly once per (plan, period).
- * NOT wired to payments: the plan purchase flow (billing owner) calls this after a gateway-verified
- * payment. Idempotent through the existing `wallet_ops` dedupe doc (kind 'plan').
- */
-export async function grantPlanCredits(
-  uid: string, planId: string, periodKey: string, cfg: UnifiedWalletConfig,
-): Promise<{ ok: true; granted: boolean; tokens: number } | { ok: false; error: string }> {
-  const plan = cfg.plans.find((p) => p.id === planId);
-  if (!plan) return { ok: false, error: 'Unknown plan' };
-  if (!/^[0-9]{4}-[0-9]{2}$/.test(periodKey)) return { ok: false, error: 'periodKey must be YYYY-MM' };
-  if (plan.monthlyCredits <= 0) return { ok: true, granted: false, tokens: 0 };
-  const { doc, runTransaction, getServerDb: db } = await import('../serverDb');
-  const { WALLET_OPS, walletOpId } = await import('../walletOps');
-  const { mirroredCreditPatch, rupeesToTokens } = await import('../walletMirror');
-  const { ledgerPatch } = await import('../walletStatement');
-  const d = db();
-  if (!d) return { ok: false, error: 'Database not initialized' };
-  try {
-    const ownerId = await walletOwnerId(d, uid);
-    const tokens = rupeesToTokens(plan.monthlyCredits);
-    const walletRef = doc(d, 'user_token_wallets', ownerId);
-    const opRef = doc(d, WALLET_OPS, walletOpId(ownerId, 'plan', `uw-grant_${plan.id}_${periodKey}`));
-    const granted = await runTransaction(d, async (t: any) => {
-      const op = await t.get(opRef);
-      if (op.exists()) return false;
-      const snap = await t.get(walletRef);
-      const w = snap.exists() ? snap.data() : { userId: ownerId, tokenBalance: 0, remaining_balance: 0, walletLedger: [] };
-      const now = new Date().toISOString();
-      t.set(walletRef, {
-        ...w, ...mirroredCreditPatch(w, tokens, 'paid'),
-        ...ledgerPatch(w, { type: 'plan_credit', amountCoinsOrTokens: tokens, description: `${plan.label} — ${plan.monthlyCredits} credits (${periodKey})`, timestamp: now } as any),
-        updatedAt: now,
-      });
-      t.set(opRef, { kind: 'plan', ownerId, ref: `uw-grant_${plan.id}_${periodKey}`, at: now });
-      return true;
-    });
-    return { ok: true, granted, tokens: granted ? tokens : 0 };
-  } catch (e: any) {
-    return { ok: false, error: e?.message || 'Plan grant failed' };
-  }
-}

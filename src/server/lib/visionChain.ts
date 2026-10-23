@@ -20,7 +20,8 @@ import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 // non-empty reply, or null when every allowed provider failed (caller shows an
 // honest message — never a fake result).
 
-import { claudeVisionAnswerModel, glmVisionModels, grokVisionModels, geminiVisionModels, vertexVisionModels } from './visionModels';
+import { claudeVisionAnswerModel, glmVisionModels, grokVisionModels, geminiVisionModels, vertexVisionModels, type VisionTier } from './visionModels';
+import { estimateTextTokens, geminiUsage, reserveFreeTierPaid, settleFreeTierPaid, FREE_TIER_PAID_OUTPUT_QUOTE } from './freeTierPaidCap';
 import { nextPoolKey } from './keyPool';
 import { vertexGenAI } from './vertexGenAI';
 
@@ -50,6 +51,31 @@ export interface VisionOptions {
   timeoutMs?: number;
   /** Optional request admission/deadline cancellation, never changes provider selection. */
   signal?: AbortSignal;
+  /**
+   * Who pays. 'free' = GLM-4.6V-flash → gemini-2.5-flash-lite → gemini-2.5-flash ONLY (no pro, no
+   * Grok, no Claude, env overrides cannot widen it) and every paid call is budgeted against the shared
+   * Free-tier daily cap. Defaults to 'free' whenever Claude is not allowed — the conservative reading.
+   */
+  tier?: VisionTier;
+}
+
+/** The effective tier: anything that may not use Claude is treated as Free (the cheaper, capped chain). */
+export function visionTier(o: Pick<VisionOptions, 'tier' | 'allowClaude'>): VisionTier {
+  if (o.tier === 'free' || !o.allowClaude) return 'free';
+  return o.tier ?? 'paid';
+}
+
+/** Rough upper bound on the input tokens a vision call bills (images ~1.3k, PDFs by size). */
+function visionInputTokens(atts: VisionAttachment[], o: VisionOptions): number {
+  const files = atts.reduce((n, f) => n + (f.type.startsWith('image/') ? 1_600 : Math.ceil((f.base64.length * 3) / 4 / 10)), 0);
+  return Math.min(1_048_576, estimateTextTokens(o.prompt, o.systemPrompt) + files);
+}
+
+/** Free tier: reserve against the shared daily cap before a paid Google call. Paid tier: no-op. */
+async function freeHold(model: string, atts: VisionAttachment[], o: VisionOptions) {
+  if (visionTier(o) !== 'free') return { ok: true as const, hold: null };
+  const hold = await reserveFreeTierPaid({ surface: 'vision-free', model, inputTokens: visionInputTokens(atts, o), outputTokens: FREE_TIER_PAID_OUTPUT_QUOTE });
+  return hold ? { ok: true as const, hold } : { ok: false as const, hold: null };
 }
 
 const DEFAULT_TIMEOUT_MS = 28_000;
@@ -91,7 +117,7 @@ async function tryGlm(atts: VisionAttachment[], o: VisionOptions): Promise<strin
     ...(o.systemPrompt ? [{ role: 'system', content: o.systemPrompt }] : []),
     { role: 'user', content },
   ];
-  for (const model of glmVisionModels()) {
+  for (const model of glmVisionModels(visionTier(o))) {
     o.signal?.throwIfAborted();
     try {
       const r: any = await withTimeout(
@@ -119,8 +145,10 @@ async function tryVertex(atts: VisionAttachment[], o: VisionOptions): Promise<st
     ...atts.map((f) => ({ inlineData: { mimeType: f.type, data: f.base64 } })),
     { text: o.prompt },
   ];
-  for (const modelId of vertexVisionModels()) {
+  for (const modelId of vertexVisionModels(visionTier(o))) {
     o.signal?.throwIfAborted();
+    const budget = await freeHold(modelId, atts, o);
+    if (!budget.ok) return null; // Free daily cap reached → no further paid call (silent)
     try {
       const result = await withTimeout(
         vertex.models.generateContent({
@@ -131,6 +159,7 @@ async function tryVertex(atts: VisionAttachment[], o: VisionOptions): Promise<st
         o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         `Vertex vision (${modelId})`,
       );
+      await settleFreeTierPaid(budget.hold, geminiUsage((result as any)?.usageMetadata));
       const text = result?.text?.trim();
       if (text) return text;
     } catch (err: any) {
@@ -150,14 +179,17 @@ async function tryGeminiKey(atts: VisionAttachment[], o: VisionOptions): Promise
   const config: any = { thinkingConfig: { thinkingBudget: 0 } };
   if (o.systemPrompt) config.systemInstruction = o.systemPrompt;
   if (o.signal) config.abortSignal = o.signal;
-  for (const modelId of geminiVisionModels()) {
+  for (const modelId of geminiVisionModels(visionTier(o))) {
     o.signal?.throwIfAborted();
+    const budget = await freeHold(modelId, atts, o);
+    if (!budget.ok) return null; // Free daily cap reached → no further paid call (silent)
     try {
       const result: any = await withTimeout(
         ai.models.generateContent({ model: modelId, contents: [{ parts }], config }),
         o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         `Gemini vision (${modelId})`,
       );
+      await settleFreeTierPaid(budget.hold, geminiUsage(result?.usageMetadata));
       const text = (result?.text as string | undefined)?.trim();
       if (text) return text;
     } catch (err: any) {
@@ -171,6 +203,7 @@ async function tryGeminiKey(atts: VisionAttachment[], o: VisionOptions): Promise
 async function tryGrok(atts: VisionAttachment[], o: VisionOptions): Promise<string | null> {
   const key = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
   const images = atts.filter((f) => f.type.startsWith('image/'));
+  if (visionTier(o) === 'free') return null; // 🔒 Grok is never a Free-tier rung
   if (!key || images.length === 0) return null;
   const OpenAI = (await import('openai')).default;
   const grok = new OpenAI({ apiKey: key, baseURL: 'https://api.x.ai/v1' });
@@ -182,7 +215,7 @@ async function tryGrok(atts: VisionAttachment[], o: VisionOptions): Promise<stri
     ...(o.systemPrompt ? [{ role: 'system', content: o.systemPrompt }] : []),
     { role: 'user', content },
   ];
-  for (const model of grokVisionModels()) {
+  for (const model of grokVisionModels(visionTier(o))) {
     o.signal?.throwIfAborted();
     try {
       const r: any = await withTimeout(
@@ -202,7 +235,7 @@ async function tryGrok(atts: VisionAttachment[], o: VisionOptions): Promise<stri
 /** Claude vision (images + PDFs). ONLY reachable when allowClaude is true (never Free). */
 async function tryClaude(atts: VisionAttachment[], o: VisionOptions): Promise<string | null> {
   const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
-  if (!key) return null;
+  if (!key || visionTier(o) === 'free') return null; // 🔒 never Claude on Free
   const Anthropic = (await import('@anthropic-ai/sdk')).default;
   const claude = new Anthropic({ apiKey: key });
   const content: any[] = [
@@ -230,9 +263,10 @@ async function tryClaude(atts: VisionAttachment[], o: VisionOptions): Promise<st
  * Slice C); Vertex next because it is the primary Google auth and reads BOTH images and PDFs
  * (an image+PDF batch skips GLM and lands here); then Gemini(key) → Grok. Non-Free adds Claude last.
  */
-export function visionProviderOrder(allowClaude: boolean): VisionResult['provider'][] {
-  const base: VisionResult['provider'][] = ['GLM', 'VERTEX', 'GEMINI', 'GROK'];
-  return allowClaude ? [...base, 'CLAUDE'] : base;
+export function visionProviderOrder(allowClaude: boolean, tier: VisionTier = allowClaude ? 'paid' : 'free'): VisionResult['provider'][] {
+  // 🔒 FREE (admin 2026-10-23): GLM ($0) → Google flash-lite → flash. Grok-4 and Claude are gone.
+  if (tier === 'free' || !allowClaude) return ['GLM', 'VERTEX', 'GEMINI'];
+  return ['GLM', 'VERTEX', 'GEMINI', 'GROK', 'CLAUDE'];
 }
 
 /**
@@ -266,7 +300,7 @@ export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions)
     GROK: tryGrok,
     CLAUDE: tryClaude,
   };
-  for (const provider of visionProviderOrder(o.allowClaude)) {
+  for (const provider of visionProviderOrder(o.allowClaude, visionTier(o))) {
     o.signal?.throwIfAborted();
     try {
       const text = await runners[provider](atts, o);

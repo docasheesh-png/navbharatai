@@ -4,7 +4,8 @@ import { visionProviderOrder, runVisionChain } from './visionChain';
 describe('visionProviderOrder — universe isolation', () => {
   it('Free universe (allowClaude=false) NEVER includes Claude', () => {
     const order = visionProviderOrder(false);
-    expect(order).toEqual(['GLM', 'VERTEX', 'GEMINI', 'GROK']);
+    expect(order).toEqual(['GLM', 'VERTEX', 'GEMINI']); // 2026-10-23: no Grok on Free either
+    expect(order).not.toContain('GROK');
     expect(order).not.toContain('CLAUDE');
   });
 

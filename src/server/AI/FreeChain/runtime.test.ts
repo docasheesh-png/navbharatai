@@ -185,10 +185,10 @@ describe('free chat chain central dispatch', () => {
  it('status never scans event history and reuses the Flash account quota only within each response', async () => {
  const first = await freeChainAdminView();
  expect(first).not.toHaveProperty('metrics'); expect(m.events).not.toHaveBeenCalled(); expect(m.where).not.toHaveBeenCalled();
- expect(m.quota).toHaveBeenCalledTimes(6);
+ expect(m.quota).toHaveBeenCalledTimes(14);
  expect(m.quota.mock.calls.filter(([scope]) => scope.provider === 'glm')).toHaveLength(1);
  expect(first.providers.find(p => p.id === 'glm47')?.usage).toEqual(first.providers.find(p => p.id === 'glm45')?.usage);
- await freeChainAdminView(); expect(m.quota).toHaveBeenCalledTimes(12); expect(m.controls).toHaveBeenCalledTimes(2); expect(m.spend).toHaveBeenCalledTimes(2);
+ await freeChainAdminView(); expect(m.quota).toHaveBeenCalledTimes(28); expect(m.controls).toHaveBeenCalledTimes(2); expect(m.spend).toHaveBeenCalledTimes(2);
  });
  it('explicit metrics are time-filtered and projected with a hard 4096-document query limit', async () => {
  vi.useFakeTimers(); vi.setSystemTime(100_000_000);

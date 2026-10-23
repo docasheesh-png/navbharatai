@@ -12,6 +12,7 @@ import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 
 import { isVisionAttachment } from './attachmentText';
 import { claudeVisionModel, grokVisionModels, geminiVisionModels } from './visionModels';
+import { geminiUsage, reserveFreeTierPaid, settleFreeTierPaid, FREE_TIER_PAID_OUTPUT_QUOTE } from './freeTierPaidCap';
 import { noClaudeZoneActive } from '../AgentV3/noClaudeZone';
 import { DESIGN_CONTRACT_INSTRUCTION } from '../AgentV3/designContract';
 
@@ -28,7 +29,11 @@ const DESCRIBE_INSTRUCTION =
   'Be thorough and factual — do not speculate beyond what is shown.';
 
 const PER_FILE_MAX = 6000;
-interface VisionDispatchOptions { signal?: AbortSignal; beforeDispatch?: () => void }
+interface VisionDispatchOptions {
+  signal?: AbortSignal; beforeDispatch?: () => void;
+  /** NavBharatAI pays (Free professional): flash-lite → flash only, under the shared Free daily cap. */
+  freeTier?: boolean;
+}
 function assertVisionDispatch(opts: VisionDispatchOptions): void { opts.signal?.throwIfAborted(); opts.beforeDispatch?.(); }
 
 function clamp(s: string): string {
@@ -42,7 +47,10 @@ async function describeWithGemini(att: RawAttachment, instruction: string, opts:
   try {
     const { GoogleGenAI } = await import('@google/genai');
     const ai = new GoogleGenAI({ apiKey: key });
-    for (const m of geminiVisionModels()) {
+    for (const m of geminiVisionModels(opts.freeTier ? 'free' : 'paid')) {
+      const hold = opts.freeTier ? await reserveFreeTierPaid({ surface: 'vision-free', model: m, outputTokens: FREE_TIER_PAID_OUTPUT_QUOTE,
+        inputTokens: Math.min(1_048_576, 2_000 + (att.type.startsWith('image/') ? 1_600 : Math.ceil(att.base64.length * 3 / 4 / 10))) }) : null;
+      if (opts.freeTier && !hold) return ''; // Free daily cap reached → silent skip
       try {
         assertVisionDispatch(opts);
         const r = await ai.models.generateContent({
@@ -50,6 +58,7 @@ async function describeWithGemini(att: RawAttachment, instruction: string, opts:
           contents: [{ parts: [{ text: instruction }, { inlineData: { mimeType: att.type, data: att.base64 } }] }],
           config: { thinkingConfig: { thinkingBudget: 0 }, ...(opts.signal ? { abortSignal: opts.signal } : {}) } as any,
         });
+        await settleFreeTierPaid(hold, geminiUsage((r as any).usageMetadata));
         const t = (r.text || '').trim();
         if (t) return t;
       } catch { assertVisionDispatch(opts); /* try next model */ }
@@ -60,7 +69,7 @@ async function describeWithGemini(att: RawAttachment, instruction: string, opts:
 
 /** Describe one image via Grok vision (cheap fallback; Grok can't read PDFs). */
 async function describeWithGrok(att: RawAttachment, instruction: string, opts: VisionDispatchOptions): Promise<string> {
-  if (att.type === 'application/pdf') return '';
+  if (att.type === 'application/pdf' || opts.freeTier) return ''; // 🔒 never Grok on Free
   const key = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
   if (!key) return '';
   try {
@@ -91,7 +100,7 @@ async function describeWithClaude(att: RawAttachment, instruction: string, opts:
   // even as a last resort. This is the raw-SDK sibling of the ClaudeClient chokepoint (rule 3 — hunt the
   // siblings): the routing policy pins free/weak vision to Gemini/Grok. Returns '' so the caller records
   // an honest "could not be read" rather than silently spending NavBharatAI's Claude budget.
-  if (noClaudeZoneActive()) return '';
+  if (noClaudeZoneActive() || opts.freeTier) return '';
   const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
   if (!key) return '';
   try {
@@ -123,7 +132,8 @@ export type VisionProvider = 'gemini' | 'grok' | 'claude';
  *   useClaude (Opus tiers) → Claude → Gemini → Grok (highest-fidelity read first).
  *   default                → Gemini → Grok → Claude (cheap first, Claude last resort).
  */
-export function visionProviderChain(opts: { useClaude?: boolean; noClaude?: boolean } = {}): VisionProvider[] {
+export function visionProviderChain(opts: { useClaude?: boolean; noClaude?: boolean; freeTier?: boolean } = {}): VisionProvider[] {
+  if (opts.freeTier) return ['gemini']; // Free professional: Gemini flash-lite → flash ONLY (2026-10-23)
   if (opts.noClaude) return ['gemini', 'grok'];
   if (opts.useClaude) return ['claude', 'gemini', 'grok'];
   return ['gemini', 'grok', 'claude'];
@@ -161,7 +171,7 @@ export function resolveVisionInstruction(
  */
 export async function describeVisionAttachments(
   atts: RawAttachment[],
-  opts: { useClaude?: boolean; noClaude?: boolean; designContract?: boolean; instruction?: string; onGatewayResult?: (result: AIProviderResponse) => void } & VisionDispatchOptions = {},
+  opts: { useClaude?: boolean; noClaude?: boolean; freeTier?: boolean; designContract?: boolean; instruction?: string; onGatewayResult?: (result: AIProviderResponse) => void } & VisionDispatchOptions = {},
 ): Promise<string> {
   const vision = (atts || []).filter((a) => a && a.base64 && isVisionAttachment(a.type, a.name));
   if (vision.length === 0) return '';

@@ -4476,6 +4476,16 @@ or protect against upgrades/external account traffic.
 | Name | Code default / interpretation |
 | --- | --- |
 | `FREE_CHAIN_ENABLED` | OFF. Deployment gate; saved admin controls cannot override OFF. |
+| `FREE_CHAIN_MAX_ATTEMPTS` | 4; integer 1–6. Max physical provider calls per Free chat turn; skipped rungs do not count. See `docs/FREE_CHAT_TIERS.md`. |
+| `FREE_CHAIN_STICKY_SPREAD` | OFF. Rotates equal-cost free Tier-1 rungs by a stable uid hash (continuity + load spread). Never moves a paid rung. |
+| `FREE_CHAIN_GLMX_API_KEY` / `FREE_CHAIN_DEEPINFRA_API_KEY` / `FREE_CHAIN_OPENAI_API_KEY` | Secret, unset. One key each for paid Tier-3 rungs GLM-4.7-FlashX, Nemotron 3 Nano (DeepInfra), GPT-5 Nano. Comma lists rejected. |
+| `FREE_CHAIN_GLMX_RATE_VERIFIED_UNTIL` / `FREE_CHAIN_DEEPINFRA_RATE_VERIFIED_UNTIL` / `FREE_CHAIN_OPENAI_RATE_VERIFIED_UNTIL` | Unset ⇒ rung skipped (`rate-card-unverified`). Owner attestation date after checking the official price page. |
+| `FREE_CHAIN_GLMX_PRICE_IN_PER_MTOK` / `_PRICE_OUT_PER_MTOK` (also `DEEPINFRA_`, `OPENAI_`) | Official list price default (0.07/0.40, 0.05/0.20, 0.05/0.40). May be raised, never lowered below list. |
+| `FREE_CHAIN_GLMX_MODEL` / `FREE_CHAIN_DEEPINFRA_MODEL` / `FREE_CHAIN_OPENAI_MODEL` | Pinned ids `glm-4.7-flashx`, `nvidia/Nemotron-3-Nano-30B-A3B`, `gpt-5-nano`; any other value is rejected. |
+| `FREE_CHAIN_NVIDIA_API_KEY` / `FREE_CHAIN_MODELSCOPE_API_KEY` / `FREE_CHAIN_LLM7_API_KEY` | Secret, unset. Registered rungs blocked by provider terms (non-production). Dispatch also needs `FREE_CHAIN_<P>_WRITTEN_APPROVAL=on`. |
+| `FREE_CHAIN_BLUESMINDS_API_KEY` / `FREE_CHAIN_REQUESTY_API_KEY` | Secret, unset. Terms/free tier unverified; blocked unless `FREE_CHAIN_<P>_WRITTEN_APPROVAL=on`. |
+| `FREE_CHAIN_<NVIDIA\|MODELSCOPE\|LLM7\|BLUESMINDS\|REQUESTY>_WRITTEN_APPROVAL` | OFF. Set only when the owner holds written commercial permission from that provider. |
+| `FREE_CHAIN_LLM7_FREE_VERIFIED_UNTIL` | Unset. Free-plan attestation for LLM7 (also requires written approval). |
 | `FREE_CHAIN_ROLLOUT_PERCENT` | 0; whole integer 0–100. Used when no saved admin override exists. |
 | `FREE_CHAIN_ALLOW_UIDS` | Empty comma-separated verified UID allowlist. Allowlisted users can be selected even at 0%. Never include secrets. |
 | `FREE_CHAIN_ORDER` | `glm47,glm45,groq,openrouter,cloudflare,gemini,deepseek`; unique known IDs, omitted rungs allowed, paid rung must remain last when present. Empty/unset uses default, not an empty chain. |
@@ -4486,6 +4496,7 @@ or protect against upgrades/external account traffic.
 | `FREE_CHAIN_CACHE_TTL_S` | 86400; integer 60–86400. Read expiry is enforced; cloud TTL deployment is a separate check. |
 | `FREE_CHAIN_QUOTA_MARGIN` | 0.9; decimal 0.1–0.95. Applied to raw local quota ceilings before dispatch. |
 | `FREE_CHAIN_PAID_DAILY_CAP_USD` | 10; exact decimal USD 0–10 (owner-authorized hard maximum). Process-configured ceiling for the TOTAL shared reservation budget across all paid fallback providers in this Free Chat chain per IST day, not a per-provider allowance or an all-inclusive provider invoice cap. Configuration observation initializes or only lowers the non-expiring shared `paid_budget_policy`, including 0; a more permissive revision never raises it. Separate from existing funded builder wallet budgets; does not fund or change them. 0 blocks new paid reservations, not already-dispatched work. |
+| `FREE_TIER_PAID_DAILY_CAP_USD` | 10; decimal USD 0–10 (clamped to the owner ceiling; invalid = 0 = closed). Daily cap for every Free-tier PAID rung OUTSIDE FreeChain: legacy `buildFree` (flash-lite / gpt-5-nano / flash), `professional-free-fallback` (Teacher AI, professionals, Design, Debug, App-debug), Doctor AI/SDA free path, and Free vision (chat photo/PDF, screenshot→prompt, avatar check, Free professional describe). Reserves against the SAME shared `free_chat_chain/paid_day_<IST day>` authority and alerts as FreeChain (`lib/freeTierPaidCap.ts`), so both draw on ONE total; a lower value also lowers the shared policy. No Firestore = paid Free rungs refused (fail-closed). Cap reached → silent fallback to the busy line in the user's language. |
 | `FREE_CHAIN_PAID_PER_USER_DAILY` | 20; integer 0–1000. Paid attempts per verified UID per IST day. |
 | `FREE_CHAIN_DEEPSEEK_PRICE_IN_PER_MTOK` | 0.30; decimal 0.30–1000 USD/million input tokens. Peak/cache-miss reservation rate; not a billing-owner rate-card override. |
 | `FREE_CHAIN_DEEPSEEK_PRICE_OUT_PER_MTOK` | 1.20; decimal 1.20–1000 USD/million output tokens. |

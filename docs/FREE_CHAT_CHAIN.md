@@ -6,6 +6,10 @@ credential creation, provider inference, live multilingual evaluation, purchase,
 or deployment was performed for this change. Offline tests are not evidence that
 an existing account is free, a model is available, or the launch acceptance bar is met.
 
+> **2026-10-23:** the owner's Tier 1 → Tier 2 → Tier 3 module (new providers, paid Tier 3,
+> max attempts, sticky spread, localized busy line, cost estimate) is documented in
+> [`FREE_CHAT_TIERS.md`](./FREE_CHAT_TIERS.md). Default order changed accordingly.
+
 ## Scope and policy precedence
 
 Only authenticated, text-only NavBharat Free Chat requests admitted by the existing
@@ -434,3 +438,21 @@ request/usage evidence can establish physical inference or billed usage.
 Configuration caches only validated timezone identifiers (bounded to 32); it never
 caches quota windows or eligibility. Actual reservations still calculate current
 civil-day boundaries, including Pacific DST. A changed timezone is revalidated.
+
+## Free-tier paid rungs outside FreeChain (2026-10-23)
+
+Every Free-tier paid call that does NOT go through FreeChain now draws on the same owner-funded daily
+budget (`FREE_TIER_PAID_DAILY_CAP_USD`, default $10, shared authority `free_chat_chain/paid_day_<IST>`):
+
+| Surface | Free order | Notes |
+|---|---|---|
+| Legacy Free chat (`buildFree`) | GLM-4.7-flash → flash-lite → gpt-5-nano → flash | paid rungs wrapped by `cappedFreeTierRung` |
+| Teacher AI / professionals / Design / Debug / App-debug | GLM-4.7-flash → flash-lite → flash | **sequential** (`route`), not raced: one answer = one bill |
+| Doctor AI / SDA (free) | GLM → Vertex flash-lite → flash → Gemini flash-lite → flash | never 2.5-pro, Grok or Claude |
+| Free vision (chat photo/PDF, screenshot→prompt, avatar) | GLM-4.6V-flash → Vertex flash-lite → flash → Gemini flash-lite → flash | Grok-4 / 2.5-pro removed |
+| Free professional image describe | Gemini flash-lite → flash | no Grok, no Claude |
+
+`VISION_VERTEX_MODELS` / `VISION_GEMINI_MODELS` / `VISION_GROK_MODELS` tune the PAID tier only; Free
+lists are fixed by an allowlist (`visionModels.ts`, `freeTierPaidCap.ts`). `tests/freeTierPaidLeaks.test.ts`
+fails CI if any Free path names `gemini-*-pro`, Grok or Claude. When the cap is reached the turn falls
+back silently to the busy line in the user's language (Hindi / Hinglish / English).

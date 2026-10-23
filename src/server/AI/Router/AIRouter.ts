@@ -3,6 +3,7 @@ import { strictFreeRequired, StrictFreeCapabilityError } from '../inferencePolic
 import { strictFreeText } from '../LiveRegistry/runtime';
 import type { FreeTextResult } from '../LiveRegistry/dispatcher';
 import { assertAiAvailable } from '../../lib/aiMaintenance';
+import { freeBusyMessage, isFreeTierUniverse } from '../../lib/freeBusyMessage';
 import { maybeGatewayText } from '../InferenceGateway/runtime';
 
 import { AIProvider, AIProviderResponse, ProviderTelemetry } from './ProviderTypes';
@@ -388,7 +389,7 @@ export class AIRouter {
     }
     // Every rung failed. An HONEST refusal, never a silent escalation to something dearer — the same
     // posture `buildProfessionalFreeFallback` states for the free build path.
-    if (!signal?.aborted) onChunk('AI service temporarily busy. Please try again. 🙏', 'notice');
+    if (!signal?.aborted) onChunk(isFreeTierUniverse(this.universe) ? freeBusyMessage(prompt) : 'AI service temporarily busy. Please try again. 🙏', 'notice');
     return { ok: false, reason: 'all-failed' };
   }
 
@@ -603,7 +604,7 @@ export class AIRouter {
     recordRouterOutcome(false);
     return {
       response: {
-        content: 'The AI service is temporarily busy. Please try again in 1-2 minutes. 🙏',
+        content: isFreeTierUniverse(this.universe) ? freeBusyMessage(prompt) : 'The AI service is temporarily busy. Please try again in 1-2 minutes. 🙏',
         latencyMs: 0,
         provider: 'GEMINI',
         model: 'fallback',

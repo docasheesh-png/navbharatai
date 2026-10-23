@@ -3,7 +3,7 @@ import { assertLegacyInferenceAllowed, StrictFreeCapabilityError } from '../../i
 import type { AIProvider, AIProviderResponse, ProviderUsage } from '../../Router/ProviderTypes';
 
 export type AdapterConfig = {
-  provider: 'GLM' | 'GEMINI' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK';
+  provider: 'GLM' | 'GEMINI' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK' | 'OPENAI' | 'DEEPINFRA' | 'NVIDIA' | 'MODELSCOPE' | 'LLM7' | 'BLUESMINDS' | 'REQUESTY';
   model: string;
   key: string;
   baseURL: string;
@@ -79,10 +79,19 @@ const ENDPOINTS: Record<AdapterConfig['provider'], RegExp> = {
   GROQ: /^https:\/\/api\.groq\.com\/openai\/v1\/?$/,
   CLOUDFLARE: /^https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/[a-fA-F0-9]{32}\/ai\/v1\/?$/,
   DEEPSEEK: /^https:\/\/api\.deepseek\.com\/v1\/?$/,
+  OPENAI: /^https:\/\/api\.openai\.com\/v1\/?$/,
+  DEEPINFRA: /^https:\/\/api\.deepinfra\.com\/v1\/openai\/?$/,
+  NVIDIA: /^https:\/\/integrate\.api\.nvidia\.com\/v1\/?$/,
+  MODELSCOPE: /^https:\/\/api-inference\.modelscope\.cn\/v1\/?$/,
+  LLM7: /^https:\/\/api\.llm7\.io\/v1\/?$/,
+  BLUESMINDS: /^https:\/\/api\.bluesminds\.com\/v1\/?$/,
+  REQUESTY: /^https:\/\/router\.requesty\.ai\/v1\/?$/,
 };
 const DEFAULT_ENV: Record<AdapterConfig['provider'], string> = {
   GLM: 'GLM_API_KEY', GEMINI: 'GEMINI_API_KEY', GROQ: 'GROQ_API_KEY',
   CLOUDFLARE: 'CLOUDFLARE_API_TOKEN', DEEPSEEK: 'DEEPSEEK_API_KEY',
+  OPENAI: 'FREE_CHAIN_OPENAI_API_KEY', DEEPINFRA: 'FREE_CHAIN_DEEPINFRA_API_KEY', NVIDIA: 'FREE_CHAIN_NVIDIA_API_KEY',
+  MODELSCOPE: 'FREE_CHAIN_MODELSCOPE_API_KEY', LLM7: 'FREE_CHAIN_LLM7_API_KEY', BLUESMINDS: 'FREE_CHAIN_BLUESMINDS_API_KEY', REQUESTY: 'FREE_CHAIN_REQUESTY_API_KEY',
 };
 const FINISH_REASONS = new Set<FreeChainFinishReason>(['stop', 'length', 'content_filter', 'tool_calls', 'function_call']);
 const COUNTER_HEADERS = [
@@ -215,7 +224,7 @@ function validatedExtraBody(extra: AdapterConfig['extraBody']): Record<string, u
       result[name] = value;
     } else if (name === 'seed' && typeof value === 'number' && Number.isSafeInteger(value)) {
       result.seed = value;
-    } else if (name === 'reasoning_effort' && value === 'none') {
+    } else if (name === 'reasoning_effort' && (value === 'none' || value === 'minimal')) {
       result.reasoning_effort = value;
     } else if (name === 'thinking' && record(value)?.type === 'disabled' && Object.keys(record(value)!).length === 1) {
       result.thinking = { type: 'disabled' };
@@ -316,7 +325,7 @@ export class OpenAiCompatProvider implements AIProvider {
         ...this.#config.extraBody,
         ...(['DEEPSEEK', 'GLM'].includes(this.name) ? { thinking: { type: 'disabled' } } : {}),
         model: this.#config.model, messages,
-        ...(this.name === 'GROQ' ? { max_completion_tokens: this.#config.maxOutputTokens } : { max_tokens: this.#config.maxOutputTokens }),
+        ...(this.name === 'GROQ' || this.name === 'OPENAI' ? { max_completion_tokens: this.#config.maxOutputTokens } : { max_tokens: this.#config.maxOutputTokens }),
       };
       const options = { signal, maxRetries: 0, timeout: this.#config.timeoutMs };
       let content = '';

@@ -9,6 +9,7 @@ import { allowedOnFreeTier, chatCostIndex, freeTierCeiling } from './freeTierCos
 import { GlmProvider } from './Router/providers/GlmProvider';
 import { AIProvider } from './Router/ProviderTypes';
 import { AIRouter } from './Router/AIRouter';
+import { cappedFreeTierRung, isFreeTierPaidModelAllowed } from '../lib/freeTierPaidCap';
 
 // Slot factory — wraps a base provider with a specific model override
 function slot(base: AIProvider, priority: number, model: string): AIProvider {
@@ -121,7 +122,9 @@ export class AIRouterManager {
         );
         return;
       }
-      try { router.registerProvider(slot(prov, priority, model)); } catch {}
+      // 🔒 Free-tier PAID rung: model allowlist + the ONE shared daily $ cap (lib/freeTierPaidCap.ts).
+      if (!isFreeTierPaidModelAllowed(model)) { console.warn(`[ROUTER_MGR] FREE: REFUSED ${model} — not on the Free paid allowlist`); return; }
+      try { router.registerProvider(cappedFreeTierRung(slot(prov, priority, model), 'free-chat')); } catch {}
     };
 
     // ── THE LADDER (admin-decided 2026-09-15) ────────────────────────────────────────────────────
@@ -265,11 +268,14 @@ export class AIRouterManager {
   // honest "busy" — a free build must never silently escalate to a paid provider.
   private static buildProfessionalFreeFallback(): AIRouter {
     const router = new AIRouter("professional-free-fallback");
-    console.log('[ROUTER_MGR] Building PROFESSIONAL-FREE-FALLBACK chain: Vertex only (gemini-2.5-flash → -flash-lite)');
+    console.log('[ROUTER_MGR] Building PROFESSIONAL-FREE-FALLBACK chain: Vertex only (gemini-2.5-flash-lite → -flash), sequential, capped');
+    // 2026-10-23: cheapest FIRST, and walked SEQUENTIALLY by the caller (`route`, never `routeRaced`):
+    // the old race fired both rungs at once, so one answer paid two bills. Each rung is budgeted
+    // against the shared Free-tier daily cap (lib/freeTierPaidCap.ts).
     try {
       const vertex = new VertexProvider();
-      router.registerProvider(slot(vertex, 1, 'gemini-2.5-flash'));
-      router.registerProvider(slot(vertex, 2, 'gemini-2.5-flash-lite'));
+      router.registerProvider(cappedFreeTierRung(slot(vertex, 1, 'gemini-2.5-flash-lite'), 'professional-free-fallback'));
+      router.registerProvider(cappedFreeTierRung(slot(vertex, 2, 'gemini-2.5-flash'), 'professional-free-fallback'));
     } catch {}
     return router;
   }

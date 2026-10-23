@@ -8,6 +8,8 @@ import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { clientPlatform } from '../AppContext/iosPurchaseGuard';
 import { extractDocumentText } from '../lib/attachmentText';
 import { claudeVisionAnswerModel, grokVisionModels, geminiVisionModels, vertexVisionModels } from '../lib/visionModels';
+import { estimateTextTokens, geminiUsage, reserveFreeTierPaid, settleFreeTierPaid, FREE_TIER_PAID_OUTPUT_QUOTE, type FreeTierPaidHold } from '../lib/freeTierPaidCap';
+import { freeBusyMessage } from '../lib/freeBusyMessage';
 import { vertexGenAI } from '../lib/vertexGenAI';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { computeClinicalTool, AVAILABLE_CLINICAL_TOOLS } from '../lib/clinical/calculators';
@@ -513,6 +515,17 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // Each racer returns what it answered AND what it cost (forensic audit 2026-10-04, P1): a paid turn
       // answered by the race used to leave `sdaSpend` null, so it was 'unmeasured' and charged ₹0 — every
       // paid Doctor AI turn after the free ones was free. The provider's own usage is the bill; never invented.
+      // 🔒 FREE-TIER CAP + ALLOWLIST (2026-10-23): on the free tier every Google door uses ONLY
+      // flash-lite → flash (never 2.5-pro, whatever VISION_* says) and each paid call first reserves
+      // against the ONE shared Free-tier daily $ cap (lib/freeTierPaidCap.ts). Refused → skip silently.
+      const sdaVisionTier = sdaTier === 'free' ? 'free' as const : 'paid' as const;
+      const sdaFreeHold = async (model: string): Promise<{ ok: boolean; hold: FreeTierPaidHold | null }> => {
+        if (sdaTier !== 'free') return { ok: true, hold: null };
+        const files = reportFiles.reduce((n: number, f: any) => n + (String(f.fileType).startsWith('image/') ? 1_600 : Math.ceil(String(f.fileData ?? '').length * 3 / 4 / 10)), 0);
+        const hold = await reserveFreeTierPaid({ surface: 'sda-free', model, outputTokens: FREE_TIER_PAID_OUTPUT_QUOTE,
+          inputTokens: Math.min(1_048_576, estimateTextTokens(SDA_SYSTEM_FINAL, message, ...historyForAI.map((m: any) => String(m.content ?? ''))) + files) });
+        return { ok: !!hold, hold };
+      };
       type SdaRacerFn = (signal: AbortSignal) => Promise<{ text: string; spend: ChatTurnUsage }>;
       const sdaRacers: SdaRacerFn[] = [];
 
@@ -525,7 +538,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
 
         // For images: use current Grok vision-capable models (shared list, env-overridable)
         // For text: use standard Grok-3 models
-        const models = isImage ? grokVisionModels() : ['grok-3', 'grok-3-fast'];
+        const models = isImage ? grokVisionModels(sdaVisionTier) : ['grok-3', 'grok-3-fast'];
         const grokImages = reportFiles.filter((f) => f.fileType.startsWith('image/'));
         const userContent: any = grokImages.length > 0
           ? [
@@ -550,12 +563,15 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       if (sdaGeminiKey && (sdaTier === 'paid' || isImage || isPDF)) sdaRacers.push(async (signal) => {
         const { GoogleGenAI } = await import('@google/genai');
         const contents = buildGeminiContents();
-        for (const m of geminiVisionModels()) {
+        for (const m of geminiVisionModels(sdaVisionTier)) {
+          const budget = await sdaFreeHold(m);
+          if (!budget.ok) break;
           try {
             // 🔴 The system prompt goes in `config` (Q-769 sibling): passed at the top level, cast `as any`, it was
             // silently dropped — Doctor AI answered on this rung WITHOUT its own instructions. And the race's
             // signal now reaches the request instead of only the catch below.
             const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, contents, config: { systemInstruction: SDA_SYSTEM_FINAL, thinkingConfig: { thinkingBudget: 0 }, abortSignal: signal } });
+            await settleFreeTierPaid(budget.hold, geminiUsage(r.usageMetadata));
             const t = r.text || '';
             if (t.trim()) return { text: t, spend: { provider: 'GEMINI', model: m, inputTokens: r.usageMetadata?.promptTokenCount, outputTokens: r.usageMetadata?.candidatesTokenCount } };
           } catch (e: any) { if (signal.aborted) throw e; console.warn(`[SDA] Gemini ${m}: ${e.message}`); }
@@ -618,9 +634,12 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           const vertexAI = vertexGenAI();
           if (!vertexAI) throw new Error('No Vertex project ID');
           const contents = buildGeminiContents();
-          for (const modelName of vertexVisionModels()) {
+          for (const modelName of vertexVisionModels(sdaVisionTier)) {
+            const budget = await sdaFreeHold(modelName);
+            if (!budget.ok) break;
             try {
               const result = await vertexAI.models.generateContent({ model: modelName, contents, config: { systemInstruction: SDA_SYSTEM_FINAL } });
+              await settleFreeTierPaid(budget.hold, geminiUsage(result.usageMetadata));
               reply = result.text || '';
               if (reply) {
                 const um = result.usageMetadata;
@@ -642,10 +661,13 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         try {
           const { GoogleGenAI } = await import('@google/genai');
           const contents = buildGeminiContents();
-          for (const m of geminiVisionModels()) {
+          for (const m of geminiVisionModels(sdaVisionTier)) {
+            const budget = await sdaFreeHold(m);
+            if (!budget.ok) break;
             try {
               // The system prompt in `config`, where the SDK reads it (see the race above — it was dropped here too).
               const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, contents, config: { systemInstruction: SDA_SYSTEM_FINAL, thinkingConfig: { thinkingBudget: 0 } } });
+              await settleFreeTierPaid(budget.hold, geminiUsage(r.usageMetadata));
               const t = r.text || '';
               if (t.trim()) {
                 reply = t;
@@ -690,7 +712,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         // Admin-facing detail stays in the log; the doctor gets an honest, on-brand busy message
         // (never internal provider/key detail — the client now shows this text directly).
         console.error('[SDA] All AI providers failed — returning 503');
-        return res.status(503).json({ error: 'Doctor AI is busy right now — please try again in a moment.' });
+        return res.status(503).json({ error: sdaTier === 'free' ? freeBusyMessage(message) : 'Doctor AI is busy right now — please try again in a moment.' });
       }
 
       // ── Extract CLINICAL_JSON from reply and persist to session store ──────────

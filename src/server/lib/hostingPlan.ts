@@ -27,6 +27,8 @@
  * already-granted plans keep their badge-removal (taking back something paid-for would be theft).
  */
 
+import { hostingOverageInrPerGb } from '../AgentV3/hostingCost';
+import { usdInrRate } from './UsdInrRate';
 import { BoundedCache } from './boundedCache';
 import { doc, getDoc, runTransaction, getServerDb } from './serverDb';
 import { computeDebitedWallet } from './walletDebit';
@@ -40,7 +42,7 @@ import { envFlag } from './envFlag';
 import { issueBillOfSupply } from './receiptStore';
 import {
   HOSTING_TIERS, LEGACY_HOSTING_PLAN_ID, hostingAgreementTerms, isKnownPlanId, purchasableTier,
-  tierForPlanId, tierRank, HOSTING_OVERAGE_INR_PER_GB, type HostingTier, type HostingTierId,
+  tierForPlanId, tierRank, type HostingTier, type HostingTierId,
 } from '../../lib/hostingTiers';
 import { activeAddonCount } from '../../lib/hostingAddons';
 import { proPlan, proPriceInr } from '../../lib/planModel';
@@ -644,7 +646,8 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
     priceInr: hostingPlanPriceInr(), days: HOSTING_PLAN_DAYS,
     // PLAN_MODEL_PRO on ⇒ new buyers are shown Pro; off ⇒ exactly today's list.
     tiers: proOffered() ? [proPlan(process.env)] : HOSTING_TIERS, tier: null, renewalPriceInr: hostingPlanPriceInr(),
-    overageInrPerGb: HOSTING_OVERAGE_INR_PER_GB,
+    // Shown = charged: the same function the billing sweep uses (₹20 on main; derived when unified wallet on).
+    overageInrPerGb: hostingOverageInrPerGb(process.env, usdInrRate()),
     extraSites: 0,
     extraDomains: 0,
   };

@@ -1,3 +1,5 @@
+import { unifiedWalletEnabled, unifiedMargin, derivedPricePaise } from '../lib/unifiedWallet/policy';
+import { HOSTING_OVERAGE_INR_PER_GB } from '../../lib/hostingTiers';
 // WHAT A HOSTED APP ACTUALLY COST, AND WHAT THE USER PAYS FOR IT (ROADMAP §11, slice 2. Admin
 // decision D5, 2026-09-07: "hamara jo bhi kharcha ayega, usme 20+% add kar ke user se charge karenge").
 //
@@ -101,10 +103,25 @@ export function hostingRates(env: NodeJS.ProcessEnv = process.env): HostingRates
 export function hostingMarkupPct(env: NodeJS.ProcessEnv = process.env): number {
   // Empty-string-first, for the same reason as `rate()` above: `Number('')` is 0, so an unset value
   // would silently mean "charge cost with NO markup" while looking deliberately configured.
+  // UNIFIED WALLET (flag, default OFF): the central margin — 2.5× real cost = +150%.
+  if (unifiedWalletEnabled(env)) return Math.round((unifiedMargin('hosting', env) - 1) * 100);
   const s = String(env.NAVBHARAT_HOSTING_MARKUP_PCT ?? '').trim();
   if (s === '') return 20;
   const n = Number(s);
   return Number.isFinite(n) && n >= 0 ? n : 20;
+}
+
+/**
+ * ₹ per GB above a hosting plan's allowance. Flag OFF: the published ₹20/GB, unchanged. Flag ON with a real
+ * egress rate configured (NAVBHARAT_RATE_EGRESS_GIB, from the Google bill): ceil(egress $/GiB × USD→INR ×
+ * margin) to the paisa. Flag ON without that rate: no meter → keep ₹20/GB (never invent a cost).
+ */
+export function hostingOverageInrPerGb(env: NodeJS.ProcessEnv = process.env, usdInr = 0): number {
+  if (!unifiedWalletEnabled(env)) return HOSTING_OVERAGE_INR_PER_GB;
+  const egress = hostingRates(env).egressGib;
+  if (egress === null || !(usdInr > 0)) return HOSTING_OVERAGE_INR_PER_GB;
+  const paise = derivedPricePaise(egress * usdInr, unifiedMargin('hosting', env));
+  return paise > 0 ? paise / 100 : HOSTING_OVERAGE_INR_PER_GB;
 }
 
 export interface HostingCost {

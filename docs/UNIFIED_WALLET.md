@@ -19,10 +19,26 @@ request ─► per-minute gate + once-only request id (unified_wallet_gate, Fire
 ```
 Low balance (< 5 credits) adds header `X-NB-Wallet-Notice` (URI-encoded, user's language).
 
-## Pro builds
-Unchanged debit path (`debitWalletForBuild`, same wallet). When enabled the bill is
-`billable real cost × UNIFIED_WALLET_BUILD_MARGIN` (default 2.5, pending owner) instead of the tiered ×4/×3 curve.
-Opus flat billing, per-tier billing and all `cancelledBuildBilling` rules are untouched.
+## One margin everywhere (owner 2026-10-23: "asli kharche me 2.5 guna, har jagah")
+`UNIFIED_WALLET_MARGIN` (default **2.5**), optional per-service `UNIFIED_WALLET_MARGIN_<SERVICE>`
+(AI, BUILD, HOSTING, …), bounded 1–10. Applied only while `UNIFIED_WALLET_ENABLED` is on.
+
+| Service | Main (flag off) | Unified wallet on |
+|---|---|---|
+| Pro app builds | real × 4 (first $1) then × 3 | real × 2.5 (`tieredMarkupUsd(…, 'build')`) |
+| Doctor AI / SDA / vision, Professionals, AI tools, app assistant, Developer API | same ×4/×3 curve (`chatSpend`) | real × 2.5 |
+| Opus build tier | flat real × 2 | unchanged (flat, separate path) |
+| Hosting real-cost markup (`hostingMarkupPct`) | +20% | +150% (= 2.5×) |
+| Hosting overage (frontend + backend) | ₹20/GB | ceil(egress $/GiB × USD→INR × 2.5) when `NAVBHARAT_RATE_EGRESS_GIB` is set; else ₹20 |
+| NavBharatAI Chat past free quota | — | ₹0.10/message (owner rate; ≈6–7× a ~₹0.015 real cost, not 2.5×) |
+| Images (paid rungs) | ₹1/image after 5 free | unchanged — **no per-image cost meter** |
+| Voice | 2 paise/second | unchanged — **no cost meter** |
+| APK | ₹1 | unchanged — **no cost meter** |
+| Hosting plans / database / add-ons | fixed plan prices | unchanged — prepaid plans, not a metered cost |
+| App Mart purchase | seller price | unchanged — not a cost of ours |
+
+Cancelled-build rules (`cancelledBuildBilling.ts`) are untouched; they act on the bill computed above.
+Derived fixed prices use `derivedPricePaise(realInr, margin)` = ceil to the paisa.
 
 ## Pay-and-use only (owner decisions 2026-10-23)
 - No subscriptions. The user recharges the wallet; 1 credit = ₹1.

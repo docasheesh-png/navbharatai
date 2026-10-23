@@ -42,7 +42,7 @@ export interface UnifiedWalletConfig {
   chatMessageMilli: number;
   guestDailyMessages: number;
   signedInDailyMessages: number;
-  /** Build charge = real provider cost × this (replaces the tiered ×4/×3 curve only when enabled). */
+  /** Pro build margin = unifiedMargin('build') — kept as a field for callers/tests. */
   buildMargin: number;
   perMinuteSignedIn: number;
   perMinuteGuest: number;
@@ -66,7 +66,7 @@ export function unifiedWalletConfig(env: Env = process.env): UnifiedWalletConfig
     chatMessageMilli: chat % MILLI_PER_TOKEN === 0 ? chat : 100,
     guestDailyMessages: int(env.UNIFIED_WALLET_GUEST_DAILY, 5, 0, 1000),
     signedInDailyMessages: int(env.UNIFIED_WALLET_SIGNED_IN_DAILY, 25, 0, 100_000),
-    buildMargin: num(env.UNIFIED_WALLET_BUILD_MARGIN, 2.5, 1, 10),
+    buildMargin: unifiedMargin('build', env),
     perMinuteSignedIn: int(env.UNIFIED_WALLET_PER_MINUTE, 20, 1, 10_000),
     perMinuteGuest: int(env.UNIFIED_WALLET_GUEST_PER_MINUTE, 6, 1, 10_000),
     lowBalanceCredits: int(env.UNIFIED_WALLET_LOW_BALANCE_CREDITS, 5, 0, 100_000),
@@ -85,6 +85,26 @@ export function milliToInr(milli: number): number { return milliToTokens(milli) 
 /** Daily free-message allowance before the wallet is debited: guest 5, signed-in 25 (config). */
 export function dailyAllowance(cfg: UnifiedWalletConfig, who: { signedIn: boolean }): number {
   return who.signedIn ? cfg.signedInDailyMessages : cfg.guestDailyMessages;
+}
+
+/**
+ * ONE CENTRAL MARGIN (owner 2026-10-23: "asli kharche me 2.5 guna, har jagah"). Price = real cost × margin for
+ * every metered service while UNIFIED_WALLET_ENABLED is on. `UNIFIED_WALLET_MARGIN` (default 2.5), optional
+ * per-service override `UNIFIED_WALLET_MARGIN_<SERVICE>` (e.g. UNIFIED_WALLET_MARGIN_BUILD=3).
+ * Bounds 1–10; anything else falls back so a typo can never bill below cost or wildly above it.
+ */
+export const DEFAULT_UNIFIED_MARGIN = 2.5;
+export type MarginService = 'ai' | 'build' | 'hosting' | 'database' | 'image' | 'apk' | 'voice' | 'vision' | 'search' | 'api';
+export function unifiedMargin(service: MarginService | string = 'ai', env: Env = process.env): number {
+  const base = num(env.UNIFIED_WALLET_MARGIN, DEFAULT_UNIFIED_MARGIN, 1, 10);
+  const key = `UNIFIED_WALLET_MARGIN_${String(service).toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+  return num(env[key], base, 1, 10);
+}
+
+/** Fixed-price service, derived: ceil(real cost ₹ × margin) to the paisa, in integer paise. */
+export function derivedPricePaise(realCostInr: number, margin: number): number {
+  if (!Number.isFinite(realCostInr) || realCostInr <= 0) return 0;
+  return Math.ceil(Math.round(realCostInr * margin * 1e6) / 1e4);
 }
 
 /** Build bill (USD) when the unified wallet is on: real cost × configured margin. */

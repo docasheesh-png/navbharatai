@@ -2450,7 +2450,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         config: { ...cfg },
         wallet: w ? { tokenBalance: w.tokenBalance ?? 0, credits: (Number(w.tokenBalance) || 0) / 100, remaining_balance: w.remaining_balance ?? 0 } : null,
         spendByFeature: spendByFeature(ledger),
-        ledgerTail: ledger.slice(-50).reverse(),
+        ledgerTail: ledger.filter((_, i) => i >= ledger.length - 50).reverse(),
       });
     } catch (e: any) {
       console.error('[ADMIN] unified wallet view failed:', e?.message);

@@ -14,6 +14,25 @@
 // paths already working in production: grok-3/grok-4, gemini-2.5-*, the
 // Claude 4.x family used by AgentV3).
 
+/** Which wallet pays for this vision call. 'free' = NavBharatAI's own money on a Free user. */
+export type VisionTier = 'free' | 'paid';
+
+/**
+ * 🔒 FREE-TIER VISION ALLOWLIST (admin 2026-10-23). Free image/PDF reads go GLM-4.6V-flash ($0) →
+ * gemini-2.5-flash-lite → gemini-2.5-flash, and NOTHING dearer. Enforced HERE, on the resolved list,
+ * so the Google doors on Free ALWAYS use this fixed cheap order — `VISION_VERTEX_MODELS` /
+ * `VISION_GEMINI_MODELS` / `VISION_GROK_MODELS` tune the PAID tier only and can never add
+ * `gemini-2.5-pro`, Grok or Claude to a Free call. `VISION_GLM_MODELS` may only narrow GLM to its
+ * free `*v-flash` ids (an override with none falls back to `glm-4.6v-flash`).
+ */
+export const FREE_VISION_PAID_MODELS: readonly string[] = Object.freeze(['gemini-2.5-flash-lite', 'gemini-2.5-flash']);
+const FREE_GLM_VISION = /^glm-[\w.]*v-flash$/i;
+
+function freeOnly(list: string[], allowed: (m: string) => boolean, fallback: readonly string[]): string[] {
+  const kept = list.filter(allowed);
+  return kept.length > 0 ? kept : [...fallback];
+}
+
 function fromEnvList(envVal: string | undefined, fallback: string[]): string[] {
   const list = (envVal || '')
     .split(',')
@@ -41,21 +60,24 @@ export function claudeVisionAnswerModel(): string {
  * image turns cost NavBharatAI nothing (NAVBHARATAI_ROUTING_PLAN.md §1 row 3). Self-gates on
  * GLM_API_KEY at the call site; on failure/rate-limit the chain falls to Vertex/Gemini as before.
  */
-export function glmVisionModels(): string[] {
-  return fromEnvList(process.env.VISION_GLM_MODELS, ['glm-4.6v-flash']);
+export function glmVisionModels(tier: VisionTier = 'paid'): string[] {
+  const list = fromEnvList(process.env.VISION_GLM_MODELS, ['glm-4.6v-flash']);
+  return tier === 'free' ? freeOnly(list, m => FREE_GLM_VISION.test(m), ['glm-4.6v-flash']) : list;
 }
 
 /** Grok vision-capable models, tried in order. Images only — Grok does not read PDFs. */
-export function grokVisionModels(): string[] {
-  return fromEnvList(process.env.VISION_GROK_MODELS, ['grok-4']);
+export function grokVisionModels(tier: VisionTier = 'paid'): string[] {
+  return tier === 'free' ? [] : fromEnvList(process.env.VISION_GROK_MODELS, ['grok-4']); // never on Free
 }
 
 /** API-key Gemini vision models (images AND PDFs), tried in order. */
-export function geminiVisionModels(): string[] {
+export function geminiVisionModels(tier: VisionTier = 'paid'): string[] {
+  if (tier === 'free') return [...FREE_VISION_PAID_MODELS]; // VISION_*_MODELS tunes PAID only
   return fromEnvList(process.env.VISION_GEMINI_MODELS, ['gemini-2.5-flash', 'gemini-2.5-pro']);
 }
 
 /** Vertex (service-account) Gemini vision models (images AND PDFs), tried in order. */
-export function vertexVisionModels(): string[] {
+export function vertexVisionModels(tier: VisionTier = 'paid'): string[] {
+  if (tier === 'free') return [...FREE_VISION_PAID_MODELS]; // VISION_*_MODELS tunes PAID only
   return fromEnvList(process.env.VISION_VERTEX_MODELS, ['gemini-2.5-flash', 'gemini-2.5-pro']);
 }

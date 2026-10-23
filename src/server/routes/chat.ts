@@ -18,6 +18,7 @@ import { clientPlatform } from '../AppContext/iosPurchaseGuard';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { toSafeClientMessage } from '../lib/httpError';
 import { runVisionChain } from '../lib/visionChain';
+import { freeBusyMessage } from '../lib/freeBusyMessage';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { groundingStatusFor, firstTokenLog } from '../lib/chatGrounding';
 import { songcraftFor } from '../AI/songcraft';
@@ -664,6 +665,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         systemPrompt,
         signal: freeAnswerSignal(req),
         allowClaude: !isFree, // absolute rule: the Free universe NEVER uses Claude
+        tier: isFree ? 'free' : 'paid', // Free: GLM → flash-lite → flash only, under the shared daily cap
       });
       if (visionResult) {
         console.log(`[CHAT/VISION] tier=${tier} provider=${visionResult.provider} files=${visionAttachments.length}`);
@@ -682,7 +684,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       assertFreeAnswerActive(req);
       if (visionResult?.text.trim()) markFreeAnswer(req);
       const replyText = visionResult?.text
-        || 'Sorry, I could not read your image/file right now. Please try again in a moment, or paste the text directly.';
+        // Free: silent fallback to the busy line in the user's own language (cap reached or every rung down).
+        || (isFree ? freeBusyMessage(message) : 'Sorry, I could not read your image/file right now. Please try again in a moment, or paste the text directly.');
       if (req.body.stream === true) {
         if (!res.headersSent) {
           res.setHeader('Content-Type', 'text/event-stream');

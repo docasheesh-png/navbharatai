@@ -113,7 +113,10 @@ export async function callProfessionalAIWithUsage(
   assertProfessionalDispatch(opts);
   const fallbackNs = tier === 'free' ? 'professional-free-fallback' : 'professional';
   const router = AIRouterManager.getRouter(fallbackNs);
-  const { response, telemetry } = await (opts?.signal ? router.routeRaced(prompt, systemPrompt, undefined, opts.signal) : router.routeRaced(prompt, systemPrompt));
+  // FREE: one rung at a time (flash-lite → flash), so one answer is one bill. PAID keeps its race.
+  const { response, telemetry } = tier === 'free'
+    ? await (opts?.signal ? router.route(prompt, systemPrompt, undefined, undefined, opts.signal) : router.route(prompt, systemPrompt))
+    : await (opts?.signal ? router.routeRaced(prompt, systemPrompt, undefined, opts.signal) : router.routeRaced(prompt, systemPrompt));
   if (telemetry.success && response.content?.trim()) return answer(response);
   throw new Error('All AI providers failed.');
 }

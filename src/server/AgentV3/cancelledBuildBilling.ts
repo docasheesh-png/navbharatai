@@ -242,6 +242,23 @@ export function renderedBeforeStop(f: Pick<CancelledBuildFacts, 'appRenderedAt' 
   return typeof r === 'number' && Number.isFinite(r) && typeof s === 'number' && Number.isFinite(s) && r < s;
 }
 
+/**
+ * THE EARLIEST MOMENT ANY PROOF SAW THE APP RUN (autopsy a75153ab, 2026-10-21). PURE.
+ *
+ * A render is proved by more than one producer: the in-build green snapshot, the post-answer verify, the render
+ * rescue. Each kept its own clock, and billing read only the last one, so an app a real browser watched render at
+ * 261 s was billed as "first seen running after the stop request" (stop at 380 s) and the user was told "you
+ * stopped this build before the app was running". Billing now takes the earliest valid time of ANY producer.
+ * Non-finite or non-positive entries are ignored; none valid ⇒ null (unknown ⇒ at cost, as before).
+ */
+export function earliestRenderProof(...times: Array<number | null | undefined>): number | null {
+  let best: number | null = null;
+  for (const t of times) {
+    if (typeof t === 'number' && Number.isFinite(t) && t > 0 && (best === null || t < best)) best = t;
+  }
+  return best;
+}
+
 /** Close an open style-pass window (no-op when it never opened or is already closed). */
 export function closeStylePassWindow(w: { startedAt: number | null; endedAt: number | null }, now: number): void {
   if (w.startedAt !== null && w.endedAt === null) w.endedAt = now;

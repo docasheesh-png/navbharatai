@@ -441,7 +441,7 @@ import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState, lastAssistantText } from '../AgentV3/ProjectContext';
 import { refersToConversation, CONVERSATION_REPLY_MAX } from '../AgentV3/conversationReference';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
-import { freeCancellationMessage, settleStopOrFailure, stopBillingSwitches, preseededUnchangedCount, stopFellInWindow, closeStylePassWindow } from '../AgentV3/cancelledBuildBilling';
+import { freeCancellationMessage, settleStopOrFailure, stopBillingSwitches, preseededUnchangedCount, stopFellInWindow, closeStylePassWindow, earliestRenderProof } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
@@ -16075,6 +16075,7 @@ async function noteBuildOutcome(
               if (st === 'saved') {
                 inBuildGreenAt = Date.now();
                 etaAppRenderedAt = inBuildGreenAt; // the ETA stops counting down to an app already on screen (9c612cdb)
+                billingCtx.appFirstRenderedAt = earliestRenderProof(billingCtx.appFirstRenderedAt, inBuildGreenAt); // billing reads the earliest proof (a75153ab)
                 events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
                 emitEtaPhaseNow();
               } else {
@@ -21786,7 +21787,8 @@ async function noteBuildOutcome(
       // same build had watched it render. Nothing failed, nothing logged; the report simply lied.
       let previewVerifiedRendered = false;
       /** When THIS pass first saw the app render (epoch ms) — compared with the stop request (cancelledBuildBilling). */
-      let appFirstRenderedAt: number | null = null;
+      // Seeded from the in-build green proof, which can land long before this pass and is billing's earliest evidence (a75153ab).
+      let appFirstRenderedAt: number | null = earliestRenderProof(billingCtx.appFirstRenderedAt);
       // When a real-browser render check last came back CLEAN (its start time). Every console line logged
       // before it has been answered by it, so the runtime auto-fix loop does not hand those to a repair
       // (autopsy 12511a9c — `runtimeAutofixSince`).

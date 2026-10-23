@@ -59,6 +59,7 @@ type Kind =
 /** "file › sub" → what it is. `clock` adds the second obligation: a SUBCOLLECTION_RETENTION_POLICIES entry. */
 const CLASSIFICATION: Record<string, Kind & { clock?: true; erasedBy?: string; foreignParent?: true }> = {
   'src/server/AI/FreeChain/cache.ts › cache': { kind: 'retained', parent: 'free_chat_chain', clock: true, why: 'allowlisted public FAQ responses, expiry at most 24 hours; fixed state parent is swept even when virtual' },
+  'src/server/AI/FreeChain/masterPlan.ts › paid_month': { kind: 'retained', parent: 'free_chat_chain', clock: true, why: 'one aggregate monthly paid-spend total per IST month (no uid, no prompt); 400-day retention for spend review' },
   'src/server/AI/FreeChain/control.ts › actions': { kind: 'retained', parent: 'free_chat_chain', clock: true, why: 'administrator control-change evidence with verified actor and reason, same 180-day retention as admin_audit_log' },
   'src/server/AgentV3/WorkspaceFileStore.ts › files': { kind: 'workspace', parent: 'workspace_files_v3' },
   // Written through the client SDK's path form until 2026-10-11 (audit F9), which this census could not see.

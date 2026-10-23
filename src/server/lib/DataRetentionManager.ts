@@ -546,7 +546,7 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
    * Pending holds, replay tombstones, reused quota/cooldown authority and state controls NEVER expire.
    * expiresAt is the deletion deadline itself, not a creation timestamp, hence ttlDays:0. */
   { collection: 'free_chat_chain', ttlDays: 0, timestampField: 'expiresAt', timestampKind: 'date',
-    subs: ['cache', 'sticky', 'actions', 'events'], discoverSubcollections: true },
+    subs: ['cache', 'sticky', 'actions', 'events', 'paid_month'], discoverSubcollections: true },
   /**
    * Removal records — the OTHER half of the 180-day duty (IT Rules, 2021 Rule 3(1)(g)).
    *
@@ -965,6 +965,8 @@ export const SUBCOLLECTION_RETENTION_POLICIES: readonly SubcollectionRetentionPo
   { parent: 'free_chat_chain', parentIds: ['state'], subcollection: 'sticky', ttlDays: 0, timestampField: 'expireAt', timestampKind: 'date' },
   // Same 180-day administrator-audit window as admin_audit_log. The 4096-slot event ring is already bounded.
   { parent: 'free_chat_chain', parentIds: ['state'], subcollection: 'actions', ttlDays: 180, timestampField: 'at', timestampKind: 'epochMs' },
+  // Master-plan monthly paid totals (one doc per IST month, no user data): kept 400 days for spend review.
+  { parent: 'free_chat_chain', parentIds: ['state'], subcollection: 'paid_month', ttlDays: 400, timestampField: 'updatedAt', timestampKind: 'epochMs' },
 ];
 
 /** The two operations a subcollection purge needs. Satisfied by `adminSubcollectionSource` and by test fakes. */

@@ -26,7 +26,7 @@ it('coalesces failures, fails closed, and retries after a bounded cooldown', asy
   await expect(publishDeploymentPaidLimit(database, 0, observe)).resolves.toBeUndefined();
   expect(observe).toHaveBeenCalledTimes(2);
 });
-it.each([NaN, -1, 10e9 + 1, Infinity])('rejects invalid configured cap %s without observing', async cap => {
+it.each([NaN, -1, 17e9 + 1, Infinity])('rejects invalid configured cap %s without observing', async cap => {
   const observe = vi.fn(); await expect(publishDeploymentPaidLimit({}, cap, observe)).rejects.toThrow(); expect(observe).not.toHaveBeenCalled();
 });
 it.each([{ capNanoUsd: 1, revision: 1 }, { capNanoUsd: 0, revision: 0 }, { capNanoUsd: 0, revision: NaN }])('rejects invalid observation %j', async policy => {

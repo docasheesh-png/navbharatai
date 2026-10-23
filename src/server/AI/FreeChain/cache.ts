@@ -3,8 +3,9 @@ import type { Firestore } from '../../lib/serverDb';
 /** Deliberately small exact safe corpus. Empty history alone never proves that a prompt lacks PII. */
 const PUBLIC_PROMPTS = new Set(['what is photosynthesis', 'explain photosynthesis', 'प्रकाश संश्लेषण क्या है', 'photosynthesis kya hai', 'what is a prime number', 'अभाज्य संख्या क्या है']);
 export function normalizedCachePrompt(message: string): string { return message.normalize('NFC').trim().toLowerCase().replace(/[?।？！!]+$/u, '').replace(/\s+/g, ' '); }
-export function safeCacheKey(input: { message: string; history: unknown[]; eligible: boolean; language: string; systemPrompt: string; modelFamily: string }): string | null {
-  if (!input.eligible || input.history.length || !PUBLIC_PROMPTS.has(normalizedCachePrompt(input.message))) return null;
+export function safeCacheKey(input: { message: string; history: unknown[]; eligible: boolean; language: string; systemPrompt: string; modelFamily: string; faq?: boolean }): string | null {
+  // `faq` = master-plan FAQ cache: caller has already proven the text is personal-data-free and undated.
+  if (!input.eligible || input.history.length || !(PUBLIC_PROMPTS.has(normalizedCachePrompt(input.message)) || input.faq === true)) return null;
   return createHash('sha256').update(JSON.stringify(['v1', normalizedCachePrompt(input.message), input.language, input.systemPrompt, input.modelFamily])).digest('hex');
 }
 export class FreeChainCache {

@@ -9,6 +9,8 @@ export interface FreeChainContext {
   privateTurn: boolean;
   healthTurn: boolean;
   cacheEligible: boolean;
+  /** Teacher/exam surface (server-derived from the request mode); routes to the quality model. */
+  teachingTurn?: boolean;
   /** Opaque server-issued entry lease, never accepted from request JSON. */
   entryAdmission?: EntryAdmissionGrant;
 }

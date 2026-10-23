@@ -20,9 +20,9 @@ describe('FREE-chain configuration is explicit and fail-closed', () => {
   });
   it('defaults OFF, zero rollout, no public cache, Gemini skipped and no invented Google quota', () => {
     const cfg = freeChainConfig({});
-    expect(cfg).toMatchObject({ enabled: false, rolloutPercent: 0, cacheEnabled: false, skipGemini: true,
+    expect(cfg).toMatchObject({ enabled: false, rolloutPercent: 0, cacheEnabled: true, skipGemini: true,
       privacyApproved: false, paidCapNanoUsd: 10_000_000_000, paidPerUserDaily: 20, safetyMargin: .9, errors: [] });
-    expect(cfg.order).toEqual(['glm47', 'glm45', 'groq', 'gemini', 'cloudflare', 'openrouter', 'glmflashx', 'nemotron', 'gpt5nano', 'deepseek']);
+    expect(cfg.order).toEqual(['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
     expect(cfg.rungs.find(r => r.id === 'gemini')).toMatchObject({ rpm: 0, rpd: 0, tpm: 0, tpd: 0, reason: 'privacy' });
   });
   it('pins GLM free models to one isolated key and shared zero-until-verified quota settings', () => {
@@ -55,7 +55,7 @@ describe('FREE-chain configuration is explicit and fail-closed', () => {
     expect(freeChainConfig({ FREE_CHAIN_PAID_DAILY_CAP_USD: '0.000000001' }).paidCapNanoUsd).toBe(1);
     expect(freeChainConfig({ FREE_CHAIN_PAID_DAILY_CAP_USD: '1.000000001' }).paidCapNanoUsd).toBe(1_000_000_001);
     expect(freeChainConfig({ FREE_CHAIN_PAID_DAILY_CAP_USD: '0' }).paidCapNanoUsd).toBe(0);
-    for (const value of ['0.0000000001', 'NaN', 'Infinity', '-1', '10.000000001', '11', '1000.000000001', '1e-9']) {
+    for (const value of ['0.0000000001', 'NaN', 'Infinity', '-1', '17.000000001', '18', '1000.000000001', '1e-9']) {
       expect(freeChainConfig({ FREE_CHAIN_PAID_DAILY_CAP_USD: value }).errors).toContain('FREE_CHAIN_PAID_DAILY_CAP_USD');
     }
   });
@@ -199,7 +199,7 @@ describe('expiry never releases financial holds or loses virtual-parent descenda
   it('registers only explicit root deadlines and cleans settled/date-scoped records, never holds/state', async () => {
     const policy = RETENTION_POLICIES.find(p => p.collection === 'free_chat_chain')!;
     expect(policy).toEqual({ collection: 'free_chat_chain', ttlDays: 0, timestampField: 'expiresAt', timestampKind: 'date',
-      subs: ['cache', 'sticky', 'actions', 'events'], discoverSubcollections: true });
+      subs: ['cache', 'sticky', 'actions', 'events', 'paid_month'], discoverSubcollections: true });
     const docs = new Map<string, any>([['settled', { expiresAt: new Date(NOW - 1) }], ['fresh', { expiresAt: new Date(NOW + DAY) }],
       ['held', { kind: 'paid_reservation', createdAt: NOW - 1000 * DAY }], ['quota', { updatedAt: NOW - 1000 * DAY }], ['state', {}]]);
     const db = { collection: () => ({ where: (field: string, _op: string, bound: Date) => ({ limit: () => ({
@@ -215,11 +215,11 @@ describe('expiry never releases financial holds or loses virtual-parent descenda
       deleteExpiredUnder: async (...args) => { calls.push(args); return 1; },
     };
     const policies = SUBCOLLECTION_RETENTION_POLICIES.filter(p => p.parent === 'free_chat_chain');
-    expect(policies).toHaveLength(3);
+    expect(policies).toHaveLength(4);
     const report = await purgeExpiredSubcollections(source, NOW, policies);
-    expect(report.totalDeleted).toBe(3); expect(source.parentIds).not.toHaveBeenCalled();
+    expect(report.totalDeleted).toBe(4); expect(source.parentIds).not.toHaveBeenCalled();
     expect(calls.map(c => c.slice(0, 4))).toEqual([
-      ['free_chat_chain', 'state', 'cache', 'expireAt'], ['free_chat_chain', 'state', 'sticky', 'expireAt'], ['free_chat_chain', 'state', 'actions', 'at'],
+      ['free_chat_chain', 'state', 'cache', 'expireAt'], ['free_chat_chain', 'state', 'sticky', 'expireAt'], ['free_chat_chain', 'state', 'actions', 'at'], ['free_chat_chain', 'state', 'paid_month', 'updatedAt'],
     ]);
     expect(calls[0][4]).toEqual(new Date(NOW)); expect(calls[2][4]).toBe(NOW - 180 * DAY);
   });

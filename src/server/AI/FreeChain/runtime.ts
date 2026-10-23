@@ -12,6 +12,7 @@ import { FreeChainStore } from './store';
 import { FreeChainCache, safeCacheKey } from './cache';
 import { maximumCostNanoUsd, usdToNanoUsd, type PaidReservation } from './spendCap';
 import { trimForRung } from './trim';
+import { tryAcquireRungSlot, releaseRungSlot, routeTurn, orderForRoute, effectiveMaxOutput, trimHistory, preparedSystemPrompt, faqCacheable, reserveMonthly, settleMonthly, type TurnRoute } from './masterPlan';
 import { logFreeChain, type FreeChainTelemetry } from './telemetry';
 import { OpenAiCompatProvider, FreeChainProviderError } from './providers/openAiCompatProvider';
 import { FreeRoutingError } from '../LiveRegistry/dispatcher';
@@ -39,7 +40,7 @@ export function busyMessage(message?: string): string {
   return BUSY;
 }
 const names: Record<ProviderId, AIProviderResponse['provider']> = { glm47: 'GLM', glm45: 'GLM', gemini: 'GEMINI', groq: 'GROQ', cloudflare: 'CLOUDFLARE', openrouter: 'OPENROUTER', deepseek: 'DEEPSEEK',
-  nvidia: 'NVIDIA', modelscope: 'MODELSCOPE', llm7: 'LLM7', bluesminds: 'BLUESMINDS', requesty: 'REQUESTY', glmflashx: 'GLM', nemotron: 'DEEPINFRA', gpt5nano: 'OPENAI' };
+  nvidia: 'NVIDIA', modelscope: 'MODELSCOPE', llm7: 'LLM7', bluesminds: 'BLUESMINDS', requesty: 'REQUESTY', glmflashx: 'GLM', gpt5nano: 'OPENAI', llama8b: 'DEEPINFRA', dsv4flash: 'DEEPINFRA', geminipaid: 'GEMINI' };
 function empty(reason: FreeChainResult['reason'] = 'all-failed', message?: string): FreeChainResult { return { content: busyMessage(message), provider: 'NONE', model: 'none', latencyMs: 0, ok: false, reason }; }
 /** Does a non-DeepSeek paid rung's reservation profile stay under the unchanged kimi-k2.7 free ceiling? */
 function verifiedPaidReservationRate(rung: RungConfig): boolean {
@@ -121,28 +122,47 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     catch { return done(empty('all-failed', input.message)); }
     const language = detectReplyLanguage(input.message);
     const languageInstruction = { hi: 'Reply in Hindi using Devanagari script.', hinglish: 'Reply in Hinglish using Roman script.', en: 'Reply in English.', other: 'Reply in the same language and script as the user.' }[language];
-    const system = `${input.systemPrompt ?? ''}\n\n${languageInstruction}`;
-    const cacheKey = cfg.cacheEnabled ? safeCacheKey({ message: input.message, history: input.history, eligible: input.context.cacheEligible, language, systemPrompt: system, modelFamily: JSON.stringify(cfg.rungs.map(r => [r.id, r.model])) }) : null;
+    // Master plan: stable cacheable prefix (dynamic parts last) and the compact core, both kill-switchable.
+    const system = `${preparedSystemPrompt(cfg, input.systemPrompt ?? '')}\n\n${languageInstruction}`;
+    const cacheKey = cfg.cacheEnabled ? safeCacheKey({ message: input.message, history: input.history, eligible: input.context.cacheEligible, language, systemPrompt: system, modelFamily: JSON.stringify(cfg.rungs.map(r => [r.id, r.model])), faq: cfg.features.faqCache && faqCacheable(input.message) }) : null;
+    const history = trimHistory(cfg, input.history);
     if (cacheKey) {
       const hit = await new FreeChainCache(db).get(cacheKey).catch(() => null);
       const cacheControls = hit ? await readControls(db, cfg).catch(() => null) : null;
       const hitRung = hit ? cfg.rungs.find(r => names[r.id] === hit.provider && r.model === hit.model && cfg.order.includes(r.id)) : undefined;
       if (hit && hit.provider !== 'OPENROUTER' && cacheControls?.enabled && hitRung && !cacheControls.disabledProviders.includes(hitRung.id) && !rungReason(hitRung, cfg, input) && !input.signal?.aborted) { trace.cacheHit = true; trace.costUsdEstimate = 0; input.onChunk?.(hit.content); return done({ ...hit, latencyMs: 0, ok: true }); }
     }
-    for (const id of orderForUser(cfg, input.context.uid)) {
+    // Rule-based router. Throttle (>= N% of the daily paid cap) keeps DeepSeek for teaching/medical only.
+    let routed = routeTurn(cfg, { message: input.message, history: input.history, teachingMode: input.context.teachingTurn });
+    if (routed.route === 'quality' && !['teaching', 'medical'].includes(routed.reason) && cfg.features.throttle) {
+      const spend = await store.spendSnapshot(Date.now()).catch(() => null);
+      const cap = spend?.capNanoUsd ?? cfg.paidCapNanoUsd;
+      if (spend && cap > 0 && spend.committedNanoUsd * 100 >= cap * cfg.features.throttlePercent) routed = routeTurn(cfg, { message: input.message, history: input.history, teachingMode: input.context.teachingTurn, throttled: true });
+    }
+    const baseOrder = orderForUser(cfg, input.context.uid);
+    let route: TurnRoute = routed.route;
+    let order = orderForRoute(baseOrder, route);
+    // A routed order with no usable rung (keys not configured yet, privacy) falls back to the plain order.
+    if (order !== baseOrder && !order.some(oid => { const r = cfg.rungs.find(x => x.id === oid); return !!r && !rungReason(r, cfg, input); })) { order = baseOrder; route = 'normal'; }
+    trace.route = route; trace.routeReason = routed.reason;
+    for (const id of order) {
       if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
-      const rung = cfg.rungs.find(r => r.id === id)!;
+      const baseRung = cfg.rungs.find(r => r.id === id)!;
+      const rung: RungConfig = { ...baseRung, maxOutputTokens: effectiveMaxOutput(cfg, id, baseRung.maxOutputTokens, route) };
       const attempt = { provider: id, model: rung.model, reason: 'pending', entered: false }; trace.attempts.push(attempt);
       // Bounded latency: at most cfg.maxAttempts PHYSICAL calls per turn; skipped rungs are free.
       if (trace.attempts.filter(a => a.entered).length >= cfg.maxAttempts) { attempt.reason = 'max-attempts'; break; }
       const reason = rungReason(rung, cfg, input); if (reason) { attempt.reason = reason; continue; }
-      const prepared = trimForRung(input.message, input.history, system, rung.maxInputTokens);
+      const prepared = trimForRung(input.message, history, system, rung.maxInputTokens);
       if (!prepared) { attempt.reason = 'context-capacity'; continue; }
       const attemptStarted = Date.now();
       const breakerName = `free-chat-chain:${id}`; const capacityName = `free-chat-chain:${accountId(id)}`; const breaker = getBreaker(breakerName);
       if (breaker.isBlocking()) { attempt.reason = 'circuit'; continue; }
-      if (!acquireSlot(capacityName)) { attempt.reason = 'capacity'; continue; }
+      // Real per-rung concurrency (GLM-4.5 Flash 2, GLM-4.7 Flash 1): busy → next rung, no wait.
+      if (!tryAcquireRungSlot(cfg, id)) { attempt.reason = 'concurrency'; continue; }
+      if (!acquireSlot(capacityName)) { releaseRungSlot(cfg, id); attempt.reason = 'capacity'; continue; }
       let reservation: PaidReservation | null = null;
+      let monthHold: { month: string; amount: number } | null = null; let monthSettled = false;
       const controller = new AbortController(); const abort = () => controller.abort(); input.signal?.addEventListener('abort', abort, { once: true });
       if (input.signal?.aborted) abort();
       let content = ''; let response: AIProviderResponse | undefined; let completeUsage = false; let partial = false;
@@ -157,6 +177,12 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           // The complete model context is reserved, not an unverified character/token approximation.
           // One requestId may hold at most one paid reservation, so a second paid rung in the same
           // turn gets a derived id rather than being rejected as a duplicate.
+          if (cfg.features.monthlyCap) {
+            const amount = quote(cfg, 1048576, rung.maxOutputTokens, rung);
+            const month = await reserveMonthly(db, cfg.features.monthlyCapNanoUsd, amount);
+            if (!month) { attempt.reason = 'monthly-budget'; continue; }
+            monthHold = { month, amount };
+          }
           reservation = await store.reservePaid({ requestId: id === 'deepseek' ? requestId : `${requestId}:${id}`, uid: input.context.uid, maxCostNanoUsd: quote(cfg, 1048576, rung.maxOutputTokens, rung), capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
           if (!reservation?.mayDispatch) { attempt.reason = 'budget'; continue; }
         }
@@ -171,8 +197,11 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
             await stickyRef.set({ model: response.model, expiresAt: Date.now() + 86400000, expireAt: new Date(Date.now() + 86400000) });
           } else {
             const provider = new OpenAiCompatProvider({ provider: names[id] as ConstructorParameters<typeof OpenAiCompatProvider>[0]['provider'], key: rung.key, envName: rung.keyEnv, model: rung.model, baseURL: rung.baseURL, priority: cfg.order.indexOf(id), maxOutputTokens: rung.maxOutputTokens, timeoutMs: 90000, streamUsage: rung.streamUsage,
-              ...(id === 'gemini' ? { extraBody: { reasoning_effort: 'none' } } : id === 'gpt5nano' ? { extraBody: { reasoning_effort: 'minimal' } } : {}) });
+              ...(id === 'gemini' || id === 'geminipaid' ? { extraBody: { reasoning_effort: 'none' } } : id === 'gpt5nano' ? { extraBody: { reasoning_effort: 'minimal' } }
+                // With the reply cap on, GLM thinking would spend the whole budget on hidden tokens.
+                : cfg.features.outputCap && (id === 'glm45' || id === 'glm47' || id === 'glmflashx') ? { extraBody: { thinking: { type: 'disabled' } } } : {}) });
             const result = await provider.executeTurn({ ...prepared, signal: controller.signal, onChunk: chunk }); response = result; completeUsage = result.completeUsage;
+            if (typeof result.cachedInputTokens === 'number') trace.cachedInputTokens = result.cachedInputTokens;
             const remaining = Number(result.rateLimitHeaders['x-ratelimit-remaining-requests']);
             if (id === 'groq' && remaining === 0) await store.cooldown(accountId(id), Date.now() + durationMs(result.rateLimitHeaders['x-ratelimit-reset-requests'], 86400000));
           }
@@ -182,6 +211,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         if (watch.verdict !== 'completed') { controller.abort(); partial = watch.delivered; if (watch.error) throw watch.error; throw new FreeChainProviderError(watch.verdict === 'first-token-timeout' ? 'TIMEOUT' : 'NETWORK'); }
         if (!response || !content.trim()) throw new FreeChainProviderError('EMPTY_RESPONSE');
         if (reservation && completeUsage && response.usage) await store.settlePaid(reservation, quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung));
+        if (monthHold) { monthSettled = true; await settleMonthly(db, monthHold.month, monthHold.amount, completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) : null); }
         breaker.recordSuccess(); recordProviderLatency(breakerName, Date.now() - attemptStarted, false);
         attempt.reason = 'served'; trace.rung = id; trace.costUsdEstimate = isPaidRung(id) ? (completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) / 1e9 : null) : 0;
         if (cacheKey && id !== 'openrouter') await new FreeChainCache(db).put(cacheKey, { content, provider: response.provider, model: response.model }, cfg.cacheTtlS).catch(() => {});
@@ -199,7 +229,11 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         // Never release an uncertain paid hold, and never mix replies after text commitment.
         if (partial || content) { trace.rung = id; if (!input.onChunk) content += '\n\nThe response was interrupted. Please try again.'; return done({ content, provider: names[id], model: response?.model ?? rung.model, latencyMs: 0, ok: true, reason: 'stalled' }); }
         if (safe?.code === 'SAFETY_REFUSAL' || safe?.code === 'INVALID_REQUEST' || safe?.code === 'POLICY_BLOCKED' || safe?.code === 'ABORTED' || input.signal?.aborted) break;
-      } finally { controller.abort(); input.signal?.removeEventListener('abort', abort); releaseSlot(capacityName); }
+      } finally {
+        controller.abort(); input.signal?.removeEventListener('abort', abort); releaseSlot(capacityName); releaseRungSlot(cfg, id);
+        // Never-dispatched holds are released; a dispatched call with unknown cost stays fully booked.
+        if (monthHold && !monthSettled) await settleMonthly(db, monthHold.month, monthHold.amount, attempt.entered ? null : 0);
+      }
     }
     const result = empty('all-failed', input.message); input.onChunk?.(result.content, 'notice'); return done(result);
   }

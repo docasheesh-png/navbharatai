@@ -37,12 +37,12 @@ describe('unified wallet policy', () => {
   it('is OFF by default and owner defaults are config-driven', () => {
     expect(unifiedWalletEnabled({})).toBe(false);
     const c = unifiedWalletConfig({});
-    expect(c).toMatchObject({ enabled: false, chatMessageMilli: 100, guestDailyMessages: 5, signedInDailyMessages: 25, buildMargin: 2 });
+    expect(c).toMatchObject({ enabled: false, chatMessageMilli: 100, guestDailyMessages: 5, signedInDailyMessages: 25, buildMargin: 2.5 });
     expect('minRechargeInr' in c).toBe(false); // existing ₹1 minimum stays; no new minimum
     expect(c.rechargePacksInr).toEqual([20, 50, 100, 500]);
     expect(unifiedWalletConfig({ UNIFIED_WALLET_RECHARGE_PACKS: '500, 10, 50,50' }).rechargePacksInr).toEqual([10, 50, 500]); // any ₹ ≥ 1, deduped, sorted
     expect('plans' in c).toBe(false); // owner: no subscriptions
-    expect(unifiedWalletConfig({ UNIFIED_WALLET_ENABLED: '1', UNIFIED_WALLET_BUILD_MARGIN: '2.5' })).toMatchObject({ enabled: true, buildMargin: 2.5 });
+    expect(unifiedWalletConfig({ UNIFIED_WALLET_ENABLED: '1', UNIFIED_WALLET_BUILD_MARGIN: '2' })).toMatchObject({ enabled: true, buildMargin: 2 });
   });
   it('uses integer milli-credits: ₹1 = 10 messages = 100 tokens', () => {
     expect(milliToTokens(100)).toBe(10);

@@ -1888,7 +1888,7 @@ export function decideBuildBilledUsd(
   if (isOpusTier) {
     effectiveBilledUsd = flatBilledUsd; // real Opus × 2 — unchanged
   } else if (realCostBillingEnabled()) {
-    // UNIFIED WALLET (flag, default OFF): real cost × UNIFIED_WALLET_BUILD_MARGIN (default 2) instead of the
+    // UNIFIED WALLET (flag, default OFF): real cost × UNIFIED_WALLET_BUILD_MARGIN (default 2.5) instead of the
     // tiered ×4/×3 curve. Same billable cost, same wallet debit, same cancelled-build rules downstream.
     const uw = unifiedWalletConfig();
     effectiveBilledUsd = uw.enabled ? unifiedBuildBilledUsd(billableTokenCost + vmCost, uw) : tieredMarkupUsd(billableTokenCost + vmCost);

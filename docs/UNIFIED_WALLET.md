@@ -21,7 +21,7 @@ Low balance (< 5 credits) adds header `X-NB-Wallet-Notice` (URI-encoded, user's 
 
 ## Pro builds
 Unchanged debit path (`debitWalletForBuild`, same wallet). When enabled the bill is
-`billable real cost × UNIFIED_WALLET_BUILD_MARGIN` (default 2) instead of the tiered ×4/×3 curve.
+`billable real cost × UNIFIED_WALLET_BUILD_MARGIN` (default 2.5, pending owner) instead of the tiered ×4/×3 curve.
 Opus flat billing, per-tier billing and all `cancelledBuildBilling` rules are untouched.
 
 ## Pay-and-use only (owner decisions 2026-10-23)

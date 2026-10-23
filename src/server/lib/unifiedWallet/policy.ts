@@ -66,7 +66,7 @@ export function unifiedWalletConfig(env: Env = process.env): UnifiedWalletConfig
     chatMessageMilli: chat % MILLI_PER_TOKEN === 0 ? chat : 100,
     guestDailyMessages: int(env.UNIFIED_WALLET_GUEST_DAILY, 5, 0, 1000),
     signedInDailyMessages: int(env.UNIFIED_WALLET_SIGNED_IN_DAILY, 25, 0, 100_000),
-    buildMargin: num(env.UNIFIED_WALLET_BUILD_MARGIN, 2, 1, 10),
+    buildMargin: num(env.UNIFIED_WALLET_BUILD_MARGIN, 2.5, 1, 10),
     perMinuteSignedIn: int(env.UNIFIED_WALLET_PER_MINUTE, 20, 1, 10_000),
     perMinuteGuest: int(env.UNIFIED_WALLET_GUEST_PER_MINUTE, 6, 1, 10_000),
     lowBalanceCredits: int(env.UNIFIED_WALLET_LOW_BALANCE_CREDITS, 5, 0, 100_000),

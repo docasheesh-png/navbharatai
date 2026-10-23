@@ -523,7 +523,7 @@ function recordFeatureSpend(tx: { feature?: WalletFeature; billedInr?: number },
  * copy, shared by every debit, hold and release, so a hold and its release can never resolve to two
  * different wallets.
  */
-async function walletOwnerId(db: any, userId: string): Promise<string> {
+export async function walletOwnerId(db: any, userId: string): Promise<string> {
   if (!walletMergeResolveEnabled()) return userId;
   return resolveCanonicalWalletId(async (u) => {
     const s = await getDoc(doc(db, 'user_token_wallets', u));

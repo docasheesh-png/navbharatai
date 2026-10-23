@@ -16,7 +16,8 @@ const digest = /^[a-f0-9]{64}$/;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 type Db = Pick<Firestore, 'doc' | 'runTransaction'>;
 
-export interface FreeAnswerQuotaSubject { key: string; limit: 5 | 20; ipKey?: string }
+/** limit: 5 (guest) / 20 (signed-in) on main; config-driven when UNIFIED_WALLET_ENABLED (see unifiedWallet/policy.ts). */
+export interface FreeAnswerQuotaSubject { key: string; limit: number; ipKey?: string; guest?: boolean }
 export interface FreeAnswerReservation {
   id: string;
   owner: string;
@@ -87,8 +88,8 @@ function snapshot(subject: FreeAnswerQuotaSubject, p: Principal, d: Day, now: nu
 }
 function identity(subject: FreeAnswerQuotaSubject): string {
   demand(typeof subject.key === 'string' && subject.key.length > 0 && subject.key.length <= 512
-    && (subject.limit === 5 || subject.limit === 20)
-    && (subject.ipKey === undefined || (subject.limit === 5 && typeof subject.ipKey === 'string' && subject.ipKey.length > 0 && subject.ipKey.length <= 512)));
+    && Number.isSafeInteger(subject.limit) && subject.limit >= 0 && subject.limit <= 100_000
+    && (subject.ipKey === undefined || ((subject.guest === true || subject.limit === 5) && typeof subject.ipKey === 'string' && subject.ipKey.length > 0 && subject.ipKey.length <= 512)));
   return hash(subject.key);
 }
 

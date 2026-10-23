@@ -1,4 +1,5 @@
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
+import { unifiedWalletConfig, unifiedBuildBilledUsd } from '../lib/unifiedWallet/policy';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction } from '../AgentV3/weakBuildPreflight';
 import { toSafeClientMessage } from '../lib/httpError';
@@ -1887,7 +1888,10 @@ export function decideBuildBilledUsd(
   if (isOpusTier) {
     effectiveBilledUsd = flatBilledUsd; // real Opus × 2 — unchanged
   } else if (realCostBillingEnabled()) {
-    effectiveBilledUsd = tieredMarkupUsd(billableTokenCost + vmCost);
+    // UNIFIED WALLET (flag, default OFF): real cost × UNIFIED_WALLET_BUILD_MARGIN (default 2) instead of the
+    // tiered ×4/×3 curve. Same billable cost, same wallet debit, same cancelled-build rules downstream.
+    const uw = unifiedWalletConfig();
+    effectiveBilledUsd = uw.enabled ? unifiedBuildBilledUsd(billableTokenCost + vmCost, uw) : tieredMarkupUsd(billableTokenCost + vmCost);
   } else {
     effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
       ? perTierBilledUsd(reconciledProviderUsage, powerLevel)

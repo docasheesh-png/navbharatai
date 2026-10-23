@@ -6,6 +6,9 @@ import { verifyFirebaseToken, rateLimiter } from './authMiddleware';
 import { addressRateKey } from './clientAddress';
 import { GUEST_ID_HEADER, readGuestId } from './guestDailyQuota';
 import { FreeAnswerQuotaStore, type FreeAnswerQuotaSubject } from './freeAnswerQuotaStore';
+import { getServerDb } from './serverDb';
+import { unifiedWalletConfig, dailyAllowance, detectLang, insufficientBalanceMessage, lowBalanceNotice, rateLimitedMessage } from './unifiedWallet/policy';
+import { UnifiedWalletGate, activePlanId, holdChatMessage, finishChatMessage } from './unifiedWallet/store';
 
 const leases = new WeakMap<Request, { controller: AbortController; leaseUntil: number; answered: boolean; failed: boolean; disconnected: boolean }>();
 const codes: Record<string, string> = { 'daily-limit': 'DAILY_LIMIT', busy: 'BUSY', duplicate: 'DUPLICATE', 'attempt-limit': 'ATTEMPT_LIMIT' };
@@ -22,10 +25,15 @@ function reject(res: Response, reason: string): void {
 }
 async function subjectFor(req: Request, options: {uid?: string | null}): Promise<FreeAnswerQuotaSubject> {
   const uid = Object.prototype.hasOwnProperty.call(options, 'uid') ? options.uid : await verifyFirebaseToken(req);
-  if (uid) return {key: `user:${uid}`, limit:20};
+  const cfg = unifiedWalletConfig();
+  if (uid) {
+    // Flag OFF: exactly main's 20. Flag ON: the owner's signed-in default (25) or a plan's higher allowance.
+    if (!cfg.enabled) return {key: `user:${uid}`, limit:20};
+    return {key: `user:${uid}`, limit: dailyAllowance(cfg, {signedIn:true, planId: await activePlanId(uid)})};
+  }
   const ip = addressRateKey(req);
   const device = readGuestId(req.headers[GUEST_ID_HEADER]);
-  return {key: device ? `guest-device:${device}` : `guest-address:${ip}`, limit:5, ipKey:ip};
+  return {key: device ? `guest-device:${device}` : `guest-address:${ip}`, ...(cfg.enabled ? {limit: cfg.guestDailyMessages, guest: true} : {limit: 5}), ipKey:ip};
 }
 export function freeAnswerSignal(req: Request): AbortSignal | undefined { return leases.get(req)?.controller.signal; }
 export function assertFreeAnswerActive(req: Request): void {
@@ -52,8 +60,25 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
     const header=req.headers['x-nb-answer-request'];
     // Invalid or absent ids never provide a replay grant. Legacy clients get a fresh server id.
     const requestId=typeof header==='string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(header) ? header : randomUUID();
+    const cfg=unifiedWalletConfig();
+    const lang=detectLang((req.body as any)?.message ?? (req.body as any)?.prompt);
+    if (cfg.enabled) {
+      // Per-minute abuse gate + once-only request id, BEFORE any allowance or money is touched.
+      const gate=await new UnifiedWalletGate().admit(subject.key,requestId,subject.guest?cfg.perMinuteGuest:cfg.perMinuteSignedIn,Date.now());
+      if (!gate.ok) {
+        if (gate.reason==='rate-limited') { if (!res.headersSent) res.status(429).json({code:'FREE_ANSWER_RATE_LIMIT',error:rateLimitedMessage(lang),reply:rateLimitedMessage(lang)}); return; }
+        reject(res,'duplicate'); return;
+      }
+    }
     const reserved=await store.reserve(subject,requestId,Date.now());
-    if (!reserved.allowed) {reject(res,reserved.reason); return;}
+    if (!reserved.allowed) {
+      // UNIFIED WALLET: a signed-in user past today's free messages pays 0.1 credit from the ONE wallet
+      // that also pays for Pro builds. Guests have no wallet — they get main's refusal.
+      if (cfg.enabled && reserved.reason==='daily-limit' && subject.key.startsWith('user:')) {
+        return await runWalletPaidTurn(req,res,run,subject.key.slice(5),requestId,lang,controller,()=>disconnected);
+      }
+      reject(res,reserved.reason); return;
+    }
     const lease={controller,leaseUntil:reserved.reservation.leaseExpiresAt,answered:false,failed:false,disconnected};
     leases.set(req,lease);
     let renewing=false;
@@ -86,6 +111,31 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
     // The route owns its error detail. This boundary never switches to a paid handler.
     if(res.headersSent && !res.writableEnded && !res.destroyed) res.end();
   } finally {res.removeListener('close',close);}
+}
+
+/** One Free chat turn paid from the unified wallet: hold → run → settle, or release on a proven no-output failure. */
+async function runWalletPaidTurn<T>(req: Request, res: Response, run: () => Promise<T>, uid: string, requestId: string, lang: ReturnType<typeof detectLang>, controller: AbortController, isDisconnected: () => boolean): Promise<T | void> {
+  const cfg=unifiedWalletConfig();
+  const db=getServerDb();
+  const held=await holdChatMessage(db,uid,requestId,cfg);
+  if (!held.ok) {
+    if (held.insufficient) { if (!res.headersSent) res.status(402).json({code:'WALLET_INSUFFICIENT',error:insufficientBalanceMessage(lang,cfg),reply:insufficientBalanceMessage(lang,cfg),minRechargeInr:cfg.minRechargeInr}); return; }
+    reject(res,'unavailable'); return;
+  }
+  const notice=lowBalanceNotice(lang,held.charge.balanceTokens,cfg);
+  if (notice && !res.headersSent) res.setHeader('X-NB-Wallet-Notice',encodeURIComponent(notice));
+  const lease={controller,leaseUntil:Date.now()+90_000,answered:false,failed:false,disconnected:isDisconnected()};
+  leases.set(req,lease);
+  const timer=setTimeout(()=>controller.abort(),90_000);
+  let finished=false;
+  try {
+    return await runWithFreeAnswerContext({signal:controller.signal,assertActive:()=>{if(finished||controller.signal.aborted){controller.abort();throw new Error('Paid Free answer expired');}}},run);
+  } finally {
+    finished=true; clearTimeout(timer);
+    const outcome=lease.answered ? 'answered' : lease.failed || (!lease.disconnected && !controller.signal.aborted) ? 'provider-failed' : 'uncertain';
+    try { await finishChatMessage(db,uid,held.charge,outcome); } catch { console.warn('[UNIFIED WALLET] settle/release unavailable; hold retained'); }
+    leases.delete(req);
+  }
 }
 
 export function registerFreeAnswerQuotaRoutes(app: Express): void {

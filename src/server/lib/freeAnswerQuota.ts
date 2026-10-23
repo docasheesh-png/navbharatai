@@ -42,7 +42,7 @@ export function markFreeAnswer(req: Request): void { assertFreeAnswerActive(req)
 /** A proven no-output provider failure can refund even after a disconnect. */
 export function markFreeAnswerProviderFailure(req: Request): void { const lease=leases.get(req); if (lease && !lease.answered) lease.failed=true; }
 
-export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: () => Promise<T>, options: {uid?: string | null; surface?: ChatSurface} = {}): Promise<T | void> {
+export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: () => Promise<T>, options: {uid?: string | null; surface: ChatSurface} = {} as never): Promise<T | void> {
   // Internal nested wrappers reuse the exact live request, never a client-supplied proof.
   if (leases.has(req)) { assertFreeAnswerActive(req); return run(); }
   const store = new FreeAnswerQuotaStore();
@@ -70,7 +70,7 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
     if (!reserved.allowed) {
       // UNIFIED WALLET: a signed-in user past today's free messages pays 0.1 credit from the ONE wallet
       // that also pays for Pro builds. Guests have no wallet — they get main's refusal.
-      // Only allow-listed surfaces (default: plain NavBharatAI Chat) may be paid; every other caller keeps main's refusal.
+      // Every Free surface is paid after the quota (owner); the explicit list can narrow it.
       if (surfaceIsCharged(options.surface) && reserved.reason==='daily-limit' && subject.key.startsWith('user:')) {
         return await runWalletPaidTurn(req,res,run,subject.key.slice(5),requestId,lang,controller,()=>disconnected);
       }

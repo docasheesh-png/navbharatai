@@ -3,17 +3,20 @@
 ## Switches (all default OFF, each independent)
 | Env | Effect when on |
 |---|---|
-| `UNIFIED_WALLET_ENABLED` | paid NavBharatAI Chat past the free quota (0.1 credit) + per-minute gate, only on `UNIFIED_WALLET_CHARGED_SURFACES` (default `chat`) |
+| `UNIFIED_WALLET_ENABLED` | every Free surface paid past the free quota (0.1 credit) + per-minute gate (`UNIFIED_WALLET_CHARGED_SURFACES`, default all) |
 | `UNIFIED_WALLET_FREE_LIMIT` | signed-in free quota 20 → 25/day (guests stay 5) |
 | `UNIFIED_WALLET_MARGIN` | `on` = real cost × 2.5 everywhere; a number 1.01–10 = that margin |
 | `UNIFIED_WALLET_IMAGE_COUNTS_TEXT` | a delivered free image also uses one daily text message |
 
 With all off, every path behaves exactly as on main.
 
-## Charged surfaces (allow-list)
-Only plain NavBharatAI Chat (`/api/chat/navbharat`, `/api/chat/navbharatai`, `surface:'chat'`) can be paid from
-the wallet. Free professionals / exam / Teacher AI (`professionals`) and Repo Analyst (`repo-analyst`) keep
-main's refusal until the owner adds them to `UNIFIED_WALLET_CHARGED_SURFACES`.
+## Charged surfaces (owner: nothing is free beyond the daily allowance)
+Every surface that admits Free answers is charged 0.1 credit/message after the shared quota, by default:
+`chat` (both NavBharatAI Chat aliases), `professionals` (Free professionals incl. Teacher AI chat), `exam`
+(Free exam papers), `repo-analyst` (chat + generate). `withFreeAnswerQuota` requires a `surface`, and a test
+scans every caller in the repo so a new one cannot be missed. `UNIFIED_WALLET_CHARGED_SURFACES` can narrow it.
+Doctor AI / SDA / document & vision, paid professionals, tools and the developer API already charge real
+metered cost from the same wallet after their own free allowance (× 2.5 with `UNIFIED_WALLET_MARGIN`).
 
 ## Hold lifecycle (review fixes)
 - One paid reply at a time per user (`inflight_*` lock, 120 s expiry for a crashed owner).

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Firestore } from 'firebase-admin/firestore';
 import {
   unifiedWalletConfig, unifiedWalletEnabled, dailyAllowance, milliToTokens, milliToInr, gstBreakdown,
-  unifiedBuildBilledUsd, detectLang, insufficientBalanceMessage, lowBalanceNotice, rechargePackView, surfaceIsCharged,
+  unifiedBuildBilledUsd, detectLang, insufficientBalanceMessage, lowBalanceNotice, rechargePackView, surfaceIsCharged, KNOWN_SURFACES,
 } from './policy';
 import { UnifiedWalletGate, holdChatMessage, closeChatHold, sweepStuckHolds, INFLIGHT_TTL_MS, holdService, finishService, SERVICE_FEATURE, type WalletMoneyOps } from './store';
 import { countDeliveredFreeImage, imageCountsAgainstText } from './imageTextQuota';
@@ -199,23 +199,30 @@ describe('chat charge orchestration', () => {
   });
 });
 
-describe('charged surfaces are an explicit allow-list', () => {
-  it('default: only plain NavBharatAI Chat, and only with UNIFIED_WALLET_ENABLED', () => {
-    expect(surfaceIsCharged('chat', {})).toBe(false);
-    expect(surfaceIsCharged('chat', { UNIFIED_WALLET_ENABLED: '1' })).toBe(true);
-    expect(surfaceIsCharged('professionals', { UNIFIED_WALLET_ENABLED: '1' })).toBe(false);
-    expect(surfaceIsCharged('repo-analyst', { UNIFIED_WALLET_ENABLED: '1' })).toBe(false);
-    expect(surfaceIsCharged(undefined, { UNIFIED_WALLET_ENABLED: '1' })).toBe(false);
-    expect(surfaceIsCharged('professionals', { UNIFIED_WALLET_ENABLED: '1', UNIFIED_WALLET_CHARGED_SURFACES: 'chat,professionals' })).toBe(true);
-  });
-  it('only chat.ts opts in; professionals/exam/Teacher and Repo Analyst callers do not', async () => {
-    const { readFileSync } = await import('node:fs');
-    expect(readFileSync('src/server/routes/chat.ts', 'utf8')).toContain("surface:'chat'");
-    for (const f of ['src/server/routes/professionals.ts', 'src/server/routes/repoAnalyst.ts']) {
-      const calls = readFileSync(f, 'utf8').match(/withFreeAnswerQuota\([^)]*\)/g) ?? [];
-      expect(calls.length).toBeGreaterThan(0);
-      for (const c of calls) expect(c).not.toContain('surface');
+describe('charged surfaces: every Free surface, explicit list', () => {
+  it('default: all known surfaces charged after the quota, only with UNIFIED_WALLET_ENABLED', () => {
+    for (const s of ['chat', 'professionals', 'exam', 'repo-analyst']) {
+      expect(surfaceIsCharged(s, {})).toBe(false);
+      expect(surfaceIsCharged(s, { UNIFIED_WALLET_ENABLED: '1' })).toBe(true);
     }
+    expect(surfaceIsCharged(undefined, { UNIFIED_WALLET_ENABLED: '1' })).toBe(false);
+    expect(surfaceIsCharged('unknown', { UNIFIED_WALLET_ENABLED: '1' })).toBe(false);
+    expect(surfaceIsCharged('exam', { UNIFIED_WALLET_ENABLED: '1', UNIFIED_WALLET_CHARGED_SURFACES: 'chat' })).toBe(false);
+  });
+  it('every withFreeAnswerQuota caller in the repo names a known surface (nothing missed)', async () => {
+    const { execSync } = await import('node:child_process');
+    const { readFileSync } = await import('node:fs');
+    const files = execSync("git ls-files 'src/**/*.ts' 'server.ts'", { encoding: 'utf8' }).split('\n')
+      .filter((f) => f && !f.endsWith('.test.ts') && !f.endsWith('freeAnswerQuota.ts'));
+    let calls = 0;
+    for (const f of files) {
+      for (const m of readFileSync(f, 'utf8').matchAll(/withFreeAnswerQuota\(([^;]*?)\);/g)) {
+        calls++;
+        const surface = /surface\s*:\s*'([a-z-]+)'/.exec(m[1])?.[1];
+        expect(KNOWN_SURFACES as readonly string[], `${f}: ${m[0]}`).toContain(surface);
+      }
+    }
+    expect(calls).toBeGreaterThanOrEqual(5);
   });
 });
 

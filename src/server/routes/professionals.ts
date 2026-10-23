@@ -292,7 +292,7 @@ export function registerProfessionalsRoutes(app: Express): void {
         return runWithInferenceScope(gate.tier === 'free' ? 'free-modules' : 'paid-professional', () =>
           withFreeProfessionalGateway(req, { selected: countedFree, uid: verifiedUserId, professionalId: config.id, deadlineAtMs, signal }, run));
       };
-      if (countedFree) await withFreeAnswerQuota(req, res, dispatch, { uid: verifiedUserId });
+      if (countedFree) await withFreeAnswerQuota(req, res, dispatch, { uid: verifiedUserId, surface: 'professionals' });
       else await dispatch();
     } catch (err: any) {
       if (!res.destroyed && !res.writableEnded) sendSafeError(res, 503, 'The assistant is busy. Please try again.', err, 'professional admission');
@@ -394,7 +394,7 @@ export function registerProfessionalsRoutes(app: Express): void {
       sendSafeError(res, 503, 'Could not set the paper right now. Please try again.', err, 'professional exam');
     }
     });
-    if (gate.tier === 'free') return withFreeAnswerQuota(req, res, dispatch, { uid: verifiedUserId });
+    if (gate.tier === 'free') return withFreeAnswerQuota(req, res, dispatch, { uid: verifiedUserId, surface: 'exam' });
     return dispatch();
   });
 }

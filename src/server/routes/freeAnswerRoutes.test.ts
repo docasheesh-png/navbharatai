@@ -28,7 +28,7 @@ afterEach(() => { vi.unstubAllEnvs(); });
 describe('shared Free quota at professional ingress', () => {
  it('reserves legacy Free chat using verified identity, then marks actual output', async () => {
   const { req, res } = await professional('chat', { uid: 'forged' });
-  expect(m.quota).toHaveBeenCalledWith(req, res, expect.any(Function), { uid: 'verified-user' }); expect(m.mark).toHaveBeenCalledWith(req); expect(res.body.reply).toBe('A real answer');
+  expect(m.quota).toHaveBeenCalledWith(req, res, expect.any(Function), { uid: 'verified-user', surface: 'professionals' }); expect(m.mark).toHaveBeenCalledWith(req); expect(res.body.reply).toBe('A real answer');
  });
  it('rejects before document extraction, generation or charge', async () => {
   m.quota.mockImplementation(async (_req, res) => res.status(429).json({ code: 'FREE_ANSWER_LIMIT' }));
@@ -63,7 +63,7 @@ describe('Repo Analyst shared Free ingress', () => {
   m.quota.mockImplementation(async (_req, res) => res.status(429).json({ code: 'FREE_ANSWER_LIMIT' }));
   const req = mockReq({ body: { message: 'inspect repo', userId: 'forged' } }); const res = mockRes();
   await captureRoutes(registerRepoAnalystRoutes).get(`POST /api/repo-analyst/${operation}`)!(req, res);
-  expect(m.quota).toHaveBeenCalledWith(req, res, expect.any(Function), { uid: 'verified-user' }); expect(m.analyst).not.toHaveBeenCalled(); expect(m.generate).not.toHaveBeenCalled();
+  expect(m.quota).toHaveBeenCalledWith(req, res, expect.any(Function), { uid: 'verified-user', surface: 'repo-analyst' }); expect(m.analyst).not.toHaveBeenCalled(); expect(m.generate).not.toHaveBeenCalled();
  });
 });
 

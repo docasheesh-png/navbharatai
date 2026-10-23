@@ -41,14 +41,19 @@ export function signedInDailyLimit(env: Env = process.env): number {
 }
 
 /**
- * Surfaces whose Free answers may be PAID from the wallet once the quota is used. Explicit allow-list,
- * default only plain NavBharatAI Chat. Free professionals / exam / Teacher AI ('professionals') and
- * Repo Analyst ('repo-analyst') keep main's refusal until the owner adds them here.
+ * EVERY surface that admits Free answers (owner 2026-10-23: "nothing is free beyond the daily allowance").
+ * Explicit list so nothing is missed: `withFreeAnswerQuota` REQUIRES a surface (compile-time), and a test
+ * asserts every caller in the repo names one from here. All are charged by default once the quota is used;
+ * UNIFIED_WALLET_CHARGED_SURFACES can narrow the list.
+ *   chat           plain NavBharatAI Chat (both aliases)
+ *   professionals  Free professionals incl. Teacher AI chat
+ *   exam           Free exam paper generation
+ *   repo-analyst   Repo Analyst chat + generate
  */
-export const KNOWN_SURFACES = ['chat', 'professionals', 'repo-analyst'] as const;
+export const KNOWN_SURFACES = ['chat', 'professionals', 'exam', 'repo-analyst'] as const;
 export type ChatSurface = typeof KNOWN_SURFACES[number];
 export function chargedSurfaces(env: Env = process.env): ChatSurface[] {
-  const raw = (env.UNIFIED_WALLET_CHARGED_SURFACES ?? 'chat').split(',').map((s) => s.trim());
+  const raw = (env.UNIFIED_WALLET_CHARGED_SURFACES ?? KNOWN_SURFACES.join(',')).split(',').map((s) => s.trim());
   return KNOWN_SURFACES.filter((s) => raw.includes(s));
 }
 export function surfaceIsCharged(surface: string | undefined, env: Env = process.env): boolean {

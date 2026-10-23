@@ -234,7 +234,8 @@ describe('every AI route a signed-out visitor can reach carries the budget', () 
       const at = src.indexOf(route);
       expect(at, `${route} not found in ${file}`).toBeGreaterThan(-1);
       const line = src.slice(at, src.indexOf('\n', at));
-      expect(line).toMatch(/guestDailyQuota\('/);
+      if (file.endsWith('/chat.ts')) { expect(line).toContain('withChatDailyQuota'); expect(src).toContain("await guestDailyQuota('chat'"); }
+      else expect(line).toMatch(/guestDailyQuota\('/);
     });
   }
 });

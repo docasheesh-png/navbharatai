@@ -123,7 +123,7 @@ describe('free chat chain central dispatch', () => {
  });
  it('streams a clear busy response when every rung is unavailable', async () => {
  const cfg=config();cfg.rungs.forEach(r=>{r.reason='unconfigured';});const onChunk=vi.fn();
- const result=await buildFreeChainRouter(db,cfg).route({...input(),onChunk});expect(result.ok).toBe(false);expect(onChunk).toHaveBeenCalledWith(result.content);
+ const result=await buildFreeChainRouter(db,cfg).route({...input(),onChunk});expect(result.ok).toBe(false);expect(onChunk).toHaveBeenCalledWith(result.content, 'notice');
  });
  it('defaults OFF and strict-free bypasses the chain', async () => {
  vi.stubEnv('FREE_CHAIN_ENABLED','off');expect(await maybeFreeChain(input())).toBeNull();expect(m.db).not.toHaveBeenCalled();
@@ -209,7 +209,7 @@ describe('free chat chain central dispatch', () => {
  await expect(freeChainAdminMetrics()).rejects.toThrow('store unavailable'); expect(m.events).toHaveBeenCalledOnce();
  m.db.mockReturnValue(null); await expect(freeChainAdminMetrics()).rejects.toThrow('FREE_CHAIN_STORE_UNAVAILABLE'); expect(m.events).toHaveBeenCalledOnce();
  });
- it('storage failure produces a nonblank stream with no external call',async()=>{vi.stubEnv('FREE_CHAIN_ENABLED','on');m.db.mockReturnValue(null);const onChunk=vi.fn();const result=await maybeFreeChain({...input(),onChunk});expect(onChunk).toHaveBeenCalledWith(result?.content);expect(m.execute).not.toHaveBeenCalled();});
+ it('storage failure produces a nonblank stream with no external call',async()=>{vi.stubEnv('FREE_CHAIN_ENABLED','on');m.db.mockReturnValue(null);const onChunk=vi.fn();const result=await maybeFreeChain({...input(),onChunk});expect(onChunk).toHaveBeenCalledWith(result?.content, 'notice');expect(m.execute).not.toHaveBeenCalled();});
  it.each([['2m59.56s',179560],['1h',3600000],['bad',86400000],[undefined,86400000]])('parses reset duration %s', (value,expected)=>{expect(durationMs(value as string|undefined,86400000)).toBe(expected);});
 });
 

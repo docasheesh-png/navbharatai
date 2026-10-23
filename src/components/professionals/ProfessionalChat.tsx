@@ -1,3 +1,5 @@
+import { FreeAnswerStatusBadge } from '../chat/FreeAnswerStatusBadge';
+import { newFreeAnswerRequestId, notifyFreeAnswerChanged } from '../../lib/freeAnswerStatus';
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Square, Sparkles, X, FileText, Clock, LogIn, Wallet, GraduationCap, Volume2 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
@@ -227,11 +229,12 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
       // Bearer token so the server can key persistent memory (e.g. Teacher AI's student
       // profile) to the VERIFIED identity — the body userId alone is never trusted for that.
       // …and the platform, so on the iPhone app no answer teaches a way to pay (Q-123).
-      const headers: Record<string, string> = { 'Content-Type': 'application/json', ...platformHeader() };
+      const headers: Record<string, string> = { 'Content-Type': 'application/json', ...platformHeader(), 'x-nb-answer-request': newFreeAnswerRequestId() };
       try {
         const token = await auth.currentUser?.getIdToken();
         if (token) headers.Authorization = `Bearer ${token}`;
       } catch { /* signed-out or token fetch failed — request proceeds anonymously */ }
+      notifyFreeAnswerChanged();
       const res = await fetch(config.endpoint || `/api/professional/${config.id}/chat`, {
         method: 'POST',
         headers,
@@ -265,6 +268,8 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
       }
     } finally {
       setLoading(false);
+      notifyFreeAnswerChanged();
+      refreshPass();
     }
   };
 
@@ -288,6 +293,7 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
   if (examOpen && config.skills?.exam) {
     return (
       <ExamMode
+        onScreen={onScreen}
         professionalId={config.id}
         onAskTeacher={(m) => { setExamOpen(false); void send(m); }}
         onClose={() => setExamOpen(false)}
@@ -327,6 +333,7 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
         )}
       </div>
 
+      <FreeAnswerStatusBadge active={onScreen} />
       <div className={`flex-1 overflow-y-auto custom-scrollbar px-4 py-6 space-y-6 ${CONVERSATION_COLUMN_CHILDREN_CLASS}`}>
         {(() => {
           const lastUser = [...messages].reverse().find((m) => m.role === 'user');

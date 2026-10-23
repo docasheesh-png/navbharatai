@@ -1,3 +1,5 @@
+// This suite isolates routing/identity; shared quota admission is tested separately.
+vi.mock('../src/server/lib/freeAnswerQuota', () => ({ withFreeAnswerQuota: (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(), assertFreeAnswerActive: () => {}, markFreeAnswer: () => {}, freeAnswerSignal: () => undefined }));
 /**
  * 🔴 PLATFORM CONTEXT NEVER RIDES IN THE USER'S TURN (admin 2026-10-17: free chat replied with
  * "[Follow-up. No greeting needed. Respond in same language as user.]").

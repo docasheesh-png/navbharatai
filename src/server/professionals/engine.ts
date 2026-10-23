@@ -99,9 +99,11 @@ export type ProfessionalTier = 'free' | 'paid';
 // The resilient chain now lives in the SHARED professionalRouting module, so the Other-AI tools call
 // the exact same engine (admin 2026-07-24) with zero drift. This thin wrapper keeps the callers here
 // unchanged and preserves the professional-specific error message.
-async function resilientCall(systemPrompt: string, prompt: string, tier: ProfessionalTier): Promise<ProfessionalAnswer> {
+async function resilientCall(systemPrompt: string, prompt: string, tier: ProfessionalTier, opts: ProfessionalChatOptions): Promise<ProfessionalAnswer> {
   try {
-    return await callProfessionalAIWithUsage(systemPrompt, prompt, tier);
+    return await (opts.beforeGeneration
+      ? callProfessionalAIWithUsage(systemPrompt, prompt, tier, { signal: opts.signal, beforeDispatch: opts.beforeGeneration })
+      : callProfessionalAIWithUsage(systemPrompt, prompt, tier));
   } catch (error) {
     if (isGatewayTerminalError(error)) throw error;
     throw new Error('All AI providers failed for this professional.');
@@ -133,6 +135,8 @@ export async function runProfessionalChat(
 
 /** Per-turn options that are neither the message nor the identity. */
 export interface ProfessionalChatOptions {
+  /** Server-owned quota lease fence after memory/grounding and before actual generation. */
+  beforeGeneration?: () => void;
   /** Server-only Free product ingress opt-in, never copied from request payloads or API model tiers. */
   freeProductGateway?: boolean;
   /**
@@ -287,7 +291,8 @@ async function runProfessionalChatInContext(
     if (liveBlock) ({ system: systemPrompt, user: prompt } = placePlatformContext({ system: systemPrompt, user: prompt, blocks: [{ label: 'Live web results', body: liveBlock }] }));
   } catch (error) { if (isGatewayTerminalError(error)) throw error; /* legacy search is best-effort */ }
 
-  const { content: raw, spend } = await resilientCall(systemPrompt, prompt, tier);
+  if (opts.beforeGeneration) { opts.signal?.throwIfAborted(); opts.beforeGeneration(); }
+  const { content: raw, spend } = await resilientCall(systemPrompt, prompt, tier, opts);
 
   // ALWAYS strip any memory block from what the user sees (even for memory-off
   // professionals / anonymous users — a leaked machine block must never reach the

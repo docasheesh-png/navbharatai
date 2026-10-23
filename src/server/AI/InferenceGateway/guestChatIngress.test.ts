@@ -1,3 +1,7 @@
+const quotaHooks=vi.hoisted(()=>({after:()=>{}}));
+vi.mock('../../lib/guestDailyQuota',async original=>{const actual=await original<typeof import('../../lib/guestDailyQuota')>();return {...actual,guestDailyQuota:(...args:Parameters<typeof actual.guestDailyQuota>)=>{const middleware=actual.guestDailyQuota(...args);return (req:any,res:any,next:any)=>middleware(req,res,()=>{quotaHooks.after();next();});}};});
+// This suite isolates routing/identity; shared quota admission is tested separately.
+vi.mock('../../lib/freeAnswerQuota', () => ({ withFreeAnswerQuota: (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(), assertFreeAnswerActive: () => {}, markFreeAnswer: () => {}, freeAnswerSignal: () => undefined }));
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockReq, mockRes } from '../../../../tests/helpers/routeTestUtils';
 const m = vi.hoisted(() => ({ verify: vi.fn(), identity: vi.fn(), detailed: vi.fn(), stream: vi.fn(), legacy: vi.fn(), add: vi.fn(), oldContext: vi.fn() }));
@@ -25,9 +29,8 @@ async function request(body: Record<string, unknown> = {}, options: { path?: str
   let pending: Promise<unknown> | undefined;
   h[0](req, res, () => {
     pending = (async () => {
-      let reply: Promise<unknown> | undefined;
-      await h[2](req, res, () => { options.afterQuota?.(); reply = Promise.resolve(h[3](req, res)); });
-      await reply;
+      quotaHooks.after=options.afterQuota ?? (()=>{});
+      await h[2](req,res);
     })();
   });
   await pending;
@@ -106,7 +109,7 @@ describe('ordinary signed-out Free chat remains usable without account authority
   it('OFF retains the old guest handler even when storage is unavailable', async () => {
     vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'off'); setServerDb(null); const { req, res } = await request();
     expect(res.body).toEqual({ reply: 'Guest answer' }); expect(m.legacy).toHaveBeenCalledOnce();
-    expect(wasGatewayGuestSelected(req)).toBe(false); expect(m.verify).not.toHaveBeenCalled();
+    expect(wasGatewayGuestSelected(req)).toBe(false); expect(m.verify).toHaveBeenCalledOnce();
   });
   it.each(['doctor', 'sda'])('body mode %s does not grant access to the paid clinical product', async mode => {
     database(); const { res } = await request({ mode });

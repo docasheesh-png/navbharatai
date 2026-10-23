@@ -1,3 +1,4 @@
+import { assertFreeAnswerDispatch, currentFreeAnswerSignal } from '../lib/freeAnswerQuotaContext';
 import { assertNoUnclaimedGatewayDispatch } from '../AI/InferenceGateway/dispatchBoundary';
 import { isGatewayRouteSelected, maybeGatewayEmbedding, currentInferenceGatewayContext, InferenceGatewayTerminalError } from '../AI/InferenceGateway/runtime';
 import { strictFreeRequired } from '../AI/inferencePolicy';
@@ -111,7 +112,9 @@ export async function embedText(text: string, timeoutMs = 6000): Promise<number[
   const client = await getClient();
   if (!client) return null;
   try {
-    const call = client.models.embedContent({ model: memoryEmbedModel(), contents: t });
+    assertFreeAnswerDispatch();
+    const signal=currentFreeAnswerSignal();
+    const call = client.models.embedContent({ model: memoryEmbedModel(), contents: t, ...(signal ? {config:{abortSignal:signal}} : {}) });
     const res = await withTimeout(call, timeoutMs);
     return extractVector(res);
   } catch {

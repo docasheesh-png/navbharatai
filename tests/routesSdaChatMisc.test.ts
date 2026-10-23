@@ -1,10 +1,11 @@
+vi.mock('../src/server/lib/freeAnswerQuota', () => ({ withFreeAnswerQuota: (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(), assertFreeAnswerActive: () => {}, markFreeAnswer: () => {}, freeAnswerSignal: () => undefined }));
 /**
  * Route handler validation tests — SDA, Chat, Zip, and Anthropic routes.
  *
  * Tests the 400 early-return branches that fire before any AI/Firestore call.
  * All run without booting a server, using captureRoutes() + direct handler invocation.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 
 process.env.VITEST = 'true';

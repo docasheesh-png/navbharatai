@@ -1,3 +1,5 @@
+import { FreeAnswerStatusBadge } from '../chat/FreeAnswerStatusBadge';
+import { newFreeAnswerRequestId, notifyFreeAnswerChanged } from '../../lib/freeAnswerStatus';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, X, GraduationCap, ArrowRight, SkipForward, RotateCcw, Sparkles, ListChecks, ChevronLeft, Settings, Timer } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
@@ -67,11 +69,12 @@ interface Props {
   paidAfterFree?: boolean;
   /** Called after a paper is set, so the surface can refresh the free-questions count. */
   onPaperSet?: () => void;
+  onScreen?: boolean;
 }
 
 type Phase = 'setup' | 'loading' | 'running' | 'result' | 'review';
 
-export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsLeft = null, paidAfterFree = false, onPaperSet }: Props) {
+export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsLeft = null, paidAfterFree = false, onPaperSet, onScreen = true }: Props) {
   const [phase, setPhase] = useState<Phase>('setup');
   const [subject, setSubject] = useState('');
   const [topic, setTopic] = useState('');
@@ -126,10 +129,12 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
     setError('');
     setPhase('loading');
     try {
+      const answerRequestId = newFreeAnswerRequestId();
+      notifyFreeAnswerChanged();
       const token = await auth.currentUser?.getIdToken().catch(() => null);
       const res = await fetch(`/api/professional/${professionalId}/exam`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...platformHeader() },
+        headers: { 'x-nb-answer-request': answerRequestId, 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...platformHeader() },
         body: JSON.stringify({ subject, topic, level, count, targetExam, targetExamOther, language: settings.language }),
       });
       const data = await res.json().catch(() => ({}));
@@ -155,6 +160,8 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
     } catch {
       setError('Could not reach the teacher. Check your connection and try again.');
       setPhase('setup');
+    } finally {
+      notifyFreeAnswerChanged();
     }
   }, [professionalId, subject, topic, level, count, targetExam, targetExamOther, ready, onPaperSet, settings]);
 
@@ -285,6 +292,7 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
 
   return (
     <div className="relative flex flex-col h-full bg-surface text-body">
+      <FreeAnswerStatusBadge active={onScreen} />
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-line shrink-0">
         <button onClick={onClose} className="w-8 h-8 rounded-lg bg-raised hover:bg-raised-hover border border-line flex items-center justify-center" title="Back to chat" aria-label="Back to chat">
           <ChevronLeft className="w-4 h-4" />

@@ -93,7 +93,8 @@ describe('the signal reaches the provider from the route', () => {
   it('chat.ts still aborts its controller when the client goes (the first half, not undone)', () => {
     const src = read('src/server/routes/chat.ts');
     expect(src).toContain('onClientGone(res, () => controller.abort())');
-    expect(src).toContain('controller.signal,');
+    expect(src).toContain('chatAnswerSignal(req, controller.signal),');
+    expect(src).toContain('AbortSignal.any([signal,quota])');
   });
 });
 

@@ -48,6 +48,8 @@ export interface VisionOptions {
   allowClaude: boolean;
   /** Hard per-provider timeout in ms (default 28s to stay under proxy limits). */
   timeoutMs?: number;
+  /** Optional request admission/deadline cancellation, never changes provider selection. */
+  signal?: AbortSignal;
 }
 
 const DEFAULT_TIMEOUT_MS = 28_000;
@@ -90,9 +92,10 @@ async function tryGlm(atts: VisionAttachment[], o: VisionOptions): Promise<strin
     { role: 'user', content },
   ];
   for (const model of glmVisionModels()) {
+    o.signal?.throwIfAborted();
     try {
       const r: any = await withTimeout(
-        glm.chat.completions.create({ model, messages, max_tokens: 1500 }),
+        glm.chat.completions.create({ model, messages, max_tokens: 1500 }, ...(o.signal ? [{ signal:o.signal }] : [])),
         o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         `GLM vision (${model})`,
       );
@@ -117,12 +120,13 @@ async function tryVertex(atts: VisionAttachment[], o: VisionOptions): Promise<st
     { text: o.prompt },
   ];
   for (const modelId of vertexVisionModels()) {
+    o.signal?.throwIfAborted();
     try {
       const result = await withTimeout(
         vertex.models.generateContent({
           model: modelId,
           contents: [{ role: 'user', parts }],
-          ...(o.systemPrompt ? { config: { systemInstruction: o.systemPrompt } } : {}),
+          ...((o.systemPrompt || o.signal) ? { config: { ...(o.systemPrompt ? { systemInstruction: o.systemPrompt } : {}), ...(o.signal ? { abortSignal:o.signal } : {}) } } : {}),
         }),
         o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         `Vertex vision (${modelId})`,
@@ -145,7 +149,9 @@ async function tryGeminiKey(atts: VisionAttachment[], o: VisionOptions): Promise
   const parts: any[] = [{ text: o.prompt }, ...atts.map((f) => ({ inlineData: { mimeType: f.type, data: f.base64 } }))];
   const config: any = { thinkingConfig: { thinkingBudget: 0 } };
   if (o.systemPrompt) config.systemInstruction = o.systemPrompt;
+  if (o.signal) config.abortSignal = o.signal;
   for (const modelId of geminiVisionModels()) {
+    o.signal?.throwIfAborted();
     try {
       const result: any = await withTimeout(
         ai.models.generateContent({ model: modelId, contents: [{ parts }], config }),
@@ -177,9 +183,10 @@ async function tryGrok(atts: VisionAttachment[], o: VisionOptions): Promise<stri
     { role: 'user', content },
   ];
   for (const model of grokVisionModels()) {
+    o.signal?.throwIfAborted();
     try {
       const r: any = await withTimeout(
-        grok.chat.completions.create({ model, messages, max_tokens: 1500 }),
+        grok.chat.completions.create({ model, messages, max_tokens: 1500 }, ...(o.signal ? [{ signal:o.signal }] : [])),
         o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         `Grok vision (${model})`,
       );
@@ -204,12 +211,13 @@ async function tryClaude(atts: VisionAttachment[], o: VisionOptions): Promise<st
       : { type: 'image', source: { type: 'base64', media_type: f.type, data: f.base64 } })),
     { type: 'text', text: o.prompt },
   ];
+  o.signal?.throwIfAborted();
   const cr: any = await withTimeout(
     claude.messages.create({
       model: claudeVisionAnswerModel(), max_tokens: 1500,
       system: o.systemPrompt || undefined,
       messages: [{ role: 'user', content }],
-    }),
+    }, ...(o.signal ? [{ signal:o.signal }] : [])),
     o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     'Claude vision',
   );
@@ -234,6 +242,7 @@ export function visionProviderOrder(allowClaude: boolean): VisionResult['provide
  * Strict-free policy is the exception: unsupported vision throws before any provider call.
  */
 export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions): Promise<VisionResult | null> {
+  o.signal?.throwIfAborted();
   if (!atts || atts.length === 0) return null;
   if (isGatewayRouteSelected()) {
     if (o.allowClaude || atts.some(att => !['image/png', 'image/jpeg', 'application/pdf'].includes(att.type))) {
@@ -258,6 +267,7 @@ export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions)
     CLAUDE: tryClaude,
   };
   for (const provider of visionProviderOrder(o.allowClaude)) {
+    o.signal?.throwIfAborted();
     try {
       const text = await runners[provider](atts, o);
       if (text) return { text, provider };

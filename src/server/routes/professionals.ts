@@ -1,3 +1,4 @@
+import { withFreeAnswerQuota, markFreeAnswer, markFreeAnswerProviderFailure, freeAnswerSignal, assertFreeAnswerActive } from '../lib/freeAnswerQuota';
 import { usageLogFields } from '../AI/Router/usageLogFields';
 import { runWithInferenceScope } from '../AI/inferencePolicy';
 import { strictFreeRequired, StrictFreeCapabilityError } from '../AI/inferencePolicy';
@@ -155,7 +156,11 @@ export function registerProfessionalsRoutes(app: Express): void {
     // Image-generation guidance retains its existing pipeline. Selected vision uses
     // its own claimed operation policy, never a text-only provider substitution.
     const imageGuidance = typeof message === 'string' && !visionRequested && detectImageIntent(message).wants;
+    const countedFree = gate.tier === 'free' && !imageGuidance;
     const run = async () => {
+    const quotaSignal = freeAnswerSignal(req);
+    const signal = quotaSignal ? AbortSignal.any([controller.signal, quotaSignal]) : controller.signal;
+    if (countedFree) assertFreeAnswerActive(req);
     if (strictFreeRequired() && visionRequested && !isGatewayRouteSelected()) {
       const error = new StrictFreeCapabilityError('professional-vision');
       res.status(error.status).json({ error: error.message, code: error.code }); return;
@@ -178,7 +183,9 @@ export function registerProfessionalsRoutes(app: Express): void {
           // Astrologer, or a diseased leaf sent to Kisan AI, came back described as an app screenshot
           // and the expert never received what its own field needs. A professional that declares an
           // instruction gets its own; every other professional is unchanged.
+          if (countedFree) assertFreeAnswerActive(req);
           const visionBlock = await describeVisionAttachments(rawAttachments, {
+            ...(countedFree ? { signal, beforeDispatch: () => assertFreeAnswerActive(req) } : {}),
             ...(config.visionInstruction ? { instruction: config.visionInstruction } : {}),
             // The free tier never runs Claude (ROUTING_AND_BILLING: weak never runs Sonnet/Opus).
             ...(gate.tier === 'free' ? { noClaude: true } : {}),
@@ -242,7 +249,13 @@ export function registerProfessionalsRoutes(app: Express): void {
     }
 
     try {
-      const { reply, spend, memoryStatus } = await runProfessionalChatWithUsage(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier, { conversationId, platform: clientPlatform(req.headers['x-nbai-platform']), signal: controller.signal, deadlineAtMs, freeProductGateway: gate.tier === 'free' });
+      if (countedFree) assertFreeAnswerActive(req);
+      const { reply, spend, memoryStatus } = await runProfessionalChatWithUsage(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier, { conversationId, platform: clientPlatform(req.headers['x-nbai-platform']), signal, deadlineAtMs, freeProductGateway: gate.tier === 'free', ...(countedFree ? { beforeGeneration: () => assertFreeAnswerActive(req) } : {}) });
+      if (countedFree) {
+        assertFreeAnswerActive(req);
+        if (!reply.trim()) throw new Error('Empty professional answer');
+        markFreeAnswer(req);
+      }
       // Only a genuinely-answered FREE turn burns a daily message (never on a paywall block or an error).
       if (gate.countsAgainstFree && verifiedUserId) {
         void professionalUsageStore.increment(verifiedUserId);
@@ -264,6 +277,8 @@ export function registerProfessionalsRoutes(app: Express): void {
       );
       res.json({ reply, professionalId: config.id, ...(memoryStatus ? { memoryStatus } : {}) });
     } catch (err: any) {
+      if (countedFree && !signal.aborted) markFreeAnswerProviderFailure(req);
+      if (res.destroyed || res.writableEnded) return;
       sendSafeError(res, 503, 'The assistant is busy. Please try again.', err, 'professional chat');
     }
     };
@@ -271,8 +286,14 @@ export function registerProfessionalsRoutes(app: Express): void {
       // Resolve entitlements BEFORE installing Free policy: the access gate itself
       // consults strictFreeRequired(), so pre-gate Free middleware would reclassify
       // a paid/pass-funded turn as free and suppress its original billing.
-      await runWithInferenceScope(gate.tier === 'free' ? 'free-modules' : 'paid-professional', () =>
-        withFreeProfessionalGateway(req, { selected: gate.tier === 'free' && !imageGuidance, uid: verifiedUserId, professionalId: config.id, deadlineAtMs, signal: controller.signal }, run));
+      const dispatch = () => {
+        const quotaSignal = freeAnswerSignal(req);
+        const signal = quotaSignal ? AbortSignal.any([controller.signal, quotaSignal]) : controller.signal;
+        return runWithInferenceScope(gate.tier === 'free' ? 'free-modules' : 'paid-professional', () =>
+          withFreeProfessionalGateway(req, { selected: countedFree, uid: verifiedUserId, professionalId: config.id, deadlineAtMs, signal }, run));
+      };
+      if (countedFree) await withFreeAnswerQuota(req, res, dispatch, { uid: verifiedUserId });
+      else await dispatch();
     } catch (err: any) {
       if (!res.destroyed && !res.writableEnded) sendSafeError(res, 503, 'The assistant is busy. Please try again.', err, 'professional admission');
     }
@@ -321,18 +342,23 @@ export function registerProfessionalsRoutes(app: Express): void {
       res.status(gate.status).json(gate.body);
       return;
     }
-    return runWithInferenceScope(gate.tier === 'free' ? 'free-modules' : 'paid-professional', async () => {
+    const dispatch = () => runWithInferenceScope(gate.tier === 'free' ? 'free-modules' : 'paid-professional', async () => {
+    const quotaSignal = freeAnswerSignal(req);
+    const signal = quotaSignal ? AbortSignal.any([controller.signal, quotaSignal]) : controller.signal;
     try {
+      if (gate.tier === 'free') assertFreeAnswerActive(req);
       const generate = () => runProfessionalChatWithUsage(
         config,
         examPaperInstruction(spec),
         [],
         verifiedUserId || undefined,
         gate.tier,
-        { conversationId: conversationIdFromBody(req.body?.conversationId), platform: clientPlatform(req.headers['x-nbai-platform']), signal: controller.signal, deadlineAtMs, freeProductGateway: gate.tier === 'free' },
+        { conversationId: conversationIdFromBody(req.body?.conversationId), platform: clientPlatform(req.headers['x-nbai-platform']), signal, deadlineAtMs, freeProductGateway: gate.tier === 'free', ...(gate.tier === 'free' ? { beforeGeneration: () => assertFreeAnswerActive(req) } : {}) },
       );
-      const { reply, spend, memoryStatus } = await withFreeProfessionalGateway(req, { selected: gate.tier === 'free', uid: verifiedUserId, professionalId: config.id, deadlineAtMs, signal: controller.signal }, generate);
+      const { reply, spend, memoryStatus } = await withFreeProfessionalGateway(req, { selected: gate.tier === 'free', uid: verifiedUserId, professionalId: config.id, deadlineAtMs, signal }, generate);
+      if (gate.tier === 'free') assertFreeAnswerActive(req);
       const paper = parseExamPaper(reply, Math.min(spec.count, EXAM_MAX_QUESTIONS));
+      if (gate.tier === 'free' && paper.questions.length > 0) markFreeAnswer(req);
       // Priced on what was DELIVERED: the free questions this paper used, and the paid share of its
       // real cost. A paper that came back empty spends nothing and is charged nothing — before
       // 2026-09-23 the charge ran BEFORE this check, so an unusable paper was billed.
@@ -352,6 +378,7 @@ export function registerProfessionalsRoutes(app: Express): void {
         );
       }
       if (paper.questions.length === 0) {
+        if (gate.tier === 'free') markFreeAnswerProviderFailure(req);
         // Honest failure: no paper, and no charge pretended into a score. The student is told plainly.
         res.status(502).json({ error: 'The paper did not come back in a usable form. Please try once more.' });
         return;
@@ -362,8 +389,12 @@ export function registerProfessionalsRoutes(app: Express): void {
       // paper was actually set on — the surface shows the difference when there is one.
       res.json({ professionalId: config.id, spec, read: paper.read, questions: paper.questions, asked: spec.count, dropped: paper.dropped, ...(memoryStatus ? { memoryStatus } : {}) });
     } catch (err: any) {
+      if (gate.tier === 'free' && !signal.aborted) markFreeAnswerProviderFailure(req);
+      if (res.destroyed || res.writableEnded) return;
       sendSafeError(res, 503, 'Could not set the paper right now. Please try again.', err, 'professional exam');
     }
     });
+    if (gate.tier === 'free') return withFreeAnswerQuota(req, res, dispatch, { uid: verifiedUserId });
+    return dispatch();
   });
 }

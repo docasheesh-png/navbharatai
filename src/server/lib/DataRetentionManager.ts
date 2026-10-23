@@ -16,7 +16,7 @@
 // delete the wrong user's data (catastrophic), so nothing is added on a guess.
 
 import * as admin from 'firebase-admin';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { getServerDb } from './serverDb';
 import { RETENTION_PURGE_TOKEN, hasRetentionFence, isRetentionPurgeToken } from './retentionFence';
 
@@ -79,7 +79,7 @@ export interface RetentionFenceTransaction {
 
 // ── The verified registry of user-scoped collections ─────────────────────────────────────────────
 /** How a collection is keyed to a user: the doc-id IS the uid, or a field equals the uid. */
-export type KeyStrategy = 'docId' | { field: string };
+export type KeyStrategy = 'docId' | { field: string; transform?: 'free-answer-principal-hash' };
 export interface UserScopedCollection {
   collection: string;
   key: KeyStrategy;
@@ -134,6 +134,8 @@ export const OWNERSHIP_UNVERIFIED_COLLECTIONS: readonly {
  * `*_COLLECTION` constant fails CI until somebody classifies it.
  */
 export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
+  // Exactly the server-minted SHA256(user:<verified uid>), never the shared guest IP counter.
+  { collection: 'free_answer_quota', key: { field: 'principalHash', transform: 'free-answer-principal-hash' } },
   { collection: 'users', key: 'docId' },
   { collection: 'user_profiles', key: 'docId' },
   { collection: 'user_sessions', key: 'docId' },
@@ -507,6 +509,8 @@ export interface RetentionPolicy {
    * maxPerRun counts CHILDREN AND PARENTS, so a partial sweep leaves its fence for the next run.
    */
   fenced?: true;
+  /** Reusable leaf authorities: atomically re-read expiry and live lease before deleting. No children. */
+  atomicLeaf?: true;
 }
 
 /**
@@ -535,6 +539,9 @@ export function retentionBound(cutoffMs: number, kind: TimestampKind): Date | nu
  * See RETAINED_INDEFINITELY below for the collections that must never be on a timer, and why.
  */
 export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
+  // All quota records are operational metadata; reusable principals refresh this deadline on reserve.
+  // Transactional deletion prevents a stale sweep from removing a newly acquired user-turn lease.
+  { collection: 'free_answer_quota', ttlDays: 0, timestampField: 'purgeAfterMs', timestampKind: 'epochMs', atomicLeaf: true },
   /** FREE chat: only immutable-date user counters and fully settled spend days have this field.
    * Pending holds, replay tombstones, reused quota/cooldown authority and state controls NEVER expire.
    * expiresAt is the deletion deadline itself, not a creation timestamp, hence ttlDays:0. */
@@ -1128,6 +1135,17 @@ export async function deleteUserData(db: RetentionFirestore, uid: string): Promi
         }
         const snap = await ref.get();
         if (snap.exists) { await ref.delete(); deleted++; }
+      } else if (entry.key.transform === 'free-answer-principal-hash') {
+        const owner = createHash('sha256').update(`user:${uid}`).digest('hex');
+        let drained = false;
+        for (let page = 0; page < MAX_ERASE_PAGES; page++) {
+          const query = db.collection(entry.collection).where(entry.key.field, '==', owner);
+          if (!query.limit) throw new Error('Quota erasure requires bounded query support.');
+          const rows = await query.limit(ERASE_PAGE).get();
+          for (const row of rows.docs) { await row.ref.delete(); deleted++; }
+          if (rows.docs.length < ERASE_PAGE) { drained = true; break; }
+        }
+        if (!drained) throw new Error('Quota erasure reached its safety bound; repeat erasure to finish.');
       } else {
         const q = await db.collection(entry.collection).where(entry.key.field, '==', uid).get();
         for (const d of q.docs) {
@@ -1346,6 +1364,29 @@ export async function purgeExpired(
       if (typeof q.limit === 'function') q = q.limit(cap);
       const snap = await q.get();
       for (const d of snap.docs) {
+        if (policy.atomicLeaf) {
+          if (policy.subs?.length || policy.discoverSubcollections || policy.timestampKind !== 'epochMs' || !db.runTransaction) {
+            throw new Error('Atomic leaf retention requires numeric expiry, no children, and a transactional database.');
+          }
+          deleted += await db.runTransaction(async tx => {
+            const current = await tx.get(d.ref);
+            if (!current.exists) return 0;
+            const data = current.data();
+            const deadline = data?.[policy.timestampField];
+            if (typeof deadline !== 'number' || !Number.isFinite(deadline) || deadline >= cutoffMs) return 0;
+            // A malformed/live owner is retained, never converted into a concurrency bypass.
+            const active = data?.active;
+            if (active !== undefined && active !== null) {
+              if (typeof active !== 'object') return 0;
+              const lease = active as Record<string, unknown>;
+              if (typeof lease.leaseExpiresAt !== 'number' || typeof lease.deadlineAt !== 'number'
+                || !Number.isFinite(lease.leaseExpiresAt) || !Number.isFinite(lease.deadlineAt)
+                || lease.leaseExpiresAt > nowMs || lease.deadlineAt > nowMs) return 0;
+            }
+            tx.delete(d.ref); return 1;
+          });
+          continue;
+        }
         let subs = policy.subs ?? [];
         if (policy.discoverSubcollections) {
           if (typeof d.ref.listCollections !== 'function') {

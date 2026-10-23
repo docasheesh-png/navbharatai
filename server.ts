@@ -90,6 +90,7 @@ import { registerGithubAuthRoutes } from './src/server/routes/githubAuth';
 import { registerFirebaseAuthRoutes } from './src/server/routes/firebaseAuth';
 import { registerCreateOrderRoute } from './src/server/routes/createOrder';
 import { registerAuditRoutes } from './src/server/routes/audit';
+import { registerFreeAnswerQuotaRoutes } from './src/server/lib/freeAnswerQuota';
 import { registerChatRoutes } from './src/server/routes/chat';
 import { registerProRoutes } from './src/server/routes/pro';
 import { registerSdaRoutes } from './src/server/routes/sda';
@@ -723,6 +724,7 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   // New Isolated Chat Endpoints
   // Chat routes (the general/FREE chat) — extracted to src/server/routes/chat.ts (Phase 1, AI-core step c).
   registerChatRoutes(app, chatLimiter);
+  registerFreeAnswerQuotaRoutes(app);
 
   // Pro engine routes (pro-chat + pro-build + callClaudePro) — extracted to src/server/routes/pro.ts (Phase 1, AI-core step d).
   registerProRoutes(app);

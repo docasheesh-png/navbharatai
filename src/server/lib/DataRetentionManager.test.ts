@@ -226,9 +226,13 @@ describe('registry sanity', () => {
   it('default retention policies are well-formed', () => {
     for (const p of RETENTION_POLICIES) {
       if (p.ttlDays === 0) {
-        expect(p.collection).toBe('free_chat_chain');
-        expect(p.timestampField).toBe('expiresAt');
-        expect(p.timestampKind).toBe('date');
+        if (p.collection === 'free_answer_quota') {
+          expect(p.timestampField).toBe('purgeAfterMs'); expect(p.timestampKind).toBe('epochMs'); expect(p.atomicLeaf).toBe(true);
+        } else {
+          expect(p.collection).toBe('free_chat_chain');
+          expect(p.timestampField).toBe('expiresAt');
+          expect(p.timestampKind).toBe('date');
+        }
       } else expect(p.ttlDays).toBeGreaterThan(0);
       expect(p.collection.length).toBeGreaterThan(0);
       expect(p.timestampField.length).toBeGreaterThan(0);
@@ -357,9 +361,13 @@ describe('🔒 what is deliberately kept forever, and what is merely undecided',
       expect(p.timestampField).toBeTruthy();
       expect(['date', 'epochMs', 'iso']).toContain(p.timestampKind);
       if (p.ttlDays === 0) {
-        expect(p.collection).toBe('free_chat_chain');
-        expect(p.timestampField).toBe('expiresAt');
-        expect(p.timestampKind).toBe('date');
+        if (p.collection === 'free_answer_quota') {
+          expect(p.timestampField).toBe('purgeAfterMs'); expect(p.timestampKind).toBe('epochMs'); expect(p.atomicLeaf).toBe(true);
+        } else {
+          expect(p.collection).toBe('free_chat_chain');
+          expect(p.timestampField).toBe('expiresAt');
+          expect(p.timestampKind).toBe('date');
+        }
       } else expect(p.ttlDays).toBeGreaterThan(0);
     }
   });

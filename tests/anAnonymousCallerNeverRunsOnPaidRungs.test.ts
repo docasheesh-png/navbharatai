@@ -265,10 +265,10 @@ describe('🔒 SOURCE CENSUS — every AI route reaches the one table', () => {
   });
 
   it('every `guestDailyQuota(...)` route is a GUEST surface of the table, listed under that surface', () => {
-    const guarded = REGS.filter((r) => r.line.includes('guestDailyQuota('));
+    const guarded = REGS.filter((r) => r.line.includes('guestDailyQuota(') || r.line.includes('withChatDailyQuota('));
     expect(guarded.length).toBeGreaterThanOrEqual(11);
     for (const r of guarded) {
-      const surface = r.line.match(/guestDailyQuota\('([^']+)'\)/)?.[1] as string;
+      const surface = (r.line.includes('withChatDailyQuota(') ? 'chat' : r.line.match(/guestDailyQuota\('([^']+)'\)/)?.[1]) as string;
       const cap = anonymousCapabilityFor(surface);
       expect(cap?.access, `${r.file} ${r.path}`).toBe('guest');
       expect(cap?.routes, `${r.file} ${r.path}`).toContain(r.path);
@@ -278,7 +278,11 @@ describe('🔒 SOURCE CENSUS — every AI route reaches the one table', () => {
       const src = code(read(f));
       const uses = (src.match(/guestDailyQuota\(/g) ?? []).length;
       const onLines = REGS.filter((r) => r.file === f && r.line.includes('guestDailyQuota(')).length;
-      expect(uses, f).toBe(onLines);
+      if (f.endsWith('/routes/chat.ts')) {
+        expect(uses).toBe(1);
+        expect(src).toContain("await guestDailyQuota('chat'");
+        expect(REGS.filter(r=>r.file===f && r.line.includes('withChatDailyQuota('))).toHaveLength(2);
+      } else expect(uses, f).toBe(onLines);
     }
   });
 
@@ -287,7 +291,8 @@ describe('🔒 SOURCE CENSUS — every AI route reaches the one table', () => {
       if (cap.access !== 'guest') continue;
       for (const path of cap.routes) {
         const reg = REGS.find((r) => r.path === path);
-        expect(reg?.line, `${surface} → ${path}`).toContain(`guestDailyQuota('${surface}')`);
+        if (surface==='chat') expect(reg?.line, path).toContain('withChatDailyQuota(');
+        else expect(reg?.line, `${surface} → ${path}`).toContain(`guestDailyQuota('${surface}')`);
       }
     }
   });

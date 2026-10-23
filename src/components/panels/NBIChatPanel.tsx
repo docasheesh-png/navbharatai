@@ -1,3 +1,4 @@
+import { FreeAnswerStatusBadge } from '../chat/FreeAnswerStatusBadge';
 import React from 'react';
 import { SURFACE_TITLE_CLASS } from '../chat/conversation';
 import { cn } from '../../lib/utils';
@@ -129,6 +130,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
             </button>
           </div>
         </div>
+        <FreeAnswerStatusBadge />
         <AIChat
           messages={messages}
           // The greeting addresses the account by its first name (chat/greetingText.ts).

@@ -47,7 +47,7 @@ it.each(['environment-off','control-off','rollout-removed'] as const)('an admitt
   const onChunk=vi.fn();
   const result=await maybeFreeChain({message:'hello',history:[],context:context!,onChunk});
   expect(result).not.toBeNull();expect(result).toMatchObject({ok:false,provider:'NONE'});
-  expect(onChunk).toHaveBeenCalledWith(expect.stringContaining('temporarily busy'));
+  expect(onChunk).toHaveBeenCalledWith(expect.stringContaining('temporarily busy'), 'notice');
  });
  expect(m.acquire).toHaveBeenCalledOnce();expect(m.release).toHaveBeenCalledOnce();
 });

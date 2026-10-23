@@ -1,3 +1,4 @@
+import { assertFreeAnswerDispatch } from '../../lib/freeAnswerQuotaContext';
 /** Tiny server-only boundary, separate from runtime to avoid provider/router import cycles. */
 import { AsyncLocalStorage } from 'node:async_hooks';
 const selection = new AsyncLocalStorage<boolean>();
@@ -15,6 +16,7 @@ export function runWithGatewaySelection<T>(selected: boolean, run: () => T): T {
 }
 export function isGatewayDispatchSelected(): boolean { return selection.getStore() === true; }
 export function assertNoUnclaimedGatewayDispatch(capability: string): void {
+  assertFreeAnswerDispatch();
   // Image routes retain their own existing quota/payment policy and were expressly excluded.
   if (capability === 'image-generation' || capability === 'image-edit' || capability === 'image-enhancement') return;
   if (selection.getStore() === true) throw new InferenceGatewayTerminalError('unclaimed-legacy-dispatch');

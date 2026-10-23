@@ -1,3 +1,5 @@
+// This suite isolates routing/identity; shared quota admission is tested separately.
+vi.mock('../../lib/freeAnswerQuota', () => ({ withFreeAnswerQuota: (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(), assertFreeAnswerActive: () => {}, markFreeAnswer: () => {}, freeAnswerSignal: () => undefined }));
 /** Real route + Firebase verifier. Only the external Admin SDK verifier and inference boundary are mocked. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from '../../../../tests/helpers/routeTestUtils';
@@ -27,6 +29,6 @@ describe('owner canary trusts the actual Firebase verification boundary', () => 
     expect(res.body).toEqual({ reply: 'answer' });
     expect(principal).toBe(kind === 'owner' ? 'actual-owner' : undefined);
     expect(m.legacy).toHaveBeenCalledTimes(kind === 'owner' ? 0 : 1);
-    expect(m.verify).toHaveBeenCalledTimes(kind === 'missing' ? 0 : 1);
+    expect(m.verify).toHaveBeenCalledTimes(kind === 'missing' ? 0 : 2);
   });
 });

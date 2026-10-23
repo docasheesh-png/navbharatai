@@ -72,3 +72,9 @@ it('non-canary Free professionals retain legacy context, charge and model behavi
   const res = mockRes(); await route()(req({ message: 'hello', uid: 'other-owner' }), res);
   expect(res.body.reply).toBe('legacy professional answer'); expect(m.engine).toHaveBeenCalledOnce(); expect(m.charge).toHaveBeenCalledOnce();
 });
+
+// These fixtures isolate routing/entitlements; shared quota behavior is covered by freeAnswerRoutes and quota store tests.
+vi.mock('../../lib/freeAnswerQuota', () => ({
+  withFreeAnswerQuota: async (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(),
+  markFreeAnswer: () => {}, markFreeAnswerProviderFailure: () => {}, assertFreeAnswerActive: () => {}, freeAnswerSignal: () => undefined,
+}));

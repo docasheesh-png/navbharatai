@@ -139,3 +139,9 @@ it('requires explicit health recovery selection and displays the exact reviewed 
  expect(JSON.parse(f.mock.calls[1][1].body).recoverHealth).toBe(true);
  expect(JSON.stringify(root())).toContain('Explicit health recovery: ');
 });
+
+it('master ON with no canary entries does not claim an active trial or expose account identifiers', async () => {
+  await mount(vi.fn(async () => response({ ...status(), deploymentEnabled: true, rollout: { mode: 'canary', canaryCount: 0 } })));
+  const html = renderToStaticMarkup(root()); expect(html).toContain('zero means nobody selected');
+  expect(html).toContain('outside this trial budget'); expect(html).toContain('do not control this gateway');
+});

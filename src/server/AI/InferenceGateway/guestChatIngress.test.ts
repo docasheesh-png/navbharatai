@@ -49,7 +49,7 @@ function database() {
   };
   setServerDb(db as never); return { docs, reads };
 }
-beforeEach(() => {
+beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
   vi.clearAllMocks(); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'on'); vi.stubEnv('INFERENCE_GATEWAY_SURFACES', 'chat');
   vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'off'); vi.stubEnv('DOSE_DIRECT_ANSWER', 'off');
   m.verify.mockResolvedValue(null); m.identity.mockResolvedValue(null); m.add.mockResolvedValue(undefined); m.oldContext.mockResolvedValue(undefined);

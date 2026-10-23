@@ -12,7 +12,7 @@ const context = (overrides: Partial<InferenceGatewayContext> = {}): InferenceGat
 });
 const trusted = <T>(run: () => Promise<T>, overrides: Partial<InferenceGatewayContext> = {}) =>
   runWithAuthenticatedInferenceGatewayRequest({} as Request, () => runWithInferenceGatewayContext(context(overrides), run));
-beforeEach(() => { vi.clearAllMocks(); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'on'); vi.stubEnv('INFERENCE_GATEWAY_SURFACES', 'chat');
+beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all'); vi.clearAllMocks(); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'on'); vi.stubEnv('INFERENCE_GATEWAY_SURFACES', 'chat');
   m.verify.mockResolvedValue('verified-user'); m.acquire.mockResolvedValue({ admitted: true, waitedMs: 3, release: m.release }); });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 describe('selected gateway early admission lifecycle', () => {
@@ -55,4 +55,11 @@ describe('selected gateway early admission lifecycle', () => {
     vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'off'); expect(await trusted(() => runWithInferenceGatewayEntryAdmission(async () => 'legacy'))).toBe('legacy');
     expect(m.acquire).not.toHaveBeenCalled();
   });
+});
+
+it('revoking a selected canary during its queue wait blocks prompt work and releases the lease', async () => {
+  vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'canary'); vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', 'verified-user');
+  const handler = vi.fn(); m.acquire.mockImplementationOnce(async () => { vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', ''); return { admitted: true, waitedMs: 1, release: m.release }; });
+  await expect(trusted(() => runWithInferenceGatewayEntryAdmission(handler))).rejects.toMatchObject({ reason: 'disabled-after-selection' });
+  expect(handler).not.toHaveBeenCalled(); expect(m.release).toHaveBeenCalledOnce();
 });

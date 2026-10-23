@@ -104,7 +104,7 @@ const req = { headers: { authorization: 'Bearer non-secret-fixture' } } as Reque
 const run = (c = context(), input = { prompt: 'Hello', systemPrompt: 'Keep the complete instructions.' }) =>
   runWithAuthenticatedInferenceGatewayRequest(req, () => runWithInferenceGatewayContext(c, () => maybeGatewayText(input)));
 let network: ReturnType<typeof vi.spyOn<typeof globalThis, 'fetch'>>;
-beforeEach(() => { mocks.verify.mockReset().mockResolvedValue('verified-user'); mocks.maintenance.mockReset().mockResolvedValue(undefined); mocks.db = null;
+beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all'); mocks.verify.mockReset().mockResolvedValue('verified-user'); mocks.maintenance.mockReset().mockResolvedValue(undefined); mocks.db = null;
   vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'on'); vi.stubEnv('INFERENCE_GATEWAY_TEST_CREDENTIAL', 'synthetic-secret-never-live');
   network = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response()); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
@@ -789,6 +789,11 @@ describe('private public-Free guest admission in the real runtime', () => {
     }));
     expect(network).not.toHaveBeenCalled();
   });
+  it('keeps an already admitted all-mode guest terminal after switching to owner canary', async () => {
+    fixture(); const { request } = await admitted(); vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'canary');
+    vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', 'verified-user');
+    await expect(guestRun(request)).rejects.toMatchObject({ reason: 'disabled-after-selection' }); expect(network).not.toHaveBeenCalled();
+  });
   it('pins an admitted guest request selected when rollout turns OFF before route entry', async () => {
     fixture(); const { request } = await admitted(); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'off');
     await expect(guestRun(request)).rejects.toMatchObject({ reason: 'disabled-after-selection' }); expect(network).not.toHaveBeenCalled();
@@ -797,5 +802,55 @@ describe('private public-Free guest admission in the real runtime', () => {
     fixture(); const { request, res } = await admitted(); const original = GatewayAuthorityStore.prototype.authorizeClaim;
     vi.spyOn(GatewayAuthorityStore.prototype, 'authorizeClaim').mockImplementationOnce(async function(claim) { const result = await original.call(this, claim); res.emit('close'); return result; });
     await expect(guestRun(request)).rejects.toMatchObject({ code: 'INFERENCE_GATEWAY_TERMINAL' }); expect(network).not.toHaveBeenCalled();
+  });
+});
+
+describe('verified-owner canary execution boundary', () => {
+  const canary = () => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'canary'); vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', 'verified-user'); };
+  it('default empty canary creates no context and performs no authority or provider work', async () => {
+    vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', ''); vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', '');
+    await runWithAuthenticatedInferenceGatewayRequest(req, () => runWithInferenceGatewayContext(context(), async () => {
+      expect(currentInferenceGatewayContext()).toBeUndefined(); expect(isGatewayRouteSelected()).toBe(false);
+      expect(await maybeGatewayText({ prompt: 'hello' })).toBeNull();
+    })); expect(network).not.toHaveBeenCalled(); expect(mocks.maintenance).not.toHaveBeenCalled();
+  });
+  it('permits an exact verified canary through the real issuer, ledger and transport', async () => {
+    fixture(); canary(); expect(await run()).toMatchObject({ content: 'Verified answer' }); expect(network).toHaveBeenCalledOnce();
+  });
+  it.each([null, 'outsider'])('does not use body/context UID as canary provenance for %s', async uid => {
+    fixture(); canary(); mocks.verify.mockResolvedValue(uid);
+    expect(await run()).toBeNull(); expect(network).not.toHaveBeenCalled();
+    expect(await runWithInferenceGatewayContext(context(), () => maybeGatewayText({ prompt: 'copied' }))).toBeNull();
+  });
+  it.each(['off', 'empty', 'invalid'])('retains selected provenance when %s changes during identity verification', async change => {
+    fixture(); canary(); mocks.verify.mockImplementationOnce(async () => {
+      if (change === 'off') vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'off');
+      if (change === 'empty') vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', '');
+      if (change === 'invalid') vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'invalid');
+      return 'verified-user';
+    });
+    await expect(run()).rejects.toMatchObject({ reason: 'disabled-after-selection' }); expect(network).not.toHaveBeenCalled();
+  });
+  it('cannot promote an initially unselected identity during an auth await', async () => {
+    fixture(); canary(); vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', 'someone-else');
+    mocks.verify.mockImplementationOnce(async () => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all'); return 'verified-user'; });
+    expect(await run()).toBeNull(); expect(network).not.toHaveBeenCalled();
+  });
+  it.each(['remove-owner', 'invalid-mode', 'all-to-canary'])('rechecks %s after final async claim and retains holds without dispatch', async change => {
+    const f = fixture(true); canary(); if (change === 'all-to-canary') vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
+    const original = GatewayAuthorityStore.prototype.authorizeClaim;
+    vi.spyOn(GatewayAuthorityStore.prototype, 'authorizeClaim').mockImplementationOnce(async function(claim) {
+      const allowed = await original.call(this, claim);
+      if (change === 'invalid-mode') vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'invalid');
+      else { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'canary'); vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', 'someone-else'); }
+      return allowed;
+    });
+    await expect(run()).rejects.toMatchObject({ code: 'INFERENCE_GATEWAY_TERMINAL' }); expect(network).not.toHaveBeenCalled();
+    expect([...f.docs.values()].some(v => (v as any)?.kind === 'gateway_attempt' && (v as any)?.phase === 'pending' && (v as any)?.heldNanoUsd > 0)).toBe(true);
+  });
+  it('pins nested auxiliary selection after owner removal instead of falling back', async () => {
+    fixture(); canary(); await expect(runWithAuthenticatedInferenceGatewayRequest(req, () => runWithInferenceGatewayContext(context(), async () => {
+      vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', ''); return maybeGatewayEmbedding('private memory');
+    }))).rejects.toMatchObject({ reason: 'disabled-after-selection' }); expect(network).not.toHaveBeenCalled();
   });
 });

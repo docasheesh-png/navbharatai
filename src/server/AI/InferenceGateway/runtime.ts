@@ -1,4 +1,5 @@
 /** Server-only composition. OFF is the only route back to a legacy text path. */
+import { gatewayRollout, gatewayRolloutAllowsUid } from './rollout';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import type { Request } from 'express';
@@ -45,7 +46,7 @@ export { InferenceGatewayTerminalError } from './dispatchBoundary';
 export function isGatewayTerminalError(error: unknown): error is InferenceGatewayTerminalError {
   return error instanceof InferenceGatewayTerminalError;
 }
-interface GatewayIngressIdentity { readonly uid: string | null; readonly guest?: GuestInferenceAdmission; readonly selectedGuest?: boolean; }
+interface GatewayIngressIdentity { readonly uid: string | null; readonly cohortSelected: boolean; readonly surfaces: readonly Surface[]; readonly guest?: GuestInferenceAdmission; readonly selectedGuest?: boolean; }
 export type GatewayGuestContext = Pick<GuestInferenceAdmission, 'kind' | 'principalId' | 'expiresAtMs'>;
 const identities = new AsyncLocalStorage<Readonly<GatewayIngressIdentity>>();
 interface ContextState {
@@ -71,10 +72,12 @@ export function inferenceGatewayEnabled(surface?: Surface): boolean {
 export async function runWithAuthenticatedInferenceGatewayRequest<T>(req: Request, fn: (uid: string | null, guest?: GatewayGuestContext) => T): Promise<Awaited<T>> {
   const selectedGuest = wasGatewayGuestSelected(req);
   if (!inferenceGatewayEnabled() && !selectedGuest) return await fn(null);
+  const cohort = gatewayRollout();
+  const surfaces = Object.freeze([...FREE_SURFACES].filter(surface => inferenceGatewayEnabled(surface)));
   const uid = await verifyFirebaseToken(req);
   const guest = uid ? null : takeGuestInferenceAdmission(req);
   const view = guest ? Object.freeze({ kind: guest.kind, principalId: guest.principalId, expiresAtMs: guest.expiresAtMs }) : undefined;
-  return await identities.run(Object.freeze({ uid, selectedGuest, ...(guest ? { guest } : {}) }), () => fn(uid, view));
+  return await identities.run(Object.freeze({ uid, selectedGuest, surfaces, cohortSelected: gatewayRolloutAllowsUid(cohort, uid), ...(guest ? { guest } : {}) }), () => fn(uid, view));
 }
 export function runWithInferenceGatewayContext<T>(context: InferenceGatewayContext, fn: () => T): T {
   const parent = contexts.getStore();
@@ -87,13 +90,23 @@ export function runWithInferenceGatewayContext<T>(context: InferenceGatewayConte
     && privacyRank[context.dataClass] >= privacyRank[parent.context.dataClass]
     && qualityRank[context.qualityTier] >= qualityRank[parent.context.qualityTier]
     && !(parent.context.mode === 'strict-free' && context.mode !== 'strict-free')));
-  const selected = parent?.selected || identities.getStore()?.selectedGuest === true || inferenceGatewayEnabled(context.surface);
+  const identity = parent?.identity ?? identities.getStore();
+  const selected = parent?.selected || identity?.selectedGuest === true || (identity
+    ? identity.cohortSelected && identity.surfaces.includes(context.surface)
+    : inferenceGatewayEnabled(context.surface) && gatewayRollout().mode === 'all');
+  // A non-canary keeps the exact legacy context; no private Gateway principal or telemetry is installed.
+  if (!selected && !parent) return fn();
   return runWithGatewaySelection(selected, () => contexts.run({ context: Object.freeze({ ...context, ...(Array.isArray(context.excludedModelIds) ? { excludedModelIds: Object.freeze([...context.excludedModelIds]) } : {}), signal: parent?.context.signal && context.signal
       ? AbortSignal.any([parent.context.signal, context.signal]) : parent?.context.signal ?? context.signal }), identity: parent?.identity ?? identities.getStore(),
     selected, validInheritance }, fn));
 }
 export function currentInferenceGatewayContext(): InferenceGatewayContext | undefined { return contexts.getStore()?.context; }
 export function isGatewayRouteSelected(): boolean { return contexts.getStore()?.selected === true; }
+
+function selectedCohortCurrent(state: ContextState): boolean {
+  return inferenceGatewayEnabled(state.context.surface)
+    && gatewayRolloutAllowsUid(gatewayRollout(), state.identity?.uid);
+}
 
 function verifiedPrincipal(state: ContextState): string | undefined {
   const { identity, context } = state;
@@ -112,7 +125,7 @@ export function assertGatewayAccountAccess(userId: string): void {
   const state = contexts.getStore();
   if (!state?.selected || !state.validInheritance || !state.identity?.uid || state.identity.uid !== userId
     || state.context.principalId !== userId || state.context.tenantId !== userId
-    || !verifiedPrincipal(state) || !inferenceGatewayEnabled(state.context.surface)
+    || !verifiedPrincipal(state) || !selectedCohortCurrent(state)
     || state.context.signal?.aborted || !Number.isSafeInteger(state.context.deadlineAtMs) || state.context.deadlineAtMs <= Date.now()) {
     throw new InferenceGatewayTerminalError('account-data-unverified');
   }
@@ -127,7 +140,7 @@ export async function runWithInferenceGatewayEntryAdmission<T>(fn: () => Promise
   const inherited = entryLeases.getStore();
   if (inherited?.active && inherited.uid === state.context.principalId && inherited.identity === state.identity) {
     if (inherited.signal?.aborted || state.context.signal?.aborted) throw new InferenceGatewayTerminalError('cancelled');
-    if (!inferenceGatewayEnabled(state.context.surface)) throw new InferenceGatewayTerminalError('disabled-after-selection');
+    if (!selectedCohortCurrent(state)) throw new InferenceGatewayTerminalError('disabled-after-selection');
     if (state.context.deadlineAtMs <= Date.now()) throw new InferenceGatewayTerminalError('deadline');
     return await fn();
   }
@@ -139,7 +152,7 @@ export async function runWithInferenceGatewayEntryAdmission<T>(fn: () => Promise
   try {
     if (context.signal?.aborted) throw new InferenceGatewayTerminalError('cancelled');
     if (!verifiedPrincipal(state)) throw new InferenceGatewayTerminalError('context-unverified');
-    if (!inferenceGatewayEnabled(context.surface)) throw new InferenceGatewayTerminalError('disabled-after-selection');
+    if (!selectedCohortCurrent(state)) throw new InferenceGatewayTerminalError('disabled-after-selection');
     if (!Number.isSafeInteger(context.deadlineAtMs) || context.deadlineAtMs <= Date.now()) throw new InferenceGatewayTerminalError('deadline');
     return await entryLeases.run(lease, fn);
   } finally { lease.active = false; admission.release(); }
@@ -189,7 +202,7 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
   let releaseAdmission: (() => void) | undefined;
   // Everything below is terminal. OFF/revocation after selection does not authorize a legacy escape.
   try {
-    if (!inferenceGatewayEnabled(context.surface)) throw new InferenceGatewayTerminalError('disabled-after-selection');
+    if (!selectedCohortCurrent(state)) throw new InferenceGatewayTerminalError('disabled-after-selection');
     if (!state.validInheritance) throw new InferenceGatewayTerminalError('context-unverified');
     const principal = verifiedPrincipal(state);
     const funding = resolveGatewayFundingAuthority(context, principal);
@@ -251,15 +264,15 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
           ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; onChunk(chunk); } } : {}),
           assertDispatchPolicy: () => {
             if (dispatchSignal.aborted || (authorizationStarted && !store.isDispatchClaimCurrent(claim))) throw new InferenceGatewayTerminalError('dispatch-authority-expired');
-            if (!verifiedPrincipal(state) || !inferenceGatewayEnabled(context.surface) || (strictFreeRequired() && intent.request.mode !== 'strict-free')) {
+            if (!verifiedPrincipal(state) || !selectedCohortCurrent(state) || (strictFreeRequired() && intent.request.mode !== 'strict-free')) {
               throw new InferenceGatewayTerminalError('dispatch-policy-changed');
             }
           },
           authorizeClaim: async () => {
             authorizationStarted = true;
-            if (!verifiedPrincipal(state) || !inferenceGatewayEnabled(context.surface) || (strictFreeRequired() && intent.request.mode !== 'strict-free')) return false;
+            if (!verifiedPrincipal(state) || !selectedCohortCurrent(state) || (strictFreeRequired() && intent.request.mode !== 'strict-free')) return false;
             const allowed = await store.authorizeClaim(claim);
-            return allowed && !dispatchSignal.aborted && !!verifiedPrincipal(state) && inferenceGatewayEnabled(context.surface) && (!strictFreeRequired() || intent.request.mode === 'strict-free');
+            return allowed && !dispatchSignal.aborted && !!verifiedPrincipal(state) && selectedCohortCurrent(state) && (!strictFreeRequired() || intent.request.mode === 'strict-free');
           } };
         try {
           const result = transport.kind === 'embedding' && input.kind === 'embedding'

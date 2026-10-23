@@ -115,7 +115,8 @@ export function InferenceGatewaySetupPanel({ adminToken }: { adminToken: string 
     <button className={button} type="button" disabled={busy} onClick={() => void load()}>Refresh saved review status</button>
     {error && <p role="alert" className="text-danger">{error}</p>}{notice && <p role="status">{notice}</p>}
     {status && <div className="space-y-2 text-sm">
-      <p>Deployment routing: {status.deploymentEnabled ? 'ON (not changed here)' : 'OFF'}. Saved review: {status.reviewState}. Revision: {status.catalogRevision ?? 'none'}.</p>
+      <p>Master switch: {status.deploymentEnabled ? 'ON (not changed here)' : 'OFF'}. Saved review: {status.reviewState}. Revision: {status.catalogRevision ?? 'none'}.</p>
+      <p>Gateway audience: {status.rollout?.mode === 'all' ? 'All eligible Free users, including admitted guests' : status.rollout?.mode === 'canary' ? `${status.rollout.canaryCount} verified accounts configured for canary; zero means nobody selected` : 'Invalid or unavailable; no audience confirmed'}. Other users retain legacy routing outside this trial budget. The Free Chat Chain rollout controls above do not control this gateway.</p>
       <p>Catalog expiry: {status.expiresAtMs === null ? 'no review' : new Date(status.expiresAtMs).toISOString()}. Paid authority: {status.paidAuthority === 'missing' ? 'missing; no paid spending authorized' : `existing shared cap USD ${status.paidCapUsd?.toFixed(2)} per IST day`}.</p>
       {status.profiles.map(p => <p key={p.id}>{p.id}: {p.provider} / {p.modelId}, {p.operationKind ?? 'text'}, {p.expiresAtMs <= now ? 'expired' : p.reviewState}, {p.billing}; credential {p.credentialAssociated ? 'associated' : 'missing or changed'}. Expires {new Date(p.expiresAtMs).toISOString()}.</p>)}
     </div>}

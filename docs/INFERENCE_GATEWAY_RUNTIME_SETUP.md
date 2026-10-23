@@ -33,7 +33,12 @@ rejection fallback chain, not general retry-on-any-error or a guarantee of avail
 
 ## Deployment switches
 
-- `INFERENCE_GATEWAY_ENABLED`: absent/OFF preserves existing paths. ON enables selection.
+- `INFERENCE_GATEWAY_ENABLED`: absent/OFF preserves existing paths. ON permits the audience gate below; it does not itself select all users.
+- `INFERENCE_GATEWAY_ROLLOUT_MODE`: `canary` by default; only explicit `all` selects the full eligible Free audience. Unknown values fail closed to no newly selected audience, never to all.
+- `INFERENCE_GATEWAY_CANARY_UIDS`: comma-separated exact Firebase UIDs, at most 32 unique entries, each 1–128 ASCII letters, digits, colon, underscore or hyphen. Whitespace around entries is trimmed; empty entries, duplicates, invalid characters, overlong entries/lists reject the entire configuration. Empty/unset selects nobody in canary mode. Only server-verified Firebase identity qualifies; body/header UID, guest locator and copied Gateway context do not. No raw UID list is logged or returned by setup status.
+  The cohort is pinned before authentication awaits and checked again on selected admission, nested operations and immediately before physical dispatch. Removal, invalid configuration or OFF after selection is terminal, never an escape into legacy inference. Explicit `all` preserves the durable public guest flow; canary mode does not mint Gateway guest receipts.
+  Non-canary users retain their existing routing, quota and funding behavior and receive no Gateway context. **Their legacy traffic is outside this trial's shared $10 cap.** The older Free Chat Chain percentage/UID controls do not govern this Gateway. Setup displays only the mode and configured canary count; master ON plus zero configured canaries does not mean an active trial.
+  An owner trial requires a real reviewed provider/account/privacy/quality/price setup first. Setting an allowlist and ON is not provider eligibility or authorization to configure credentials. Start with master OFF, obtain the owner's actual Firebase UID through an authorized account view, review one eligible provider, then separately authorize an owner-only test. No credential configuration, provider call or production flag change is performed by this code.
 - `INFERENCE_GATEWAY_SURFACES`: optional comma-separated surfaces. Absent/empty with master ON
   selects only `chat`, `professional`; explicit lists intersect this fixed allowlist.
   Builder, Doctor/SDA, developer/published-app and image surfaces are always excluded, even when explicitly listed.

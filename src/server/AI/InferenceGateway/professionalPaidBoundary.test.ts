@@ -34,7 +34,7 @@ async function invoke(operation: 'chat' | 'exam', body: Record<string, unknown>)
   await dispatch(0); return res;
 }
 const paper = JSON.stringify({ read: { subject: 'Physics', topic: '' }, questions: [{ question: 'Which is a unit of force?', options: ['Newton', 'Metre', 'Second', 'Kelvin'], correctIndex: 0, explanation: 'Force is measured in newtons.', topic: 'Units', level: 'low' }] });
-beforeEach(() => {
+beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
   vi.clearAllMocks(); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'on'); vi.stubEnv('INFERENCE_GATEWAY_SURFACES', 'professional');
   vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'on'); vi.stubEnv('PROFESSIONAL_FREE_QUOTA', 'on'); vi.stubEnv('AI_WALLET_SPEND', 'on');
   vi.stubEnv('SEMANTIC_MEMORY', 'off'); vi.stubEnv('NODE_ENV', 'production');

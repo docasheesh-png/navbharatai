@@ -14,7 +14,7 @@ import { currentInferenceGatewayContext, InferenceGatewayTerminalError } from '.
 import { runWithInferenceScope } from '../inferencePolicy';
 import { freeChainAdmissionQueue } from '../FreeChain/admissionQueue';
 const route = () => captureRoutes(registerChatRoutes as any, () => {}).get('POST /api/chat/navbharat')!;
-beforeEach(() => {
+beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
   vi.clearAllMocks(); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'on'); vi.stubEnv('INFERENCE_GATEWAY_SURFACES', 'chat');
   vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'off'); vi.stubEnv('DOSE_DIRECT_ANSWER', 'off');
   m.live.mockResolvedValue(''); m.needsLive.mockReturnValue(false); m.document.mockResolvedValue('document text');
@@ -25,6 +25,18 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 describe('ordinary chat reaches the real gateway ingress context', () => {
+  it.each([null, 'outsider'])('canary nonowner %s keeps the exact legacy route despite forged UID headers/body', async uid => {
+    vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'canary'); vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', 'verified-user'); m.verify.mockResolvedValue(uid);
+    m.detailed.mockImplementationOnce(async () => { expect(currentInferenceGatewayContext()).toBeUndefined(); return { ok: true, content: 'legacy answer' }; });
+    const res = mockRes(); await route()(mockReq({ headers: { 'x-nb-guest': 'verified-user', 'x-user-id': 'verified-user' }, body: { message: 'hello', uid: 'verified-user', userId: 'verified-user' } }), res);
+    expect(res.body).toEqual({ reply: 'legacy answer' }); expect(m.legacy).toHaveBeenCalledOnce(); expect(m.oldContext).toHaveBeenCalledOnce();
+  });
+  it('verified canary uses the actual route admission without the old chain', async () => {
+    vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'canary'); vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', 'verified-user');
+    m.detailed.mockImplementationOnce(async () => { expect(currentInferenceGatewayContext()?.principalId).toBe('verified-user'); return { ok: true, content: 'owner answer' }; });
+    const res = mockRes(); await route()(mockReq({ body: { message: 'hello', uid: 'forged' } }), res);
+    expect(res.body).toEqual({ reply: 'owner answer' }); expect(m.legacy).not.toHaveBeenCalled(); expect(m.oldContext).not.toHaveBeenCalled();
+  });
   it('binds only verified identity and conservative requirements, bypassing old admission and context', async () => {
     let context: ReturnType<typeof currentInferenceGatewayContext>;
     m.detailed.mockImplementationOnce(async () => { context = currentInferenceGatewayContext(); return { ok: true, content: 'answer' }; });

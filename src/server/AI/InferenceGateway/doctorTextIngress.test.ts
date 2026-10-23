@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs';
 const route = () => captureRoutes(registerSdaRoutes as any).get('POST /api/sda-chat')!;
 let sequence = 0;
 const request = (body: Record<string, unknown> = {}) => mockReq({ body: { message: 'Discuss assessment of fever', sessionId: `gateway-case-${++sequence}`, ...body } });
-beforeEach(() => {
+beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
   vi.clearAllMocks(); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'on'); vi.stubEnv('INFERENCE_GATEWAY_SURFACES', 'doctor');
   vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'on'); vi.stubEnv('DOSE_DIRECT_ANSWER', 'off'); vi.stubEnv('SDA_VERIFY', '1');
   for (const key of ['GROK_API_KEY', 'XAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY']) vi.stubEnv(key, '');

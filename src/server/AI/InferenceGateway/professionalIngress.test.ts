@@ -15,7 +15,7 @@ import { freeChainAdmissionQueue } from '../FreeChain/admissionQueue';
 const route = () => captureRoutes(registerProfessionalsRoutes).get('POST /api/professional/:id/chat')!;
 const req = (body: Record<string, unknown>) => mockReq({ params: { id: 'teacher_ai' }, body });
 const freeGate = { allow: true, tier: 'free', countsAgainstFree: false, billableFraction: 0, isFreeListed: false, hasActivePass: false, freeQuestions: 5 };
-beforeEach(() => {
+beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
   vi.clearAllMocks(); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'on'); vi.stubEnv('INFERENCE_GATEWAY_SURFACES', 'professional');
   vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'off'); vi.stubEnv('NODE_ENV', 'production');
   m.verify.mockResolvedValue('verified-user'); m.identity.mockResolvedValue({ uid: 'verified-user', email: null }); m.gate.mockResolvedValue(freeGate);
@@ -64,4 +64,11 @@ describe('professional Free product early ingress', () => {
     await route()(req({ message: 'hello' }), res);
     expect(res.statusCode).toBe(503); expect(m.engine).not.toHaveBeenCalled(); expect(m.document).not.toHaveBeenCalled();
   });
+});
+
+it('non-canary Free professionals retain legacy context, charge and model behavior', async () => {
+  vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'canary'); vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', 'other-owner');
+  m.engine.mockImplementationOnce(async () => { expect(currentInferenceGatewayContext()).toBeUndefined(); return { reply: 'legacy professional answer', spend: {} }; });
+  const res = mockRes(); await route()(req({ message: 'hello', uid: 'other-owner' }), res);
+  expect(res.body.reply).toBe('legacy professional answer'); expect(m.engine).toHaveBeenCalledOnce(); expect(m.charge).toHaveBeenCalledOnce();
 });

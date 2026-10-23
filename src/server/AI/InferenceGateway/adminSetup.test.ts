@@ -410,3 +410,23 @@ describe('explicit audited health recovery leaves financial authority untouched'
   await expect(f.setup.preview(renewal())).rejects.toThrow();
  });
 });
+
+it('reports canary audience count without exposing UIDs or treating rollout controls as credentials', async () => {
+  const f = fixture(); f.setOn(); f.setEnv({ INFERENCE_GATEWAY_TEST_KEY: 'synthetic-never-live-secret', INFERENCE_GATEWAY_ROLLOUT_MODE: 'canary', INFERENCE_GATEWAY_CANARY_UIDS: 'private-owner-uid,second-private-uid' });
+  const status = await f.setup.status(); expect(status.rollout).toEqual({ mode: 'canary', canaryCount: 2 });
+  expect(status.credentialEnvironments).toEqual(['INFERENCE_GATEWAY_TEST_KEY']);
+  expect(JSON.stringify(status)).not.toContain('private-owner-uid'); expect(JSON.stringify(status)).not.toContain('second-private-uid');
+  f.setEnv({ INFERENCE_GATEWAY_ROLLOUT_MODE: 'bad' }); expect((await f.setup.status()).rollout).toEqual({ mode: 'invalid', canaryCount: 0 });
+  f.setEnv({}); expect((await f.setup.status()).rollout).toEqual({ mode: 'canary', canaryCount: 0 }); expect(f.writes).toEqual([]);
+});
+
+it.each(['all', 'other-owner'])('rejects a setup preview when audience changes to %s before save', async change => {
+  const f = fixture(); f.setOn(); const env = { INFERENCE_GATEWAY_TEST_KEY: 'synthetic-never-live-secret', INFERENCE_GATEWAY_ROLLOUT_MODE: 'canary', INFERENCE_GATEWAY_CANARY_UIDS: 'owner' };
+  f.setEnv(env); const submission = gatewayReviewFixture(); const preview = await f.setup.preview(submission);
+  f.setEnv({ ...env, ...(change === 'all' ? { INFERENCE_GATEWAY_ROLLOUT_MODE: 'all' } : { INFERENCE_GATEWAY_CANARY_UIDS: change }) });
+  await expect(f.setup.submit(submission, preview.previewBinding, 'verified-admin')).rejects.toMatchObject({ code: 'preview-changed' });
+  expect(f.writes).toEqual([]);
+});
+it.each([null, {}, [], { mode: 'all', canaryCount: -1 }, { mode: 'unknown', canaryCount: 0 }])('malformed cohort status returns false without throwing', async rollout => {
+  const f = fixture(); expect(isGatewaySetupStatus({ ...await f.setup.status(), rollout })).toBe(false);
+});

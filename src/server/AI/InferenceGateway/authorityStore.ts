@@ -1,3 +1,4 @@
+import { modelSlotIdentity, modelSlotPath, modelSlotBinding, readModelSlotPolicy, readModelSlotState, readHeldModelSlot, type GatewayModelSlotPolicy } from './modelConcurrency';
 /**
  * Server-only issuer over reviewed, non-client-writable configuration and existing
  * migrated quota state. This does NOT enroll accounts, assume an empty quota, create
@@ -17,11 +18,11 @@ import { gatewayAccountCooldownPath, gatewayCredentialHealthPath, gatewayAccount
 import { GatewayQuotaRollover, gatewayQuotaRulePath, gatewayQuotaWindow, reviewedGatewayQuotaRule, type GatewayRolloverPolicy } from './quotaRollover';
 import { isIdentifier } from './capabilities';
 import type { BudgetAuthorization, Candidate, EvidenceKind, EvidenceRecord, PrivacyRequirement, ProviderProfile, QualityRequirement, RoutingRequest, Surface, CapabilityRequest } from './types';
-import { gatewayTextCredentialBinding, readGatewayTextHealth, readGatewayTextCostAnomaly, readGatewayTextRejection, readGatewayTextUsage, readGatewayTextConservativeUsage, type GatewayTextTransportConfig, type GatewayTextResponse } from './textTransport';
+import { gatewayTextCredentialBinding, readGatewayTextHealth, readGatewayTextCostAnomaly, readGatewayTextRejection, readGatewayTextUsage, readGatewayTextCompletion, readGatewayTextConservativeUsage, type GatewayTextTransportConfig, type GatewayTextResponse } from './textTransport';
 import { readGatewayOpenRouterHealth, readGatewayOpenRouterCostAnomaly, readGatewayOpenRouterRejection, readGatewayOpenRouterUsage, type GatewayOpenRouterConfig } from './openRouterTransport';
 import { gatewayEmbeddingCredentialBinding, readGatewayEmbeddingHealth, readGatewayEmbeddingUsage, readGatewayEmbeddingCostAnomaly, type GatewayEmbeddingConfig } from './embeddingTransport';
 import { readGatewayGroundingHealth, readGatewayGroundingUsage, type GatewayGroundingConfig } from './groundingTransport';
-import { readGatewayVisionHealth, readGatewayVisionUsage, readGatewayVisionConservativeUsage, readGatewayVisionCostAnomaly, readGatewayVisionRejection, type GatewayVisionTransportConfig } from './visionTransport';
+import { readGatewayVisionHealth, readGatewayVisionUsage, readGatewayVisionCompletion, readGatewayVisionConservativeUsage, readGatewayVisionCostAnomaly, readGatewayVisionRejection, type GatewayVisionTransportConfig } from './visionTransport';
 import type { GatewayInvocationPayload, GatewayOperationPolicy } from './capabilityInvocation';
 export type GatewayRuntimeTransport = (GatewayTextTransportConfig & { readonly kind?: 'text' })
   | (GatewayOpenRouterConfig & { readonly kind?: 'text'; readonly rateCard?: never })
@@ -43,6 +44,7 @@ export interface GatewayCatalogEntry {
   /** Reviewed underlying model identity across providers/aliases, required for independent audit. */
   canonicalModelId?: string;
   accountCredentialBinding: string;
+  modelConcurrency?: GatewayModelSlotPolicy;
   freeBillingSafety?: GatewayFreeBillingSafety;
   availability: { coolingUntilMs: number; predictedQueueMs: number; predictedFirstOutputMs: number; predictedCompletionMs: number };
   legacyProvider: string; migrationId: string;
@@ -261,6 +263,7 @@ export class GatewayAuthorityStore {
       const binding = evidenceBinding(withoutEvidence(r));
       const candidates: Candidate[] = []; const entries = new Map<string, GatewayCatalogEntry>();
       const sourceBindings: { path: string; binding: string }[] = [];
+      const modelSlots: Record<string, GatewayModelSlotPolicy> = {};
       const records = new Map<string, EvidenceRecord>();
       const issueEvidence = (kind: EvidenceKind, subject: { evidenceRef: string }, expiresAtMs: number) => {
         records.set(subject.evidenceRef, { kind, binding: evidenceBinding(withoutEvidence(subject)), issuedAtMs: now,
@@ -289,6 +292,14 @@ export class GatewayAuthorityStore {
             && Array.isArray(entry.profile.quotaDimensions) && entry.profile.quotaDimensions.length > 0 && entry.profile.quotaDimensions.length <= 32);
           const fencePath = gatewayAccountFencePath(entry.legacyProvider, gatewayAccountScopeIds(entry.profile.quotaDimensions));
           const fenceRaw = await this.get(tx, fencePath); const fence = validFence(fenceRaw, entry, now);
+          const slotIdentity = modelSlotIdentity(entry.profile);
+          let slotPolicy: GatewayModelSlotPolicy | undefined;
+          if (slotIdentity) {
+            slotPolicy = readModelSlotPolicy(await this.get(tx, modelSlotPath('policy', slotIdentity)), slotIdentity, now);
+            const state = readModelSlotState(await this.get(tx, modelSlotPath('state', slotIdentity)), slotIdentity);
+            requireValue(same(slotPolicy, entry.modelConcurrency) && slotPolicy.accountReviewRef === entry.review.account
+              && Object.keys(state.occupants).length < slotPolicy.limit);
+          }
           if (entry.transport.kind === 'vision-pdf' && entry.transport.provider === 'GEMINI') requireValue(entry.profile.capabilities.some(c => c.kind === 'vision-pdf' && c.maxInputTokens >= 1048576 && c.maxContextTokens >= 1048576 + p.maxOutputTokens));
           const profile = { ...entry.profile, evidenceRef: randomUUID() };
           const profileBinding = evidenceBinding(withoutEvidence(profile));
@@ -329,8 +340,9 @@ export class GatewayAuthorityStore {
               ceilingNanoUsd: maximumFor(entry.transport, p, this.payload),
               coverage: 'all-request-usage' as const, capability: r.capability, evidenceRef: randomUUID() } } : {}) };
           candidates.push(candidate); entries.set(profile.id, copy(entry));
+          if (slotPolicy) { modelSlots[profile.id] = slotPolicy; sourceBindings.push({ path: modelSlotPath('policy', slotIdentity!), binding: evidenceBinding(slotPolicy) }); }
           sourceBindings.push({ path: fencePath, binding: evidenceBinding(fence) }, ...ruleSources);
-          const expiry = Math.min(entry.expiresAtMs, fence.expiresAtMs, entry.freeBillingSafety?.expiresAtMs ?? entry.expiresAtMs, ...ruleExpiries);
+          const expiry = Math.min(entry.expiresAtMs, fence.expiresAtMs, entry.freeBillingSafety?.expiresAtMs ?? entry.expiresAtMs, slotPolicy?.expiresAtMs ?? entry.expiresAtMs, ...ruleExpiries);
           issueEvidence('profile', profile, expiry); issueEvidence('quota', candidate.quota, expiry);
           issueEvidence('availability', candidate.availability, expiry); if (candidate.price) issueEvidence('price', candidate.price, Math.min(expiry, entry.transport.rateCard!.expiresAtMs));
         } catch { /* An unknown/missing account is not free capacity. Other reviewed candidates may remain. */ }
@@ -351,7 +363,7 @@ export class GatewayAuthorityStore {
         snapshot: { revision: randomUUID(), request: r, candidates, ...(budget ? { budget } : {}) },
         scope: { id: c.platformScope.id, kind: 'platform-free-fallback' }, logicalLimitNanoUsd: p.logicalLimitNanoUsd,
         paidPolicyRevision: paid?.revision ?? 0, configurationBinding: evidenceBinding(c),
-        sourceBindings: [...new Map(sourceBindings.map(source => [source.path, source])).values()] };
+        modelSlots, sourceBindings: [...new Map(sourceBindings.map(source => [source.path, source])).values()] };
       requireValue(authority.sourceBindings!.length <= 32);
       this.checkLive();
       for (const [reference, record] of records) tx.create(this.db.doc(gatewayLedgerPath('evidence', reference)), record);
@@ -416,6 +428,13 @@ export class GatewayAuthorityStore {
       for (const old of authority.snapshot.candidates) {
         const entry = this.entries.get(old.profile.id)!;
         if (rejectedProviders.has(old.profile.providerId)) continue;
+        const slotIdentity = modelSlotIdentity(old.profile);
+        if (slotIdentity) {
+          const slotPolicy = readModelSlotPolicy(await this.get(tx, modelSlotPath('policy', slotIdentity)), slotIdentity, now);
+          const state = readModelSlotState(await this.get(tx, modelSlotPath('state', slotIdentity)), slotIdentity);
+          requireValue(same(slotPolicy, authority.modelSlots?.[old.profile.id]));
+          if (Object.keys(state.occupants).length >= slotPolicy.limit) continue;
+        }
         const dimensions = [];
         for (const d of old.profile.quotaDimensions) {
           const ledgerKey = quotaLedgerKey(d);
@@ -502,6 +521,17 @@ export class GatewayAuthorityStore {
           finalChecks.push(now => hasCurrentEvidence({ lookup: () => record }, subject.evidenceRef, kind, withoutEvidence(subject), now));
         }
         requireValue(entry.transport.model === claim.binding.modelId);
+        const slotIdentity = modelSlotIdentity(entry.profile);
+        if (slotIdentity) {
+          const policy = readModelSlotPolicy(await this.get(tx, modelSlotPath('policy', slotIdentity)), slotIdentity, Date.now());
+          const state = readModelSlotState(await this.get(tx, modelSlotPath('state', slotIdentity)), slotIdentity);
+          const held = readHeldModelSlot(attempt.heldModelSlot);
+          const occupant = state.occupants[claim.binding.physicalAttemptId];
+          requireValue(same(policy, entry.modelConcurrency) && same(held.identity, slotIdentity) && held.policyRevision === policy.revision
+            && occupant?.intentBinding === held.intentBinding && occupant.claimBinding === modelSlotBinding(claim)
+            && Object.keys(state.occupants).length <= policy.limit);
+          expiries.push(policy.expiresAtMs); finalChecks.push(now => current(policy.reviewedAtMs, policy.expiresAtMs, now));
+        }
         for (const path of [gatewayAccountCooldownPath(entry.legacyProvider, gatewayAccountScopeIds(entry.profile.quotaDimensions)),
           gatewayCredentialHealthPath(entry.legacyProvider, gatewayAccountScopeIds(entry.profile.quotaDimensions), entry.accountCredentialBinding)]) {
           const raw = await this.get(tx, path); const until = raw === undefined ? 0 : object(raw).untilMs;
@@ -641,6 +671,31 @@ export class GatewayAuthorityStore {
     const document = object(value); const rejection = document.rejection as AuthenticatedRejection;
     requireValue(document.kind === 'gateway_rejection' && document.version === 1 && same(rejection.binding, claim.binding)
       && rejection.evidenceRef === reference); return rejection;
+  }
+  /** Releases physical occupancy only; financial/quota holds and incidents are untouched. */
+  async releaseTrustedModelSlot(value: unknown, claim: DispatchClaim): Promise<void> {
+    const entry = this.entries.get(claim.binding.profileId); requireValue(entry && same(claim.binding.key, this.key));
+    const identity = modelSlotIdentity(entry.profile); if (!identity) return;
+    const terminal = readGatewayTextCompletion(value, claim) ?? readGatewayVisionCompletion(value, claim);
+    const rejection = readGatewayTextRejection(value, claim) ?? readGatewayVisionRejection(value, claim);
+    const proof = terminal ?? rejection; if (!proof) return;
+    const kind = terminal ? 'provider-terminal' : 'no-generation-rejection';
+    const receiptPath = modelSlotPath('release', claim.binding.physicalAttemptId);
+    await this.db.runTransaction(async tx => {
+      const [attemptRaw, stateRaw, receipt] = await Promise.all([
+        this.get(tx, gatewayLedgerPath('attempt', claim.binding.physicalAttemptId)), this.get(tx, modelSlotPath('state', identity)), this.get(tx, receiptPath),
+      ]);
+      const attempt = object(attemptRaw); const held = readHeldModelSlot(attempt.heldModelSlot);
+      requireValue(same(attempt.claim, claim) && same(held.identity, identity) && nonnegativeInteger(attempt.dispatchAuthorizedAtMs)
+        && proof.receivedAtMs >= (attempt.dispatchAuthorizedAtMs as number) && proof.receivedAtMs <= Date.now());
+      const claimBinding = modelSlotBinding(claim);
+      if (receipt !== undefined) { requireValue(object(receipt).claimBinding === claimBinding); return; }
+      const state = readModelSlotState(stateRaw, identity); const occupant = state.occupants[claim.binding.physicalAttemptId];
+      requireValue(occupant?.claimBinding === claimBinding && occupant.intentBinding === held.intentBinding);
+      const occupants = { ...state.occupants }; delete occupants[claim.binding.physicalAttemptId];
+      tx.set(this.db.doc(modelSlotPath('state', identity)), { ...state, occupants });
+      tx.create(this.db.doc(receiptPath), { kind: 'gateway_model_slot_release', version: 1, claimBinding, identity, proof: kind, atMs: proof.receivedAtMs });
+    });
   }
   async recordTrustedUsage(result: unknown, claim: DispatchClaim): Promise<string | undefined> {
     const measured = readGatewayTextUsage(result, claim) ?? readGatewayOpenRouterUsage(result, claim)

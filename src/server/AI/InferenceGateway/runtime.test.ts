@@ -1,3 +1,4 @@
+import { modelSlotIdentity, modelSlotPath, emptyModelSlotState } from './modelConcurrency';
 /** Offline vertical tests: real issuer, planner, ledger and transport; only Firebase/token/network edges are simulated. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Request } from 'express';
@@ -76,6 +77,14 @@ function fixture(paid = false, freeProvider: 'GLM' | 'GROQ' = 'GLM', quotaWindow
       availability: { coolingUntilMs: 0, predictedQueueMs: 0, predictedFirstOutputMs: 10, predictedCompletionMs: 100 }, legacyProvider, migrationId: 'reviewed-migration-v1',
       review: { account: 'account-review', terms: 'terms-review', quality: 'quality-review', privacy: 'privacy-review', capability: 'capability-review', pricing: 'pricing-review' },
       reviewedAtMs: now - 100, expiresAtMs: now + 60_000 }] };
+  const slotIdentity = modelSlotIdentity(c.profiles[0].profile);
+  if (slotIdentity) {
+    const policy = { ...slotIdentity, kind: 'gateway_model_slot_policy' as const, version: 1 as const, revision: 'reviewed-slots-v1', limit: 1,
+      accountReviewRef: c.profiles[0].review.account, reviewedAtMs: now - 100, expiresAtMs: now + 60_000 };
+    c.profiles[0].modelConcurrency = policy;
+    state.docs.set(modelSlotPath('policy', slotIdentity), policy);
+    state.docs.set(modelSlotPath('state', slotIdentity), emptyModelSlotState(slotIdentity));
+  }
   state.docs.set(GATEWAY_CATALOG_PATH, c);
   state.docs.set(gatewayAccountFencePath(legacyProvider, ['reviewed-account-one']), { kind: 'gateway_account_owner', version: 2, provider: legacyProvider, migrationId: 'reviewed-migration-v1', authority: 'gateway-local-capacity',
     accountScopeIds: ['reviewed-account-one'], accountReviewRef: 'review-of-actual-shared-account', upstreamQuota: 'unknown',
@@ -107,7 +116,7 @@ let network: ReturnType<typeof vi.spyOn<typeof globalThis, 'fetch'>>;
 beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all'); mocks.verify.mockReset().mockResolvedValue('verified-user'); mocks.maintenance.mockReset().mockResolvedValue(undefined); mocks.db = null;
   vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'on'); vi.stubEnv('INFERENCE_GATEWAY_TEST_CREDENTIAL', 'synthetic-secret-never-live');
   network = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response()); });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
 describe('production gateway runtime composition', () => {
   it('keeps OFF and explicitly unselected surfaces on legacy without auth, DB or provider calls', async () => {
@@ -611,6 +620,13 @@ function operationFixture(kind: 'embedding' | 'grounding-search' | 'vision-pdf',
       : kind === 'grounding-search' ? [{ kind, maxQueries: 1, maxResults: 5, citations: true, domainFiltering: false }]
       : [{ kind, maxInputTokens: policy.maxInputTokens, maxOutputTokens: 512, maxContextTokens: policy.maxInputTokens + 512, streaming: false, systemPrompt: true, formats: pdf ? ['application/pdf'] : ['image/png'], maxImages: 1, maxPdfPages: pdf ? 1000 : 0 }],
     privacy: { ...entry.profile.privacy, processingRegions: [region] }, quotaDimensions: dimensions };
+  const identity = modelSlotIdentity(entry.profile);
+  if (identity) {
+    entry.modelConcurrency = { ...identity, kind: 'gateway_model_slot_policy', version: 1, revision: 'operation-slots-v1', limit: 1,
+      accountReviewRef: entry.review.account, reviewedAtMs: now - 100, expiresAtMs: now + 60000 };
+    f.docs.set(modelSlotPath('policy', identity), entry.modelConcurrency);
+    f.docs.set(modelSlotPath('state', identity), emptyModelSlotState(identity));
+  } else delete entry.modelConcurrency;
   const credential = { credentialEnv: 'INFERENCE_GATEWAY_TEST_CREDENTIAL', credentialBinding: gatewayTextCredentialBinding('synthetic-secret-never-live') };
   entry.transport = kind === 'embedding' ? { kind, provider, model, project: 'my-project', location: 'us-central1',
     credentialPrincipal: 'runtime@my-project.iam.gserviceaccount.com', vectorSpaceId: VERTEX_EMBEDDING_VECTOR_SPACE,
@@ -852,5 +868,106 @@ describe('verified-owner canary execution boundary', () => {
     fixture(); canary(); await expect(runWithAuthenticatedInferenceGatewayRequest(req, () => runWithInferenceGatewayContext(context(), async () => {
       vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', ''); return maybeGatewayEmbedding('private memory');
     }))).rejects.toMatchObject({ reason: 'disabled-after-selection' }); expect(network).not.toHaveBeenCalled();
+  });
+});
+
+describe('durable Gateway-owned exact-model slots', () => {
+  const slots = (f: ReturnType<typeof fixture>) => [...f.docs.values()].filter((v: any) => v.kind === 'gateway_model_slot_state') as any[];
+  const runUser = (uid: string) => runWithAuthenticatedInferenceGatewayRequest({ headers: { authorization: uid } } as Request,
+    () => runWithInferenceGatewayContext(context({ principalId: uid, tenantId: uid }), () => maybeGatewayText({ prompt: 'Hello', systemPrompt: 'Keep all rules.' })));
+  it.each([1, 2])('bounds concurrent real issuer/ledger/transport calls across instances at reviewed limit %i', async limit => {
+    const f = fixture(); const identity = modelSlotIdentity(f.catalog.profiles[0].profile)!;
+    const policy = { ...f.catalog.profiles[0].modelConcurrency!, limit };
+    f.catalog.profiles[0].modelConcurrency = policy; f.docs.set(GATEWAY_CATALOG_PATH, f.catalog); f.docs.set(modelSlotPath('policy', identity), policy);
+    mocks.verify.mockImplementation((r: Request) => Promise.resolve(r.headers.authorization));
+    let finish!: () => void; const pending = new Promise<void>(resolve => { finish = resolve; });
+    network.mockImplementation(async () => { await pending; return response(); });
+    const first = Array.from({ length: limit }, (_, i) => runUser(`first-${i}`));
+    await vi.waitFor(() => expect(network).toHaveBeenCalledTimes(limit));
+    const later = await Promise.allSettled(Array.from({ length: 6 }, (_, i) => runUser(`later-${i}`)));
+    expect(later.every(r => r.status === 'rejected')).toBe(true); expect(network).toHaveBeenCalledTimes(limit);
+    expect(Object.keys(slots(f)[0].occupants)).toHaveLength(limit);
+    finish(); await Promise.all(first); expect(slots(f)[0].occupants).toEqual({});
+    await expect(runUser('after-completion')).resolves.toMatchObject({ ok: true });
+  });
+  it('releases protocol-terminal work independently of missing monetary or quota usage', async () => {
+    const f = fixture(); network.mockImplementation(async () => new Response(JSON.stringify({ model: 'glm-4.7-flash', choices: [{ message: { content: 'Finished' }, finish_reason: 'stop' }] })));
+    await expect(run()).resolves.toMatchObject({ ok: true }); expect(slots(f)[0].occupants).toEqual({});
+    const quotas = [...f.docs.values()].filter((v: any) => v.kind === 'gateway_quota_state') as any[];
+    expect(quotas.every(q => q.held > 0)).toBe(true);
+    await expect(run()).resolves.toMatchObject({ ok: true }); expect(network).toHaveBeenCalledTimes(2);
+  });
+  it('retains unknown occupancy after network loss and cannot turn midnight or a new key into a slot', async () => {
+    const f = fixture(); network.mockRejectedValue(new Error('connection lost'));
+    await expect(run()).rejects.toThrow(); expect(Object.keys(slots(f)[0].occupants)).toHaveLength(1);
+    network.mockResolvedValue(response()); await expect(run()).rejects.toThrow(); expect(network).toHaveBeenCalledOnce();
+    const original = structuredClone(slots(f)[0]); vi.stubEnv('INFERENCE_GATEWAY_TEST_CREDENTIAL', 'rotated-synthetic-secret');
+    await expect(run()).rejects.toThrow(); expect(slots(f)[0]).toEqual(original);
+    vi.useFakeTimers(); vi.setSystemTime(Date.now() + 86400000);
+    await expect(run()).rejects.toThrow(); expect(slots(f)[0]).toEqual(original); vi.useRealTimers();
+  });
+  it('releases a completed exact-model safety refusal but never opens fallback', async () => {
+    const f = fixture(); network.mockResolvedValue(new Response(JSON.stringify({ model: 'glm-4.7-flash', choices: [{ message: { refusal: 'Refused' }, finish_reason: 'sensitive' }] })));
+    await expect(run()).rejects.toThrow(); expect(network).toHaveBeenCalledOnce(); expect(slots(f)[0].occupants).toEqual({});
+  });
+  it('retains occupancy after a streamed refusal without protocol completion', async () => {
+    const f = fixture(); network.mockResolvedValue(new Response('data: '+JSON.stringify({ model: 'glm-4.7-flash', choices: [{ delta: { refusal: 'Refused' }, finish_reason: null }] })+'\n\n', { headers: { 'content-type': 'text/event-stream' } }));
+    await expect(runWithAuthenticatedInferenceGatewayRequest(req, () => runWithInferenceGatewayContext(context(), () => maybeGatewayText({ prompt: 'Hello', onChunk: () => {} })))).rejects.toThrow();
+    expect(Object.keys(slots(f)[0].occupants)).toHaveLength(1);
+  });
+  it('retains the claimed slot when final dispatch permission is revoked before fetch', async () => {
+    const f = fixture(); f.onCommitted(writes => { if ([...writes.values()].some((v: any) => v.kind === 'gateway_attempt' && v.dispatchAuthorizedAtMs)) vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'off'); });
+    await expect(run()).rejects.toThrow(); expect(network).not.toHaveBeenCalled(); expect(Object.keys(slots(f)[0].occupants)).toHaveLength(1);
+  });
+});
+
+describe('model-slot candidate availability', () => {
+  it('skips a saturated exact model without skipping another approved model on the same account', async () => {
+    const f = fixture(); const first = f.catalog.profiles[0];
+    const second = structuredClone(first); second.profile.id = 'profile-two'; second.profile.modelId = 'glm-4.5-flash'; second.canonicalModelId = 'glm45-canonical';
+    second.transport.model = 'glm-4.5-flash';
+    const identity = modelSlotIdentity(second.profile)!; second.modelConcurrency = { ...second.modelConcurrency!, ...identity, limit: 2 };
+    f.docs.set(modelSlotPath('policy', identity), second.modelConcurrency); f.docs.set(modelSlotPath('state', identity), emptyModelSlotState(identity));
+    f.catalog.profiles.push(second); f.docs.set(GATEWAY_CATALOG_PATH, f.catalog);
+    const firstIdentity = modelSlotIdentity(first.profile)!;
+    f.docs.set(modelSlotPath('state', firstIdentity), { ...emptyModelSlotState(firstIdentity), occupants: { 'uncertain-other-request': { intentBinding: 'a'.repeat(64), claimBinding: 'b'.repeat(64), acquiredAtMs: Date.now() } } });
+    network.mockResolvedValue(new Response(JSON.stringify({ model: 'glm-4.5-flash', choices: [{ message: { content: 'Other approved model' }, finish_reason: 'stop' }] })));
+    await expect(run()).resolves.toMatchObject({ model: 'glm-4.5-flash' }); expect(network).toHaveBeenCalledOnce();
+    const attempts = [...f.docs.values()].filter((v: any) => v.kind === 'gateway_attempt') as any[];
+    expect(attempts).toHaveLength(1); expect(attempts[0].claim.binding.modelId).toBe('glm-4.5-flash');
+  });
+});
+
+describe('provider-record recovery after actual ambiguous transport', () => {
+  it('keeps real request quota holds while an MFA-admin reviewed record releases only the physical slot', async () => {
+    const f = fixture(); network.mockRejectedValueOnce(new Error('upstream disconnected'));
+    await expect(run()).rejects.toThrow(); const before = new Map([...f.docs].map(([k, v]) => [k, structuredClone(v)]));
+    const attempt = [...f.docs.values()].find((v: any) => v.kind === 'gateway_attempt') as any;
+    const { GatewayAdminSetup } = await import('./adminSetup');
+    const setup = new GatewayAdminSetup(f.db, { now: Date.now, environment: () => process.env, deploymentEnabled: () => true });
+    const reviewedAtMs = Date.now();
+    const v: import('../../../lib/inferenceGatewaySetup').GatewaySlotRecoverySubmission = { kind: 'model-slot-recovery', operationId: 'real-transport-recovery', reason: 'Independently reviewed exact upstream completion record', canonicalAccountId: 'reviewed-account-one', modelId: 'glm-4.7-flash', physicalAttemptId: attempt.claim.binding.physicalAttemptId, providerRequestId: 'upstream-completed-request', evidenceRef: 'review:upstream-completion', providerCompletedAtMs: reviewedAtMs, reviewedAtMs, providerRecordVerified: true, exactAttemptMatched: true, upstreamFinished: true };
+    const preview = await setup.preview(v); await setup.submit(v, preview.previewBinding, 'mfa-admin');
+    for (const [path, doc] of before) if (!path.includes('gateway_model_slot_state_')) expect(f.docs.get(path)).toEqual(doc);
+    const state = [...f.docs.values()].find((d: any) => d.kind === 'gateway_model_slot_state') as any;
+    expect(state.occupants).toEqual({}); expect(network).toHaveBeenCalledOnce();
+  });
+});
+
+describe('automatic slot completion replay', () => {
+  it('an old private completion receipt cannot erase a later live occupant', async () => {
+    const f = fixture(); const original = GatewayAuthorityStore.prototype.releaseTrustedModelSlot;
+    let old: { store: GatewayAuthorityStore; value: unknown; claim: import('./executor').DispatchClaim } | undefined;
+    vi.spyOn(GatewayAuthorityStore.prototype, 'releaseTrustedModelSlot').mockImplementation(function (value, claim) {
+      old ??= { store: this, value, claim }; return original.call(this, value, claim);
+    });
+    await run(); expect(old).toBeDefined();
+    let finish!: () => void; const pending = new Promise<void>(resolve => { finish = resolve; });
+    network.mockImplementation(async () => { await pending; return response(); });
+    const second = run(); await vi.waitFor(() => expect(network).toHaveBeenCalledTimes(2));
+    const statePath = [...f.docs.keys()].find(p => p.includes('gateway_model_slot_state_'))!;
+    const occupied = structuredClone(f.docs.get(statePath));
+    await original.call(old!.store, old!.value, old!.claim); expect(f.docs.get(statePath)).toEqual(occupied);
+    finish(); await second; expect((f.docs.get(statePath) as any).occupants).toEqual({});
   });
 });

@@ -1,3 +1,4 @@
+import { modelSlotIdentity, modelSlotPath, modelSlotBinding, readModelSlotPolicy, readModelSlotState, readHeldModelSlot, type GatewayModelSlotPolicy, type GatewayModelSlotState, type HeldModelSlot } from './modelConcurrency';
 /**
  * Firestore hold/claim ledger composed by the server-only runtime. No default DB,
  * credential selection, timers or provider calls. All inputs to the constructor are
@@ -86,6 +87,7 @@ export interface GatewayAuthorityDocument {
   /** Production issuer binds the complete current server-reviewed catalog and exclusive account fences. */
   configurationBinding?: string;
   sourceBindings?: readonly { path: string; binding: string }[];
+  modelSlots?: Record<string, GatewayModelSlotPolicy>;
 }
 export interface GatewayQuotaPolicy {
   kind: 'gateway_quota_policy'; version: 1;
@@ -122,6 +124,7 @@ interface AttemptState {
   phase: 'held' | 'claimed' | 'pending' | 'released' | 'settled';
   window: DayWindow; heldQuota: HeldQuota[]; heldNanoUsd: number; createdAtMs: number;
   claim?: DispatchClaim; record?: AttemptRecord;
+  heldModelSlot?: HeldModelSlot;
   settlement?: { evidenceRef: string; usageBinding: string;
     chargeBasis?: 'actual' | 'conservative-ceiling'; bookedNanoUsd?: number;
     replaces?: { evidenceRef: string; usageBinding: string } };
@@ -137,6 +140,7 @@ interface CurrentAuthority {
   policy: PaidBudgetPolicy | null;
   day: SpendDay;
   paidUserCount: number;
+  modelSlot?: { policy: GatewayModelSlotPolicy; state: GatewayModelSlotState };
   window: DayWindow;
 }
 export interface FirestoreLedgerOptions {
@@ -153,22 +157,7 @@ export interface FirestoreLedgerOptions {
 }
 
 type LedgerPort = ExecutionPorts['ledger'];
-export class FirestoreInferenceLedger implements LedgerPort {
-  constructor(private readonly db: Db, private readonly options: FirestoreLedgerOptions) {
-    demand(db && typeof db.runTransaction === 'function' && typeof db.doc === 'function');
-    demand(options && [options.principal.principalId, options.principal.tenantId, options.platformScope.id,
-      options.platformScope.ownerId].every(isIdentifier) && typeof options.now === 'function' && typeof options.adminEmails === 'function');
-    demand(nonnegativeInteger(options.perUserDailyLimit ?? DEFAULT_PAID_PER_USER_DAILY_LIMIT)
-      && (options.perUserDailyLimit ?? DEFAULT_PAID_PER_USER_DAILY_LIMIT) <= DEFAULT_PAID_PER_USER_DAILY_LIMIT);
-    this.options = { ...options, principal: { ...options.principal }, platformScope: { ...options.platformScope } };
-  }
-  private ref(kind: DocumentKind, id: string) { return this.db.doc(gatewayLedgerPath(kind, id)); }
-  private async get(tx: Transaction, kind: DocumentKind, id: string): Promise<unknown> { return readData(await tx.get(this.ref(kind, id))); }
-  private now(): number { const now = this.options.now(); validTime(now); return now; }
-  private authorize(key: ExecutionKey): void {
-    demand(validKey(key) && key.principalId === this.options.principal.principalId && key.tenantId === this.options.principal.tenantId);
-  }
-  private parseAttempt(value: unknown): AttemptState {
+export function readGatewayAttempt(value: unknown): AttemptState {
     const a = raw(value, 'gateway_attempt') as unknown as AttemptState;
     demand(a.reservation && /^[a-f0-9]{64}$/.test(a.reservation.id) && a.intent
       && a.reservation.intentBinding === admissionBinding(a.intent)
@@ -183,6 +172,11 @@ export class FirestoreInferenceLedger implements LedgerPort {
         && q.window && isIdentifier(q.window.id) && nonnegativeInteger(q.window.startsAtMs)
         && nonnegativeInteger(q.window.endsAtMs) && q.window.startsAtMs <= a.createdAtMs && q.window.endsAtMs > a.createdAtMs));
     demand(same(a.window, civilDayWindow(a.createdAtMs, PAID_BUDGET_TIME_ZONE)));
+    if (a.heldModelSlot !== undefined) {
+      const held = readHeldModelSlot(a.heldModelSlot);
+      const identity = modelSlotIdentity(a.intent.candidate.profile);
+      demand(identity && same(held.identity, identity) && held.intentBinding === modelSlotBinding(admissionBinding(a.intent)));
+    }
     if (a.phase === 'claimed' || a.phase === 'pending' || a.phase === 'settled') {
       demand(a.claim && a.record && validRecord(a.record) && a.claim.id === a.reservation.id
         && a.claim.intentBinding === a.reservation.intentBinding && same(a.claim.binding, a.intent.binding)
@@ -198,6 +192,22 @@ export class FirestoreInferenceLedger implements LedgerPort {
         && a.retryRejection.cooldownUntilMs >= a.retryRejection.receivedAtMs && a.retryRejection.cooldownUntilMs <= a.retryRejection.receivedAtMs + 7 * 86400000)));
     return a;
   }
+export class FirestoreInferenceLedger implements LedgerPort {
+  constructor(private readonly db: Db, private readonly options: FirestoreLedgerOptions) {
+    demand(db && typeof db.runTransaction === 'function' && typeof db.doc === 'function');
+    demand(options && [options.principal.principalId, options.principal.tenantId, options.platformScope.id,
+      options.platformScope.ownerId].every(isIdentifier) && typeof options.now === 'function' && typeof options.adminEmails === 'function');
+    demand(nonnegativeInteger(options.perUserDailyLimit ?? DEFAULT_PAID_PER_USER_DAILY_LIMIT)
+      && (options.perUserDailyLimit ?? DEFAULT_PAID_PER_USER_DAILY_LIMIT) <= DEFAULT_PAID_PER_USER_DAILY_LIMIT);
+    this.options = { ...options, principal: { ...options.principal }, platformScope: { ...options.platformScope } };
+  }
+  private ref(kind: DocumentKind, id: string) { return this.db.doc(gatewayLedgerPath(kind, id)); }
+  private async get(tx: Transaction, kind: DocumentKind, id: string): Promise<unknown> { return readData(await tx.get(this.ref(kind, id))); }
+  private now(): number { const now = this.options.now(); validTime(now); return now; }
+  private authorize(key: ExecutionKey): void {
+    demand(validKey(key) && key.principalId === this.options.principal.principalId && key.tenantId === this.options.principal.tenantId);
+  }
+  private parseAttempt(value: unknown): AttemptState { return readGatewayAttempt(value); }
   private logical(value: unknown, authority: GatewayAuthorityDocument): LogicalState {
     const r = authority.snapshot.request;
     if (value === undefined) {
@@ -273,7 +283,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
       const catalog = await tx.get(this.db.doc('free_chat_chain/gateway_catalog')).then(readData);
       demand(catalog !== undefined && evidenceBinding(catalog) === authority.configurationBinding);
       for (const source of authority.sourceBindings) {
-        demand(/^free_chat_chain\/gateway_(?:account_owner|quota_rule)_[a-f0-9]{64}$/.test(source.path) && typeof source.binding === 'string');
+        demand(/^free_chat_chain\/gateway_(?:account_owner|quota_rule|model_slot_policy)_[a-f0-9]{64}$/.test(source.path) && typeof source.binding === 'string');
         const record = await tx.get(this.db.doc(source.path)).then(readData);
         demand(record !== undefined && evidenceBinding(record) === source.binding);
       }
@@ -292,6 +302,16 @@ export class FirestoreInferenceLedger implements LedgerPort {
       const record = raw(await this.get(tx, 'evidence', ref)) as unknown as EvidenceRecord;
       return [ref, record] as const;
     })));
+    let modelSlot: CurrentAuthority['modelSlot'];
+    const slotIdentity = modelSlotIdentity(selected.profile);
+    if (slotIdentity) {
+      const reviewed = authority.modelSlots?.[selected.profile.id];
+      demand(reviewed);
+      const [policyRaw, stateRaw] = await Promise.all(['policy', 'state'].map(kind => tx.get(this.db.doc(modelSlotPath(kind as 'policy' | 'state', slotIdentity))).then(readData)));
+      const policy = readModelSlotPolicy(policyRaw, slotIdentity, now);
+      demand(same(policy, reviewed));
+      modelSlot = { policy, state: readModelSlotState(stateRaw, slotIdentity) };
+    }
     const window = civilDayWindow(now, PAID_BUDGET_TIME_ZONE);
     const profileQuarantineId = evidenceBinding([intent.binding.providerId, intent.binding.profileId]);
     const [dayRaw, profileQuarantine, userRaw, ...quotaPolicies] = await Promise.all([
@@ -308,7 +328,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
       return { policy, state: this.quotaState(s, policy.ledgerKey, policy.migrationId), period: this.quotaPeriod(p, policy.ledgerKey, policy.window) };
     }));
     return { authority, evidence, logical: this.logical(l, authority), ...(attempt === undefined ? {} : { attempt: this.parseAttempt(attempt) }),
-      quotas, policy: readPaidPolicy(policyRaw), day: readSpendDay(dayRaw, window),
+      ...(modelSlot ? { modelSlot } : {}), quotas, policy: readPaidPolicy(policyRaw), day: readSpendDay(dayRaw, window),
       paidUserCount: readPaidUser(userRaw, window.key, hash(key.principalId)), window };
   }
   private eligible(current: CurrentAuthority, supplied: AdmissionIntent, claiming: boolean, now: number): AdmissionIntent {
@@ -324,6 +344,17 @@ export class FirestoreInferenceLedger implements LedgerPort {
     demand(!l.cancelled && !l.outputVisible && !l.terminal && !l.completed && !r.cancellation.cancelled
       && same(l.attempts, r.attempts) && l.queueWaitConsumedMs === r.queueWaitConsumedMs
       && (r.surface !== 'chat' || r.maxQueueWaitMs <= 5000));
+    if (current.modelSlot) {
+      const { policy: slotPolicy, state } = current.modelSlot;
+      readModelSlotPolicy(slotPolicy, state.identity, now);
+      const occupant = state.occupants[intent.binding.physicalAttemptId];
+      if (claiming) {
+        const held = readHeldModelSlot(attempt?.heldModelSlot);
+        demand(same(held.identity, state.identity) && held.policyRevision === slotPolicy.revision
+          && held.intentBinding === modelSlotBinding(admissionBinding(intent)) && occupant?.intentBinding === held.intentBinding && occupant.claimBinding === undefined
+          && Object.keys(state.occupants).length <= slotPolicy.limit);
+      } else demand(!occupant && Object.keys(state.occupants).length < slotPolicy.limit);
+    } else demand(attempt?.heldModelSlot === undefined);
     const amount = intent.binding.budget?.amountNanoUsd ?? 0;
     const own = claiming ? attempt!.heldNanoUsd : 0;
     if (claiming) demand(attempt?.phase === 'held' && same(attempt.window, window) && l.activeAttemptId === intent.binding.physicalAttemptId);
@@ -379,9 +410,11 @@ export class FirestoreInferenceLedger implements LedgerPort {
         const amount = fresh.binding.budget?.amountNanoUsd ?? 0;
         const attempt: AttemptState = { kind: 'gateway_attempt', version: 1, reservation, intent: fresh, phase: 'held',
           window: c.window, heldNanoUsd: amount, createdAtMs: now,
+          ...(c.modelSlot ? { heldModelSlot: { identity: c.modelSlot.state.identity, policyRevision: c.modelSlot.policy.revision, intentBinding: modelSlotBinding(admissionBinding(fresh)) } } : {}),
           heldQuota: c.quotas.map((q, i) => ({ ...fresh.binding.quota[i], migrationId: q.policy.migrationId,
             policyRevision: q.policy.revision, window: q.policy.window })) };
         // All reads are complete before the first write, as the real Firestore SDK requires.
+        if (c.modelSlot) tx.set(this.db.doc(modelSlotPath('state', c.modelSlot.state.identity)), { ...c.modelSlot.state, occupants: { ...c.modelSlot.state.occupants, [fresh.binding.physicalAttemptId]: { intentBinding: modelSlotBinding(admissionBinding(fresh)), acquiredAtMs: now } } });
         for (const [i, q] of c.quotas.entries()) tx.set(this.ref('quota-state', q.policy.ledgerKey), { ...q.state, held: checkedAdd(q.state.held, attempt.heldQuota[i].amount) });
         if (amount) writeSpendDay(tx, this.db, { ...c.day, heldNanoUsd: checkedAdd(c.day.heldNanoUsd, amount),
           pending: checkedAdd(c.day.pending, 1), requests: checkedAdd(c.day.requests, 1) }, c.policy!.capNanoUsd, now, this.options.adminEmails);
@@ -406,6 +439,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
           queueWaitConsumedAtDispatchMs: queue };
         const record: AttemptRecord = { physicalAttemptId: fresh.binding.physicalAttemptId, profileId: fresh.binding.profileId,
           outcome: 'uncertain', outputVisible: false };
+        if (c.modelSlot) tx.set(this.db.doc(modelSlotPath('state', c.modelSlot.state.identity)), { ...c.modelSlot.state, occupants: { ...c.modelSlot.state.occupants, [fresh.binding.physicalAttemptId]: { ...c.modelSlot.state.occupants[fresh.binding.physicalAttemptId], claimBinding: modelSlotBinding(claim) } } });
         tx.set(this.ref('attempt', fresh.binding.physicalAttemptId), { ...c.attempt, phase: 'claimed', claim, record });
         tx.set(this.ref('logical', fresh.binding.key.logicalRequestId), { ...c.logical, attempts: [...c.logical.attempts, record], queueWaitConsumedMs: queue });
         return { kind: 'claimed' as const, claim };
@@ -444,11 +478,21 @@ export class FirestoreInferenceLedger implements LedgerPort {
         && logical.heldNanoUsd >= attempt.heldNanoUsd);
       const states = attempt.heldQuota.map((q, i) => this.quotaState(quotaRaw[i], q.ledgerKey, q.migrationId));
       const nextStates = states.map((s, i) => ({ ...s, held: subtract(s.held, attempt.heldQuota[i].amount) }));
+      let releasedSlot: GatewayModelSlotState | undefined;
+      if (attempt.heldModelSlot) {
+        const held = readHeldModelSlot(attempt.heldModelSlot);
+        const state = readModelSlotState(readData(await tx.get(this.db.doc(modelSlotPath('state', held.identity)))), held.identity);
+        const occupant = state.occupants[attempt.intent.binding.physicalAttemptId];
+        demand(occupant?.intentBinding === held.intentBinding && occupant.claimBinding === undefined);
+        const occupants = { ...state.occupants }; delete occupants[attempt.intent.binding.physicalAttemptId];
+        releasedSlot = { ...state, occupants };
+      }
       const nextLogical = { ...logical, activeAttemptId: null, heldNanoUsd: subtract(logical.heldNanoUsd, attempt.heldNanoUsd) };
       const policy = readPaidPolicy(policyRaw);
       let day: SpendDay | undefined;
       if (attempt.heldNanoUsd) { demand(dayRaw !== undefined); const d = readSpendDay(dayRaw, attempt.window);
         day = { ...d, heldNanoUsd: subtract(d.heldNanoUsd, attempt.heldNanoUsd), pending: subtract(d.pending, 1) }; }
+      if (releasedSlot) tx.set(this.db.doc(modelSlotPath('state', releasedSlot.identity)), releasedSlot);
       nextStates.forEach(s => tx.set(this.ref('quota-state', s.ledgerKey), s));
       if (day) writeSpendDay(tx, this.db, day, policy?.capNanoUsd ?? 0, this.now(), this.options.adminEmails);
       tx.set(this.ref('logical', key.logicalRequestId), nextLogical);

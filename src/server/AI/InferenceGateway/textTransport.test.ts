@@ -6,7 +6,7 @@ import { runWithInferenceScope } from '../inferencePolicy';
 import { evidenceBinding, withoutEvidence } from './profiles';
 import type { DispatchBinding } from './executor';
 import type { ProviderProfile, RoutingRequest } from './types';
-import { executeGatewayText, gatewayTextCredentialBinding, gatewayTextPayloadDigest, readGatewayTextUsage, readGatewayTextHealth, readGatewayTextConservativeUsage, readGatewayTextRejection, readGatewayTextCostAnomaly, GatewayTextTransportError,
+import { executeGatewayText, gatewayTextCredentialBinding, gatewayTextPayloadDigest, readGatewayTextUsage, readGatewayTextCompletion, readGatewayTextHealth, readGatewayTextConservativeUsage, readGatewayTextRejection, readGatewayTextCostAnomaly, GatewayTextTransportError,
   type GatewayTextInput, type GatewayTextProvider, type GatewayTextTransportConfig } from './textTransport';
 
 const SECRET = 'fake-test-secret-never-retain';
@@ -151,7 +151,7 @@ describe('streaming visibility and measured accounting', () => {
     const order: string[] = []; let release: (() => void) | undefined;
     const input = streaming(fixture(), vi.fn(text => { order.push(`chunk:${text}`); }));
     vi.mocked(input.markOutputVisible).mockImplementation(() => new Promise<void>(resolve => { order.push('mark'); release = resolve; }));
-    fetchMock.mockResolvedValue(streamResponse([chunk('  '), chunk('Hello'), chunk(' world', 'stop'), { choices: [], usage: { prompt_tokens: 100, completion_tokens: 20 } }]));
+    fetchMock.mockResolvedValue(streamResponse([chunk('  '), chunk('Hello'), { ...chunk(' world', 'stop'), model: input.transport.model }, { choices: [], usage: { prompt_tokens: 100, completion_tokens: 20 } }]));
     const pending = executeGatewayText(input);
     await vi.waitFor(() => expect(order).toEqual(['mark'])); expect(input.onChunk).not.toHaveBeenCalled();
     release!(); const result = await pending;
@@ -180,8 +180,8 @@ describe('streaming visibility and measured accounting', () => {
     expect(input.onChunk).not.toHaveBeenCalled();
   });
   it('invalidates intermediate usage when later text arrives without new totals', async () => {
-    const input = streaming(); fetchMock.mockResolvedValue(streamResponse([chunk('Hello', null, { prompt_tokens: 100, completion_tokens: 1 }), chunk(' world', 'stop')]));
-    const result = await executeGatewayText(input); expect(result.completeUsage).toBe(false); expect(result.usage).toBeUndefined(); expect(readGatewayTextUsage(result, input.claim)).toBeUndefined();
+    const input = streaming(); fetchMock.mockResolvedValue(streamResponse([chunk('Hello', null, { prompt_tokens: 100, completion_tokens: 1 }), { ...chunk(' world', 'stop'), model: input.transport.model }]));
+    const result = await executeGatewayText(input); expect(readGatewayTextCompletion(result, input.claim)).toEqual({ receivedAtMs: expect.any(Number) }); expect(readGatewayTextCompletion({ ...result }, input.claim)).toBeUndefined(); expect(readGatewayTextCompletion(result, { ...input.claim, claimId: 'other-claim' })).toBeUndefined(); expect(result.completeUsage).toBe(false); expect(result.usage).toBeUndefined(); expect(readGatewayTextUsage(result, input.claim)).toBeUndefined();
   });
   it.each([undefined, {}, { prompt_tokens: 100 }, { prompt_tokens: 100, completion_tokens: '20' }, { prompt_tokens: 100, completion_tokens: 20, total_tokens: 99 },
     { prompt_tokens: 100, completion_tokens: 20, prompt_cache_hit_tokens: 101 }])('never invents complete usage from %j', async usage => {
@@ -467,5 +467,18 @@ describe('private physical transport health observations', () => {
     const input = fixture(); fetchMock.mockRejectedValue(new Error('socket closed'));
     const error = await executeGatewayText(input).catch(e => e); expect(readGatewayTextHealth(error, input.claim)?.kind).toBe('transient');
     expect(readGatewayTextRejection(error, input.claim)).toBeUndefined();
+  });
+});
+
+describe('private completed protocol occupancy evidence', () => {
+  it.each(['empty', 'journal'])('preserves completion across downstream %s failure without inventing usage', async kind => {
+    const input = fixture();
+    fetchMock.mockResolvedValue(jsonResponse({ model: input.transport.model, choices: [{ message: { content: kind === 'empty' ? '' : 'Finished' }, finish_reason: 'stop' }] }));
+    if (kind === 'journal') vi.mocked(input.markOutputVisible).mockRejectedValue(new Error('journal unavailable'));
+    const error = await executeGatewayText(input).catch(e => e);
+    expect(error).toBeInstanceOf(GatewayTextTransportError);
+    expect(readGatewayTextCompletion(error, input.claim)).toEqual({ receivedAtMs: expect.any(Number) });
+    expect(readGatewayTextUsage(error, input.claim)).toBeUndefined();
+    expect(readGatewayTextCompletion({ ...error }, input.claim)).toBeUndefined();
   });
 });

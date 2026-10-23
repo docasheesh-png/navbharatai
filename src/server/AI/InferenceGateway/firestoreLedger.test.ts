@@ -1,3 +1,4 @@
+import { emptyModelSlotState, modelSlotIdentity, modelSlotPath } from './modelConcurrency';
 import { describe, expect, it } from 'vitest';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { FirestoreInferenceLedger, gatewayLedgerPath, type GatewayAuthorityDocument,
@@ -67,7 +68,7 @@ function database() {
 }
 const NOW = Date.parse('2026-10-22T12:00:00.000Z');
 const MONEY = 1_000_000_000;
-function fixture(state = database(), id = 'logical-one', cost = 2 * MONEY, startNow = NOW, principalId = `${id}-principal`) {
+function fixture(state = database(), id = 'logical-one', cost = 2 * MONEY, startNow = NOW, principalId = `${id}-principal`, slotLimit?: number) {
   let now = startNow;
   let clock = () => now;
   const window = civilDayWindow(now, PAID_BUDGET_TIME_ZONE);
@@ -98,6 +99,10 @@ function fixture(state = database(), id = 'logical-one', cost = 2 * MONEY, start
     ], charging: cost ? 'metered' : 'verified-free-no-overage', evidenceRef: 'synthetic-profile-evidence',
     privacy: { dataClasses: ['public'], training: 'none', humanReview: 'none', retentionHours: 0, processingRegions: ['synthetic-region'] },
   };
+  if (slotLimit !== undefined) {
+    profile.providerId = 'GLM'; profile.modelId = 'glm-4.7-flash';
+    profile.quotaDimensions = profile.quotaDimensions.map(d => ({ ...d, scope: { ...d.scope, providerId: 'GLM' } }));
+  }
   const requestBinding = evidenceBinding(withoutEvidence(r));
   const profileBinding = evidenceBinding(withoutEvidence(profile));
   const candidate: Candidate = { profile,
@@ -117,6 +122,14 @@ function fixture(state = database(), id = 'logical-one', cost = 2 * MONEY, start
   const snapshot: ExecutionSnapshot = { revision: 'revision-one', request: r, candidates: [candidate], ...(cost ? { budget } : {}) };
   const authority: GatewayAuthorityDocument = { kind: 'gateway_authority', version: 1, key, snapshot,
     scope: { id: r.budgetScopeId, kind: 'platform-free-fallback' }, logicalLimitNanoUsd: 10 * MONEY, paidPolicyRevision: 1 };
+  const identity = modelSlotIdentity(profile);
+  if (identity) {
+    const policy = { ...identity, kind: 'gateway_model_slot_policy' as const, version: 1 as const, revision: 'slot-review-v1', limit: slotLimit!, accountReviewRef: 'account-review', reviewedAtMs: startNow - 1, expiresAtMs: startNow + 600000 };
+    authority.modelSlots = { [profile.id]: policy };
+    if (!state.docs.has(modelSlotPath('policy', identity))) {
+      state.seed(modelSlotPath('policy', identity), policy); state.seed(modelSlotPath('state', identity), emptyModelSlotState(identity));
+    }
+  }
   const evidence = new Map<string, EvidenceRecord>();
   function issue(kind: EvidenceKind, value: { evidenceRef: string }) {
     const record: EvidenceRecord = { kind, binding: evidenceBinding(withoutEvidence(value)), issuedAtMs: startNow - 1,
@@ -742,5 +755,47 @@ describe('inactive Firestore inference ledger', () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(new URL('./firestoreLedger.ts', import.meta.url), 'utf8');
     expect(source).not.toMatch(/getServerDb|process\.env|setTimeout|setInterval/);
+  });
+});
+
+describe('atomic exact-model slot ledger', () => {
+  const make = (state = database(), id = 'slot-one', limit = 1) => fixture(state, id, 0, NOW, `${id}-principal`, limit);
+  const occupants = (state: ReturnType<typeof database>) => ([...state.docs.values()].find((v: any) => v.kind === 'gateway_model_slot_state') as any).occupants;
+  it.each([1, 2])('serializes optimistic competing instances at limit %i without counting rejected work as physical attempts', async limit => {
+    const state = database(); const callers = Array.from({ length: 8 }, (_, i) => make(state, `slot-${i}`, limit));
+    const results = await Promise.all(callers.map(f => f.ledger.reserve(f.intent())));
+    expect(results.filter(r => r.kind === 'held')).toHaveLength(limit); expect(Object.keys(occupants(state))).toHaveLength(limit);
+    expect(state.retries).toBeGreaterThan(0);
+    for (const value of state.docs.values()) if ((value as any).kind === 'gateway_logical') expect((value as any).attempts).toEqual([]);
+  });
+  it('duplicate reserve and lost commit response cannot duplicate occupancy', async () => {
+    const f = make(); f.state.loseResponse(); await expect(f.ledger.reserve(f.intent())).rejects.toThrow('Commit response lost');
+    expect(Object.keys(occupants(f.state))).toHaveLength(1);
+    const responses = await Promise.all(Array.from({ length: 5 }, () => f.ledger.reserve(f.intent())));
+    expect(responses.every(r => r.kind === 'denied')).toBe(true); expect(Object.keys(occupants(f.state))).toHaveLength(1);
+  });
+  it('releases only proved-unclaimed cancellation and a replay cannot erase another occupant', async () => {
+    const f = make(); const h = await f.reserve(); await f.ledger.releaseUndispatched(h.reservation, 'cancelled-before-dispatch');
+    expect(occupants(f.state)).toEqual({});
+    const next = make(f.state, 'other'); await next.claim(); const saved = structuredClone(occupants(f.state));
+    await f.ledger.releaseUndispatched(h.reservation, 'cancelled-before-dispatch'); expect(occupants(f.state)).toEqual(saved);
+  });
+  it('does not release a claimed slot for local cancellation, uncertainty or elapsed time', async () => {
+    const f = make(); const h = await f.claim(); const saved = structuredClone(occupants(f.state));
+    await expect(f.ledger.releaseUndispatched(h.reservation, 'cancelled-before-dispatch')).rejects.toThrow();
+    f.now(NOW + 86400000); expect(occupants(f.state)).toEqual(saved);
+  });
+  it('claims its own last slot after unrelated availability evidence changes', async () => {
+    const f = make(); const h = await f.reserve();
+    f.authority.snapshot.candidates[0].availability.predictedFirstOutputMs = 200; f.seal();
+    const result = await f.ledger.claim(h.reservation, f.intent(), 0); expect(result.kind).toBe('claimed');
+    expect(Object.keys(occupants(f.state))).toHaveLength(1);
+  });
+  it('lowering reviewed policy between reserve and claim preserves held occupancy and denies dispatch', async () => {
+    const f = make(undefined, 'one', 2); const h = await f.reserve();
+    const key = [...f.state.docs.keys()].find(k => k.includes('gateway_model_slot_policy_'))!;
+    f.state.seed(key, { ...(f.state.docs.get(key) as any), revision: 'lowered', limit: 1 });
+    expect(await f.ledger.claim(h.reservation, h.intent, 0)).toEqual({ kind: 'denied' });
+    expect(Object.keys(occupants(f.state))).toHaveLength(1);
   });
 });

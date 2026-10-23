@@ -47,3 +47,27 @@ describe('gateway setup admin routes', () => {
     expect(JSON.stringify([mocks.audit.mock.calls, f.res.json.mock.calls])).not.toContain('secret');
   });
 });
+
+describe('model slot recovery uses the existing protected review boundary', () => {
+  it('passes a recovery only through server-actor reviewed submission and logs no provider evidence', async () => {
+    const f = setup(); const submission = { kind: 'model-slot-recovery', evidenceRef: 'review:private-record', providerRequestId: 'private-provider-record' };
+    mocks.preview.mockResolvedValue({ kind: 'gateway_slot_recovery_preview' });
+    mocks.submit.mockResolvedValue({ ok: true, recovery: true, operationId: 'recovery', catalogRevision: 'unchanged' });
+    await f.handler('/preview')({ body: submission }, f.res); expect(mocks.submit).not.toHaveBeenCalled();
+    await f.handler('/review')({ body: { submission, previewBinding: 'bound' } }, f.res);
+    expect(mocks.submit).toHaveBeenCalledWith(submission, 'bound', 'verified-admin');
+    expect(JSON.stringify(mocks.audit.mock.calls)).not.toContain('private-record');
+    expect(JSON.stringify(mocks.audit.mock.calls)).not.toContain('private-provider-record');
+  });
+});
+
+describe('unauthenticated slot recovery denial', () => {
+  it('never invokes recovery preview or mutation before the shared admin gate permits it', () => {
+    const f = setup(); const req = { headers: {}, body: { kind: 'model-slot-recovery', providerRecordVerified: true } };
+    for (const suffix of ['/preview', '/review']) {
+      const handlers = f.routes.get(`POST /api/admin/inference-gateway/setup${suffix}`)!;
+      const next = vi.fn(() => handlers.at(-1)(req, f.res)); handlers[0](req, f.res, next); expect(next).not.toHaveBeenCalled();
+    }
+    expect(mocks.preview).not.toHaveBeenCalled(); expect(mocks.submit).not.toHaveBeenCalled();
+  });
+});

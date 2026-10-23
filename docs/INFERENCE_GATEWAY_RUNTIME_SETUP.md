@@ -216,3 +216,58 @@ Maximum input and output are separate bounds. A reviewed generation capability's
 Provider health is separate from rejection and billing. Private physical-request observations open a credential-generation/account-scoped one-hour auth cooldown or a bounded account transient circuit (30 seconds increasing to five minutes). These records survive process restart and are checked again before physical dispatch. They never refund an uncertain hold or permit another attempt in the same logical request. Coordinator deadlines and first-output timeouts carry a private server-issued reason so real dispatched timeouts can update health without treating user cancellation as provider failure. User cancellation and policy/safety failures do not masquerade as provider-health evidence.
 
 The Free-chat client treats explicit gateway JSON/SSE failures as terminal, preserves partial text with an interruption notice, and does not create a new logical request after an ambiguous network/timeout outcome. Stop aborts both the default JSON request and the streaming request; a late response after Stop is not displayed as success. These client safeguards do not constitute evidence that a provider did not bill.
+
+## Exact-model occupancy (GLM Gateway calls)
+
+Before reviewing a GLM profile, enter the concurrency count shown for that exact
+standard API account and model in **Free Chat Chain → Gateway setup**. This count
+is concurrent physical calls, not requests/day or tokens/minute. The owner's
+reported 1 / 2 / 1 for 4.7-Flash / 4.5-Flash / 4.6V-Flash are account observations,
+not universal limits or defaults. An absent or invalid review fails closed.
+
+The new review requires confirmation that older, unguarded Gateway revisions
+have drained. Creating an absent state document is not evidence that an old
+revision has no work upstream. Start the first trial with routing OFF and no
+older Gateway work. Do not run overlapping old/new Gateway revisions and claim
+this bound is complete.
+
+Each canonical account plus exact API model has one durable slot policy and one
+non-expiring occupied-attempt map. Profile aliases, keys, review renewal, minute
+reset and IST midnight do not create extra slots or erase occupancy. A reduced
+limit preserves all existing occupants and blocks new work until below the
+limit. Preview/status show the occupied count and reviewed limit; there is no
+browser-controlled runtime increase outside an authenticated reviewed submission.
+
+Acquisition shares the existing quota/budget reservation transaction. Saturated
+models are skipped without dispatching or consuming a physical-attempt count;
+other eligible models can still serve the request. Claim and final dispatch
+revalidate the exact reviewed policy. A protocol-terminal provider response or
+an authenticated clean no-generation rejection releases only its own slot.
+Missing monetary/token usage can retain financial/quota holds even after the
+physical slot is released. Local timeout, disconnect, process loss, elapsed time
+or a missing terminal frame never proves upstream completion and keeps the slot.
+
+This protects **Gateway-owned occupancy only**. Preserved Builder, Doctor, image
+and other legacy consumers may use the same upstream account outside this guard.
+An unknown account-wide cap remains unknown; model limits do not prove additive
+capacity. Never multiply capacity by API key count. No live concurrency test or
+provider account verification is implied by the offline transaction tests.
+
+Uncertain occupancy is not cleared by health recovery, catalog renewal, key
+rotation or deleting/recreating a profile. There is no automatic reconciliation or generic admin “clear slot” action.
+The separate **Recover a verified completed model call** form requires an
+independently reviewed provider completion record, its provider request ID, an
+exact occupied attempt ID, completion timestamp, `review:` evidence reference,
+reason and explicit matching/terminal attestations. This is an MFA-admin trust
+boundary, not automatic verification of an upstream record. Local timeouts, a
+429, elapsed time, a health check or a wish to retry are not completion evidence.
+
+Preview is read-only and binds the exact occupied claim. Confirming uses one
+transaction to remove only that occupant and write immutable release/evidence/
+audit receipts. A provider request record cannot recover another attempt on the
+same account. Duplicate confirmations replay safely; stale or changed evidence
+requires a new preview. Reviews expire after 15 minutes. Recovery never changes
+quota or monetary holds, the shared paid cap, quarantines, health, credentials,
+catalog, or activation. If no trustworthy completion record exists, leave the
+slot unavailable and use another reviewed eligible model. Do not manually zero
+or TTL-delete occupancy as a timeout workaround.

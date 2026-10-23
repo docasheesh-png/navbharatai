@@ -16,6 +16,8 @@ export interface GatewaySetupSubmission {
   processingRegions: string[]; retentionHours: number; maxInputTokens: number; maxOutputTokens: number; maxContextTokens: number;
   localTokensPerMinute: number; billing: 'intrinsic-zero' | 'provider-hard-stop' | 'metered';
   reviewedPriority?: number;
+  maxConcurrentCalls?: number;
+  gatewayOccupancyReviewed?: boolean;
   recoverHealth?: boolean;
   operation?: GatewaySetupOperation;
   inputNanoUsdPerMillion?: number; outputNanoUsdPerMillion?: number;
@@ -32,7 +34,7 @@ export interface GatewaySetupStatus {
   reviewState: 'missing' | 'current' | 'expired' | 'invalid'; expiresAtMs: number | null;
   credentialEnvironments: string[];
   scopes: { key: string; label: string; dataClass: 'health' | 'confidential'; qualityTier: 'clinical' | 'professional' }[];
-  profiles: { id: string; provider: string; modelId: string; operationKind?: 'text' | GatewaySetupOperation['kind']; expiresAtMs: number; reviewState: 'current' | 'expired' | 'invalid'; credentialAssociated: boolean; billing: 'intrinsic-zero' | 'provider-hard-stop' | 'metered' | 'unreviewed' }[];
+  profiles: { id: string; provider: string; modelId: string; operationKind?: 'text' | GatewaySetupOperation['kind']; modelConcurrency?: { limit: number; occupied: number; scope: 'gateway-only'; canonicalAccountId: string; attemptIds: string[] }; expiresAtMs: number; reviewState: 'current' | 'expired' | 'invalid'; credentialAssociated: boolean; billing: 'intrinsic-zero' | 'provider-hard-stop' | 'metered' | 'unreviewed' }[];
   paidAuthority: 'existing' | 'missing'; paidCapUsd: number | null;
   upstreamRemaining: 'unknown'; liveProviderVerified: false;
 }
@@ -41,6 +43,7 @@ export interface GatewaySetupPreview {
   profileId: string; canonicalAccountId: string; policyKeys: string[]; billing: GatewaySetupSubmission['billing'];
   expiresAtMs: number; localTokensPerMinute: number; quotaMeter?: 'tokens/minute' | 'requests/minute'; operationKind?: 'text' | GatewaySetupOperation['kind']; maximumOperationNanoUsd?: number; reviewedPriority: number; credentialAssociated: true;
   healthRecoveryRecords?: number;
+  modelConcurrency?: { limit: number; occupied: number; scope: 'gateway-only' };
   paidAuthority: 'existing' | 'missing'; activationFlagChanged: false; deploymentEnabled: boolean;
 }
 export function isGatewaySetupStatus(value: unknown): value is GatewaySetupStatus {
@@ -56,6 +59,7 @@ export function isGatewaySetupStatus(value: unknown): value is GatewaySetupStatu
     && Array.isArray(v.scopes) && v.scopes.length <= 256 && v.scopes.every(s => str(s.key) && str(s.label) && ['health', 'confidential'].includes(s.dataClass) && ['clinical', 'professional'].includes(s.qualityTier))
     && Array.isArray(v.profiles) && v.profiles.length <= 32 && v.profiles.every(p => str(p.id) && str(p.provider) && str(p.modelId) && n(p.expiresAtMs)
       && (p.operationKind === undefined || ['text', 'embedding', 'grounding-search', 'vision-pdf'].includes(p.operationKind))
+      && (p.modelConcurrency === undefined || (p.modelConcurrency !== null && p.modelConcurrency.scope === 'gateway-only' && n(p.modelConcurrency.limit) && p.modelConcurrency.limit >= 1 && p.modelConcurrency.limit <= 64 && n(p.modelConcurrency.occupied) && p.modelConcurrency.occupied <= 64 && str(p.modelConcurrency.canonicalAccountId) && Array.isArray(p.modelConcurrency.attemptIds) && p.modelConcurrency.attemptIds.length === p.modelConcurrency.occupied && p.modelConcurrency.attemptIds.every(str)))
       && ['current', 'expired', 'invalid'].includes(p.reviewState) && typeof p.credentialAssociated === 'boolean' && ['intrinsic-zero', 'provider-hard-stop', 'metered', 'unreviewed'].includes(p.billing))
     && ['existing', 'missing'].includes(v.paidAuthority) && (v.paidCapUsd === null || (typeof v.paidCapUsd === 'number' && v.paidCapUsd >= 0 && v.paidCapUsd <= 10))
     && v.upstreamRemaining === 'unknown' && v.liveProviderVerified === false;
@@ -69,7 +73,30 @@ export function isGatewaySetupPreview(value: unknown): value is GatewaySetupPrev
     && ['intrinsic-zero', 'provider-hard-stop', 'metered'].includes(v.billing) && Number.isSafeInteger(v.expiresAtMs)
     && (v.maximumOperationNanoUsd === undefined || (Number.isSafeInteger(v.maximumOperationNanoUsd) && v.maximumOperationNanoUsd >= 0 && v.maximumOperationNanoUsd <= 10_000_000_000))
     && (v.healthRecoveryRecords === undefined || (Number.isSafeInteger(v.healthRecoveryRecords) && v.healthRecoveryRecords >= 1 && v.healthRecoveryRecords <= 2))
+    && (v.modelConcurrency === undefined || (v.modelConcurrency !== null && v.modelConcurrency.scope === 'gateway-only' && Number.isSafeInteger(v.modelConcurrency.limit) && v.modelConcurrency.limit >= 1 && v.modelConcurrency.limit <= 64 && Number.isSafeInteger(v.modelConcurrency.occupied) && v.modelConcurrency.occupied >= 0 && v.modelConcurrency.occupied <= 64))
     && Number.isSafeInteger(v.reviewedPriority) && v.reviewedPriority >= 0 && v.reviewedPriority <= 1000
     && Number.isSafeInteger(v.localTokensPerMinute) && v.localTokensPerMinute > 0 && v.credentialAssociated === true
     && ['existing', 'missing'].includes(v.paidAuthority) && v.activationFlagChanged === false && typeof v.deploymentEnabled === 'boolean';
+}
+
+/** Manual evidence trust boundary: a verified admin reviews a provider record, not local timeout logs. */
+export interface GatewaySlotRecoverySubmission {
+  kind: 'model-slot-recovery'; operationId: string; reason: string; canonicalAccountId: string;
+  modelId: 'glm-4.7-flash' | 'glm-4.5-flash' | 'glm-4.6v-flash'; physicalAttemptId: string;
+  providerRequestId: string; evidenceRef: string; providerCompletedAtMs: number; reviewedAtMs: number;
+  providerRecordVerified: true; exactAttemptMatched: true; upstreamFinished: true;
+}
+export interface GatewaySlotRecoveryPreview {
+  kind: 'gateway_slot_recovery_preview'; version: 1; previewBinding: string;
+  physicalAttemptId: string; canonicalAccountId: string; modelId: GatewaySlotRecoverySubmission['modelId'];
+  occupied: number; scope: 'gateway-only'; financialWrites: false; evidenceBasis: 'admin-reviewed-provider-record';
+}
+export function isGatewaySlotRecoveryPreview(value: unknown): value is GatewaySlotRecoveryPreview {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as GatewaySlotRecoveryPreview;
+  return v.kind === 'gateway_slot_recovery_preview' && v.version === 1 && /^[a-f0-9]{64}$/.test(v.previewBinding)
+    && [v.physicalAttemptId, v.canonicalAccountId].every(s => typeof s === 'string' && s.length > 0 && s.length <= 120)
+    && ['glm-4.7-flash', 'glm-4.5-flash', 'glm-4.6v-flash'].includes(v.modelId)
+    && Number.isSafeInteger(v.occupied) && v.occupied >= 1 && v.occupied <= 64
+    && v.scope === 'gateway-only' && v.financialWrites === false && v.evidenceBasis === 'admin-reviewed-provider-record';
 }

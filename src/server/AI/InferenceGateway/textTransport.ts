@@ -149,6 +149,11 @@ export function gatewayTextPayloadDigest(input: GatewayTextPayload): string {
 }
 
 /** JSON-shaped lookalikes and serialized copies can never mint accounting proof. */
+const completedCalls = new WeakMap<object, { claim: string; receivedAtMs: number }>();
+export function readGatewayTextCompletion(value: unknown, claim: DispatchClaim): { receivedAtMs: number } | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const proof = completedCalls.get(value); return proof?.claim === evidenceBinding(claim) ? { receivedAtMs: proof.receivedAtMs } : undefined;
+}
 const measured = new WeakMap<object, { claim: string; usage: GatewayTextUsage }>();
 export function readGatewayTextUsage(result: unknown, claim: DispatchClaim): GatewayTextUsage | undefined {
   if (!result || typeof result !== 'object') return undefined;
@@ -351,6 +356,7 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
   const started = Date.now();
   let controller: AbortController | undefined; let timer: ReturnType<typeof setTimeout> | undefined;
   let abortExternal: (() => void) | undefined; let timedOut = false; let dispatchedClaim: DispatchClaim | undefined;
+  let terminalReceivedAtMs: number | undefined;
   try {
     if (!input || typeof input.authorizeClaim !== 'function' || typeof input.markOutputVisible !== 'function' || typeof input.reportCostAnomaly !== 'function' || typeof input.assertDispatchPolicy !== 'function'
       || !input.signal || typeof input.signal.addEventListener !== 'function'
@@ -428,7 +434,7 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
     if (!response.body) throw remoteError(undefined, t.provider, response.status);
     const reader = response.body.getReader(); const decoder = new TextDecoder('utf-8', { fatal: true });
     let bytes = 0; let content = ''; let usage: UsageReading | undefined;
-    let finishReason: 'stop' | 'length' | undefined; let outputVisible = false; let committed = false;
+    let finishReason: 'stop' | 'length' | undefined; let exactTerminalModel = false; let outputVisible = false; let committed = false;
     let sawReasoning = false; let paidUsageSeen: unknown; let paidUsageAmbiguous = false; let maximumReportedCost = 0;
     const nextText = async (): Promise<string | undefined> => {
       assertActive(); const part = await bounded(reader.read()); assertActive();
@@ -482,7 +488,17 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
       const choice = raw(obj.choices[0]); if (!choice) { if (!stream || !usage) fail('NETWORK'); return; }
       if (choice.index !== undefined && choice.index !== 0) fail('NETWORK');
       const message = raw(stream ? choice.delta : choice.message); if (!message) fail('NETWORK');
-      const reason = checkedFinish(choice.finish_reason, message.refusal);
+      let reason: ReturnType<typeof checkedFinish>;
+      try { reason = checkedFinish(choice.finish_reason, message.refusal); }
+      catch (error) {
+        // A complete non-streaming exact-model terminal refusal is finished work,
+        // independently of missing financial usage. A streamed refusal without DONE is not.
+        if (!stream && obj.model === t.model && typeof choice.finish_reason === 'string'
+          && (SAFETY_REASONS.has(choice.finish_reason.toLowerCase()) || ['stop', 'length'].includes(choice.finish_reason)) && error && typeof error === 'object') {
+          completedCalls.set(error, { claim: evidenceBinding(a.claim), receivedAtMs: Date.now() });
+        }
+        throw error;
+      }
       if (message.reasoning_content !== undefined && message.reasoning_content !== null) {
         if (typeof message.reasoning_content !== 'string') fail('NETWORK');
         if (message.reasoning_content) sawReasoning = true;
@@ -492,6 +508,7 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
       const text = typeof message.content === 'string' ? message.content : '';
       if (finishReason && (text || (reason && reason !== finishReason))) fail('NETWORK');
       finishReason = reason ?? finishReason;
+      if (reason && obj.model === t.model) exactTerminalModel = true;
       if (text) {
         if (!hasUsage && !hasExtensionUsage) usage = undefined;
         content += text;
@@ -531,6 +548,7 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
         // A truncated final frame is not a final provider/accounting record.
         if (data.length || !done) fail('NETWORK');
       }
+      if (finishReason && exactTerminalModel) terminalReceivedAtMs = Date.now();
       assertActive();
       if (!content.trim()) fail('EMPTY_RESPONSE');
       if (!finishReason) fail('NETWORK');
@@ -553,6 +571,7 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
         ...(usage.cachedInputTokens === undefined ? {} : { cachedInputTokens: usage.cachedInputTokens }),
         chargeBasis: 'conservative-ceiling', conservativeCeilingNanoUsd: ceiling, rateCardVersion: t.rateCard!.version,
       }) });
+      if (terminalReceivedAtMs !== undefined) completedCalls.set(result, { claim: evidenceBinding(a.claim), receivedAtMs: terminalReceivedAtMs });
       return result;
     } finally {
       // Cancellation is cleanup, not a second generation deadline. Observe every
@@ -566,6 +585,9 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
       : error instanceof GatewayTextTransportError ? error : new GatewayTextTransportError('NETWORK');
     // Cleanup cancellation changes the caller-visible error, not an already
     // authenticated billing contradiction or the durable quarantine obligation.
+    const completion = error && typeof error === 'object' ? completedCalls.get(error) : undefined;
+    if (completion) completedCalls.set(sanitized, completion);
+    else if (terminalReceivedAtMs !== undefined && dispatchedClaim) completedCalls.set(sanitized, { claim: evidenceBinding(dispatchedClaim), receivedAtMs: terminalReceivedAtMs });
     const anomaly = error && typeof error === 'object' ? anomalies.get(error) : undefined;
     if (anomaly) anomalies.set(sanitized, anomaly);
     const observedHealth = error && typeof error === 'object' ? health.get(error) : undefined;

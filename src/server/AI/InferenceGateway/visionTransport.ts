@@ -74,6 +74,11 @@ export function readGatewayVisionConservativeUsage(result: unknown, claim: Dispa
     const proof = result && typeof result === 'object' ? ceilings.get(result) : undefined;
     return proof?.claim === evidenceBinding(claim) ? proof.usage : undefined;
 }
+const completedCalls = new WeakMap<object, { claim: string; receivedAtMs: number }>();
+export function readGatewayVisionCompletion(value: unknown, claim: DispatchClaim): { receivedAtMs: number } | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const proof = completedCalls.get(value); return proof?.claim === evidenceBinding(claim) ? { receivedAtMs: proof.receivedAtMs } : undefined;
+}
 const measured = new WeakMap<object, {
     claim: string;
     usage: GatewayTextUsage;
@@ -272,6 +277,7 @@ export async function executeGatewayVision(input: GatewayVisionInput): Promise<G
     let visible = false;
     let original: unknown;
     let dispatchedClaim: DispatchClaim | undefined;
+    let terminalReceivedAtMs: number | undefined;
     const controller = new AbortController();
     const abort = () => controller.abort();
     input.signal?.addEventListener('abort', abort, { once: true });
@@ -362,8 +368,15 @@ export async function executeGatewayVision(input: GatewayVisionInput): Promise<G
             await bounded(input.reportCostAnomaly(error));
             throw error;
         }
-        if (flags.safety)
-            fail('SAFETY_REFUSAL');
+        if (flags.safety) {
+            const error = new GatewayTextTransportError('SAFETY_REFUSAL');
+            const choice = data?.choices?.[0];
+            if (response.ok && a.transport.provider === 'GLM' && data?.model === a.transport.model
+                && data.choices.length === 1 && typeof choice?.finish_reason === 'string'
+                && (safety.has(choice.finish_reason.toLowerCase()) || ['stop', 'length'].includes(choice.finish_reason)))
+                completedCalls.set(error, { claim: evidenceBinding(a.claim), receivedAtMs: Date.now() });
+            throw error;
+        }
         if (!response.ok) {
             const quotaCode = ['1113', '1308', '1310', '1313'].includes(String(data?.error?.code));
             const error = new GatewayTextTransportError(response.status === 429 ? (quotaCode ? 'QUOTA_EXHAUSTED' : 'RATE_LIMIT') : response.status === 401 || response.status === 403 ? 'AUTH' : response.status >= 500 ? 'SERVER' : 'INVALID_REQUEST', response.status);
@@ -402,9 +415,11 @@ export async function executeGatewayVision(input: GatewayVisionInput): Promise<G
         }
         const choice = data?.choices?.[0];
         const content = choice?.message?.content;
-        if (data?.error || data?.model !== a.transport.model || !Array.isArray(data.choices) || data.choices.length !== 1 || typeof content !== 'string' || !content.trim()
+        if (data?.error || data?.model !== a.transport.model || !Array.isArray(data.choices) || data.choices.length !== 1 || typeof content !== 'string'
             || !['stop', 'length'].includes(choice.finish_reason) || choice.message.tool_calls?.length)
             fail('NETWORK');
+        terminalReceivedAtMs = Date.now();
+        if (!content.trim()) fail('EMPTY_RESPONSE');
         const usage = data.usage;
         const complete = usage && isPositiveCount(usage.prompt_tokens) && isPositiveCount(usage.completion_tokens)
             && isPositiveCount(usage.total_tokens) && usage.total_tokens === usage.prompt_tokens + usage.completion_tokens
@@ -416,11 +431,15 @@ export async function executeGatewayVision(input: GatewayVisionInput): Promise<G
             ...(complete ? { usage: { inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens } } : {}) };
         if (complete)
             measured.set(result, { claim: evidenceBinding(a.claim), usage: immutable({ binding: a.claim.binding, final: true, outcome: { kind: 'completed' }, outputVisible: visible, inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens, actualNanoUsd: 0 }) });
+        completedCalls.set(result, { claim: evidenceBinding(a.claim), receivedAtMs: Date.now() });
         return result;
     }
     catch (error) {
         const executorTimeout = input.signal?.aborted && isInferenceExecutorTimeout(input.signal.reason);
         const safe = controller.signal.aborted ? new GatewayTextTransportError(input.signal?.aborted && !executorTimeout ? 'ABORTED' : 'TIMEOUT') : error instanceof GatewayTextTransportError ? error : new GatewayTextTransportError('NETWORK');
+        const completion = error && typeof error === 'object' ? completedCalls.get(error) : undefined;
+        if (completion) completedCalls.set(safe, completion);
+        else if (terminalReceivedAtMs !== undefined && dispatchedClaim) completedCalls.set(safe, { claim: evidenceBinding(dispatchedClaim), receivedAtMs: terminalReceivedAtMs });
         if (original && typeof original === 'object') {
             const proof = anomalies.get(original);
             if (proof)

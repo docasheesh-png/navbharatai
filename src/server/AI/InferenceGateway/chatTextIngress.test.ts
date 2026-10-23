@@ -1,3 +1,5 @@
+// This suite isolates routing/identity; shared quota admission is tested separately.
+vi.mock('../../lib/freeAnswerQuota', () => ({ withFreeAnswerQuota: (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(), assertFreeAnswerActive: () => {}, markFreeAnswer: () => {}, freeAnswerSignal: () => undefined }));
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from '../../../../tests/helpers/routeTestUtils';
 const m = vi.hoisted(() => ({ verify: vi.fn(), legacy: vi.fn(), detailed: vi.fn(), stream: vi.fn(), oldContext: vi.fn(), add: vi.fn(), live: vi.fn(), needsLive: vi.fn(), document: vi.fn(), vision: vi.fn() }));
@@ -45,13 +47,13 @@ describe('ordinary chat reaches the real gateway ingress context', () => {
     expect(res.body).toEqual({ reply: 'answer' });
     expect(context).toMatchObject({ principalId: 'verified-user', tenantId: 'verified-user', surface: 'chat', policyKey: 'chat:text', funding: 'platform-free-fallback', dataClass: 'health', qualityTier: 'clinical', signal: expect.any(AbortSignal) });
     expect(context!.deadlineAtMs).toBeGreaterThan(Date.now());
-    expect(m.verify).toHaveBeenCalledOnce(); expect(m.legacy).not.toHaveBeenCalled(); expect(m.oldContext).not.toHaveBeenCalled();
+    expect(m.verify).toHaveBeenCalledTimes(2); expect(m.legacy).not.toHaveBeenCalled(); expect(m.oldContext).not.toHaveBeenCalled();
     expect(m.detailed.mock.calls[0][4]).toContain('LANGUAGE RULE');
   });
-  it('OFF preserves old admission and does not add authentication work', async () => {
+  it('OFF preserves old provider admission while user quota still verifies identity', async () => {
     vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'off'); const res = mockRes();
     await route()(mockReq({ body: { message: 'hello' } }), res);
-    expect(res.body).toEqual({ reply: 'answer' }); expect(m.legacy).toHaveBeenCalledOnce(); expect(m.verify).not.toHaveBeenCalled();
+    expect(res.body).toEqual({ reply: 'answer' }); expect(m.legacy).toHaveBeenCalledOnce(); expect(m.verify).toHaveBeenCalledOnce();
   });
   it('does not give a claimed body uid authority when authentication is absent', async () => {
     m.verify.mockResolvedValue(null);
@@ -126,7 +128,7 @@ describe('ordinary chat reaches the real gateway ingress context', () => {
   });
   it('rejects oversized media turns after authenticated admission without legacy escape', async () => {
     const res = mockRes(); await route()(mockReq({ body: { message: 'x'.repeat(100_001), fileAttachments: [{ type: 'image/png', name: 'photo.png', base64: 'AA==' }] } }), res);
-    expect(res.statusCode).toBe(413); expect(m.legacy).not.toHaveBeenCalled(); expect(m.verify).toHaveBeenCalledOnce(); expect(m.detailed).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(413); expect(m.legacy).not.toHaveBeenCalled(); expect(m.verify).not.toHaveBeenCalled(); expect(m.detailed).not.toHaveBeenCalled();
   });
 });
 
@@ -146,7 +148,7 @@ describe('Free attachments share authenticated early admission', () => {
   m.vision.mockImplementationOnce(async()=>{context=currentInferenceGatewayContext();return {text:'vision answer',provider:'GLM'};});
   const res=mockRes();await runWithInferenceScope('free-modules',()=>route()(mockReq({body:{message:'describe this',fileAttachments:[{name:'file',type,base64:'AAAA'}]}}),res));
   expect(res.body).toMatchObject({reply:'vision answer'});expect(context).toMatchObject({principalId:'verified-user',funding:'platform-free-fallback',mode:'strict-free'});
-  expect(m.verify).toHaveBeenCalledOnce();expect(m.legacy).not.toHaveBeenCalled();expect(m.detailed).not.toHaveBeenCalled();
+  expect(m.verify).toHaveBeenCalledTimes(2);expect(m.legacy).not.toHaveBeenCalled();expect(m.detailed).not.toHaveBeenCalled();
  });
  it('does not attempt media work when verified identity is absent',async()=>{
   m.verify.mockResolvedValue(null);const res=mockRes();await route()(mockReq({body:{message:'describe',fileAttachments:[{name:'file',type:'image/png',base64:'AAAA'}]}}),res);
@@ -169,8 +171,8 @@ describe('unauthenticated Free traffic cannot escape selected admission', () => 
   res.flushHeaders = () => { res.headersSent = true; }; res.write = (chunk: string) => { chunks.push(chunk); return true; };
   await route()(mockReq({ body: { message: 'hello', ...(kind === 'stream' ? { stream: true } : {}),
     ...(kind === 'pdf' ? { fileAttachments: [{ type: 'application/pdf', name: 'file.pdf', base64: 'AAAA' }] } : {}) } }), res);
-  if (kind === 'stream') { expect(res.ended).toBe(true); expect(chunks.join('')).toContain('INFERENCE_GATEWAY_UNAVAILABLE'); }
-  else expect(res.statusCode).toBe(503);
+  // Guest durable admission now refuses before SSE headers, including stream requests.
+  expect(res.statusCode).toBe(503); expect(res.body.code).toBe('INFERENCE_GATEWAY_UNAVAILABLE'); expect(chunks).toEqual([]);
   expect(m.legacy).not.toHaveBeenCalled(); expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled();
   expect(m.vision).not.toHaveBeenCalled(); expect(m.live).not.toHaveBeenCalled(); expect(m.document).not.toHaveBeenCalled();
  });

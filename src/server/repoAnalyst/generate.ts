@@ -81,15 +81,18 @@ RULES (non-negotiable):
   Use relative paths only (no leading slash, no .. ). Put real, complete, working content in each file (not placeholders). Keep to the few highest-impact files (typically 1–5).
 - These are suggestions for the user's own fork; you cannot and do not push to any repository.`;
 
-async function resilientCall(systemPrompt: string, prompt: string): Promise<string> {
-  if (isGatewayRouteSelected()) return callProfessionalAI(systemPrompt, prompt, 'free');
+async function resilientCall(systemPrompt: string, prompt: string, opts: AnalystOptions): Promise<string> {
+  const dispatch = { signal: opts.signal, beforeDispatch: opts.beforeGeneration };
+  const check = () => { opts.signal?.throwIfAborted(); opts.beforeGeneration?.(); };
+  check();
+  if (isGatewayRouteSelected()) return callProfessionalAI(systemPrompt, prompt, 'free', dispatch);
   // One centrally bounded free chain; never restart it through the legacy Groq wrapper.
-  if (strictFreeRequired()) return callGemini(prompt, undefined, [], systemPrompt);
-  try { const t = await callGemini(prompt, undefined, [], systemPrompt); if (t && t.trim()) return t; } catch { /* fall through */ }
+  if (strictFreeRequired()) return callGemini(prompt, undefined, [], systemPrompt, dispatch);
+  try { const t = await callGemini(prompt, undefined, [], systemPrompt, dispatch); if (t && t.trim()) return t; } catch { check(); /* fall through */ }
   // No Claude rung (forensic audit 2026-10-04, P1): this surface is free and unbilled, guests included, and
   // any Gemini failure — a deliberate safety block too — used to fall through to Sonnet on our bill. The
   // free chain never runs Sonnet/Opus (ROUTING_AND_BILLING.md); Gemini → Groq, then an honest refusal.
-  try { const t = await callGroq(`${systemPrompt}\n\n${prompt}`, undefined, []); if (t && t.trim()) return t; } catch { /* fall through */ }
+  try { const t = await callGroq(`${systemPrompt}\n\n${prompt}`, undefined, [], dispatch); if (t && t.trim()) return t; } catch { check(); /* fall through */ }
   throw new Error('All AI providers are busy right now. Please try again in a moment.');
 }
 
@@ -130,8 +133,10 @@ export async function runRepoImprovementGen(
     'Remember the exact === FILE: path === / === END FILE === format, original content only, relative paths, highest-impact files only.',
   ].join('\n');
 
-  const raw = await resilientCall(system, prompt);
+  opts.signal?.throwIfAborted(); opts.beforeGeneration?.();
+  const raw = await resilientCall(system, prompt, opts);
   const result = parseGeneratedFiles(raw);
+  if (result.files.length || result.summary.trim()) opts.onAnswer?.();
   if (!result.files.length && !result.summary) {
     result.summary = 'The model did not return any files in the expected format. Please try again, or ask for a specific file (e.g. "generate a CI workflow").';
   }

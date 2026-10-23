@@ -40,6 +40,15 @@ export interface AppFeature {
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
+    id: 'shared_free_daily_answers',
+    name: 'Shared Free daily answer ceiling',
+    path: 'Free chat or Professionals → Shared Free daily ceiling',
+    description: 'Free chat has a daily ceiling of 5 answers for guests and 20 for signed-in accounts, shared across Free chat and all Free-classified professional modes, not per mode. The ceiling resets at midnight India time. The status distinguishes available answers, used answers and an in-progress reservation. Only one Free answer can generate per account at a time across windows. A provider failure with no answer restores the answer credit; provider accounting remains separate. A delivered partial answer can still count. Existing professional free allowances, paid answers, exam-question allowances, Doctor AI, Pro Builder and image allowances keep their separate rules. The shared ceiling does not promise 20 free professional answers or make paid actions free.',
+    howToUse: 'Read the shared ceiling near the chat header. Wait for an in-progress answer to finish before sending another Free request. If the ceiling is used, return after midnight IST. An unavailable status is not a fresh allowance. Reloading, opening another window or changing Free mode does not reset the server count.',
+    relatedFeatures: [], aiSurface: 'nbi_chat',
+    keywords: ['daily limit', 'free answers', 'remaining', 'shared quota', 'midnight', 'roz limit', 'bache jawab'],
+  },
+  {
     id: 'build_ownership_interruption',
     name: 'Build paused for app protection',
     path: 'Builder chat → build status',

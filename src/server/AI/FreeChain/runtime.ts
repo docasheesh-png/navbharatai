@@ -28,7 +28,7 @@ import { runWatchedStream, watchdogLimits } from '../Router/streamWatchdog';
 import type { RoutedCall } from '../UniversalAIRouter';
 import type { AIProviderResponse } from '../Router/ProviderTypes';
 import { readFreeChainBudgetAction, type FreeChainBudgetAction, type FreeChainBudgetResponse, FREE_CHAIN_METRICS_SCAN_LIMIT, FREE_CHAIN_PROVIDER_IDS, type FreeChainAdminMetrics, type FreeChainAdminView, type FreeChainControlAction } from '../../../lib/freeChatChainView';
-export interface FreeChainInput { message: string; history: unknown[]; systemPrompt?: string; signal?: AbortSignal; onChunk?: (text: string) => void; context: FreeChainContext }
+export interface FreeChainInput { message: string; history: unknown[]; systemPrompt?: string; signal?: AbortSignal; onChunk?: (text: string, source?: 'notice') => void; context: FreeChainContext }
 export type FreeChainResult = RoutedCall & { reason?: 'aborted' | 'no-provider' | 'all-failed' | 'stalled'; freeChain?: FreeChainTelemetry };
 const BUSY = 'The AI service is temporarily busy. Please try again in 1-2 minutes. 🙏';
 const names: Record<ProviderId, AIProviderResponse['provider']> = { glm47: 'GLM', glm45: 'GLM', gemini: 'GEMINI', groq: 'GROQ', cloudflare: 'CLOUDFLARE', openrouter: 'OPENROUTER', deepseek: 'DEEPSEEK' };
@@ -163,7 +163,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         if (safe?.code === 'SAFETY_REFUSAL' || safe?.code === 'INVALID_REQUEST' || safe?.code === 'POLICY_BLOCKED' || safe?.code === 'ABORTED' || input.signal?.aborted) break;
       } finally { controller.abort(); input.signal?.removeEventListener('abort', abort); releaseSlot(capacityName); }
     }
-    const result = empty(); input.onChunk?.(result.content); return done(result);
+    const result = empty(); input.onChunk?.(result.content, 'notice'); return done(result);
   }
   return { async route(input: FreeChainInput): Promise<FreeChainResult> {
     const entry = input.context.entryAdmission;
@@ -177,13 +177,13 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       const trace: FreeChainTelemetry = { requestId: randomUUID(), queueWaitMs: admission.waitedMs, admissionReason: admission.reason, rung: null, provider: 'NONE', model: 'none', attempts: [], fallbacks: 0, cacheHit: false, costUsdEstimate: null, ttftMs: null, latencyMs: admission.waitedMs, rolloutBucket: rolloutBucket(input.context.uid) };
       logFreeChain(trace);
       await persistFreeChainSample(db, trace, false);
-      if (result.content) input.onChunk?.(result.content);
+      if (result.content) input.onChunk?.(result.content, 'notice');
       return { ...result, freeChain: trace };
     }
     try {
       const current = refreshConfig?.() ?? cfg;
       if (!current.enabled || current.errors.length || strictFreeRequired()) {
-        const result = empty(); input.onChunk?.(result.content); return result;
+        const result = empty(); input.onChunk?.(result.content, 'notice'); return result;
       }
       return await routeAdmitted(input, admission.waitedMs);
     } finally { admission.release(); }
@@ -203,7 +203,7 @@ export async function maybeFreeChain(input: FreeChainInput): Promise<FreeChainRe
   if (held && entry.signal.aborted) return { ...empty('aborted'), content: '' };
   // The existing strict router remains authoritative, including a policy change during assembly.
   if (strictFreeRequired()) return null;
-  const unavailable = () => { const result = empty(); input.onChunk?.(result.content); return result; };
+  const unavailable = () => { const result = empty(); input.onChunk?.(result.content, 'notice'); return result; };
   if (cfg.errors.length && (cfg.enabled || held)) { warnOnce(`Invalid configuration: ${cfg.errors.join(', ')}`); return unavailable(); }
   // OFF restores legacy for new requests, never for a turn already admitted to this chain.
   if (!cfg.enabled) return held ? unavailable() : null;

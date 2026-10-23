@@ -82,3 +82,9 @@ it.each(['chat', 'generate'] as const)('non-canary %s preserves legacy repo fetc
   expect(res.statusCode).toBe(200); expect(m.fetchRepo).toHaveBeenCalledWith({ owner: 'acme', repo: 'widget' }, undefined);
   expect(m.gemini).toHaveBeenCalledOnce(); expect(m.routed).not.toHaveBeenCalled(); expect(admission).not.toHaveBeenCalled();
 });
+
+// These fixtures isolate routing/entitlements; shared quota behavior is covered by freeAnswerRoutes and quota store tests.
+vi.mock('../../lib/freeAnswerQuota', () => ({
+  withFreeAnswerQuota: async (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(),
+  markFreeAnswer: () => {}, markFreeAnswerProviderFailure: () => {}, assertFreeAnswerActive: () => {}, freeAnswerSignal: () => undefined,
+}));

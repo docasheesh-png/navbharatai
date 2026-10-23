@@ -171,7 +171,7 @@ describe('professional chat route — verified identity only', () => {
     );
     expect(res.statusCode).toBe(200);
     // The options also carry the client's platform (Q-123); no header ⇒ the web.
-    expect(runChatMock.mock.calls[0][5]).toEqual({ conversationId: 'c_9f2a-b', platform: 'web', signal: expect.any(AbortSignal), deadlineAtMs: expect.any(Number), freeProductGateway: true });
+    expect(runChatMock.mock.calls[0][5]).toEqual({ conversationId: 'c_9f2a-b', platform: 'web', signal: expect.any(AbortSignal), deadlineAtMs: expect.any(Number), freeProductGateway: true, beforeGeneration: expect.any(Function) });
   });
 
   it('an absent or implausible conversationId reaches the engine as undefined — the legacy conversation, never a guess', async () => {
@@ -181,7 +181,7 @@ describe('professional chat route — verified identity only', () => {
       const res = mockRes();
       await chatHandler()(mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hello', conversationId: bad } }), res);
       expect(res.statusCode).toBe(200);
-      expect(runChatMock.mock.calls[0][5]).toEqual({ conversationId: undefined, platform: 'web', signal: expect.any(AbortSignal), deadlineAtMs: expect.any(Number), freeProductGateway: true });
+      expect(runChatMock.mock.calls[0][5]).toEqual({ conversationId: undefined, platform: 'web', signal: expect.any(AbortSignal), deadlineAtMs: expect.any(Number), freeProductGateway: true, beforeGeneration: expect.any(Function) });
     }
   });
 });
@@ -214,3 +214,9 @@ describe('the daily allowance reaches the charge (admin 2026-09-23: "10 free, th
     expect(chargeMock).not.toHaveBeenCalled();
   });
 });
+
+// These fixtures isolate routing/entitlements; shared quota behavior is covered by freeAnswerRoutes and quota store tests.
+vi.mock('../src/server/lib/freeAnswerQuota', () => ({
+  withFreeAnswerQuota: async (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(),
+  markFreeAnswer: () => {}, markFreeAnswerProviderFailure: () => {}, assertFreeAnswerActive: () => {}, freeAnswerSignal: () => undefined,
+}));

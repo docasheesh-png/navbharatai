@@ -129,7 +129,7 @@ export class UniversalAIRouter {
     history: any[],
     tier: string,
     systemPrompt: string | undefined,
-    onChunk: (text: string) => void,
+    onChunk: (text: string, source?: 'notice') => void,
     signal?: AbortSignal,
     allowFreeChatHedge = false,
     freeChainContext?: FreeChainContext,

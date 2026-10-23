@@ -1,3 +1,5 @@
+import { verifyFirebaseToken } from '../lib/authMiddleware';
+import { withFreeAnswerQuota, assertFreeAnswerActive, markFreeAnswer, freeAnswerSignal } from '../lib/freeAnswerQuota';
 import { withFreeChainEntryAdmission } from '../AI/FreeChain/entryAdmission';
 import { freeChainRequestContext } from '../AI/FreeChain/requestContext';
 import { usageLogFields } from '../AI/Router/usageLogFields';
@@ -41,6 +43,32 @@ import {
   appRequestDirective, missingProLine, isAboutNavBharatAI,
 } from '../lib/freeChatReplies';
 
+function isChatImageEditRequest(req: Request): boolean {
+  const files=Array.isArray(req.body?.fileAttachments) ? req.body.fileAttachments : [];
+  const vision=files.filter((f: any)=>typeof f?.type==='string' && (f.type.startsWith('image/') || f.type==='application/pdf'));
+  return vision.length===1 && vision[0].type.startsWith('image/') && looksLikeImageEdit(String(req.body?.message || ''));
+}
+async function withChatDailyQuota(req: Request, res: Response, run: () => Promise<unknown>): Promise<unknown> {
+  const body=req.body || {};
+  if (body.mode === 'doctor' || body.mode === 'sda') {res.status(400).json({code:'DOCTOR_ROUTE_REQUIRED',error:'Please use the Doctor AI service for this mode.'});return;}
+  if (!body.message && !Array.isArray(body.fileAttachments)) {res.status(400).json({reply:'Message is required'}); return;}
+  const limits=checkChatInput({message:body.message,fileAttachments:body.fileAttachments,history:body.history});
+  if (!limits.ok) {res.status(limits.status).json({reply:limits.reply});return;}
+  let disconnected=false;
+  onClientGone(res,()=>{disconnected=true;});
+  const uid=await verifyFirebaseToken(req);
+  if(disconnected || res.destroyed || res.writableEnded) return;
+  const admitted=async()=>{
+    let work: Promise<unknown> | undefined;
+    await guestDailyQuota('chat',{identify:async()=>uid ? {uid} : null})(req,res,()=>{work=run();});
+    return await work;
+  };
+  return isChatImageEditRequest(req) ? admitted() : withFreeAnswerQuota(req,res,admitted,{uid});
+}
+function chatAnswerSignal(req: Request, signal: AbortSignal): AbortSignal {
+  const quota=freeAnswerSignal(req); return quota ? AbortSignal.any([signal,quota]) : signal;
+}
+
 /** Verified Free ingress. Image generation/edit retains its separate admitted pipeline. */
 async function withChatTextGateway<T>(req: Request, res: Response, handler: () => Promise<T>): Promise<T | void> {
   // A client mode label cannot select the paid clinical product or bypass Free budgets.
@@ -67,7 +95,7 @@ async function withChatTextGateway<T>(req: Request, res: Response, handler: () =
         // reviewed classifier exists, so public-only providers cannot be inferred safe.
         qualityTier: 'clinical', dataClass: 'health',
         mode: strictFreeRequired() ? 'strict-free' : 'free-first-authorized-paid',
-        deadlineAtMs: guest ? Math.min(deadlineAtMs, guest.expiresAtMs) : deadlineAtMs, signal: controller.signal,
+        deadlineAtMs: guest ? Math.min(deadlineAtMs, guest.expiresAtMs) : deadlineAtMs, signal: chatAnswerSignal(req, controller.signal),
       // Bound active/queued turns BEFORE prompt, profile, document and grounding work.
       // Runtime reuses the private live lease, not a second queue or the old rollout's grant.
       }, () => isGatewayRouteSelected() ? runWithInferenceGatewayEntryAdmission(handler) : legacy());
@@ -445,6 +473,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         ? vialRememberedMessage(taught.drug, taught.concentration)
         : (directDoseReply(message, vials) ?? unknownNewbornDoseReply(message));
       if (direct) {
+        markFreeAnswer(req);
         if (req.body.stream === true) {
           if (!res.headersSent) {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -545,7 +574,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     const loneImage = visionAttachments.length === 1 && visionAttachments[0].type.startsWith('image/')
       ? visionAttachments[0]
       : null;
-    if (loneImage && looksLikeImageEdit(message)) {
+    if (loneImage && isChatImageEditRequest(req)) {
       const streamOut = req.body.stream === true;
       const sendEdit = (reply: string) => {
         if (streamOut) {
@@ -629,9 +658,11 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
 
     if (visionAttachments.length > 0 && strictFreeRequired() && !isGatewayRouteSelected()) { const error = new StrictFreeCapabilityError('vision'); return res.status(error.status).json({ reply: error.message, code: error.code }); }
     if (visionAttachments.length > 0) {
+      assertFreeAnswerActive(req);
       const visionResult = await runVisionChain(visionAttachments, {
         prompt: contextualMessage,
         systemPrompt,
+        signal: freeAnswerSignal(req),
         allowClaude: !isFree, // absolute rule: the Free universe NEVER uses Claude
       });
       if (visionResult) {
@@ -648,6 +679,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           ok: true, streamed: false, createdAt: new Date().toISOString(),
         }).catch(() => {});
       }
+      assertFreeAnswerActive(req);
+      if (visionResult?.text.trim()) markFreeAnswer(req);
       const replyText = visionResult?.text
         || 'Sorry, I could not read your image/file right now. Please try again in a moment, or paste the text directly.';
       if (req.body.stream === true) {
@@ -780,9 +813,12 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         let outcome: Awaited<ReturnType<typeof aiRouter.routeStream>> | null = null;
         let streamedText = '';
         try {
+          assertFreeAnswerActive(req);
           outcome = await aiRouter.routeStream(
             contextualMessage, history, tier, systemPrompt,
-            (chunk: string) => {
+            (chunk: string, source?: 'notice') => {
+              assertFreeAnswerActive(req);
+              if (source !== 'notice' && chunk.trim() && !res.destroyed && !res.writableEnded) markFreeAnswer(req);
               streamedText += chunk;
               if (!res.writableEnded) {
                 if (firstTokenAt === null) {
@@ -793,7 +829,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
                 res.write(`data: ${JSON.stringify({ c: chunk })}\n\n`);
               }
             },
-            controller.signal,
+            chatAnswerSignal(req, controller.signal),
             true, // Server-owned: only ordinary chat may hedge two verified-free models.
             freeChainContext,
           );
@@ -820,6 +856,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         // ⚠️ Only on `stalled`. A clean finish must never carry a caveat, and a turn where NOTHING was
         // delivered took the honest "temporarily busy" line from the ladder itself, so adding one here
         // would say it twice.
+        assertFreeAnswerActive(req);
         if (!res.writableEnded) {
           if (outcome?.reason === 'stalled') {
             res.write(`data: ${JSON.stringify({
@@ -865,7 +902,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       } else {
         const controller = new AbortController();
         onClientGone(res, () => controller.abort());
-        const routed = await aiRouter.routeDetailed(contextualMessage, history, tier, undefined, systemPrompt, true, controller.signal, freeChainContext);
+        assertFreeAnswerActive(req);
+        const routed = await aiRouter.routeDetailed(contextualMessage, history, tier, undefined, systemPrompt, true, chatAnswerSignal(req, controller.signal), freeChainContext);
         // USAGE LOGGING — what actually happened, and nothing else (2026-09-12).
         //
         // 🔴 THIS BLOCK USED TO INVENT EVERY FIELD IT WROTE: `providerName: 'auto'`, `modelName: 'auto'`,
@@ -897,11 +935,19 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           ok: routed.ok,
           createdAt: new Date().toISOString(),
         }).catch(() => {});
+        assertFreeAnswerActive(req);
+        if (routed.ok && routed.content.trim()) markFreeAnswer(req);
         const proTail = appAsk && routed.ok && routed.content ? missingProLine(routed.content, message) : '';
         res.json({ reply: `${routed.content}${proTail}` });
       }
     } catch(e: any) {
       console.error(`Error for tier ${tier}:`, e.message);
+      if (freeAnswerSignal(req)?.aborted && !res.writableEnded && !res.destroyed) {
+        const message='This answer was interrupted. Please check the partial reply before trying again.';
+        if (res.headersSent) {res.write(`data: ${JSON.stringify({c:`\n\n${message}`,error:message,code:'FREE_ANSWER_UNAVAILABLE'})}\n\n`);res.end();}
+        else res.status(503).json({error:message,reply:message,code:'FREE_ANSWER_UNAVAILABLE'});
+        return;
+      }
       if (res.headersSent && isGatewayTerminalError(e) && !res.writableEnded && !res.destroyed) {
         res.write(`data: ${JSON.stringify({ c: 'The AI service is temporarily unavailable. Please try again later.', code: 'INFERENCE_GATEWAY_UNAVAILABLE' })}\n\n`);
         res.end();
@@ -915,6 +961,6 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     }
   };
 
-  app.post('/api/chat/navbharat', freeModuleInferenceScope,       chatLimiter, guestDailyQuota('chat'), (req, res) => withChatTextGateway(req, res, () => chatHandler(req, res, 'navbharat')));
-  app.post('/api/chat/navbharatai', freeModuleInferenceScope,     chatLimiter, guestDailyQuota('chat'), (req, res) => withChatTextGateway(req, res, () => chatHandler(req, res, 'navbharat')));
+  app.post('/api/chat/navbharat', freeModuleInferenceScope,       chatLimiter, (req, res) => withChatDailyQuota(req, res, () => withChatTextGateway(req, res, () => chatHandler(req, res, 'navbharat'))));
+  app.post('/api/chat/navbharatai', freeModuleInferenceScope,     chatLimiter, (req, res) => withChatDailyQuota(req, res, () => withChatTextGateway(req, res, () => chatHandler(req, res, 'navbharat'))));
 }

@@ -99543,3 +99543,9 @@ The merged master/surface switches could select an entire Free surface and had n
   account capacity or live Firestore contention. Uncertain-job recovery requires independently reviewed exact-provider completion
   evidence, an authenticated preview/CAS and durable audit; it never refunds money
   or clears quota holds. No elapsed-time automatic reset exists.
+
+## 2026-10-23 — Shared Free daily answer ceiling (draft implementation)
+
+Added independent server-authoritative answer admission: guest Free chat 5/day; signed-in shared 20/day across canonical Free chat/professional modes, reset midnight IST. Existing professional/Doctor 10-message entitlement, exam questions, paid routes and $10 gateway budget are unchanged; exhaustion never creates a new paid call. Durable owner-fenced renewable logical lease, request idempotency, partial/disconnect policy, exactly-once user-credit restore, real remaining/reservation badge, and isolated retention/erasure are covered by focused tests. Provider accounting remains independent; gateway activation remains OFF unless independently configured. See `docs/FREE_ANSWER_DAILY_LIMITS.md` for exact scope, uncertainty and retention.
+
+Final focused aggregate: 32 suites / 490 tests passed. Local typechecks, unused-import, build/bundle, dependency/native, boot, license, SBOM and OAuth gates passed; independent safety review completed. Full coverage and exact-head hosted CI remain release gates. Local executor uses Node 24 rather than hosted Node 22; these local checks are not a completed merge gate. No live inference or production setting changes.

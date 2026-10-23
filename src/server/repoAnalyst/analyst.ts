@@ -14,7 +14,7 @@ import { callProfessionalAI } from '../lib/professionalRouting';
  */
 
 export interface AnalystTurn { role: 'user' | 'assistant'; content: string; }
-export interface AnalystOptions { signal?: AbortSignal }
+export interface AnalystOptions { signal?: AbortSignal; beforeGeneration?: () => void; onAnswer?: () => void }
 
 const PERSONA = `You are GitHub Repo Analyst & Improver inside NavBharatAI — an expert software engineer who analyses PUBLIC GitHub repositories and gives honest, practical, actionable feedback and improvement plans. You work ONLY from the real repository content provided to you below; you never invent files, code, or facts about the repo.
 
@@ -72,17 +72,20 @@ export function buildRepoContext(s: RepoSnapshot): string {
   return lines.join('\n');
 }
 
-async function resilientCall(systemPrompt: string, prompt: string): Promise<string> {
+async function resilientCall(systemPrompt: string, prompt: string, opts: AnalystOptions): Promise<string> {
+  const dispatch = { signal: opts.signal, beforeDispatch: opts.beforeGeneration };
+  const check = () => { opts.signal?.throwIfAborted(); opts.beforeGeneration?.(); };
+  check();
   // The selected gateway owns the whole chain. Never catch its terminal result
   // and restart it through either direct SDK helper below.
-  if (isGatewayRouteSelected()) return callProfessionalAI(systemPrompt, prompt, 'free');
+  if (isGatewayRouteSelected()) return callProfessionalAI(systemPrompt, prompt, 'free', dispatch);
   // One centrally bounded free chain; never restart it through the legacy Groq wrapper.
-  if (strictFreeRequired()) return callGemini(prompt, undefined, [], systemPrompt);
-  try { const t = await callGemini(prompt, undefined, [], systemPrompt); if (t && t.trim()) return t; } catch { /* fall through */ }
+  if (strictFreeRequired()) return callGemini(prompt, undefined, [], systemPrompt, dispatch);
+  try { const t = await callGemini(prompt, undefined, [], systemPrompt, dispatch); if (t && t.trim()) return t; } catch { check(); /* fall through */ }
   // No Claude rung (forensic audit 2026-10-04, P1): this surface is free and unbilled, guests included, and
   // any Gemini failure — a deliberate safety block too — used to fall through to Sonnet on our bill. The
   // free chain never runs Sonnet/Opus (ROUTING_AND_BILLING.md); Gemini → Groq, then an honest refusal.
-  try { const t = await callGroq(`${systemPrompt}\n\n${prompt}`, undefined, []); if (t && t.trim()) return t; } catch { /* fall through */ }
+  try { const t = await callGroq(`${systemPrompt}\n\n${prompt}`, undefined, [], dispatch); if (t && t.trim()) return t; } catch { check(); /* fall through */ }
   throw new Error('All AI providers are busy right now. Please try again in a moment.');
 }
 
@@ -117,7 +120,10 @@ export async function runRepoAnalystChat(
     // No repo yet — answer generally but steer to a repo URL.
     const system = `${PERSONA}\n\n${DISCLAIMER}`;
     const prompt = `The user hasn't given a GitHub repository to analyse yet. Their message: "${message}".\nIf they're asking how this works or a general question, answer briefly and helpfully, then ask them to paste a PUBLIC GitHub repo URL (or owner/repo) so you can fetch and analyse it for real.`;
-    return resilientCall(system, prompt);
+    opts.signal?.throwIfAborted(); opts.beforeGeneration?.();
+    const answer = await resilientCall(system, prompt, opts);
+    if (answer.trim()) opts.onAnswer?.();
+    return answer;
   }
 
   let snapshot: RepoSnapshot;
@@ -147,5 +153,8 @@ export async function runRepoAnalystChat(
     'Respond grounded ONLY in the repo content above. If the user asked a specific question, answer it; otherwise give a structured analysis: Overview, Tech stack, Strengths, Gaps/Weaknesses, Security/Quality flags (note these are from a partial view), License & reuse note, and a Prioritised improvement plan with short, adoptable code snippets. Be specific and honest about what you could and could not see.',
   ].join('\n');
 
-  return resilientCall(system, prompt);
+  opts.signal?.throwIfAborted(); opts.beforeGeneration?.();
+  const answer = await resilientCall(system, prompt, opts);
+  if (answer.trim()) opts.onAnswer?.();
+  return answer;
 }

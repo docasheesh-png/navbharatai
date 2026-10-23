@@ -1,3 +1,4 @@
+import { newFreeAnswerRequestId, notifyFreeAnswerChanged } from '../lib/freeAnswerStatus';
 // useChatEngine — the free (NBI) chat engine, lifted out of the App.tsx God component (P3.1, behavior-
 // preserving). Owns the send pipeline: handleSendForTab (the core turn handler — intent routing, GitHub
 // PAT/repo capture, attachment encoding, streaming reply, build-mode code extraction) and handleSend
@@ -94,7 +95,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
     target?: string,
     agent: string = 'navbharatai',
     mode: string = 'chat',
-    memorySummary?: string
+    memorySummary?: string,
+    answerRequestId?: string
   ): Promise<string> => {
     let endpoint = '/api/chat/navbharatai';
 
@@ -103,6 +105,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
     const timeoutId = setTimeout(() => controller.abort(), 95000);
 
     try {
+      notifyFreeAnswerChanged();
       const response = await axios.post(endpoint, {
         message: prompt,
         preferredModel: selectedModel === 'auto' ? 'gemini' : selectedModel,
@@ -119,6 +122,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
           // The account token (or, signed out, this device's guest id): the server counts a guest's daily
           // messages and must recognise a signed-in user as one. This route used to receive neither.
           ...(await authHeader()),
+          ...(answerRequestId ? { 'x-nb-answer-request': answerRequestId } : {}),
           'x-gemini-key': keys.gemini,
           'x-groq-key': keys.groq,
           'x-openai-key': keys.openai,
@@ -178,7 +182,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
     intent: string = 'general', 
     target?: string,
     agent: string = 'navbharatai',
-    mode: string = 'chat'
+    mode: string = 'chat',
+    answerRequestId?: string
   ): Promise<{ reply: string, model: string }> => {
     if (intent === 'security') {
         addLog('Security Auditor: Analyzing project architecture...', 'info');
@@ -199,7 +204,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
     const activeSession = sessions.find(s => s.id === currentSessionId);
 
     // Switch to a single high-speed call for near-instant response
-    const response = await callGeminiFrontend(message, enableSearch || (intent === 'security'), history, intent, target, agent, mode, activeSession?.memorySummary);
+    const response = await callGeminiFrontend(message, enableSearch || (intent === 'security'), history, intent, target, agent, mode, activeSession?.memorySummary, answerRequestId);
     
     return { 
       reply: response, 
@@ -210,6 +215,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
   const handleSendForTab = async (tabId: ViewType, overrideMessage?: string, files: File[] = []) => {
       // ... (existing logic, maybe add files to messages)
     const isNbi = tabId === 'nbi_chat';
+    const answerRequestId = newFreeAnswerRequestId();
     const currentInput = input;
     const currentMessages = messages;
     const activeSession = sessions.find(s => s.id === currentSessionId);
@@ -404,6 +410,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
         // `vishwakarma_*` id got a 404 on send (Q-673). `tests/everyApiPathTheClientCallsExists.test.ts`
         // keeps a client path from pointing at a route that does not exist.
         const endpoint = '/api/chat/navbharat';
+        headers['x-nb-answer-request'] = answerRequestId;
 
         // TELLING IT A VIAL is stored HERE, on the device, before the message goes anywhere — the vial
         // is a fact about this cot side and belongs on this phone, not on a server. The server sends
@@ -417,6 +424,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
         const userAbort = new AbortController();
         abortRef.current = userAbort;
         let response: Response;
+        notifyFreeAnswerChanged();
         try { response = await fetch(endpoint, {
           method: 'POST',
           headers,
@@ -549,7 +557,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
             potentialTarget = urlMatch ? urlMatch[0] : '';
           }
 
-          data = await runFrontendPipeline(messageToSend, isRealTime || detectedIntent === 'security', historyForAPI, detectedIntent, potentialTarget, currentAgent, currentMode);
+          data = await runFrontendPipeline(messageToSend, isRealTime || detectedIntent === 'security', historyForAPI, detectedIntent, potentialTarget, currentAgent, currentMode, answerRequestId);
         } catch (frontendErr: any) {
           if (frontendErr instanceof ChatStreamTerminalError || frontendErr?.guestLimit === true) throw frontendErr;
           console.warn('Frontend Gemini failed, trying backend fallback...', frontendErr.message);
@@ -678,6 +686,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
       setMessagesForTab((prev) => [...prev, errorMessage]);
     } finally {
       setIsLoadingForTab(false);
+      notifyFreeAnswerChanged();
     }
   };
 

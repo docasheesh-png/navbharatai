@@ -1,3 +1,4 @@
+import { assertFreeAnswerDispatch, currentFreeAnswerSignal } from '../../lib/freeAnswerQuotaContext';
 import { strictFreeRequired, StrictFreeCapabilityError } from '../inferencePolicy';
 import { strictFreeText } from '../LiveRegistry/runtime';
 import type { FreeTextResult } from '../LiveRegistry/dispatcher';
@@ -182,10 +183,10 @@ export class AIRouter {
   private release(name: string): void { releaseSlot(this.slotKey(name)); }
   private inFlightCount(name: string): number { return inFlight.get(this.slotKey(name)) || 0; }
 
-  private async routeVerifiedFree(prompt: string, systemPrompt?: string, schema?: unknown, images?: string[], modelOverride?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+  private async routeVerifiedFree(prompt: string, systemPrompt?: string, schema?: unknown, images?: string[], modelOverride?: string, signal?: AbortSignal): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
     await assertAiAvailable();
     if (schema || images?.length || modelOverride) throw new StrictFreeCapabilityError('unsupported-schema-image-or-model-override');
-    const response = await strictFreeText({ prompt, systemPrompt });
+    const response = await strictFreeText({ prompt, systemPrompt, signal });
     return { response, telemetry: { provider: response.provider, retries: 0, latency: response.latencyMs, success: true } };
   }
 
@@ -214,12 +215,14 @@ export class AIRouter {
    * provider(s) (e.g. Claude Haiku). This gives the lowest-latency answer while
    * keeping Claude strictly as the final safety net (Grok-primary/Claude-last law).
    */
-  async routeRaced(prompt: string, systemPrompt?: string, images?: string[]): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
+  async routeRaced(prompt: string, systemPrompt?: string, images?: string[], signal?: AbortSignal): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
     // Selected gateway turns own their complete sequential fallback chain. They
     // must never enter this legacy speculative race, including on refusal/error.
-    const gateway = await maybeGatewayText({ prompt, systemPrompt, images });
+    signal = signal ?? currentFreeAnswerSignal();
+    assertFreeAnswerDispatch(); signal?.throwIfAborted();
+    const gateway = await maybeGatewayText({ prompt, systemPrompt, images, signal });
     if (gateway) return { response: gateway, telemetry: { provider: gateway.provider, retries: 0, latency: gateway.latencyMs, success: gateway.ok } };
-    if (strictFreeRequired()) return this.routeVerifiedFree(prompt, systemPrompt, undefined, images);
+    if (strictFreeRequired()) return this.routeVerifiedFree(prompt, systemPrompt, undefined, images, undefined, signal);
     await assertAiAvailable();
     const racers = this.providers.filter(p => !p.lastResort);
     const fallbacks = this.providers.filter(p => p.lastResort);
@@ -229,6 +232,7 @@ export class AIRouter {
     const eligible: AIProvider[] = [];
     for (const p of racers) {
       if (isOnCooldown(p.name)) { console.log(`[RACE] skip ${p.name} (cooldown)`); continue; }
+      assertFreeAnswerDispatch();
       if (!(await p.healthCheck().catch(() => false))) { console.log(`[RACE] skip ${p.name} (unhealthy)`); continue; }
       if (this.inFlightCount(p.name) >= MAX_IN_FLIGHT) { console.log(`[RACE] skip ${p.name} (at capacity)`); continue; }
       eligible.push(p);
@@ -240,6 +244,7 @@ export class AIRouter {
         if (!this.acquire(p.name)) throw new Error(`${p.name}: no slot`);
         const t = Date.now();
         try {
+          assertFreeAnswerDispatch(); signal?.throwIfAborted();
           const response = assertNonEmpty(await p.execute(prompt, undefined, undefined, systemPrompt, images), p.name);
           recordProviderLatency(p.name, Date.now() - t, false);
           return { response, name: p.name };
@@ -269,11 +274,13 @@ export class AIRouter {
 
     // Last-resort fallback (sequential) — e.g. Claude Haiku.
     for (const p of fallbacks) {
+      assertFreeAnswerDispatch();
       if (!(await p.healthCheck().catch(() => false))) continue;
       if (!this.acquire(p.name)) continue;
       const t = Date.now();
       try {
         console.log(`[RACE] last-resort: ${p.name}`);
+        assertFreeAnswerDispatch(); signal?.throwIfAborted();
         const response = assertNonEmpty(await p.execute(prompt, undefined, undefined, systemPrompt, images), p.name);
         recordProviderLatency(p.name, Date.now() - t, false);
         recordRouterOutcome(true);
@@ -301,6 +308,7 @@ export class AIRouter {
   /** Returns true if at least one registered provider passes its health check. */
   async hasHealthyProvider(): Promise<boolean> {
     for (const p of this.providers) {
+      assertFreeAnswerDispatch();
       if (await p.healthCheck().catch(() => false)) return true;
     }
     return false;
@@ -322,7 +330,7 @@ export class AIRouter {
     providers: AIProvider[],
     prompt: string,
     systemPrompt: string | undefined,
-    onChunk: (text: string) => void,
+    onChunk: (text: string, source?: 'notice') => void,
     signal?: AbortSignal,
   ): Promise<StreamOutcome> {
     for (const p of providers) {
@@ -342,6 +350,7 @@ export class AIRouter {
         // was threaded through here, this method only checked `signal.aborted` BETWEEN rungs: the
         // request already in flight ran to completion and was billed in full, so a user who closed
         // the tab after one word still paid for the whole answer.
+        assertFreeAnswerDispatch(); signal?.throwIfAborted();
         const limits = watchdogLimits(process.env, this.universe);
         if (!limits) {
           await p.executeStream(prompt, systemPrompt, onChunk, undefined, signal);
@@ -379,7 +388,7 @@ export class AIRouter {
     }
     // Every rung failed. An HONEST refusal, never a silent escalation to something dearer — the same
     // posture `buildProfessionalFreeFallback` states for the free build path.
-    if (!signal?.aborted) onChunk('AI service temporarily busy. Please try again. 🙏');
+    if (!signal?.aborted) onChunk('AI service temporarily busy. Please try again. 🙏', 'notice');
     return { ok: false, reason: 'all-failed' };
   }
 
@@ -394,7 +403,7 @@ export class AIRouter {
   async routeStream(
     prompt: string,
     systemPrompt: string | undefined,
-    onChunk: (text: string) => void,
+    onChunk: (text: string, source?: 'notice') => void,
     signal?: AbortSignal,
   ): Promise<StreamOutcome> {
     const gateway = await maybeGatewayText({ prompt, systemPrompt, onChunk, signal });
@@ -412,7 +421,7 @@ export class AIRouter {
   private async routeStreamInner(
     prompt: string,
     systemPrompt: string | undefined,
-    onChunk: (text: string) => void,
+    onChunk: (text: string, source?: 'notice') => void,
     signal?: AbortSignal,
   ): Promise<StreamOutcome> {
     await assertAiAvailable();
@@ -423,7 +432,7 @@ export class AIRouter {
     const allProviders = available.length > 0 ? available : this.providers.filter(p => p.executeStream);
 
     if (allProviders.length === 0) {
-      if (!signal?.aborted) onChunk('AI service temporarily unavailable. 🙏');
+      if (!signal?.aborted) onChunk('AI service temporarily unavailable. 🙏', 'notice');
       return { ok: false, reason: 'no-provider' };
     }
 
@@ -446,6 +455,7 @@ export class AIRouter {
     const commitPromise = new Promise<void>(res => { commitResolve = res; });
 
     const runStream = (p: typeof p1, index: number): Promise<void> => {
+      assertFreeAnswerDispatch(); signal?.throwIfAborted();
       if (!this.acquire(p.name)) return Promise.resolve();
       const t = Date.now();
       // `signal` rides the call itself, not only the chunk guard below (Q-621): dropping a chunk the
@@ -512,9 +522,11 @@ export class AIRouter {
   private async execute(prompt: string, schema?: any, systemPrompt?: string, images?: string[], modelOverride?: string, signal?: AbortSignal): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
     // Keep the complete capability envelope. A schema, image or pinned model is
     // never silently downgraded to plain text when a selected route cannot serve it.
+    signal = signal ?? currentFreeAnswerSignal();
+    assertFreeAnswerDispatch(); signal?.throwIfAborted();
     const gateway = await maybeGatewayText({ prompt, systemPrompt, schema, images, modelOverride, signal });
     if (gateway) return { response: gateway, telemetry: { provider: gateway.provider, retries: 0, latency: gateway.latencyMs, success: gateway.ok } };
-    if (strictFreeRequired()) return this.routeVerifiedFree(prompt, systemPrompt, schema, images, modelOverride);
+    if (strictFreeRequired()) return this.routeVerifiedFree(prompt, systemPrompt, schema, images, modelOverride, signal);
     await assertAiAvailable();
     const targetSchema = schema?.type === 'OBJECT' ? schema : undefined;
     const errors: string[] = [];
@@ -537,6 +549,7 @@ export class AIRouter {
         }
 
         await assertAiAvailable();
+        assertFreeAnswerDispatch();
         const isHealthy = await provider.healthCheck().catch(() => false);
         if (!isHealthy) {
           console.log(`[ROUTER] ${provider.name} healthCheck=false, skipping`);
@@ -553,6 +566,7 @@ export class AIRouter {
         try {
           const startTime = Date.now();
           console.log(`[ROUTER] Trying ${provider.name} (pass ${pass}, in-flight ${concurrent + 1})...`);
+          assertFreeAnswerDispatch(); signal?.throwIfAborted();
           const response = assertNonEmpty(
             await provider.execute(prompt, targetSchema, modelOverride, systemPrompt, images),
             provider.name,

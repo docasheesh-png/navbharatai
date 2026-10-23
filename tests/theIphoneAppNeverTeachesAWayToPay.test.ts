@@ -72,7 +72,7 @@ describe('🔒 every caller passes the platform, and every chat client sends it'
 
   it('the four chat clients send X-NBAI-Platform', () => {
     expect(code('src/hooks/useChatEngine.ts')).toContain('...platformHeader() };');
-    expect(code('src/components/professionals/ProfessionalChat.tsx')).toContain("{ 'Content-Type': 'application/json', ...platformHeader() }");
+    expect(code('src/components/professionals/ProfessionalChat.tsx')).toContain("{ 'Content-Type': 'application/json', ...platformHeader(), 'x-nb-answer-request': newFreeAnswerRequestId() }");
     expect(code('src/components/professionals/ExamMode.tsx')).toContain('...platformHeader() }');
     expect(code('src/components/sda/SDAChat.tsx')).toContain('headers: { ...(await authJsonHeaders()), ...platformHeader() },');
   });

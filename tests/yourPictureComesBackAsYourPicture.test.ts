@@ -44,7 +44,7 @@ const FREE = 'src/components/ide/AIImageGenerator.tsx';
  * that passes on an empty slice is the worst kind.
  */
 function editBranch(body: string): string {
-  const start = body.indexOf('looksLikeImageEdit(message)');
+  const start = body.indexOf('if (loneImage && isChatImageEditRequest(req))');
   const end = body.indexOf('runVisionChain(visionAttachments', start);
   const slice = body.slice(start, end);
   expect(slice.length, 'the edit branch could not be sliced — the anchors have moved').toBeGreaterThan(400);
@@ -192,7 +192,7 @@ describe('🔒 free chat changes the picture, or says why it cannot', () => {
   const body = code(read(CHAT));
 
   it('the edit branch runs BEFORE the describe path', () => {
-    const edit = body.indexOf('looksLikeImageEdit(message)');
+    const edit = body.indexOf('if (loneImage && isChatImageEditRequest(req))');
     const vision = body.indexOf('runVisionChain(visionAttachments');
     expect(edit).toBeGreaterThan(-1);
     expect(edit).toBeLessThan(vision);

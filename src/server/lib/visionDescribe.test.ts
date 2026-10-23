@@ -112,3 +112,14 @@ describe('describeVisionAttachments — weak-module no-Claude guard', () => {
     expect(out.indexOf('b.png')).toBeLessThan(out.indexOf('c.pdf'));
   });
 });
+
+it('rejects an aborted Free attachment before any provider dispatch', async () => {
+ const controller = new AbortController(); controller.abort(); const beforeDispatch = vi.fn();
+ await expect(describeVisionAttachments([IMG], { noClaude: true, signal: controller.signal, beforeDispatch })).rejects.toThrow();
+ expect(beforeDispatch).not.toHaveBeenCalled();
+});
+it('fences an expired Free attachment lease before selecting a provider', async () => {
+ const beforeDispatch = vi.fn(() => { throw new Error('lease expired'); });
+ await expect(describeVisionAttachments([IMG], { noClaude: true, beforeDispatch })).rejects.toThrow('lease expired');
+ expect(beforeDispatch).toHaveBeenCalledOnce();
+});

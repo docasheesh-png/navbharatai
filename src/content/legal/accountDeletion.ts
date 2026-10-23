@@ -61,7 +61,7 @@ When ownership is independently verified and your deletion request is completed,
 - your **projects and built apps**, including their files and any archives you uploaded, the review comments left on them, and the list of things the builder asked you to do for them;
 - your **build history and diagnostics** tied to your account, including the reports of past builds, saved versions whose ownership can be independently verified, and the record of which instructions each build ran with;
 - your **notifications and devices** — the mentions sent to you inside NavBharatAI, and the push-notification address of each phone you signed in on;
-- your **wallet, token balance and usage records**;
+- your **wallet, token balance and usage records, including your Free answer allowance and request records**;
 - any **API keys and credentials** you stored in the secrets vault;
 - your **NavBharatAI API keys** — every developer key you made at Home → Other AI → Developer Tools, and
   the daily usage counted against each one. A key that was still in use stops working the moment it is

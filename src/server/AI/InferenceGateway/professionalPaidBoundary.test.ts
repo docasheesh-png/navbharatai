@@ -88,3 +88,9 @@ describe('server professional entitlements precede Free inference policy', () =>
     expect(res.statusCode).toBe(200); expect(m.vision).toHaveBeenCalledOnce(); expect(m.engine).toHaveBeenCalledOnce();
   });
 });
+
+// These fixtures isolate routing/entitlements; shared quota behavior is covered by freeAnswerRoutes and quota store tests.
+vi.mock('../../lib/freeAnswerQuota', () => ({
+  withFreeAnswerQuota: async (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(),
+  markFreeAnswer: () => {}, markFreeAnswerProviderFailure: () => {}, assertFreeAnswerActive: () => {}, freeAnswerSignal: () => undefined,
+}));

@@ -94,6 +94,7 @@ describe('the page and the deletion code do not drift apart', () => {
     // added there, the user-facing description of "what is deleted" must grow with it — otherwise the
     // page silently understates what happens to someone's data.
     const described: Record<string, RegExp> = {
+      free_answer_quota: /Free answer allowance and request records/i,
       users: /account record and profile/i,
       user_profiles: /account record and profile/i,
       user_sessions: /saved sessions and preferences/i,

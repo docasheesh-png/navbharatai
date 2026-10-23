@@ -182,7 +182,7 @@ export function decideGuestMessage(state: GuestBudgetState, limit: number, ipCap
 export function guestLimitMessage(limit: number): string {
   return limit <= 0
     ? 'Please sign in to chat with NavBharatAI. It is free.'
-    : `You have used your ${limit} free messages for today. Sign in to keep going — it is free — or come back tomorrow.`;
+    : `You have reached today's ${limit} guest AI attempts. This abuse-prevention limit includes unsuccessful attempts. Sign in to keep going or come back after 12:00 AM IST.`;
 }
 
 /** Storage seam, so the decision can be tested without Firestore. */

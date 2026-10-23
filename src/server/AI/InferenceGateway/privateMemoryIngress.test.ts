@@ -45,3 +45,9 @@ describe('actual professional private-memory account binding', () => {
     expect(m.memory).not.toHaveBeenCalled(); expect(m.profiles).not.toHaveBeenCalled(); expect(m.answer).not.toHaveBeenCalled();
   });
 });
+
+// These fixtures isolate routing/entitlements; shared quota behavior is covered by freeAnswerRoutes and quota store tests.
+vi.mock('../../lib/freeAnswerQuota', () => ({
+  withFreeAnswerQuota: async (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(),
+  markFreeAnswer: () => {}, markFreeAnswerProviderFailure: () => {}, assertFreeAnswerActive: () => {}, freeAnswerSignal: () => undefined,
+}));

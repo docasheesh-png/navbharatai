@@ -25,6 +25,8 @@ import { assistantSpendStore } from './AssistantSpendStore';
 import { usdInrRate } from './UsdInrRate';
 
 export type ProfessionalTier = 'free' | 'paid';
+export interface ProfessionalDispatchOptions { signal?: AbortSignal; beforeDispatch?: () => void }
+function assertProfessionalDispatch(opts?: ProfessionalDispatchOptions): void { opts?.signal?.throwIfAborted(); opts?.beforeDispatch?.(); }
 
 /** One answered turn: the text the user gets, plus what it cost us to produce. */
 export interface ProfessionalAnswer {
@@ -53,7 +55,9 @@ export async function callProfessionalAIWithUsage(
   systemPrompt: string,
   prompt: string,
   tier: ProfessionalTier = 'free',
+  opts?: ProfessionalDispatchOptions,
 ): Promise<ProfessionalAnswer> {
+  assertProfessionalDispatch(opts);
   const gatewaySelected = isGatewayRouteSelected();
   const answer = (response: Pick<AIProviderResponse, 'content' | 'provider' | 'model' | 'usage' | 'pricingProof' | 'inferenceGateway' | 'gatewayPricingProof'>): ProfessionalAnswer => {
     const spend: ChatTurnUsage = {
@@ -85,18 +89,20 @@ export async function callProfessionalAIWithUsage(
   };
 
   // Strict policy has one bounded dispatcher; never repeat its exhausted fallback chain.
-  if (!gatewaySelected && strictFreeRequired()) return answer(await strictFreeText({ prompt, systemPrompt }));
+  if (!gatewaySelected && strictFreeRequired()) return answer(await strictFreeText({ prompt, systemPrompt, ...(opts?.signal ? { signal: opts.signal } : {}) }));
 
   // Tier-1 leader (both tiers) — GLM-flash. Any failure/rate-limit/empty reply falls through silently.
   try {
+    assertProfessionalDispatch(opts);
     const leader = AIRouterManager.getRouter('professional-free');
-    const { response, telemetry } = await leader.routeRaced(prompt, systemPrompt);
+    const { response, telemetry } = await (opts?.signal ? leader.routeRaced(prompt, systemPrompt, undefined, opts.signal) : leader.routeRaced(prompt, systemPrompt));
     if (telemetry.success && response.content?.trim()) return answer(response);
   } catch (error) {
     // A selected gateway already owns its entire candidate chain. A refusal,
     // cancellation, partial answer or missing authority is final, not a reason to
     // start a second logical request through the legacy professional fallback.
     if (gatewaySelected || isGatewayTerminalError(error)) throw error;
+    assertProfessionalDispatch(opts);
     /* Unselected turns retain the tier's existing fallback universe. */
   }
 
@@ -104,9 +110,10 @@ export async function callProfessionalAIWithUsage(
   // an unsuccessful/empty result. Even a malformed result cannot reopen legacy.
   if (gatewaySelected) throw new Error('The selected AI route did not return an answer.');
 
+  assertProfessionalDispatch(opts);
   const fallbackNs = tier === 'free' ? 'professional-free-fallback' : 'professional';
   const router = AIRouterManager.getRouter(fallbackNs);
-  const { response, telemetry } = await router.routeRaced(prompt, systemPrompt);
+  const { response, telemetry } = await (opts?.signal ? router.routeRaced(prompt, systemPrompt, undefined, opts.signal) : router.routeRaced(prompt, systemPrompt));
   if (telemetry.success && response.content?.trim()) return answer(response);
   throw new Error('All AI providers failed.');
 }
@@ -119,7 +126,8 @@ export async function callProfessionalAI(
   systemPrompt: string,
   prompt: string,
   tier: ProfessionalTier = 'free',
+  opts?: ProfessionalDispatchOptions,
 ): Promise<string> {
-  const { content } = await callProfessionalAIWithUsage(systemPrompt, prompt, tier);
+  const { content } = await (opts ? callProfessionalAIWithUsage(systemPrompt, prompt, tier, opts) : callProfessionalAIWithUsage(systemPrompt, prompt, tier));
   return content;
 }

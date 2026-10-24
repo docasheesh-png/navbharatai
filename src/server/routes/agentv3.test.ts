@@ -118,7 +118,7 @@ describe('terminalConversationStatus (build-report autopsy 2026-08-02 — "na su
   });
 });
 
-describe('providerDebugTag (temporary admin provider-debug, env-gated)', () => {
+describe('providerDebugTag (public replies never reveal routing)', () => {
   const prev = process.env.AGENTV3_DEBUG_PROVIDER;
   afterEach(() => {
     if (prev === undefined) delete process.env.AGENTV3_DEBUG_PROVIDER;
@@ -130,10 +130,11 @@ describe('providerDebugTag (temporary admin provider-debug, env-gated)', () => {
     expect(providerDebugTag('VERTEX')).toBe('');
   });
 
-  it('tags the reply with the provider when AGENTV3_DEBUG_PROVIDER is enabled', () => {
+  it('cannot expose provider identity even when the historic debug flag is enabled', () => {
     process.env.AGENTV3_DEBUG_PROVIDER = '1';
-    expect(providerDebugTag('VERTEX')).toContain('VERTEX');
-    expect(providerDebugTag('GEMINI')).toContain('replied via GEMINI');
+    expect(providerDebugTag('VERTEX')).toBe('');
+    expect(providerDebugTag('GEMINI')).toBe('');
+    expect(providerDebugTag('SURPLUS / glm-5.3 / custom-provider')).toBe('');
     // An empty label still produces no tag.
     expect(providerDebugTag('')).toBe('');
   });

@@ -135,8 +135,9 @@ describe('a text-only call the build route makes is on the record too', () => {
 
   it('…and every remaining `runTurn` in the route is one of the known, recorded callers', () => {
     const lines = code.split('\n').filter((l) => l.includes('.runTurn('));
-    // Exactly five, and each is accounted for below. A SIXTH — a new aux call site — fails this count.
-    expect(lines.length).toBe(5);
+    // Six explicitly accounted sites: the added Surplus judge is a runner definition,
+    // not an unrecorded classifier call. A new raw aux site still fails this exact census.
+    expect(lines.length).toBe(6);
     const joined = lines.join('\n');
     // Two planners that have always recorded both outcomes (asserted individually further down).
     expect(joined).toContain('const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({');
@@ -146,9 +147,28 @@ describe('a text-only call the build route makes is on the record too', () => {
     // The judge chain's Claude backstop: a runner DEFINITION, not a build call — the judge's own
     // recording is a separate path and not what this row is about.
     expect(joined).toContain("runTurn: (a) => new ClaudeClient(undefined, { maxRetries: 1 }).runTurn(a)");
+    expect(joined).toContain("runTurn: args => surplus.runner.runTurn(args).then(result => ({ text: result.text }))");
+    // Both definitions run through the same recorded judge chain; no raw scope call is allowed.
+    expect(code).not.toMatch(/surplusSession!?\.runner\([\s\S]{0,180}\.runTurn\(/);
     // The admin-only `/api/agentv3/diag?test=1` probe. It is not a build: there is no `buildDiag` in
     // its scope and nothing to attach a row to. Named here so it is an allowance, not an oversight.
     expect(joined).toContain('const turn = await client.runTurn({');
+  });
+
+  it('the early scope classifier records both outcomes before a build report exists, then flushes them', () => {
+    const scope = codeOnly(read('src/server/AI/SurplusRegistry/scopeAdmission.ts'));
+    expect(scope).toContain('await recordedTextCall({');
+    expect(scope).toContain('records.push(sanitized)');
+    expect(scope).toContain('observe?.(Object.freeze({ ...sanitized }))');
+    expect(scope).toContain("responsePreview: ''");
+    expect(scope).toContain('promptPreview: SURPLUS_SCOPE_PURPOSE');
+    expect(scope).toContain('usage: { ...turn.usage }');
+    expect(code).toContain('createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords,');
+    expect(code).toContain('for (const row of earlySurplusRecords) buildDiag.recordLlmCall(row)');
+    expect(code).toContain("audit('AGENTV3_DISCOUNT_SCOPE_CALL'");
+    // The shared recorder owns the success/failure pair, tested behaviorally by scopeAdmission.test.
+    expect(codeOnly(recorder)).toContain('ok: true');
+    expect(codeOnly(recorder)).toContain('ok: false');
   });
 
   it('the four repair gates go through the one door', () => {

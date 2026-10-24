@@ -4,6 +4,21 @@ import { parseEnvFlag } from '../lib/envFlag';
 import { assertNoUnclaimedGatewayDispatch } from './InferenceGateway/dispatchBoundary';
 
 export type InferenceScope = 'free-modules' | 'weak' | 'paid-builder' | 'paid-professional';
+const surplusBuild = new AsyncLocalStorage<{ enabled: boolean }>();
+/** Narrow server-owned build boundary: unrelated requests and media keep their existing policy. */
+export function runWithSurplusBuild<T>(enabled: boolean, fn: () => T): T { return surplusBuild.run({ enabled }, fn); }
+export function activateSurplusBuildForCurrentRequest(enabled = true): void {
+  const state = surplusBuild.getStore();
+  if (!state) throw new Error('Missing discounted build request scope');
+  state.enabled = enabled;
+}
+export class SurplusLegacyFallbackError extends Error {
+  readonly code = 'DISCOUNT_BUILD_LEGACY_FALLBACK_BLOCKED';
+  constructor() { super('The discounted build engine cannot use this auxiliary engine. No paid fallback was used.'); }
+}
+const SURPLUS_MEDIA_EXCEPTIONS = new Set(['image-generation', 'image-edit', 'image-enhancement', 'vision', 'vision-description']);
+export const surplusBuildInferenceScope: RequestHandler = (_req, _res, next) => runWithSurplusBuild(false, next);
+
 const admittedImageEdit = new AsyncLocalStorage<boolean>();
 const scopes = new AsyncLocalStorage<{ scope: InferenceScope }>();
 /** Server-owned scope only. Never derive this from a user's prompt or arbitrary request field. */
@@ -23,6 +38,7 @@ export class StrictFreeCapabilityError extends Error {
 /** Every legacy network path must opt out before dispatch, not after provider billing. */
 export function assertLegacyInferenceAllowed(capability: string): void {
   assertNoUnclaimedGatewayDispatch(capability);
+  if (surplusBuild.getStore()?.enabled === true && !SURPLUS_MEDIA_EXCEPTIONS.has(capability)) throw new SurplusLegacyFallbackError();
   if (capability === 'image-edit' && scopes.getStore()?.scope === 'free-modules' && admittedImageEdit.getStore() === true) return;
   if (strictFreeRequired()) throw new StrictFreeCapabilityError(capability);
 }

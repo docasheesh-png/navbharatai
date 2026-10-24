@@ -100,6 +100,7 @@ export const PROCESS_ONLY_CODES = new Set([
   // Locked by `tests/aProblemTheUserIsShownCanBeActedOn.test.ts`, which also fails when a NEW code is
   // recorded at problem severity and left in no registry at all.
   'COST_CEILING_REACHED',     // our spending ceiling stopped the build — our policy, not their code
+  'DISCOUNT_COST_UNCONFIRMED', // our supplier receipt could not confirm cost, not a defect in their app
   'FUTILITY_BREAKER',         // our own loop breaker stopped the build
   'OUTCOME_UNEXPLAINED',      // the run ended not-ok and wrote no outcome — an engine hole, not their app
   'VERIFY_DID_NOT_RUN',       // our fast-lane typecheck could not execute — the class of RUNTIME_UNCHECKED
@@ -4635,7 +4636,7 @@ export function userFacingReport(report: BuildDiagnosticsReport): BuildDiagnosti
     ts: i.ts,
     phase: i.phase,
     severity: i.severity,
-    code: i.code, // a machine code like PROVIDER_FALLBACK is a generic category, not a vendor name
+    code: /^SURPLUS(?:_|$)/i.test(i.code) ? 'ENGINE_UNAVAILABLE' : i.code, // Supplier-specific codes stay in the admin report.
     message: redactProvidersText(i.message),
     autoResolved: i.autoResolved,
     ...(i.detail !== undefined ? { detail: redactProvidersText(i.detail) } : {}),

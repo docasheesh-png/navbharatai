@@ -232,8 +232,12 @@ describe('🔒 the wiring — the job that DELETES is the one made exclusive', (
       expect(await claim(jobId), jobId).toBe(false);
     }
     expect(calls).toEqual(['retention-purge', 'monitor-alerts', 'future-job', 'live-model-registry-extra']);
-    for (const jobId of ['live-model-registry', 'live-image-model-registry']) expect(await claim(jobId)).toBe(true);
+    for (const jobId of ['live-model-registry', 'live-image-model-registry', 'surplus-metadata-registry']) expect(await claim(jobId)).toBe(true);
     expect(calls).toHaveLength(4);
+    expect(await claim('surplus-metadata-registry-extra')).toBe(false);
+    expect(server).toContain('await surplus.refreshSurplusRegistry()');
+    const surplusSync = readFileSync(join(__dirname, '..', 'src/server/AI/SurplusRegistry/sync.ts'), 'utf8');
+    expect(surplusSync).toContain('await store.claim(');
     expect(server).toContain('await liveRegistry.syncLiveModels()');
     expect(server).toContain('await liveRegistry.syncLiveImageModels()');
     const sync = readFileSync(join(__dirname, '..', 'src/server/AI/LiveRegistry/sync.ts'), 'utf8');

@@ -99549,3 +99549,51 @@ The merged master/surface switches could select an entire Free surface and had n
 Added independent server-authoritative answer admission: guest Free chat 5/day; signed-in shared 20/day across canonical Free chat/professional modes, reset midnight IST. Existing professional/Doctor 10-message entitlement, exam questions, paid routes and $10 gateway budget are unchanged; exhaustion never creates a new paid call. Durable owner-fenced renewable logical lease, request idempotency, partial/disconnect policy, exactly-once user-credit restore, real remaining/reservation badge, and isolated retention/erasure are covered by focused tests. Provider accounting remains independent; gateway activation remains OFF unless independently configured. See `docs/FREE_ANSWER_DAILY_LIMITS.md` for exact scope, uncertainty and retention.
 
 Final focused aggregate: 32 suites / 490 tests passed. Local typechecks, unused-import, build/bundle, dependency/native, boot, license, SBOM and OAuth gates passed; independent safety review completed. Full coverage and exact-head hosted CI remain release gates. Local executor uses Node 24 rather than hosted Node 22; these local checks are not a completed merge gate. No live inference or production setting changes.
+
+## 2026-10-24 — Isolated Surplus client prepared locally (not deployed)
+
+Added opt-in server-only official OpenAI SDK helper, text and detailed response helpers,
+exact endpoint allowlist, sanitized errors, HTTP 200 error-envelope validation, preserved
+numeric usage metadata, 60-second timeout/zero retries, guarded smoke script, environment
+example and standalone Python sample. No production routing, UI, wallet, paid Doctor or
+Builder wiring changes. No API credentials configured or real inference requests made.
+Mocked tests and typechecks are recorded with the handoff; this is not a production or
+live-provider validation claim. Full release CI/production smoke remains a separate gate
+before any publication/deployment. Source: `docs/SURPLUS_CLIENT.md`.
+
+## 2026-10-24 — Surplus metadata phase one prepared locally (OFF; not automatic Builder)
+
+Added isolated public metadata observer, bounded fixed-document fenced lease, optional
+5–10 minute scheduler, and non-dispatchable prebuild preview contract with fixture-tested
+quality/cohort/90%-discount/full-workload-cost gates. Metadata-derived units and origin
+freshness remain unverified; no reviews fabricated. All candidate results canDispatch:false.
+No current Builder tier, provider rate, wallet multiplier or billing policy changed. No
+production activation, paid request or deployment. Automatic app building remains BLOCKED
+on documented quotes/rates, comparable quality/capability reviews, sticky Builder adapter,
+provider receipts and final billing authorization; see `docs/SURPLUS_REGISTRY.md`.
+
+### 2026-10-24 — Surplus Pro native app-builder integration, offline review checkpoint
+
+- Added default-OFF native tool/history/parallel-ID/truncation/Stop adapter and real fixed-min90, provider-pinned price transport. Actual build sessions use independent account/credential, quality/capability, request-time-floor and official-tariff/usage evidence. Metadata is not authority; no seed review or live activation.
+- Added durable pre-HTTP bounded pilot reservation and content-free per-call receipts; unknown liability blocks continuation. Explicitly serialized inference across the build's runners preserves one pending pilot slot; native parallel tools remain supported.
+- Surplus-only exact capped10x settlement is partitioned from unchanged legacy inference/VM formulas. Stable receipt identities deduplicate callbacks; missing evidence fails closed, and partial/discarded work absorbs the whole supplier call. Existing wallet remains sole writer.
+- Real account/tool benchmark/credential validation, pilot budget authorization and production configuration remain OPEN requirements. No paid calls, credentials, funds, PR publication, merge or deployment performed. Focused checks passed during implementation; full integrated gates follow this checkpoint and are reported separately, not assumed green.
+
+### 2026-10-24 — Bounded paid model manager and safe failed-turn fallback (OFF)
+
+- Recovered the full tested integration from its complete backup onto upstream `a6d08479e`; recovery commit `e9a970ec1` has exactly the prior tested source tree. No unrelated worktree changes were overwritten.
+- Expanded observations to a bounded 15-model catalog shortlist, never auto-approved quality. Shared durable five-minute sync, fresh per-build/per-dispatch filters, comparable workload cost ranking, and immediate revisioned manual exclusions remain separate from STRICT_FREE routing.
+- Added a real authenticated admin status/control panel beside the existing registry. It shows observed prices/age, review status and blocked reasons. Controls only remove/reinstate a manual block; they cannot approve a model, create credentials, change budgets, lower the discount floor or activate production.
+- Native turns may make at most three attempts, under one deadline, only after a documented pre-routing no-attempt outcome or fully accounted empty completion. Each attempt has its own reservation/evidence; winning fallback becomes sticky. Unknown timeout/auth/shared quota/Stop/policy-filter/accounting failures do not automatically replay. Failed attempts cannot publish partial text or execute tools.
+- Review findings fixed at source: whole-turn queue prevents concurrent old-model permits reverting the winner; omitted/oversized routing headers taint no-attempt evidence instead of appearing absent. Regression for the queue was proven by reversion, then restored. Durable controls are checked inside the pre-HTTP reservation transaction.
+- Provisional copied-dependency checks: 738 tests across 25 focused suites pass; frontend/server types pass. Exact lock validation is still pending: local cache lacks body-parser1.20.9, nested body-parser2.4.0, zod4.6.7 and qs6.16.1. No registry install/audit was retried without permission.
+- No credential configuration, paid inference, review seeding, pilot authority, production activation, PR publication or deployment has occurred at this checkpoint. PR/CI is owner-requested but pending coordinated dependency-metadata approval; merge must also account for the existing automatic live rule-deployment consequence. Full final-source gates remain required before release.
+
+### 2026-10-24 — Exact dependencies and bounded connection controls
+
+- Owner explicitly approved npm package-metadata security checks and this release's raw internal usage-log read restriction. Exact-lock installation completed; the earlier copied-dependency results remain labeled provisional rather than retroactively exact.
+- New admin-only credential authentication check is separate from the $1-authorized, fixed synthetic one-shot response test. The latter stays blocked without independently verified provider-side budget evidence. Durable consumed attempts/unknown outcomes cannot automatically rearm; no secret or raw account body reaches the UI.
+- Independent review reproduced and closed the final-review-await credential/flag race. Canonical charge is retained on error responses; the UI states a hard-stop requirement rather than claiming unverified protection. No live provider calls or approval records were created.
+- Security audit found a new undici advisory; a minimal approved patch updates only direct/shared undici and e2b's optional alias. Node's bundled global fetch is separate and deployed runtime verification remains distinct. Final exact-source coverage and sequential release gates follow this checkpoint.
+- Final bounded hardening: documented monthly active hard-stop/remaining-budget evidence replaces speculative total-liability attestations; profile-read403 remains inconclusive rather than invalid-key. Existing platform runtime/build surfaces pin same-major Node22.23.4, preserving OS variants. Exact-runtime local gates will use an isolated official binary; deployed runtime remains unverified until release.
+- Exact head `cf38c15d7` completed all 15 release gates on Node 22.23.4/npm 11.18.0: 46,279 passed/91 skipped across 3,041 files. A subsequent paid-admission review adds fresh account-bound automatic-funding-OFF evidence to prevent a test-triggered wallet recharge outside the owner's $1 authority; final gates must rerun for that new head. Authentication-only checks remain independent.

@@ -1,3 +1,5 @@
+import { PublicBuildEngineError } from '../lib/buildEngineError';
+import { isSurplusReceiptDecision, type SurplusReceiptDecision } from '../AI/SurplusRegistry/receiptPolicy';
 import { isVerifiedFreeProof, type VerifiedFreeProof } from '../AI/LiveRegistry/proof';
 // AgentV3 — REAL provider rate cards + tiered-markup billing (admin model, 2026-07-14).
 //
@@ -234,6 +236,7 @@ export function realRateCard(): Record<string, TokenRate> {
  * 'GEMINI'|'GROK'|'other'); `model` is TurnResult.model (may be undefined for aux calls).
  */
 export function realRateFor(provider: string, model?: string): TokenRate {
+  if ((provider ?? '').toUpperCase() === 'SURPLUS') throw new SurplusAccountingUnavailableError();
   const card = realRateCard();
   const m = (model ?? '').toLowerCase();
   const p = (provider ?? '').toUpperCase();
@@ -338,7 +341,19 @@ export function usageCostUsd(usage: BilledUsage, rate: TokenRate): number {
 }
 
 /** One attributed slice of a build's token spend: which provider/model, and how many tokens. */
+/** Unknown supplier expense is never a static tariff or a measured zero. */
+export class SurplusAccountingUnavailableError extends PublicBuildEngineError {
+  declare readonly code: 'SURPLUS_ACCOUNTING_UNAVAILABLE';
+  constructor() {
+    super();
+    Object.defineProperty(this, 'code', { value: 'SURPLUS_ACCOUNTING_UNAVAILABLE', enumerable: false });
+  }
+}
+
 export interface ProviderCostEntry {
+  surplusReceipt?: SurplusReceiptDecision;
+  surplusAbsorbed?: boolean;
+  surplusAccountingConflict?: boolean;
   pricingProof?: VerifiedFreeProof;
   provider: string;
   model?: string;
@@ -353,7 +368,18 @@ export interface ProviderCostEntry {
  */
 export function realProviderCostUsd(entries: ProviderCostEntry[], remainder: BilledUsage = { inputTokens: 0, outputTokens: 0 }): number {
   let total = 0;
+  let surplusExpenseExact = 0n;
   for (const e of entries) {
+    if (e.provider.toUpperCase() === 'SURPLUS') {
+      const receipt = e.surplusReceipt;
+      if (e.surplusAccountingConflict || !isSurplusReceiptDecision(receipt)
+        || receipt.status === 'conflict'
+        || receipt.actualCostUsd === null || !/^(0|[1-9]\d{0,17})(\.\d{1,24})?$/.test(receipt.actualCostUsd)
+        || receipt.modelId !== e.model || receipt.expenseEvidence !== 'provider-reported-actual') throw new SurplusAccountingUnavailableError();
+      const [whole, fraction = ''] = receipt.actualCostUsd.split('.');
+      surplusExpenseExact += BigInt(whole + fraction.padEnd(24, '0'));
+      continue;
+    }
     const proof = e.pricingProof;
     const covered = e.provider === 'OPENROUTER' && isVerifiedFreeProof(proof, e.model)
       && Number.isSafeInteger(proof.inputTokens) && (proof.inputTokens ?? -1) >= 0
@@ -364,6 +390,8 @@ export function realProviderCostUsd(entries: ProviderCostEntry[], remainder: Bil
     if (!covered) total += usageCostUsd(e.usage, e.provider.toUpperCase() === 'OPENROUTER'
       ? sonnetRate() : realRateFor(e.provider, e.model));
   }
+  // Preserve exact decimal addition until this legacy telemetry API's number boundary.
+  total += Number(surplusExpenseExact) / 1e24;
   total += usageCostUsd(remainder, sonnetRate()); // conservative: aux calls at Sonnet rate
   return total;
 }
@@ -426,7 +454,8 @@ export function explainRealCostBuild(
 ): RealCostBreakdown {
   const perProviderMap = new Map<string, number>();
   for (const e of entries) {
-    const cost = usageCostUsd(e.usage, realRateFor(e.provider, e.model));
+    const cost = e.provider.toUpperCase() === 'SURPLUS'
+      ? realProviderCostUsd([e]) : usageCostUsd(e.usage, realRateFor(e.provider, e.model));
     perProviderMap.set(e.provider, (perProviderMap.get(e.provider) ?? 0) + cost);
   }
   const remCost = usageCostUsd(remainder, sonnetRate());

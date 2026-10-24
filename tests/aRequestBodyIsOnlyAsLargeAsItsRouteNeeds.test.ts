@@ -29,6 +29,9 @@ const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
  * is on neither list.
  */
 const REVIEWED_SMALL: Record<string, string> = {
+  '/api/admin/surplus-registry/connection-test': 'strict empty JSON object only; every caller field is rejected, no prompts, models, credentials, reviews or budgets; standard 1 MB parser cap unchanged',
+  '/api/admin/surplus-registry/credential-check': 'strict empty JSON object only; every caller field is rejected, saved server credential only and no account response body; standard 1 MB parser cap unchanged',
+  '/api/admin/surplus-registry/models/action': 'strict five-key allowlist: 120-character model id, disable/enable enum, safe integer revision, 36-character snapshot UUID and 10–500 character audit reason; all other fields rejected, no files/credentials, standard 1 MB parser cap unchanged',
   '/api/admin/inference-gateway/setup/preview': 'strict typed review metadata capped at 16 KiB canonical serialization, bounded fields and reason, no files/prompts/credentials; standard 1 MB parser cap unchanged',
   '/api/admin/inference-gateway/setup/review': 'same strictly capped 16 KiB review metadata plus one 64-character preview binding; no media/file payload and standard 1 MB parser cap unchanged',
   '/api/admin/free-chat-chain/budget': 'strict allowlist of 0..10 USD numeric cap in cents, safe integer expected revision and 500-character audit reason; readFreeChainBudgetAction rejects other fields, standard 1 MB parser cap unchanged',
@@ -278,6 +281,33 @@ describe('🔒 every route that can receive a big body is on the large-body list
       missing.push(`${s.file}:${s.line} ${s.method.toUpperCase()} ${s.path} reads ${payload.join(', ') || 'the whole body'}`);
     }
     expect(missing, 'add each to LARGE_BODY_ROUTES in src/server/lib/requestBodyLimits.ts (with its evidence), or to REVIEWED_SMALL here with the reason its body stays under 1 MB').toEqual([]);
+  });
+
+  it('the reviewed-small paid candidate control still has only bounded scalar fields', () => {
+    const path = '/api/admin/surplus-registry/models/action';
+    const route = SITES.find(site => site.path === path && site.method === 'post');
+    expect(route).toBeDefined();
+    expect(REVIEWED_SMALL[path]).toContain('strict five-key allowlist');
+    expect(LARGE_PATHS.has(path)).toBe(false);
+    expect(isLargeBodyRoute(path)).toBe(false);
+    expect(DEFAULT_JSON_LIMIT).toBe('1mb');
+    expect(route!.text).toContain("Object.keys(body).some(key => !['modelId', 'action', 'expectedRevision', 'snapshotVersion', 'reason'].includes(key))");
+    expect(route!.text).toContain('!isSurplusModelId(modelId)');
+    expect(read('src/server/AI/SurplusRegistry/config.ts')).toContain('{0,119}');
+    expect(route!.text).toContain("action !== 'disable' && action !== 'enable'");
+    expect(route!.text).toContain('!Number.isSafeInteger(expectedRevision)');
+    expect(route!.text).toContain('reason.trim().length < 10 || reason.length > 500');
+    expect(route!.text).toContain('[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}');
+  });
+
+  it.each(['/api/admin/surplus-registry/connection-test', '/api/admin/surplus-registry/credential-check'])('connection checks accept no caller fields at %s', path => {
+    const route = SITES.find(site => site.path === path && site.method === 'post');
+    expect(route).toBeDefined();
+    expect(REVIEWED_SMALL[path]).toContain('strict empty JSON object only');
+    expect(LARGE_PATHS.has(path)).toBe(false);
+    expect(isLargeBodyRoute(path)).toBe(false);
+    expect(route!.text).toContain('Array.isArray(body) || Object.keys(body).length !== 0');
+    expect(route!.text).toMatch(/await runSurplus(?:ConnectionTest|CredentialCheck)\(\)/);
   });
 
   it('the big-body routes this audit found by evidence are all on the list', () => {

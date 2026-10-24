@@ -185,11 +185,16 @@ describe('the fast-lane shadow ledger is observational, by construction', () => 
     const fast = runnerCompletion('makeFastTextRunner');
     expect(ts.isConditionalExpression(fast)).toBe(true);
     if (!ts.isConditionalExpression(fast)) throw new Error('Missing conditional fast-lane attribution');
-    // Only the existing admitted repair path uses the real ledger; manual usage must not double count.
-    expect(fast.condition.getText(parsedRoute).replace(/\s+/g, '')).toBe('!manualUsage&&heal&&weakCandidateActive(powerLevelReqEffective)');
+    // Surplus receipts always reach the real ledger; OFF retains the exact admitted repair boundary.
+    expect(fast.condition.getText(parsedRoute).replace(/\s+/g, '')).toBe('surplusSession||(!manualUsage&&heal&&weakCandidateActive(powerLevelReqEffective))');
     expect(fast.whenTrue.getText(parsedRoute)).toBe('captureTurnUsage');
     expect(fast.whenFalse.getText(parsedRoute)).toBe('captureShadowUsage');
-    expect(runnerCompletion('makePlanTextRunner').getText(parsedRoute)).toBe('captureShadowUsage');
+    const plan = runnerCompletion('makePlanTextRunner');
+    expect(ts.isConditionalExpression(plan)).toBe(true);
+    if (!ts.isConditionalExpression(plan)) throw new Error('Missing conditional planner attribution');
+    expect(plan.condition.getText(parsedRoute)).toBe('surplusSession');
+    expect(plan.whenTrue.getText(parsedRoute)).toBe('captureTurnUsage');
+    expect(plan.whenFalse.getText(parsedRoute)).toBe('captureShadowUsage');
   });
 
   it('shadow attribution writes only the observational ledger, never the billing ledger', () => {

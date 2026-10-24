@@ -84,13 +84,13 @@ describe('2 · the three planner calls are attributed to the provider that answe
       const usage = args[1];
       expect(ts.isObjectLiteralExpression(usage)).toBe(true);
       if (!ts.isObjectLiteralExpression(usage)) throw new Error('Missing measured planner usage');
-      const fields = Object.fromEntries(usage.properties.map(property => {
-        if (!ts.isPropertyAssignment(property)) throw new Error('Unexpected planner usage field');
-        return [property.name.getText(parsed), property.initializer.getText(parsed)];
-      }));
-      // Preserve original paid Builder attribution: exact measured input/output, model and cache
-      // counters. Retired Strict Weak pricing receipts must not change this billing contract.
-      expect(fields).toEqual({ inputTokens: `${turn}.usage.inputTokens`, outputTokens: `${turn}.usage.outputTokens` });
+      // The complete measured usage now carries the authenticated per-call receipt too.
+      // Exactly one spread, with no overrides: input/output/cache counts remain the turn's own.
+      expect(usage.properties).toHaveLength(1);
+      const spread = usage.properties[0];
+      expect(ts.isSpreadAssignment(spread)).toBe(true);
+      if (!ts.isSpreadAssignment(spread)) throw new Error('Missing full measured planner usage');
+      expect(spread.expression.getText(parsed)).toBe(`${turn}.usage`);
       expect(args.slice(2).map(argument => argument.getText(parsed))).toEqual([
         `${turn}.model`, `${turn}.usage.cacheReadInputTokens ?? 0`, `${turn}.usage.cacheCreationInputTokens ?? 0`,
       ]);

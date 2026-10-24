@@ -4701,3 +4701,52 @@ unresolved holds plus intrinsic-zero/provider-hard-stop protection for unknown u
 account enrollment, inferred zero usage, new paid pool, user-wallet change or production
 activation occurs. See `docs/INFERENCE_GATEWAY_RUNTIME_SETUP.md` for exact policies, retained
 maximum paid-hold utilization limits, registry-vs-catalog boundaries and release prerequisites.
+
+## Optional isolated Surplus helper (2026-10-24; not production-configured)
+
+- `SURPLUS_API_KEY`: server-only credential read lazily by `surplusClient.ts`. Its value is
+  never logged. This entry records code support, NOT a claim that a key is configured.
+- `SURPLUS_BASE_URL`: exact HTTPS allowlist; default `https://api.surplusintelligence.ai/v1`,
+  optional `https://api.surplusintelligence.ai/min30/v1` (estimated discount, not latency).
+- `SURPLUS_MODEL`: defaults to `deepseek-v4.1-flash`; per-call model override is supported.
+
+No production caller, route, fallback, wallet, Doctor or Builder is changed. The opt-in
+smoke script needs `--send` and can incur a charge. See `docs/SURPLUS_CLIENT.md`.
+
+## Surplus public metadata observer (2026-10-24; OFF, not production-configured)
+
+- `SURPLUS_REGISTRY_ENABLED`: defaults OFF; enables only metadata scheduler, no inference.
+- `SURPLUS_REGISTRY_INTERVAL_MS`: retained for configuration compatibility; cadence is now
+  fixed at 300000 ms (five minutes). Legacy ten-minute values normalize to five minutes.
+- `SURPLUS_REGISTRY_MODELS`: explicit comma-separated observation universe, at most 15 unique
+  catalog IDs. When absent, the 15 public-catalog candidates listed in `SurplusRegistry/config.ts`
+  are observed. Invalid or empty overrides fail closed; there is no truncation or automatic
+  future model discovery. Candidate membership does not grant coding quality approval.
+
+Fixed retained server metadata document under the existing `live_ai_registry` collection;
+15 models / 960 offers / 500000 serialized bytes maximum. Three concurrent public detail reads
+fit inside a 120-second transaction lease; complete snapshots expire five minutes from sync
+start, never from a failed refresh. The document records real last-attempt/success times and
+revisioned manual exclusions. OFF performs no manager network or storage work, including
+admin status reads. Admin Dashboard → AI Engines → Live Model Registry exposes the Discounted PAID Builder Manager; controls
+only disable or re-enable independent eligibility checks and never create reviews or keys.
+Price units/origin timestamp/quality/account/privacy are not inferred from metadata. Preview
+selection remains non-dispatchable. The separate opt-in Builder adapter below consumes fresh,
+reviewed observations and honors exclusions; neither flag is activated by this change.
+See `docs/SURPLUS_REGISTRY.md` for the bounded candidate list and honest activation blockers.
+
+## Surplus Pro tool-loop integration (2026-10-24; default OFF)
+
+`AGENTV3_SURPLUS_BUILDER=false`: opt-in only. OFF bypasses new registry/review/receipt I/O and leaves existing Weak/Normal/Strong ladders and billing unchanged. ON requires independent server account/credential/pilot, quality, capability, official tariff and usage reviews before any Surplus HTTP. No defaults grant a live pilot. Main build inference uses fixed `/min90/v1`, provider-family allowlist and price objective; no ordinary paid fallback. Plain chat, Doctor, media and VM pricing are separate and unchanged. Full scope, concurrency, retention and honest activation blockers: `docs/SURPLUS_BUILDER.md`. Earlier observer-only notes describe Phase 1; this later opt-in caller does not turn it on.
+
+### Owner-reported Cloud Run configuration (2026-10-24; verification pending)
+
+The owner reports that `SURPLUS_API_KEY` has been configured in Cloud Run, with
+`SURPLUS_BASE_URL=https://api.surplusintelligence.ai/v1`,
+`AGENTV3_SURPLUS_BUILDER=false`, and `SURPLUS_REGISTRY_ENABLED=false`.
+No credential value is recorded here. Live credential validity, the deployed revision,
+and any Secret Manager reference/version have not been independently verified.
+This operational note is not runtime authority, a quality review, or an activation record.
+Admin status must continue to derive configuration from the real server environment,
+never from this note. A separately authorized synthetic connection test is pending its
+safe runtime path and verified spending controls; no test result is claimed here.

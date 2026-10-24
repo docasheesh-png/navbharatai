@@ -85,10 +85,10 @@ service cloud.firestore {
       allow write: if false; // server-only writes via /api/sync
     }
 
-    // AI usage logs — server writes only, user can read own logs
+    // Raw AI usage contains supplier/model identity. Admin SDK only; users retain usage
+    // visibility through the authenticated /api/wallet/:userId/logs allow-list.
     match /ai_usage_logs/{logId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow write: if false; // server-only
+      allow read, write: if false;
     }
 
     // Payment transactions — read own, no client writes

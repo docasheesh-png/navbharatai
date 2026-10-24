@@ -105,6 +105,15 @@ export function billableEntries(
 ): ProviderCostEntry[] {
   if (!Array.isArray(entries)) return [];
   return entries.map((e) => {
+    // A supplier receipt is indivisible. Any discarded/empty share absorbs the WHOLE
+    // affected call, without shrinking the expense proof or allocating it by tokens.
+    if (e.provider.toUpperCase() === 'SURPLUS') {
+      const absorbed = e.surplusAbsorbed === true || e.surplusReceipt?.status === 'absorbed' || !!(e.phase && barrenPhases.has(e.phase))
+        || !!(e.unbilled && (clean(e.unbilled.inputTokens) + clean(e.unbilled.outputTokens)
+          + clean(e.unbilled.discardedOutputTokens) > 0));
+      return { ...e, usage: { ...e.usage }, ...(e.unbilled ? { unbilled: { ...e.unbilled } } : {}),
+        surplusAbsorbed: absorbed };
+    }
     if (e.phase && barrenPhases.has(e.phase)) {
       return { provider: e.provider, ...(e.model ? { model: e.model } : {}), ...(e.pricingProof ? { pricingProof: e.pricingProof } : {}), usage: { inputTokens: 0, outputTokens: 0 } };
     }
@@ -147,7 +156,7 @@ export function splitUnbilledCost(
   barrenPhases: BarrenPhases = NO_BARREN_PHASES,
 ): { realCostUsd: number; billableCostUsd: number; absorbedCostUsd: number } {
   const realCostUsd = realProviderCostUsd(entries as ProviderCostEntry[], remainder);
-  const billableCostUsd = realProviderCostUsd(billableEntries(entries, barrenPhases), remainder);
+  const billableCostUsd = realProviderCostUsd(billableEntries(entries, barrenPhases).filter((e) => !(e.provider.toUpperCase() === 'SURPLUS' && e.surplusAbsorbed)), remainder);
   // Clamped, and never allowed to exceed the real cost: absorbing more than we spent would be an
   // invented number, which is the one thing the billing law forbids in either direction.
   const absorbedCostUsd = Math.min(realCostUsd, Math.max(0, realCostUsd - billableCostUsd));

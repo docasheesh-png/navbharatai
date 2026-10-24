@@ -115,11 +115,11 @@ describe('the exact patched runtime is used by build, runtime, and CI', () => {
     }
   });
 
-  it('pins Cloud Build’s Node step to the same slim runtime', () => {
+  it('pins both independent Cloud Build rules steps to the same slim runtime', () => {
     const cloudBuild = readFileSync(join(root, 'cloudbuild.yaml'), 'utf8');
     const tags = [...cloudBuild.matchAll(/^\s*-\s*name:\s*['"]?node:([^'"\s#]+)/gm)]
       .map((match) => match[1]);
-    expect(tags).toEqual([`${PATCHED_NODE_VERSION}-slim`]);
+    expect(tags).toEqual([`${PATCHED_NODE_VERSION}-slim`, `${PATCHED_NODE_VERSION}-slim`]);
   });
 });
 

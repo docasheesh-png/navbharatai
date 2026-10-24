@@ -37,7 +37,7 @@
 # same as the Android template's own cost note.
 # ---------------------------------------------------------------------------
 
-FROM node:22-bookworm
+FROM node:22.23.4-bookworm
 
 # --- OS tooling (default set) + gnupg for the MongoDB apt repo key ----------
 RUN apt-get update && apt-get install -y --no-install-recommends \

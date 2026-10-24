@@ -1,3 +1,5 @@
+import { isSurplusReceiptDecision, type SurplusReceiptDecision } from '../AI/SurplusRegistry/receiptPolicy';
+import { SurplusAccountingUnavailableError } from './providerRates';
 import { isVerifiedFreeProof, type VerifiedFreeProof } from '../AI/LiveRegistry/proof';
 // Billing Phase 3 — per-provider token attribution for one v5.0 build (admin plan 2026-07-10).
 //
@@ -32,6 +34,7 @@ import {
 } from './pricing';
 
 export interface ProviderTokens {
+  surplusReceipt?: SurplusReceiptDecision;
   pricingProof?: VerifiedFreeProof;
   inputTokens: number;
   outputTokens: number;
@@ -46,6 +49,9 @@ export interface ProviderTokens {
 
 /** A per-(provider, model) attributed slice — feeds the REAL-cost billing (providerRates.ts). */
 export interface ProviderModelEntry {
+  surplusReceipt?: SurplusReceiptDecision;
+  surplusAbsorbed?: boolean;
+  surplusAccountingConflict?: boolean;
   pricingProof?: VerifiedFreeProof;
   provider: string;
   /** The actual model id that answered (TurnResult.model), when the runner reported it. */
@@ -156,6 +162,7 @@ function sliceKey(provider: string, model: string | undefined, phase: string | u
 export function createProviderUsageLedger(): ProviderUsageLedger {
   const buckets = new Map<string, ProviderTokens>();
   const calls = new Map<string, number>();
+  const surplusIdentities = new Map<string, { fingerprint: string; row: ProviderModelEntry }>();
   let receiptSequence = 0;
   // Model-granular slices, keyed `${provider} ${model}` so provider+model are exact and can't
   // collide with a provider label that happens to contain the separator.
@@ -208,6 +215,40 @@ export function createProviderUsageLedger(): ProviderUsageLedger {
   return {
     add(provider, usage, model, opts) {
       const key = provider && provider.trim() ? provider : UNATTRIBUTED_PROVIDER;
+      if (key.toUpperCase() === 'SURPLUS') {
+        // Only policy-issued, immutable decisions are trusted. Structural/serialized copies
+        // retain their token usage but are explicitly unsettled, never upgraded to proof.
+        const receipt = isSurplusReceiptDecision(usage.surplusReceipt) ? usage.surplusReceipt : undefined;
+        const phase = opts?.phase?.trim() || undefined;
+        const actualModel = model?.trim() ? model : undefined;
+        const tokens = {
+          inputTokens: Number.isFinite(usage.inputTokens) && usage.inputTokens > 0 ? usage.inputTokens : 0,
+          outputTokens: Number.isFinite(usage.outputTokens) && usage.outputTokens > 0 ? usage.outputTokens : 0,
+        };
+        addCache(tokens, usage);
+        const fingerprint = JSON.stringify([actualModel, phase, tokens, receipt,
+          opts?.producedNothing === true, opts?.discardedOutput === true]);
+        const identities = receipt?.accountId && receipt.callId ? [JSON.stringify(['call', receipt.accountId, receipt.callId]),
+          ...(receipt.receiptId ? [JSON.stringify(['receipt', receipt.accountId, receipt.receiptId])] : [])] : [];
+        const prior = identities.map((id) => surplusIdentities.get(id)).filter((v) => v !== undefined);
+        if (prior.length) {
+          if (prior.some((v) => v.fingerprint !== fingerprint || v.row.surplusAccountingConflict)) {
+            for (const v of prior) v.row.surplusAccountingConflict = true;
+            throw new SurplusAccountingUnavailableError();
+          }
+          return; // repeated callback: neither tokens nor supplier expense are counted twice
+        }
+        const absorbed = receipt?.status === 'absorbed' || opts?.producedNothing === true || opts?.discardedOutput === true;
+        const row: ProviderModelEntry = { provider: key, model: actualModel, usage: tokens,
+          ...(receipt ? { surplusReceipt: receipt } : {}), ...(phase ? { phase } : {}),
+          ...(absorbed ? { surplusAbsorbed: true, unbilled: { ...tokens,
+            ...(opts?.discardedOutput ? { discardedOutputTokens: tokens.outputTokens } : {}) } } : {}) };
+        calls.set(key, (calls.get(key) ?? 0) + 1);
+        addTo(key, tokens);
+        modelBuckets.set(`${sliceKey(key, actualModel, phase)}\0surplus:${++receiptSequence}`, row);
+        for (const id of identities) surplusIdentities.set(id, { fingerprint, row });
+        return;
+      }
       calls.set(key, (calls.get(key) ?? 0) + 1);
       addTo(key, usage);
       addModel(key, model && model.trim() ? model : undefined, usage, opts);
@@ -220,6 +261,16 @@ export function createProviderUsageLedger(): ProviderUsageLedger {
       const m = model && model.trim() ? model : undefined;
       const phase = opts?.phase && opts.phase.trim() ? opts.phase.trim() : undefined;
       const key = sliceKey(p, m, phase);
+      if (p.toUpperCase() === 'SURPLUS') {
+        // This legacy API has no call identity. Absorb every matching call rather than
+        // inventing a token-proportional allocation of supplier receipt money.
+        for (const row of modelBuckets.values()) {
+          if (row.provider !== p || row.model !== m || row.phase !== phase) continue;
+          row.surplusAbsorbed = true;
+          row.unbilled = { ...row.usage, discardedOutputTokens: row.usage.outputTokens };
+        }
+        return;
+      }
       const cur = modelBuckets.get(key);
       // Proof-carrying turns stay split. Attribute a later discard to the most recent
       // matching receipts, bounded by their remaining output; never invent a new slice.
@@ -254,6 +305,9 @@ export function createProviderUsageLedger(): ProviderUsageLedger {
       return [...modelBuckets.values()].map((e) => ({
         provider: e.provider,
         model: e.model,
+        ...(e.surplusReceipt ? { surplusReceipt: e.surplusReceipt } : {}),
+        ...(e.surplusAbsorbed ? { surplusAbsorbed: true } : {}),
+        ...(e.surplusAccountingConflict ? { surplusAccountingConflict: true } : {}),
         ...(e.pricingProof ? { pricingProof: e.pricingProof } : {}),
         ...(e.phase ? { phase: e.phase } : {}),
         usage: { ...e.usage },

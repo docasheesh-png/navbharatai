@@ -8,7 +8,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 const lines = readFileSync('Dockerfile', 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-const runtimeAt = lines.findIndex((l) => /^FROM node:22-slim\b/.test(l));
+// Keep the security-fixed version and slim variant explicit, as in oneDeclaredRuntime.test.ts.
+const runtimeAt = lines.findIndex((l) => /^FROM node:22\.23\.4-slim AS runtime$/.test(l));
 const runtime = lines.slice(runtimeAt);
 const at = (re: RegExp) => runtime.findIndex((l) => re.test(l));
 

@@ -19,7 +19,7 @@
 # Pinned LTS — covers create-vite v6 (needs Node ^20.19 || >=22) AND
 # create-next-app latest. Do NOT use a floating tag; pin so the image never
 # drifts under us. Debian bookworm gives us apt for the system tools below.
-FROM node:22-bookworm
+FROM node:22.23.4-bookworm
 
 # --- OS tooling the builders rely on ---------------------------------------
 #   git             : clone / checkpoint operations

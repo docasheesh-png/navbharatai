@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import ts from 'typescript';
 import {
   fatalProviderHint, isFatalProviderError, isRateLimitProviderError, makeMultiProviderTurnRunner,
   sharedRateLimitCooldowns, type NamedRunner,
@@ -66,10 +67,28 @@ describe('a provider account with no balance cannot recover through rate-limit r
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
     const client = route.slice(route.indexOf('const client = buildTurnRunner({'), route.indexOf('// WHY THIS BUILD\'S ENGINES'));
     const heal = route.slice(route.indexOf('const healRunnerOpts = () => ({'), route.indexOf('// MEGA-APP ROADMAP', route.indexOf('const healRunnerOpts = () => ({')));
-    const retry = route.split('\n').find((line) => line.includes("client: buildTurnRunner({ tier: powerLevelReqEffective, fromProvider:"));
+    // Match the retry by its routing role, not object-property order. Optional provider
+    // sessions cannot remove the SAME per-build exhausted-credential memory.
+    const parsed = ts.createSourceFile('agentv3.ts', route, ts.ScriptTarget.Latest, true);
+    const retries: ts.ObjectLiteralExpression[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'buildTurnRunner') {
+        const options = node.arguments[0];
+        if (options && ts.isObjectLiteralExpression(options) && options.properties.some(property =>
+          ts.isPropertyAssignment(property) && property.name.getText(parsed) === 'fromProvider')) retries.push(options);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+    expect(retries).toHaveLength(1);
+    const retryMemory = retries[0].properties.filter(property =>
+      ts.isPropertyAssignment(property) && property.name.getText(parsed) === 'deadRungs');
+    expect(retryMemory).toHaveLength(1);
+    const memory = retryMemory[0];
+    if (!ts.isPropertyAssignment(memory)) throw new Error('Missing retry retirement memory');
+    expect(memory.initializer.getText(parsed)).toBe('fastLaneDeadRungs');
     expect(client.includes('deadRungs: fastLaneDeadRungs')).toBe(true);
     expect(heal.includes('deadRungs: fastLaneDeadRungs')).toBe(true);
-    expect(retry?.includes('deadRungs: fastLaneDeadRungs')).toBe(true);
   });
 
   it('keeps an independently funded credential in the same provider pool available', async () => {

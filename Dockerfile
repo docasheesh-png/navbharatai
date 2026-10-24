@@ -19,7 +19,9 @@
 # run correctly in the runtime stage.
 
 # ---------- Stage 1: build ----------
-FROM node:22 AS builder
+# Pin the same Node 22 security release as CI: its bundled undici 6.29.1 fixes
+# global fetch's GHSA-xjj6-f33q-929c independently of the npm undici dependency.
+FROM node:22.23.4 AS builder
 
 WORKDIR /app
 
@@ -67,7 +69,7 @@ RUN node scripts/precompress.mjs dist
 RUN npm prune --omit=dev
 
 # ---------- Stage 2: runtime ----------
-FROM node:22-slim AS runtime
+FROM node:22.23.4-slim AS runtime
 
 # OS SECURITY UPDATES ARE INSTALLED AT BUILD TIME (2026-10-08, Q-750).
 # The nightly image scan went red on 2026-10-05 and stayed red: `node:22-slim` (Debian 12) still shipped

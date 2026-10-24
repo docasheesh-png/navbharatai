@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
+import ts from 'typescript';
 
 /**
  * THE FREE PROGRAM PAUSE (admin 2026-10-22): "navbharatai pro ka free token system band karna hoga — paise nahi
@@ -149,7 +150,21 @@ describe('census: every door asks the switch', () => {
   const read = (p: string) => readFileSync(p, 'utf8');
   it('the Pro build route runs the pause gate as middleware — the handler itself gains no branches', () => {
     const src = read('src/server/routes/agentv3.ts');
-    expect(src).toContain("app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), enforceFreeProgramPause(), withBuildRequestCleanup(");
+    const parsed = ts.createSourceFile('agentv3.ts', src, ts.ScriptTarget.Latest, true);
+    const registrations: ts.CallExpression[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'app.post'
+        && ts.isStringLiteral(node.arguments[0]) && node.arguments[0].text === '/api/agentv3/chat') registrations.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+    expect(registrations).toHaveLength(1);
+    const args = registrations[0].arguments;
+    expect(args.slice(1, -1).map(arg => arg.getText(parsed))).toEqual([
+      'buildRateLimiter()', 'enforceNotBanned()', 'enforceFreeProgramPause()', 'surplusBuildInferenceScope',
+    ]);
+    const handler = args[args.length - 1];
+    expect(ts.isCallExpression(handler) && handler.expression.getText(parsed) === 'withBuildRequestCleanup').toBe(true);
     expect(src).not.toContain('AGENTV3_FREE_PROGRAM_PAUSED_REFUSAL');
   });
   it('the referral ladder is live only while the program is not paused', () => {

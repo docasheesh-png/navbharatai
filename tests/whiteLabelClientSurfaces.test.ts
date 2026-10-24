@@ -100,6 +100,7 @@ const ALLOWED: Record<string, string> = {
   // Admin-only surfaces. CLAUDE.md §3: "provider/model identity … MUST stay available to the admin:
   // the admin dashboard, build diagnostics, server logs, the deliveredVia / per-provider telemetry."
   'src/components/AdminDashboard.tsx': 'admin-only dashboard — vendor identity is permitted and needed',
+  'src/components/admin/SurplusRegistryPanel.tsx': 'mounted only inside the admin Live Model Registry; status and controls require server-verified admin authentication, and exact paid-candidate identities/source prices are needed for operator review, never public engine labels',
   'src/lib/agentV3CostSummary.ts': 'feeds AdminDashboard only — per-tier cost rows for the admin',
   'src/components/admin/InferenceGatewaySlotRecoveryPanel.tsx': 'mounted only within authenticated admin setup; recovery must identify the exact reviewed provider model and account',
   'src/components/admin/InferenceGatewaySetupPanel.tsx': 'mounted only inside the admin dashboard; authorized administrators must review exact provider/model/account identities, not public chat labels',
@@ -266,6 +267,25 @@ describe('🔒 long-form user-facing TEXT may not name a vendor', () => {
 });
 
 describe('🔒 no NEW user-facing surface may name a vendor', () => {
+  it('the paid manager exception remains confined to the authenticated admin surface', () => {
+    const panel = 'src/components/admin/SurplusRegistryPanel.tsx';
+    expect(ALLOWED[panel]).toContain('server-verified admin authentication');
+    const clientFiles = walk(resolve(root, 'src'))
+      .map(file => relative(root, file).replace(/\\/g, '/'))
+      .filter(file => !file.startsWith('src/server/'));
+    const importers = clientFiles.filter(file => /(?:\bfrom\s+|\bimport\s*\(\s*)['"][^'"]*\/SurplusRegistryPanel['"]/.test(read(file)));
+    expect(importers).toEqual(['src/components/admin/LiveModelRegistryPanel.tsx']);
+    const registryImporters = clientFiles.filter(file => /(?:\bfrom\s+|\bimport\s*\(\s*)['"][^'"]*\/LiveModelRegistryPanel['"]/.test(read(file)));
+    expect(registryImporters).toEqual(['src/components/AdminDashboard.tsx']);
+    expect(read('src/components/admin/LiveModelRegistryPanel.tsx')).toContain('<SurplusRegistryPanel adminToken={adminToken} />');
+    expect(read('src/components/AdminDashboard.tsx')).toContain('<LiveModelRegistryPanel adminToken={adminToken} />');
+    expect(read('src/server/routes/admin.ts')).toContain('registerSurplusRegistryAdminRoutes(app, verifyAdminToken)');
+    const routes = read('src/server/routes/surplusRegistryAdmin.ts');
+    expect(routes).toContain("app.get('/api/admin/surplus-registry', verifyAdminToken, reads,");
+    expect(routes).toContain("app.post('/api/admin/surplus-registry/models/action', verifyAdminToken, writes,");
+    expect(read(panel)).toContain('adminHeaders(adminToken)');
+  });
+
   it('sweeps every client file that is not explicitly allowed', () => {
     // 🔴 WIDENED 2026-09-17. This walked components/lib/hooks only, so FOUR client trees carrying
     // user-facing text were outside an ABSOLUTE rule's only guard — `src/content` most of all: the

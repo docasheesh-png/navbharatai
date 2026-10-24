@@ -6,9 +6,13 @@ export function weakCandidateActive(tier: string): boolean {
   return weakScopePolicyEnabled() && tier === 'weak';
 }
 
-export async function weakAdmissionForTurn(input: { prompt: string; intent: string; importing: boolean; tier: string }): Promise<WeakAdmission | null> {
+export async function weakAdmissionForTurn(
+  input: { prompt: string; intent: string; importing: boolean; tier: string },
+  ask: Parameters<typeof admitWeakBuild>[1] = weakBuildAdmissionAsk,
+): Promise<WeakAdmission | null> {
   if (!weakCandidateActive(input.tier) || input.intent === 'chat' || input.importing) return null;
-  const result = await admitWeakBuild(input.prompt, weakBuildAdmissionAsk, {
+  // The selected classifier is exclusive: admission owns its timeout and never falls back.
+  const result = await admitWeakBuild(input.prompt, ask, {
     template: process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && input.intent === 'new_build'
       && goldenScaffoldForPrompt(input.prompt) !== null,
   });

@@ -1,6 +1,7 @@
 import { registerInferenceGatewayAdminRoutes } from './inferenceGatewayAdmin';
 import { registerFreeChatChainRoutes } from './freeChatChainAdmin';
 import { registerLiveModelRegistryRoutes } from './liveModelRegistry';
+import { registerSurplusRegistryAdminRoutes } from './surplusRegistryAdmin';
 import { sendAdminOwnerApps } from './adminOwnerApps';
 import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
 import { registerAiMaintenanceRoutes } from './aiMaintenance';
@@ -181,6 +182,8 @@ const GROWING_COLLECTIONS: readonly string[] = [
   // and admin decisions; controls/health grow per model. Only history/routing are bounded rings.
   // Inventory the entire retained tree, not a misleading count of its two root documents.
   'live_ai_registry',
+  // Retained supplier receipts and pilot admission fences must remain visible to the storage board.
+  'surplus_build_receipts', 'surplus_pilot_admissions', 'surplus_connection_tests',
   // Shared quota windows, paid reservations and routing samples for Free Chat.
   'free_chat_chain',
   'metrics_snapshots', 'session_error_hints', 'hosting_usage', 'site_analytics',
@@ -431,6 +434,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   };
 
   registerLiveModelRegistryRoutes(app, verifyAdminToken);
+  registerSurplusRegistryAdminRoutes(app, verifyAdminToken);
   registerFreeChatChainRoutes(app, verifyAdminToken);
   registerInferenceGatewayAdminRoutes(app, verifyAdminToken);
   registerAiMaintenanceRoutes(app, verifyAdminToken);

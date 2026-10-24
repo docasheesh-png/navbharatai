@@ -10,7 +10,8 @@
 // project's runtime at all.** `package.json` had no `engines` field, so six workflows and a Dockerfile each
 // carried their own number and two of them drifted — and a seventh could drift tomorrow with nothing to
 // catch it. The requirement is now declared ONCE, in `engines.node`, and every declaration is checked
-// against it here.
+// against it here. That supported-major floor stays unchanged; exact platform security-release
+// pins are checked separately below, since a matching major alone does not prove patched global fetch.
 //
 // ⚠️ AND THE ROW NAMED ONLY `ci.yml`. `dast.yml` was on 20 as well — the sibling a per-instance fix would
 // have left behind, which is the whole reason rule 3 says to hunt them.
@@ -26,6 +27,10 @@ const root = join(__dirname, '..');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { engines?: { node?: string } };
 const WORKFLOW_DIR = join(root, '.github/workflows');
 const workflows = readdirSync(WORKFLOW_DIR).filter((f) => /\.ya?ml$/.test(f));
+// Node's global fetch uses its bundled undici, not the npm override. Node 22.23.4
+// includes undici 6.29.1, fixing GHSA-xjj6-f33q-929c without a Node major upgrade.
+// https://nodejs.org/en/blog/release/v22.23.4
+const PATCHED_NODE_VERSION = '22.23.4';
 
 /** The major version a `>=22`-style range requires. */
 const requiredMajor = (): number => {
@@ -39,7 +44,7 @@ describe('🔒 the project declares its runtime in exactly one place', () => {
     expect(pkg.engines!.node, 'engines.node is the single source of truth').toMatch(/^>=\d+$/);
   });
 
-  it('and it is the version production actually runs', () => {
+  it('and it matches the production image’s declared major', () => {
     const docker = readFileSync(join(root, 'Dockerfile'), 'utf8');
     const froms = [...docker.matchAll(/^FROM node:(\d+)/gm)].map((m) => Number(m[1]));
     expect(froms.length, 'the Dockerfile must name its runtime').toBeGreaterThan(0);
@@ -75,8 +80,46 @@ describe('🧭 CLASS GUARD: no workflow may name a different runtime', () => {
 
   it('…and the gate in particular, since a gate on another runtime proves nothing about what ships', () => {
     const ci = readFileSync(join(WORKFLOW_DIR, 'ci.yml'), 'utf8');
-    expect(ci).toMatch(/node-version:\s*'22'/);
+    expect(ci).toContain(`node-version: '${PATCHED_NODE_VERSION}'`);
     expect(ci, 'the reason is written where the version is, so nobody lowers it back').toContain('Q-1060');
+  });
+});
+
+describe('the exact patched runtime is used by build, runtime, and CI', () => {
+  it('keeps the declared supported major while pinning the security release', () => {
+    expect(Number(PATCHED_NODE_VERSION.split('.')[0])).toBe(requiredMajor());
+  });
+
+  it('pins every workflow setup-node declaration, not just its major', () => {
+    const declarations = workflows.flatMap((file) => {
+      const src = readFileSync(join(WORKFLOW_DIR, file), 'utf8');
+      return [...src.matchAll(/^\s*node-version:\s*['"]?([^'"\s#]+)/gm)]
+        .map((match) => ({ file, version: match[1] }));
+    });
+    expect(declarations.length).toBeGreaterThanOrEqual(7);
+    for (const { file, version } of declarations) expect(version, file).toBe(PATCHED_NODE_VERSION);
+  });
+
+  it('pins production and all sandbox Docker stages while retaining their variants', () => {
+    const dockerfiles = ['Dockerfile', ...readdirSync(join(root, 'infra/e2b'))
+      .filter((file) => file.endsWith('.Dockerfile')).map((file) => `infra/e2b/${file}`)];
+    expect(dockerfiles.length).toBeGreaterThanOrEqual(4);
+    for (const file of dockerfiles) {
+      const src = readFileSync(join(root, file), 'utf8');
+      const tags = [...src.matchAll(/^FROM\s+node:([^\s]+)/gm)].map((match) => match[1]);
+      expect(tags.length, file).toBeGreaterThan(0);
+      for (const tag of tags) expect(tag.split('-')[0], file).toBe(PATCHED_NODE_VERSION);
+      expect(tags, file).toEqual(file === 'Dockerfile'
+        ? [PATCHED_NODE_VERSION, `${PATCHED_NODE_VERSION}-slim`]
+        : [`${PATCHED_NODE_VERSION}-bookworm`]);
+    }
+  });
+
+  it('pins Cloud Build’s Node step to the same slim runtime', () => {
+    const cloudBuild = readFileSync(join(root, 'cloudbuild.yaml'), 'utf8');
+    const tags = [...cloudBuild.matchAll(/^\s*-\s*name:\s*['"]?node:([^'"\s#]+)/gm)]
+      .map((match) => match[1]);
+    expect(tags).toEqual([`${PATCHED_NODE_VERSION}-slim`]);
   });
 });
 

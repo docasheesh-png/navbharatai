@@ -71,7 +71,7 @@ export function publicTierLabel(powerLevel: string | null | undefined): string {
  * does the same job for server text — the two are deliberately the same vocabulary.
  */
 export const PROVIDER_IDENTITY_RE =
-  /\b(?:anthropic|claude|openai|chatgpt|gpt-?\d[\w.-]*|gemini|vertex|xai|grok|moonshot|kimi|z\.?ai|chatglm|glm|deepseek|cohere|mistral|perplexity|bedrock|sonnet|opus|haiku)\b/i;
+  /\b(?:surplus(?:\s+intelligence)?|anthropic|claude|openai|chatgpt|gpt-?\d[\w.-]*|gemini|vertex|xai|grok|moonshot|kimi|z\.?ai|chatglm|glm|deepseek|cohere|mistral|perplexity|bedrock|sonnet|opus|haiku)\b/i;
 
 /** Does this string name a vendor, model family or tier word a user must never be shown? */
 export function namesAProvider(text: unknown): boolean {

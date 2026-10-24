@@ -1190,12 +1190,22 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
             .then(({ claimJobRun }) => import('./src/server/lib/serverDb').then(({ getServerDb }) => {
               // Resolved per CALL, not at wiring time: the db may not be set yet at boot, and a null
               // store means the job runs — never that it is silently cancelled.
-              scheduler.setClaim((jobId) => ['live-model-registry', 'live-image-model-registry'].includes(jobId) ? Promise.resolve(true) : claimJobRun(getServerDb() as any, { jobId }));
+              scheduler.setClaim((jobId) => ['live-model-registry', 'live-image-model-registry', 'surplus-metadata-registry'].includes(jobId) ? Promise.resolve(true) : claimJobRun(getServerDb() as any, { jobId }));
             }))
             .catch(() => { /* no claim wired ⇒ every job runs, exactly as before */ })
             // Either way the boot run happens — a claim that could not be wired must delay the purge,
             // never cancel it.
             .finally(() => { bootRun?.(); });
+          // Optional public metadata only. Its own durable fenced lease fails closed; no inference or key required.
+          try {
+            const surplus = await import('./src/server/AI/SurplusRegistry/runtime');
+            const config = surplus.surplusRegistryConfig();
+            if (config.enabled) {
+              scheduler.register({ id: surplus.SURPLUS_SYNC_JOB, schedule: { kind: 'everyMs', ms: config.intervalMs }, exclusive: true,
+                handler: async () => { await surplus.refreshSurplusRegistry(); } });
+              void surplus.refreshSurplusRegistry().catch(() => {});
+            }
+          } catch { console.warn('[SURPLUS_REGISTRY] Metadata scheduler unavailable; inference remains disabled.'); }
           // Registry sync uses its own fail-closed, fenced transaction. Scheduler's generic lease is fail-open.
           try {
           const liveRegistry = await import('./src/server/AI/LiveRegistry/runtime');

@@ -269,7 +269,8 @@ describe('REVERSION GUARDS — the wiring lives in a 20k-line route no unit test
     // Old: three readers (the two settle paths and the live figure).
     // New: those three, plus the watchdog failure-ledger remainder. That fourth call
     // reads realCostRemainder for the admin ledger. It does not set the user bill.
-    expect(route.match(/decideBuildBilledUsd\([\s\S]{0,220}?barrenPhases\)/g) ?? []).toHaveLength(4);
+    // Fifth: the Surplus-only partition delegates unchanged legacy+VM pricing with the same verdict.
+    expect(route.match(/decideBuildBilledUsd\([\s\S]{0,220}?barrenPhases\)/g) ?? []).toHaveLength(5);
     expect(route).toContain('decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, vm.usd, barrenPhases)');
     expect(route).toContain('decideBuildBilledUsd(ledger, sink, powerLevelReqEffective, userId ?? undefined, email, sandboxUsd, barrenPhases).realCostRemainder');
   });

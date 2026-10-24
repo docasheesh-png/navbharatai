@@ -28,7 +28,7 @@
 # default template's own cost note.
 # ---------------------------------------------------------------------------
 
-FROM node:22-bookworm
+FROM node:22.23.4-bookworm
 
 # --- OS tooling + OpenJDK 17 (required by Android Gradle Plugin 8.x) --------
 RUN apt-get update && apt-get install -y --no-install-recommends \

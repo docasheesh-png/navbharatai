@@ -3173,6 +3173,15 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Money") stil
     keywords: ['live model registry', 'free models', 'model sync', 'model prices', 'verified free', 'strict free', 'catalog age'],
   },
   {
+    id: 'admin-discounted-paid-builder-manager',
+    name: 'Discounted PAID Builder Manager (admin only)',
+    path: 'Admin Dashboard → AI Engines → Live Model Registry → Discounted PAID Builder Manager',
+    description: 'A separate administrator-only section for paid discounted builder candidates, not the strict-free catalog. It distinguishes configured candidates, independent quality review recorded at the last status read, provider-reported availability, and candidate estimates that do not grant dispatch authority. It shows snapshot age, synchronization status, raw source prices and unknown monetary units honestly. Status refreshes every 30 seconds while the page is open; metadata synchronization is server-managed on a five-minute cadence, not an instantaneous quote. Block candidate and Remove manual block only change manual exclusion, with the exact reviewed snapshot and control revision plus an audit reason. Removing a block cannot approve quality, create a review, lower the 90% discount floor, raise a budget or activate paid inference. Failed or stale reads never imply eligibility; uncertain writes require a refresh before retrying. No credentials or production activation controls are accepted here.',
+    howToUse: 'Sign in as admin, open AI Engines → Live Model Registry, then review the separate Discounted PAID Builder Manager section. Expand Observed prices and sources to inspect recorded rates and freshness. Only block or remove a manual candidate block after reviewing the current snapshot and entering an audit reason. Independent quality, account, privacy, capability and cost safeguards remain mandatory for execution.',
+    relatedFeatures: ['admin-tab-navigation', 'admin-live-model-registry'],
+    keywords: ['discounted paid builder', 'paid candidate manager', 'candidate block', 'discount prices', 'paid price sync', 'quality review status'],
+  },
+  {
     id: 'admin-free-chat-chain',
     name: 'Free Chat Chain (admin only)',
     path: 'Admin Dashboard → AI Engines → Free Chat Chain',

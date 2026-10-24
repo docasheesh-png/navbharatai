@@ -120,7 +120,7 @@ steps:
   # ONE-TIME SETUP (admin): give the Cloud Build service account the **Firebase Rules Admin** role
   # (`roles/firebaserules.admin`) on `gen-lang-client-0866594388`. Until then this step prints
   # "Rules NOT deployed: permission" on every build and changes nothing.
-  - name: 'node:22-slim'
+  - name: 'node:22.23.4-slim'
     id: 'deploy-security-rules'
     allowFailure: true
     entrypoint: 'bash'

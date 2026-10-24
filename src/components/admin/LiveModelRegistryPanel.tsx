@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
+import { SurplusRegistryPanel } from './SurplusRegistryPanel';
 import type { AdminRegistryView } from '../../server/AI/LiveRegistry/types';
 import { EMPTY_REGISTRY_FILTERS, REGISTRY_STATUSES, effectiveRegistryStatus, filterRegistryModels, isRegistryView, registryActionReason, registryTimestamp, safeRegistrySource, type RegistryFilters, type RegistryModelView } from '../../lib/liveModelRegistryView';
 
@@ -98,7 +99,9 @@ export function LiveModelRegistryPanel({ adminToken }: { adminToken: string }): 
   };
   const validAction = !!pending && registryActionReason(reason) && (pending.action !== 'approve-terms' || confirmed) && !busy && !loading && !error && pending.version === view?.manifest?.version;
 
-  return <section aria-label="Live Model Registry" className="space-y-4">
+  return <div className="space-y-8">
+    <SurplusRegistryPanel adminToken={adminToken} />
+    <section aria-label="Live Model Registry" className="space-y-4">
     <div className="rounded-xl border border-line bg-card p-4 space-y-3">
       <div className="flex flex-wrap justify-between gap-3">
         <div><h2 className="text-lg font-bold text-ink">Live Model Registry</h2><p className="text-sm text-muted">Admin-only discovery and strict-free eligibility. Catalog metadata is not proof of unlimited quota or a zero hosting bill. Status refreshes every 30 seconds while this page is open.</p></div>
@@ -113,7 +116,7 @@ export function LiveModelRegistryPanel({ adminToken }: { adminToken: string }): 
           <div><dt className="font-bold">Catalog service</dt><dd>{view.enabled ? 'Enabled' : 'Disabled by server configuration'}</dd></div>
           <div><dt className="font-bold">Account configuration</dt><dd>{view.configured ? 'Configured; per-model access still required' : 'Not configured'}</dd></div>
           <div><dt className="font-bold">Free + professional modules flag</dt><dd>{view.strictFreeModulesEnabled ? 'Enabled; unverified capabilities fail closed' : 'Not enabled; existing routing is unchanged'}</dd></div>
-          <div><dt className="font-bold">Pro App Builder</dt><dd>Outside this rollout; all tiers retain their original routing</dd></div>
+          <div><dt className="font-bold">Pro App Builder</dt><dd>Outside this strict-free rollout; the separate paid manager cannot activate production routing</dd></div>
           <div><dt className="font-bold">Pro Normal / Strong</dt><dd>Not changed by these strict-free flags</dd></div>
           <div><dt className="font-bold">Sync interval target</dt><dd>{view.syncIntervalMs / 1000} seconds; not instantaneous</dd></div>
           <div><dt className="font-bold">Last successful catalog</dt><dd>{registryTimestamp(view.manifest?.fetchedAt ?? null)}</dd></div>
@@ -170,7 +173,8 @@ export function LiveModelRegistryPanel({ adminToken }: { adminToken: string }): 
       {rows.slice(0, limit).map(model => <RegistryModelCard key={model.exactModelId} model={model} now={now} snapshotTrusted={!error && !loading} disabled={busy || loading || !!error || !view.manifest} termsUntil={view.controls[model.exactModelId]?.termsReviewedUntil ?? 0} manuallyDisabled={view.controls[model.exactModelId]?.disabled === true} onAction={action => openAction(model, action)} />)}
       {rows.length > limit && <button type="button" className={button} onClick={() => setLimit(n => n + 25)}>Show 25 more models</button>}
     </div>}
-  </section>;
+  </section>
+  </div>;
 }
 
 export function RegistryModelCard({ model: m, now, snapshotTrusted, disabled, termsUntil, manuallyDisabled, onAction }: { model: RegistryModelView; now: number; snapshotTrusted: boolean; disabled: boolean; termsUntil: number; manuallyDisabled: boolean; onAction: (action: Action) => void }): React.ReactElement {

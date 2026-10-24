@@ -1,3 +1,4 @@
+import type { SurplusReceiptDecision } from '../AI/SurplusRegistry/receiptPolicy';
 import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import type { VerifiedFreeProof } from '../AI/LiveRegistry/proof';
 import { assertAiAvailable } from '../lib/aiMaintenance';
@@ -68,6 +69,8 @@ export interface ToolUse {
  * the type has ONE meaning and every bill prices the shares at their own rates (`tokenCostUsd`).
  */
 export interface TurnUsage {
+  /** Server-issued, per-call Surplus accounting evidence; never inferred from token prices. */
+  surplusReceipt?: SurplusReceiptDecision;
   /** Actual output ceiling selected by a verified registry endpoint, not a usage count. */
   selectedMaxOutputTokens?: number;
   /** Server-issued zero-inference price receipt; never reconstructed from user JSON. */

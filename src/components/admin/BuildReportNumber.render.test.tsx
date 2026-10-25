@@ -7,8 +7,8 @@ import { isFailedBuildPage } from '../../lib/failedBuildReports';
 describe('report numbers on both private lists', () => {
   it('renders the server rank, total and as-of explanation, not an array position', () => {
     const html = renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: 604, total: 604, asOf: 1792540800000 }} />);
-    expect(html).toContain('#604'); expect(html).toContain('of 604 retained reports as of');
-    expect(html).toContain('Oldest is 1'); expect(html).toContain('not a permanent report ID');
+    expect(html).toContain('#604'); expect(html).toContain('of 604 assigned');
+    expect(html).toContain('Permanent failed-report number'); expect(html).toContain('never renumbered');
   });
   it('shows loading without blocking the report row', () => {
     expect(renderToStaticMarkup(<BuildReportNumber />)).toContain('Number loading');
@@ -21,7 +21,7 @@ describe('report numbers on both private lists', () => {
   });
   it('explains safe server failures visibly, not only in a hover tooltip', () => {
     const html = renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: null, total: null, asOf: null, reason: 'snapshot_miss' }} />);
-    expect(html).toContain('The complete snapshot must refresh before a number can be shown.');
+    expect(html).toContain('New failures receive the next number automatically');
     expect(html).not.toContain('#1');
     expect(isFailedBuildPage({ reports: [{ workspaceId: 'a', historyId: '1', startedAt: 1, endedAt: 2, appLabel: 'Synthetic', numbering: { ordinal: null, total: null, asOf: null, reason: 'private-server-error' } }], nextCursor: null, scanned: 1 })).toBe(false);
     expect(() => renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: null, total: null, asOf: null, reason: '__proto__' } as any} />)).not.toThrow();

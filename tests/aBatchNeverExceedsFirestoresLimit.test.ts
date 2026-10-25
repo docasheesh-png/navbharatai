@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { deleteInChunks, SAFE_BATCH_WRITES } from '../src/server/lib/batchChunks';
+import { commitDiagnosticsHistory } from '../src/server/AgentV3/diagnosticsHistoryPersistence';
 
 function fakeDb() {
   const commits: string[][] = [];
@@ -55,6 +56,7 @@ describe('census: every batch is bounded', () => {
   const REVIEWED: Record<string, [number, string]> = {
     'src/server/lib/batchChunks.ts': [2, 'the chunking helper itself (SAFE_BATCH_WRITES = 400)'],
     'src/server/AgentV3/DiagnosticsStore.ts': [1, 'loop of limit(300) pages'],
+    'src/server/AgentV3/diagnosticsHistoryPersistence.ts': [1, 'exactly two writes: merge-only parent marker and one history document; asserted below'],
     'src/server/AgentV3/WorkspaceAssetStore.ts': [1, 'slices of BATCH'],
     'src/server/AgentV3/AdminBuildReportStore.ts': [1, 'loop of limit(300) pages'],
     'src/server/AgentV3/WorkspaceFileStore.ts': [4, 'slices of BATCH, or limit(BATCH) pages; the merge store is called with slices'],
@@ -78,5 +80,21 @@ describe('census: every batch is bounded', () => {
   it('the two unbounded deletes go through the helper', () => {
     expect(readFileSync('src/server/AgentV3/FirestoreConversationStore.ts', 'utf8')).toMatch(/await deleteInChunks\(this\.db, /);
     expect(readFileSync('src/server/lib/metricsTimeline.ts', 'utf8')).toMatch(/await deleteInChunks\(db, stale\.docs\.map/);
+  });
+
+  it('history discovery commits exactly two writes, independent of report payload size', async () => {
+    for (const inProgress of [undefined, true, false]) {
+      const writes: string[] = [];
+      let commits = 0;
+      const doc = (path: string): any => ({ path, collection: (name: string) => ({ doc: (id: string) => doc(`${path}/${name}/${id}`) }) });
+      const db = {
+        collection: (name: string) => ({ doc: (id: string) => doc(`${name}/${id}`) }),
+        batch: () => ({ set: (ref: { path: string }) => { writes.push(ref.path); }, commit: async () => { commits++; } }),
+      };
+      const report = { startedAt: 100, issues: Array.from({ length: 600 }, () => ({ code: 'synthetic' })) };
+      await commitDiagnosticsHistory(db as never, 'synthetic-workspace', report, 200, inProgress);
+      expect(writes).toEqual(['workspace_diagnostics_v3/synthetic-workspace', 'workspace_diagnostics_v3/synthetic-workspace/history/100']);
+      expect(commits).toBe(1);
+    }
   });
 });

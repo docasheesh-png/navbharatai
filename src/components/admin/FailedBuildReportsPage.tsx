@@ -98,7 +98,7 @@ export function FailedBuildReportsPage({ token, onLogout }: { token: string; onL
       <div><p className="text-sm text-muted">Private · Admin access</p><h1 className="text-3xl font-serif text-ink">Failed build reports</h1></div>
       <div className="flex gap-2"><a href="https://navbharatai.com/admin" className={button}>Admin console</a><button className={button} onClick={onLogout}>Sign out</button></div>
     </header>
-    <p className="text-sm text-muted">Reports come automatically from retained build history, including failures before a later successful build. This page refreshes its current batch every minute. Browse every batch to see all retained failures; batches stay in workspace/history order. Numbers run oldest (1) to newest across all retained failures, not just this batch. The numbering snapshot is reused for up to 10 minutes; retention can change numbers.</p>
+    <p className="text-sm text-muted">Reports come automatically from retained build history, including failures before a later successful build. This page refreshes its current batch every minute. Browse every batch to see all retained failures; batches stay in workspace/history order. Numbers run oldest (1) to newest across all retained failures, not just this batch. Existing numbers may use a snapshot up to 10 minutes old; new reports trigger a refreshed snapshot after a short cooldown. Temporary failures retry automatically twice. Retention can change numbers.</p>
     <FailedReportOAuthConsent token={token} />
     {error && <p role="alert" className="rounded-xl border border-line p-4 text-danger">{error}</p>}
     {message && <p role="status" className="text-success">{message}</p>}

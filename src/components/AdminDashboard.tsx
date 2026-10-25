@@ -4831,7 +4831,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   )}
                 />
                 <p className="text-[10px] text-muted">
-                  Numbers run oldest (1) to newest across all retained latest-per-workspace reports, before filters. Snapshot reused for up to 10 minutes; retention can change numbers. Showing {allBuilds.length}
+                  Numbers run oldest (1) to newest across all retained latest-per-workspace reports, before filters. Existing ranks may use a 10-minute snapshot; new builds refresh it after a short cooldown. Temporary failures retry twice. Retention can change numbers. Showing {allBuilds.length}
                   {allBuildsFetched && allBuildsFetched.fetched >= allBuildsFetched.limit
                     /* Honest about the fetch ceiling: at the limit there may be OLDER builds this
                        list has not looked at, so "0 failed" must not read as "none exist". */

@@ -4750,3 +4750,13 @@ This operational note is not runtime authority, a quality review, or an activati
 Admin status must continue to derive configuration from the real server environment,
 never from this note. A separately authorized synthetic connection test is pending its
 safe runtime path and verified spending controls; no test result is claimed here.
+
+### Owner-reported Cloud Run update (2026-10-25 Asia/Calcutta)
+
+Owner reports both flags flipped **on** in Cloud Run `navbharat-ai-prod` after PR #3914
+merged: `AGENTV3_SURPLUS_BUILDER=on` and `SURPLUS_REGISTRY_ENABLED=on`. `SURPLUS_API_KEY`
+remains configured (name only; value never recorded). Product rule clarified the same day:
+Weak builds must use Surplus; Normal and Strong stay on direct providers. Two Weak build
+reports after the flag flip still showed GLM→Kimi with no Surplus delivery — admission
+fail-open suspected (snapshot empty/stale or key/path issue); build-report observability
+and Weak-only gate follow-up in progress. This note is still not runtime authority.

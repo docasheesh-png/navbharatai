@@ -9,7 +9,7 @@ import { buildElapsedMs } from './buildClock';
 import { nextUserMessageTs } from './conversationClock';
 import { SubmissionScope, submissionStatus, submissionIsWorking, type SubmissionPhase } from './submissionScope';
 import { CONTINUE_INTERRUPTED_BUILD_PROMPT, CONTINUE_PAST_BUDGET_PROMPT, CONTINUE_AND_FIX_BUILD_PROMPT } from '../../lib/continueBuildPrompts';
-import { isWeakScopeGuidanceCode } from '../../lib/weakScopeGuidance';
+import { isWeakScopeGuidanceCode, weakScopeGuidanceCard } from '../../lib/weakScopeGuidance';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
 import { publicTierLabel } from '../../lib/engineLabels';
 import { sessionIsPro } from '../../lib/sessionRouting';
@@ -505,6 +505,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // 2026-07-12: "maine recharge kar liya fir bhi tiers locked" — the user recharges on the Wallet page and
   // comes back; without this refetch the tiers stayed 🔒 until a full page reload).
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** When Switch module opens Build options from Weak scope guidance, gently highlight the Power picker. */
+  const [highlightPowerPicker, setHighlightPowerPicker] = useState(false);
   // The starter picker shows a short first screen and hides the rest behind "More templates" — the wall
   // of thirty-odd chips was the thing a first-time user scrolled past. Collapsed by default on purpose:
   // expanded-by-default would be the wall again with one extra button on top of it.
@@ -5144,23 +5146,69 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   )}
                 </div>
               ) : isWeakScopeGuidanceCode(state.resultCode) ? (
-                /* Weak scope guidance — not a build failure. Offer Switch module → Build options Power picker. */
-                <div className="px-3 py-2 bg-indigo-500/10 text-accent-text text-xs rounded border border-indigo-900/50">
-                  <div className="flex items-start gap-2">
-                    <Settings className="w-4 h-4 shrink-0 mt-0.5" />
-                    <span className="whitespace-pre-wrap break-words">{state.summary}</span>
-                  </div>
-                  {!running && (
-                    <button
-                      type="button"
-                      onClick={() => setSettingsOpen(true)}
-                      title="Open Build options to pick Weak, Normal, or Strong"
-                      className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-on-accent bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1.5"
+                /* Weak scope guidance — calm product card, not a failed-build amber strip. */
+                (() => {
+                  const guide = weakScopeGuidanceCard(state.resultCode);
+                  const openModulePicker = () => {
+                    setHighlightPowerPicker(true);
+                    setSettingsOpen(true);
+                    requestAnimationFrame(() => {
+                      document.querySelector<HTMLElement>('[data-build-options-trigger]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    });
+                  };
+                  return (
+                    <div
+                      role="status"
+                      className="mx-0 px-3.5 py-3 bg-card text-body text-xs rounded-xl border border-indigo-500/40 shadow-sm"
                     >
-                      <Settings className="w-3.5 h-3.5" /> Switch module · मॉड्यूल बदलें
-                    </button>
-                  )}
-                </div>
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-600/15 text-accent-text ring-1 ring-indigo-500/30">
+                          <Settings className="w-4 h-4" aria-hidden />
+                        </div>
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <div className="text-sm font-semibold text-ink leading-snug">{guide.title}</div>
+                          <p className="text-[12px] text-muted leading-relaxed">{guide.body}</p>
+                          <p className="text-[10px] text-faint">{guide.hint}</p>
+                          {!running && (
+                            <div className="flex flex-wrap items-center gap-2 pt-1.5">
+                              <button
+                                type="button"
+                                onClick={openModulePicker}
+                                title="Open Build options — Power: Weak, Normal, Strong"
+                                className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-on-accent bg-indigo-600 hover:bg-indigo-500 rounded-lg px-3 py-2 shadow-sm transition-colors"
+                              >
+                                <Settings className="w-3.5 h-3.5" aria-hidden />
+                                Switch module · मॉड्यूल बदलें
+                              </button>
+                              {powerUnlocked && (
+                                <div className="flex items-center gap-1.5">
+                                  {([
+                                    { key: 'off' as const, label: 'Normal' },
+                                    { key: 'mini' as const, label: 'Strong' },
+                                  ]).map((opt) => (
+                                    <button
+                                      key={opt.key}
+                                      type="button"
+                                      onClick={() => { setPowerLevel(opt.key); openModulePicker(); }}
+                                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium border border-line bg-raised text-muted hover:border-indigo-500/60 hover:text-accent-text transition-colors"
+                                    >
+                                      {opt.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {!powerUnlocked && !running && (
+                            <p className="text-[10px] text-faint pt-0.5">
+                              Normal and Strong unlock with any wallet recharge — or shrink the first version and stay on Weak.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()
               ) : (
                 <div className="px-3 py-2 bg-amber-500/10 text-warn text-xs rounded">
                   <div className="flex items-start gap-2">
@@ -5656,7 +5704,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 {settingsOpen && (
                   <>
                     {/* outside-click catcher */}
-                    <div className="fixed inset-0 z-10" onClick={() => setSettingsOpen(false)} />
+                    <div className="fixed inset-0 z-10" onClick={() => { setSettingsOpen(false); setHighlightPowerPicker(false); }} />
                     <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-card border border-line rounded-lg shadow-xl p-1.5 space-y-0.5">
                       {/* Planning + Thinking toggles removed (admin 2026-08-14: "no need now"). Plan is
                           still available as its own chat mode; thinking is automatic for complex builds. */}
@@ -5669,8 +5717,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                           always VISIBLE; a FREE user (powerUnlocked=false) sees the paid two LOCKED (🔒,
                           not selectable) until they recharge — and the server clamps free→weak regardless,
                           so a UI/API bypass can never reach a paid engine. Paid default = Normal. */}
-                      <div className="px-3 py-2">
-                        <div className="text-sm text-body mb-1.5">Power</div>
+                      <div
+                        data-power-picker
+                        className={`px-3 py-2 rounded-md transition-shadow ${highlightPowerPicker ? 'ring-2 ring-indigo-500/70 bg-indigo-500/5' : ''}`}
+                      >
+                        <div className="text-sm text-body mb-1.5 flex items-center justify-between gap-2">
+                          <span>Power</span>
+                          {highlightPowerPicker && (
+                            <span className="text-[10px] font-medium text-accent-text">Pick Weak · Normal · Strong</span>
+                          )}
+                        </div>
                         <div className="flex flex-col gap-1">
                           {([
                             { key: 'weak', label: 'Weak' },
@@ -5684,7 +5740,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                                 type="button"
                                 disabled={running || locked}
                                 title={locked ? 'Add credits to unlock this tier' : undefined}
-                                onClick={() => { if (!locked) setPowerLevel(opt.key); }}
+                                onClick={() => { if (!locked) { setPowerLevel(opt.key); setHighlightPowerPicker(false); } }}
                                 className={`w-full px-2.5 py-1.5 rounded text-xs font-medium text-left transition-colors disabled:opacity-50 ${
                                   powerLevel === opt.key
                                     ? 'bg-indigo-600 text-on-accent'
@@ -5733,7 +5789,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 )}
                 <button
                   type="button"
-                  onClick={() => setSettingsOpen((v) => !v)}
+                  data-build-options-trigger
+                  onClick={() => { setSettingsOpen((v) => { const next = !v; if (!next) setHighlightPowerPicker(false); return next; }); }}
                   title="Build options"
                   className={`relative h-7 w-9 flex items-center justify-center rounded border ${settingsOpen ? 'border-indigo-500 text-accent-text' : 'border-line text-muted hover:text-ink'}`}
                 >

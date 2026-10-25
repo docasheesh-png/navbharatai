@@ -44,10 +44,12 @@ describe('Weak scope preflight', () => {
     expect(strong).toContain('Switch module');
     expect(strong).toContain('Normal or Strong');
     expect(strong).toContain('staged plan');
-    expect(strong.toLowerCase()).not.toMatch(/fail|beyond the weak|coding has not started/);
+    expect(strong).toContain('Nothing was charged');
+    expect(strong.toLowerCase()).not.toMatch(/\bfail|beyond the weak|fix with ai/);
     const unavailable = weakAdmissionReply(null);
     expect(unavailable).toContain('Switch module');
     expect(unavailable).toContain('Build options');
+    expect(unavailable).toContain('Nothing was charged');
     expect(unavailable).not.toContain('select Strong');
     expect(unavailable.toLowerCase()).not.toMatch(/could not reliably|fix with ai/);
   });

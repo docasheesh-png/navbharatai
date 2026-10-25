@@ -65,6 +65,6 @@ export function weakAdmissionCode(scope: WeakScope | null): WeakScopeGuidanceCod
  */
 export function weakAdmissionReply(scope: WeakScope | null): string {
   return scope === 'strong'
-    ? 'This request looks larger than Weak is meant for. Use Switch module below to open Build options and pick Normal or Strong, or describe a smaller first version. A full commercial-scale product usually needs a staged plan even on Strong. If Strong is locked, add credits in Wallet & Billing to unlock it.'
-    : 'I could not confirm this request fits Weak right now, so coding has not started. Use Switch module below to open Build options and pick Normal or Strong, or retry with a clearer, smaller version of the app.';
+    ? 'This request looks larger than Weak is meant for. Nothing was charged — coding has not started. Switch module below to open Build options and pick Normal or Strong, or describe a smaller first version. A full commercial-scale product usually needs a staged plan even on Strong.'
+    : 'I could not confirm this request fits Weak right now. Nothing was charged — coding has not started. Switch module below to open Build options and pick Normal or Strong, or retry with a clearer, smaller version of the app.';
 }

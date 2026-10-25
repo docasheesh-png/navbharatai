@@ -12,23 +12,12 @@ import type { SurplusReviewedAdapter, SurplusReviewedState, SurplusCapabilityRev
 import type { TurnResult } from '../../AgentV3/ClaudeClient';
 import type { OpenAiCompletionLike } from '../../AgentV3/providers/OpenAiToolAdapter';
 import type { SurplusTurnPermit } from '../../AgentV3/providers/SurplusTurnRunner';
+import { synthesizeLiveReviews, surplusLiveKey, type LiveProductionReviews, type LiveUsageMapping } from './liveAdmission';
 
+/** @deprecated Review Firestore seed is no longer required for live Surplus; kept for admin/legacy references. */
 export const SURPLUS_REVIEWS_DOCUMENT = 'live_ai_registry/surplus-builder-reviews';
-export interface SurplusUsageMapping {
-  reviewId: string; model: string; reviewedAt: number; expiresAt: number;
-  /** Explicit reviewed semantics. Unsupported dimensions are zero ONLY under this evidence. */
-  cacheRead: 'prompt_tokens_details.cached_tokens' | 'prompt_cache_hit_tokens';
-  cacheWrite: 'unsupported';
-  reasoning: 'included-in-completion-output-rate' | 'completion_tokens_details.reasoning_tokens';
-  additionalCharges: 'none';
-}
-export interface SurplusProductionReviews extends Omit<SurplusReviewedState, 'snapshot'> {
-  revision: number;
-  account: { accountId: string; credentialSha256: string; marketplaceOnly: true; noFallbackKeys: true; reviewedUntil: number; liveCredentialCheckAt: number; liveCredentialCheckExpiresAt: number };
-  pilot: SurplusPilotAuthority;
-  tariffs: SurplusOfficialTariff[];
-  usageMappings: SurplusUsageMapping[];
-}
+export type SurplusUsageMapping = LiveUsageMapping;
+export type SurplusProductionReviews = LiveProductionReviews;
 type WireResponse = { body: unknown; headers: Record<string, string>; receivedAt: number; status: number };
 const object = (x: unknown): Record<string, unknown> => x && typeof x === 'object' && !Array.isArray(x) ? x as Record<string, unknown> : {};
 const count = (x: unknown): string | null => typeof x === 'number' && Number.isSafeInteger(x) && x >= 0 ? String(x) : null;
@@ -45,40 +34,26 @@ function envelope(raw: unknown): { wire: WireResponse; body: Record<string, unkn
     objective: supplied.route_objective ?? h['x-si-route-objective'],
   } };
 }
-const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 512 && value.trim() === value && !/[\u0000-\u001f\u007f]/.test(value);
-const time = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-function assertAccount(config: SurplusProductionReviews, env: NodeJS.ProcessEnv, now: number): void {
-  if (!Number.isSafeInteger(config?.revision) || config.revision < 1) throw new Error('Surplus review revision missing');
+/** Live admission: Standard key present + AGENTV3_SURPLUS_BUILDER on. No Firestore review seed. */
+function assertLive(env: NodeJS.ProcessEnv): string {
   if (parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) !== true) throw new Error('Surplus builder is disabled');
-  const account = config?.account, key = env.SURPLUS_API_KEY?.trim(), pilot = config?.pilot;
-  if (!pilot || !/^[A-Za-z0-9._:-]{1,120}$/.test(pilot.id) || !Number.isSafeInteger(pilot.maxCalls) || pilot.maxCalls < 1
-      || !time(pilot.expiresAt) || pilot.expiresAt <= now || !time(pilot.providerSpendLimitReviewedUntil)
-      || pilot.providerSpendLimitReviewedUntil <= now || pilot.noAutoTopup !== true || !/^[0-9]{1,18}$/.test(pilot.maxEstimatedMicroUsd)
-      || BigInt(pilot.maxEstimatedMicroUsd) <= 0n) throw new Error('Surplus bounded pilot review missing');
-  if (!account || !text(account.accountId) || account.marketplaceOnly !== true || account.noFallbackKeys !== true
-      || !time(account.reviewedUntil) || account.reviewedUntil <= now
-      || !time(account.liveCredentialCheckAt) || account.liveCredentialCheckAt > now
-      || !time(account.liveCredentialCheckExpiresAt) || account.liveCredentialCheckExpiresAt <= now
-      || !key || key.startsWith('inf_admin_') || key === 'replace_with_your_surplus_api_key' || /[\r\n]/.test(key) || !/^[a-f0-9]{64}$/.test(account.credentialSha256)
-      || createHash('sha256').update(key).digest('hex') !== account.credentialSha256) {
-    throw new Error('Surplus account or exact credential review missing');
-  }
+  const key = surplusLiveKey(env);
+  if (!key) throw new Error('Surplus API key missing or invalid for live builder');
+  return key;
 }
 function reviewedEvidence(config: SurplusProductionReviews, review: SurplusCapabilityReview, now: number) {
-  const mappings = config.usageMappings.filter(m => m && m.model === review.model && text(m.reviewId)
-    && time(m.reviewedAt) && m.reviewedAt <= now && time(m.expiresAt) && m.expiresAt > now
+  const mappings = config.usageMappings.filter(m => m && m.model === review.model
     && ['prompt_tokens_details.cached_tokens', 'prompt_cache_hit_tokens'].includes(m.cacheRead)
     && m.cacheWrite === 'unsupported' && ['included-in-completion-output-rate', 'completion_tokens_details.reasoning_tokens'].includes(m.reasoning)
-    && m.additionalCharges === 'none');
-  if (mappings.length !== 1) throw new Error('Surplus usage review missing or ambiguous');
+    && m.additionalCharges === 'none' && m.expiresAt > now);
+  if (mappings.length !== 1) throw new Error('Surplus usage mapping missing for live model');
   const mapping = mappings[0];
   const tariffs = config.tariffs.filter(t => isSurplusOfficialTariffApplicable(t, {
     modelId: review.model, modelVersion: review.modelVersion, mappingReviewId: mapping.reviewId, startedAt: now, receivedAt: now,
   }, now));
-  if (tariffs.length !== 1) throw new Error('Surplus official tariff review missing or ambiguous');
+  if (tariffs.length !== 1) throw new Error('Surplus tariff missing for live model');
   return { mapping, tariff: tariffs[0] };
 }
-/** Read-only production review loader. No route can write this document or accept reviews from a request. */
 export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.env): SurplusReviewedAdapter {
   // State authority and call authority are object identities, never mutable "latest" data.
   const states = new WeakMap<object, SurplusProductionReviews & SurplusReviewedState>();
@@ -86,21 +61,18 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
     mapping: SurplusUsageMapping; tariff: SurplusOfficialTariff; state: SurplusReviewedState; canContinue?: boolean }>();
   return {
     async readState() {
+      assertLive(env);
       const db = getServerDb();
-      if (!db) throw new Error('Surplus review store unavailable');
-      const data = structuredClone((await db.doc(SURPLUS_REVIEWS_DOCUMENT).get()).data()) as unknown as SurplusProductionReviews;
-      const now = Date.now();
-      assertAccount(data, env, now);
-      if (!Array.isArray(data.capabilities) || !Array.isArray(data.tariffs) || !Array.isArray(data.usageMappings)) throw new Error('Surplus reviews missing');
-      data.capabilities = data.capabilities.filter(c => {
-        if (!c || !text(c.model) || !text(c.modelVersion)) return false;
-        try { reviewedEvidence(data, c, now); return true; } catch { return false; }
-      });
-      if (!data.capabilities.length) throw new Error('Surplus official tariff or usage mapping review missing');
+      if (!db) throw new Error('Surplus metadata store unavailable');
       // Metadata refresh has a durable 5–10 minute lease; no inference occurs here.
       await refreshSurplusRegistry();
-      const state: SurplusReviewedState = { ...data, snapshot: await new SurplusStore(db).read(surplusRegistryConfig(env).models) };
-      states.set(state, structuredClone({ ...data, snapshot: state.snapshot }));
+      const snapshot = await new SurplusStore(db).read(surplusRegistryConfig(env).models);
+      const now = Date.now();
+      // Live path: synthesize admission from key + observed snapshot. No Firestore review seed.
+      const data = synthesizeLiveReviews(env, snapshot, now);
+      if (!data.capabilities.length) throw new Error('Surplus live admission has no observed models yet');
+      const state: SurplusReviewedState = { ...data, snapshot };
+      states.set(state, structuredClone({ ...data, snapshot }));
       return state;
     },
     routing(review) { return { provider: review.providerId, si_route: { objective: 'price' } }; },
@@ -115,7 +87,7 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
     async dispatch(request, signal, permit) {
       const record = permits.get(permit), now = Date.now();
       if (!record || record.startedAt !== null) throw new Error('Unissued or replayed Surplus dispatch');
-      assertAccount(record.config, env, now);
+      assertLive(env);
       if (record.review.expiresAt <= now || permit.endpoint !== record.review.endpoint || request.model !== permit.model
           || request.provider !== permit.providerId || object(request.si_route).objective !== 'price') throw new Error('Expired or mismatched Surplus dispatch');
       reviewedEvidence(record.config, record.review, now);
@@ -145,7 +117,7 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
         endpoint: permit.endpoint, policyVersion: permit.policyVersion, priceGeneration: permit.priceGeneration,
         estimatedMicroUsd: selection.estimatedMicroUsd, controlRevision: record.state.snapshot?.controlRevision ?? 0, reviewRevision: record.config.revision, pilot: record.config.pilot, now });
       // Reservation I/O may outlive review validity or observe a credential rotation. Fail closed.
-      assertAccount(record.config, env, Date.now());
+      assertLive(env);
       reviewedEvidence(record.config, record.review, Date.now());
       recheck();
       permit.assertCurrent?.();

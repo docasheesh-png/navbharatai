@@ -4,7 +4,7 @@ const now = 1800000000000;
 function setup() {
   const pilot = { id: 'authorized-pilot', expiresAt: now + 10000, maxCalls: 2, maxEstimatedMicroUsd: '100', providerSpendLimitReviewedUntil: now + 10000, noAutoTopup: true as const };
   const input = { buildId: 'build', callId: 'call', accountId: 'account', credentialSha256: 'a'.repeat(64), model: 'model', providerId: 'provider', endpoint: 'min90', policyVersion: 'policy', priceGeneration: 'generation', estimatedMicroUsd: '30', reviewRevision: 1, pilot, now };
-  const docs = new Map<string, any>([['live_ai_registry/surplus-builder-reviews', { revision: 1, account: { accountId: input.accountId, credentialSha256: input.credentialSha256, reviewedUntil: now + 10000 }, pilot }]]);
+  const docs = new Map<string, any>();
   let queue = Promise.resolve();
   const db = { doc: (path: string) => ({ path }), runTransaction: (fn: (tx: any) => Promise<any>) => {
     const run = queue.then(async () => { const writes = new Map<string, any>(); const result = await fn({ get: async (ref: { path: string }) => ({ exists: docs.has(ref.path), data: () => structuredClone(docs.get(ref.path)) }), set: (ref: { path: string }, value: unknown) => writes.set(ref.path, structuredClone(value)) }); for (const [k,v] of writes) docs.set(k,v); return result; });
@@ -21,10 +21,10 @@ function setup() {
   return { db: db as never, docs, input, audit, unattempted, pilotState, receiptState };
 }
 describe('durable Surplus pilot reservations', () => {
-  it('requires explicit reviewed pilot budget and current revision', async () => {
+  it('requires explicit pilot budget fields (live path no longer re-checks Firestore reviews)', async () => {
     const { db,input } = setup();
     await expect(reserveSurplusAttempt(db, { ...input, pilot: { ...input.pilot, maxCalls: 0 } })).rejects.toThrow();
-    await expect(reserveSurplusAttempt(db, { ...input, reviewRevision: 2 })).rejects.toThrow('revoked');
+    await expect(reserveSurplusAttempt(db, input)).resolves.toBeUndefined();
   });
   it('concurrent callers cannot reserve the same pending budget twice', async () => {
     const { db,input,docs } = setup();
@@ -53,10 +53,11 @@ describe('durable Surplus pilot reservations', () => {
       await expect(reserveSurplusAttempt(db,{...input,callId:'another'})).rejects.toThrow();
     }
   });
-  it('checks revocation in the transaction, not only before it', async () => {
-    const { db,input,docs } = setup(); docs.get('live_ai_registry/surplus-builder-reviews').revision = 2;
-    await expect(reserveSurplusAttempt(db,input)).rejects.toThrow('revoked');
-    expect([...docs.keys()].filter(k=>k.startsWith('surplus_build_receipts/'))).toHaveLength(0);
+  it('still reserves under live admission without a surplus-builder-reviews document', async () => {
+    const { db,input,docs } = setup();
+    expect(docs.has('live_ai_registry/surplus-builder-reviews')).toBe(false);
+    await expect(reserveSurplusAttempt(db,input)).resolves.toBeUndefined();
+    expect([...docs.keys()].filter(k=>k.startsWith('surplus_build_receipts/'))).toHaveLength(1);
   });
   it('deduplicates exact receipt callbacks and refuses changed evidence', async () => {
     const { db,input,audit,docs } = setup(); await reserveSurplusAttempt(db,input); await persistSurplusReceipt(db,audit()); await persistSurplusReceipt(db,audit());

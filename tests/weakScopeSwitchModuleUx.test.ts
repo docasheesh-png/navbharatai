@@ -36,7 +36,7 @@ describe('Weak scope Switch module UX', () => {
     expect(panel).toContain('setHighlightPowerPicker(true)');
     expect(panel).toContain('data-build-options-trigger');
     expect(panel).toContain('data-power-picker');
-    expect(panel).toContain('Switch module · मॉड्यूल बदलें');
+    expect(panel).toContain('Switch module');
     const start = panel.indexOf('isWeakScopeGuidanceCode(state.resultCode)');
     const end = panel.indexOf(') : (', start);
     expect(start).toBeGreaterThan(-1);

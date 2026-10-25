@@ -110,10 +110,10 @@ describe('rollout and measured cost guard', () => {
   it('does not publish a refused implementation as successful chat completion', () => {
     const route = readFileSync(new URL('../src/server/routes/agentv3.ts', import.meta.url), 'utf8');
     const lane = route.slice(route.indexOf('if (isPlainChatTurn) {'), route.indexOf('// SECURITY (audit A2'));
-    expect(lane).toContain("chatEvents.emit({ type: 'done', ok: !weakScopeBlocked");
-    expect(lane).toContain("send({ type: 'result', ok: !weakScopeBlocked");
-    expect(lane).toContain('weakAdmissionCode');
-    expect(lane).toContain('scopeCode');
+    expect(lane).toContain('weakScopeChatTerminal');
+    expect(lane).toContain('weakScopeCatchResult');
+    expect(lane).toContain('chatEvents.emit(scopeTerminal.done)');
+    expect(lane).toContain('send(scopeTerminal.result)');
   });
 });
 

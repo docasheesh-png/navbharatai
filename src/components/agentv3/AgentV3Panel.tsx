@@ -5178,7 +5178,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                                 className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-on-accent bg-indigo-600 hover:bg-indigo-500 rounded-lg px-3 py-2 shadow-sm transition-colors"
                               >
                                 <Settings className="w-3.5 h-3.5" aria-hidden />
-                                Switch module · मॉड्यूल बदलें
+                                Switch module
                               </button>
                               {powerUnlocked && (
                                 <div className="flex items-center gap-1.5">

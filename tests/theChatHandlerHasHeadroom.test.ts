@@ -72,7 +72,8 @@ function branchTokens(body: string): number {
 // Coordination/preflight/heartbeat extracted in Phase2: measured543, preserving the down-only ratchet.
 // Framework-question eligibility extracted without changing its conditions (candidate Weak scope work).
 // Surplus Weak-only + SURPLUS_* report recording extracted to surplusChatAdmission (measured 539).
-const BRANCH_BUDGET = 539;
+// Weak scope Switch-module terminal extracted to weakScopeTerminal (measured 537).
+const BRANCH_BUDGET = 537;
 
 const WHAT_TO_DO = [
   'The chat handler is at or over its branch budget.',

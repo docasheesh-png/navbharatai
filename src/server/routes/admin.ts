@@ -205,6 +205,8 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'guest_daily_usage', 'analytics_daily', 'analytics_events', 'build_events', 'abuseLedger',
   'user_reports', 'admin_apk_reports', 'admin_build_reports', 'admin_build_triage',
   'admin_failed_report_autopsies',
+  // Singleton counter for permanent failed-build report numbers (RETAINED_INDEFINITELY).
+  'admin_failed_report_numbers',
   'hosting_billing', 'hosting_period_usage',
   // Already on clocks, and absent from this inventory for the same reason the eleven above were.
   'takedown_records', 'safety_flags', 'admin_audit_log', 'build_jobs', 'build_failures',

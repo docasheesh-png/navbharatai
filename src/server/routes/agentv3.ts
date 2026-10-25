@@ -3,7 +3,7 @@ import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibili
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
-import { resolveProBuildSurplusAdmission } from '../AI/SurplusRegistry/admitOrFallback';
+import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction } from '../AgentV3/weakBuildPreflight';
@@ -11328,35 +11328,27 @@ async function noteBuildOutcome(
     }
     const earlySurplusTurns: Array<import('../AgentV3/ClaudeClient').TurnResult> = [];
     const earlySurplusRecords: Array<Omit<import('../AgentV3/BuildDiagnostics').LlmCallRecord, 'ts'>> = [];
-    if (intent !== 'chat' || hasImportIntent) {
-      // Prefer Surplus when key+flag are live; hang/empty registry fail-opens to Weak (module keeps branches out of this handler).
-      const surplusAdmit = await resolveProBuildSurplusAdmission({
-        buildId: randomUUID(),
-        tier: powerLevelReqEffective,
-        initialWorkload: { input: Buffer.byteLength(prompt, 'utf8') + 8192, output: 8192, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
-        tierEngineAvailable: () => tierEngineAvailable(powerLevelReqEffective),
-        onFallback: (reason) => {
-          try {
-            audit('AGENTV3_SURPLUS_FALLBACK_TO_WEAK', { reason }, 'warn');
-            console.warn(`[AGENT_STEP] Surplus unavailable (${reason}); continuing on Weak/CHEAP_FLOOR ladder.`);
-          } catch { /* best-effort audit */ }
-        },
-        onAdmitted: (session) => {
-          try {
-            audit('AGENTV3_SURPLUS_ADMITTED', { model: session.model }, 'info');
-            console.log(`[AGENT_STEP] Surplus admitted for Pro build (model=${session.model}).`);
-          } catch { /* best-effort audit */ }
-        },
-      });
-      if (!surplusAdmit.ok) {
-        releaseBuildLock(buildKey, buildLockToken);
-        audit('AGENTV3_TIER_ENGINE_UNAVAILABLE', { userId, tier: powerLevelReqEffective, afterSurplusFallback: surplusAdmit.afterSurplusFallback }, 'warn');
-        respondBuilderEngineUnavailable(res, powerLevelReqEffective);
-        return;
-      }
-      surplusSession = surplusAdmit.session;
-      setAdmittedSurplusScope(surplusSession);
+    // Buffered until buildDiag exists later (module keeps Weak-only + report branches out of this handler — TS2563).
+    let surplusAdmissionDiag: SurplusAdmissionDiag | undefined;
+    // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders. Branches live in surplusChatAdmission.
+    const surplusAdmitGate = await runWeakSurplusAdmissionForChat({
+      powerLevel: powerLevelReqEffective,
+      intent,
+      hasImportIntent,
+      prompt,
+      buildId: randomUUID(),
+      tierEngineAvailable: () => tierEngineAvailable(powerLevelReqEffective),
+      audit,
+    });
+    surplusAdmissionDiag = surplusAdmitGate.diag;
+    if (!surplusAdmitGate.ok) {
+      releaseBuildLock(buildKey, buildLockToken);
+      audit('AGENTV3_TIER_ENGINE_UNAVAILABLE', { userId, tier: powerLevelReqEffective, afterSurplusFallback: surplusAdmitGate.afterSurplusFallback }, 'warn');
+      respondBuilderEngineUnavailable(res, powerLevelReqEffective);
+      return;
     }
+    surplusSession = surplusAdmitGate.session;
+    setAdmittedSurplusScope(surplusSession);
     if (surplusBuilderEnabled() && !(await checkPaidBuildAdmission())) return;
     // Scope is checked before sandbox/setup. Imports need their files inspected and keep the import pipeline.
     const weakAdmission = await weakAdmissionForTurn({ prompt, intent, importing: hasImportIntent, tier: powerLevelReqEffective },
@@ -14480,6 +14472,7 @@ async function noteBuildOutcome(
        * else's build. It is deliberately NOT a module-level singleton, which is the one shape that would
        * turn "slow for this build" into "blacklisted for everybody".
        */
+      recordSurplusAdmissionDiag(buildDiag, surplusAdmissionDiag);
       for (const row of earlySurplusRecords) buildDiag.recordLlmCall(row);
       for (const turn of earlySurplusTurns) captureTurnUsage('SURPLUS', turn.usage, turn.model, turn.usage.cacheReadInputTokens, turn.usage.cacheCreationInputTokens);
       const fastLaneDeadRungs = new Map<string, string>();

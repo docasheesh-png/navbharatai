@@ -30,7 +30,7 @@ function setup(extraEnv: Record<string, string> = {}) {
   mocks.transport.mockImplementation(async () => { vi.setSystemTime(now + 1); return wire; });
   const env = { AGENTV3_SURPLUS_BUILDER: 'true', SURPLUS_API_KEY: 'synthetic-test-key', SURPLUS_REGISTRY_MODELS: 'model-a,model-b,model-c,model-d', ...extraEnv };
   const adapter = createProductionSurplusAdapter(env);
-  const make = () => createSurplusBuildSession({ buildId: 'build', tier: 'off', enabled: true, adapter });
+  const make = () => createSurplusBuildSession({ buildId: 'build', tier: 'weak', enabled: true, adapter });
   const run = async () => (await make())!.runner().runTurn(params);
   return { snap, wire, adapter, make, run, env };
 }
@@ -94,7 +94,7 @@ describe('production Surplus adapter — live key+flag admission', () => {
   });
   it('does no database, registry or transport work when the build flag is OFF', async () => {
     setup();
-    expect(await createSurplusBuildSession({ buildId: 'build', tier: 'off', enabled: false })).toBeUndefined();
+    expect(await createSurplusBuildSession({ buildId: 'build', tier: 'weak', enabled: false })).toBeUndefined();
     expect(mocks.getServerDb).not.toHaveBeenCalled(); expect(mocks.refresh).not.toHaveBeenCalled(); expect(mocks.factory).not.toHaveBeenCalled(); expect(mocks.transport).not.toHaveBeenCalled();
   });
   it('fails closed when metadata snapshot has no offers yet', async () => {

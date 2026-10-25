@@ -64,6 +64,7 @@ export const WORKAROUND_CODES: ReadonlySet<string> = new Set([
   'SIMPLE_BUILD_FALLBACK',
   'ONESHOT_FALLBACK',
   'SIMPLE_BUILD_OUTCOME',
+  'SURPLUS_FALLBACK', // Weak Surplus fail-open to GLM/Kimi ladder — routing around, not a repair
   // HEAL_RULE 3 (autopsy 303e8a6f's heal census, each verdict checked by a second reviewer): each is recorded
   // WARNING + closed when the engine went AROUND something, and each was counted as a self-heal.
   'GOLDEN_SCAFFOLD_SKIPPED', // the tested template was not seeded; the build wrote the app from scratch instead

@@ -25,13 +25,13 @@ function setup() {
   const s = state();
   const completion = { model: 'model-a', choices: [{ message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 2 } };
   const adapter: SurplusReviewedAdapter = { readState: vi.fn(async () => s), routing: review => ({ provider: review.providerId, si_route: { objective: 'price' } }), dispatch: vi.fn(async () => completion), identify: raw => ({ model: 'model-a', providerId: 'provider-a', completion: raw as typeof completion }), receipt: vi.fn(async (_raw, permit) => receipt(permit)) };
-  const make = () => createSurplusBuildSession({ buildId: 'build', tier: 'off', enabled: true, adapter, now: () => now });
+  const make = () => createSurplusBuildSession({ buildId: 'build', tier: 'weak', enabled: true, adapter, now: () => now });
   return { s, adapter, make };
 }
 describe('Surplus build-scoped authority', () => {
   it('default OFF does not read state or construct transport', async () => {
     const { adapter } = setup();
-    expect(await createSurplusBuildSession({ buildId: 'build', tier: 'off', enabled: false, adapter })).toBeUndefined();
+    expect(await createSurplusBuildSession({ buildId: 'build', tier: 'weak', enabled: false, adapter })).toBeUndefined();
     expect(adapter.readState).not.toHaveBeenCalled(); expect(adapter.dispatch).not.toHaveBeenCalled();
   });
   it('uses full runner from an independently reviewed model/provider class', async () => {
@@ -90,4 +90,19 @@ describe('Surplus build-scoped authority', () => {
     expect(peak).toBe(1); expect(adapter.dispatch).toHaveBeenCalledTimes(2);
   });
 
+});
+
+describe('Surplus build scope is Weak-only (owner 2026-10-25)', () => {
+  it.each(['off', 'mini'] as const)('rejects Normal/Strong tier %j before adapter I/O', async (tier) => {
+    const { createSurplusBuildSession, SurplusBuildUnavailableError } = await import('./buildSession');
+    const adapter = { readState: vi.fn() } as never;
+    try {
+      await createSurplusBuildSession({ buildId: 'build', tier, enabled: true, adapter });
+      throw new Error('expected invalid_build_scope');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SurplusBuildUnavailableError);
+      expect(error).toMatchObject({ reason: 'invalid_build_scope' });
+    }
+    expect((adapter as { readState: ReturnType<typeof vi.fn> }).readState).not.toHaveBeenCalled();
+  });
 });

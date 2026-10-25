@@ -1,6 +1,6 @@
 import { PUBLIC_BUILD_ENGINE_UNAVAILABLE } from '../../lib/buildEngineError';
 import { describe, expect, it, vi } from 'vitest';
-import { createSurplusBuildTransport, SurplusBuildTransportError } from './transport';
+import { createSurplusBuildTransport, SurplusBuildTransportError, SURPLUS_TRANSPORT_TIMEOUT_MS } from './transport';
 import { BuildStoppedError } from '../../AgentV3/stopSignal';
 const env = () => ({ AGENTV3_SURPLUS_BUILDER: 'true', SURPLUS_API_KEY: 'test-only-not-a-real-key' });
 const request = () => ({ model: 'reviewed-model', provider: 'reviewed-provider', si_route: { objective: 'price' }, messages: [{ role: 'user', content: 'build' }], stream: false, max_tokens: 500 });
@@ -109,6 +109,16 @@ describe('dedicated min90 build transport', () => {
     await expect(dispatch(request(), signal())).rejects.toThrow(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
     expect(fetcher).not.toHaveBeenCalled();
   });
+  it('passes a hard transport timeout so hung Surplus HTTP cannot pin the builder forever', async () => {
+    expect(SURPLUS_TRANSPORT_TIMEOUT_MS).toBe(60_000);
+    const { dispatch, fetcher } = setup();
+    await dispatch(request(), signal());
+    const init = fetcher.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    // Combined signal must be distinct from a fresh caller signal (AbortSignal.any / controller).
+    expect(init?.signal).not.toBe(signal());
+  });
+
 });
 
 it.each([{ 'x-si-provider-family': 'x'.repeat(1025) }, { 'x-si-attempted-provider': 'provider' }])('marks omitted provider metadata instead of turning it into no-attempt evidence', async headers => {

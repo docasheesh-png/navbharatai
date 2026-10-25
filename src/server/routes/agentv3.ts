@@ -6,6 +6,7 @@ import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRe
 import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
+import { weakScopeChatTerminal, weakScopeCatchResult } from '../AgentV3/weakScopeTerminal';
 import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction } from '../AgentV3/weakBuildPreflight';
 import { toSafeClientMessage } from '../lib/httpError';
 import { clarityGateEnabled, shouldJudgeClarity, judgeClarity, clarifyReply, categoryFromWords, bestGuessPrompt, type ClarityCategory, type QuickReply } from '../AgentV3/clarityGate';
@@ -11581,10 +11582,16 @@ async function noteBuildOutcome(
         chatEvents.subscribe((e) => send(e), false);
         chatEvents.emit({ type: 'narration', agent: 'architect', text: reply, ts: Date.now(), ...(sheetFile ? { file: sheetFile } : {}) });
         if (clarifyChips && clarifyChips.length > 0) chatEvents.emit({ type: 'quick_replies', chips: clarifyChips, ts: Date.now() });
-        // A scope refusal is an answer, but cannot complete a queued implementation step.
-        chatEvents.emit({ type: 'done', ok: !weakScopeBlocked, summary: reply, ts: Date.now() });
-        // billedUsd: 0 — the cheap free router is not billed to the user as a build.
-        send({ type: 'result', ok: !weakScopeBlocked, summary: reply, steps: 0, billedUsd: 0, billedInr: 0 });
+        // A scope guidance reply is an answer, but cannot complete a queued implementation step.
+        // WEAK_SCOPE_* codes (via weakScopeChatTerminal) tell the panel to offer Switch module.
+        const scopeTerminal = weakScopeChatTerminal({
+          blocked: weakScopeBlocked,
+          admission: weakAdmission,
+          reply,
+          now: Date.now(),
+        });
+        chatEvents.emit(scopeTerminal.done);
+        send(scopeTerminal.result);
         // HISTORY (single-source-of-truth rebuild): persist this chat turn to the SAME server
         // ConversationStore every build turn uses. The plain-chat lane previously saved NOTHING
         // server-side — the root reason the client kept its own (bug-prone) transcript copies in
@@ -11613,8 +11620,7 @@ async function noteBuildOutcome(
         // A chat-side error must never turn a refused scope into an unchecked paid build.
         if (weakScopeBlocked) {
           openStream();
-          const summary = weakAdmissionReply(weakAdmission?.scope ?? null);
-          send({ type: 'result', ok: false, summary, steps: 0, billedUsd: 0, billedInr: 0 });
+          send(weakScopeCatchResult(weakAdmission));
           releaseBuildLock(buildKey, buildLockToken);
           await releaseBuildLease();
           if (!res.writableEnded) res.end();

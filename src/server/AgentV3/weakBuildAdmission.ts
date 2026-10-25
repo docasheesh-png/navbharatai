@@ -1,4 +1,5 @@
 import type { VerifiedFreeProof } from '../AI/LiveRegistry/proof';
+import { WEAK_SCOPE_STRONG, WEAK_SCOPE_UNAVAILABLE, type WeakScopeGuidanceCode } from '../../lib/weakScopeGuidance';
 /** Weak-tier preflight: one bounded classification, before sandbox work. No fallback chain. */
 export type WeakScope = 'simple' | 'complex' | 'strong';
 export interface AdmissionUsage { pricingProof?: VerifiedFreeProof; inputTokens: number; outputTokens: number; }
@@ -53,8 +54,17 @@ export async function admitWeakBuild(
   }
 }
 
+/** Structured guidance code for the Pro panel (Switch module CTA — not a Fix-with-AI failure). */
+export function weakAdmissionCode(scope: WeakScope | null): WeakScopeGuidanceCode {
+  return scope === 'strong' ? WEAK_SCOPE_STRONG : WEAK_SCOPE_UNAVAILABLE;
+}
+
+/**
+ * Calm guidance when Weak should not start coding. Not a failure framing — the user should
+ * switch Power (Weak / Normal / Strong) in Build options, or shrink the first version.
+ */
 export function weakAdmissionReply(scope: WeakScope | null): string {
   return scope === 'strong'
-    ? 'This project is beyond the Weak tier’s scope. Open ⚙️ Build options below the message box and select Strong, or ask for a smaller prototype. A full commercial-scale game needs a staged development plan even on Strong. If Strong is locked, add credits in Wallet & Billing to unlock it.'
-    : 'I could not reliably check this request’s scope, so coding has not started. Please retry or describe a smaller, specific version of the app.';
+    ? 'This request looks larger than Weak is meant for. Nothing was charged — coding has not started. Switch module below to open Build options and pick Normal or Strong, or describe a smaller first version. A full commercial-scale product usually needs a staged plan even on Strong.'
+    : 'I could not confirm this request fits Weak right now. Nothing was charged — coding has not started. Switch module below to open Build options and pick Normal or Strong, or retry with a clearer, smaller version of the app.';
 }

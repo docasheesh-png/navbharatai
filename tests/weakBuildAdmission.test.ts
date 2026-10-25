@@ -1,6 +1,7 @@
 import { glmCanDisableThinking } from '../src/server/AgentV3/providers/glmThinking';
 import { describe, expect, it, vi } from 'vitest';
-import { admitWeakBuild, parseWeakScope, weakAdmissionReply } from '../src/server/AgentV3/weakBuildAdmission';
+import { admitWeakBuild, parseWeakScope, weakAdmissionReply, weakAdmissionCode } from '../src/server/AgentV3/weakBuildAdmission';
+import { WEAK_SCOPE_STRONG, WEAK_SCOPE_UNAVAILABLE, isWeakScopeGuidanceCode } from '../src/lib/weakScopeGuidance';
 import { planLadder, tierLadder } from '../src/server/AgentV3/tierLadder';
 
 describe('Weak scope preflight', () => {
@@ -33,10 +34,24 @@ describe('Weak scope preflight', () => {
     expect((await admitWeakBuild('x'.repeat(32_001), ask)).scope).toBeNull();
     expect(ask).not.toHaveBeenCalled();
   });
-  it('offers the real selector path without promising a commercial game', () => {
-    expect(weakAdmissionReply('strong')).toContain('Build options');
-    expect(weakAdmissionReply('strong')).toContain('staged development');
-    expect(weakAdmissionReply(null)).not.toContain('select Strong');
+  it('offers calm Switch-module guidance without failure framing or a commercial-game promise', () => {
+    expect(weakAdmissionCode('strong')).toBe(WEAK_SCOPE_STRONG);
+    expect(weakAdmissionCode(null)).toBe(WEAK_SCOPE_UNAVAILABLE);
+    expect(isWeakScopeGuidanceCode(WEAK_SCOPE_STRONG)).toBe(true);
+    expect(isWeakScopeGuidanceCode('OTHER')).toBe(false);
+    const strong = weakAdmissionReply('strong');
+    expect(strong).toContain('Build options');
+    expect(strong).toContain('Switch module');
+    expect(strong).toContain('Normal or Strong');
+    expect(strong).toContain('staged plan');
+    expect(strong).toContain('Nothing was charged');
+    expect(strong.toLowerCase()).not.toMatch(/\bfail|beyond the weak|fix with ai/);
+    const unavailable = weakAdmissionReply(null);
+    expect(unavailable).toContain('Switch module');
+    expect(unavailable).toContain('Build options');
+    expect(unavailable).toContain('Nothing was charged');
+    expect(unavailable).not.toContain('select Strong');
+    expect(unavailable.toLowerCase()).not.toMatch(/could not reliably|fix with ai/);
   });
 });
 
@@ -95,8 +110,10 @@ describe('rollout and measured cost guard', () => {
   it('does not publish a refused implementation as successful chat completion', () => {
     const route = readFileSync(new URL('../src/server/routes/agentv3.ts', import.meta.url), 'utf8');
     const lane = route.slice(route.indexOf('if (isPlainChatTurn) {'), route.indexOf('// SECURITY (audit A2'));
-    expect(lane).toContain("chatEvents.emit({ type: 'done', ok: !weakScopeBlocked");
-    expect(lane).toContain("send({ type: 'result', ok: !weakScopeBlocked");
+    expect(lane).toContain('weakScopeChatTerminal');
+    expect(lane).toContain('weakScopeCatchResult');
+    expect(lane).toContain('chatEvents.emit(scopeTerminal.done)');
+    expect(lane).toContain('send(scopeTerminal.result)');
   });
 });
 

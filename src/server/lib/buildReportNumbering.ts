@@ -103,11 +103,51 @@ async function scan(db: Firestore, cohort: ReportNumberingCohort, drained: () =>
   }
 }
 
+/** Failed cohort: read permanent reportNumber from history (assigned once on retain). No renumbering. */
+async function numberPersistedFailures<T extends { workspaceId: string; startedAt?: number }>(
+  rows: T[], historyId: (row: T) => string,
+): Promise<Array<T & { numbering: BuildReportNumbering }>> {
+  const db = getServerDb();
+  if (!db) return rows.map(row => ({ ...row, numbering: unavailable('storage_unavailable') }));
+  let total: number | null = null;
+  try {
+    const counter = await db.collection('admin_failed_report_numbers').doc('counter').get();
+    const next = counter.data()?.nextNumber;
+    total = typeof next === 'number' && Number.isSafeInteger(next) && next >= 2 ? next - 1 : null;
+  } catch {
+    return rows.map(row => ({ ...row, numbering: unavailable('storage_unavailable') }));
+  }
+  return Promise.all(rows.map(async (row) => {
+    const id = historyId(row);
+    if (!validTime(row.startedAt)) return { ...row, numbering: unavailable('invalid_timestamp') };
+    try {
+      const root = db.collection(COLLECTION).doc(row.workspaceId);
+      const snap = await (id === 'latest' ? root : root.collection('history').doc(id)).get();
+      const data = snap.data();
+      const report = (id === 'latest' ? data?.report : data?.report) as Record<string, unknown> | undefined;
+      const reportNumber = data?.reportNumber;
+      const numberedAt = data?.numberedAt ?? data?.savedAt;
+      if (typeof reportNumber !== 'number' || !Number.isSafeInteger(reportNumber) || reportNumber < 1 ||
+        typeof numberedAt !== 'number' || !Number.isFinite(numberedAt) || numberedAt <= 0) {
+        return { ...row, numbering: unavailable('snapshot_miss') };
+      }
+      if (report && validTime(report.startedAt) && report.startedAt !== row.startedAt) {
+        return { ...row, numbering: unavailable('snapshot_miss') };
+      }
+      const knownTotal = total !== null && total >= reportNumber ? total : reportNumber;
+      return { ...row, numbering: { ordinal: reportNumber, total: knownTotal, asOf: numberedAt } };
+    } catch {
+      return { ...row, numbering: unavailable('storage_unavailable') };
+    }
+  }));
+}
+
 /** Lazy authenticated-list reads only. A failure never replaces the report list or invents a rank. */
 export async function numberBuildReports<T extends { workspaceId: string; startedAt?: number }>(
   cohort: ReportNumberingCohort, rows: T[], historyId: (row: T) => string,
 ): Promise<Array<T & { numbering: BuildReportNumbering }>> {
   if (!rows.length) return [];
+  if (cohort === 'failed') return numberPersistedFailures(rows, historyId);
   const db = getServerDb();
   if (!db) return rows.map(row => ({ ...row, numbering: unavailable('storage_unavailable') }));
   let entries = cache.get(db);

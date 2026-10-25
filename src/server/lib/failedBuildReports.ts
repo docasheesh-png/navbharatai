@@ -56,11 +56,31 @@ function scrubbedReportDigest(value: unknown): string {
 export function failedReportDigest(value: unknown): string {
   return scrubbedReportDigest(redactFailedReport(value));
 }
-function row(workspaceId: string, historyId: string, r: Record<string, unknown> & { startedAt: number; endedAt: number }): FailedBuildRow {
+function validReportNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
+}
+/** Permanent failed-report number from the history document; never invent a page rank here. */
+function numberingOf(data: Record<string, unknown> | undefined, total: number | null): FailedBuildRow['numbering'] {
+  if (!data || !validReportNumber(data.reportNumber)) return undefined;
+  const stamped = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0;
+  const asOf = stamped(data.numberedAt) ? data.numberedAt : (stamped(data.savedAt) ? data.savedAt : null);
+  if (asOf === null) return undefined;
+  const ordinal = data.reportNumber;
+  const knownTotal = total !== null && total >= ordinal ? total : ordinal;
+  return { ordinal, total: knownTotal, asOf };
+}
+function row(workspaceId: string, historyId: string, r: Record<string, unknown> & { startedAt: number; endedAt: number }, data?: Record<string, unknown>, total: number | null = null): FailedBuildRow {
   return redactFailedReport({ workspaceId, historyId, reportDigest: failedReportDigest(r), buildId: typeof r.buildId === 'string' ? r.buildId : null,
     startedAt: r.startedAt, endedAt: r.endedAt,
     appLabel: typeof r.prompt === 'string' ? r.prompt.split('\n')[0].slice(0, 180) : 'Untitled build',
-    rootCause: typeof r.rootCause === 'string' ? r.rootCause.slice(0, 1000) : null }) as FailedBuildRow;
+    rootCause: typeof r.rootCause === 'string' ? r.rootCause.slice(0, 1000) : null,
+    numbering: numberingOf(data, total) }) as FailedBuildRow;
+}
+async function readFailedNumberTotal(db: NonNullable<ReturnType<typeof getServerDb>>): Promise<number | null> {
+  const snap = await db.collection('admin_failed_report_numbers').doc('counter').get();
+  const next = snap.data()?.nextNumber;
+  if (!validReportNumber(next) || next < 2) return validReportNumber(next) && next === 1 ? 0 : null;
+  return next - 1;
 }
 /** Only an opaque deployment fingerprint crosses this private read boundary. */
 export function failedBuildReadObservation(): FailedBuildReadObservation {
@@ -85,6 +105,7 @@ export async function readFailedBuildPage(rawCursor?: unknown, rawLimit?: unknow
   if (!db) throw new Error('Report storage unavailable.');
   const reports: FailedBuildRow[] = [];
   let scanned = 0;
+  const total = await readFailedNumberTotal(db);
   for (let workspace = 0; workspace < MAX_WORKSPACES && scanned < MAX_SCANNED; workspace++) {
     let query = db.collection(COLLECTION).orderBy(FieldPath.documentId());
     if (c.w) query = c.after ? query.startAfter(c.w) : query.startAt(c.w);
@@ -99,7 +120,7 @@ export async function readFailedBuildPage(rawCursor?: unknown, rawLimit?: unknow
       const latest = parent.data().report;
       // Legacy latest-only reports remain readable, without duplicating their normal history row.
       if (settledFailure(latest) && !(await history.doc(String(latest.startedAt)).get()).exists) {
-        reports.push(row(parent.id, 'latest', latest));
+        reports.push(row(parent.id, 'latest', latest, parent.data(), total));
       }
       c.b = '0'; scanned++;
       if (reports.length >= limit) return { reports, nextCursor: encodeCursor(c), scanned, observation: failedBuildReadObservation() };
@@ -110,7 +131,7 @@ export async function readFailedBuildPage(rawCursor?: unknown, rawLimit?: unknow
     for (const doc of entries.docs) {
       c.b = doc.id; scanned++;
       const r = doc.data().report;
-      if (settledFailure(r)) reports.push(row(parent.id, doc.id, r));
+      if (settledFailure(r)) reports.push(row(parent.id, doc.id, r, doc.data(), total));
       if (reports.length >= limit) return { reports, nextCursor: encodeCursor(c), scanned, observation: failedBuildReadObservation() };
     }
     if (entries.size < want) { c.after = true; c.b = ''; }

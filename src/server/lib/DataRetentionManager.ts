@@ -846,6 +846,7 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
   // doc is replaced in place, but every settled build also writes `{workspace}/history/{startedAt}`, and
   // that subcollection grew for ever. It is on SUBCOLLECTION_RETENTION_POLICIES (180 days) now.
   { collection: 'workspace_diagnostics_v3', reason: "the latest report per workspace, replaced in place. Its `history` subcollection is on a 180-day clock (SUBCOLLECTION_RETENTION_POLICIES)" },
+  { collection: 'admin_failed_report_numbers', reason: 'singleton counter for permanent failed-build report numbers (max+1 on retain). Replaced in place; deleting it would allow number reuse and break agent references' },
   { collection: 'project_plans_v3', reason: "the plan the user's app is being built against" },
   { collection: 'app_engineering_memory_v1', reason: "the app's requirement ledger, open issues and change log — bounded per app, erased with the workspace" },
   { collection: 'app_builds', reason: "the user's own build record" },

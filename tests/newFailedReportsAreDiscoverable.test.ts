@@ -29,6 +29,9 @@ function fakeFirestore() {
     return q;
   };
   const ref = (path: string): any => ({ path, collection: (id: string) => collection(`${path}/${id}`), get: async () => snap(path) });
+  const applyWrite = (path: string, data: any, merge?: boolean) => {
+    docs.set(path, merge ? { ...docs.get(path), ...data } : data);
+  };
   const db: any = {
     collection,
     batch: () => {
@@ -37,9 +40,18 @@ function fakeFirestore() {
         set: (r: any, data: any, options?: { merge: boolean }) => { writes.push({ path: r.path, data, merge: options?.merge }); },
         commit: async () => {
           if (failCommit) throw new Error('Synthetic atomic write failure');
-          for (const w of writes) docs.set(w.path, w.merge ? { ...docs.get(w.path), ...w.data } : w.data);
+          for (const w of writes) applyWrite(w.path, w.data, w.merge);
         },
       };
+    },
+    runTransaction: async (fn: (tx: any) => Promise<void>) => {
+      if (failCommit) throw new Error('Synthetic atomic write failure');
+      const pending: Array<{ path: string; data: any; merge?: boolean }> = [];
+      await fn({
+        get: async (r: { path: string }) => snap(r.path),
+        set: (r: { path: string }, data: any, options?: { merge: boolean }) => { pending.push({ path: r.path, data, merge: options?.merge }); },
+      });
+      for (const w of pending) applyWrite(w.path, w.data, w.merge);
     },
   };
   return { db, docs, setFailure: (value: boolean) => { failCommit = value; } };
@@ -89,8 +101,11 @@ describe('new retained failed-report discovery', () => {
     setFailure(false);
     await commitDiagnosticsHistory(db, 'workspace-a', failure(2000), 3000);
     await commitDiagnosticsHistory(db, 'workspace-a', failure(2000), 3000);
-    expect(docs.size).toBe(2);
+    expect(docs.size).toBe(3); // root + history + failed-number counter
+    expect(docs.get('workspace_diagnostics_v3/workspace-a/history/2000').reportNumber).toBe(1);
+    expect(docs.get('admin_failed_report_numbers/counter').nextNumber).toBe(2);
     expect((await readFailedBuildPage()).reports).toHaveLength(1);
+    expect((await readFailedBuildPage()).reports[0].numbering?.ordinal).toBe(1);
   });
   it('progress becomes discoverable only after settlement, without widening the read scope', async () => {
     const { db } = fakeFirestore(); state.db = db;
@@ -118,7 +133,30 @@ describe('new retained failed-report discovery', () => {
     expect(JSON.stringify(fresh)).not.toContain('synthetic-private-deployment-name');
     expect(fresh.observation?.deployment).toBe(old.observation?.deployment);
   });
-  it('both history writers use the atomic helper, with no private independent history write', () => {
+  it('assigns permanent max+1 numbers on new failures and never renumbers on re-save or list', async () => {
+    const { db, docs } = fakeFirestore(); state.db = db;
+    await commitDiagnosticsHistory(db, 'workspace-a', failure(1000), 1010);
+    await commitDiagnosticsHistory(db, 'workspace-b', failure(2000), 2010);
+    await commitDiagnosticsHistory(db, 'workspace-a', failure(1000), 9999); // re-save older failure
+    expect(docs.get('workspace_diagnostics_v3/workspace-a/history/1000').reportNumber).toBe(1);
+    expect(docs.get('workspace_diagnostics_v3/workspace-b/history/2000').reportNumber).toBe(2);
+    expect(docs.get('admin_failed_report_numbers/counter').nextNumber).toBe(3);
+    const page = await readFailedBuildPage();
+    const byStarted = Object.fromEntries(page.reports.map(r => [r.startedAt, r.numbering?.ordinal]));
+    expect(byStarted).toEqual({ 1000: 1, 2000: 2 });
+    expect(page.reports.every(r => r.numbering?.total === 2)).toBe(true);
+  });
+  it('does not number in-progress or successful builds', async () => {
+    const { db, docs } = fakeFirestore(); state.db = db;
+    await commitDiagnosticsHistory(db, 'workspace-a', { startedAt: 1000 }, 1010, true);
+    await commitDiagnosticsHistory(db, 'workspace-a', { ...failure(2000), ok: true }, 2010);
+    expect(docs.get('workspace_diagnostics_v3/workspace-a/history/1000').reportNumber).toBeUndefined();
+    expect(docs.get('workspace_diagnostics_v3/workspace-a/history/2000').reportNumber).toBeUndefined();
+    expect(docs.has('admin_failed_report_numbers/counter')).toBe(false);
+    await commitDiagnosticsHistory(db, 'workspace-a', failure(1000), 1020);
+    expect(docs.get('workspace_diagnostics_v3/workspace-a/history/1000').reportNumber).toBe(1);
+  });
+    it('both history writers use the atomic helper, with no private independent history write', () => {
     const source = readFileSync('src/server/AgentV3/DiagnosticsStore.ts', 'utf8');
     const ast = ts.createSourceFile('DiagnosticsStore.ts', source, ts.ScriptTarget.Latest, true);
     for (const name of ['saveDiagnosticsHistory', 'upsertDiagnosticsHistoryProgress']) {

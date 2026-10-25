@@ -72,7 +72,7 @@ async function setup(costMicro = '1', signal?: AbortSignal, maxSteps = 4) {
     identify: raw => ({ model: 'model-a', providerId: 'provider-a', completion: raw as OpenAiCompletionLike }),
     receipt: vi.fn(async (_raw, permit) => receipt(permit, costMicro)),
   };
-  const session = await createSurplusBuildSession({ buildId: 'hello-build', tier: 'off', enabled: true, adapter, now: () => now });
+  const session = await createSurplusBuildSession({ buildId: 'hello-build', tier: 'weak', enabled: true, adapter, now: () => now });
   if (!session) throw new Error('Expected an enabled reviewed session');
   const ledger = createProviderUsageLedger();
   let phase = 'build';

@@ -71,8 +71,8 @@ function branchTokens(body: string): number {
  */
 // Coordination/preflight/heartbeat extracted in Phase2: measured543, preserving the down-only ratchet.
 // Framework-question eligibility extracted without changing its conditions (candidate Weak scope work).
-// Surplus admission extraction lowers the existing down-only ratchet, never raises it.
-const BRANCH_BUDGET = 541;
+// Surplus Weak-only + SURPLUS_* report recording extracted to surplusChatAdmission (measured 539).
+const BRANCH_BUDGET = 539;
 
 const WHAT_TO_DO = [
   'The chat handler is at or over its branch budget.',

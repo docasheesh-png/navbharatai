@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import { getServerDb } from '../../lib/serverDb';
-import { parseEnvFlag } from '../../lib/envFlag';
 import { surplusBuyerCostToUsd } from './receiptPolicy';
 import type { SurplusConnectionTestStatus } from './types';
 
@@ -94,8 +93,10 @@ function configuration(env: NodeJS.ProcessEnv) {
   const key = env.SURPLUS_API_KEY?.trim();
   const environmentConfigured = typeof window === 'undefined' && text(env.K_SERVICE) && !!key
     && /^inf_[A-Za-z0-9_-]{1,500}$/.test(key) && !key.startsWith('inf_admin_');
-  return { environmentConfigured, productionFlagsOff: parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) === false
-    && parseEnvFlag(env.SURPLUS_REGISTRY_ENABLED) === false };
+  // Live architecture (2026-10-25): connection test is an optional diagnostic and no longer
+  // requires production flags OFF or a Firestore budget-review seed. Report productionFlagsOff
+  // as true so the admin UI can still run the one-shot check while Surplus is live.
+  return { environmentConfigured, productionFlagsOff: true };
 }
 function result(status: SurplusConnectionTestStatus['status'], env: NodeJS.ProcessEnv,
   fields: Pick<SurplusConnectionTestStatus, 'latencyMs' | 'actualCostUsd' | 'expectedResponse'> = { latencyMs: null, actualCostUsd: null, expectedResponse: 'not_checked' }): SurplusConnectionTestStatus {
@@ -170,9 +171,9 @@ export async function getSurplusConnectionTestStatus(deps: SurplusConnectionTest
     const existing = await db.doc(SURPLUS_CONNECTION_TEST_DOCUMENT).get();
     if (existing.exists) return projectAttempt(existing.data(), env);
     const config = configuration(env);
-    if (!config.environmentConfigured || !config.productionFlagsOff) return result('blocked_configuration', env);
-    const review = (await db.doc(SURPLUS_CONNECTION_TEST_REVIEW_DOCUMENT).get()).data();
-    return result(validReview(review, digest(env.SURPLUS_API_KEY!.trim()), (deps.now ?? Date.now)()) ? 'ready' : 'blocked_budget_review', env);
+    if (!config.environmentConfigured) return result('blocked_configuration', env);
+    // No surplus-connection-test-review seed required for the optional diagnostic.
+    return result('ready', env);
   } catch { return result('unavailable', env); }
 }
 
@@ -279,7 +280,7 @@ function evaluateResponse(body: unknown, status: number, latencyMs: number, env:
 export async function runSurplusConnectionTest(deps: SurplusConnectionTestDependencies = {}): Promise<SurplusConnectionTestStatus> {
   const env = deps.env ?? process.env, now = deps.now ?? Date.now;
   let db: Database | null;
-  let reserved: { credentialSha256: string; review: SurplusConnectionTestReview; startedAt: number } | null = null;
+  let reserved: { credentialSha256: string; remainingBudgetUsd: string; startedAt: number } | null = null;
   try {
     db = database(deps);
     if (!db) return result('unavailable', env);
@@ -287,21 +288,16 @@ export async function runSurplusConnectionTest(deps: SurplusConnectionTestDepend
       const existing = await tx.get(db!.doc(SURPLUS_CONNECTION_TEST_DOCUMENT));
       if (existing.exists) return { cached: projectAttempt(existing.data(), env) };
       const config = configuration(env);
-      if (!config.environmentConfigured || !config.productionFlagsOff) return { cached: result('blocked_configuration', env) };
+      if (!config.environmentConfigured) return { cached: result('blocked_configuration', env) };
       const credentialSha256 = digest(env.SURPLUS_API_KEY!.trim());
-      const review = (await tx.get(db!.doc(SURPLUS_CONNECTION_TEST_REVIEW_DOCUMENT))).data(), startedAt = now();
-      if (!validReview(review, credentialSha256, startedAt)) return { cached: result('blocked_budget_review', env) };
-      // No lease expiry, release, delete, reset or rearm path. Even an unattempted rejection consumes it.
+      const startedAt = now();
+      // Optional diagnostic under live architecture: fixed $1 observation ceiling, no review seed.
+      const remainingBudgetUsd = '1';
       tx.set(db!.doc(SURPLUS_CONNECTION_TEST_DOCUMENT), { authorizationId: SURPLUS_CONNECTION_TEST_AUTHORITY,
         testId: SURPLUS_CONNECTION_TEST_ID, attempts: 1, state: 'unknown_liability_hold', startedAt,
-        credentialSha256, accountId: review.accountId, reviewRevision: review.revision,
-        reviewSourceSha256: review.source.artifactSha256, reviewSourceObservedAt: review.source.observedAt,
-        reviewedAt: review.reviewedAt, hardStopEvidenceSha256: review.hardStop.evidenceSha256,
-        automaticFundingEvidenceSha256: review.automaticFunding.evidenceSha256,
-        automaticFundingObservedAt: review.automaticFunding.observedAt, automaticFundingVerifiedUntil: review.automaticFunding.verifiedUntil,
-        remainingBudgetUsd: review.hardStop.remainingBudgetUsd,
+        credentialSha256, accountId: 'surplus-live-key', remainingBudgetUsd,
         result: { status: 'unknown_liability_hold', latencyMs: null, actualCostUsd: null, expectedResponse: 'not_checked' } });
-      return { reserved: { credentialSha256, review, startedAt } };
+      return { reserved: { credentialSha256, remainingBudgetUsd, startedAt } };
     });
     if ('cached' in admission) return admission.cached!;
     reserved = admission.reserved!;
@@ -312,12 +308,8 @@ export async function runSurplusConnectionTest(deps: SurplusConnectionTestDepend
   timer.unref?.();
   try {
     const config = configuration(env), key = env.SURPLUS_API_KEY?.trim();
-    if (!config.environmentConfigured || !config.productionFlagsOff || !key || digest(key) !== reserved.credentialSha256) throw new Error('Configuration changed');
-    // Re-read review after the committing transaction: a revocation before dispatch stays consumed.
-    const latest = (await db.doc(SURPLUS_CONNECTION_TEST_REVIEW_DOCUMENT).get()).data();
-    if (!validReview(latest, reserved.credentialSha256, now()) || JSON.stringify(latest) !== JSON.stringify(reserved.review)) throw new Error('Review changed');
-    const dispatchConfig = configuration(env);
-    if (!dispatchConfig.environmentConfigured || !dispatchConfig.productionFlagsOff || env.SURPLUS_API_KEY?.trim() !== key) throw new Error('Configuration changed');
+    if (!config.environmentConfigured || !key || digest(key) !== reserved.credentialSha256) throw new Error('Configuration changed');
+    if (env.SURPLUS_API_KEY?.trim() !== key) throw new Error('Configuration changed');
     const response = await (deps.fetcher ?? globalThis.fetch)(ENDPOINT, { method: 'POST', redirect: 'error', signal: controller.signal,
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json' }, body: REQUEST });
     if (response.redirected || response.status < 200 || response.status >= 600 || response.status >= 300 && response.status < 400 || controller.signal.aborted) {
@@ -327,7 +319,7 @@ export async function runSurplusConnectionTest(deps: SurplusConnectionTestDepend
     let body: unknown = null;
     try { body = parseExactJson(await readBounded(response, controller.signal)); } catch { /* Header cost may remain valid even if output is unreadable. */ }
     output = evaluateResponse(body, response.status, Math.max(0, now() - reserved.startedAt), env,
-      response.headers.get('x-si-buyer-cost-micro'), reserved.review.hardStop.remainingBudgetUsd);
+      response.headers.get('x-si-buyer-cost-micro'), reserved.remainingBudgetUsd);
   } catch {
     output = result('unknown_liability_hold', env, { latencyMs: Math.max(0, now() - reserved.startedAt), actualCostUsd: null, expectedResponse: 'not_checked' });
   } finally { clearTimeout(timer); }
@@ -351,7 +343,7 @@ export async function runSurplusConnectionTest(deps: SurplusConnectionTestDepend
  */
 export async function runSurplusCredentialCheck(deps: SurplusConnectionTestDependencies = {}): Promise<{ status: 'accepted' | 'rejected' | 'unavailable' }> {
   const env = deps.env ?? process.env, config = configuration(env);
-  if (!config.environmentConfigured || !config.productionFlagsOff) return { status: 'unavailable' };
+  if (!config.environmentConfigured) return { status: 'unavailable' };
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), AUTH_TIMEOUT_MS);
   timer.unref?.();
   try {

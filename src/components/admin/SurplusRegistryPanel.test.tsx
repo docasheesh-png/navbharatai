@@ -195,7 +195,7 @@ describe('independent one-shot connection testing', () => {
     const fetch = vi.fn(async () => response(connectionFixture())); await mountConnection(fetch);
     expect(button(connectionRoot(), 'Test connection').props.disabled).toBe(false);
     expect(renderToStaticMarkup(connectionRoot())).toContain('Configured on the server');
-    expect(renderToStaticMarkup(connectionRoot())).toContain('automatic account funding is off');
+    expect(renderToStaticMarkup(connectionRoot())).toContain('Optional diagnostic only under the live key+flag architecture');
     await vi.advanceTimersByTimeAsync(30000);
     expect(fetch).toHaveBeenCalledTimes(2);
     for (const [url, options] of fetch.mock.calls as unknown as [string, RequestInit][]) { expect(url).toBe('/api/v1/admin/surplus-registry/connection-test'); expect(options.method).toBeUndefined(); }

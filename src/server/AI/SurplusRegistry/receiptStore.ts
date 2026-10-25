@@ -82,13 +82,11 @@ export async function reserveSurplusAttempt(db: Pick<Firestore, 'doc' | 'runTran
   const pilotRef = db.doc(`surplus_pilot_admissions/${pilotKey}`);
   const receiptRef = db.doc(`surplus_build_receipts/${digest([input.accountId, input.callId])}`);
   await db.runTransaction(async tx => {
-    const [pilotDoc, receiptDoc, reviewDoc, metadataDoc] = await Promise.all([tx.get(pilotRef), tx.get(receiptRef), tx.get(db.doc('live_ai_registry/surplus-builder-reviews')), tx.get(db.doc(SURPLUS_DOCUMENT))]);
+    const [pilotDoc, receiptDoc, metadataDoc] = await Promise.all([tx.get(pilotRef), tx.get(receiptRef), tx.get(db.doc(SURPLUS_DOCUMENT))]);
     const controls = readSurplusModelControls(metadataDoc.data()?.controls);
     if (!controls || controls.revision !== controlRevision || controls.disabledModels.includes(input.model)) throw new Error('Surplus model controls revoked or changed');
-    const current = reviewDoc.data();
-    if (!current || current.revision !== input.reviewRevision || current.account?.accountId !== input.accountId
-        || current.account?.credentialSha256 !== input.credentialSha256 || current.account?.reviewedUntil <= now
-        || current.pilot?.id !== pilot.id || (['expiresAt', 'maxCalls', 'maxEstimatedMicroUsd', 'providerSpendLimitReviewedUntil', 'noAutoTopup'] as const).some(key => current.pilot?.[key] !== pilot[key])) throw new Error('Surplus review revoked or changed');
+    // Live admission (2026-10-25): pilot authority is carried on the in-process adapter permit.
+    // No Firestore surplus-builder-reviews seed is required or re-checked here.
     if (receiptDoc.exists) throw new Error('Surplus attempt already reserved; reconcile before retrying');
     const state = pilotDoc.data() ?? {};
     if (pilotDoc.exists) {

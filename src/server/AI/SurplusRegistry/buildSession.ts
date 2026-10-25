@@ -78,7 +78,7 @@ function capability(state: SurplusReviewedState, selection: { model: string; pro
       || workload.input + workload.output > r.contextTokens || workload.output > r.maxOutputTokens) return fail('reviewed_capability_or_exact_route_contract_missing');
   return r;
 }
-/** Default OFF is a strict no-I/O path. ON without reviewed adapter fails before any paid work. */
+/** Default OFF is a strict no-I/O path. ON with SURPLUS_API_KEY uses live key+flag admission (no Firestore review seed). */
 export async function createSurplusBuildSession(options: {
   buildId: string; tier: string; initialWorkload?: Workload; enabled?: boolean; adapter?: SurplusReviewedAdapter; now?: () => number;
 }): Promise<SurplusBuildSession | undefined> {

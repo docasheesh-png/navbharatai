@@ -155,7 +155,7 @@ export function SurplusRegistryPanel({ adminToken }: { adminToken: string }): Re
 
   return <section aria-label="Discounted PAID Builder Manager" className="rounded-xl border-2 border-line bg-card p-4 space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><h2 className="text-lg font-bold text-ink">Discounted PAID Builder Manager</h2><p className="text-sm text-muted">Separate from OpenRouter STRICT_FREE. Discounted offers are paid, never free. Manager controls change candidate blocks only; the separate connection check never activates production.</p></div>
+      <div><h2 className="text-lg font-bold text-ink">Discounted PAID Builder Manager</h2><p className="text-sm text-muted">Separate from OpenRouter STRICT_FREE. Discounted offers are paid, never free. Manager controls change candidate blocks only. Live Surplus needs SURPLUS_API_KEY + AGENTV3_SURPLUS_BUILDER (and SURPLUS_REGISTRY_ENABLED for metadata); the connection check is optional and never activates production.</p></div>
       <button type="button" className={button} disabled={busy || loading} onClick={() => void load()}>{loading ? 'Reading manager…' : 'Refresh paid status'}</button>
     </div>
     <p className="text-sm text-body">Status is read every 30 seconds while open. Provider metadata is synchronized by the server, not continuously streamed. Status reads never make paid calls. The separate connection test below requires an explicit action and its own server-side safeguards.</p>
@@ -330,8 +330,8 @@ export function SurplusConnectionTestPanel({ adminToken }: { adminToken: string 
   const confirmed = !!status && !error;
   return <section aria-label="One-shot connection test" className="rounded-lg border border-line bg-well p-4 space-y-3">
     <h3 className="font-bold text-ink">Connection test</h3>
-    <p className="text-sm text-muted">Independent of whether the observation manager is enabled. Uses only the saved server credential, which is never shown or entered here. Production builder and discovery flags must both remain off.</p>
-    <p className="text-sm text-muted">One fixed, short request expects “OK”. This checks connection only, not coding quality, model quality or a benchmark. The approved ceiling is $1 USD. Testing stays blocked unless the server verifies an independently reviewed provider hard stop and confirms automatic account funding is off; a token estimate is not a spending guarantee. This button cannot create that review or change a budget.</p>
+    <p className="text-sm text-muted">Independent of whether the observation manager is enabled. Uses only the saved server credential, which is never shown or entered here. Optional while Surplus is live (key + AGENTV3_SURPLUS_BUILDER).</p>
+    <p className="text-sm text-muted">One fixed, short request expects “OK”. This checks connection only, not coding quality, model quality or a benchmark. The approved ceiling is $1 USD. Optional diagnostic only under the live key+flag architecture (no Firestore budget-review seed required). A token estimate is not a spending guarantee. This button cannot change production flags or budgets.</p>
     <div className="rounded-lg border border-line p-3 space-y-2">
       <p className="text-sm text-body">Saved credential check: a separate, non-inference account authentication request. It does not spend the paid test allowance or approve output quality.</p>
       <button type="button" className={button} disabled={!status?.environmentConfigured || !status.productionFlagsOff || !!error || loading || testing || checkingCredential} onClick={() => void checkCredential()}>{checkingCredential ? 'Checking saved credential…' : 'Check saved credential'}</button>

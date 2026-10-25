@@ -144,6 +144,38 @@ export function SurplusRegistryPanel({ adminToken }: { adminToken: string }): Re
     }
   };
 
+  /** Asks the server to refresh public marketplace metadata under the shared lease. Never inference. */
+  const syncMetadata = async () => {
+    if (!view?.enabled || busy || loading || mutationLock.current) return;
+    mutationLock.current = true; setBusy(true); setNotice(''); setError('');
+    const currentSession = session.current;
+    readSequence.current++; readRequest.current?.abort(); setLoading(false);
+    const controller = new AbortController(); writeRequest.current = controller;
+    const deadline = setTimeout(() => controller.abort(), 60_000);
+    try {
+      const response = await fetch(`${ROOT}/sync`, { method: 'POST', headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' }, body: '{}', signal: controller.signal });
+      if (!mounted.current || currentSession !== session.current) return;
+      if (!response.ok) throw new ManagerUiError(response.status === 401 || response.status === 403 ? 'Admin sign-in or authorization required.' : `Metadata sync was not confirmed (HTTP ${response.status}).`);
+      const body: unknown = await response.json();
+      if (!mounted.current || currentSession !== session.current) return;
+      if (!record(body) || !['synced', 'held', 'disabled', 'unavailable', 'invalid_configuration'].includes(String(body.status))) {
+        throw new ManagerUiError('Sync response was unreadable. Refresh paid status before retrying.');
+      }
+      const status = String(body.status);
+      setNotice(status === 'synced' ? 'Metadata sync completed. No paid inference or connection test was run.'
+        : status === 'held' ? 'Another sync owns the lease or the five-minute cooldown is still active. Wait for next allowed attempt, then retry.'
+        : status === 'disabled' ? 'Observation service is disabled by server configuration.'
+        : status === 'invalid_configuration' ? 'Configured candidate universe is invalid. Check SURPLUS_REGISTRY_MODELS.'
+        : 'Metadata sync failed. Previous observations are retained; empty status cannot authorize Surplus admission.');
+      await load(true);
+    } catch (failure) {
+      if (mounted.current && currentSession === session.current) setError(`${failure instanceof ManagerUiError ? failure.message : 'Sync outcome is uncertain.'} Refresh paid status before retrying; a lost response does not prove failure.`);
+    } finally {
+      clearTimeout(deadline);
+      if (mounted.current && currentSession === session.current) { mutationLock.current = false; setBusy(false); }
+    }
+  };
+
   const controlForm = pending && <form aria-label="Review paid candidate control" onSubmit={event => { event.preventDefault(); void control(); }} className="rounded-lg border border-line bg-well p-4 space-y-3">
       <h3 className="font-bold text-ink">{pending.action === 'disable' ? 'Block paid candidate' : 'Remove manual candidate block'}</h3>
       <p className="text-sm text-body break-all">{pending.modelId}</p>
@@ -156,9 +188,12 @@ export function SurplusRegistryPanel({ adminToken }: { adminToken: string }): Re
   return <section aria-label="Discounted PAID Builder Manager" className="rounded-xl border-2 border-line bg-card p-4 space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="text-lg font-bold text-ink">Discounted PAID Builder Manager</h2><p className="text-sm text-muted">Separate from OpenRouter STRICT_FREE. Discounted offers are paid, never free. Manager controls change candidate blocks only. Live Surplus needs SURPLUS_API_KEY + AGENTV3_SURPLUS_BUILDER (and SURPLUS_REGISTRY_ENABLED for metadata); the connection check is optional and never activates production.</p></div>
-      <button type="button" className={button} disabled={busy || loading} onClick={() => void load()}>{loading ? 'Reading manager…' : 'Refresh paid status'}</button>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={button} disabled={busy || loading} onClick={() => void load()}>{loading ? 'Reading manager…' : 'Refresh paid status'}</button>
+        <button type="button" className={button} disabled={!view?.enabled || busy || loading} onClick={() => void syncMetadata()}>{busy ? 'Working…' : 'Sync metadata now'}</button>
+      </div>
     </div>
-    <p className="text-sm text-body">Status is read every 30 seconds while open. Provider metadata is synchronized by the server, not continuously streamed. Status reads never make paid calls. The separate connection test below requires an explicit action and its own server-side safeguards.</p>
+    <p className="text-sm text-body">Status is read every 30 seconds while open. Refresh paid status only re-reads saved observations. Sync metadata now asks the server to refresh public marketplace metadata under the shared five-minute lease; it never runs paid inference. The separate connection test below requires an explicit action and its own server-side safeguards.</p>
     {error && <p role="alert" className="text-sm text-danger">{error}{view ? ' The last received snapshot is unconfirmed; controls are blocked until refresh succeeds.' : ''}</p>}
     {notice && <p role="status" className="text-sm text-body">{notice}</p>}
     {!view && <p role="status" className="text-sm text-muted">{error ? 'Manager unavailable. No candidate status has been verified.' : 'Reading discounted builder status…'}</p>}

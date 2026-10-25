@@ -69,8 +69,15 @@ describe('bounded public metadata sync', () => {
     expect(fetcher.mock.calls[1]).toEqual([`${MARKET_ORIGIN}/api/markets/model-a`, expect.objectContaining({ method: 'GET', redirect: 'error', headers: { Accept: 'application/json' } })]);
     expect(store.publish).toHaveBeenCalled();
   });
-  it('rejects an oversized eligible universe instead of silently dropping offers', () => {
-    expect(() => normalizeOffers('model-a', { ...body, offers: Array.from({ length: 65 }, (_, i) => ({ ...body.offers[0], id: `offer-${i}` })) }, new Headers(), now)).toThrow('universe exceeds bound');
+  it('retains a deterministic top slice when the eligible universe exceeds the bound', () => {
+    const offers = Array.from({ length: 65 }, (_, i) => ({
+      ...body.offers[0], id: `offer-${String(i).padStart(2, '0')}`,
+      discount_pct: i === 64 ? 99 : 90, effective_input_per_1m: 100 + i, effective_output_per_1m: 200,
+    }));
+    const retained = normalizeOffers('model-a', { ...body, offers }, new Headers(), now);
+    expect(retained).toHaveLength(64);
+    expect(retained[0].offerId).toBe('offer-64');
+    expect(retained.map(o => o.offerId)).not.toContain('offer-63'); // lowest-ranked of the 90% cohort dropped
   });
   it.each([NaN, Infinity, 1, 300001, 600000, 600001])('rejects invalid sync cadence before store/network (%s)', async interval => {
     const store = { claim: vi.fn() } as unknown as Store;

@@ -37,7 +37,8 @@ export interface LiveUsageMapping {
 
 export interface LiveProductionReviews {
   revision: number;
-  snapshot: null;
+  /** Observed metadata snapshot when attached by the production adapter; synthesizer leaves null. */
+  snapshot: Snapshot | null;
   reviews: Reviews;
   capabilities: SurplusCapabilityReview[];
   floorContract: SurplusRequestFloorContract;

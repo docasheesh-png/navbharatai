@@ -426,3 +426,16 @@ describe('repo ownership decides whether we may offer a deploy from it', () => {
     expect(s.repoOwnedByUser).toBe(false);
   });
 });
+
+describe('Weak scope guidance code on result/done', () => {
+  it('stores result.code as resultCode', () => {
+    const fromResult = agentV3Reducer(initialAgentV3State(), {
+      type: 'result', ok: false, summary: 'Switch module', steps: 0, billedUsd: 0, code: 'WEAK_SCOPE_STRONG',
+    } as never);
+    expect(fromResult.resultCode).toBe('WEAK_SCOPE_STRONG');
+    const fromDone = agentV3Reducer(initialAgentV3State(), {
+      type: 'done', ok: false, summary: 'Switch module', ts: 1, code: 'WEAK_SCOPE_UNAVAILABLE',
+    } as never);
+    expect(fromDone.resultCode).toBe('WEAK_SCOPE_UNAVAILABLE');
+  });
+});

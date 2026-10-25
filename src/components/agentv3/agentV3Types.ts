@@ -163,14 +163,14 @@ export type AgentV3WireEvent =
    * (liveBuildCost.ts). Sent only to someone who will be charged; one number, no vendor, no split.
    */
   | { type: 'cost_so_far'; inr: number; ts: number }
-  | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
+  | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth; code?: string }
   /**
    * `code` is set when the server refused for a reason the UI can ACT on rather than merely print.
    * Today that is `phone-verification-required` (an import from an account with no verified number),
    * which opens the verify sheet instead of leaving the user reading a sentence with nowhere to go.
    */
   | { type: 'error'; message: string; ts: number; code?: string; diagnostics?: unknown }
-  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; queueContinuation?: QueueContinuationTicket; budgetReached?: boolean; tokens?: number; planRemaining?: number; filesWritten?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string; appRendered?: boolean };
+  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; queueContinuation?: QueueContinuationTicket; budgetReached?: boolean; tokens?: number; planRemaining?: number; filesWritten?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string; appRendered?: boolean; /** Weak scope guidance — Switch module, not Fix with AI. */ code?: string };
 
 /** One live agent card in the "AI Team" tracker (D9 — driven by REAL events only). */
 export interface AgentCard {
@@ -359,6 +359,8 @@ export interface AgentV3ClientState {
   error?: string;
   /** Set when the failure has an action attached — see the `error` wire event's `code`. */
   errorCode?: string;
+  /** Set when `result`/`done` carries a UI action code (e.g. WEAK_SCOPE_STRONG → Switch module). */
+  resultCode?: string;
 }
 
 /** R2 §4.6 — readiness verdict shown as a build-health card after a build. */

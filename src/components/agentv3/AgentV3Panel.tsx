@@ -9,6 +9,7 @@ import { buildElapsedMs } from './buildClock';
 import { nextUserMessageTs } from './conversationClock';
 import { SubmissionScope, submissionStatus, submissionIsWorking, type SubmissionPhase } from './submissionScope';
 import { CONTINUE_INTERRUPTED_BUILD_PROMPT, CONTINUE_PAST_BUDGET_PROMPT, CONTINUE_AND_FIX_BUILD_PROMPT } from '../../lib/continueBuildPrompts';
+import { isWeakScopeGuidanceCode } from '../../lib/weakScopeGuidance';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
 import { publicTierLabel } from '../../lib/engineLabels';
 import { sessionIsPro } from '../../lib/sessionRouting';
@@ -5139,6 +5140,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-emerald-700 hover:bg-emerald-600 rounded px-2.5 py-1"
                     >
                       <Sparkles className="w-3.5 h-3.5" /> Look at the remaining check
+                    </button>
+                  )}
+                </div>
+              ) : isWeakScopeGuidanceCode(state.resultCode) ? (
+                /* Weak scope guidance — not a build failure. Offer Switch module → Build options Power picker. */
+                <div className="px-3 py-2 bg-indigo-500/10 text-accent-text text-xs rounded border border-indigo-900/50">
+                  <div className="flex items-start gap-2">
+                    <Settings className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span className="whitespace-pre-wrap break-words">{state.summary}</span>
+                  </div>
+                  {!running && (
+                    <button
+                      type="button"
+                      onClick={() => setSettingsOpen(true)}
+                      title="Open Build options to pick Weak, Normal, or Strong"
+                      className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-on-accent bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1.5"
+                    >
+                      <Settings className="w-3.5 h-3.5" /> Switch module · मॉड्यूल बदलें
                     </button>
                   )}
                 </div>

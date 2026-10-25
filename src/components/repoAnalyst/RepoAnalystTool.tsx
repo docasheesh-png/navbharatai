@@ -1,3 +1,5 @@
+import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS } from '../chat/ComposerShell';
+import { autoGrow } from '../../lib/autoGrowTextarea';
 import React, { useEffect, useRef, useState } from 'react';
 import { GitBranch, Search, Send, Sparkles, Copy, Download } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
@@ -50,6 +52,8 @@ export function RepoAnalystTool({ userId }: { userId?: string }) {
   const [turns, setTurns] = useState<Turn[]>([]); // report + follow-ups (assistant/user)
   const [loading, setLoading] = useState(false);
   const [followUp, setFollowUp] = useState('');
+  const followUpRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (followUpRef.current) autoGrow(followUpRef.current, 192); }, [followUp]);
   const [genFiles, setGenFiles] = useState<GenFile[]>([]);
   const [genSummary, setGenSummary] = useState('');
   const [genLoading, setGenLoading] = useState(false);
@@ -234,18 +238,19 @@ export function RepoAnalystTool({ userId }: { userId?: string }) {
 
       {/* Follow-up box (only after a report exists) */}
       {hasReport && (
-        <div className="p-3 border-t border-line flex items-end gap-2 shrink-0">
-          <textarea
-            value={followUp}
-            onChange={(e) => setFollowUp(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(); } }}
-            placeholder="Ask a follow-up about this repo (e.g. “how would I add tests?”)…"
-            rows={1}
-            className="flex-1 resize-none bg-card border border-line rounded-xl px-3 py-2 text-sm text-ink placeholder:text-faint focus:outline-none focus:border-indigo-500/40 max-h-32"
-          />
-          <button onClick={() => ask()} disabled={!followUp.trim() || loading} className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-on-accent flex items-center justify-center shrink-0">
-            {loading ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-          </button>
+        <div className={COMPOSER_PANEL_CLASS}>
+          <ComposerShell controls={null} send={(
+            <button onClick={() => ask()} disabled={!followUp.trim() || loading} aria-label="Send follow-up" className={COMPOSER_SEND_CLASS}>
+              {loading ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+            </button>
+          )}>
+            <textarea ref={followUpRef} value={followUp}
+              onChange={(e) => setFollowUp(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); ask(); } }}
+              placeholder="Ask a follow-up about this repo…" aria-label="Ask a follow-up about this repo"
+              rows={1} className={COMPOSER_TEXTAREA_CLASS}
+            />
+          </ComposerShell>
         </div>
       )}
     </div>

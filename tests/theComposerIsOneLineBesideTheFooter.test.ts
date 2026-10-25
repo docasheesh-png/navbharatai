@@ -1,27 +1,12 @@
-/**
- * THE MESSAGE BOX IS ONE LINE WHEN THE FOOTER ALREADY CARRIES HISTORY AND MODE (admin 2026-09-24).
- *
- * Admin, with a phone screenshot of the free chat — footer on, box still two rows:
- *   "jab navbharatai free chat ke sabhi ai me footer on hai, (full screen exit hai) to input box double
- *    line dikhane ki jarurat nahi hai!!! … input box ko 2 line me is liye dikhaya ja raha tha, kyu ki
- *    history button gayab tha. ab jab history button footer me hai, to input box single line me
- *    chalega!! sabhi mode ke liye badlo"
- *
- * The two rows (2026-09-23) existed only to stand beside the History / Mode column; with that column
- * gone the text no longer needed a row of its own. The column is absent EXACTLY when the phone's bottom
- * bar is on screen (App passes `undefined` for both openers then), so the shell reads the column — one
- * answer, derived once in App — and never asks the device question a second time.
- *
- * Every surface renders this one shell, so "sabhi mode ke liye" is true by construction; the last block
- * holds each of them to passing BOTH openers through, since a surface that dropped one would silently
- * pick the wrong layout.
+/** 2026-10-25: the roomy prompt card supersedes the September one-line footer layout.
+ * Footer visibility changes only the navigation rail, never the width available for writing.
  */
 import { describe, it, expect } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { ComposerShell, SEND_SLOT_CLASS } from '../src/components/chat/ComposerShell';
+import { ComposerShell, COMPOSER_SEND_SLOT_CLASS } from '../src/components/chat/ComposerShell';
 
 const read = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8');
 
@@ -40,27 +25,26 @@ function render(opts: { history?: boolean; mode?: boolean }): string {
   );
 }
 
-describe('footer on (no History / Mode column) ⇒ one line', () => {
+describe('footer on (no History / Mode column) ⇒ roomy prompt card', () => {
   const html = render({});
 
-  it('lays the box out on one line', () => {
-    expect(html).toContain('data-composer-layout="one-line"');
-    expect(html).not.toContain('data-composer-layout="two-rows"');
+  it('keeps writing and controls on separate rows', () => {
+    expect(html).toContain('data-composer-layout="two-rows"');
+    expect(html).not.toContain('data-composer-layout="one-line"');
   });
 
-  it('puts the text, the controls and Send side by side, in that order', () => {
+  it('puts the text before the toolbar and keeps Send last', () => {
     const text = html.indexOf('data-ctl="text"');
     const ctl = html.indexOf('data-ctl="attach"');
     const send = html.indexOf('data-ctl="send"');
     expect(text).toBeGreaterThan(-1);
     expect(ctl).toBeGreaterThan(text);
     expect(send).toBeGreaterThan(ctl);
-    // No column and no second row: the controls are not wrapped in the two-row box's own row.
-    expect(html).not.toContain('justify-end gap-1 px-1.5 pb-1');
+    expect(html.indexOf('data-composer-toolbar')).toBeGreaterThan(text);
   });
 
   it('does not force the box to two rows\' height through Send', () => {
-    expect(html).toContain(SEND_SLOT_CLASS.oneLine);
+    expect(html).toContain(COMPOSER_SEND_SLOT_CLASS);
     expect(html).not.toContain('min-h-[84px]');
   });
 
@@ -75,11 +59,12 @@ describe('full screen (the column is back) ⇒ the two rows the admin sketched',
     ['Mode only', { mode: true }],
     ['History only', { history: true }],
   ] as const) {
-    it(`${label}: two rows, Send at least 72px`, () => {
+    it(`${label}: two rows, Send in its own non-shrinking slot`, () => {
       const html = render(opts);
       expect(html).toContain('data-composer-layout="two-rows"');
-      expect(html).toContain(SEND_SLOT_CLASS.twoRows);
-      expect(html).toContain('justify-end gap-1 px-1.5 pb-1');
+      expect(html).toContain(COMPOSER_SEND_SLOT_CLASS);
+      expect(html).toContain('data-composer-toolbar');
+      expect(html).toContain('flex-wrap');
     });
   }
 });
@@ -170,10 +155,10 @@ describe('a tap anywhere in the box that is not a control goes to the text', () 
     expect(tapFocusesComposerText(null, box)).toBe(false);
   });
 
-  it('both layouts wire the handler onto the box itself', () => {
+  it('the one layout wires the handler onto the box itself', () => {
     const SHELL = read('src/components/chat/ComposerShell.tsx');
     const wired = SHELL.match(/ref=\{wholeBox\.ref\} onMouseDown=\{wholeBox\.onMouseDown\} onClick=\{wholeBox\.onClick\}/g) ?? [];
-    expect(wired.length).toBe(2);
+    expect(wired.length).toBe(1);
   });
 });
 

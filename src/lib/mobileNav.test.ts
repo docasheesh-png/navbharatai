@@ -59,7 +59,7 @@ describe('every professional gets the compact header (locked)', () => {
     // 2026-10-13 ("claude jaisa") it is the page itself with 4px above and 8px below — tighter still.
     expect(chat).toContain('className={COMPOSER_PANEL_CLASS}');
     const shell = readFileSync(resolve(process.cwd(), 'src/components/chat/ComposerShell.tsx'), 'utf8');
-    expect(shell).toContain("'px-3 pt-1 pb-2 bg-surface shrink-0'");
+    expect(shell).toContain("'px-3 pt-2 pb-2 sm:pt-3 sm:pb-3 bg-surface shrink-0'");
   });
 });
 

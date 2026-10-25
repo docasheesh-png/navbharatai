@@ -195,5 +195,7 @@ is now enforced at the source, by CI.**
   above fails when one stops.
 - **The composer is one soft pill (`chat/ComposerShell.tsx`):** `rounded-[1.5rem]` on the card surface, a
   faint shadow, the accent token on focus, and a 36px `rounded-full` Send with an up arrow at the bottom-right.
-  This SUPERSEDES the 2026-09-23 tall Send and the indigo focus border; the layout rules (two rows beside the
-  rail, one line beside the footer, the whole box is the input) are unchanged.
+  This SUPERSEDES the 2026-09-23 tall Send and the indigo focus border. The 2026-10-25 app-wide input request
+  supersedes the single-line footer layout: every AI composer uses a centred, roomy card with a full-width
+  writing row and a separate wrapping toolbar. The history/mode rail remains optional; it never decides
+  whether the text must compete with controls for horizontal space. Pro uses the same card/text tokens.

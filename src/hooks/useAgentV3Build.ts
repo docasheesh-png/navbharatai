@@ -1,3 +1,4 @@
+import { createConversationEventClock, nextUserMessageTs } from '../components/agentv3/conversationClock';
 import { createPendingRequestIdentities } from '../lib/requestIdentity';
 import { fetchQueuedContinuationAdmission } from '../components/agentv3/queuedContinuationClient';
 import { confirmedQueueResponse, confirmedQueueClaim, confirmedEnqueue, type QueueResponseItem } from '../lib/queueResponse';
@@ -51,6 +52,10 @@ export type UserChatMsg = { role: 'user'; text: string; ts: number };
 export interface UseAgentV3Build {
   state: AgentV3ClientState;
   running: boolean;
+  /** Synchronous execution ownership, including before React commits running. */
+  isBusy: () => boolean;
+  /** Anchor a mid-build user message before subsequent response events. */
+  markUserMessage: (ts: number) => void;
   error: string | null;
   /**
    * True when `error` came from an HTTP refusal raised BEFORE the build stream opened — so no
@@ -58,7 +63,7 @@ export interface UseAgentV3Build {
    * there is no app code a "Fix with AI" could refer to (autopsy fdd59ef8).
    */
   errorBeforeBuildStarted: boolean;
-  start: (prompt: string, opts?: { requestId?: string; queueItemId?: string; queueClaimToken?: string; queueContinuationProtocol?: 1; queueContinuationNonce?: string; queuePredecessorAttemptId?: string; userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean; confirmedFeatures?: { include: string[]; exclude: string[] } }) => Promise<void>;
+  start: (prompt: string, opts?: { userMessageTs?: number; requestId?: string; queueItemId?: string; queueClaimToken?: string; queueContinuationProtocol?: 1; queueContinuationNonce?: string; queuePredecessorAttemptId?: string; userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean; confirmedFeatures?: { include: string[]; exclude: string[] } }) => Promise<void>;
   /** Approve or reject a pending plan/permission gate (P4). */
   respond: (requestId: string, approved: boolean) => Promise<void>;
   /** A project import gave this session a workspace without a build — adopt it unless one is already live. */
@@ -330,7 +335,15 @@ export function stallWatchdogAction(opts: { alive: boolean; sawResult: boolean }
 
 export function useAgentV3Build(): UseAgentV3Build {
   const [state, setState] = useState<AgentV3ClientState>(initialAgentV3State);
-  const [running, setRunning] = useState(false);
+  const [running, setRunningState] = useState(false);
+  const runningRef = useRef(false);
+  const setRunning = useCallback((value: boolean) => { runningRef.current = value; setRunningState(value); }, []);
+  const startInFlightRef = useRef<symbol | null>(null);
+  const isBusy = useCallback(() => runningRef.current || startInFlightRef.current !== null, []);
+  const eventClockRef = useRef(createConversationEventClock());
+  const latestStateRef = useRef(state);
+  latestStateRef.current = state;
+  const markUserMessage = useCallback((ts: number) => eventClockRef.current.markUserMessage(ts), []);
   // ⏱️ The build clock freezes when the build stops running, on THIS device's clock — the same one `startedAt`
   // was stamped on at Send (autopsy 303e8a6f; see buildClock.ts). One effect covers every way a build ends.
   useEffect(() => {
@@ -409,6 +422,8 @@ export function useAgentV3Build(): UseAgentV3Build {
     // genuinely running server-side keeps running in the background and shows up in history when done;
     // this only stops THIS UI from displaying its stream).
     generationRef.current += 1;
+    startInFlightRef.current = null;
+    eventClockRef.current = createConversationEventClock();
     abortRef.current?.abort();
     abortRef.current = null;
     resumeInFlightRef.current = false;
@@ -422,6 +437,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   const stop = useCallback((workspaceId?: string) => {
     generationRef.current += 1; // invalidate any in-flight resume()/subscribeLive() from this point on
     const stopGeneration = generationRef.current;
+    startInFlightRef.current = null;
     abortRef.current?.abort();
     abortRef.current = null;
     setRunning(false);
@@ -525,7 +541,8 @@ export function useAgentV3Build(): UseAgentV3Build {
     // FILE-REVEAL PACING (admin 2026-07-21): burst-completed "✓ file (n/m)" lines drip into the feed
     // one-by-one (order-preserving, real events only; a terminal event flushes instantly). The build
     // itself is untouched — this paces only what the user SEES. See revealPacer.ts for the honesty rules.
-    const pacer = createRevealPacer<AgentV3WireEvent>((e) => setState((prev) => agentV3Reducer(prev, e)), FILE_REVEAL_PACER_OPTS);
+    const eventClock = eventClockRef.current;
+    const pacer = createRevealPacer<AgentV3WireEvent>((e) => { if (!isStale(gen)) setState((prev) => agentV3Reducer(prev, eventClock.project(e))); }, FILE_REVEAL_PACER_OPTS);
     for (;;) {
       if (isStale(gen)) { pacer.discard(); try { await reader.cancel(); } catch { /* best-effort */ } return; }
       const { done, value } = await reader.read();
@@ -559,6 +576,7 @@ export function useAgentV3Build(): UseAgentV3Build {
         // result is in. Key ONLY on `result` (build-terminal, once per build) — NOT `done`, which
         // sub-agents also emit on this shared stream. See the same guard in start()'s stream loop.
         if ((event as { type?: string }).type === 'result' && !isStale(gen)) {
+          startInFlightRef.current = null; // this generation owns the confirmed terminal result
           if (sink) sink.sawResult = true; // build is terminal — a later stream drop is not a failure
           sawResultRef.current = true; // WATCHDOG — a later "not running" probe = finished, not stalled
           resultWorkspaceRef.current = workspaceIdRef.current;
@@ -642,7 +660,8 @@ export function useAgentV3Build(): UseAgentV3Build {
             if (isStale(myGen)) { stopped = true; return; } // session moved on while this fetch was in flight
             idlePolls = 0;
             hadActivity = true;
-            setState((cur) => events.reduce((s, e) => agentV3Reducer(s, e), cur));
+            const eventClock = eventClockRef.current;
+            setState((cur) => events.reduce((s, e) => agentV3Reducer(s, eventClock.project(e)), cur));
           } else if (j.running !== true) {
             idlePolls += 1; // no activity + not provably running → wind down so an idle open panel stops polling
           }
@@ -787,7 +806,10 @@ export function useAgentV3Build(): UseAgentV3Build {
       // (complete/error/stopped), so 'running' + not-live is a TRUTHFUL "unfinished" signal, never a
       // cleanly-finished build. The panel uses it to honestly offer a one-click Continue.
       const unfinished = isUnfinishedBuild(conv);
-      return { messages: conversationToUserMessages(conv), workspaceId: conv.workspaceId, framework: conv.framework, unfinished };
+      const messages = conversationToUserMessages(conv);
+      startInFlightRef.current = null;
+      eventClockRef.current = createConversationEventClock(unfinished ? messages.at(-1)?.ts : undefined);
+      return { messages, workspaceId: conv.workspaceId, framework: conv.framework, unfinished };
     } catch (e) {
       lastLoadDiagRef.current = `network/exception while loading (${e instanceof Error ? e.message : String(e)})`;
       return null; // best-effort — never disrupt the panel on a load failure
@@ -1346,8 +1368,12 @@ export function useAgentV3Build(): UseAgentV3Build {
   }, []);
 
   const start = useCallback(
-    async (prompt: string, opts?: { requestId?: string; queueItemId?: string; queueClaimToken?: string; queueContinuationProtocol?: 1; queueContinuationNonce?: string; queuePredecessorAttemptId?: string; userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean; confirmedFeatures?: { include: string[]; exclude: string[] } }) => {
-      if (running) return;
+    async (prompt: string, opts?: { userMessageTs?: number; requestId?: string; queueItemId?: string; queueClaimToken?: string; queueContinuationProtocol?: 1; queueContinuationNonce?: string; queuePredecessorAttemptId?: string; userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean; confirmedFeatures?: { include: string[]; exclude: string[] } }) => {
+      if (running || startInFlightRef.current) return;
+      const startToken = Symbol('build-send');
+      startInFlightRef.current = startToken;
+      const previous = latestStateRef.current;
+      eventClockRef.current = createConversationEventClock(opts?.userMessageTs ?? nextUserMessageTs(Date.now(), [previous.narration, previous.activity, previous.activityLog]));
       // V4-1a — remember this turn's shape so an interrupted build can auto-continue itself
       // (attachments/importUrl deliberately dropped: the continue-turn resumes from durable files).
       lastStartRef.current = { prompt, opts: { userId: opts?.userId, email: opts?.email, sessionId: opts?.sessionId, framework: opts?.framework, queueItemId: opts?.queueItemId } };
@@ -1457,6 +1483,7 @@ export function useAgentV3Build(): UseAgentV3Build {
         const res = opts?.queueContinuationNonce
           ? await fetchQueuedContinuationAdmission({ send: sendBuild, signal: controller.signal, current: () => !isStale(gen) })
           : await sendBuild(controller.signal);
+        if (isStale(gen)) { try { await res.body?.cancel(); } catch { /* abandoned response */ } return; }
 
         if (!res.ok || !res.body) {
           let msg = `AgentV3 request failed (${res.status}).`;
@@ -1470,6 +1497,7 @@ export function useAgentV3Build(): UseAgentV3Build {
           } catch {
             /* non-JSON error body */
           }
+          if (isStale(gen)) return;
           // A verified terminal receipt confirms that this logical request has ended. No retry is
           // executed here; a later deliberate Send may create a new turn. Unknown/in-progress stays pinned.
           if (body.code === 'BUILD_REQUEST_TERMINAL' && body.requestState === 'terminal') {
@@ -1551,7 +1579,8 @@ export function useAgentV3Build(): UseAgentV3Build {
         // any event already in-flight when that happens must still be dropped, exactly like
         // pumpStream/subscribeLive, or it silently repopulates the session the user just switched to.
         // FILE-REVEAL PACING (admin 2026-07-21): same honest drip as the attach stream — see revealPacer.ts.
-        const pacer = createRevealPacer<AgentV3WireEvent>((e) => setState((prev) => agentV3Reducer(prev, e)), FILE_REVEAL_PACER_OPTS);
+        const eventClock = eventClockRef.current;
+        const pacer = createRevealPacer<AgentV3WireEvent>((e) => { if (!isStale(gen)) setState((prev) => agentV3Reducer(prev, eventClock.project(e))); }, FILE_REVEAL_PACER_OPTS);
         for (;;) {
           if (isStale(gen)) { pacer.discard(); try { await reader.cancel(); } catch { /* best-effort */ } return; }
           const { done, value } = await reader.read();
@@ -1591,6 +1620,7 @@ export function useAgentV3Build(): UseAgentV3Build {
             }
             if ((event as { type?: string }).type === 'result' && !isStale(gen)) {
               if (!receiptRefused) pendingBuildRequestIds.current.acknowledge(requestKey, requestId);
+              if (startInFlightRef.current === startToken) startInFlightRef.current = null;
               sawResult = true; // build is terminal — a later stream drop is not a failure
               sawResultRef.current = true; // WATCHDOG — a later "not running" probe = finished, not stalled
               resultWorkspaceRef.current = workspaceIdRef.current;
@@ -1674,6 +1704,7 @@ export function useAgentV3Build(): UseAgentV3Build {
           }
         }
       } finally {
+        if (startInFlightRef.current === startToken) startInFlightRef.current = null;
         // Only clear shared flags if THIS build is still the current generation — otherwise a
         // NEWER session's reset()/start()/resume() that began while this one was unwinding would
         // have its own running/abortRef state clobbered by this call's cleanup.
@@ -1751,5 +1782,6 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
 
-  return { state, running, error, errorBeforeBuildStarted, start, respond, restore, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueState, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
+  return {
+    isBusy, markUserMessage, state, running, error, errorBeforeBuildStarted, start, respond, restore, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueState, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

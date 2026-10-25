@@ -1,3 +1,5 @@
+import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS, COMPOSER_ICON_CLASS } from '../chat/ComposerShell';
+import { autoGrow } from '../../lib/autoGrowTextarea';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Bot, X, ChevronDown, Send, ImagePlus, User } from 'lucide-react';
 import { authJsonHeaders } from '../../lib/authHeaders';
@@ -50,6 +52,8 @@ export const BotBuildHelp: React.FC<Props> = ({ mode, onModeChange }) => {
     { sender: 'ai', text: "Hi! I'm your NavBharatAI helper 🤖 I'll walk you through building your bot and putting it live on Telegram/WhatsApp — one simple step at a time. Stuck somewhere? Just send me a screenshot and I'll tell you exactly what to tap next. What would you like to do first?" },
   ]);
   const [input, setInput] = useState('');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (inputRef.current) autoGrow(inputRef.current, 192); }, [input]);
   const [busy, setBusy] = useState(false);
   const [pendingImg, setPendingImg] = useState<{ name: string; type: string; base64: string; preview: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -167,7 +171,7 @@ export const BotBuildHelp: React.FC<Props> = ({ mode, onModeChange }) => {
       </div>
 
       {/* Composer */}
-      <div className="flex-shrink-0 border-t border-line p-2.5" style={{ background: 'var(--surface-card)' }}>
+      <div className={COMPOSER_PANEL_CLASS}>
         {pendingImg && (
           <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-lg bg-raised text-xs text-muted">
             <img src={pendingImg.preview} alt="attached" className="w-8 h-8 rounded object-cover" />
@@ -175,20 +179,19 @@ export const BotBuildHelp: React.FC<Props> = ({ mode, onModeChange }) => {
             <button onClick={() => setPendingImg(null)} className="text-faint hover:text-ink"><X size={13} /></button>
           </div>
         )}
-        <div className="flex items-end gap-1.5">
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pickImage} />
-          <button onClick={() => fileRef.current?.click()} title="Attach a screenshot" aria-label="Attach screenshot" className="w-9 h-9 rounded-lg flex items-center justify-center text-muted hover:text-ink hover:bg-raised flex-shrink-0"><ImagePlus size={17} /></button>
-          <textarea
-            value={input}
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pickImage} />
+        <ComposerShell controls={(
+          <button onClick={() => fileRef.current?.click()} title="Attach a screenshot" aria-label="Attach screenshot" className={COMPOSER_ICON_CLASS}><ImagePlus size={17} /></button>
+        )} send={(
+          <button onClick={send} disabled={busy || (!input.trim() && !pendingImg)} aria-label="Send" className={COMPOSER_SEND_CLASS}><Send size={15} /></button>
+        )}>
+          <textarea ref={inputRef} value={input}
             onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-            rows={1}
-            placeholder="Ask anything, or send a screenshot…"
-            className="flex-1 rounded-xl px-3 py-2 text-xs text-body border border-line resize-none focus:outline-none focus:border-indigo-500/50 max-h-24"
-            style={{ background: 'var(--surface-base)' }}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
+            rows={1} aria-label="Ask NavBharatAI"
+            placeholder="Ask anything, or send a screenshot…" className={COMPOSER_TEXTAREA_CLASS}
           />
-          <button onClick={send} disabled={busy || (!input.trim() && !pendingImg)} aria-label="Send" className="w-9 h-9 rounded-lg flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-on-accent flex-shrink-0"><Send size={15} /></button>
-        </div>
+        </ComposerShell>
       </div>
     </div>
   );

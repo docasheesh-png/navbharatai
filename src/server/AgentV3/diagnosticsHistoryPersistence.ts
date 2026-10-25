@@ -4,7 +4,7 @@ import type { Firestore } from 'firebase-admin/firestore';
 export const FAILED_REPORT_NUMBER_COLLECTION = 'admin_failed_report_numbers';
 export const FAILED_REPORT_NUMBER_DOC = 'counter';
 
-function isSettledFailure(report: { startedAt: number } & Record<string, unknown>, inProgress?: boolean): boolean {
+function isSettledFailure(report: { startedAt: number; endedAt?: number; ok?: boolean }, inProgress?: boolean): boolean {
   if (inProgress) return false;
   const endedAt = report.endedAt;
   return report.ok === false && typeof report.startedAt === 'number' && Number.isFinite(report.startedAt) && report.startedAt > 0 &&
@@ -28,7 +28,7 @@ function validReportNumber(value: unknown): value is number {
 export async function commitDiagnosticsHistory(
   db: Firestore,
   workspaceId: string,
-  report: { startedAt: number } & Record<string, unknown>,
+  report: { startedAt: number; endedAt?: number; ok?: boolean },
   savedAt: number,
   inProgress?: boolean,
 ): Promise<void> {

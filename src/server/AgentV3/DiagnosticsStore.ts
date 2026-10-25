@@ -9,6 +9,7 @@
 // Pattern mirrors WorkspaceFileStore: firebase-admin, VITEST-skip, best-effort, never throws.
 
 import * as admin from 'firebase-admin';
+import { commitDiagnosticsHistory } from './diagnosticsHistoryPersistence';
 import { getServerDb } from '../lib/serverDb';
 import { audit, truncateForAudit } from '../lib/audit';
 import { reportProblems, outcomeCodeOf, severityOfOutcome, appWasSeenRunning, stoppedByUser, type BuildDiagnosticsReport } from './BuildDiagnostics';
@@ -625,12 +626,7 @@ export async function saveDiagnosticsHistory(workspaceId: string, report: BuildD
       return;
     }
     const result = await persistWithRetry(async () => {
-      await db
-        .collection(COLLECTION)
-        .doc(workspaceId)
-        .collection(HISTORY_SUBCOLLECTION)
-        .doc(String(report.startedAt))
-        .set({ report: stored, savedAt: Date.now() }, { merge: false });
+      await commitDiagnosticsHistory(db, workspaceId, stored, Date.now());
     });
     if (!result.ok) {
       const message = result.error instanceof Error ? result.error.message : String(result.error);
@@ -664,12 +660,7 @@ export async function upsertDiagnosticsHistoryProgress(workspaceId: string, repo
     const db = getDb();
     if (!db) return; // the latest-doc + per-user paths still hold this report; the archive entry is optional here
     await persistWithRetry(async () => {
-      await db
-        .collection(COLLECTION)
-        .doc(workspaceId)
-        .collection(HISTORY_SUBCOLLECTION)
-        .doc(String(report.startedAt))
-        .set({ report: stored, savedAt: Date.now(), inProgress: report.endedAt === undefined }, { merge: false });
+      await commitDiagnosticsHistory(db, workspaceId, stored, Date.now(), report.endedAt === undefined);
     });
   } catch { /* best-effort — the settle-time saveDiagnosticsHistory still backstops a clean finish */ }
 }

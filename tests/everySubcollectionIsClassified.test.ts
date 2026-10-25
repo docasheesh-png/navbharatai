@@ -68,6 +68,8 @@ const CLASSIFICATION: Record<string, Kind & { clock?: true; erasedBy?: string; f
   'src/server/AgentV3/CheckpointStore.ts › items': { kind: 'workspace', parent: 'workspace_checkpoints_v3' },
   'src/server/AgentV3/EmbeddingStore.ts › files': { kind: 'workspace', parent: 'workspace_embeddings_v3' },
   'src/server/AgentV3/DiagnosticsStore.ts › history': { kind: 'workspace', parent: 'workspace_diagnostics_v3', clock: true },
+  // Atomic writer extracted from DiagnosticsStore; same history, workspace erasure and retention clock.
+  'src/server/AgentV3/diagnosticsHistoryPersistence.ts › history': { kind: 'workspace', parent: 'workspace_diagnostics_v3', clock: true },
   // Read-only failed-report traversal of that SAME existing history; its erasure and clock are unchanged.
   'src/server/lib/buildReportNumbering.ts › history': { kind: 'workspace', parent: 'workspace_diagnostics_v3', clock: true },
   'src/server/lib/failedBuildReports.ts › history': { kind: 'workspace', parent: 'workspace_diagnostics_v3', clock: true },

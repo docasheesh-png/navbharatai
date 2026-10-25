@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const harness = vi.hoisted(() => ({ value: null as any, effect: null as null | (() => void | (() => void)) }));
 vi.mock('react', () => ({
   useState: (initial: unknown) => [harness.value ?? initial, (value: unknown) => { harness.value = value; }],
@@ -13,6 +13,7 @@ const a = [{ workspaceId: 'a', id: '1', startedAt: 1 }];
 const b = [{ workspaceId: 'b', id: '2', startedAt: 2 }];
 const numbered = [{ ...b[0], numbering: { ordinal: 10, total: 10, asOf: 100 } }];
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
+afterEach(() => { vi.useRealTimers(); });
 beforeEach(() => { harness.value = null; harness.effect = null; loader.mockReset(); });
 describe('numbering hook lifecycle (isolated effect harness)', () => {
   it('returns browsable rows immediately and ignores a late response from a previous page/filter', async () => {
@@ -32,11 +33,52 @@ describe('numbering hook lifecycle (isolated effect harness)', () => {
     expect(useBuildReportNumbers(b, 'latest', 'token-a')).toBe(numbered);
     expect(useBuildReportNumbers(b, 'latest', 'new-token')).toBe(b);
   });
+  it('does not display a different cohort rank for the same row reference and token', async () => {
+    loader.mockResolvedValue(numbered);
+    useBuildReportNumbers(b, 'latest', 'token'); harness.effect!(); await flush();
+    expect(useBuildReportNumbers(b, 'latest', 'token')).toBe(numbered);
+    expect(useBuildReportNumbers(b, 'failed', 'token')).toBe(b);
+  });
   it('preserves rows with unavailable labels on metadata errors', async () => {
     loader.mockRejectedValue(new Error('metadata offline'));
     expect(useBuildReportNumbers(a, 'failed', 'token')).toBe(a);
     harness.effect!(); await flush();
-    expect(useBuildReportNumbers(a, 'failed', 'token')).toEqual([{ ...a[0], numbering: { ordinal: null, total: null, asOf: null } }]);
+    expect(useBuildReportNumbers(a, 'failed', 'token')).toEqual([{ ...a[0], numbering: { ordinal: null, total: null, asOf: null, reason: 'request_failed' } }]);
+  });
+  it('retries transient misses only twice, keeps rows visible, and cleans up timers', async () => {
+    vi.useFakeTimers();
+    const missing = [{ ...a[0], numbering: { ordinal: null, total: null, asOf: null, reason: 'snapshot_miss' } }];
+    loader.mockResolvedValue(missing);
+    useBuildReportNumbers(a, 'latest', 'token');
+    const cleanup = harness.effect!(); await flush();
+    expect(harness.value.rows).toEqual(missing);
+    await vi.advanceTimersByTimeAsync(62_001);
+    expect(loader).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(loader).toHaveBeenCalledTimes(3);
+    if (typeof cleanup === 'function') cleanup();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('stops retrying when a refreshed rank arrives or the component unmounts', async () => {
+    vi.useFakeTimers();
+    loader.mockResolvedValueOnce([{ ...b[0], numbering: { ordinal: null, total: null, asOf: null, reason: 'snapshot_miss' } }]).mockResolvedValue(numbered);
+    useBuildReportNumbers(b, 'latest', 'token'); const cleanup = harness.effect!(); await flush();
+    await vi.advanceTimersByTimeAsync(31_001);
+    expect(harness.value.rows).toEqual(numbered);
+    expect(vi.getTimerCount()).toBe(0);
+    if (typeof cleanup === 'function') cleanup();
+    loader.mockResolvedValueOnce([{ ...a[0], numbering: { ordinal: null, total: null, asOf: null } }]);
+    useBuildReportNumbers(a, 'latest', 'token'); const cancel = harness.effect!(); await flush();
+    if (typeof cancel === 'function') cancel();
+    await vi.advanceTimersByTimeAsync(62_001);
+    expect(loader).toHaveBeenCalledTimes(3);
+  });
+  it('does not retry invalid chronology or scan budget limits', async () => {
+    vi.useFakeTimers();
+    loader.mockResolvedValue([{ ...a[0], numbering: { ordinal: null, total: null, asOf: null, reason: 'invalid_timestamp' } }]);
+    useBuildReportNumbers(a, 'latest', 'token'); harness.effect!(); await flush();
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(loader).toHaveBeenCalledTimes(1);
   });
   it('does not publish errors after unmount or fetch empty lists', async () => {
     let reject!: (reason: Error) => void;

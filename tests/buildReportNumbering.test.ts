@@ -79,7 +79,7 @@ describe('chronological numbers are complete-cohort metadata, not page positions
     state.db = database({ app: { report: failure(205), savedAt: 205, history } });
     expect((await number('failed', rows(['app', 205], ['app', 2]))).map(r => r.numbering.ordinal)).toEqual([205, 2]);
   });
-  it('shares in-flight scans, keeps new/replaced rows unnumbered, then refreshes retention after expiry', async () => {
+  it('shares scans then refreshes new/replaced rows after the short cooldown, not the ten-minute TTL', async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-21T00:00:00Z'));
     const source: Record<string, Workspace> = { a: { report: failure(100), savedAt: 100 }, b: { report: failure(200), savedAt: 200 } };
     state.db = database(source);
@@ -88,10 +88,43 @@ describe('chronological numbers are complete-cohort metadata, not page positions
     source.c = { report: failure(300), savedAt: 300 }; delete source.a;
     source.b.report = failure(250);
     expect((await number('latest', rows(['c', 300], ['b', 250]))).every(r => r.numbering.ordinal === null)).toBe(true);
-    vi.advanceTimersByTime(600_001);
+    vi.advanceTimersByTime(30_001);
     const fresh = await number('latest', rows(['b', 250], ['c', 300]));
     expect(fresh.map(r => r.numbering.ordinal)).toEqual([1, 2]);
     expect(fresh[0].numbering.asOf).toBeGreaterThan(b[0].numbering.asOf!);
+  });
+  it('coalesces concurrent cache-miss refreshes and preserves exact identity matching', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-25T00:00:00Z'));
+    const source: Record<string, Workspace> = { a: { report: failure(100), savedAt: 100 } };
+    state.db = database(source);
+    await number('latest', rows(['a', 100]));
+    source.b = { report: failure(200), savedAt: 200 };
+    vi.advanceTimersByTime(30_001);
+    const [one, two] = await Promise.all([number('latest', rows(['b', 200])), number('latest', rows(['b', 200]))]);
+    expect(state.db.transactionCount()).toBe(2);
+    expect(one[0].numbering).toMatchObject({ ordinal: 2, total: 2 });
+    expect(two[0].numbering).toEqual(one[0].numbering);
+    expect((await number('latest', rows(['b', 201])))[0].numbering).toMatchObject({ ordinal: null, reason: 'snapshot_miss' });
+    expect(state.db.transactionCount()).toBe(2);
+  });
+  it('refreshes newly retained failures without assigning a page offset', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-25T00:00:00Z'));
+    const source: Record<string, Workspace> = { z: { history: { '100': failure(100) } } };
+    state.db = database(source);
+    await number('failed', rows(['z', 100]));
+    source.a = { history: { '200': failure(200) } };
+    vi.advanceTimersByTime(31_000);
+    const newest = await number('failed', rows(['a', 200]));
+    expect(newest[0].numbering).toMatchObject({ ordinal: 2, total: 2 });
+    expect((await number('failed', rows(['z', 100])))[0].numbering.ordinal).toBe(1);
+  });
+  it('gives safe distinct causes without leaking database errors or guessing undated chronology', async () => {
+    state.db = database({ a: { report: { startedAt: NaN }, savedAt: 1 }, b: { report: failure(2), savedAt: 2 } });
+    expect((await number('latest', rows(['b', 2])))[0].numbering).toMatchObject({ ordinal: null, reason: 'invalid_timestamp' });
+    state.db = { runTransaction: () => Promise.reject(new Error('private database details')) };
+    const response = await number('failed', rows(['a', 1]));
+    expect(response[0].numbering.reason).toBe('storage_unavailable');
+    expect(JSON.stringify(response)).not.toContain('private database details');
   });
   it('does not perform reads for empty results or background refreshes', async () => {
     vi.useFakeTimers(); state.db = database({});
@@ -101,7 +134,7 @@ describe('chronological numbers are complete-cohort metadata, not page positions
   it('preserves rows with explicit unavailable numbers when the store fails', async () => {
     state.db = { runTransaction: () => Promise.reject(new Error('unavailable')) };
     const result = await number('failed', rows(['a', 100]));
-    expect(result).toEqual([{ workspaceId: 'a', startedAt: 100, historyId: '100', numbering: { ordinal: null, total: null, asOf: null } }]);
+    expect(result).toEqual([{ workspaceId: 'a', startedAt: 100, historyId: '100', numbering: { ordinal: null, total: null, asOf: null, reason: 'storage_unavailable' } }]);
   });
   it('bounds workspace and document scans instead of numbering an incomplete prefix', async () => {
     state.db = database(Object.fromEntries(Array.from({ length: 1001 }, (_, i) => [`a${i}`, { report: failure(i + 1), savedAt: i + 1 }])));
@@ -110,6 +143,21 @@ describe('chronological numbers are complete-cohort metadata, not page positions
     state.db = database({ a: { history } });
     expect((await number('failed', rows(['a', 1])))[0].numbering.ordinal).toBeNull();
     expect(state.db.reads.length).toBeLessThanOrEqual(52);
+  });
+  it('classifies elapsed wall-clock budget as timeout even before the timer callback runs', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-25T00:00:00Z'));
+    const source = Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`a${String(i).padStart(3, '0')}`, { report: failure(i + 1), savedAt: i + 1 }]));
+    const db = database(source);
+    const original = db.runTransaction.getMockImplementation()!;
+    db.runTransaction.mockImplementation((fn, options) => original((tx: any) => fn({ get: async (q: any) => {
+      const result = await tx.get(q);
+      vi.setSystemTime(Date.now() + 31_000);
+      return result;
+    } }), options));
+    state.db = db;
+    const response = await number('latest', rows(['a000', 1]));
+    expect(response[0].numbering).toMatchObject({ ordinal: null, reason: 'scan_timeout' });
+    expect(db.reads).toHaveLength(1);
   });
   it('admits at most eight late history reads and never advances after a timeout', async () => {
     vi.useFakeTimers();
@@ -128,7 +176,7 @@ describe('chronological numbers are complete-cohort metadata, not page positions
     await vi.advanceTimersByTimeAsync(1);
     expect(releases).toHaveLength(8);
     await vi.advanceTimersByTimeAsync(30_000);
-    expect((await pending)[0].numbering.ordinal).toBeNull();
+    expect((await pending)[0].numbering).toMatchObject({ ordinal: null, reason: 'scan_timeout' });
     await vi.advanceTimersByTimeAsync(600_001);
     await number('failed', rows(['app0', 100]));
     expect(db.transactionCount()).toBe(1);
@@ -149,7 +197,7 @@ describe('chronological numbers are complete-cohort metadata, not page positions
     state.db = { runTransaction: vi.fn(() => new Promise(() => {})) };
     const pending = number('latest', rows(['a', 1]));
     await vi.advanceTimersByTimeAsync(30_000);
-    expect((await pending)[0].numbering.ordinal).toBeNull();
+    expect((await pending)[0].numbering).toMatchObject({ ordinal: null, reason: 'scan_timeout' });
     await vi.advanceTimersByTimeAsync(600_001);
     await number('latest', rows(['a', 1])); expect(state.db.runTransaction).toHaveBeenCalledTimes(1);
   });

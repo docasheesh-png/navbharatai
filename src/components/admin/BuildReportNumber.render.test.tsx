@@ -19,6 +19,13 @@ describe('report numbers on both private lists', () => {
       expect(html).toContain('Number unavailable'); expect(html).not.toContain('#0'); expect(html).not.toContain('#1');
     }
   });
+  it('explains safe server failures visibly, not only in a hover tooltip', () => {
+    const html = renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: null, total: null, asOf: null, reason: 'snapshot_miss' }} />);
+    expect(html).toContain('The complete snapshot must refresh before a number can be shown.');
+    expect(html).not.toContain('#1');
+    expect(isFailedBuildPage({ reports: [{ workspaceId: 'a', historyId: '1', startedAt: 1, endedAt: 2, appLabel: 'Synthetic', numbering: { ordinal: null, total: null, asOf: null, reason: 'private-server-error' } }], nextCursor: null, scanned: 1 })).toBe(false);
+    expect(() => renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: null, total: null, asOf: null, reason: '__proto__' } as any} />)).not.toThrow();
+  });
   it('rejects malformed supplied numbering at the failed-page state boundary', () => {
     const row = { workspaceId: 'synthetic', historyId: '1', startedAt: 1, endedAt: 2, appLabel: 'Synthetic fixture' };
     expect(isFailedBuildPage({ reports: [{ ...row, numbering: { ordinal: -1, total: 10, asOf: 100 } }], nextCursor: null, scanned: 1 })).toBe(false);

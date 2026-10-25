@@ -1,5 +1,5 @@
 import { adminHeaders } from './adminFetch';
-import { isBuildReportNumbering, type BuildReportNumbering } from './buildReportNumbering';
+import { isBuildReportNumbering, type BuildReportNumbering, type ReportNumberFailure } from './buildReportNumbering';
 
 export interface NumberedReportReference {
   workspaceId: string;
@@ -9,8 +9,8 @@ export interface NumberedReportReference {
   numbering?: BuildReportNumbering;
 }
 const keyOf = (row: NumberedReportReference) => JSON.stringify([row.workspaceId, row.historyId ?? row.id, row.startedAt]);
-export function unavailableReportNumbers<T extends NumberedReportReference>(rows: readonly T[]): T[] {
-  return rows.map(row => ({ ...row, numbering: { ordinal: null, total: null, asOf: null } }));
+export function unavailableReportNumbers<T extends NumberedReportReference>(rows: readonly T[], reason?: ReportNumberFailure): T[] {
+  return rows.map(row => ({ ...row, numbering: { ordinal: null, total: null, asOf: null, ...(reason ? { reason } : {}) } }));
 }
 /** One metadata-only request, independent of the list request. No polling or full-report reread. */
 export async function loadBuildReportNumbers<T extends NumberedReportReference>(
@@ -19,7 +19,7 @@ export async function loadBuildReportNumbers<T extends NumberedReportReference>(
   if (!rows.length) return [];
   const reports = rows.filter(row => typeof row.startedAt === 'number' && Number.isFinite(row.startedAt) && row.startedAt > 0)
     .map(row => ({ workspaceId: row.workspaceId, historyId: row.historyId ?? row.id, startedAt: row.startedAt }));
-  if (!reports.length) return unavailableReportNumbers(rows);
+  if (!reports.length) return unavailableReportNumbers(rows, 'invalid_timestamp');
   const response = await fetch(cohort === 'latest' ? '/api/v1/admin/all-builds/numbers' : '/api/v1/failedbr/report-numbers', {
     method: 'POST', cache: 'no-store', signal,
     headers: { ...adminHeaders(token), 'Content-Type': 'application/json' }, body: JSON.stringify({ reports }),
@@ -39,5 +39,5 @@ export async function loadBuildReportNumbers<T extends NumberedReportReference>(
     if (!requested.has(key) || byKey.has(key)) throw new Error('Mismatched report numbering.');
     byKey.set(key, row.numbering);
   }
-  return rows.map(row => ({ ...row, numbering: byKey.get(keyOf(row)) ?? { ordinal: null, total: null, asOf: null } }));
+  return rows.map(row => ({ ...row, numbering: byKey.get(keyOf(row)) ?? { ordinal: null, total: null, asOf: null, reason: typeof row.startedAt === 'number' && Number.isFinite(row.startedAt) && row.startedAt > 0 ? 'snapshot_miss' : 'invalid_timestamp' } }));
 }

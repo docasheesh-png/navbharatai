@@ -3,7 +3,7 @@ import { FieldPath } from 'firebase-admin/firestore';
 import { createHash } from 'node:crypto';
 import { getServerDb } from './serverDb';
 import { redactSecrets } from '../AgentV3/SourceSecretRedactor';
-import type { FailedBuildPage, FailedBuildRow } from '../../lib/failedBuildReports';
+import type { FailedBuildPage, FailedBuildRow, FailedBuildReadObservation } from '../../lib/failedBuildReports';
 
 const COLLECTION = 'workspace_diagnostics_v3';
 const MAX_SCANNED = 100;
@@ -62,6 +62,16 @@ function row(workspaceId: string, historyId: string, r: Record<string, unknown> 
     appLabel: typeof r.prompt === 'string' ? r.prompt.split('\n')[0].slice(0, 180) : 'Untitled build',
     rootCause: typeof r.rootCause === 'string' ? r.rootCause.slice(0, 1000) : null }) as FailedBuildRow;
 }
+/** Only an opaque deployment fingerprint crosses this private read boundary. */
+export function failedBuildReadObservation(): FailedBuildReadObservation {
+  const revision = process.env.K_REVISION?.trim();
+  return {
+    observedAt: Date.now(),
+    deployment: revision ? createHash('sha256').update(revision).digest('hex').slice(0, 16) : null,
+    scope: 'retained-settled-failures',
+    ordering: 'workspace-history',
+  };
+}
 /**
  * Walk ALL workspaces and their retained per-build history, including failures preceding a green build.
  * Name-ordered cursors need only Firestore's built-in indexes. A bounded empty batch is NOT an empty inbox;
@@ -79,7 +89,7 @@ export async function readFailedBuildPage(rawCursor?: unknown, rawLimit?: unknow
     let query = db.collection(COLLECTION).orderBy(FieldPath.documentId());
     if (c.w) query = c.after ? query.startAfter(c.w) : query.startAt(c.w);
     const parents = await query.limit(1).get();
-    if (parents.empty) return { reports, nextCursor: null, scanned };
+    if (parents.empty) return { reports, nextCursor: null, scanned, observation: failedBuildReadObservation() };
     const parent = parents.docs[0];
     if (parent.id !== c.w || c.after) c.b = '';
     c.w = parent.id; c.after = false;
@@ -92,7 +102,7 @@ export async function readFailedBuildPage(rawCursor?: unknown, rawLimit?: unknow
         reports.push(row(parent.id, 'latest', latest));
       }
       c.b = '0'; scanned++;
-      if (reports.length >= limit) return { reports, nextCursor: encodeCursor(c), scanned };
+      if (reports.length >= limit) return { reports, nextCursor: encodeCursor(c), scanned, observation: failedBuildReadObservation() };
     }
     const want = Math.min(50, MAX_SCANNED - scanned);
     if (want === 0) break;
@@ -101,12 +111,12 @@ export async function readFailedBuildPage(rawCursor?: unknown, rawLimit?: unknow
       c.b = doc.id; scanned++;
       const r = doc.data().report;
       if (settledFailure(r)) reports.push(row(parent.id, doc.id, r));
-      if (reports.length >= limit) return { reports, nextCursor: encodeCursor(c), scanned };
+      if (reports.length >= limit) return { reports, nextCursor: encodeCursor(c), scanned, observation: failedBuildReadObservation() };
     }
     if (entries.size < want) { c.after = true; c.b = ''; }
     else workspace--; // continue the same workspace, still under the hard document budget
   }
-  return { reports, nextCursor: encodeCursor(c), scanned };
+  return { reports, nextCursor: encodeCursor(c), scanned, observation: failedBuildReadObservation() };
 }
 /** One stored read and one redaction pass bind the digest to the exact returned evidence. */
 export async function readFailedBuildWithDigest(workspaceId: string, historyId: string): Promise<{ report: unknown; reportDigest: string } | null> {

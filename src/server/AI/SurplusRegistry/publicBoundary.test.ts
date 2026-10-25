@@ -38,7 +38,7 @@ describe('public build failure boundary', () => {
   it('preflight and persisted failure chat use the public projection, not raw errors', () => {
     const route = readFileSync('src/server/routes/agentv3.ts','utf8');
     // Surplus admission fail-opens to Weak/CHEAP_FLOOR (never a Surplus-only hard 503).
-    expect(route).toContain('admitSurplusOrFallback');
+    expect(route).toContain('resolveProBuildSurplusAdmission');
     expect(route).toContain('AGENTV3_SURPLUS_FALLBACK_TO_WEAK');
     expect(route).toContain('[AGENT_STEP] Surplus unavailable');
     expect(route).not.toContain("res.status(503).json({ code: 'ENGINE_UNAVAILABLE', error: PUBLIC_BUILD_ENGINE_UNAVAILABLE });");

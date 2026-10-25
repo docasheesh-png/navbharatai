@@ -3,7 +3,7 @@ import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibili
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
-import { admitSurplusOrFallback } from '../AI/SurplusRegistry/admitOrFallback';
+import { resolveProBuildSurplusAdmission } from '../AI/SurplusRegistry/admitOrFallback';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction } from '../AgentV3/weakBuildPreflight';
@@ -11329,36 +11329,33 @@ async function noteBuildOutcome(
     const earlySurplusTurns: Array<import('../AgentV3/ClaudeClient').TurnResult> = [];
     const earlySurplusRecords: Array<Omit<import('../AgentV3/BuildDiagnostics').LlmCallRecord, 'ts'>> = [];
     if (intent !== 'chat' || hasImportIntent) {
-      // Prefer Surplus when key+flag are live, but NEVER hard-fail the Pro builder on Surplus
-      // hang / empty registry / API errors — fall open to Weak/CHEAP_FLOOR with an AGENT_STEP log.
-      const admission = await admitSurplusOrFallback({
+      // Prefer Surplus when key+flag are live; hang/empty registry fail-opens to Weak (module keeps branches out of this handler).
+      const surplusAdmit = await resolveProBuildSurplusAdmission({
         buildId: randomUUID(),
         tier: powerLevelReqEffective,
         initialWorkload: { input: Buffer.byteLength(prompt, 'utf8') + 8192, output: 8192, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+        tierEngineAvailable: () => tierEngineAvailable(powerLevelReqEffective),
         onFallback: (reason) => {
           try {
             audit('AGENTV3_SURPLUS_FALLBACK_TO_WEAK', { reason }, 'warn');
             console.warn(`[AGENT_STEP] Surplus unavailable (${reason}); continuing on Weak/CHEAP_FLOOR ladder.`);
           } catch { /* best-effort audit */ }
         },
+        onAdmitted: (session) => {
+          try {
+            audit('AGENTV3_SURPLUS_ADMITTED', { model: session.model }, 'info');
+            console.log(`[AGENT_STEP] Surplus admitted for Pro build (model=${session.model}).`);
+          } catch { /* best-effort audit */ }
+        },
       });
-      if (admission.status === 'admitted') {
-        surplusSession = admission.session;
-        setAdmittedSurplusScope(surplusSession);
-        try {
-          audit('AGENTV3_SURPLUS_ADMITTED', { model: surplusSession.model }, 'info');
-          console.log(`[AGENT_STEP] Surplus admitted for Pro build (model=${surplusSession.model}).`);
-        } catch { /* best-effort audit */ }
-      } else if (admission.status === 'fallback') {
-        surplusSession = undefined;
-      }
-      // Surplus OFF or Surplus failed open: still need a keyed Weak/tier ladder.
-      if (!surplusSession && !tierEngineAvailable(powerLevelReqEffective)) {
+      if (!surplusAdmit.ok) {
         releaseBuildLock(buildKey, buildLockToken);
-        audit('AGENTV3_TIER_ENGINE_UNAVAILABLE', { userId, tier: powerLevelReqEffective, afterSurplusFallback: admission.status === 'fallback' }, 'warn');
+        audit('AGENTV3_TIER_ENGINE_UNAVAILABLE', { userId, tier: powerLevelReqEffective, afterSurplusFallback: surplusAdmit.afterSurplusFallback }, 'warn');
         respondBuilderEngineUnavailable(res, powerLevelReqEffective);
         return;
       }
+      surplusSession = surplusAdmit.session;
+      setAdmittedSurplusScope(surplusSession);
     }
     if (surplusBuilderEnabled() && !(await checkPaidBuildAdmission())) return;
     // Scope is checked before sandbox/setup. Imports need their files inspected and keep the import pipeline.

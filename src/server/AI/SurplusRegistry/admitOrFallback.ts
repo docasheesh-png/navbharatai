@@ -73,3 +73,36 @@ export async function admitSurplusOrFallback(options: {
     return { status: 'fallback', session: undefined, reason };
   }
 }
+
+
+/** Route-facing helper: keeps control-flow branches OUT of the chat handler (TS2563 budget). */
+export async function resolveProBuildSurplusAdmission(options: {
+  buildId: string;
+  tier: string;
+  initialWorkload?: Parameters<typeof createSurplusBuildSession>[0]['initialWorkload'];
+  timeoutMs?: number;
+  enabled?: boolean;
+  create?: typeof createSurplusBuildSession;
+  now?: () => number;
+  tierEngineAvailable: () => boolean;
+  onFallback?: (reason: string) => void;
+  onAdmitted?: (session: SurplusBuildSession) => void;
+}): Promise<{ ok: true; session: SurplusBuildSession | undefined } | { ok: false; afterSurplusFallback: boolean }> {
+  const admission = await admitSurplusOrFallback({
+    buildId: options.buildId,
+    tier: options.tier,
+    initialWorkload: options.initialWorkload,
+    timeoutMs: options.timeoutMs,
+    enabled: options.enabled,
+    create: options.create,
+    now: options.now,
+    onFallback: options.onFallback,
+  });
+  if (admission.status === 'admitted') {
+    try { options.onAdmitted?.(admission.session); } catch { /* best-effort */ }
+    return { ok: true, session: admission.session };
+  }
+  const afterSurplusFallback = admission.status === 'fallback';
+  if (!options.tierEngineAvailable()) return { ok: false, afterSurplusFallback };
+  return { ok: true, session: undefined };
+}

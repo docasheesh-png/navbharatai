@@ -53,3 +53,24 @@ describe('admitSurplusOrFallback', () => {
     }
   });
 });
+
+describe('resolveProBuildSurplusAdmission', () => {
+  it('continues without Surplus when flag is off and Weak ladder is available', async () => {
+    const { resolveProBuildSurplusAdmission } = await import('./admitOrFallback');
+    const outcome = await resolveProBuildSurplusAdmission({
+      buildId: 'b1', tier: 'weak', enabled: false, create: vi.fn(),
+      tierEngineAvailable: () => true,
+    });
+    expect(outcome).toEqual({ ok: true, session: undefined });
+  });
+
+  it('refuses when Surplus fails open and Weak ladder is unavailable', async () => {
+    const { resolveProBuildSurplusAdmission } = await import('./admitOrFallback');
+    const create = vi.fn(async () => { throw new SurplusBuildUnavailableError('stale_or_missing_snapshot'); });
+    const outcome = await resolveProBuildSurplusAdmission({
+      buildId: 'b1', tier: 'weak', enabled: true, create,
+      tierEngineAvailable: () => false,
+    });
+    expect(outcome).toEqual({ ok: false, afterSurplusFallback: true });
+  });
+});

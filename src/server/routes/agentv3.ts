@@ -3,7 +3,7 @@ import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibili
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
-import { resolveProBuildSurplusAdmission } from '../AI/SurplusRegistry/admitOrFallback';
+import { resolveProBuildSurplusAdmission, safeSurplusAdmissionReason } from '../AI/SurplusRegistry/admitOrFallback';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction } from '../AgentV3/weakBuildPreflight';
@@ -11328,7 +11328,10 @@ async function noteBuildOutcome(
     }
     const earlySurplusTurns: Array<import('../AgentV3/ClaudeClient').TurnResult> = [];
     const earlySurplusRecords: Array<Omit<import('../AgentV3/BuildDiagnostics').LlmCallRecord, 'ts'>> = [];
-    if (intent !== 'chat' || hasImportIntent) {
+    // Buffered until buildDiag exists later in this handler (admission runs before the report object).
+    let surplusAdmissionDiag: { code: 'SURPLUS_ADMITTED' | 'SURPLUS_FALLBACK'; reason?: string; model?: string } | undefined;
+    // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders.
+    if (powerLevelReqEffective === 'weak' && (intent !== 'chat' || hasImportIntent)) {
       // Prefer Surplus when key+flag are live; hang/empty registry fail-opens to Weak (module keeps branches out of this handler).
       const surplusAdmit = await resolveProBuildSurplusAdmission({
         buildId: randomUUID(),
@@ -11336,15 +11339,18 @@ async function noteBuildOutcome(
         initialWorkload: { input: Buffer.byteLength(prompt, 'utf8') + 8192, output: 8192, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
         tierEngineAvailable: () => tierEngineAvailable(powerLevelReqEffective),
         onFallback: (reason) => {
+          const safe = safeSurplusAdmissionReason(reason);
+          surplusAdmissionDiag = { code: 'SURPLUS_FALLBACK', reason: safe };
           try {
-            audit('AGENTV3_SURPLUS_FALLBACK_TO_WEAK', { reason }, 'warn');
-            console.warn(`[AGENT_STEP] Surplus unavailable (${reason}); continuing on Weak/CHEAP_FLOOR ladder.`);
+            audit('AGENTV3_SURPLUS_FALLBACK_TO_WEAK', { reason: safe }, 'warn');
+            console.warn(`[AGENT_STEP] Surplus unavailable (${safe}); continuing on Weak/CHEAP_FLOOR ladder.`);
           } catch { /* best-effort audit */ }
         },
         onAdmitted: (session) => {
+          surplusAdmissionDiag = { code: 'SURPLUS_ADMITTED', model: session.model };
           try {
             audit('AGENTV3_SURPLUS_ADMITTED', { model: session.model }, 'info');
-            console.log(`[AGENT_STEP] Surplus admitted for Pro build (model=${session.model}).`);
+            console.log(`[AGENT_STEP] Surplus admitted for Weak build (model=${session.model}).`);
           } catch { /* best-effort audit */ }
         },
       });
@@ -14480,6 +14486,22 @@ async function noteBuildOutcome(
        * else's build. It is deliberately NOT a module-level singleton, which is the one shape that would
        * turn "slow for this build" into "blacklisted for everybody".
        */
+      if (surplusAdmissionDiag) {
+        try {
+          if (surplusAdmissionDiag.code === 'SURPLUS_ADMITTED') {
+            buildDiag.record({
+              phase: 'provider', severity: 'info', code: 'SURPLUS_ADMITTED', autoResolved: true,
+              message: `Surplus admitted for Weak build (model=${surplusAdmissionDiag.model ?? 'unknown'}).`,
+            });
+          } else {
+            buildDiag.record({
+              phase: 'provider', severity: 'warning', code: 'SURPLUS_FALLBACK', autoResolved: true,
+              message: `Surplus unavailable — continuing on Weak ladder (reason: ${surplusAdmissionDiag.reason ?? 'other_safe'}).`,
+              detail: surplusAdmissionDiag.reason ?? 'other_safe',
+            });
+          }
+        } catch { /* diagnostics are best-effort */ }
+      }
       for (const row of earlySurplusRecords) buildDiag.recordLlmCall(row);
       for (const turn of earlySurplusTurns) captureTurnUsage('SURPLUS', turn.usage, turn.model, turn.usage.cacheReadInputTokens, turn.usage.cacheCreationInputTokens);
       const fastLaneDeadRungs = new Map<string, string>();

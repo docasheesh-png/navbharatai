@@ -74,3 +74,19 @@ describe('resolveProBuildSurplusAdmission', () => {
     expect(outcome).toEqual({ ok: false, afterSurplusFallback: true });
   });
 });
+
+describe('safeSurplusAdmissionReason', () => {
+  it('passes through the allowlisted safe tokens', async () => {
+    const { safeSurplusAdmissionReason } = await import('./admitOrFallback');
+    for (const reason of ['flag_off', 'missing_or_invalid_key', 'admission_timeout', 'stale_or_missing_snapshot', 'no_eligible_90_percent_offer', 'review_unavailable', 'other_safe'] as const) {
+      expect(safeSurplusAdmissionReason(reason)).toBe(reason);
+    }
+  });
+
+  it('never echoes secrets or URLs from unknown errors', async () => {
+    const { safeSurplusAdmissionReason } = await import('./admitOrFallback');
+    expect(safeSurplusAdmissionReason('https://api.surplusintelligence.ai/key=inf_SECRET_boom')).toBe('other_safe');
+    expect(safeSurplusAdmissionReason('Surplus API key missing or invalid for live builder')).toBe('missing_or_invalid_key');
+    expect(safeSurplusAdmissionReason('stale_or_missing_snapshot')).toBe('stale_or_missing_snapshot');
+  });
+});

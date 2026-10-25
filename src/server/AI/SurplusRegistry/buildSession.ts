@@ -84,7 +84,7 @@ export async function createSurplusBuildSession(options: {
 }): Promise<SurplusBuildSession | undefined> {
   if (!(options.enabled ?? surplusBuilderEnabled())) return undefined;
   const adapter = options.adapter ?? createProductionSurplusAdapter();
-  if (!options.buildId || !['weak', 'off', 'mini'].includes(options.tier)) return fail('invalid_build_scope');
+  if (!options.buildId || options.tier !== 'weak') return fail('invalid_build_scope'); // Owner 2026-10-25: Surplus = Weak only; Normal/Strong stay direct.
   const now = options.now ?? Date.now;
   const initialWorkload: Workload = options.initialWorkload ?? { input: 8192, output: 8192, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
   const initialState = await adapter.readState();

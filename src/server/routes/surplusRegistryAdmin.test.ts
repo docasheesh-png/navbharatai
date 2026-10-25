@@ -1,8 +1,8 @@
 import type { Express, Request, Response, RequestHandler } from 'express';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-const mocks = vi.hoisted(() => ({ read: vi.fn(), control: vi.fn(), audit: vi.fn(), limiter: vi.fn(), connectionStatus: vi.fn(), connectionTest: vi.fn(), credentialCheck: vi.fn() }));
-vi.mock('../AI/SurplusRegistry/runtime', () => ({ readSurplusObservations: mocks.read, controlSurplusModel: mocks.control }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), control: vi.fn(), sync: vi.fn(), audit: vi.fn(), limiter: vi.fn(), connectionStatus: vi.fn(), connectionTest: vi.fn(), credentialCheck: vi.fn() }));
+vi.mock('../AI/SurplusRegistry/runtime', () => ({ readSurplusObservations: mocks.read, controlSurplusModel: mocks.control, refreshSurplusRegistry: mocks.sync }));
 vi.mock('../AI/SurplusRegistry/connectionTest', () => ({ getSurplusConnectionTestStatus: mocks.connectionStatus, runSurplusConnectionTest: mocks.connectionTest, runSurplusCredentialCheck: mocks.credentialCheck }));
 vi.mock('../lib/adminAuth', () => ({ adminUsername: () => 'verified-owner' }));
 vi.mock('../lib/audit', () => ({ audit: mocks.audit }));
@@ -34,22 +34,36 @@ beforeEach(() => { vi.clearAllMocks(); mocks.control.mockResolvedValue(undefined
 describe('admin-only discounted paid registry', () => {
   it('mounts next to the existing verified-admin registry and keeps auth before rate limits and I/O', () => {
     const { auth, routes } = setup();
-    expect(routes.size).toBe(5);
+    expect(routes.size).toBe(6);
     for (const handlers of routes.values()) { expect(handlers[0]).toBe(auth); expect(handlers).toHaveLength(3); }
     expect(mocks.limiter).toHaveBeenCalledWith(expect.objectContaining({ limit: 30, windowMs: 60_000 }));
     expect(mocks.limiter).toHaveBeenCalledWith(expect.objectContaining({ limit: 6, windowMs: 60_000 }));
     const source = readFileSync('src/server/routes/admin.ts', 'utf8');
     expect(source).toContain('registerSurplusRegistryAdminRoutes(app, verifyAdminToken)');
   });
-  it.each([['GET', ''], ['POST', '/models/action'], ['GET', '/connection-test'], ['POST', '/connection-test'], ['POST', '/credential-check']])('rejects unauthorized %s without reading or mutating state', async (method, path) => {
+  it.each([['GET', ''], ['POST', '/models/action'], ['POST', '/sync'], ['GET', '/connection-test'], ['POST', '/connection-test'], ['POST', '/credential-check']])('rejects unauthorized %s without reading or mutating state', async (method, path) => {
     const { call, response } = setup(); await call(method, path, body, 'forged-or-expired');
-    expect(response.status).toHaveBeenCalledWith(401); expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.control).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(401); expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.control).not.toHaveBeenCalled(); expect(mocks.sync).not.toHaveBeenCalled();
     expect(mocks.connectionStatus).not.toHaveBeenCalled(); expect(mocks.connectionTest).not.toHaveBeenCalled(); expect(mocks.credentialCheck).not.toHaveBeenCalled();
   });
   it('returns a no-store read without syncing or granting dispatch', async () => {
     const { call, response } = setup(); mocks.read.mockResolvedValue({ status: 'disabled', canDispatch: false });
     await call('GET'); expect(response.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
     expect(response.json).toHaveBeenCalledWith({ status: 'disabled', canDispatch: false }); expect(mocks.control).not.toHaveBeenCalled();
+  });
+  it('manual sync performs metadata refresh only and never grants dispatch', async () => {
+    const { call, response } = setup(); mocks.sync.mockResolvedValue({ status: 'synced', count: 12 });
+    await call('POST', '/sync', {});
+    expect(mocks.sync).toHaveBeenCalledExactlyOnceWith(); expect(mocks.control).not.toHaveBeenCalled(); expect(mocks.connectionTest).not.toHaveBeenCalled();
+    expect(response.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+    expect(response.json).toHaveBeenCalledWith({ status: 'synced', count: 12 });
+    expect(mocks.audit).toHaveBeenCalledWith('ADMIN_SURPLUS_METADATA_SYNC', { admin: 'verified-owner', result: 'synced' });
+  });
+  it.each(['held', 'disabled', 'unavailable', 'invalid_configuration'] as const)('returns safe sync status %s without secrets', async status => {
+    const { call, response } = setup(); mocks.sync.mockResolvedValue({ status });
+    await call('POST', '/sync', {});
+    expect(response.json).toHaveBeenCalledWith({ status });
+    expect(mocks.audit).toHaveBeenCalledWith('ADMIN_SURPLUS_METADATA_SYNC', { admin: 'verified-owner', result: status });
   });
   it('keeps private backend failures out of responses and audit metadata', async () => {
     const { call, response } = setup(); mocks.read.mockRejectedValue(new Error('private-key-and-database-url'));

@@ -35,17 +35,27 @@ export function normalizeOffers(model: string, body: unknown, headers: Headers, 
   const eligible = body.offers.filter(record).filter(o => typeof o.id === 'string' && ID.test(o.id)
     && typeof o.provider_id === 'string' && ID.test(o.provider_id))
     .filter(o => o.available === true && o.healthy === true && o.trusted === true);
-  if (eligible.length > SURPLUS_MAX_OFFERS_PER_MODEL) throw new Error('Surplus offer universe exceeds bound');
-  return eligible.map(o => {
+  // Marketplace books often exceed the retained bound. Keep a deterministic top slice
+  // (highest discount, then cheapest input+output) so sync can publish instead of fail-closed empty.
+  const ranked = eligible.map(o => {
       const input = rate(o.effective_input_per_1m), output = rate(o.effective_output_per_1m);
       const directInput = rate(o.direct_input_per_1m), directOutput = rate(o.direct_output_per_1m);
-      return { model, offerId: o.id as string, providerId: o.provider_id as string, available: true, healthy: true, trusted: true, providerTrustConfirmed: false, trustObservedAt: null,
-        discountPct: typeof o.discount_pct === 'number' && Number.isFinite(o.discount_pct) && o.discount_pct >= 0 && o.discount_pct <= 100 ? o.discount_pct : null,
-        rates: { ...(input ? { input } : {}), ...(output ? { output } : {}) },
-        referenceRates: { ...(directInput ? { input: directInput } : {}), ...(directOutput ? { output: directOutput } : {}) },
-        unit: 'unverified', upstreamGeneratedAt: null, observedAt, sourceDate, sourceAgeSeconds, cacheMaxAgeSeconds,
-        sourceUrl: `${MARKET_ORIGIN}/api/markets/${encodeURIComponent(model)}` };
-    });
+      const discountPct = typeof o.discount_pct === 'number' && Number.isFinite(o.discount_pct) && o.discount_pct >= 0 && o.discount_pct <= 100 ? o.discount_pct : null;
+      const inputCost = input === undefined ? Number.POSITIVE_INFINITY : Number(input);
+      const outputCost = output === undefined ? Number.POSITIVE_INFINITY : Number(output);
+      return {
+        sortDiscount: discountPct ?? -1,
+        sortCost: inputCost + outputCost,
+        sortId: o.id as string,
+        observation: { model, offerId: o.id as string, providerId: o.provider_id as string, available: true, healthy: true, trusted: true, providerTrustConfirmed: false, trustObservedAt: null,
+          discountPct,
+          rates: { ...(input ? { input } : {}), ...(output ? { output } : {}) },
+          referenceRates: { ...(directInput ? { input: directInput } : {}), ...(directOutput ? { output: directOutput } : {}) },
+          unit: 'unverified' as const, upstreamGeneratedAt: null, observedAt, sourceDate, sourceAgeSeconds, cacheMaxAgeSeconds,
+          sourceUrl: `${MARKET_ORIGIN}/api/markets/${encodeURIComponent(model)}` },
+      };
+    }).sort((a, b) => b.sortDiscount - a.sortDiscount || a.sortCost - b.sortCost || (a.sortId < b.sortId ? -1 : a.sortId > b.sortId ? 1 : 0));
+  return ranked.slice(0, SURPLUS_MAX_OFFERS_PER_MODEL).map(entry => entry.observation);
 }
 export async function syncSurplusMetadata(store: Store, models: string[], intervalMs = 300_000, transport: typeof fetch = fetch, clock = Date.now) {
   if (!validSurplusUniverse(models)

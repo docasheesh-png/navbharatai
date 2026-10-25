@@ -71,8 +71,10 @@ fully settled before returning; partial snapshots are never published.
 
 Only available, healthy, trusted offers with exact IDs are normalized. Trust must also match
 the separate provider feed; these remain provider claims, not independent quality evidence.
-There are at most 64 eligible offers per model, 960 in aggregate, and 500000 serialized bytes
-per snapshot. Oversized input fails closed instead of silently losing a cheaper candidate.
+At most 64 offers per model are retained (960 aggregate, 500000 serialized bytes). When the
+marketplace returns more eligible offers, sync keeps a deterministic top slice ranked by highest
+discount then cheapest input+output rates, then stable offer id — so a busy order book cannot
+leave Observation permanently empty. Partial model failures still fail the whole refresh.
 
 Fetched time, HTTP Date, Age and Cache-Control are recorded separately. Unknown origin quote
 generation time stays null. A successful fetch is not a fresh executable quote. Numeric
@@ -103,9 +105,12 @@ status and blocked reasons. Its illustrative estimate uses 10,000 input + 2,000 
 not a claimed actual build price. Complete dispatch eligibility is explicitly not granted
 by this screen.
 
-Refresh status only reads saved metadata; it does not trigger inference or bypass the
-shared polling lease. OFF returns a disabled response without storage or network work.
-Server outages or malformed control state return unavailable, never invented freshness.
+Refresh paid status only reads saved metadata; it does not trigger inference or bypass the
+shared polling lease. Sync metadata now (admin POST `/api/admin/surplus-registry/sync`) asks
+the server to run the same `refreshSurplusRegistry` path as startup/scheduler, still under the
+durable five-minute lease/cooldown, and never runs inference or production activation. OFF
+returns a disabled response without storage or network work. Server outages or malformed
+control state return unavailable, never invented freshness.
 
 Disable/re-enable requires the current snapshot version, manual-control revision and a
 10–500 character reason. Concurrent changes return a conflict for fresh review. The control

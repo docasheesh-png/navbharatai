@@ -4739,14 +4739,16 @@ See `docs/SURPLUS_REGISTRY.md` for the bounded candidate list and honest activat
 
 `AGENTV3_SURPLUS_BUILDER=false`: opt-in only. OFF bypasses new registry/review/receipt I/O and leaves existing Weak/Normal/Strong ladders and billing unchanged. ON requires independent server account/credential/pilot, quality, capability, official tariff and usage reviews before any Surplus HTTP. No defaults grant a live pilot. Main build inference uses fixed `/min90/v1`, provider-family allowlist and price objective; no ordinary paid fallback. Plain chat, Doctor, media and VM pricing are separate and unchanged. Full scope, concurrency, retention and honest activation blockers: `docs/SURPLUS_BUILDER.md`. Earlier observer-only notes describe Phase 1; this later opt-in caller does not turn it on.
 
-### Owner-reported Cloud Run configuration (2026-10-24; verification pending)
+### Owner-reported Cloud Run configuration (current as of 2026-10-25 Asia/Calcutta)
 
-The owner reports that `SURPLUS_API_KEY` has been configured in Cloud Run, with
-`SURPLUS_BASE_URL=https://api.surplusintelligence.ai/v1`,
-`AGENTV3_SURPLUS_BUILDER=false`, and `SURPLUS_REGISTRY_ENABLED=false`.
-No credential value is recorded here. Live credential validity, the deployed revision,
-and any Secret Manager reference/version have not been independently verified.
-This operational note is not runtime authority, a quality review, or an activation record.
-Admin status must continue to derive configuration from the real server environment,
-never from this note. A separately authorized synthetic connection test is pending its
-safe runtime path and verified spending controls; no test result is claimed here.
+**Current Cloud Run (`navbharat-ai-prod`) — names only, never values:**
+- `SURPLUS_API_KEY` — configured (owner-reported; value not recorded)
+- `SURPLUS_BASE_URL` — `https://api.surplusintelligence.ai/v1`
+- `AGENTV3_SURPLUS_BUILDER` — **`on`** (owner set 2026-10-25 after PR #3914; was `false` on 2026-10-24)
+- `SURPLUS_REGISTRY_ENABLED` — **`on`** (owner set 2026-10-25; was `false` on 2026-10-24)
+
+Product rule (2026-10-25): Weak builds must use Surplus; Normal and Strong stay on direct
+providers. Two Weak build reports after the flag flip still showed GLM→Kimi with no Surplus
+delivery — admission fail-open suspected; build-report observability follow-up in progress.
+No credential value is recorded here. Live credential validity and the deployed revision have
+not been independently verified. This note is not runtime authority — Admin/server env wins.

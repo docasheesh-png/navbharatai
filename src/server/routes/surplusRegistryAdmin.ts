@@ -2,7 +2,7 @@ import type { Express, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import { audit } from '../lib/audit';
 import { adminUsername } from '../lib/adminAuth';
-import { controlSurplusModel, readSurplusObservations } from '../AI/SurplusRegistry/runtime';
+import { controlSurplusModel, readSurplusObservations, refreshSurplusRegistry } from '../AI/SurplusRegistry/runtime';
 import { isSurplusModelId } from '../AI/SurplusRegistry/config';
 import { getSurplusConnectionTestStatus, runSurplusConnectionTest, runSurplusCredentialCheck } from '../AI/SurplusRegistry/connectionTest';
 
@@ -60,6 +60,18 @@ export function registerSurplusRegistryAdminRoutes(app: Express, verifyAdminToke
     catch {
       audit('ADMIN_SURPLUS_REGISTRY_READ_FAILED', { admin: adminUsername(), result: 'unavailable' });
       res.status(503).json({ error: 'Discounted builder status is unavailable. No eligibility is confirmed.' });
+    }
+  });
+  /** Metadata sync only. Same durable lease/cooldown as the scheduler; never inference or production activation. */
+  app.post('/api/admin/surplus-registry/sync', verifyAdminToken, writes, async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const result = await refreshSurplusRegistry();
+      audit('ADMIN_SURPLUS_METADATA_SYNC', { admin: adminUsername(), result: result.status });
+      res.json(result);
+    } catch {
+      audit('ADMIN_SURPLUS_METADATA_SYNC_FAILED', { admin: adminUsername(), result: 'unavailable' });
+      res.status(503).json({ error: 'Metadata sync failed. Previous observations are retained; empty or stale status cannot authorize paid Surplus admission.' });
     }
   });
   app.post('/api/admin/surplus-registry/models/action', verifyAdminToken, writes, async (req, res) => {

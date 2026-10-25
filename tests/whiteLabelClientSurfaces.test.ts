@@ -282,6 +282,7 @@ describe('🔒 no NEW user-facing surface may name a vendor', () => {
     expect(read('src/server/routes/admin.ts')).toContain('registerSurplusRegistryAdminRoutes(app, verifyAdminToken)');
     const routes = read('src/server/routes/surplusRegistryAdmin.ts');
     expect(routes).toContain("app.get('/api/admin/surplus-registry', verifyAdminToken, reads,");
+    expect(routes).toContain("app.post('/api/admin/surplus-registry/sync', verifyAdminToken, writes,");
     expect(routes).toContain("app.post('/api/admin/surplus-registry/models/action', verifyAdminToken, writes,");
     expect(read(panel)).toContain('adminHeaders(adminToken)');
   });

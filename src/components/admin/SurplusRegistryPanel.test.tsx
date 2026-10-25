@@ -95,6 +95,25 @@ describe('paid manager validates server data before rendering claims', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     for (const [url, options] of fetch.mock.calls as unknown as [string, RequestInit][]) { expect(url).toBe('/api/v1/admin/surplus-registry'); expect(options.method).toBeUndefined(); }
   });
+  it('Sync metadata now posts the dedicated sync route and never claims inference', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response(fixture()))
+      .mockResolvedValueOnce(response({ status: 'synced', count: 12 }))
+      .mockResolvedValue(response(fixture()));
+    await mount(fetch);
+    button(root(), 'Sync metadata now').props.onClick(); await settle();
+    const [url, options] = fetch.mock.calls[1] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/v1/admin/surplus-registry/sync');
+    expect(options.method).toBe('POST'); expect(options.body).toBe('{}');
+    const html = renderToStaticMarkup(root());
+    expect(html).toContain('Metadata sync completed');
+    expect(html).toContain('No paid inference or connection test was run');
+  });
+  it('held sync cooldown is reported without inventing a published snapshot', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(response(fixture())).mockResolvedValueOnce(response({ status: 'held' })).mockResolvedValue(response(fixture()));
+    await mount(fetch); button(root(), 'Sync metadata now').props.onClick(); await settle();
+    expect(renderToStaticMarkup(root())).toContain('five-minute cooldown');
+  });
   it('turns a hung read into an honest unavailable state', async () => {
     await mount(vi.fn((_url: string, options: RequestInit) => new Promise((_resolve, reject) => options.signal?.addEventListener('abort', () => reject(new Error('aborted'))))));
     await vi.advanceTimersByTimeAsync(15000); await settle();

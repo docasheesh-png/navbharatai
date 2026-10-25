@@ -1,9 +1,11 @@
+import { nextUserMessageTs } from '../agentv3/conversationClock';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Bot } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { ChatMarkdown } from '../chat/ChatMarkdown';
 import { USER_TURN_CLASS, ASSISTANT_TURN_CLASS, USER_MESSAGE_CLASS, ASSISTANT_MESSAGE_CLASS, PLAIN_TEXT_CLASS } from '../chat/conversation';
-import { COMPOSER_SEND_CLASS } from '../chat/ComposerShell';
+import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS } from '../chat/ComposerShell';
+import { autoGrow } from '../../lib/autoGrowTextarea';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { getAgentV3SessionId, getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import { withoutStaleLiveStatus, lastActivityTs } from '../../lib/liveStatusLine';
@@ -30,9 +32,12 @@ interface MiniMsg {
  * edit does — this widget is a second window onto the same brain, not a separate agent.
  */
 export function AgentV3MiniChat({ userId, email, prefill }: { userId?: string; email?: string; prefill?: { text: string; nonce: number } }) {
-  const { state, running, start, checkRunning, resume, loadConversation, reset, serverBuildRunning } = useAgentV3Build();
+  const { state, running, isBusy, start, checkRunning, resume, loadConversation, reset, serverBuildRunning } = useAgentV3Build();
   const [userMsgs, setUserMsgs] = useState<MiniMsg[]>([]);
+  const [agentHistory, setAgentHistory] = useState<MiniMsg[]>([]);
   const [input, setInput] = useState('');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (inputRef.current) autoGrow(inputRef.current, 192); }, [input]);
   /**
    * Text handed in from another surface — today the preview's Tag Mode ("edit THIS element") and the
    * error overlay's Fix Bug button. It APPENDS to whatever is already typed rather than replacing it,
@@ -96,13 +101,16 @@ export function AgentV3MiniChat({ userId, email, prefill }: { userId?: string; e
 
   const send = () => {
     const text = input.trim();
-    if (!text || running || !userId || !sessionId) return;
-    setUserMsgs((cur) => [...cur, { role: 'user', text, ts: Date.now() }]);
+    if (!text || running || isBusy() || !userId || !sessionId) return;
+    const userMessageTs = nextUserMessageTs(Date.now(), [userMsgs, agentHistory, state.narration, state.activity, state.activityLog]);
+    setAgentHistory((history) => [...history, ...withoutStaleLiveStatus(state.narration, false).map((n) => ({ role: 'agent' as const, text: n.text, ts: n.ts }))]);
+    setUserMsgs((cur) => [...cur, { role: 'user', text, ts: userMessageTs }]);
     setInput('');
-    void start(text, { userId, email, sessionId });
+    void start(text, { userId, email, sessionId, userMessageTs });
   };
 
   const convo: MiniMsg[] = [
+    ...agentHistory,
     ...userMsgs,
     // Live status (the clock, the ETA) only while it is still true — the same rule as the main thread (liveStatusLine.ts).
     ...withoutStaleLiveStatus(state.narration, running, lastActivityTs(state.activity)).map((n) => ({ role: 'agent' as const, text: n.text, ts: n.ts })),
@@ -145,28 +153,21 @@ export function AgentV3MiniChat({ userId, email, prefill }: { userId?: string; e
           </div>
         )}
       </div>
-      <div className="p-3 border-t border-line flex items-center gap-2 shrink-0">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              send();
-            }
-          }}
-          disabled={running}
-          placeholder="Message NavBharatAI Pro…"
-          className="flex-1 bg-card border border-line rounded-full px-4 py-2.5 text-[15px] text-ink placeholder:text-muted disabled:opacity-50 focus:outline-none focus:border-accent transition-colors"
-        />
-        <button
-          onClick={send}
-          disabled={running || !input.trim()}
-          aria-label="Send"
-          className={COMPOSER_SEND_CLASS}
-        >
-          <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
-        </button>
+      <div className={COMPOSER_PANEL_CLASS}>
+        <ComposerShell controls={null} send={(
+          <button onClick={send} disabled={running || !input.trim()} aria-label="Send" className={COMPOSER_SEND_CLASS}>
+            <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
+          </button>
+        )}>
+          <textarea ref={inputRef} rows={1} value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); }
+            }}
+            disabled={running} aria-label="Message NavBharatAI Pro"
+            placeholder="Message NavBharatAI Pro…" className={COMPOSER_TEXTAREA_CLASS}
+          />
+        </ComposerShell>
       </div>
     </div>
   );

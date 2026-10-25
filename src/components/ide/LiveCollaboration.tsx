@@ -1,3 +1,5 @@
+import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS } from '../chat/ComposerShell';
+import { autoGrow } from '../../lib/autoGrowTextarea';
 import { useState, useEffect, useRef } from 'react';
 import { Users, Share2, Plus, Trash2, X, Check, Copy, Clock, RefreshCw, Sparkles, Bot, Send, Briefcase, ChevronDown, Zap, Code2, MessageSquare, CornerDownLeft } from 'lucide-react';
 import { db } from '../../lib/firebase';
@@ -135,6 +137,8 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
   const [selectedProfessional, setSelectedProfessional] = useState(ROOM_PROFESSIONALS[0]?.id ?? 'teacher'); // owner picks (Professional tab)
   const [aiMessages, setAiMessages] = useState<AiMessage[]>([]);
   const [aiInput, setAiInput] = useState('');
+  const aiInputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (aiInputRef.current) autoGrow(aiInputRef.current, 192); }, [aiInput]);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState('');
   const unsubscribeRef = useRef<(() => void) | null>(null);
@@ -681,20 +685,18 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
               <div ref={aiBottomRef} />
             </div>
             {aiError && <p className="px-3 py-1.5 text-[10px] text-danger bg-red-500/10 border-t border-red-500/20">{aiError}</p>}
-            <div className="p-2 border-t border-line bg-card">
-              <div className="flex gap-1.5">
-                <input
-                  className="flex-1 bg-surface border border-line rounded-xl px-3 py-2 text-xs text-ink placeholder-faint focus:outline-none focus:border-blue-500/40 disabled:opacity-50"
-                  placeholder="Ask the shared AI…"
-                  value={aiInput}
-                  disabled={aiBusy}
-                  onChange={e => setAiInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') sendAiPrompt(); }}
-                />
-                <button onClick={sendAiPrompt} disabled={!aiInput.trim() || aiBusy} className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded-xl transition-all text-on-accent">
-                  <Send className="w-3.5 h-3.5" />
+            <div className={COMPOSER_PANEL_CLASS}>
+              <ComposerShell controls={null} send={(
+                <button onClick={sendAiPrompt} disabled={!aiInput.trim() || aiBusy} aria-label="Send to shared AI" className={COMPOSER_SEND_CLASS}>
+                  <Send className="w-4 h-4" />
                 </button>
-              </div>
+              )}>
+                <textarea ref={aiInputRef} rows={1} className={COMPOSER_TEXTAREA_CLASS}
+                  placeholder="Ask the shared AI…" aria-label="Ask the shared AI" value={aiInput} disabled={aiBusy}
+                  onChange={e => setAiInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); sendAiPrompt(); } }}
+                />
+              </ComposerShell>
             </div>
           </div>
           )}

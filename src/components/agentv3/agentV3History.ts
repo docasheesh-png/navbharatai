@@ -72,11 +72,22 @@ export function messageText(content: unknown): string {
   return '';
 }
 
-/** The timestamp a persisted message restores with: its real wall-clock time when the server
- * stamped one (eternal sessions), else its transcript POSITION (idx+1 — legacy records). */
-function restoredTs(m: unknown, idx: number): number {
-  const ts = (m as { ts?: unknown } | null)?.ts;
-  return typeof ts === 'number' && ts > 0 ? ts : idx + 1;
+/**
+ * The store returns messages in causal transcript order (Firestore turn sequence, then array
+ * position). Timestamps are evidence for interleaving activity, not permission to reverse that
+ * order: plain-chat batches share one write time, older turns have none, and clocks can regress.
+ * Both replay readers MUST use this same mapping before splitting users from assistants. Keep
+ * compatible wall-clock times; assign only conflicting/missing times the next causal slot. This
+ * also keeps a saved reply behind its prompt after the panel archives narration into history.
+ */
+function restoredMessageTimes(messages: unknown[]): number[] {
+  let previous = 0;
+  return messages.map((m) => {
+    const ts = m && typeof m === 'object' ? (m as { ts?: unknown }).ts : undefined;
+    const candidate = typeof ts === 'number' && Number.isSafeInteger(ts) && ts > 0 && ts < Number.MAX_SAFE_INTEGER - messages.length ? ts : 0;
+    previous = Math.max(previous + 1, candidate);
+    return previous;
+  });
 }
 
 /** Map one persisted timeline event (compact server shape) back to its live wire event. */
@@ -165,6 +176,7 @@ export function conversationToEvents(conv: PersistedConversation): AgentV3WireEv
     events.push({ type: 'repo', url: `https://github.com/${owner}/${repo}`, fullName: `${owner}/${repo}`, ownedByUser: true, ts: 0 });
   }
   const msgs = conv.messages ?? [];
+  const messageTimes = restoredMessageTimes(msgs);
   const replayed: AgentV3WireEvent[] = [];
   msgs.forEach((m, idx) => {
     if (!m || typeof m !== 'object') return;
@@ -172,7 +184,7 @@ export function conversationToEvents(conv: PersistedConversation): AgentV3WireEv
     if (msg.role !== 'assistant') return;
     const text = messageText(msg.content).trim();
     const file = restoredSheetFile(msg.file);
-    if (text) replayed.push({ type: 'narration', agent: 'architect', text, ts: restoredTs(m, idx), ...(file ? { file } : {}) });
+    if (text) replayed.push({ type: 'narration', agent: 'architect', text, ts: messageTimes[idx], ...(file ? { file } : {}) });
   });
   for (const raw of conv.timeline ?? []) {
     const wire = timelineToWireEvent(raw);
@@ -274,6 +286,7 @@ export function isEngineInjectedUserText(text: string): boolean {
 export function conversationToUserMessages(conv: PersistedConversation): Array<{ role: 'user'; text: string; ts: number }> {
   const out: Array<{ role: 'user'; text: string; ts: number }> = [];
   const msgs = conv.messages ?? [];
+  const messageTimes = restoredMessageTimes(msgs);
   msgs.forEach((m, idx) => {
     if (!m || typeof m !== 'object') return;
     const msg = m as { role?: unknown; content?: unknown; origin?: unknown };
@@ -282,7 +295,7 @@ export function conversationToUserMessages(conv: PersistedConversation): Array<{
     // `origin: 'platform'` when persisted (AgentRunner, autopsy 1be16985) — never the person's words.
     if (msg.origin === 'platform') return;
     const text = cleanRestoredUserPrompt(messageText(msg.content).trim());
-    if (text && !isEngineInjectedUserText(text)) out.push({ role: 'user', text, ts: restoredTs(m, idx) });
+    if (text && !isEngineInjectedUserText(text)) out.push({ role: 'user', text, ts: messageTimes[idx] });
   });
   return out;
 }

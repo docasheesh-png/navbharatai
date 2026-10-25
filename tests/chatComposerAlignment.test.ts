@@ -31,7 +31,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS, SEND_SLOT_CLASS } from '../src/components/chat/ComposerShell';
+import { COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_SLOT_CLASS } from '../src/components/chat/ComposerShell';
 import { RAIL_BUTTON_CLASS } from '../src/components/chat/ModeButton';
 
 const SRC = readFileSync(join(__dirname, '..', 'src/components/ide/AIChat.tsx'), 'utf8');
@@ -58,7 +58,7 @@ describe('the control row has its own line, under the text', () => {
   });
 
   it('the row is a normal flex row in the shell, never laid over the text', () => {
-    expect(SHELL).toContain('<div className="flex items-center justify-end gap-1 px-1.5 pb-1">{controls}</div>');
+    expect(SHELL).toContain('<div className="flex min-w-0 flex-wrap items-center gap-1">{controls}</div>');
     expect(SHELL).not.toMatch(/absolute right-\d/);
   });
 
@@ -110,9 +110,9 @@ describe('the tap targets did not shrink', () => {
   });
 
   it('in both layouts the slot pins Send to the bottom edge, so a growing message never moves it', () => {
-    expect(SEND_SLOT_CLASS.twoRows).toContain('items-end');
-    expect(SEND_SLOT_CLASS.oneLine).toContain('self-end');
-    for (const slot of Object.values(SEND_SLOT_CLASS)) expect(slot).not.toMatch(/min-h-\[/);
+    expect(COMPOSER_SEND_SLOT_CLASS).toContain('self-end');
+    expect(COMPOSER_SEND_SLOT_CLASS).toContain('shrink-0');
+    expect(COMPOSER_SEND_SLOT_CLASS).not.toMatch(/min-h-\[/);
   });
 
   it('the box at rest is taller than one rail button, so the rail (self-end) never overhangs it', () => {

@@ -1235,6 +1235,9 @@ export const AIChat: React.FC<AIChatProps> = ({
               onOpenMode={showFreeModeButton ? onOpenModePicker : undefined}
               controls={(
                 <>
+                  {onModeChange && activeAgent === 'navbharatai-pro' && (
+                    <ModeSelector mode={mode || 'chat'} setMode={onModeChange} />
+                  )}
                     {( (input || '').length > 300 || (((input || '').match(/\n/g) || []).length > 4)) && (
                       <button
                         type="button"
@@ -1357,8 +1360,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                       // no right-hand reserve for the controls any more — they have their own row below.
                       // That reserve (a fixed ~176px) is what squeezed the box to a sliver on a phone
                       // once History and Mode sat beside it (admin screenshot 2026-09-23).
-                      COMPOSER_TEXTAREA_CLASS,
-                      onModeChange && activeAgent === 'navbharatai-pro' && "pl-32"
+                      COMPOSER_TEXTAREA_CLASS
                     )}
                     style={{ maxHeight: '240px', overflowY: 'auto' }}
                   />
@@ -1367,11 +1369,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                       {pasteLineCount} lines pasted
                     </div>
                   )}
-                  {onModeChange && activeAgent === 'navbharatai-pro' && (
-                    <div className="absolute left-2 top-3 z-50 pointer-events-auto">
-                      <ModeSelector mode={mode || 'chat'} setMode={onModeChange} />
-                    </div>
-                  )}
+
             </ComposerShell>
         </div>
       </div>

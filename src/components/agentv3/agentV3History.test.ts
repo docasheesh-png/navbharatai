@@ -444,3 +444,63 @@ describe('conversationToEvents — replays the durable repo fact, not only the c
     expect(conversationToEvents(conv({ repoOwnedByUser: true, repoName: 'mitrify' })).some((e) => e.type === 'repo')).toBe(false);
   });
 });
+
+
+describe('restored transcript causal order', () => {
+  // Deliberately put narration first, like the panel after archiving a completed turn.
+  // A stable timestamp sort alone used to put the saved answer before its same-time prompt.
+  const rows = (c: PersistedConversation) => [
+    ...conversationToEvents(c).filter((e) => e.type === 'narration'),
+    ...conversationToUserMessages(c),
+  ].sort((a, b) => a.ts - b.ts);
+
+  it('keeps equal-time persisted batches in transcript order across multiple turns', () => {
+    const c = conv({ messages: [
+      { role: 'user', content: 'First question', ts: 1000 },
+      { role: 'assistant', content: 'First answer', ts: 1000 },
+      { role: 'user', content: 'Second question', ts: 1000 },
+      { role: 'assistant', content: 'Second answer', ts: 1000 },
+    ] });
+    expect(rows(c).map((r) => r.text)).toEqual(['First question', 'First answer', 'Second question', 'Second answer']);
+    expect(rows(c).map((r) => r.ts)).toEqual([1000, 1001, 1002, 1003]);
+    expect(c.messages.map((m) => (m as { ts: number }).ts)).toEqual([1000, 1000, 1000, 1000]);
+  });
+
+  it('repairs clock regression and mixed missing times without moving compatible real times', () => {
+    const c = conv({ messages: [
+      { role: 'user', content: 'Legacy question' },
+      { role: 'assistant', content: 'Stamped answer', ts: 1000 },
+      { role: 'user', content: 'Missing timestamp' },
+      { role: 'assistant', content: 'Regressed clock', ts: 900 },
+      { role: 'user', content: 'Later question', ts: 2000 },
+      { role: 'assistant', content: 'Later answer', ts: 2100 },
+    ] });
+    expect(rows(c).map((r) => r.ts)).toEqual([1, 1000, 1001, 1002, 2000, 2100]);
+    expect(rows(c).map((r) => r.text)).toEqual(c.messages.map((m) => (m as { content: string }).content));
+  });
+
+  it('retains real timeline interleaving and skips internal turns without losing their causal slots', () => {
+    const c = conv({ messages: [
+      { role: 'user', content: 'Build it', ts: 1000 },
+      { role: 'assistant', content: 'Making files', ts: 1100 },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'ok' }], ts: 1200 },
+      { role: 'user', content: 'Internal instruction', origin: 'platform', ts: 1250 },
+      { role: 'assistant', content: 'Done', ts: 1300 },
+    ], timeline: [
+      { t: 'tool_call', id: 't', tool: 'write_file', agent: 'architect', ts: 1150 },
+      { t: 'tool_result', id: 't', ok: true, ts: 1200 },
+    ] });
+    const events = conversationToEvents(c).filter((e) => ['narration', 'tool_call', 'tool_result'].includes(e.type));
+    expect(events.map((e) => e.type)).toEqual(['narration', 'tool_call', 'tool_result', 'narration']);
+    expect(rows(c).map((r) => r.text)).toEqual(['Build it', 'Making files', 'Done']);
+    expect(rows(c).map((r) => r.ts)).toEqual([1000, 1100, 1300]);
+  });
+
+  it('does not let invalid timestamps poison later restored messages', () => {
+    const c = conv({ messages: [NaN, Infinity, -10, 1e30].flatMap((ts, i) => [
+      { role: 'user', content: `Question ${i}`, ts },
+      { role: 'assistant', content: `Answer ${i}` },
+    ]) });
+    expect(rows(c).map((r) => r.ts)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+});

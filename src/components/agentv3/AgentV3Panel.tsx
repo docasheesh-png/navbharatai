@@ -1,3 +1,4 @@
+import { COMPOSER_BOX_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ServiceRecommendationCard } from './ServiceRecommendationCard';
 import { offerWatchLive } from './earlyPreviewCue';
@@ -5,6 +6,8 @@ import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByE
 import { stopVersionPreview } from '../../lib/versionPreviewStop';
 import { isLiveStatusLine, withoutStaleLiveStatus, latestLiveStatusText, lastActivityTs, ETA_LINE_ID } from '../../lib/liveStatusLine';
 import { buildElapsedMs } from './buildClock';
+import { nextUserMessageTs } from './conversationClock';
+import { SubmissionScope, submissionStatus, submissionIsWorking, type SubmissionPhase } from './submissionScope';
 import { CONTINUE_INTERRUPTED_BUILD_PROMPT, CONTINUE_PAST_BUDGET_PROMPT, CONTINUE_AND_FIX_BUILD_PROMPT } from '../../lib/continueBuildPrompts';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
 import { publicTierLabel } from '../../lib/engineLabels';
@@ -150,7 +153,7 @@ interface ChatMsg {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>, opts?: { live?: boolean }) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, errorBeforeBuildStarted, start, respond, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop: stopBuild, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueState, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+  const { state, running, isBusy, error, errorBeforeBuildStarted, start, markUserMessage, respond, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop: stopBuild, unsend, reset: resetBuild, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueState, queueCancel, queueRecover, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
@@ -735,11 +738,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     // clampComposerHeight (pure, unit-tested): rest at 1 line, grow up to ~6 lines, then scroll.
     el.style.height = `${clampComposerHeight(el.scrollHeight, lineH, padY)}px`;
   }, [prompt, composerExpanded]);
-  // Composer action buttons (expand / send / stop) vertical placement. RESTING/GROWN composer: vertically
-  // CENTERED — equidistant from the top and bottom border (admin 2026-07-21: "buttons ka center of mass
-  // upper aur lower border se equal distance par ho"), instead of pinned to the lower edge. EXPANDED
-  // editor (h-[50vh]): pinned near the bottom, since centering a button in a half-screen box reads wrong.
-  const composerBtnY = composerExpanded ? 'bottom-2' : 'top-1/2 -translate-y-1/2';
+  // Actions belong to the card's bottom toolbar, never beside the text. The wrapping toolbar
+  // reserves their width so Send / Stop stay reachable even in a narrow split pane.
+  const composerBtnY = 'bottom-2';
   // Framework selector + import
   const [framework, setFramework] = useState('vite-react');
   // True once the user DELIBERATELY chose a framework (picker) or a reopened session carries one — that
@@ -755,6 +756,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // The feature card shown before the first build of a new app (featurePlan.ts). `launch` resumes the
   // paused send with the user's answer.
   const [featureConfirm, setFeatureConfirm] = useState<{ plan: FeaturePlanView; launch: (answer?: { include: string[]; exclude: string[] }) => void } | null>(null);
+  const submissionRef = useRef(new SubmissionScope());
+  // Optimistic messages cancelled before launch must never purge the previous server turn.
+  const localSubmissionMessagesRef = useRef(new Set<number>());
+  const [submissionPhase, setSubmissionPhase] = useState<SubmissionPhase | null>(null);
+  const cancelSubmission = useCallback(() => {
+    submissionRef.current.cancel();
+    setSubmissionPhase(null);
+    setFwConflict(null);
+    setFeatureConfirm(null);
+  }, []);
+  const reset = useCallback(() => {
+    cancelSubmission();
+    localSubmissionMessagesRef.current.clear();
+    resetBuild();
+  }, [cancelSubmission, resetBuild]);
+  useEffect(() => () => submissionRef.current.cancel(), []);
   const fwName = useCallback((id: string) => FRAMEWORKS.find((f) => f.id === id)?.name ?? id, []);
   const [importUrl, setImportUrl] = useState('');
   // A repository import waiting for the new chat it opened to render (Q-733 — see importRepo).
@@ -1063,6 +1080,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   useEffect(() => () => queueContinuationAbortRef.current?.abort(), []);
   const selectSessionId = (sessionId: string): void => {
     if (sessionIdRef.current !== sessionId) {
+      if (sessionIdRef.current) cancelSubmission();
       queueScopeRef.current.invalidate();
       queueContinuationAbortRef.current?.abort();
       activeQueuedItemRef.current = null;
@@ -1117,9 +1135,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   }, []);
 
   const stop = useCallback(() => {
+    cancelSubmission();
     invalidateQueuedContinuation();
     stopBuild(state.workspaceId || clientWorkspaceId(userId, sessionIdRef.current) || undefined);
-  }, [invalidateQueuedContinuation, stopBuild, state.workspaceId, userId]);
+  }, [cancelSubmission, invalidateQueuedContinuation, stopBuild, state.workspaceId, userId]);
 
   // HOW MUCH OF THE APP IS BUILT (admin 2026-09-20: "app kitne % ban gayi woh bhi likh kar aana
   // chahiye … 100% done - tap on preview!").
@@ -1234,6 +1253,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     : null;
   const handleUnsend = async (ts: number) => {
     if (unsending) return;
+    const localOnly = localSubmissionMessagesRef.current.has(ts);
+    cancelSubmission();
     invalidateQueuedContinuation();
     setUnsending(true);
     try {
@@ -1241,11 +1262,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       // (no workspaceId yet — it never persisted) is just halted locally. Either way the reply lives in
       // `narration`, which unsend()/stop() clears.
       let purged = true;
-      if (state.workspaceId) purged = await unsend();
-      else stop();
+      if (!localOnly) {
+        if (state.workspaceId) purged = await unsend();
+        else stop();
+      }
       // On failure the message is NOT removed (it stays visible — honest, no fake "unsent"); the user
       // can simply try again. Never claim a purge that didn't happen.
       if (!purged) return;
+      localSubmissionMessagesRef.current.delete(ts);
       setUserMsgs((prev) => prev.filter((m) => m.ts < ts));
       setAgentHistory((prev) => prev.filter((m) => m.ts < ts));
     } finally {
@@ -1257,13 +1281,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // take-back can't leave the message both in the thread AND in the composer.
   const handleEdit = async (ts: number, text: string) => {
     if (unsending) return;
+    const localOnly = localSubmissionMessagesRef.current.has(ts);
+    cancelSubmission();
     invalidateQueuedContinuation();
     setUnsending(true);
     try {
       let purged = true;
-      if (state.workspaceId) purged = await unsend();
-      else stop();
+      if (!localOnly) {
+        if (state.workspaceId) purged = await unsend();
+        else stop();
+      }
       if (!purged) return; // keep the message; never a fake "edited"
+      localSubmissionMessagesRef.current.delete(ts);
       setUserMsgs((prev) => prev.filter((m) => m.ts < ts));
       setAgentHistory((prev) => prev.filter((m) => m.ts < ts));
       setPrompt(text); // load the taken-back text back into the composer to re-write
@@ -1649,7 +1678,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const send = async (override?: { text: string; importUrl: string }) => {
     const text = (override?.text ?? prompt).trim();
     const sendFiles = override ? [] : files;
-    if ((!text && sendFiles.length === 0) || running) return;
+    if ((!text && sendFiles.length === 0) || running || isBusy() || sessionSwitchRef.current || queueClaimInFlightRef.current) return;
     // A deliberate new message must not race a delayed automatic handoff from this visit.
     queueContinuationAbortRef.current?.abort();
     setQueueContinuationWaiting(false);
@@ -1665,26 +1694,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     lastPlanRemainingRef.current = null;
     noProgressRef.current = 0;
     lastFilesWrittenRef.current = null;
-    // Preserve the previous turn's agent replies BEFORE start() resets the live
-    // build state — otherwise the prior reply (which lives only in state.narration)
-    // disappears from the thread the moment the next message begins.
-    if (state.narration.length > 0) {
-      setAgentHistory((h) => [
-        ...h,
-        ...withoutStaleLiveStatus(state.narration, false).map((n) => ({
-          role: 'agent' as const,
-          agent: n.agent,
-          text: n.text,
-          ts: n.ts,
-          kind: n.kind,
-          ...(n.file ? { file: n.file } : {}),
-        })),
-      ]);
-    }
-    // Also preserve this turn's git checkpoints before start() resets them.
-    if (state.checkpoints.length > 0) {
-      setCheckpointHistory((h) => [...h, ...state.checkpoints]);
-    }
     // SIZE GUARD (Fix 36a): an oversized zip dies at the platform's request-body limit BEFORE the
     // server sees it — the user only saw the stall banner ("zip upload band ho gayi"). Refuse it
     // HERE with the honest reason + the workable alternatives, and keep the composer state intact.
@@ -1695,70 +1704,141 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
         return;
       }
     }
-    const attachments = sendFiles.length > 0 ? await Promise.all(sendFiles.map(fileToAttachment)) : undefined;
+    // Claim synchronously: repeated Enter/clicks can arrive before React commits a render.
+    const ticket = submissionRef.current.begin(sessionIdRef.current);
+    if (!ticket) return;
+    const isCurrent = () => submissionRef.current.current(ticket, sessionIdRef.current);
+    const finishSubmission = () => {
+      if (submissionRef.current.finish(ticket)) setSubmissionPhase(null);
+    };
+    const failSubmission = () => {
+      if (!isCurrent()) return;
+      setUserMsgs((c) => [...c, { role: 'agent', text: 'Your request could not be started. Please try again.', ts: Math.max(Date.now(), userMessageTs + 1) }]);
+      finishSubmission();
+    };
+    setSubmissionPhase(sendFiles.length > 0 ? 'attachments' : onBeforeBuild ? 'saving' : 'starting');
     // A file with no text gets a sensible default prompt (the server requires one).
     const msgText = text || (sendFiles.length > 0 ? `Please read and analyze the attached file(s): ${sendFiles.map((f) => f.name).join(', ')}` : '');
     const displayText = text || `📎 ${sendFiles.map((f) => f.name).join(', ')}`;
-    setUserMsgs((c) => [...c, { role: 'user', text: displayText, ts: Date.now() }]);
+    const userMessageTs = nextUserMessageTs(Date.now(), [userMsgs, agentHistory, state.narration, state.activity, state.activityLog]);
+    localSubmissionMessagesRef.current.add(userMessageTs);
+    setUserMsgs((c) => [...c, { role: 'user', text: displayText, ts: userMessageTs }]);
     if (!override) {
       setPrompt('');
       setFiles([]);
     }
     const pendingImportUrl = (override?.importUrl ?? importUrl).trim();
     if (!override) setImportUrl(''); // consume the set-by-hand import URL on first send
-    // Phase S3 conflict guard: flush any pending IDE edits to v5.0's durable store BEFORE the build
-    // starts, so the build reads the user's latest hand edits — never a stale file set. Best-effort:
-    // a flush failure must never block the build (the syncer swallows its own errors).
-    try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
-    // Run the build with a concrete framework. `resolved` marks the choice as final so neither the client
-    // nor the server re-prompts on the same conflict.
-    const startBuild = (fw: string, resolved: boolean, confirmedFeatures?: { include: string[]; exclude: string[] }) => start(msgText, {
-      userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments,
-      framework: fw, frameworkExplicit: frameworkExplicit || resolved, frameworkResolved: resolved, appSignature: appSignaturePref(),
-      importUrl: pendingImportUrl || undefined,
-      // 3-role model (FIX #6): Plan/Advise send the message down the read-only role lane instead of
-      // the builder — same session, same workspace, so proposed steps land in THIS app's queue.
-      chatRole: chatMode === 'build' ? undefined : chatMode,
-      confirmedFeatures,
-    });
-    // THE FEATURE CARD (admin 2026-09-26). Before the FIRST build of a new app, show what the build is
-    // about to be told to make — the features read from the message and the ones the app's kind usually
-    // needs — so a misread never becomes an order. Deterministic on the server and fast; any failure
-    // (network, non-JSON, nothing to show) simply builds, exactly as before this card existed.
-    const offerCard = shouldOfferFeatureCard({
-      buildMode: chatMode === 'build',
-      hasWorkspace: !!state.workspaceId,
-      priorTurns: agentHistory.length + state.narration.length,
-      importing: !!pendingImportUrl,
-      hasAttachments: !!attachments && attachments.length > 0,
-      programmatic: !!override,
-      disabled: featureConfirmDisabled(),
-    });
-    const launch = async (fw: string, resolved: boolean) => {
-      if (!offerCard) { startBuild(fw, resolved); return; }
-      let plan: FeaturePlanView | null = null;
-      try {
-        const res = await fetch('/api/agentv3/feature-plan', {
-          method: 'POST',
-          headers: await authJsonHeaders(),
-          body: JSON.stringify({ prompt: msgText }),
-        });
-        if (res.ok) plan = (await res.json()) as FeaturePlanView;
-      } catch { plan = null; }
-      if (!plan || !plan.show) { startBuild(fw, resolved); return; }
-      setFeatureConfirm({ plan, launch: (answer) => startBuild(fw, resolved, answer) });
-    };
-    // FRAMEWORK CONFLICT CONFIRM (admin 2026-07-20): only for a BUILD turn, and only when the user PICKED
-    // one framework but the message NAMES a different one — pause and ask which to use instead of building
-    // the wrong stack. A plan/advise turn or a no-conflict build proceeds immediately.
-    const sel = chatMode === 'build'
-      ? resolveFrameworkSelection({ picked: framework, explicit: frameworkExplicit, prompt: msgText })
-      : { status: 'ok' as const, framework };
-    if (sel.status === 'conflict') {
-      setFwConflict({ picked: sel.picked, detected: sel.detected, launch: (fw: string) => launch(fw, true) });
-      return;
-    }
-    launch(sel.framework, false);
+    try {
+      const attachments = sendFiles.length > 0 ? await Promise.all(sendFiles.map(fileToAttachment)) : undefined;
+      if (!isCurrent()) return;
+      // Phase S3 conflict guard: flush any pending IDE edits to v5.0's durable store BEFORE the build
+      // starts, so the build reads the user's latest hand edits — never a stale file set. Best-effort:
+      // a flush failure must never block the build (the syncer swallows its own errors).
+      if (onBeforeBuild) {
+        setSubmissionPhase('saving');
+        try { await onBeforeBuild(); } catch { /* flush is best-effort */ }
+        if (!isCurrent()) return;
+      }
+      // Run the build with a concrete framework. `resolved` marks the choice as final so neither the client
+      // nor the server re-prompts on the same conflict.
+      const startBuild = (fw: string, resolved: boolean, confirmedFeatures?: { include: string[]; exclude: string[] }) => {
+        if (!submissionRef.current.launch(ticket, sessionIdRef.current)) return;
+        localSubmissionMessagesRef.current.delete(userMessageTs);
+        setSubmissionPhase('starting');
+        setFwConflict(null);
+        setFeatureConfirm(null);
+        // Archive only when the hook is about to replace the live turn, never while waiting for a choice.
+        // Preserve the previous turn's agent replies BEFORE start() resets the live
+        // build state — otherwise the prior reply (which lives only in state.narration)
+        // disappears from the thread the moment the next message begins.
+        if (state.narration.length > 0) {
+          setAgentHistory((h) => [
+            ...h,
+            ...withoutStaleLiveStatus(state.narration, false).map((n) => ({
+              role: 'agent' as const,
+              agent: n.agent,
+              text: n.text,
+              ts: n.ts,
+              kind: n.kind,
+              ...(n.file ? { file: n.file } : {}),
+            })),
+          ]);
+        }
+        // Also preserve this turn's git checkpoints before start() resets them.
+        if (state.checkpoints.length > 0) {
+          setCheckpointHistory((h) => [...h, ...state.checkpoints]);
+        }
+        try {
+          const request = start(msgText, {
+            userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: ticket.sessionId, userMessageTs, attachments,
+            framework: fw, frameworkExplicit: frameworkExplicit || resolved, frameworkResolved: resolved, appSignature: appSignaturePref(),
+            importUrl: pendingImportUrl || undefined,
+            // 3-role model (FIX #6): Plan/Advise send the message down the read-only role lane instead of
+            // the builder — same session, same workspace, so proposed steps land in THIS app's queue.
+            chatRole: chatMode === 'build' ? undefined : chatMode,
+            confirmedFeatures,
+          });
+          // Execution owns a synchronous lock now, even before React renders running=true.
+          // Release preflight immediately so a fast result cannot strand it through an open tail.
+          finishSubmission();
+          // Do not keep send() (or Screenshot → App) pending for the post-result stream tail.
+          void request.catch(failSubmission).finally(finishSubmission);
+        } catch { failSubmission(); }
+      };
+      // THE FEATURE CARD (admin 2026-09-26). Before the FIRST build of a new app, show what the build is
+      // about to be told to make — the features read from the message and the ones the app's kind usually
+      // needs — so a misread never becomes an order. Deterministic on the server and fast; any failure
+      // (network, non-JSON, nothing to show) simply builds, exactly as before this card existed.
+      const offerCard = shouldOfferFeatureCard({
+        buildMode: chatMode === 'build',
+        hasWorkspace: !!state.workspaceId,
+        priorTurns: agentHistory.length + state.narration.length,
+        importing: !!pendingImportUrl,
+        hasAttachments: !!attachments && attachments.length > 0,
+        programmatic: !!override,
+        disabled: featureConfirmDisabled(),
+      });
+      let launchRequested = false;
+      const launch = async (fw: string, resolved: boolean) => {
+        if (!isCurrent() || launchRequested) return;
+        launchRequested = true;
+        setFwConflict(null);
+        if (!offerCard) { startBuild(fw, resolved); return; }
+        setSubmissionPhase('features');
+        let plan: FeaturePlanView | null = null;
+        try {
+          const res = await fetch('/api/agentv3/feature-plan', {
+            method: 'POST',
+            headers: await authJsonHeaders(),
+            signal: ticket.abort.signal,
+            body: JSON.stringify({ prompt: msgText }),
+          });
+          if (res.ok) {
+            const body = await res.json();
+            if (body && typeof body.show === 'boolean' && typeof body.domain === 'string'
+              && Array.isArray(body.named) && body.named.every((v: unknown) => typeof v === 'string')
+              && Array.isArray(body.suggested) && body.suggested.every((v: unknown) => typeof v === 'string')) plan = body;
+          }
+        } catch { plan = null; }
+        if (!isCurrent()) return;
+        if (!plan || !plan.show) { startBuild(fw, resolved); return; }
+        setSubmissionPhase('confirmation');
+        setFeatureConfirm({ plan, launch: (answer) => startBuild(fw, resolved, answer) });
+      };
+      // FRAMEWORK CONFLICT CONFIRM (admin 2026-07-20): only for a BUILD turn, and only when the user PICKED
+      // one framework but the message NAMES a different one — pause and ask which to use instead of building
+      // the wrong stack. A plan/advise turn or a no-conflict build proceeds immediately.
+      const sel = chatMode === 'build'
+        ? resolveFrameworkSelection({ picked: framework, explicit: frameworkExplicit, prompt: msgText })
+        : { status: 'ok' as const, framework };
+      if (sel.status === 'conflict') {
+        setSubmissionPhase('framework');
+        setFwConflict({ picked: sel.picked, detected: sel.detected, launch: (fw: string) => launch(fw, true) });
+        return;
+      }
+      await launch(sel.framework, false);
+    } catch { failSubmission(); }
   };
 
   // ── INLINE VOICE DICTATION (admin 2026-07-22) ────────────────────────────────────────────────
@@ -1990,7 +2070,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const sendSteer = async () => {
     const text = prompt.trim();
     if (!text || !canSteerMidBuild(running, powerLevel, chatMode)) return;
-    setUserMsgs((c) => [...c, { role: 'user', text, ts: Date.now() }]);
+    const userMessageTs = nextUserMessageTs(Date.now(), [userMsgs, agentHistory, state.narration, state.activity, state.activityLog]);
+    markUserMessage(userMessageTs);
+    setUserMsgs((c) => [...c, { role: 'user', text, ts: userMessageTs }]);
     setPrompt('');
     setComposerExpanded(false);
     try {
@@ -2213,7 +2295,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // (a fresh idle session has no settled build, so the effect alone would never start the queue).
   // The server's claimNext is the real serial guard — it refuses while one is running, atomically.
   const claimAndRunNext = useCallback(async (resumeAfterFailure = false) => {
-    if (running || queueClaimInFlightRef.current || state.pendingPermission) return;
+    if (running || submissionRef.current.busy || queueClaimInFlightRef.current || isBusy() || state.pendingPermission) return;
     const claimOwner = Symbol('queue-claim');
     queueClaimInFlightRef.current = claimOwner;
     const snapshot = queueScopeRef.current.capture();
@@ -2233,11 +2315,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           lastFilesWrittenRef.current = null;
           activeQueuedItemRef.current = { id: item.id, claimToken: item.claimToken, scope };
           setQueueError(null);
-          setUserMsgs((c) => [...c, { role: 'user', text: item.prompt, ts: Date.now() }]);
+          const userMessageTs = nextUserMessageTs(Date.now(), [userMsgs, agentHistory, state.narration, state.activity, state.activityLog]);
+          setUserMsgs((c) => [...c, { role: 'user', text: item.prompt, ts: userMessageTs }]);
           if (state.narration.length > 0) {
             setAgentHistory((h) => [...h, ...withoutStaleLiveStatus(state.narration, false).map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) }))]);
           }
-          void start(item.prompt, { queueItemId: item.id, queueClaimToken: item.claimToken, queueContinuationProtocol: 1, userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: scope.sessionId, framework, frameworkExplicit, appSignature: appSignaturePref() });
+          void start(item.prompt, { queueItemId: item.id, queueClaimToken: item.claimToken, queueContinuationProtocol: 1, userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: scope.sessionId, userMessageTs, framework, frameworkExplicit, appSignature: appSignaturePref() });
         },
       });
       if (outcome !== 'stale' && queueScopeRef.current.isCurrent(snapshot)) void refreshQueue();
@@ -2247,7 +2330,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       if (queueClaimInFlightRef.current === claimOwner) queueClaimInFlightRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, state.pendingPermission, state.narration, queueNext, start, userId, email, onlyOpus, powerLevel, planFirst, thinking, framework, frameworkExplicit, onBeforeBuild, refreshQueue]);
+  }, [running, submissionPhase, userMsgs, agentHistory, state.activity, state.activityLog, state.pendingPermission, state.narration, queueNext, start, userId, email, onlyOpus, powerLevel, planFirst, thinking, framework, frameworkExplicit, onBeforeBuild, refreshQueue]);
 
   useEffect(() => {
     const hasError = !!(error || state.error);
@@ -5080,6 +5163,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 middle of the message stream, where a long narration pushed them out of sight and a
                 reload lost them. They are now rows in the ❓ tray in the header — the SAME card and
                 the SAME `respond` call, mounted somewhere the user can find them again. */}
+            {submissionPhase && !running && (
+              <div role="status" aria-live="polite" aria-atomic="true" className="flex items-center gap-2 text-xs text-muted" data-testid="submission-status">
+                {submissionIsWorking(submissionPhase) && <TirangaLoader className="w-4 h-4" />}
+                <span>{submissionStatus[submissionPhase]}</span>
+                <button type="button" onClick={cancelSubmission} className="text-accent-text">Cancel</button>
+              </div>
+            )}
             {featureConfirm && (
               <FeatureConfirmCard
                 plan={featureConfirm.plan}
@@ -5088,7 +5178,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   featureConfirm.launch(answer);
                   setFeatureConfirm(null);
                 }}
-                onCancel={() => setFeatureConfirm(null)}
+                onCancel={cancelSubmission}
               />
             )}
             {fwConflict && (
@@ -5109,7 +5199,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     className="px-3 py-1 text-xs rounded bg-raised hover:bg-raised-hover text-body"
                   >Keep {fwName(fwConflict.picked)} (your selection)</button>
                   <button
-                    onClick={() => setFwConflict(null)}
+                    onClick={cancelSubmission}
                     className="px-3 py-1 text-xs rounded bg-transparent hover:bg-raised text-faint"
                   >Cancel</button>
                 </div>
@@ -5459,14 +5549,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               </div>
             )}
             {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) below. */}
-            <div className="flex flex-col gap-1.5 px-2 py-0.5">
+            <div className={`relative mx-auto w-[calc(100%-1.5rem)] max-w-3xl my-3 flex flex-col gap-1.5 ${COMPOSER_BOX_CLASS}`} data-composer-surface="pro">
               {/* OPTION A (admin 2026-07-19 — "input box gadbad, reposition + attractive"): the input now
                   sits on its OWN full-width row (order-1) and the Build/Plan/Advise MODE SELECTOR + settings
                   + attach sit in a slim toolbar row BELOW it (order-2, flex-wrap so more controls can be
                   added later without squeezing the input). CSS `order` reorders VISUALLY without touching
                   DOM order or any handler — same setChatMode, same dropups (still open upward, now over the
                   input), running dot, thread counts. Input is full-width again (the phone squish is gone). */}
-              <div className="flex items-center gap-1 order-2 flex-wrap">
+              <div className="flex min-h-11 items-center gap-1 order-2 flex-wrap px-2 pb-2 pr-24">
               <div className="relative">
                 {modeMenuOpen && (
                   <>
@@ -5708,7 +5798,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   rather than emptying the message array: a v5.0 thread owns a workspace, a build lock,
                   a preview and a report, and blanking only the bubbles would leave all of that live
                   underneath — the exact "+New chat leak" class this panel has been root-caused for twice. */}
-              <div className="order-0 w-full mb-1">
+              <div className="order-0 w-full px-3 pt-2">
                 <ChatToolbar
                   /* Progress on the LEFT of the same row the actions live on. Scrollable, because a
                      build can spawn several specialists and they must never push Send off a phone. */
@@ -5770,7 +5860,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   )}
                 </div>
               )}
-              <div className="relative w-full order-1" data-tour="chat">
+              <div className="w-full order-1" data-tour="chat">
                 {/* C3 — the @ file picker. Naming the file removes the SEARCH that otherwise starts
                     every edit request (billed tokens) and the wrong-file guess that follows it. */}
                 {mentionOpen && (
@@ -5791,7 +5881,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 )}
                 <textarea
                   ref={composerRef}
-                  className={`w-full bg-card border border-line rounded-[1.5rem] shadow-[0_2px_16px_rgba(0,0,0,0.06)] pl-4 pr-20 py-2.5 text-[15px] leading-relaxed text-ink placeholder:text-muted resize-none focus:outline-none focus:border-accent focus:shadow-[0_4px_24px_rgba(0,0,0,0.10)] transition-all overflow-y-auto ${composerExpanded ? 'h-[50vh]' : ''}`}
+                  aria-label="Message NavBharatAI Pro"
+                  className={`${COMPOSER_TEXTAREA_CLASS} overflow-y-auto ${composerExpanded ? 'h-[50vh]' : ''}`}
                   rows={1}
                   placeholder={
                     chatMode === 'planner'
@@ -5866,7 +5957,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     type="button"
                     onClick={() => setComposerExpanded((v) => !v)}
                     title={composerExpanded ? 'Minimize' : 'Expand'}
-                    className={`absolute right-12 ${composerBtnY} h-8 w-8 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-raised`}
+                    className={`absolute right-12 ${composerBtnY} h-9 w-9 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-raised`}
                   >
                     {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                   </button>
@@ -5875,7 +5966,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   // Plan/Advise are read-only lanes: ALWAYS a Send button (even while a build runs) — they
                   // never take the build lock, so they must be sendable anytime. Disabled only while THEIR
                   // own turn is streaming.
-                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className={`absolute right-2 ${composerBtnY} h-8 w-8 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
+                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
                     {roleBusy ? <TirangaLoader className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" strokeWidth={2.5} />}
                   </button>
                 ) : canSteerMidBuild(running, powerLevel, chatMode) ? (
@@ -5888,19 +5979,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   // revert, never silent — which is the trade this switch is for. Do not delete the
                   // branch to tidy up; it is what the gate returns to.
                   <>
-                    <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`absolute right-12 ${composerBtnY} h-8 w-8 flex items-center justify-center rounded-full text-danger hover:bg-raised`}>
+                    <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`absolute right-12 ${composerBtnY} h-9 w-9 flex items-center justify-center rounded-full text-danger hover:bg-raised`}>
                       <Square className="w-3.5 h-3.5 fill-current" />
                     </button>
-                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-8 w-8 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
+                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
                       <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
                     </button>
                   </>
+                ) : submissionPhase && !running ? (
+                  <button onClick={cancelSubmission} aria-label="Cancel request" title="Cancel request" className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-ink hover:opacity-90 rounded-full text-surface transition-all`}>
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                  </button>
                 ) : running ? (
-                  <button onClick={stop} title="Stop" className={`absolute right-2 ${composerBtnY} h-8 w-8 flex items-center justify-center bg-ink hover:opacity-90 rounded-full text-surface transition-all`}>
+                  <button onClick={stop} title="Stop" className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-ink hover:opacity-90 rounded-full text-surface transition-all`}>
                     <Square className="w-3.5 h-3.5 fill-current" />
                   </button>
                 ) : (
-                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className={`absolute right-2 ${composerBtnY} h-8 w-8 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
+                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
                     <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
                   </button>
                 )}

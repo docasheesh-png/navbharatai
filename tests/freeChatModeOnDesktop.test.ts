@@ -107,9 +107,12 @@ describe('the button, in the composer — AIChat', () => {
     expect(box).toBeGreaterThan(mode);
     // No left column at all when neither door is passed — a phone, where the bottom bar has both.
     expect(SHELL).toContain('const rail = onOpenHistory || onOpenMode ? (');
-    // The free chat hands the shell its textarea; Pro's own dropdown still owns the left inset.
+    // The free chat hands the shell its textarea; the Pro dropdown now uses the toolbar,
+    // leaving the entire writing row available under the shared roomy-composer policy.
     expect(CHAT.indexOf('<ComposerShell')).toBeLessThan(CHAT.indexOf('placeholder="Ask NavBharatAI..."'));
-    expect(CHAT).toContain(`onModeChange && activeAgent === 'navbharatai-pro' && "pl-32"`);
+    expect(CHAT).not.toContain('"pl-32"');
+    const controls = CHAT.slice(CHAT.indexOf('controls={('), CHAT.indexOf('send={(', CHAT.indexOf('controls={(')));
+    expect(controls).toContain('<ModeSelector mode={mode || \'chat\'} setMode={onModeChange} />');
     expect(CHAT).not.toContain('pl-24');
   });
 

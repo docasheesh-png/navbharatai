@@ -13,7 +13,22 @@ export interface FailedBuildRow {
   reportDigest: string;
   autopsy?: Pick<FailedReportAutopsyView, 'state' | 'revision'> | { state: 'cleanup_in_progress'; revision: null };
 }
+/** Observation of this authenticated read, not a promise that every build was saved. */
+export interface FailedBuildReadObservation {
+  observedAt: number;
+  deployment: string | null;
+  scope: 'retained-settled-failures';
+  ordering: 'workspace-history';
+}
+function isReadObservation(value: unknown): value is FailedBuildReadObservation {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as FailedBuildReadObservation;
+  return typeof v.observedAt === 'number' && Number.isFinite(v.observedAt) && v.observedAt > 0 &&
+    (v.deployment === null || (typeof v.deployment === 'string' && /^[a-f0-9]{16}$/.test(v.deployment))) &&
+    v.scope === 'retained-settled-failures' && v.ordering === 'workspace-history';
+}
 export interface FailedBuildPage {
+  observation?: FailedBuildReadObservation;
   reports: FailedBuildRow[];
   nextCursor: string | null;
   scanned: number;
@@ -28,7 +43,7 @@ export function isFailedBuildPage(value: unknown): value is FailedBuildPage {
   if (!value || typeof value !== 'object') return false;
   const p = value as FailedBuildPage;
   return Array.isArray(p.reports) && (p.nextCursor === null || typeof p.nextCursor === 'string') &&
-    typeof p.scanned === 'number' && p.reports.every((r) => r && typeof r.workspaceId === 'string' &&
+    typeof p.scanned === 'number' && (p.observation === undefined || isReadObservation(p.observation)) && p.reports.every((r) => r && typeof r.workspaceId === 'string' &&
       typeof r.historyId === 'string' && typeof r.startedAt === 'number' && typeof r.endedAt === 'number' &&
       typeof r.appLabel === 'string' && (r.numbering === undefined || isBuildReportNumbering(r.numbering)) && (r.autopsy === undefined || (r.autopsy && typeof r.autopsy === 'object' &&
         (r.autopsy.state === 'cleanup_in_progress' ? r.autopsy.revision === null :

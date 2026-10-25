@@ -5,6 +5,8 @@ import { BuildStoppedError } from '../../AgentV3/stopSignal';
 const URL = 'https://api.surplusintelligence.ai/min90/v1/chat/completions';
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
+/** Hard ceiling so a hung Surplus HTTP call cannot pin the Pro builder UI at 100% with no reply. */
+export const SURPLUS_TRANSPORT_TIMEOUT_MS = 60_000;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
 const REQUEST_KEYS = new Set(['model', 'provider', 'si_route', 'messages', 'tools', 'tool_choice', 'max_tokens', 'stream']);
 const RESPONSE_HEADERS = ['x-si-provider-family', 'x-si-served-by', 'x-si-truncated', 'x-si-adapted-params', 'x-si-route-objective'] as const;
@@ -99,17 +101,31 @@ export function createSurplusBuildTransport(env: NodeJS.ProcessEnv = process.env
       if (signal.aborted) throw stoppedError();
       if (parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) !== true) throw new SurplusBuildTransportError('configuration');
       const body = encodeRequest(request);
+      // Combine caller Stop/deadline with a hard transport ceiling. Never wait forever on Surplus.
+      const deadline = AbortSignal.timeout(SURPLUS_TRANSPORT_TIMEOUT_MS);
+      let combined: AbortSignal;
+      if (typeof AbortSignal.any === 'function') {
+        combined = AbortSignal.any([signal, deadline]);
+      } else {
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        signal.addEventListener('abort', abort, { once: true });
+        deadline.addEventListener('abort', abort, { once: true });
+        if (signal.aborted || deadline.aborted) controller.abort();
+        combined = controller.signal;
+      }
       const response = await fetcher(URL, {
-        method: 'POST', redirect: 'error', signal,
+        method: 'POST', redirect: 'error', signal: combined,
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json' },
         body,
       });
-      if (signal.aborted) throw stoppedError();
+      if (signal.aborted || combined.aborted) throw stoppedError();
       if (response.redirected || response.status < 200 || response.status >= 600 || (response.status >= 300 && response.status < 400)) {
         try { await response.body?.cancel(); } catch { /* best effort */ }
         throw new SurplusBuildTransportError('response');
       }
-      const parsed = await readBounded(response, signal);
+      // Bound the body read with the same hard ceiling as the request itself.
+      const parsed = await readBounded(response, combined);
       const headers: Record<string, string> = {};
       let metadataIncomplete = false;
       response.headers.forEach((_value, name) => {

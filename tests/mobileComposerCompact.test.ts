@@ -157,11 +157,12 @@ describe('mobile tools and desktop layout contract', () => {
     expect(html).toContain('data-open="false"');
     expect(html).toContain('data-send="true"');
   });
-  it('omits empty tool menus but keeps the desktop spacer before Send', () => {
+  it('omits empty tool menus and keeps Send on the Type right edge', () => {
     const html = shell(null);
     expect(html).not.toContain('aria-label="Composer tools"');
     expect(html).toContain('nb-composer-no-tools');
-    expect(html).toMatch(/nb-composer-controls[^>]*><\/div><div class="nb-composer-send-slot/);
+    expect(html).not.toContain('data-composer-toolbar');
+    expect(html).toMatch(/<\/textarea><div class="nb-composer-send-slot/);
   });
   it('keeps desktop flow and scopes all compact layout to the phone breakpoint', () => {
     const css = sourceText('src/components/chat/composer.css');
@@ -175,28 +176,34 @@ describe('mobile tools and desktop layout contract', () => {
     expect(css).toContain('flex-wrap: nowrap');
     expect(css).toContain('overflow-y: visible');
   });
-  it('keeps Pro Send in the action bar (outside Type) and resizes across breakpoints', () => {
+  it('keeps Pro Send on the Type right edge and resizes across breakpoints', () => {
     const pro = sourceText('src/components/agentv3/AgentV3Panel.tsx');
     const toolsStart = pro.indexOf('<MobileComposerTools');
     const toolsEnd = pro.indexOf('</MobileComposerTools>');
-    // Search/Clear sit above the pad (like Free); circular Send stays in the tools bar.
+    // Search/Clear sit above the pad (like Free); circular Send sits on Type's right edge.
     expect(pro.indexOf('<ChatToolbar')).toBeGreaterThan(-1);
     expect(pro.indexOf('<ChatToolbar')).toBeLessThan(toolsStart);
     const toolsBlock = pro.slice(toolsStart, toolsEnd);
-    expect(toolsBlock).toContain('nb-pro-send-slot');
-    expect(toolsBlock).toContain('aria-label="Cancel request"');
+    expect(toolsBlock).not.toContain('nb-pro-send-slot');
     expect(toolsBlock).toContain('NextSuggestionsBulb');
     expect(toolsBlock).toContain('nb-pro-expand-desktop');
+    const sendAt = pro.indexOf('nb-pro-send-slot');
+    expect(sendAt).toBeGreaterThan(pro.indexOf('data-tour="chat"'));
+    expect(sendAt).toBeGreaterThan(toolsEnd);
+    const sendBlock = pro.slice(sendAt, sendAt + 4000);
+    expect(sendBlock).toContain('aria-label="Cancel request"');
     expect(pro).not.toContain('nb-pro-suggestions-corner');
     expect(pro).toContain("window.visualViewport?.addEventListener('resize', resize)");
     expect(pro).toContain('if (resizeMobileComposer(el))');
   });
-  it('unified pad CSS: Type above, action bar below, no + disclosure, menus fixed', () => {
+  it('unified pad CSS: Send on Type edge, no divider, no + disclosure, menus fixed', () => {
     const css = sourceText('src/components/chat/composer.css');
     expect(css).toContain('nb-composer-tools-toggle { display: none !important; }');
     expect(css).toContain('[data-composer-toolbar]');
-    expect(css).toContain('border-top: 1px solid');
+    expect(css).toContain('border-top: none !important');
     expect(css).toContain('nb-pro-send-slot');
+    expect(css).toContain('position: absolute !important');
+    expect(css).toContain('right: 8px !important');
     expect(css).toContain('position: fixed !important');
     expect(css).toContain('order: 1 !important'); // Type
     expect(css).toContain('order: 2 !important'); // action bar

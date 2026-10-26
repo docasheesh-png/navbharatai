@@ -40,8 +40,9 @@ describe('one roomy prompt card across NavBharatAI', () => {
     }));
     expect(html).toContain('mx-auto w-full max-w-3xl');
     expect(html.indexOf('</textarea>')).toBeLessThan(html.indexOf('data-composer-toolbar'));
+    expect(html.indexOf('nb-composer-send-slot')).toBeLessThan(html.indexOf('data-composer-toolbar'));
     expect(html).toContain('flex-nowrap');
-    expect(html).toContain('shrink-0 self-end');
+    expect(html).toContain('nb-composer-send-slot');
     expect(html).not.toContain('one-line');
   });
 });

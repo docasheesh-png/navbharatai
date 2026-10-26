@@ -32,9 +32,8 @@ export const COMPOSER_ICON_CLASS =
   'p-2.5 rounded-full text-muted hover:text-ink hover:bg-raised transition-colors flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed';
 
 /**
- * Send — a filled circle at the box's bottom-right corner, an arrow pointing up. 36px, so it stays a
- * real thumb target, and set apart from the voice button by the box's own gap so a reach for Send
- * cannot land on a paid control. Its non-shrinking slot pins it to the bottom edge, so a message that grows to several lines keeps Send where the thumb already is.
+ * Send — a filled circle on the Type field's right edge, an arrow pointing up. 36px thumb target.
+ * Tools stay on their own row below; Send never lives in that tools row.
  */
 export const COMPOSER_SEND_CLASS =
   'h-9 w-9 rounded-full bg-accent text-on-accent disabled:opacity-30 disabled:cursor-not-allowed hover:brightness-110 transition-all flex items-center justify-center active:scale-95';
@@ -43,8 +42,8 @@ export const COMPOSER_SEND_CLASS =
 export const COMPOSER_STOP_CLASS =
   'h-9 w-9 rounded-full bg-ink text-surface hover:opacity-90 transition-all flex items-center justify-center active:scale-95';
 
-/** Send never shrinks or competes with the writing row. */
-export const COMPOSER_SEND_SLOT_CLASS = 'nb-composer-send-slot shrink-0 self-end';
+/** Send sits on the Type field's right edge and never shrinks. */
+export const COMPOSER_SEND_SLOT_CLASS = 'nb-composer-send-slot shrink-0';
 
 export interface ComposerShellProps {
   /** Opens chat history. Absent ⇒ no History half in the left column. */
@@ -55,7 +54,7 @@ export interface ComposerShellProps {
   children: React.ReactNode;
   /** The quiet controls for the wrapping bottom row: attach, mic, voice, star. */
   controls: React.ReactNode;
-  /** The Send / Stop button, at the bottom-right of the toolbar. */
+  /** The Send / Stop button, on the right edge of the Type field. */
   send: React.ReactNode;
 }
 
@@ -127,11 +126,15 @@ export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, s
     <div className={`${CONVERSATION_COLUMN_CLASS} flex items-end gap-2`} data-composer-layout="two-rows">
       {rail}
       <div className={`${COMPOSER_BOX_CLASS} flex-1 min-w-0 cursor-text ${controls ? '' : 'nb-composer-no-tools'}`} ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick}>
-        <div className="relative w-full min-w-0">{children}</div>
-        <div className="nb-composer-actionbar flex items-center justify-between gap-2" data-composer-toolbar="">
-          {controls ? <MobileComposerTools><div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto">{controls}</div></MobileComposerTools> : <div className="nb-composer-controls" />}
+        <div className="relative w-full min-w-0">
+          {children}
           <div className={COMPOSER_SEND_SLOT_CLASS}>{send}</div>
         </div>
+        {controls ? (
+          <div className="nb-composer-actionbar flex items-center justify-between gap-2" data-composer-toolbar="">
+            <MobileComposerTools><div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto">{controls}</div></MobileComposerTools>
+          </div>
+        ) : null}
       </div>
     </div>
   );

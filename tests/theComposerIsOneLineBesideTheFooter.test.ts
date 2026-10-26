@@ -33,14 +33,14 @@ describe('footer on (no History / Mode column) ⇒ roomy prompt card', () => {
     expect(html).not.toContain('data-composer-layout="one-line"');
   });
 
-  it('puts the text before the toolbar and keeps Send last', () => {
+  it('puts Send on the Type row and tools in the toolbar below', () => {
     const text = html.indexOf('data-ctl="text"');
     const ctl = html.indexOf('data-ctl="attach"');
     const send = html.indexOf('data-ctl="send"');
     expect(text).toBeGreaterThan(-1);
-    expect(ctl).toBeGreaterThan(text);
-    expect(send).toBeGreaterThan(ctl);
-    expect(html.indexOf('data-composer-toolbar')).toBeGreaterThan(text);
+    expect(send).toBeGreaterThan(text);
+    expect(ctl).toBeGreaterThan(send);
+    expect(html.indexOf('data-composer-toolbar')).toBeGreaterThan(send);
   });
 
   it('does not force the box to two rows\' height through Send', () => {

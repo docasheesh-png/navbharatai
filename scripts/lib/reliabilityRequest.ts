@@ -1,4 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import type { PowerLevel } from '../../src/server/AgentV3/powerLevel';
+
+/** Never infer a paid benchmark tier from account defaults or a misspelled label. */
+export function benchmarkTier(value: unknown): PowerLevel {
+  if (value === 'weak' || value === 'off' || value === 'mini') return value;
+  throw new Error('Set BENCH_POWER_LEVEL explicitly to weak, off (Normal), or mini (Strong).');
+}
 
 /** Validate before a paid run. Never send a bearer token to a plaintext remote server. */
 export function benchmarkEndpoint(baseUrl: string): string {
@@ -20,7 +27,8 @@ export function benchmarkToken(value: string | undefined): string {
 }
 
 /** A fresh independent repetition, with stable identity if the server sees a duplicate delivery. */
-export function benchmarkRequest(prompt: string, token: string, userId?: string, email?: string) {
+export function benchmarkRequest(prompt: string, token: string, userId?: string, email?: string, requestedTier?: unknown) {
+  const powerLevel = benchmarkTier(requestedTier);
   const requestId = randomUUID();
   const sessionId = `relbench-${randomUUID()}`;
   return {
@@ -31,7 +39,7 @@ export function benchmarkRequest(prompt: string, token: string, userId?: string,
       // A redirect is never authority to forward a paid request to another route/origin.
       redirect: 'error' as const,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${benchmarkToken(token)}` },
-      body: JSON.stringify({ prompt, userId, email, requestId, sessionId, planFirst: false }),
+      body: JSON.stringify({ prompt, userId, email, requestId, sessionId, planFirst: false, powerLevel }),
     },
   };
 }

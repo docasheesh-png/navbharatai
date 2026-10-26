@@ -1,3 +1,4 @@
+import { canaryFetch } from './reliability/canarySpendGuard';
 import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import OpenAI from 'openai';
 import { parseKeyPool } from '../lib/keyPool';
@@ -9,7 +10,7 @@ export async function weakBuildAdmissionAsk(system: string, user: string, signal
   assertLegacyInferenceAllowed('builder-scope-classifier');
   const keys = parseKeyPool(process.env.GLM_API_KEY);
   if (!keys.length) throw new Error('scope classifier unavailable');
-  const client = new OpenAI({ apiKey: keys[turn++ % keys.length], baseURL: process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', timeout: WEAK_SCOPE_TIMEOUT_MS, maxRetries: 0 });
+  const client = new OpenAI({ apiKey: keys[turn++ % keys.length], baseURL: process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', timeout: WEAK_SCOPE_TIMEOUT_MS, maxRetries: 0, fetch: canaryFetch() });
   const res = await client.chat.completions.create({
     model: WEAK_SCOPE_MODEL,
     temperature: 0,

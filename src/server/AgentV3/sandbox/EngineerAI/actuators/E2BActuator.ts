@@ -1,3 +1,4 @@
+import { assertCanaryLegacyAllowed } from '../../../reliability/canarySpendGuard';
 import { manifestRangeRepairEnabled, repairUnavailableRanges, manifestRepairNote } from '../../../manifestRangeRepair';
 import { missingRanges, latestVersionsCommand, isSafePackageName } from '../../../npmVersionHint';
 import { shouldSeedStarter } from './seedStarter';
@@ -1131,6 +1132,7 @@ export class E2BActuator implements IEngineerActuator {
    * Returns whether this instance is the one holding the sandbox, for honest diagnostics only.
    */
   noteUserActivity(workspaceId: string): boolean {
+    assertCanaryLegacyAllowed('sandbox-infrastructure');
     if (!workspaceId) return false;
     const now = Date.now();
     this._lastActivity.set(workspaceId, now);
@@ -1499,6 +1501,7 @@ export class E2BActuator implements IEngineerActuator {
    * with a shape `isDeadSandboxError` catches so `getSandbox` reconnects and resumes).
    */
   private _extendLifetime(workspaceId: string, sandbox: Sandbox, force = false): void {
+    assertCanaryLegacyAllowed('sandbox-infrastructure');
     const now = Date.now();
     if (!force && !shouldExtendLifetime(this._lastLifetimeExtend.get(workspaceId), now)) return;
     this._lastLifetimeExtend.set(workspaceId, now);
@@ -1525,6 +1528,7 @@ export class E2BActuator implements IEngineerActuator {
   }
 
   private async getSandbox(workspaceId: string, resumeSandboxId?: string, framework?: string): Promise<Sandbox> {
+    assertCanaryLegacyAllowed('sandbox-infrastructure');
     // Refresh activity FIRST so any in-flight operation protects its sandbox from
     // the idle sweep for its full window.
     this._lastActivity.set(workspaceId, Date.now());
@@ -1593,6 +1597,7 @@ export class E2BActuator implements IEngineerActuator {
    * refuses without creating or restoring a replacement.
    */
   private async _createSandbox(workspaceId: string, resumeSandboxId?: string, framework?: string): Promise<Sandbox> {
+    assertCanaryLegacyAllowed('sandbox-infrastructure');
     // Every create/connect is bounded by SANDBOX_CREATE_TIMEOUT_MS so a slow E2B can
     // never hang the build silently — on timeout we throw and the caller surfaces it.
     let sandbox: Sandbox;

@@ -15,6 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { braceBlock, codeOnly } from './helpers/sourceSlice';
 import { AIRouter } from '../src/server/AI/Router/AIRouter';
 import type { AIProvider } from '../src/server/AI/Router/ProviderTypes';
 
@@ -90,7 +91,9 @@ describe('the signal reaches the provider from the route', () => {
   });
 
   it('the RACE passes it too — a raced turn pays two providers, so it has twice the reason to', () => {
-    expect(read('src/server/AI/Router/AIRouter.ts')).toContain('}, undefined, signal).then(() => {');
+    const race = braceBlock(codeOnly(read('src/server/AI/Router/AIRouter.ts')), 'const runStream =');
+    expect(race).toContain('await p.executeStream!(prompt, systemPrompt, (chunk) => {');
+    expect(race).toContain('}, undefined, signal);');
   });
 
   it('chat.ts still aborts its controller when the client goes (the first half, not undone)', () => {

@@ -472,76 +472,107 @@ export class AIRouter {
       return await this.streamSequential(allProviders, prompt, systemPrompt, onChunk, signal);
     }
 
-    // Race p1 and p2
+    // Race p1 and p2. Transport activity is not an answer: only visible output commits a racer.
     const raceStartedAt = Date.now();
     let lastChunkAt = raceStartedAt;
     let committed: string | null = null;
+    let active = true;
     let commitResolve!: () => void;
     const commitPromise = new Promise<void>(res => { commitResolve = res; });
+    type RaceTerminal = 'completed' | 'failed' | 'cancelled' | 'skipped';
 
-    const runStream = (p: typeof p1, index: number): Promise<void> => {
-      assertFreeAnswerDispatch(); signal?.throwIfAborted();
-      if (!this.acquire(p.name)) return Promise.resolve();
+    const runStream = (p: typeof p1, index: number): Promise<RaceTerminal> => {
+      if (signal?.aborted) return Promise.resolve('cancelled');
+      assertFreeAnswerDispatch();
+      if (!this.acquire(p.name)) return Promise.resolve('skipped');
       const t = Date.now();
-      // `signal` rides the call itself, not only the chunk guard below (Q-621): dropping a chunk the
-      // user will never see still pays for the tokens that produced it, and a RACE pays twice.
-      return p.executeStream!(prompt, systemPrompt, (chunk) => {
-        if (signal?.aborted) return;
-        lastChunkAt = Date.now(); // the moving target the idle bound below watches
-        if (!committed) {
-          committed = p.name;
-          console.log(`[RACE_STREAM] ${p.name} (p${index+1}) won — committing`);
-          commitResolve();
+      let delivered = false;
+      let prefix = '';
+      let streaming = true;
+      return (async (): Promise<RaceTerminal> => {
+        try {
+          // Keep the existing parent signal and both paid attempts. This does not cancel the loser.
+          await p.executeStream!(prompt, systemPrompt, (chunk) => {
+            if (!streaming || signal?.aborted || !chunk) return;
+            if (!delivered) {
+              prefix += chunk;
+              if (!prefix.trim()) return;
+              delivered = true;
+              chunk = prefix;
+              prefix = '';
+            }
+            // A loser may still finish (and is measured honestly), but a closed race cannot emit.
+            if (!active) return;
+            lastChunkAt = Date.now();
+            if (!committed) {
+              committed = p.name;
+              console.log(`[RACE_STREAM] ${p.name} (p${index+1}) won — committing`);
+              commitResolve();
+            }
+            if (committed === p.name) onChunk(chunk);
+          }, undefined, signal);
+          if (signal?.aborted) return 'cancelled';
+          if (!delivered) throw new Error('stream produced no content');
+          recordProviderLatency(p.name, Date.now() - t, false);
+          return 'completed';
+        } catch (err: any) {
+          // Only the observed caller signal proves cancellation. An adapter may implement a timeout
+          // using AbortError too, so the error name alone must never hide a provider-health failure.
+          if (signal?.aborted) return 'cancelled';
+          noteProviderFailure(p.name, err);
+          recordProviderLatency(p.name, 0, true);
+          console.warn(`[RACE_STREAM] ${p.name} failed: ${err?.message?.slice(0, 60)}`);
+          return 'failed';
+        } finally {
+          streaming = false;
+          this.release(p.name);
+          if (committed === p.name) commitResolve();
         }
-        if (committed === p.name) onChunk(chunk);
-      }, undefined, signal).then(() => {
-        recordProviderLatency(p.name, Date.now() - t, false);
-      }).catch((err: any) => {
-        noteProviderFailure(p.name, err);
-        recordProviderLatency(p.name, 0, true);
-        console.warn(`[RACE_STREAM] ${p.name} failed: ${err?.message?.slice(0, 60)}`);
-      }).finally(() => {
-        this.release(p.name);
-        // If this was the committed provider and it's done, resolve
-        if (committed === p.name) commitResolve();
-      });
+      })();
     };
 
-    const s1 = runStream(p1, 0);
-    const s2 = runStream(p2, 1);
+    let commitTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const s1 = runStream(p1, 0);
+      const s2 = runStream(p2, 1);
+      // Preserve the existing 12-second commit budget and rest-of-ladder fallback policy.
+      const commitTimeout = new Promise<void>(res => { commitTimer = setTimeout(res, 12000); });
+      await Promise.race([commitPromise, commitTimeout]);
+      if (commitTimer) clearTimeout(commitTimer);
+      if (signal?.aborted) return { ok: false, reason: 'aborted' };
 
-    // Wait for commit (first chunk from either) with 12s timeout
-    const commitTimeout = new Promise<void>(res => setTimeout(() => { commitResolve(); res(); }, 12000));
-    await Promise.race([commitPromise, commitTimeout]);
-
-    if (!committed) {
-      // Neither committed in time — walk the REST of the ladder, one rung at a time. Same walker the
-      // free universe uses, so "what happens when a rung fails" has one implementation, not two.
-      console.warn('[RACE_STREAM] No commit in 12s — trying sequential fallbacks');
-      return await this.streamSequential(rest, prompt, systemPrompt, onChunk, signal);
-    }
-
-    // 🔎 SIBLING (rule 3): the 12-second COMMIT timeout above only asks "did anyone start speaking?".
-    // This final await used to be as unbounded as the sequential path's, so a provider that spoke one
-    // word and then hung stalled a PRO/PROFESSIONAL turn for ever. Bounded by SILENCE, same rule.
-    const winner = committed === p1.name ? p1 : p2;
-    const committedStream = committed === p1.name ? s1 : s2;
-    const raceLimits = watchdogLimits();
-    let stalled = false;
-    if (!raceLimits) {
-      await committedStream.catch(() => {});
-    } else {
-      const verdict = await awaitWithIdleBound(committedStream, () => lastChunkAt, raceStartedAt, raceLimits);
-      if (verdict !== 'completed') {
-        stalled = true;
-        console.warn(`[RACE_STREAM] ${winner.name} ${verdict} after committing — ending the turn`);
+      if (!committed) {
+        active = false; // Late racers must not interleave with the sequential fallback.
+        console.warn('[RACE_STREAM] No commit in 12s — trying sequential fallbacks');
+        return await this.streamSequential(rest, prompt, systemPrompt, onChunk, signal);
       }
+
+      const winner = committed === p1.name ? p1 : p2;
+      const winnerStream = committed === p1.name ? s1 : s2;
+      const raceLimits = watchdogLimits();
+      // The idle waiter reports whether a promise settled, not whether its provider succeeded.
+      // Retain the explicit terminal result so rejection/cancellation cannot become a clean finish.
+      let terminal: RaceTerminal | undefined;
+      const committedStream = winnerStream.then(result => { terminal = result; });
+      let stalled = false;
+      if (!raceLimits) {
+        await committedStream;
+      } else {
+        const verdict = await awaitWithIdleBound(committedStream, () => lastChunkAt, raceStartedAt, raceLimits);
+        stalled = verdict !== 'completed';
+      }
+      if (signal?.aborted) return { ok: false, reason: 'aborted' };
+      stalled = stalled || terminal !== 'completed';
+      if (stalled) console.warn(`[RACE_STREAM] ${winner.name} interrupted after committing — ending the turn`);
+      return {
+        ok: true, provider: winner.name, model: winner.pinnedModel,
+        latencyMs: Date.now() - raceStartedAt, raced: true,
+        ...(stalled ? { reason: 'stalled' as const } : {}),
+      };
+    } finally {
+      active = false;
+      if (commitTimer) clearTimeout(commitTimer);
     }
-    return {
-      ok: true, provider: winner.name, model: winner.pinnedModel,
-      latencyMs: Date.now() - raceStartedAt, raced: true,
-      ...(stalled ? { reason: 'stalled' as const } : {}),
-    };
   }
 
   private async execute(prompt: string, schema?: any, systemPrompt?: string, images?: string[], modelOverride?: string, signal?: AbortSignal): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {

@@ -5,7 +5,7 @@ import { CanaryReservationStore, type CanaryAuthority } from './canarySpendGuard
 import { CanarySandboxController, e2bCanaryProvider } from './canarySandboxController';
 import { type CanarySandboxManifest, sandboxManifestHash } from './canarySandboxPolicy';
 import { canaryWorkspaceId } from './canaryIsolation';
-import { database } from './canarySandboxTestDb';
+import { database } from '../../../../tests/helpers/canarySandboxTestDb';
 const now = 1_800_000_000_000;
 const key = 'synthetic-test-key';
 const hash = createHash('sha256').update(key).digest('hex');

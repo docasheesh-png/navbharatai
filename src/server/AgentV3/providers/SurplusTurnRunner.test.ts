@@ -1,5 +1,5 @@
 import { SERVICE_IDENTITY_REPLY, SURPLUS_SERVICE_IDENTITY_INSTRUCTION } from './surplusNarrativeIdentity';
-import { PUBLIC_BUILD_ENGINE_UNAVAILABLE } from '../../lib/buildEngineError';
+import { PUBLIC_BUILD_ENGINE_UNAVAILABLE, PUBLIC_BUILD_ENGINE_TIMEOUT, publicBuildEngineSafeReason } from '../../lib/buildEngineError';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SurplusReceiptDecision } from '../../AI/SurplusRegistry/receiptPolicy';
 import type { RunTurnParams } from '../ClaudeClient';
@@ -204,7 +204,7 @@ describe('Surplus native tool turns', () => {
     const dispatch = vi.fn(() => new Promise<OpenAiCompletionLike>(r => { resolve = r; }));
     const { runner } = setup({ dispatch, onFailure, onTurnComplete, timeoutMs: 20 });
     const pending = runner.runTurn(params({ onText }));
-    const rejected = expect(pending).rejects.toThrow(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
+    const rejected = expect(pending).rejects.toThrow(PUBLIC_BUILD_ENGINE_TIMEOUT);
     await vi.advanceTimersByTimeAsync(21); await rejected;
     const raw = completion(); resolve(raw); await vi.advanceTimersByTimeAsync(0);
     expect(onFailure).toHaveBeenCalledExactlyOnceWith(raw, expect.any(Object), expect.any(Error), expect.any(Object));
@@ -267,7 +267,7 @@ describe('Surplus native tool turns', () => {
     let resolve!: (value: SurplusTurnPermit) => void;
     const { runner, authority } = setup({ timeoutMs: 10, authorize: vi.fn(() => new Promise(r => { resolve = r; })) });
     const pending = runner.runTurn(params());
-    const rejected = expect(pending).rejects.toThrow(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
+    const rejected = expect(pending).rejects.toThrow(PUBLIC_BUILD_ENGINE_TIMEOUT);
     await vi.advanceTimersByTimeAsync(11); await rejected;
     resolve(permit()); await vi.advanceTimersByTimeAsync(0);
     expect(authority.dispatch).not.toHaveBeenCalled();
@@ -475,7 +475,7 @@ describe('Surplus bounded authorized fallback', () => {
     const authorizeFallback = vi.fn(async () => nextPermit(2)); const onText = vi.fn();
     const { runner, authority } = setup({ timeoutMs: kind === 'deadline' ? 1000 : 100, onFailure, authorizeFallback, dispatch: vi.fn(async () => emptyCompletion()) });
     const pending = runner.runTurn(params({ onText, signal: controller.signal, ...(kind === 'deadline' ? { deadlineAt: Date.now() + 500 } : {}) }));
-    const rejected = expect(pending).rejects.toThrow(kind === 'stop' ? /stop/i : kind === 'maintenance' ? 'maintenance' : kind === 'deadline' ? BUDGET_REACHED_MESSAGE : PUBLIC_BUILD_ENGINE_UNAVAILABLE);
+    const rejected = expect(pending).rejects.toThrow(kind === 'stop' ? /stop/i : kind === 'maintenance' ? 'maintenance' : kind === 'deadline' ? BUDGET_REACHED_MESSAGE : PUBLIC_BUILD_ENGINE_TIMEOUT);
     await vi.advanceTimersByTimeAsync(0); expect(onFailure).toHaveBeenCalledOnce();
     if (kind === 'stop') controller.abort();
     else if (kind === 'maintenance') for (const listener of maintenance.listeners) listener({ enabled: true });
@@ -498,7 +498,7 @@ describe('Surplus bounded authorized fallback', () => {
     const authorizeFallback = vi.fn(async () => nextPermit(2));
     const onFailure = vi.fn(async () => { vi.setSystemTime(Date.now() + 101); return retryAuthorized(); });
     const { runner, authority } = setup({ timeoutMs: 100, dispatch: vi.fn(async () => emptyCompletion()), onFailure, authorizeFallback });
-    await expect(runner.runTurn(params())).rejects.toThrow(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
+    await expect(runner.runTurn(params())).rejects.toThrow(PUBLIC_BUILD_ENGINE_TIMEOUT);
     expect(authority.dispatch).toHaveBeenCalledOnce(); expect(authorizeFallback).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -511,11 +511,26 @@ describe('Surplus bounded authorized fallback', () => {
       return new Promise<OpenAiCompletionLike>(resolve => { secondResolve = resolve; });
     });
     const { runner } = setup({ timeoutMs: 100, dispatch, onFailure, onResponse, authorizeFallback: vi.fn(async () => nextPermit(2)) });
-    const pending = runner.runTurn(params({ onText })); const rejected = expect(pending).rejects.toThrow(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
+    const pending = runner.runTurn(params({ onText })); const rejected = expect(pending).rejects.toThrow(PUBLIC_BUILD_ENGINE_TIMEOUT);
     await vi.advanceTimersByTimeAsync(61); expect(dispatch).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(40); await rejected;
     secondResolve(completion({ model: 'reviewed-model-2' })); await vi.advanceTimersByTimeAsync(0);
     expect(onFailure).toHaveBeenCalledTimes(2); expect(onResponse).not.toHaveBeenCalled(); expect(onText).not.toHaveBeenCalled();
     expect(dispatch).toHaveBeenCalledTimes(2); expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('tags turn_timeout distinctly from terminal_fold without leaking own properties', async () => {
+    vi.useFakeTimers();
+    const { runner } = setup({ timeoutMs: 100, dispatch: vi.fn(async () => new Promise(() => {})) });
+    const pending = runner.runTurn(params());
+    const rejected = expect(pending).rejects.toThrow(PUBLIC_BUILD_ENGINE_TIMEOUT);
+    await vi.advanceTimersByTimeAsync(101);
+    const error = await pending.catch(e => e);
+    await rejected;
+    expect(publicBuildEngineSafeReason(error)).toBe('turn_timeout');
+    expect(Object.getOwnPropertyNames(error).sort()).toEqual(['message', 'name', 'stack']);
+    expect(JSON.stringify(error)).not.toMatch(/turn_timeout|surplus|Surplus/i);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
 });

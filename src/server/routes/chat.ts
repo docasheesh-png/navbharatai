@@ -117,8 +117,7 @@ async function withChatTextGateway<T>(req: Request, res: Response, handler: () =
         res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders();
       }
-      res.write(`data: ${JSON.stringify({ c: reply, error: reply, code })}\n\n`);
-      res.end();
+      res.end(`data: ${JSON.stringify({ c: reply, error: reply, code })}\n\n`);
     } else if (!res.headersSent) res.status(503).json({ code, reply });
   }
 }
@@ -483,7 +482,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
             res.flushHeaders();
           }
           if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: direct })}\n\n`);
-          if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+          if (!res.writableEnded) { res.end('data: [DONE]\n\n'); }
         } else {
           res.json({ reply: direct });
         }
@@ -588,7 +587,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
             res.flushHeaders();
           }
           if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: reply })}\n\n`);
-          if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+          if (!res.writableEnded) { res.end('data: [DONE]\n\n'); }
         } else {
           res.json({ reply });
         }
@@ -696,7 +695,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           res.flushHeaders();
         }
         if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: replyText })}\n\n`);
-        if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+        if (!res.writableEnded) { res.end('data: [DONE]\n\n'); }
       } else {
         res.json({ reply: replyText });
       }
@@ -730,7 +729,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
             res.flushHeaders();
           }
           if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: reply })}\n\n`);
-          if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+          if (!res.writableEnded) { res.end('data: [DONE]\n\n'); }
         } else {
           res.json({ reply });
         }
@@ -847,8 +846,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           if (!res.writableEnded && !res.destroyed) {
             const notice = streamedText ? '\n\nThis reply was interrupted. Please retry when the service is available.' : strictFreeRequired() ? 'No verified free model is currently available. Please try again later.' : 'The AI service is temporarily unavailable. Please try again later.';
             res.write(`data: ${JSON.stringify({ c: notice })}\n\n`);
-            res.write(`data: ${JSON.stringify({ error: strictFreeRequired() ? 'No paid fallback was used.' : 'The selected AI route stopped.', code: strictFreeRequired() ? 'STRICT_FREE_INTERRUPTED' : 'INFERENCE_GATEWAY_INTERRUPTED', partial: !!streamedText })}\n\n`);
-            res.end();
+            res.end(`data: ${JSON.stringify({ error: strictFreeRequired() ? 'No paid fallback was used.' : 'The selected AI route stopped.', code: strictFreeRequired() ? 'STRICT_FREE_INTERRUPTED' : 'INFERENCE_GATEWAY_INTERRUPTED', partial: !!streamedText })}\n\n`);
           }
           return;
         } finally {
@@ -870,7 +868,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
             const failure = unavailableChatReply(streamedAnswer
               ? 'This reply was interrupted. Please retry when the service is available.' : streamedText);
             // Keep a notice already sent; add one only for empty or genuinely interrupted output.
-            res.write(`data: ${JSON.stringify({
+            res.end(`data: ${JSON.stringify({
               ...(streamedAnswer ? { c: `\n\n${failure.reply}` } : !streamedText.trim() ? { c: failure.reply } : {}),
               error: failure.reply, code: failure.code, partial: streamedAnswer,
             })}\n\n`);
@@ -883,9 +881,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
             // FREE_CHAT_ANSWER_ALL: exactly one Pro line on an app request, even if the model left it out.
             const proTail = appAsk && outcome?.reason !== 'stalled' && streamedText.trim() ? missingProLine(streamedText, message, replyLanguage ? chatReplyLanguageCategory(replyLanguage) : undefined) : '';
             if (proTail) res.write(`data: ${JSON.stringify({ c: proTail })}\n\n`);
-            res.write('data: [DONE]\n\n');
+            res.end('data: [DONE]\n\n');
           }
-          res.end();
         }
         // The SAME shape the non-streaming branch writes, so one collection answers for both paths and
         // no reader has to know which one served. Missing provider usage stays unmeasured and has
@@ -966,13 +963,12 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       console.error(`Error for tier ${tier}:`, e.message);
       if (freeAnswerSignal(req)?.aborted && !res.writableEnded && !res.destroyed) {
         const message='This answer was interrupted. Please check the partial reply before trying again.';
-        if (res.headersSent) {res.write(`data: ${JSON.stringify({c:`\n\n${message}`,error:message,code:'FREE_ANSWER_UNAVAILABLE'})}\n\n`);res.end();}
+        if (res.headersSent) {res.end(`data: ${JSON.stringify({c:`\n\n${message}`,error:message,code:'FREE_ANSWER_UNAVAILABLE'})}\n\n`);}
         else res.status(503).json({error:message,reply:message,code:'FREE_ANSWER_UNAVAILABLE'});
         return;
       }
       if (res.headersSent && isGatewayTerminalError(e) && !res.writableEnded && !res.destroyed) {
-        res.write(`data: ${JSON.stringify({ c: 'The AI service is temporarily unavailable. Please try again later.', code: 'INFERENCE_GATEWAY_UNAVAILABLE' })}\n\n`);
-        res.end();
+        res.end(`data: ${JSON.stringify({ c: 'The AI service is temporarily unavailable. Please try again later.', code: 'INFERENCE_GATEWAY_UNAVAILABLE' })}\n\n`);
       }
       if (!res.headersSent) {
         // Never leak the raw inference error (may name a provider/model) to the client.

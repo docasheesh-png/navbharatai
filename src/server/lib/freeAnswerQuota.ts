@@ -1,3 +1,4 @@
+import { confirmedFreeAnswerSettlement, stageFreeAnswerCompletion } from './freeAnswerCompletion';
 import { runWithFreeAnswerContext } from './freeAnswerQuotaContext';
 /** User answer credits are independent from provider usage, money holds and routing. */
 import { randomUUID } from 'node:crypto';
@@ -78,6 +79,8 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
     }
     const lease={controller,leaseUntil:reserved.reservation.leaseExpiresAt,answered:false,failed:false,disconnected};
     leases.set(req,lease);
+    const completion=stageFreeAnswerCompletion(res);
+    let runCompleted=false;
     let renewing=false;
     let finished=false;
     let expiryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -94,14 +97,28 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
       }).catch(()=>controller.abort()).finally(()=>{renewing=false;});
     },10_000);
     const deadlineTimer=setTimeout(()=>controller.abort(),Math.max(0,reserved.reservation.deadlineAt-Date.now()));
-    try { assertFreeAnswerActive(req); return await runWithFreeAnswerContext({ signal:controller.signal, assertActive:()=>{if (finished || controller.signal.aborted || Date.now()>=lease.leaseUntil) {controller.abort(); throw new Error('Free answer reservation expired');}} },run); }
+    try {
+      assertFreeAnswerActive(req);
+      const result=await runWithFreeAnswerContext({ signal:controller.signal, assertActive:()=>{if (finished || controller.signal.aborted || Date.now()>=lease.leaseUntil) {controller.abort(); throw new Error('Free answer reservation expired');}} },run);
+      runCompleted=true;
+      return result;
+    }
     finally {
       finished=true;
       clearInterval(renewTimer); clearTimeout(deadlineTimer); clearTimeout(expiryTimer);
       // No timeout refund: uncertainty is still consumed; expired owners cannot affect successors.
       const outcome=lease.answered ? 'answered' : lease.failed || (!lease.disconnected && !controller.signal.aborted) ? 'provider-failed' : 'uncertain';
-      try {await store.settle(reserved.reservation,outcome,Date.now());} catch {console.warn('[FREE ANSWERS] settlement unavailable; reservation retained');}
+      let settled=false;
+      try { settled=await confirmedFreeAnswerSettlement(store.settle(reserved.reservation,outcome,Date.now())); }
+      catch { /* Synchronous adapter failures are also unconfirmed, never successful completion. */ }
       leases.delete(req);
+      try {
+        if (settled && runCompleted) completion.publish();
+        else {
+          if (!settled) console.warn('[FREE ANSWERS] settlement unconfirmed; reservation retained');
+          completion.fail(lease.answered);
+        }
+      } finally { completion.restore(); }
     }
   } catch(error) {
     reject(res,'unavailable');

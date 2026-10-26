@@ -5,6 +5,9 @@
  * are synthetic; no live provider or user data is touched.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import http from 'node:http';
+import express from 'express';
+import { responseCompression } from '../src/server/lib/responseCompression';
 import { mockReq, mockRes } from './helpers/routeTestUtils';
 const m = vi.hoisted(() => ({ verify: vi.fn(), identity: vi.fn(), legacy: vi.fn(), detailed: vi.fn(), stream: vi.fn(), oldContext: vi.fn(), add: vi.fn(), live: vi.fn(), document: vi.fn(), vision: vi.fn(), reserve: vi.fn(), renew: vi.fn(), settle: vi.fn(), status: vi.fn(), getRouter: vi.fn() }));
 vi.mock('../src/server/lib/authMiddleware', async original => ({ ...await original<typeof import('../src/server/lib/authMiddleware')>(), verifyFirebaseToken: m.verify, verifyFirebaseIdentity: m.identity }));
@@ -36,6 +39,8 @@ function response() {
   res.removeListener = () => {};
   res.flushHeaders = () => { res.headersSent = true; };
   res.write = chunk => { res.chunks.push(chunk); return true; };
+  const end = res.end.bind(res);
+  res.end = (chunk?: string) => { if (chunk !== undefined) res.write(chunk); res.writableEnded = true; return end(); };
   return res;
 }
 function request(body: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
@@ -188,4 +193,74 @@ describe('actual non-streaming router remains compatible at both registered alia
     expect(usage).not.toHaveProperty('inputTokens');expect(usage).not.toHaveProperty('outputTokens');
     expect(usage).not.toHaveProperty('stalled');
   });
+});
+
+
+describe('durable settlement precedes the actual registered Chat terminal', () => {
+  it.each([true, false])('withholds terminal frames until settlement confirms, answered %s', async answered => {
+    let entered!: () => void;
+    let release!: () => void;
+    const enteredPromise = new Promise<void>(resolve => { entered = resolve; });
+    const releasePromise = new Promise<void>(resolve => { release = resolve; });
+    m.settle.mockImplementationOnce(async () => { entered(); await releasePromise; return true; });
+    if (answered) configure(async (_prompt, _system, chunk) => { chunk('An actual synthetic answer.'); return 'An actual synthetic answer.'; });
+    else configure(async () => '', async () => '');
+    const res = response();
+    const pending = route()(request({ stream: true }), res);
+    try {
+      await enteredPromise;
+      const chunks = res.chunks.join('');
+      if (answered) expect(chunks).toContain('An actual synthetic answer.');
+      expect(chunks, 'DONE is client-observable completion before the HTTP socket closes').not.toContain('[DONE]');
+      expect(chunks, 'Error frames also complete the actual client parser immediately').not.toContain('"error":');
+      expect(res.ended).toBe(false);
+      release();
+      await pending;
+      const actual = await parsed(res);
+      if (answered) expect(actual).toEqual({ text: 'An actual synthetic answer.' });
+      else expect(actual.failure).toMatchObject({ code: 'CHAT_ROUTE_UNAVAILABLE', partial: false });
+      expect(m.settle).toHaveBeenCalledOnce();
+      expect(m.settle.mock.calls[0][1]).toBe(answered ? 'answered' : 'provider-failed');
+    } finally {
+      release();
+      await pending;
+    }
+  });
+});
+
+
+it.each([true, false])('defers the actual Chat SSE terminal over HTTP with compression mounted, answered %s', async answered => {
+  let entered!: () => void; let release!: () => void; let received!: () => void;
+  const enteredPromise = new Promise<void>(resolve => { entered = resolve; });
+  const releasePromise = new Promise<void>(resolve => { release = resolve; });
+  const receivedPromise = new Promise<void>(resolve => { received = resolve; });
+  m.settle.mockImplementationOnce(async () => { entered(); await releasePromise; return true; });
+  if (answered) configure(async (_prompt, _system, chunk) => { chunk('An actual HTTP synthetic answer.'); return 'An actual HTTP synthetic answer.'; });
+  else configure(async () => '', async () => '');
+  const app = express(); app.use(express.json()); app.use(responseCompression());
+  registerChatRoutes(app, ((_req: unknown, _res: unknown, next: () => void) => next()) as never);
+  const server = await new Promise<http.Server>(resolve => { const server = app.listen(0, '127.0.0.1', () => resolve(server)); });
+  let text = ''; let ended = false;
+  const complete = new Promise<void>((resolve, reject) => {
+    const req = http.request({ hostname: '127.0.0.1', port: (server.address() as { port: number }).port, path: '/api/chat/navbharat', method: 'POST', headers: {
+      'content-type': 'application/json', 'accept-encoding': 'gzip', 'x-nb-answer-request': requestId,
+    } }, res => {
+      expect(res.headers['content-encoding']).toBeUndefined();
+      res.setEncoding('utf8'); res.on('data', chunk => { text += chunk; received(); });
+      res.on('end', () => { ended = true; resolve(); }); res.on('error', reject);
+    });
+    req.on('error', reject); req.end(JSON.stringify({ message: 'Explain this synthetic concept.', stream: true }));
+  });
+  try {
+    await Promise.all([enteredPromise, receivedPromise]);
+    expect(ended).toBe(false); expect(text).not.toContain('[DONE]'); expect(text).not.toContain('"error":');
+    release(); await complete;
+    const parsed = await consumeChatResponseStream(new Response(text).body!, true, vi.fn());
+    if (answered) expect(parsed).toEqual({ text: 'An actual HTTP synthetic answer.' });
+    else expect(parsed.failure).toMatchObject({ code: 'CHAT_ROUTE_UNAVAILABLE', partial: false });
+    expect(m.settle).toHaveBeenCalledOnce();
+  } finally {
+    release();
+    try { await complete; } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+  }
 });

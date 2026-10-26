@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { textMarkerFilePaths, truncationRecoverySteer, truncationRecoveryNarration } from './TruncationRecovery';
+import { textMarkerFilePaths, truncationRecoverySteer, truncationRecoveryNarration, lostTruncatedOutput, turnDiscardedTruncatedOutput } from './TruncationRecovery';
 
 // Connectly autopsy 2026-07-21: kimi hit its 8000-token ceiling mid `<<<FILE src/index.css>>>` — the file
 // was emitted as TEXT, never became a write_file tool call, so the main loop never saved it. main.tsx
@@ -77,5 +77,46 @@ describe('truncationRecoverySteer', () => {
 describe('truncationRecoveryNarration', () => {
   it('counts both broken and lost files', () => {
     expect(truncationRecoveryNarration(1, 2)).toContain('3 file(s)');
+  });
+});
+
+describe('empty write_files_batch on a truncated turn (autopsy bd20f9b2)', () => {
+  it('names an empty/missing batch so recovery steers onto write_file', () => {
+    const steer = truncationRecoverySteer({ emptyBatchTruncated: true })!;
+    expect(steer).toMatch(/write_files_batch/);
+    expect(steer).toMatch(/empty\/missing files array|NOT saved/i);
+    expect(steer).toMatch(/write_file/);
+  });
+
+  it('lostTruncatedOutput flags an empty batch and a missing files array', () => {
+    const empty = lostTruncatedOutput({
+      truncated: true,
+      toolUses: [{ name: 'write_files_batch', input: { files: [] } }],
+    }, false);
+    expect(empty.emptyBatchTruncated).toBe(true);
+    expect(empty.truncatedToolPaths).toEqual([]);
+
+    const missing = lostTruncatedOutput({
+      truncated: true,
+      toolUses: [{ name: 'write_files_batch', input: {} }],
+    }, false);
+    expect(missing.emptyBatchTruncated).toBe(true);
+
+    expect(turnDiscardedTruncatedOutput({
+      truncated: true,
+      toolUses: [{ name: 'write_files_batch', input: { files: [] } }],
+    }, false)).toBe(true);
+  });
+
+  it('does not flag an empty batch when a whole file was also written in the same turn', () => {
+    const r = lostTruncatedOutput({
+      truncated: true,
+      toolUses: [
+        { name: 'write_files_batch', input: { files: [] } },
+        { name: 'write_file', input: { path: 'src/Ok.tsx', content: 'export const ok = 1;' } },
+      ],
+    }, false);
+    expect(r.emptyBatchTruncated).toBe(false);
+    expect(r.written['src/Ok.tsx']).toBeDefined();
   });
 });

@@ -136,6 +136,29 @@ export function armedFutilityState(now: ProgressSnapshot): FutilityState {
   };
 }
 
+/**
+ * Clear the quiet streak without changing the progress baseline (autopsy bd20f9b2, 2026-10-20).
+ *
+ * Truncation recovery asks the model to rewrite a cut-off file RIGHT NOW. If the quiet window has
+ * already filled (or is about to), the heartbeat can abort that recovery call mid-flight — the
+ * report said "producing nothing" while the platform had just ordered a rewrite. A user answer
+ * already resets via `initialFutilityState`; a truncation steer is the same kind of "the next
+ * minutes are spoken for". Keeping `last` means a rewrite that lands still counts as fresh
+ * progress, and another ten quiet minutes after a failed recovery still stop the build.
+ */
+export function resetFutilityQuiet(state: FutilityState): FutilityState {
+  const last = state?.last ?? { ...ZERO };
+  return {
+    last: {
+      filesWritten: num(last.filesWritten),
+      commandsRun: num(last.commandsRun),
+      stepsDone: num(last.stepsDone),
+      pathsRead: num(last.pathsRead),
+    },
+    quietTicks: 0,
+  };
+}
+
 /** Did anything at all move? A single field is enough — this is "getting anywhere", not "getting far". */
 function madeProgress(a: ProgressSnapshot, b: ProgressSnapshot): boolean {
   return b.filesWritten > a.filesWritten || b.commandsRun > a.commandsRun || b.stepsDone > a.stepsDone

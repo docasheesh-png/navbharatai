@@ -1672,9 +1672,9 @@ export class AgentRunner {
             // Lost: a write sliced mid-`content` (the "Unterminated string in JSON" case), a batch's
             // cut-off tail, and `<<<FILE …>>>` text blocks the main loop never writes (Connectly autopsy
             // 2026-07-21). A buffered write resumed with append_file is not lost (P2b).
-            const { written, truncatedToolPaths: truncatedLost, textMarkerPaths: textLost } = lostTruncatedOutput(turn, resumeTruncatedEnabled());
+            const { written, truncatedToolPaths: truncatedLost, textMarkerPaths: textLost, emptyBatchTruncated } = lostTruncatedOutput(turn, resumeTruncatedEnabled());
             const broken = Object.keys(written).length > 0 ? await findSyntaxErrors(written) : [];
-            const steerInput = { brokenJs: broken, textMarkerPaths: textLost, truncatedToolPaths: truncatedLost };
+            const steerInput = { brokenJs: broken, textMarkerPaths: textLost, truncatedToolPaths: truncatedLost, emptyBatchTruncated };
             truncationSteer = truncationRecoverySteer({
               ...steerInput,
               // What this guard has already asked for in THIS run. A file cut off at the ceiling twice
@@ -1684,7 +1684,17 @@ export class AgentRunner {
             });
             for (const p of truncationSteeredPaths(steerInput)) this._truncationSteered.add(p);
             if (truncationSteer) {
-              events.emit({ type: 'narration', agent: agentRole, text: truncationRecoveryNarration(broken.length, textLost.length + truncatedLost.length), ts: Date.now() });
+              events.emit({ type: 'narration', agent: agentRole, text: truncationRecoveryNarration(broken.length, textLost.length + truncatedLost.length + (emptyBatchTruncated ? 1 : 0)), ts: Date.now() });
+              // 🔴 GIVE THE REWRITE A QUIET WINDOW (autopsy bd20f9b2). The futility breaker can fire on
+              // the same heartbeat that truncation recovery starts, aborting the rewrite mid-call.
+              // The route resets quiet ticks on this note — same idea as a user answer resetting it.
+              try {
+                this.opts.onNote?.({
+                  code: 'TRUNCATION_RECOVERY',
+                  message: 'Truncation recovery steered — futility quiet window reset so the rewrite can run',
+                  detail: [...truncatedLost, ...textLost, ...(emptyBatchTruncated ? ['write_files_batch(empty)'] : [])].slice(0, 20).join(', ') || undefined,
+                });
+              } catch { /* a note must never fail a build */ }
             }
           } catch { /* the guard is best-effort — it must never break a build */ }
         }

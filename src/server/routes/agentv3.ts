@@ -540,7 +540,7 @@ import { fillGateFromLedger, renderProvenInLedger } from '../AgentV3/evidenceLed
 import { appRenderedRecord, renderSeenThisBuild } from '../AgentV3/renderProof';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
-import { futilityMinutes, initialFutilityState, armedFutilityState, tickFutility, futilityDetail, futilityStopApplies } from '../AgentV3/futilityBreaker';
+import { futilityMinutes, initialFutilityState, armedFutilityState, resetFutilityQuiet, tickFutility, futilityDetail, futilityStopApplies } from '../AgentV3/futilityBreaker';
 import { waitingForUserLine } from '../AgentV3/userWait';
 import { STOP_DRAIN_WAIT_MS, BUILD_STILL_STOPPING_CODE, BUILD_STILL_STOPPING_MESSAGE, stoppedBuildGate, waitForBuildExit, markBuildExited, hasBuildBodyExitHold } from '../AgentV3/stoppingBuild';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -17255,6 +17255,11 @@ async function noteBuildOutcome(
         onNote: (note: { code: string; message: string; detail?: string }) => {
           // OUR style pass starts here (cancelledBuildBilling `stoppedDuringOurStylePass`).
           if (note.code === 'STYLE_RULES_RESUMED' && stylePassWindow.startedAt === null) stylePassWindow.startedAt = Date.now();
+          // Truncation recovery just ordered a rewrite — do not let the futility breaker abort it
+          // on the same quiet streak that filled while the cut-off turn was running (autopsy bd20f9b2).
+          if (note.code === 'TRUNCATION_RECOVERY') {
+            try { futilityState = resetFutilityQuiet(futilityState); } catch { /* breaker state is best-effort */ }
+          }
           try { buildDiag.record({ phase: 'build', severity: 'info', code: note.code, message: note.message, detail: note.detail, autoResolved: true }); } catch { /* a note must never fail a build */ }
         },
         // A small new app is built by ONE agent (soloBuild.ts, autopsy ca99778e) — the prompt says so beside the tools.

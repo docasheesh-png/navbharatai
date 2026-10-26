@@ -51,19 +51,84 @@
 }
 @media (min-width: 640px) { .nb-pro-expand-mobile { display: none; } }
 
-/* Tiny 💡 sits in the upper-right gap of the Pro composer — outside the + expander. */
-.nb-composer-box[data-composer-surface="pro"] .nb-pro-suggestions-corner {
-  top: 6px; right: 48px; line-height: 0;
-}
+/* Desktop Pro: 💡 stays in the tools row (end) — no extra corner chrome. */
 @media (min-width: 640px) {
-  .nb-composer-box[data-composer-surface="pro"] .nb-pro-suggestions-corner {
-    top: 8px; right: 56px;
-  }
+  .nb-composer-box[data-composer-surface="pro"] .nb-pro-suggestions-corner { display: none; }
 }
 @media (max-width: 639px) {
-  /* + strip: only the action buttons on one horizontal line — hide Search/Clear + Expand chrome. */
+  /* Non-Pro + strip: hide Search/Clear + Expand chrome when open. */
   .nb-composer-tools-content[data-open="true"] > .order-0,
   .nb-composer-tools-content[data-open="true"] .nb-pro-expand-mobile {
     display: none !important;
+  }
+
+  /*
+   * Pro mobile (match OLD good screenshot): NO + button.
+   * Build|settings|attach|mic|speaker is an always-visible clear row ABOVE Type.
+   * Desktop rules above are unchanged (display:contents on tools at min-width default).
+   */
+  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools {
+    display: contents;
+    position: static;
+    height: auto;
+    inset: auto;
+    pointer-events: auto;
+    z-index: auto;
+  }
+  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-toggle {
+    display: none !important;
+  }
+  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content,
+  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content[data-open="true"],
+  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content[data-open="false"] {
+    display: contents;
+    position: static;
+    overflow: visible;
+    max-height: none;
+    width: auto;
+    max-width: none;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  /* Tools ABOVE Type (textarea is order-1). */
+  .nb-composer-box[data-composer-surface="pro"] .nb-pro-controls {
+    order: 0;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-height: 36px;
+    max-width: none;
+    padding: 2px 8px 6px !important;
+    overflow: visible !important;
+  }
+  /* Natural button size — do not force 44px which cramps the Build label. */
+  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content button {
+    min-height: 32px;
+    min-width: 32px;
+    height: auto;
+    overflow: visible;
+    flex-shrink: 0;
+  }
+  .nb-composer-box[data-composer-surface="pro"] .nb-composer-text {
+    padding-left: 16px;
+  }
+  /* Expand lives inside the Type box (like OLD), not in the tools row. */
+  .nb-composer-box[data-composer-surface="pro"] .nb-pro-expand-mobile {
+    display: none !important;
+  }
+  .nb-composer-box[data-composer-surface="pro"] .nb-pro-expand-desktop {
+    display: flex !important;
+  }
+  /* Dropdowns must not be clipped — keep fixed escape. */
+  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content .absolute.bottom-full {
+    position: fixed;
+    left: 12px; right: 12px;
+    bottom: var(--nb-composer-menu-bottom, 60px);
+    width: auto !important; min-width: 0; max-width: calc(100vw - 24px);
+    max-height: var(--nb-composer-menu-max-height, 50dvh); overflow-y: auto;
+    z-index: 80;
   }
 }

@@ -180,12 +180,21 @@ describe('mobile tools and desktop layout contract', () => {
     const toolsEnd = pro.indexOf('</MobileComposerTools>');
     expect(toolsEnd).toBeGreaterThan(pro.indexOf('<ChatToolbar', pro.indexOf('<MobileComposerTools')));
     expect(pro.indexOf('aria-label="Cancel request"', toolsEnd)).toBeGreaterThan(toolsEnd);
-    // 💡 sits outside the + expander (upper-right corner), not inside the tools strip.
-    expect(pro.indexOf('nb-pro-suggestions-corner', toolsEnd)).toBeGreaterThan(toolsEnd);
-    expect(pro.indexOf('<NextSuggestionsBulb', toolsEnd)).toBeGreaterThan(toolsEnd);
-    expect(pro.slice(pro.indexOf('<MobileComposerTools'), toolsEnd)).not.toContain('NextSuggestionsBulb');
+    // 💡 lives at the end of the always-visible Pro tools row (OLD layout) — not a new corner.
+    const toolsBlock = pro.slice(pro.indexOf('<MobileComposerTools'), toolsEnd);
+    expect(toolsBlock).toContain('NextSuggestionsBulb');
+    expect(pro).not.toContain('nb-pro-suggestions-corner');
     expect(pro).toContain("window.visualViewport?.addEventListener('resize', resize)");
     expect(pro).toContain('if (resizeMobileComposer(el))');
+  });
+  it('Pro mobile CSS shows tools above Type without a + disclosure', () => {
+    const css = sourceText('src/components/chat/composer.css');
+    expect(css).toContain('.nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-toggle');
+    expect(css).toContain('display: none !important');
+    expect(css).toContain('.nb-composer-box[data-composer-surface="pro"] .nb-pro-controls');
+    expect(css).toContain('order: 0');
+    // Desktop contract untouched: tools default to display:contents outside the phone media query.
+    expect(css.split('@media')[0]).toContain('.nb-composer-tools, .nb-composer-tools-content { display: contents; }');
   });
 });
 

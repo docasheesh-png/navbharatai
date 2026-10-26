@@ -1,3 +1,5 @@
+import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../lib/chatReplyLanguage';
+import { FREE_CHAT_LANGUAGE_RULE, chatReplyLanguageInstruction } from '../lib/freeChatReplyLanguage';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { withFreeAnswerQuota, assertFreeAnswerActive, markFreeAnswer, freeAnswerSignal } from '../lib/freeAnswerQuota';
 import { withFreeChainEntryAdmission } from '../AI/FreeChain/entryAdmission';
@@ -128,13 +130,7 @@ async function withChatTextGateway<T>(req: Request, res: Response, handler: () =
  * deprecated/removed. Routing to providers is delegated to the shared aiRouter.
  */
 export function registerChatRoutes(app: Express, chatLimiter: RateLimitRequestHandler): void {
-  const LANGUAGE_RULE = `
-LANGUAGE RULE (MANDATORY):
-- Detect the language/tone/style the user is writing in
-- Reply in EXACTLY the same language, tone, and emotion — Hindi, English, Hinglish, Tamil, Telugu, Bengali, Marathi, Punjabi, or any other language
-- If user writes casually → you write casually; if formally → formally; if with emojis → with emojis
-- EXCEPTION: All code (variable names, comments, function names, strings) must ALWAYS be in professional English regardless of conversation language
-- EXPLAINING CODE OR AN ERROR in Hindi/Hinglish/another Indian language: keep every technical noun in ENGLISH (variable, function, error, loop, deploy, API) inside the user's grammar — never translate technical terms into Hindi words. And never show an error without immediately saying, in the user's language, what it means and what to change`;
+  const LANGUAGE_RULE = FREE_CHAT_LANGUAGE_RULE;
 
   const SYSTEM_PROMPT_EDIT = `You are NavBharatAI — world's best AI App Editor.
 ${LANGUAGE_RULE}
@@ -354,6 +350,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // Bounded BEFORE any extraction or provider call (chatInputLimits.ts, forensic audit 2026-10-04).
     const limits = checkChatInput({ message, fileAttachments, history });
     if (!limits.ok) return res.status(limits.status).json({ reply: limits.reply });
+    // Resolve from user text before attachment injection and history trimming.
+    const replyLanguage = resolveChatReplyLanguage(message, history, req.body.replyLanguage);
     history = limits.history;
 
     // Process attached files
@@ -433,7 +431,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       if (answerAll) {
         systemPrompt = systemPrompt.replace(/APP BUILDING — LEAD WITH NavBharatAI Pro[\s\S]*?(?=\nHARD LIMITS:)/, `${FREE_ANSWER_ALL_RULES}\n`)
           .replace('(guide them to NavBharatAI Pro instead, per the rule above)', '(for an app request, explain the idea instead, per the rule above)');
-        if (appAsk) systemPrompt = `${systemPrompt}\n\n${appRequestDirective(detectReplyLanguage(message))}`;
+        if (appAsk) systemPrompt = `${systemPrompt}\n\n${appRequestDirective(replyLanguage ? chatReplyLanguageCategory(replyLanguage) : detectReplyLanguage(message))}`;
       }
     } else if (hasCanvas) {
       systemPrompt = SYSTEM_PROMPT_EDIT;
@@ -520,6 +518,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // change. It is not a judgement that paid answers read better unshaped — widening it is this one
     // condition, deliberately left for them to ask for rather than taken on their behalf.
     if (isFree) systemPrompt = `${systemPrompt}${answerShapeFor(message)}`;
+
+    systemPrompt += chatReplyLanguageInstruction(replyLanguage);
 
     // Every chat tier credits its creators consistently (single source of truth).
     systemPrompt = `${systemPrompt}\n\n${CREATOR_IDENTITY}`;
@@ -775,7 +775,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         }
       } catch (error) { if (isGatewayTerminalError(error)) throw error; /* legacy search is best-effort */ }
 
-      const freeChainContext = isGatewayRouteSelected() ? undefined : await freeChainRequestContext(req, { tier, message: contextualMessage, history, attachments: attachments.length, hasProfile: !!userProfile, hasMemory, grounded: !!groundingStatus });
+      const freeChainContext = isGatewayRouteSelected() ? undefined : await freeChainRequestContext(req, { tier, message: contextualMessage, history, replyLanguage, attachments: attachments.length, hasProfile: !!userProfile, hasMemory, grounded: !!groundingStatus });
 
       if (req.body.stream === true) {
         // SSE stream — proper format so proxies/load balancers don't drop idle connections.
@@ -881,7 +881,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
               })}\n\n`);
             }
             // FREE_CHAT_ANSWER_ALL: exactly one Pro line on an app request, even if the model left it out.
-            const proTail = appAsk && outcome?.reason !== 'stalled' && streamedText.trim() ? missingProLine(streamedText, message) : '';
+            const proTail = appAsk && outcome?.reason !== 'stalled' && streamedText.trim() ? missingProLine(streamedText, message, replyLanguage ? chatReplyLanguageCategory(replyLanguage) : undefined) : '';
             if (proTail) res.write(`data: ${JSON.stringify({ c: proTail })}\n\n`);
             res.write('data: [DONE]\n\n');
           }
@@ -959,7 +959,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           return;
         }
         if (routed.ok && routed.content.trim()) markFreeAnswer(req);
-        const proTail = appAsk && routed.ok && routed.content ? missingProLine(routed.content, message) : '';
+        const proTail = appAsk && routed.ok && routed.content ? missingProLine(routed.content, message, replyLanguage ? chatReplyLanguageCategory(replyLanguage) : undefined) : '';
         res.json({ reply: `${routed.content}${proTail}` });
       }
     } catch(e: any) {

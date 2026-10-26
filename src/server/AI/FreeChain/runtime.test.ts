@@ -26,6 +26,7 @@ import { freeChainConfig } from './config';
 import { getBreaker, resetAllBreakers } from '../Router/CircuitBreaker';
 import { FreeChainProviderError } from './providers/openAiCompatProvider';
 import { isFreeChainAdminView, isFreeChainAdminMetrics } from '../../../lib/freeChatChainView';
+import type { ChatReplyLanguage } from '../../../lib/chatReplyLanguage';
 m.observeBudget.mockImplementation(async (cap: number) => ({ capNanoUsd: cap, revision: 1 }));
 const db = {} as Parameters<typeof buildFreeChainRouter>[0];
 function config(order = 'groq,cloudflare,deepseek') {
@@ -56,6 +57,38 @@ describe('free chat chain central dispatch', () => {
  m.execute.mockRejectedValueOnce(new FreeChainProviderError('RATE_LIMIT')).mockImplementation(successful('second'));
  const chunks: string[]=[]; const result = await buildFreeChainRouter(db, config()).route({ ...input(), onChunk: s=>chunks.push(s) });
  expect(result.provider).toBe('CLOUDFLARE'); expect(chunks).toEqual(['second']); expect(result.freeChain?.fallbacks).toBe(1); expect(m.cooldown).toHaveBeenCalled();
+ });
+ it.each([false, true])('keeps the explicit script in every provider request, including quality=%s and history trim', async teachingTurn => {
+ const history = [{ sender: 'user', text: 'Please explain world trade.' }, { sender: 'ai', text: 'A Roman-script answer.' }, { sender: 'user', text: 'devnaagri me bataao' }, ...Array.from({ length: 10 }, (_, i) => ({ sender: 'user', text: `Follow-up ${i}` }))];
+ m.execute.mockRejectedValueOnce(new FreeChainProviderError('RATE_LIMIT')).mockImplementation(successful('A synthetic answer.'));
+ const result = await buildFreeChainRouter(db, config('groq,cloudflare')).route({ ...input(), message: 'aur batao', history, context: { ...input().context, teachingTurn } });
+ expect(result.ok).toBe(true); expect(m.execute).toHaveBeenCalledTimes(2);
+ for (const [request] of m.execute.mock.calls) {
+   expect(request.systemPrompt).toContain('Hindi using Devanagari script, not Romanized Hindi or Hinglish');
+   expect(request.systemPrompt).not.toContain('Reply in Hinglish using Roman script.');
+   expect(request.prompt).not.toContain('devnaagri me bataao'); // policy survives the six-turn history window
+ }
+ expect(m.paid).not.toHaveBeenCalled(); // no paid translation/rewrite hop
+ });
+ it('honors a current Roman-script override over an older Devanagari preference', async () => {
+ await buildFreeChainRouter(db, config('groq')).route({ ...input(), message: 'Please reply in Hinglish', history: [{ role: 'user', content: 'Answer in Hindi' }] });
+ expect(m.execute.mock.calls[0][0].systemPrompt).toContain('Hinglish using Roman script, not Devanagari');
+ expect(m.execute.mock.calls[0][0].systemPrompt).not.toContain('Reply in Hindi using Devanagari script');
+ });
+ it('uses the preference resolved at ingress when the source turn was trimmed already', async () => {
+ await buildFreeChainRouter(db, config('groq')).route({ ...input(), message: 'more detail please', context: { ...input().context, replyLanguage: 'hi' } });
+ expect(m.execute.mock.calls[0][0].systemPrompt).toContain('Hindi using Devanagari script');
+ });
+ it.each(['Tamil', 'French'])('honors an explicit %s request instead of the English input language', async language => {
+ const cfg = config('groq'); cfg.rungs.find(r => r.id === 'groq')!.languages = ['other'];
+ const result = await buildFreeChainRouter(db, cfg).route({ ...input(), message: `Please reply in ${language}`, history: [{ sender: 'user', text: 'Reply in Hindi' }] });
+ expect(result.ok).toBe(true); expect(m.execute).toHaveBeenCalledOnce();
+ expect(m.execute.mock.calls[0][0].systemPrompt).toContain(`explicit user choice): Reply in ${language}.`);
+ expect(m.execute.mock.calls[0][0].systemPrompt).not.toContain('Reply in English.');
+ });
+ it('keeps detection subordinate even for explicit phrasing outside the deterministic parser', async () => {
+ await buildFreeChainRouter(db, config('groq')).route({ ...input(), message: 'For my answers I would prefer the Hindi language.' });
+ expect(m.execute.mock.calls[0][0].systemPrompt).toContain('DEFAULT ONLY when this conversation has no explicit reply-language or script request');
  });
  it('does not switch provider after text was committed', async () => {
  m.execute.mockImplementationOnce(async (arg) => { arg.onChunk('partial'); throw new FreeChainProviderError('NETWORK'); });
@@ -343,6 +376,42 @@ describe('free chat chain central dispatch', () => {
  const result=await buildFreeChainRouter(db,cfg).route({...input(),message:'what is photosynthesis',context:{...input().context,cacheEligible:true}});
  expect(result.provider).toBe('GROQ');expect(result.freeChain?.cacheHit).toBe(false);expect(m.execute).toHaveBeenCalledOnce();
  });
+ it('bypasses response caching for historical language preferences even on a public corpus prompt', async () => {
+  const cfg = config('groq'); cfg.cacheEnabled = true;
+  const router = buildFreeChainRouter(db, cfg);
+  for (const [index, preference] of ['devnaagri me bataao', 'Reply in English'].entries()) {
+   const result = await router.route({ ...input(), message: 'photosynthesis kya hai',
+    history: [{ role: 'user', content: preference }],
+    context: { ...input().context, uid: `public-user-${index}`, conversationKey: `chat-${index}`, cacheEligible: true } });
+   expect(result.ok).toBe(true); expect(result.freeChain?.cacheHit).toBe(false);
+  }
+  expect(m.cacheGet).not.toHaveBeenCalled(); expect(m.cachePut).not.toHaveBeenCalled();
+  expect(m.execute).toHaveBeenCalledTimes(2);
+ });
+ it.each<[ChatReplyLanguage, ChatReplyLanguage]>([['hi', 'en'], ['hi', 'hinglish'], ['ta', 'fr'], ['hi-latn', 'hinglish']])(
+  'separates public response-cache keys for %s and %s across users and conversations', async (firstLanguage, secondLanguage) => {
+   const cfg = config('groq'); cfg.cacheEnabled = true;
+   cfg.rungs.find(r => r.id === 'groq')!.languages = ['hi', 'hinglish', 'en', 'other'];
+   const entries = new Map<string, { content: string; provider: string; model: string }>();
+   m.cacheGet.mockImplementation(async key => entries.get(key) ?? null);
+   m.cachePut.mockImplementation(async (key, value) => { entries.set(key, value); });
+   m.execute.mockImplementationOnce(successful('first requested language answer'))
+    .mockImplementationOnce(successful('second requested language answer'));
+   const router = buildFreeChainRouter(db, cfg);
+   const turn = (replyLanguage: ChatReplyLanguage, identity: string) => router.route({ ...input(), message: 'photosynthesis kya hai',
+    context: { ...input().context, uid: identity, conversationKey: `chat-${identity}`, cacheEligible: true, replyLanguage } });
+   const first = await turn(firstLanguage, 'first-public-user');
+   const second = await turn(secondLanguage, 'second-public-user');
+   const repeat = await turn(firstLanguage, 'third-public-user');
+   expect(first.content).toBe('first requested language answer'); expect(first.freeChain?.cacheHit).toBe(false);
+   expect(second.content).toBe('second requested language answer'); expect(second.freeChain?.cacheHit).toBe(false);
+   expect(repeat.content).toBe(first.content); expect(repeat.freeChain?.cacheHit).toBe(true);
+   const keys = m.cacheGet.mock.calls.map(([key]) => key);
+   expect(keys).toHaveLength(3); expect(keys.every(key => /^[a-f0-9]{64}$/.test(key))).toBe(true);
+   expect(keys[0]).not.toBe(keys[1]); expect(keys[2]).toBe(keys[0]);
+   expect(m.cachePut.mock.calls.map(([key]) => key)).toEqual(keys.slice(0, 2));
+   expect(m.execute).toHaveBeenCalledTimes(2); expect(m.paid).not.toHaveBeenCalled();
+  });
  it('does not confuse two GLM model identities when one cached model is disabled',async()=>{
  const cfg=config('glm47,glm45');cfg.cacheEnabled=true;cfg.rungs.filter(r=>r.id.startsWith('glm')).forEach(r=>{r.reason=undefined;r.key='single-key';});
  m.controls.mockResolvedValue({enabled:true,rolloutPercent:100,disabledProviders:['glm45']});m.cacheGet.mockResolvedValue({content:'old',provider:'GLM',model:'glm-4.5-flash'});

@@ -1,3 +1,4 @@
+import { FREE_CHAT_LANGUAGE_RULE } from '../../lib/freeChatReplyLanguage';
 import { modelSlotPath, modelSlotBinding } from './modelConcurrency';
 import type { GatewaySlotRecoverySubmission } from '../../../lib/inferenceGatewaySetup';
 import { readFileSync } from 'node:fs';
@@ -29,7 +30,7 @@ function actualSystemPrompt() {
  function visit(node:ts.Node) { if(ts.isVariableDeclaration(node)&&ts.isIdentifier(node.name)&&node.initializer){if(node.name.text==='LANGUAGE_RULE') language=node.initializer.getText(ast);if(node.name.text==='buildFreeSystemPrompt') builder=node.initializer.getText(ast);}ts.forEachChild(node,visit); }
  visit(ast);expect(language).not.toBe('');expect(builder).not.toBe('');
  const js=ts.transpile(`const build=${builder}; return build(undefined,true);`,{target:ts.ScriptTarget.ES2022});
- const base=new Function('LANGUAGE_RULE','sessionGreetingRule',js)(new Function(`return ${language}`)(),sessionGreetingRule) as string;
+ const base=new Function('LANGUAGE_RULE','sessionGreetingRule',js)(new Function('FREE_CHAT_LANGUAGE_RULE', `return ${language}`)(FREE_CHAT_LANGUAGE_RULE),sessionGreetingRule) as string;
  return `${base}\n\n${freeChatModeGuide()}`.replace(/APP BUILDING — LEAD WITH NavBharatAI Pro[\s\S]*?(?=\nHARD LIMITS:)/,`${FREE_ANSWER_ALL_RULES}\n`).replace('(guide them to NavBharatAI Pro instead, per the rule above)','(for an app request, explain the idea instead, per the rule above)')+`\n\n${CREATOR_IDENTITY}\n\n${INDIA_TERRITORIAL_INTEGRITY}\n\n${recencyDirective()}\n\n${LINK_POLICY}\n\nReply in English.`;
 }
 const START = 1_800_000_010_000;

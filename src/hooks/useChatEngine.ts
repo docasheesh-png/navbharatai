@@ -1,3 +1,4 @@
+import { resolveChatReplyLanguage } from '../lib/chatReplyLanguage';
 import { newFreeAnswerRequestId, notifyFreeAnswerChanged } from '../lib/freeAnswerStatus';
 // useChatEngine — the free (NBI) chat engine, lifted out of the App.tsx God component (P3.1, behavior-
 // preserving). Owns the send pipeline: handleSendForTab (the core turn handler — intent routing, GitHub
@@ -130,6 +131,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
         message: prompt,
         preferredModel: selectedModel === 'auto' ? 'gemini' : selectedModel,
         history: history,
+        replyLanguage: resolveChatReplyLanguage('', history),
         mode: mode,
         intent: intent,
         target: target,
@@ -471,6 +473,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
           body: JSON.stringify({
             message: messageToSend,
             preferredModel: isNbi ? 'gemini' : selectedModel,
+            replyLanguage: resolveChatReplyLanguage('', historyForAPI),
             history: historyForAPI.slice(-40).map(m => ({ sender: m.sender, text: String(m.text || '').slice(0, 2000) })),
             memorySummary: memorySummary || undefined,
             agent: currentAgent,

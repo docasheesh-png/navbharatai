@@ -143,6 +143,41 @@ describe('real Free chat hook terminal request handling', () => {
       expect.objectContaining({ text: 'Answer to Question 1', sender: 'ai' }),
     ]));
   });
+  it.each(['axios', 'fetch'])('carries per-chat language through %s without changing global preference', async transport => {
+    mock.post.mockResolvedValue({ data: { reply: 'A synthetic answer.' } });
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ reply: 'A synthetic answer.' }), { headers: { 'Content-Type': 'application/json' } }));
+    const f = fixture();
+    if (transport === 'fetch') { f.deps.selectedModel = 'openai'; f.deps.keys = { openai: 'test' }; }
+    const send = async (message: string) => { f.deps.input = message; await f.engine().handleSendForTab('studio'); };
+    await send('Tell me about world trade.');
+    await send('devnaagri me bataao');
+    await send('aur details batao');
+    const payloads = transport === 'axios' ? mock.post.mock.calls.map(call => call[1])
+      : vi.mocked(fetch).mock.calls.map(call => JSON.parse(String(call[1]?.body)));
+    expect(payloads[1].message).toBe('devnaagri me bataao');
+    expect(payloads[2].replyLanguage).toBe('hi');
+    expect(f.deps.setPreferredLanguage).not.toHaveBeenCalled();
+    expect(f.deps.preferredLanguage).toBe('english');
+    const next = fixture(); await next.engine().handleSend('A new conversation');
+    expect(mock.post.mock.calls.at(-1)![1].replyLanguage).toBeUndefined();
+  });
+  it('keeps a script request after a failed response and before client history text trimming', async () => {
+    mock.post.mockRejectedValueOnce({ response: { status: 503, data: { code: 'CHAT_ROUTE_UNAVAILABLE', reply: 'Unavailable' } } })
+      .mockResolvedValue({ data: { reply: 'A synthetic answer.' } });
+    const f = fixture(); await f.engine().handleSend('devnaagri me bataao');
+    await f.engine().handleSend('Try again');
+    expect(mock.post.mock.calls[1][1].replyLanguage).toBe('hi');
+    expect(f.deps.setPreferredLanguage).not.toHaveBeenCalled();
+    const longTurn = `Reply in Hindi. ${'background '.repeat(220)}. Reply in English`;
+    f.deps.messages = [{ id: 'older', sender: 'user', text: longTurn, timestamp: new Date() }];
+    f.deps.selectedModel = 'openai'; f.deps.keys = { openai: 'test' };
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ reply: 'A synthetic answer.' }), { headers: { 'Content-Type': 'application/json' } }));
+    f.deps.input = 'next question'; await f.engine().handleSendForTab('studio');
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+    expect(body.replyLanguage).toBe('en');
+    expect(body.history[0].text).not.toContain('Reply in English');
+    expect(body.history[0].text.length).toBe(2000);
+  });
   it.each(['CHAT_ROUTE_UNAVAILABLE', 'FREE_ANSWER_UNAVAILABLE', 'FREE_ANSWER_BUSY'])('allows a fresh manual turn after terminal %s without automatic replay', async code => {
     mock.post.mockResolvedValueOnce({ data: { reply: 'First answer' } })
       .mockRejectedValueOnce({ response: { status: 503, data: { code, reply: 'Unavailable for this turn' } }, message: 'Request failed' })

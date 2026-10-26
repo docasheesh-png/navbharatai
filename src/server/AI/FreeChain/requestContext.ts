@@ -12,7 +12,7 @@ import {
 import { isAdminEmail } from '../../lib/adminEmails';
 
 /** Called only after attachment, vision, image, safety and direct-answer paths have returned. */
-export async function freeChainRequestContext(req: Request, input: { tier: string; message: string; history: unknown[]; attachments: number; hasProfile: boolean; hasMemory: boolean; grounded: boolean }): Promise<FreeChainContext | undefined> {
+export async function freeChainRequestContext(req: Request, input: { tier: string; message: string; history: unknown[]; replyLanguage?: FreeChainContext['replyLanguage']; attachments: number; hasProfile: boolean; hasMemory: boolean; grounded: boolean }): Promise<FreeChainContext | undefined> {
   const entryAdmission = entryAdmissionFor(req);
   const mode = cheaperInferenceMode();
   const freeChainOn = parseEnvFlag(process.env.FREE_CHAIN_ENABLED) === true;
@@ -56,6 +56,7 @@ export async function freeChainRequestContext(req: Request, input: { tier: strin
   const healthTurn = /\b(doctor|patient|diagnos\w*|symptom\w*|medicine|dose|pregnan\w*|medical|health)\b|दवा|बीमारी|मरीज़|मरीज|डॉक्टर|स्वास्थ्य|रोग/u.test(input.message.toLowerCase())
     || req.body?.mode === 'doctor' || req.body?.mode === 'health';
   return { uid, ...(entryAdmission ? { entryAdmission } : {}), conversationKey: conversationHash(uid, conversation), privateTurn, healthTurn,
+    ...(input.replyLanguage ? { replyLanguage: input.replyLanguage } : {}),
     teachingTurn: typeof req.body?.mode === 'string' && /^(teacher|teacher_ai|exam|exam_mode|tutor|study)$/i.test(req.body.mode),
     cacheEligible: !privateTurn && !healthTurn && !input.grounded && !input.history.length && !input.attachments,
     ...(isAdmin ? { isAdmin: true } : {}) };

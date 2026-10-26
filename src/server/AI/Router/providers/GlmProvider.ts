@@ -61,8 +61,9 @@ export class GlmProvider implements AIProvider {
     return c;
   }
 
-  async execute(prompt: string, _schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[]): Promise<AIProviderResponse> {
+  async execute(prompt: string, _schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[], signal?: AbortSignal): Promise<AIProviderResponse> {
     assertLegacyInferenceAllowed('direct-text-provider');
+    signal?.throwIfAborted();
     // The free GLM-flash model is text-only. Defer any image turn to the next
     // (vision-capable) provider instead of sending images it cannot read.
     if (Array.isArray(images) && images.length > 0) {
@@ -76,7 +77,7 @@ export class GlmProvider implements AIProvider {
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
     messages.push({ role: 'user', content: prompt });
 
-    const response = await this.client.chat.completions.create({ model, messages, max_tokens: 8000 });
+    const response = await this.client.chat.completions.create({ model, messages, max_tokens: 8000 }, signal ? { signal } : undefined);
 
     // Rock-solid: an HTTP-200 with EMPTY content is NOT an answer (free tiers do this when
     // rate-limited/overloaded). Throw at the provider level so EVERY caller — current router

@@ -154,6 +154,23 @@ describe('free chat chain central dispatch', () => {
  const controller=new AbortController();controller.abort();const onChunk=vi.fn();
  const result=await buildFreeChainRouter(db,config()).route({...input(),signal:controller.signal,onChunk});expect(result.reason).toBe('aborted');expect(m.execute).not.toHaveBeenCalled();expect(onChunk).not.toHaveBeenCalled();
  });
+ it.each([true, false])('abort during daily reserve closes only a newly dispatchable hold (mayDispatch=%s)', async mayDispatch => {
+ const controller = new AbortController();
+ const reservation = { id: 'synthetic-held', day: '2026-10-26', uidHash: 'synthetic-owner', maxCostNanoUsd: 315801600, createdAt: 0, mayDispatch };
+ m.paid.mockImplementation(async () => { controller.abort(); return reservation; });
+ m.settle.mockResolvedValue(true);
+ const result = await buildFreeChainRouter(db, config('deepseek')).route({ ...input(), signal: controller.signal });
+ expect(result.ok).toBe(false); expect(m.execute).not.toHaveBeenCalled(); expect(m.paid).toHaveBeenCalledOnce();
+ if (mayDispatch) expect(m.settle).toHaveBeenCalledExactlyOnceWith(reservation, 0);
+ else expect(m.settle).not.toHaveBeenCalled();
+ });
+ it('daily hold stays conservative when cancellation occurs after adapter entry', async () => {
+ const controller = new AbortController();
+ m.paid.mockResolvedValue({ id: 'synthetic-held', day: '2026-10-26', uidHash: 'synthetic-owner', maxCostNanoUsd: 315801600, createdAt: 0, mayDispatch: true });
+ m.execute.mockImplementation(async () => { controller.abort(); throw new FreeChainProviderError('ABORTED'); });
+ expect((await buildFreeChainRouter(db, config('deepseek')).route({ ...input(), signal: controller.signal })).ok).toBe(false);
+ expect(m.execute).toHaveBeenCalledOnce(); expect(m.settle).not.toHaveBeenCalled();
+ });
  it('streams a clear busy response when every rung is unavailable', async () => {
  const cfg=config();cfg.rungs.forEach(r=>{r.reason='unconfigured';});const onChunk=vi.fn();
  const result=await buildFreeChainRouter(db,cfg).route({...input(),onChunk});expect(result.ok).toBe(false);expect(onChunk).toHaveBeenCalledWith(result.content, 'notice');

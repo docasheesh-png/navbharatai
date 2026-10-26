@@ -19,7 +19,7 @@ function slot(base: AIProvider, priority: number, model: string): AIProvider {
     // What this rung pins — so telemetry can name the model that actually served, not just "VERTEX".
     pinnedModel: model,
     healthCheck: () => base.healthCheck(),
-    execute: (p, s, _, sys) => base.execute(p, s, model, sys),
+    execute: (p, s, _, sys, images, signal) => base.execute(p, s, model, sys, images, signal),
     // 🔴 THE MODEL MUST RIDE THE STREAM TOO. Dropping it here is what made every slotted rung stream
     // on its provider's hardcoded default — on Vertex, `gemini-2.5-pro` at $10/MTok — so the cheap
     // rungs of the FREE ladder were, on the streaming path chat actually uses, the dearest model.

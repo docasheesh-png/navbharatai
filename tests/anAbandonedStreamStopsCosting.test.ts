@@ -85,7 +85,9 @@ describe('the signal reaches the provider from the route', () => {
     const src = read('src/server/AI/Router/AIRouter.ts');
     const sequential = src.slice(src.indexOf('private async streamSequential('), src.indexOf('async routeStream('));
     expect(sequential).toContain('p.executeStream!(prompt, systemPrompt, (text) => {');
-    expect(sequential).toContain('}, undefined, signal)');
+    expect(sequential).toContain('AbortSignal.any([signal, attempt.signal])');
+    expect(sequential).toContain('}, undefined, attemptSignal)');
+    expect(sequential).toContain('attempt.abort(new Error(watched.verdict))');
     expect(sequential).toContain('await run(onChunk)');
     expect(sequential).toMatch(/runWatchedStream\(\s*run,/);
   });

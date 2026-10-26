@@ -225,6 +225,7 @@ export class AIRouter {
     if (gateway) return { response: gateway, telemetry: { provider: gateway.provider, retries: 0, latency: gateway.latencyMs, success: gateway.ok } };
     if (strictFreeRequired()) return this.routeVerifiedFree(prompt, systemPrompt, undefined, images, undefined, signal);
     await assertAiAvailable();
+    signal?.throwIfAborted();
     const racers = this.providers.filter(p => !p.lastResort);
     const fallbacks = this.providers.filter(p => p.lastResort);
     const errors: string[] = [];
@@ -232,9 +233,12 @@ export class AIRouter {
     // Eligible racers: healthy, not on cooldown, with capacity.
     const eligible: AIProvider[] = [];
     for (const p of racers) {
+      signal?.throwIfAborted();
       if (isOnCooldown(p.name)) { console.log(`[RACE] skip ${p.name} (cooldown)`); continue; }
       assertFreeAnswerDispatch();
-      if (!(await p.healthCheck().catch(() => false))) { console.log(`[RACE] skip ${p.name} (unhealthy)`); continue; }
+      const healthy = await p.healthCheck().catch(() => false);
+      signal?.throwIfAborted();
+      if (!healthy) { console.log(`[RACE] skip ${p.name} (unhealthy)`); continue; }
       if (this.inFlightCount(p.name) >= MAX_IN_FLIGHT) { console.log(`[RACE] skip ${p.name} (at capacity)`); continue; }
       eligible.push(p);
     }
@@ -246,12 +250,14 @@ export class AIRouter {
         const t = Date.now();
         try {
           assertFreeAnswerDispatch(); signal?.throwIfAborted();
-          const response = assertNonEmpty(await p.execute(prompt, undefined, undefined, systemPrompt, images), p.name);
+          const response = assertNonEmpty(await p.execute(prompt, undefined, undefined, systemPrompt, images, signal), p.name);
+          signal?.throwIfAborted();
           recordProviderLatency(p.name, Date.now() - t, false);
           return { response, name: p.name };
         } catch (err: any) {
           // Genuine failure → cool the provider down. (Slow-but-successful losers
           // resolve instead of rejecting, so they are never wrongly penalized.)
+          signal?.throwIfAborted();
           noteProviderFailure(p.name, err);
           recordProviderLatency(p.name, 0, true);
           errors.push(`${p.name}: ${String(err?.message).slice(0, 60)}`);
@@ -262,6 +268,7 @@ export class AIRouter {
       });
       try {
         const winner = await Promise.any(attempts);
+        signal?.throwIfAborted();
         console.log(`[RACE] won by ${winner.name}`);
         recordRouterOutcome(true);
         return {
@@ -269,20 +276,25 @@ export class AIRouter {
           telemetry: { provider: winner.name, retries: errors.length, latency: winner.response.latencyMs, success: true },
         };
       } catch {
+        signal?.throwIfAborted();
         console.warn('[RACE] all racers failed → last resort');
       }
     }
 
     // Last-resort fallback (sequential) — e.g. Claude Haiku.
     for (const p of fallbacks) {
+      signal?.throwIfAborted();
       assertFreeAnswerDispatch();
-      if (!(await p.healthCheck().catch(() => false))) continue;
+      const healthy = await p.healthCheck().catch(() => false);
+      signal?.throwIfAborted();
+      if (!healthy) continue;
       if (!this.acquire(p.name)) continue;
       const t = Date.now();
       try {
         console.log(`[RACE] last-resort: ${p.name}`);
         assertFreeAnswerDispatch(); signal?.throwIfAborted();
-        const response = assertNonEmpty(await p.execute(prompt, undefined, undefined, systemPrompt, images), p.name);
+        const response = assertNonEmpty(await p.execute(prompt, undefined, undefined, systemPrompt, images, signal), p.name);
+        signal?.throwIfAborted();
         recordProviderLatency(p.name, Date.now() - t, false);
         recordRouterOutcome(true);
         return {
@@ -290,6 +302,7 @@ export class AIRouter {
           telemetry: { provider: p.name, retries: errors.length, latency: response.latencyMs, success: true, fallbackReason: errors.length ? `Race failed: ${errors.slice(0, 3).join('; ')}` : undefined },
         };
       } catch (err: any) {
+        signal?.throwIfAborted();
         noteProviderFailure(p.name, err);
         recordProviderLatency(p.name, 0, true);
         errors.push(`${p.name}: ${String(err?.message).slice(0, 60)}`);
@@ -340,22 +353,36 @@ export class AIRouter {
       if (!p.executeStream) continue;
       if (!this.acquire(p.name)) continue;
       const t = Date.now();
+      const attempt = new AbortController();
+      const attemptSignal = signal ? AbortSignal.any([signal, attempt.signal]) : attempt.signal;
+      let physical: Promise<string> | undefined;
+      let released = false;
+      const release = () => { if (!released) { released = true; this.release(p.name); } };
       let delivered = false;
       let active = true;
       let prefix = '';
       // Commit only actual answer text. A whitespace/reasoning-only stream may safely
       // fall back; once visible text is sent, this turn must never mix in another answer.
-      const run = (cb: (text: string) => void) => p.executeStream!(prompt, systemPrompt, (text) => {
-        if (!active || signal?.aborted || !text) return;
-        if (!delivered) {
-          prefix += text;
-          if (!prefix.trim()) return;
-          delivered = true;
-          text = prefix;
-          prefix = '';
-        }
-        cb(text);
-      }, undefined, signal);
+      const run = (cb: (text: string) => void) => {
+        physical = Promise.resolve().then(() => {
+          assertFreeAnswerDispatch(); attemptSignal.throwIfAborted();
+          return p.executeStream!(prompt, systemPrompt, (text) => {
+            if (!active || attemptSignal.aborted || !text) return;
+            if (!delivered) {
+              prefix += text;
+              if (!prefix.trim()) return;
+              delivered = true;
+              text = prefix;
+              prefix = '';
+            }
+            cb(text);
+          }, undefined, attemptSignal);
+        });
+        // A watchdog ends the observer, not physical occupancy. Both settlement branches release
+        // exactly once; a non-cooperative SDK keeps its slot instead of multiplying zombie calls.
+        void physical.then(release, release);
+        return physical;
+      };
       try {
         // 🔴 THE ONLY THING THAT COULD END A STREAMED TURN WAS THE CLIENT DISCONNECTING (2026-09-17).
         // This `await` had no bound of any kind, so a provider that accepted the connection and then
@@ -377,6 +404,7 @@ export class AIRouter {
             onChunk,
             limits,
           );
+          if (watched.verdict !== 'completed' && watched.verdict !== 'failed') attempt.abort(new Error(watched.verdict));
           if (signal?.aborted) return { ok: false, reason: 'aborted' };
           if (watched.verdict === 'failed') throw watched.error ?? new Error('stream failed');
           if (mayTryNextRung(watched)) {
@@ -409,7 +437,12 @@ export class AIRouter {
           return { ok: true, provider: p.name, model: p.pinnedModel, latencyMs: Date.now() - t, raced: false, reason: 'stalled' };
         }
         console.warn(`[STREAM] ${p.name} failed: ${String(err?.message).slice(0, 60)} — next rung`);
-      } finally { active = false; this.release(p.name); }
+      } finally {
+        active = false; attempt.abort();
+        // Pre-dispatch fencing may throw before a provider promise exists. Otherwise that promise
+        // alone owns release, including a late rejection after timeout or disconnect.
+        if (!physical) release();
+      }
     }
     // Every rung failed. An HONEST refusal, never a silent escalation to something dearer — the same
     // posture `buildProfessionalFreeFallback` states for the free build path.
@@ -503,13 +536,15 @@ export class AIRouter {
             }
             // A loser may still finish (and is measured honestly), but a closed race cannot emit.
             if (!active) return;
-            lastChunkAt = Date.now();
             if (!committed) {
               committed = p.name;
               console.log(`[RACE_STREAM] ${p.name} (p${index+1}) won — committing`);
               commitResolve();
             }
-            if (committed === p.name) onChunk(chunk);
+            if (committed === p.name) {
+              lastChunkAt = Date.now();
+              onChunk(chunk);
+            }
           }, undefined, signal);
           if (signal?.aborted) return 'cancelled';
           if (!delivered) throw new Error('stream produced no content');
@@ -584,6 +619,7 @@ export class AIRouter {
     if (gateway) return { response: gateway, telemetry: { provider: gateway.provider, retries: 0, latency: gateway.latencyMs, success: gateway.ok } };
     if (strictFreeRequired()) return this.routeVerifiedFree(prompt, systemPrompt, schema, images, modelOverride, signal);
     await assertAiAvailable();
+    signal?.throwIfAborted();
     const targetSchema = schema?.type === 'OBJECT' ? schema : undefined;
     const errors: string[] = [];
     // Providers actually invoked this request. Pass 2 exists to retry providers that pass 1 SKIPPED
@@ -596,6 +632,7 @@ export class AIRouter {
     //         already attempted (and failed) in pass 1.
     for (const pass of [1, 2]) {
       for (const provider of this.providers) {
+        signal?.throwIfAborted();
         if (pass === 2 && attempted.has(provider.name)) continue;
 
         const onCooldown = isOnCooldown(provider.name);
@@ -605,8 +642,10 @@ export class AIRouter {
         }
 
         await assertAiAvailable();
+        signal?.throwIfAborted();
         assertFreeAnswerDispatch();
         const isHealthy = await provider.healthCheck().catch(() => false);
+        signal?.throwIfAborted();
         if (!isHealthy) {
           console.log(`[ROUTER] ${provider.name} healthCheck=false, skipping`);
           continue;
@@ -624,9 +663,10 @@ export class AIRouter {
           console.log(`[ROUTER] Trying ${provider.name} (pass ${pass}, in-flight ${concurrent + 1})...`);
           assertFreeAnswerDispatch(); signal?.throwIfAborted();
           const response = assertNonEmpty(
-            await provider.execute(prompt, targetSchema, modelOverride, systemPrompt, images),
+            await provider.execute(prompt, targetSchema, modelOverride, systemPrompt, images, signal),
             provider.name,
           );
+          signal?.throwIfAborted();
           const latency = Date.now() - startTime;
           console.log(`[ROUTER] ${provider.name} SUCCESS in ${latency}ms`);
           recordProviderLatency(provider.name, latency, false);
@@ -644,6 +684,7 @@ export class AIRouter {
             },
           };
         } catch (error: any) {
+          signal?.throwIfAborted();
           console.error(`[ROUTER] ${provider.name} FAILED (${error?.message?.slice(0, 80)})`);
           noteProviderFailure(provider.name, error);
           recordProviderLatency(provider.name, 0, true);

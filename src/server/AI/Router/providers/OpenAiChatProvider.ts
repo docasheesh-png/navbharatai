@@ -97,8 +97,9 @@ export class OpenAiChatProvider implements AIProvider {
     }
   }
 
-  async execute(prompt: string, _schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[]): Promise<AIProviderResponse> {
+  async execute(prompt: string, _schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[], signal?: AbortSignal): Promise<AIProviderResponse> {
     assertLegacyInferenceAllowed('direct-text-provider');
+    signal?.throwIfAborted();
     // Text-only — defer an image turn instead of sending pixels to a model that cannot read them.
     if (Array.isArray(images) && images.length > 0) {
       throw new Error('GPT Nano is text-only — deferring this vision turn to the next provider');
@@ -111,7 +112,7 @@ export class OpenAiChatProvider implements AIProvider {
     messages.push({ role: 'user', content: prompt });
 
     try {
-      const response = await this.client.chat.completions.create({ model, messages, max_tokens: 8000 });
+      const response = await this.client.chat.completions.create({ model, messages, max_tokens: 8000 }, signal ? { signal } : undefined);
       return {
         content: response.choices[0]?.message?.content || '',
         latencyMs: Date.now() - startTime,

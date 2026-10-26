@@ -271,7 +271,8 @@ it.each(visionCases)('never reports unavailable vision as an answer at $path str
   const res = response();
   await route(path)(request({ message: 'Describe the supplied fixture.', stream, fileAttachments: [{ name: 'fixture', type, base64: 'AA==' }] }), res);
   expect(m.vision).toHaveBeenCalledOnce();
-  expect(m.settle).toHaveBeenCalledExactlyOnceWith(expect.any(Object), 'provider-failed', expect.any(Number));
+  expect(m.settle).toHaveBeenCalledOnce();
+  expect(m.settle.mock.calls[0].slice(0, 2)).toEqual([expect.objectContaining({ id: 'a'.repeat(64), owner: requestId }), 'provider-failed']);
   if (stream) {
     expect((await parsed(res)).failure).toMatchObject({ code: 'CHAT_ROUTE_UNAVAILABLE', partial: false });
     expect(res.chunks.join('')).not.toContain('[DONE]');
@@ -284,7 +285,8 @@ it.each(paths.flatMap(path => [true, false].map(stream => ({ path, stream }))))(
   m.vision.mockResolvedValueOnce({ text: 'The fixture contains a blue square.', provider: 'GLM' });
   const res = response();
   await route(path)(request({ message: 'Describe the supplied fixture.', stream, fileAttachments: [{ name: 'fixture.png', type: 'image/png', base64: 'AA==' }] }), res);
-  expect(m.settle).toHaveBeenCalledExactlyOnceWith(expect.any(Object), 'answered', expect.any(Number));
+  expect(m.settle).toHaveBeenCalledOnce();
+  expect(m.settle.mock.calls[0].slice(0, 2)).toEqual([expect.objectContaining({ id: 'a'.repeat(64), owner: requestId }), 'answered']);
   if (stream) expect(await parsed(res)).toEqual({ text: 'The fixture contains a blue square.' });
   else { expect(res.statusCode).toBe(200); expect(res.body.reply).toBe('The fixture contains a blue square.'); }
 });

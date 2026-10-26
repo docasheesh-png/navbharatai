@@ -4831,7 +4831,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   )}
                 />
                 <p className="text-[10px] text-muted">
-                  Numbers run oldest (1) to newest across all retained latest-per-workspace reports, before filters. Existing ranks may use a 10-minute snapshot; new builds refresh it after a short cooldown. Temporary failures retry twice. Retention can change numbers. Showing {allBuilds.length}
+                  Chronological ranks (#1 oldest → newest) across retained latest-per-workspace reports, before filters — separate from permanent failed-report numbers on /failedbr. Existing ranks may use a 10-minute snapshot; new builds refresh after a short cooldown. Temporary failures retry twice. Retention can change these ranks. Missing ranks show — n/a. Showing {allBuilds.length}
                   {allBuildsFetched && allBuildsFetched.fetched >= allBuildsFetched.limit
                     /* Honest about the fetch ceiling: at the limit there may be OLDER builds this
                        list has not looked at, so "0 failed" must not read as "none exist". */
@@ -4849,7 +4849,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         onClick={() => void expandWorkspaceBuilds(b.workspaceId)}
                         className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-raised"
                       >
-                        <BuildReportNumber numbering={b.numbering} />
+                        <BuildReportNumber numbering={b.numbering} kind="chronological" />
                         <span className={`shrink-0 w-2 h-2 rounded-full ${b.ok === true ? 'bg-emerald-400' : b.ok === false ? 'bg-rose-400' : 'bg-faint'}`} />
                         <span className="flex-1 min-w-0">
                           <span className="block text-[12px] font-bold text-ink truncate">{b.prompt || b.summary || b.workspaceId}</span>

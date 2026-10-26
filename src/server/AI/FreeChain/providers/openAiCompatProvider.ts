@@ -366,7 +366,15 @@ export class OpenAiCompatProvider implements AIProvider {
             const choice = chunk.choices?.[0];
             reason = finishReason(choice?.finish_reason) ?? reason;
             assertFinishAllowed(choice?.finish_reason, choice?.delta?.refusal);
-            const text = choice?.delta?.content;
+            const delta = choice?.delta as { content?: unknown; reasoning_content?: unknown; reasoning?: unknown } | undefined;
+            const text = delta?.content;
+            // Reasoning models (CheaperInference beam) may stream reasoning before content.
+            // Pulse the FreeChain stream watchdog with an empty chunk so first-token silence
+            // resets without delivering text to the user (runtime ignores empty chunks).
+            const reasoningPulse = typeof delta?.reasoning_content === 'string' ? delta.reasoning_content
+              : typeof delta?.reasoning === 'string' ? delta.reasoning
+              : '';
+            if (reasoningPulse) onChunk('');
             if (typeof text === 'string' && text) {
               // Earlier usage is stale if more text arrives without updated totals. Never release
               // a reservation on an intermediate count from a partially measured stream.

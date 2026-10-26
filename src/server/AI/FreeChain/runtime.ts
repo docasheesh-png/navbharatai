@@ -1,5 +1,5 @@
 import { publishDeploymentPaidLimit } from './deploymentBudget';
-import { cheaperInferenceAdminStatus, cheaperInferenceMode } from '../../lib/cheaperInferencePolicy';
+import { cheaperInferenceAdminStatus, cheaperInferenceMode, cheapinfFirstTokenMs } from '../../lib/cheaperInferencePolicy';
 import { adminBusyDetail, withAdminBusyDetail } from './adminBusyDetail';
 import { persistFreeChainSample } from './eventSample';
 export { shouldPersistFreeChainEvent } from './eventSample';
@@ -46,8 +46,13 @@ const names: Record<ProviderId, AIProviderResponse['provider']> = { glm47: 'GLM'
 function empty(reason: FreeChainResult['reason'] = 'all-failed', message?: string, adminDetail?: string): FreeChainResult {
   return { content: withAdminBusyDetail(busyMessage(message), adminDetail), provider: 'NONE', model: 'none', latencyMs: 0, ok: false, reason };
 }
-function adminDetailFor(input: FreeChainInput, earlyReason?: string, attempts?: { provider: string; reason: string; entered?: boolean }[]): string | undefined {
-  return adminBusyDetail({ context: input.context, earlyReason, attempts });
+function adminDetailFor(
+  input: FreeChainInput,
+  earlyReason?: string,
+  attempts?: { provider: string; reason: string; entered?: boolean }[],
+  extras?: { waitMs?: number; ttftCapMs?: number },
+): string | undefined {
+  return adminBusyDetail({ context: input.context, earlyReason, attempts, waitMs: extras?.waitMs, ttftCapMs: extras?.ttftCapMs });
 }
 /** Does a non-DeepSeek paid rung's reservation profile stay under the unchanged kimi-k2.7 free ceiling? */
 function verifiedPaidReservationRate(rung: RungConfig): boolean {
@@ -260,9 +265,26 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
             if (id === 'groq' && remaining === 0) await store.cooldown(accountId(id), Date.now() + durationMs(result.rateLimitHeaders['x-ratelimit-reset-requests'], 86400000));
           }
         };
-        const watch = await runWatchedStream(execute, chunk => { if (!chunk) return; if (trace.ttftMs === null) trace.ttftMs = Date.now() - started; content += chunk; input.onChunk?.(chunk); },
-          { ...(watchdogLimits(undefined, 'free') ?? { firstTokenMs: cfg.ttftMs, idleMs: 30000, hardCapMs: 120000 }), firstTokenMs: cfg.ttftMs });
-        if (watch.verdict !== 'completed') { controller.abort(); partial = watch.delivered; if (watch.error) throw watch.error; throw new FreeChainProviderError(watch.verdict === 'first-token-timeout' ? 'TIMEOUT' : 'NETWORK'); }
+        // Beam (and other cheapinf models) may stream reasoning before delta.content.
+          // Free-chat default FREE_CHAIN_TTFT_MS=6s was killing exclusive admin as cheapinf:timeout.
+          const firstTokenMs = id === 'cheapinf'
+            ? cheapinfFirstTokenMs(exclusiveAdmin, cfg.ttftMs)
+            : cfg.ttftMs;
+          const watch = await runWatchedStream(execute, chunk => { if (!chunk) return; if (trace.ttftMs === null) trace.ttftMs = Date.now() - started; content += chunk; input.onChunk?.(chunk); },
+            { ...(watchdogLimits(undefined, 'free') ?? { firstTokenMs, idleMs: 30000, hardCapMs: 120000 }), firstTokenMs });
+          if (watch.verdict !== 'completed') {
+            controller.abort();
+            partial = watch.delivered;
+            if (watch.error) throw watch.error;
+            // Encode verdict + cap so admin diagnostic shows why (not a bare "timeout").
+            const kind = watch.verdict === 'first-token-timeout' ? 'first-token'
+              : watch.verdict === 'idle-timeout' ? 'idle'
+              : watch.verdict === 'hard-cap' ? 'hard-cap'
+              : 'stream';
+            const err = new FreeChainProviderError(watch.verdict === 'first-token-timeout' || watch.verdict === 'idle-timeout' || watch.verdict === 'hard-cap' ? 'TIMEOUT' : 'NETWORK');
+            (err as FreeChainProviderError & { watchdogDetail?: string }).watchdogDetail = `${kind}:${firstTokenMs}ms`;
+            throw err;
+          }
         if (!response || !content.trim()) throw new FreeChainProviderError('EMPTY_RESPONSE');
         if (reservation && completeUsage && response.usage) await store.settlePaid(reservation, quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung));
         if (monthHold) { monthSettled = true; await settleMonthly(db, monthHold.month, monthHold.amount, completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) : null); }
@@ -272,7 +294,12 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         return done({ ...response, content, ok: true });
       } catch (error) {
         controller.abort(); const safe = error instanceof FreeChainProviderError ? error : error instanceof FreeRoutingError ? new FreeChainProviderError(error.code === 'SAFETY_REFUSAL' ? 'SAFETY_REFUSAL' : error.code === 'REQUEST_ABORTED' ? 'ABORTED' : /^(INVALID_|UNVERIFIED_|TOOL_ENVELOPE_|HTTP_400$|HTTP_413$|HTTP_422$)/.test(error.code) ? 'INVALID_REQUEST' : error.code === 'FREE_BILLING_ANOMALY' ? 'POLICY_BLOCKED' : 'SERVER') : null;
-        attempt.reason = safe ? `${safe.code.toLowerCase()}${typeof safe.status === 'number' ? `:http=${safe.status}` : ''}` : 'unavailable';
+        const watchdogDetail = safe && typeof (safe as FreeChainProviderError & { watchdogDetail?: string }).watchdogDetail === 'string'
+          ? (safe as FreeChainProviderError & { watchdogDetail?: string }).watchdogDetail
+          : undefined;
+        attempt.reason = safe
+          ? `${safe.code.toLowerCase()}${typeof safe.status === 'number' ? `:http=${safe.status}` : ''}${watchdogDetail ? `:${watchdogDetail}` : ''}`
+          : 'unavailable';
         if (safe?.code === 'AUTH') warnOnce(`${rung.keyEnv}: authentication failed`);
         if (!['INVALID_REQUEST', 'SAFETY_REFUSAL', 'ABORTED'].includes(safe?.code ?? '')) {
           // Ordinary rungs keep AUTH=1h / QUOTA=1d. Owner exclusive cheapinf caps at 30s so a bad
@@ -294,7 +321,12 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         if (monthHold && !monthSettled) await settleMonthly(db, monthHold.month, monthHold.amount, attempt.entered ? null : 0);
       }
     }
-    const result = empty('all-failed', input.message, adminDetailFor(input, 'all-failed', trace.attempts)); input.onChunk?.(result.content, 'notice'); return done(result);
+    const lastTtft = [...trace.attempts].reverse().find(a => a.provider === 'cheapinf' && /timeout:/.test(a.reason));
+    const ttftCapMs = lastTtft ? Number((/timeout:(?:first-token|idle|hard-cap|stream):(\d+)ms/.exec(lastTtft.reason) ?? [])[1]) : undefined;
+    const result = empty('all-failed', input.message, adminDetailFor(input, 'all-failed', trace.attempts, {
+      waitMs: Date.now() - started,
+      ttftCapMs: Number.isFinite(ttftCapMs) ? ttftCapMs : undefined,
+    })); input.onChunk?.(result.content, 'notice'); return done(result);
   }
   return { async route(input: FreeChainInput): Promise<FreeChainResult> {
     const entry = input.context.entryAdmission;

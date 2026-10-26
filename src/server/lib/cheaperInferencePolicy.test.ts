@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { grantEmail } from '../AgentV3/featureFlag';
 import {
+  CHEAPERINFERENCE_ADMIN_FIRST_TOKEN_MS,
   CHEAPERINFERENCE_BASE_URL,
+  CHEAPERINFERENCE_CHAT_MODEL_CANDIDATES,
+  CHEAPERINFERENCE_PAID_FIRST_TOKEN_MS,
   cheaperInferenceAdminStatus,
   cheaperInferenceApiKeyConfigured,
   cheaperInferenceExclusiveAdmin,
   cheaperInferenceMode,
   cheaperInferencePaidRungEnabled,
+  cheapinfFirstTokenMs,
   isCheaperInferenceAdmin,
 } from './cheaperInferencePolicy';
 
@@ -43,5 +47,13 @@ describe('cheaperInferencePolicy (simple mode)', () => {
     expect(cheaperInferencePaidRungEnabled(env)).toBe(true);
     expect(cheaperInferenceExclusiveAdmin(adminMail, env)).toBe(false);
     expect(cheaperInferenceApiKeyConfigured({ CHEAPERINFERENCE_API_KEY: 'a,b' })).toBe(false);
+  });
+
+  it('lists catalog beam ids and gives exclusive admin a long first-content grace', () => {
+    expect(CHEAPERINFERENCE_CHAT_MODEL_CANDIDATES).toContain('beam');
+    expect(CHEAPERINFERENCE_CHAT_MODEL_CANDIDATES).toContain('beam-1.0-501b-a23b');
+    expect(cheapinfFirstTokenMs(true, 6_000)).toBe(CHEAPERINFERENCE_ADMIN_FIRST_TOKEN_MS);
+    expect(cheapinfFirstTokenMs(false, 6_000)).toBe(CHEAPERINFERENCE_PAID_FIRST_TOKEN_MS);
+    expect(cheapinfFirstTokenMs(true, 90_000)).toBe(90_000);
   });
 });

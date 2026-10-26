@@ -13,6 +13,10 @@ export function adminBusyDetail(input: {
   earlyReason?: string;
   attempts?: readonly AdminBusyAttempt[];
   env?: NodeJS.ProcessEnv;
+  /** Wall ms spent before busy (admin exclusive path). */
+  waitMs?: number;
+  /** First-content watchdog cap applied to the last attempt. */
+  ttftCapMs?: number;
 }): string | undefined {
   if (input.context.isAdmin !== true) return undefined;
   const status = cheaperInferenceAdminStatus(input.env);
@@ -21,6 +25,12 @@ export function adminBusyDetail(input: {
     `keyConfigured=${status.apiKeyConfigured ? 'yes' : 'no'}`,
     `model=${sanitizeToken(status.defaultModel)}`,
   ];
+  if (typeof input.waitMs === 'number' && Number.isFinite(input.waitMs) && input.waitMs >= 0) {
+    parts.push(`waitMs=${Math.min(Math.floor(input.waitMs), 600_000)}`);
+  }
+  if (typeof input.ttftCapMs === 'number' && Number.isFinite(input.ttftCapMs) && input.ttftCapMs > 0) {
+    parts.push(`ttftCapMs=${Math.min(Math.floor(input.ttftCapMs), 600_000)}`);
+  }
   if (input.earlyReason) parts.push(`early=${sanitizeToken(input.earlyReason)}`);
   const attempts = input.attempts ?? [];
   if (attempts.length) {

@@ -19607,6 +19607,8 @@ async function noteBuildOutcome(
         ) break;
         result = undefined;
       }
+      // Loop exits only after the convergence statement set `result`.
+      result = result!;
       // …and the architect's loop, and with it OUR style pass, is over.
       closeStylePassWindow(stylePassWindow, Date.now());
 

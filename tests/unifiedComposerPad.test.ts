@@ -26,6 +26,24 @@ describe('unified composer pad', () => {
     expect(css).toContain('position: fixed !important');
   });
 
+  it('Pro flattens MobileComposerTools so desktop Type stays above tools', () => {
+    const css = read('src/components/chat/composer.css');
+    expect(css).toContain('data-composer-surface="pro"] > .nb-composer-tools');
+    expect(css).toMatch(/\[data-composer-surface="pro"\][\s\S]*nb-composer-tools-content[\s\S]*display: contents !important/);
+    expect(css).toMatch(/\[data-composer-surface="pro"\][\s\S]*\[data-route="chat"\][\s\S]*order: 1/);
+    expect(css).toMatch(/\[data-composer-surface="pro"\][\s\S]*\.nb-pro-controls[\s\S]*order: 2/);
+  });
+
+  it('desktop hides the duplicate ↵ Send chip while Search/Clear remain', () => {
+    const css = read('src/components/chat/composer.css');
+    const desktop = css.slice(css.indexOf('@media (min-width: 640px)'));
+    expect(desktop).toContain('.nb-send-enter-toggle');
+    expect(desktop).toContain('display: none !important');
+    const toolbar = read('src/components/chat/ChatToolbar.tsx');
+    expect(toolbar).toContain('Search');
+    expect(toolbar).toContain('Clear');
+  });
+
   it('Pro Send/Expand sit in the tools action bar, not absolute over Type', () => {
     const pro = read('src/components/agentv3/AgentV3Panel.tsx');
     const tools = pro.slice(pro.indexOf('<MobileComposerTools'), pro.indexOf('</MobileComposerTools>'));

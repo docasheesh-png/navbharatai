@@ -5642,38 +5642,33 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               </div>
             )}
             {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) below. */}
+            {/* Search/Clear above the pad (same as Free) — not inside the white Type box. */}
+            <div className="relative mx-auto w-[calc(100%-1.5rem)] max-w-3xl px-0.5">
+              <ChatToolbar
+                leftSlot={!showTeamHq(running, powerLevel) && agents.length > 0 ? (
+                  <div
+                    className="flex gap-1.5 overflow-x-auto overscroll-x-contain min-w-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    style={{ WebkitOverflowScrolling: 'touch' }}
+                  >
+                    {agents.map((a) => <AgentChip key={a.agent} card={a} running={running} />)}
+                  </div>
+                ) : undefined}
+                messageCount={convo.length}
+                sendOnEnter={sendOnEnter}
+                onSendOnEnterChange={setSendOnEnter}
+                searchQuery={chatSearchQuery}
+                onSearchQueryChange={setChatSearchQuery}
+                searchOpen={showChatSearch}
+                onSearchOpenChange={setShowChatSearch}
+                searchMatches={visibleConvo.length}
+                onClear={running ? undefined : newChatFromHistory}
+                charCount={prompt.length}
+              />
+            </div>
             <div className={`relative mx-auto w-[calc(100%-1.5rem)] max-w-3xl my-3 flex flex-col gap-1.5 ${COMPOSER_BOX_CLASS}`} data-composer-surface="pro" data-steering={canSteerMidBuild(running, powerLevel, chatMode)} data-expanded={composerExpanded}>
-              {/* OPTION A (admin 2026-07-19 — "input box gadbad, reposition + attractive"): the input now
-                  sits on its OWN full-width row (order-1) and the Build/Plan/Advise MODE SELECTOR + settings
-                  + attach sit in a slim toolbar row BELOW it (order-2, flex-wrap so more controls can be
-                  added later without squeezing the input). CSS `order` reorders VISUALLY without touching
-                  DOM order or any handler — same setChatMode, same dropups (still open upward, now over the
-                  input), running dot, thread counts. Input is full-width again (the phone squish is gone). */}
+              {/* Unified pad: Type on top (order-1), tools + circular Send below (order-2). CSS
+                  flattens MobileComposerTools so order wins on desktop too. */}
               <MobileComposerTools open={composerToolsOpen} onOpenChange={setComposerToolsOpen}>
-              <div className="order-0 w-full px-3 pt-2">
-                <ChatToolbar
-                  /* Progress on the LEFT of the same row the actions live on. Scrollable, because a
-                     build can spawn several specialists and they must never push Send off a phone. */
-                  leftSlot={!showTeamHq(running, powerLevel) && agents.length > 0 ? (
-                    <div
-                      className="flex gap-1.5 overflow-x-auto overscroll-x-contain min-w-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                      style={{ WebkitOverflowScrolling: 'touch' }}
-                    >
-                      {agents.map((a) => <AgentChip key={a.agent} card={a} running={running} />)}
-                    </div>
-                  ) : undefined}
-                  messageCount={convo.length}
-                  sendOnEnter={sendOnEnter}
-                  onSendOnEnterChange={setSendOnEnter}
-                  searchQuery={chatSearchQuery}
-                  onSearchQueryChange={setChatSearchQuery}
-                  searchOpen={showChatSearch}
-                  onSearchOpenChange={setShowChatSearch}
-                  searchMatches={visibleConvo.length}
-                  onClear={running ? undefined : newChatFromHistory}
-                  charCount={prompt.length}
-                />
-              </div>
                 {!canSteerMidBuild(running, powerLevel, chatMode) && (
                   <button type="button" className="nb-pro-expand-mobile items-center text-muted hover:text-ink"
                     onClick={() => setComposerExpanded((value) => !value)}>{composerExpanded ? 'Minimize editor' : 'Expand editor'}</button>

@@ -3496,7 +3496,14 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
     // Drop Surplus from the recursive Weak factory so we never wrap Surplus again after fail-open.
     return wrapSurplusRunnerPreWriteFailOpen(
       surplusRunner,
-      () => buildTurnRunner({ ...opts, surplusSession: undefined, surplusPreWriteFailOpen: undefined }),
+      // Explicit tier + onTurnComplete so heal/tier static guards see attribution through the spread.
+      () => buildTurnRunner({
+        ...opts,
+        surplusSession: undefined,
+        surplusPreWriteFailOpen: undefined,
+        tier: opts.tier,
+        onTurnComplete: opts.onTurnComplete,
+      }),
       opts.surplusPreWriteFailOpen,
     );
   }

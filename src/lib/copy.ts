@@ -8,6 +8,8 @@ export const COPY = {
     heroSubtitle: 'Describe an app in Hindi, English or Hinglish. NavBharatAI plans, codes, previews and deploys it.',
   },
   branding: {
+    // Display copy only: never use this name as a mode, route, storage or billing identifier.
+    aiChatName: 'AI chat',
     defaultTagline: 'AI app builder',
   },
   preview: {

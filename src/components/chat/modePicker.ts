@@ -1,3 +1,4 @@
+import { COPY } from '../../lib/copy';
 // modePicker — WHO can the Free chat's Mode button switch to? (admin 2026-08-25: "user mode par click
 // kare aur professional ki list aa jaye … professional ki alag tile home page se hatani hai".)
 //
@@ -161,7 +162,7 @@ export function recentTargetFromId(id: string): RecentTarget | null {
  * ONE table, so row 1 and the list row for the same AI can never disagree about its name.
  */
 export function modeNameFor(viewId: string): string | null {
-  if (viewId === 'nbi_chat') return 'NavBharatAI FREE';
+  if (viewId === 'nbi_chat') return COPY.branding.aiChatName;
   if (viewId === 'sda_chat') return 'Doctor AI';
   if (viewId === IMAGE_MODE_ID) return IMAGE_MODE_NAME;
   return PROFESSIONAL_CHATS[viewId]?.name ?? null;
@@ -288,7 +289,7 @@ export function newModeEntries(opts: { hideMedical: boolean }): ModeEntry[] {
   const entries: ModeEntry[] = [];
   // A NEW free chat. The old one stays in History — `startNewChat` mints a new session id and the
   // previous record keeps its own, so nothing is overwritten.
-  entries.push({ id: FREE_MODE_ID, name: 'NavBharatAI FREE', kind: 'free', emoji: '💬' });
+  entries.push({ id: FREE_MODE_ID, name: COPY.branding.aiChatName, kind: 'free', emoji: '💬' });
   // The image studio, above Doctor AI (admin: "images generator ai … doctor ai se upar").
   entries.push({ id: IMAGE_MODE_ID, name: IMAGE_MODE_NAME, kind: 'image', emoji: modeEmojiFor(IMAGE_MODE_ID) });
   // Doctor AI, then every professional.

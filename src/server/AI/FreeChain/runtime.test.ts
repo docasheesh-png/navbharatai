@@ -129,6 +129,40 @@ describe('free chat chain central dispatch', () => {
  vi.stubEnv('FREE_CHAIN_ENABLED','off');expect(await maybeFreeChain(input())).toBeNull();expect(m.db).not.toHaveBeenCalled();
  vi.stubEnv('FREE_CHAIN_ENABLED','on');m.strict.mockReturnValue(true);expect(await maybeFreeChain(input())).toBeNull();expect(m.execute).not.toHaveBeenCalled();
  });
+ it('CHEAPERINFERENCE=admin still serves when FREE_CHAIN_ENABLED is off (owner exclusive path)', async () => {
+  vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  vi.stubEnv('FREE_CHAIN_MONTHLY_CAP_ENABLED', 'off');
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  m.settle.mockResolvedValue(undefined);
+  const onChunk = vi.fn();
+  const result = await maybeFreeChain({ ...input(), context: { ...input().context, isAdmin: true }, onChunk });
+  expect(result?.ok).toBe(true);
+  expect(result?.provider).toBe('CHEAPERINFERENCE');
+  expect(result?.model).toBe('beam');
+  expect(m.execute).toHaveBeenCalledTimes(1);
+  expect(onChunk).toHaveBeenCalledWith('answer');
+  expect(onChunk).not.toHaveBeenCalledWith(expect.stringMatching(/busy/i), 'notice');
+ });
+ it('CHEAPERINFERENCE=admin exclusive path answers private/profile turns', async () => {
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  const cfg = freeChainConfig({
+    FREE_CHAIN_ENABLED: 'on', FREE_CHAIN_ROLLOUT_PERCENT: '100', FREE_CHAIN_ORDER: 'cheapinf',
+    CHEAPERINFERENCE: 'admin', CHEAPERINFERENCE_API_KEY: 'ci_live_test_key',
+    FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off', FREE_CHAIN_OUTPUT_CAP_ENABLED: 'off',
+  });
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  m.settle.mockResolvedValue(undefined);
+  const result = await buildFreeChainRouter(db, cfg).route({
+    ...input(),
+    context: { ...input().context, isAdmin: true, privateTurn: true, cacheEligible: false },
+  });
+  expect(result.ok).toBe(true);
+  expect(result.provider).toBe('CHEAPERINFERENCE');
+  expect(m.execute).toHaveBeenCalledTimes(1);
+ });
  it('OpenRouter account admission works with the real quota validator and transaction store', async () => {
  const real = await vi.importActual<typeof import('./store')>('./store');
  const docs=new Map<string,unknown>();

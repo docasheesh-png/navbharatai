@@ -98,7 +98,10 @@ function rungReason(rung: RungConfig, cfg: FreeChainConfig, input?: FreeChainInp
   if (rung.id === 'openrouter' && !cfg.openRouterModels.length) return 'quality-allowlist-required';
   if (input && rung.id === 'gemini' && (!input.context.cacheEligible || !safeCacheKey({ message: input.message, history: input.history, eligible: true, language: 'public', systemPrompt: '', modelFamily: '' }))) return 'privacy-public-corpus-only';
   if (input && !rung.languages.includes(detectReplyLanguage(input.message))) return 'language';
-  if (input && (rung.id === 'gemini' || isPaidRung(rung.id)) && (input.context.privateTurn || input.context.healthTurn)) return 'privacy';
+  if (input && (rung.id === 'gemini' || isPaidRung(rung.id)) && (input.context.privateTurn || input.context.healthTurn)) {
+    // Exclusive CHEAPERINFERENCE=admin must answer every admin Free Chat turn, including profile/memory.
+    if (!(rung.id === 'cheapinf' && input.context.isAdmin === true && cheaperInferenceMode() === 'admin')) return 'privacy';
+  }
   return undefined;
 }
 function accountId(id: ProviderId): string { return id === 'glm47' || id === 'glm45' ? 'glm' : id; }
@@ -268,7 +271,10 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     }
     try {
       const current = refreshConfig?.() ?? cfg;
-      if (!current.enabled || current.errors.length || strictFreeRequired()) {
+      // #3933 bug: maybeFreeChain admits CHEAPERINFERENCE=admin when FREE_CHAIN_ENABLED is off,
+      // but this gate still returned the busy notice before cheapinf could run.
+      const exclusiveAdmin = input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
+      if (strictFreeRequired() || (!exclusiveAdmin && (!current.enabled || current.errors.length))) {
         const result = empty(); input.onChunk?.(result.content, 'notice'); return result;
       }
       return await routeAdmitted(input, admission.waitedMs);

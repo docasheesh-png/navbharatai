@@ -45,6 +45,12 @@ describe('public build failure boundary', () => {
     expect(surplusAdmit).toContain('resolveProBuildSurplusAdmission');
     expect(surplusAdmit).toContain('AGENTV3_SURPLUS_FALLBACK_TO_WEAK');
     expect(surplusAdmit).toContain('[AGENT_STEP] Surplus unavailable');
+    // Mid-build sibling of admission fail-open: Surplus timeout/transport with Files=0 → Weak ladder.
+    const preWrite = readFileSync('src/server/AI/SurplusRegistry/surplusPreWriteFailOpen.ts','utf8');
+    expect(preWrite).toContain('wrapSurplusRunnerPreWriteFailOpen');
+    expect(route).toContain('surplusPreWriteFailOpen');
+    expect(route).toContain('wrapSurplusRunnerPreWriteFailOpen');
+    expect(route).toContain("phase: 'mid_build_pre_write'");
     expect(route).not.toContain("res.status(503).json({ code: 'ENGINE_UNAVAILABLE', error: PUBLIC_BUILD_ENGINE_UNAVAILABLE });");
     expect(route).toContain('content: `❌ Build failed: ${redactProviderError(errMsg)}`');
     expect(route).not.toContain('content: `❌ Build failed: ${errMsg}`');

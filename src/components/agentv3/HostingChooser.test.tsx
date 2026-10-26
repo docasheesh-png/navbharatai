@@ -21,22 +21,24 @@ describe('HostingChooser — the two-path Publish surface', () => {
   // CHANGED 2026-09-13 (slice 5's last half): path 2 is now a disclosure, so its old title is only on
   // screen once it is open. The assertion did not get weaker — it still proves both paths are offered,
   // and now also proves the collapsed one names itself well enough to find.
-  it('always shows both paths + the honest full-stack "coming soon" note', () => {
+  it('shows both hosting paths and explains account-specific server availability', () => {
     const html = render([P('firebase', 'Firebase Hosting', true)]);
     expect(html).toContain('Host on NavBharatAI');
     expect(html).toContain(ADVANCED_PUBLISH_LABEL);   // path 2, collapsed but named
     expect(html).toContain(ADVANCED_PUBLISH_HINT);    // and readable without opening it
     expect(html).toContain('Publish on NavBharatAI');
-    expect(html).toContain('coming soon'); // full-stack honesty
+    expect(html).toContain('Server and database availability is checked for your account');
+    expect(html).not.toContain('coming soon');
     // The resell card names the bring-your-own choice and does not invent a buy button before the server says one can start.
     expect(html).toContain('You can host it yourself');
     expect(html).not.toContain('Run this server on NavBharatAI');
     expect(html).not.toContain('Create the database on NavBharatAI');
     // Open, it is the same card it always was — both sub-choices, nothing dropped.
     const open = render(BYO_OPEN);
-    expect(open).toContain('We deploy to your provider');
+    expect(open).toContain('Other configured hosts');
     expect(open).toContain('I host it myself');
-    expect(open).toContain('your cloud, your bill, free from us');
+    expect(open).toContain('not keys saved in your vault');
+    expect(open).not.toContain('your cloud, your bill');
   });
 
   it('offers a BYO button only for CONFIGURED non-NavBharatAI providers', () => {
@@ -59,7 +61,7 @@ describe('HostingChooser — the two-path Publish surface', () => {
       ownRepo: { owner: 'aashish', repo: 'mitrify', workBranch: 'navbharatai/work', baseBranch: 'main' },
     });
     expect(opened).not.toContain('Publish to Firebase Hosting');
-    expect(opened).toContain('No provider connected yet'); // BYO empty state
+    expect(opened).toContain('No other hosting service is configured here'); // BYO empty state
   });
 
   it('disables the NavBharatAI publish button when our host is not configured', () => {
@@ -153,7 +155,7 @@ describe('HostingChooser — "Make an Android app" (APK) path', () => {
     // CHANGED 2026-09-13: rendered with the card open, since that card is now collapsed by default.
     const html = render(BYO_OPEN);
     // Both sub-choices of path 2 are present in one card.
-    expect(html).toContain('We deploy to your provider');
+    expect(html).toContain('Other configured hosts');
     expect(html).toContain('I host it myself');
   });
 
@@ -166,7 +168,7 @@ describe('HostingChooser — "Make an Android app" (APK) path', () => {
       ownRepo: { owner: 'aashish', repo: 'mitrify', workBranch: 'navbharatai/work', baseBranch: 'main' },
     })).toContain('Connected: aashish/mitrify');
     // And the default screen really is the collapsed one, or the change did nothing.
-    expect(render([P('firebase', 'Firebase Hosting', true)])).not.toContain('We deploy to your provider');
+    expect(render([P('firebase', 'Firebase Hosting', true)])).not.toContain('Other configured hosts');
   });
 });
 
@@ -200,7 +202,7 @@ describe('HostingChooser — the sheet must scroll on a phone (clipped-content f
   it('still renders the content that used to be clipped below the fold', () => {
     const html = render(BYO_OPEN);
     expect(html).toContain('Set up');                 // path 3's button
-    expect(html).toContain('coming soon');            // the full-stack note under it
+    expect(html).toContain('Server and database availability is checked for your account');            // the full-stack note under it
     expect(html).toContain('always the same app you built');
   });
 });
@@ -232,7 +234,7 @@ describe('HostingChooser — a publish that cannot start SAYS SO (no dead button
     expect(html).toContain('disabled');
     expect(html).toContain('NavBharatAI hosting isn'); // apostrophe is HTML-escaped in static markup
     expect(html).toContain('t available right now');
-    expect(html).toContain('you can still publish to your own'); // gives a real way forward
+    expect(html).toContain('use your own repo below'); // gives a real way forward
   });
 });
 

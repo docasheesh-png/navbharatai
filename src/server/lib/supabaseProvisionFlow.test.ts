@@ -24,6 +24,7 @@ vi.mock('./audit', () => ({ audit: vi.fn() }));
 vi.mock('../AgentV3/WorkspaceFileStore', () => ({ loadWorkspaceFiles: deps.loadWorkspaceFiles }));
 
 import { provisionDatabaseForUser } from './supabaseProvisionFlow';
+import { databaseProvisionResult } from '../../lib/databaseProvisionResult';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -43,6 +44,30 @@ beforeEach(() => {
 });
 
 describe('database provisioning authorizes workspace access before any effects', () => {
+  it('a created project whose keys could not be saved stays recovery-locked', async () => {
+    deps.getServerDb.mockReturnValue(null);
+    const result = await provisionDatabaseForUser('alice', { workspaceId: 'agentv3-alice-session123' });
+    expect(result).toMatchObject({ ok: false, status: 500, projectRef: 'own-project' });
+    if (result.ok) throw new Error('A project without saved credentials must not be connected.');
+    expect(databaseProvisionResult(result.status, result)).toMatchObject({ kind: 'unconfirmed' });
+    expect(deps.createProject).toHaveBeenCalledTimes(1);
+    expect(result).not.toHaveProperty('env');
+  });
+
+  it.each(['readiness', 'credentials'])('a %s delay leaves the project pending, not connected in either UI', async (phase) => {
+    const pending = { ok: false, failure: 'timeout', message: 'The existing project is still starting.' };
+    if (phase === 'readiness') deps.waitUntilReady.mockResolvedValue(pending);
+    else deps.fetchProjectCredentials.mockResolvedValue(pending);
+    const result = await provisionDatabaseForUser('alice', { workspaceId: 'agentv3-alice-session123' });
+    expect(result).toMatchObject({ ok: false, status: 202, projectRef: 'own-project' });
+    if (result.ok) throw new Error('A pending project must not succeed.');
+    expect(databaseProvisionResult(result.status, result)).toMatchObject({ kind: 'pending' });
+    expect(deps.createProject).toHaveBeenCalledTimes(1);
+    expect(deps.addSecret).not.toHaveBeenCalled();
+    expect(deps.applySchemaToProject).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty('env');
+  });
+
   it.each([
     ['foreign workspace', 'alice', 'agentv3-bob-session123'],
     ['anonymous workspace', 'alice', 'agentv3-anon-session123'],

@@ -111,10 +111,11 @@ describe('🔒 the wiring — the long actions pass their ceiling, and no caller
     expect(store).toContain('const timedOut = isFetchTimeout(e);');
   });
 
-  it('every long-action catch reports through fetchFailureLine — no catch invents "nothing happened" on its own', () => {
+  it('long-action catches use honest shared messages — a lost database response never invites another create', () => {
     expect(chooser).toContain('fetchFailureLine(e, PUSH_APP_FAILURE)');
     expect(chooser).toContain('fetchFailureLine(e, DEPLOY_BACKEND_FAILURE)');
-    expect(chooser).toContain('fetchFailureLine(e, PROVISION_DB_FAILURE)');
+    expect(chooser).toContain('setDbNote(DATABASE_PROVISION_UNCONFIRMED)');
+    expect(chooser).toContain('setDbNeedsRecovery(true)');
     expect(chooser).not.toContain("setBackendLines(['Could not reach NavBharatAI — nothing was changed.'])");
     expect(chooser).not.toContain("setBackendLines(['Could not reach NavBharatAI — nothing was deployed.'])");
   });

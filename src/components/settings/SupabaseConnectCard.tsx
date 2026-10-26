@@ -15,7 +15,7 @@
 //  • Disconnect says plainly that Supabase must be told separately; we do not imply we revoked it.
 
 import { usePublicFlags } from '../../lib/publicFlags';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Database, Check, Loader2, ExternalLink, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
 import { V3_TAB_FLAG, V3_VIEW } from '../agentv3/v3TabPersistence';
@@ -23,6 +23,7 @@ import { SUPABASE_NATIVE_RETURN_EVENT } from '../../lib/supabaseOauthReturn';
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { readAnswer, isRecord } from '../../lib/serverAnswer';
+import { databaseProvisionResult, DATABASE_PROVISION_UNCONFIRMED } from '../../lib/databaseProvisionResult';
 
 /**
  * True on the native (Capacitor) app. Checked at CALL TIME, not cached, because it decides how to open
@@ -173,6 +174,8 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
   /** True when the last "Create database" attached an existing one instead of making a new project —
    *  which is what turns "create a separate one instead" from clutter into a relevant follow-up. */
   const [reused, setReused] = useState(false);
+  const createInFlight = useRef(false);
+  const [needsRecovery, setNeedsRecovery] = useState(false);
   // Read once at mount: is Pro v5.0 open behind this screen? Drives the "Back to your app" return.
   const [v3TabOpen] = useState<boolean>(() => {
     try { return sessionStorage.getItem(V3_TAB_FLAG) === '1'; } catch { return false; }
@@ -293,7 +296,10 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
    * data kept apart presses the second button, which passes `forceNew`.
    */
   const createDatabase = async (forceNew = false): Promise<void> => {
+    if (createInFlight.current || needsRecovery) return;
+    createInFlight.current = true;
     setBusy('create'); setError(''); setDone(''); setReused(false);
+    let outcomeConfirmed = false;
     try {
       // A generous ceiling: the server waits for Supabase to actually bring the database up, which
       // routinely takes over a minute. The default 20s would abort a request that was going fine.
@@ -302,10 +308,14 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ appLabel: appLabel ?? '', workspaceId: workspaceId ?? '', forceNew }),
       }, 240_000);
-      const data = await res.json();
-      // The server words these to tell the user what to do next (plan limit, still starting up,
-      // reconnect) — passing them through unchanged is more useful than any generic line here.
-      if (!res.ok) { setError(data?.error || 'Could not create the database.'); return; }
+      const result = databaseProvisionResult(res.status, await res.json().catch(() => null));
+      outcomeConfirmed = result.kind === 'connected' || result.kind === 'failed';
+      if (result.kind !== 'connected') {
+        setError(result.message);
+        setNeedsRecovery(result.kind !== 'failed');
+        return;
+      }
+      const data = result.database;
       // The database and its TABLES are reported separately, because they fail separately. Saying
       // "ready" when the schema did not apply would be the nearly-true claim this feature exists to
       // avoid — the app would be wired to an empty database and every query would fail.
@@ -318,14 +328,16 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
         if (typeof data?.asleepNote === 'string' && data.asleepNote) setError(data.asleepNote);
       } else if (data?.schemaApplied === false) {
         setDone('Your database was created and your app is wired to it, but its tables could not be '
-          + 'set up yet. ' + (data?.schemaNote || 'Try "Create database" again in a moment.'));
+          + 'set up yet. ' + (data?.schemaNote || 'Ask me to run the migrations on this existing database; do not create another one.'));
       } else {
         setDone('Database ready. Your app will use it automatically — no keys to copy.');
       }
       onProvisioned?.();
     } catch {
-      setError('Could not reach NavBharatAI. Check your connection and try again.');
+      setError(DATABASE_PROVISION_UNCONFIRMED);
+      setNeedsRecovery(true);
     } finally {
+      createInFlight.current = !outcomeConfirmed;
       setBusy(null);
     }
   };
@@ -390,11 +402,11 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => void createDatabase()}
-              disabled={busy !== null}
+              disabled={busy !== null || needsRecovery}
               className="flex items-center gap-2 text-xs font-bold px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-on-accent disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {busy === 'create' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
-              {busy === 'create' ? 'Creating your database…' : 'Create database'}
+              {busy === 'create' ? 'Creating your database…' : needsRecovery ? 'Creation needs checking' : 'Create database'}
             </button>
             {byoLifecycle && (
               <>
@@ -417,7 +429,7 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
               Disconnect
             </button>
           </div>
-          {reused && busy === null && (
+          {reused && busy === null && !needsRecovery && (
             /* Offered only AFTER a reuse, so it is an answer to what just happened rather than a
                choice nobody asked for. A separate database is a real want — two apps that should not
                see each other's rows — and it costs one of the user's two free project slots, which is

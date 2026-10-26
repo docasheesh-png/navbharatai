@@ -45,7 +45,6 @@ import { usePreviewDwell } from '../../hooks/usePreviewDwell';
 import { ActionDot } from '../ActionDot';
 import { rememberPublishIntent, takePublishIntent, browserIntentStore } from '../../lib/publishResume';
 import { getStoredMotionMode, resolveReduceMotion, systemPrefersReducedMotion } from '../../lib/a11y';
-import {  } from '../../lib/authHeaders';
 import { authedFetch } from '../../lib/authedFetch';
 const ConnectedServices = lazy(() => import('./ConnectedServices').then((m) => ({ default: m.ConnectedServices })));
 import { importProjectArchive, importProjectFolder, pickProjectFolder, type MasterImportResult } from '../../lib/masterZipImport';
@@ -62,6 +61,8 @@ import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages, filterSe
 import { HISTORY_TAB_NOTE } from './versionHelp';
 import { VersionTimeline } from '../versions/VersionTimeline';
 import { historyKeyFor } from '../../lib/versionRestoreClient';
+import { VersionUndoCard } from './VersionUndoCard';
+import { wantsVersionUndo } from '../../lib/versionUndoIntent';
 import { toggleCompareSelection, compareOrder, type CheckpointDiffResponse } from './checkpointCompare';
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
 import type { ReportPickerItem } from '../../lib/reportPicker';
@@ -774,6 +775,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // The feature card shown before the first build of a new app (featurePlan.ts). `launch` resumes the
   // paused send with the user's answer.
   const [featureConfirm, setFeatureConfirm] = useState<{ plan: FeaturePlanView; launch: (answer?: { include: string[]; exclude: string[] }) => void } | null>(null);
+  // Undo / pehle wala / reverse in Pro chat → in-chat version picker (never auto-restore; never send to Other → Versioning).
+  const [versionUndoOpen, setVersionUndoOpen] = useState(false);
   const submissionRef = useRef(new SubmissionScope());
   // Optimistic messages cancelled before launch must never purge the previous server turn.
   const localSubmissionMessagesRef = useRef(new Set<number>());
@@ -783,6 +786,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     setSubmissionPhase(null);
     setFwConflict(null);
     setFeatureConfirm(null);
+    setVersionUndoOpen(false);
   }, []);
   const reset = useCallback(() => {
     cancelSubmission();
@@ -1757,6 +1761,20 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
         setSubmissionPhase('saving');
         try { await onBeforeBuild(); } catch { /* flush is best-effort */ }
         if (!isCurrent()) return;
+      }
+      // VERSION UNDO PICKER (admin 2026-10-26): undo / reverse / pehle wala / wapas → show the same
+      // restore-point list as History / Time Machine inside Pro. Selection required; nothing restores yet.
+      // Never route the user to Other → Versioning for this intent.
+      if (
+        wantsVersionUndo(msgText)
+        && !pendingImportUrl
+        && !(attachments && attachments.length > 0)
+      ) {
+        setFwConflict(null);
+        setFeatureConfirm(null);
+        setVersionUndoOpen(true);
+        finishSubmission();
+        return;
       }
       // Run the build with a concrete framework. `resolved` marks the choice as final so neither the client
       // nor the server re-prompts on the same conflict.
@@ -5272,6 +5290,20 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   setFeatureConfirm(null);
                 }}
                 onCancel={cancelSubmission}
+              />
+            )}
+            {versionUndoOpen && (
+              <VersionUndoCard
+                historyKey={historyKeyFor(state.workspaceId, userId)}
+                workspaceId={state.workspaceId}
+                userId={userId}
+                email={email}
+                onDismiss={() => setVersionUndoOpen(false)}
+                onRestored={(files, message) => {
+                  handleVersionRestored(files);
+                  setUserMsgs((c) => [...c, { role: 'agent', text: message, ts: Date.now() }]);
+                  setVersionUndoOpen(false);
+                }}
               />
             )}
             {fwConflict && (

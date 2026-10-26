@@ -6,16 +6,9 @@ vi.mock('../inferencePolicy', () => ({ strictFreeRequired: m.strict }));
 vi.mock('./control', () => ({ readControls: m.controls, readControlsForSelection: m.controls, writeControls: vi.fn(), controlRef: () => ({ collection: () => ({ doc: () => ({ set: m.set, get: m.get }), where: m.where, select: m.select, limit: m.limit, get: m.events }) }) }));
 vi.mock('./cache', async original => ({ ...(await original<typeof import('./cache')>()), FreeChainCache: class { get=m.cacheGet; put=m.cachePut; } }));
 vi.mock('./store', () => ({ FreeChainStore: class { observePaidBudgetPolicy = m.observeBudget; setPaidBudgetPolicy = m.setBudget; reserveQuota = m.reserve; reservePaid = m.paid; settlePaid = m.settle; cooldown = m.cooldown; clearCooldown = m.clearCooldown; quotaSnapshot = m.quota; spendSnapshot = m.spend; } }));
-vi.mock('./providers/openAiCompatProvider', () => ({
+vi.mock('./providers/openAiCompatProvider', async original => ({
+ ...await original<typeof import('./providers/openAiCompatProvider')>(),
  OpenAiCompatProvider: class { constructor(readonly config: unknown) {} executeTurn(input: unknown) { return m.execute(input, this.config); } },
- FreeChainProviderError: class extends Error {
-   readonly status?: number; readonly retryAfterMs?: number; readonly credentialEnv?: string;
-   constructor(readonly code: string, details: { status?: number; retryAfterMs?: number; credentialEnv?: string } | number = {}) {
-     super(String(code));
-     if (typeof details === 'number') { this.retryAfterMs = details; }
-     else { this.status = details.status; this.retryAfterMs = details.retryAfterMs; this.credentialEnv = details.credentialEnv; }
-   }
- },
 }));
 vi.mock('./providers/openRouterRegistryRung', () => ({ runRegistryRung: m.registry }));
 vi.mock('../Router/AIRouter', () => ({ acquireSlot: () => true, releaseSlot: vi.fn(), recordProviderLatency: vi.fn() }));
@@ -297,6 +290,8 @@ describe('free chat chain central dispatch', () => {
   expect(result?.content).toMatch(/circuit:last=auth:http=401:remain=\d+s/);
  });
  it('CHEAPERINFERENCE=admin waits 60s for first content and labels timeout:first-token', async () => {
+  // Keep the real immutable error contract: an unfrozen mock hid a failed metadata assignment.
+  expect(Object.isFrozen(new FreeChainProviderError('TIMEOUT'))).toBe(true);
   vi.useFakeTimers();
   vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
   vi.stubEnv('CHEAPERINFERENCE', 'admin');
@@ -325,6 +320,20 @@ describe('free chat chain central dispatch', () => {
   expect(result?.content).toMatch(/timeout:first-token:60000ms/);
   expect(result?.content).toMatch(/ttftCapMs=60000/);
   expect(result?.content).toMatch(/waitMs=/);
+ });
+
+ it('keeps watchdog metadata local to the timed-out attempt and preserves the real error contract', async () => {
+  vi.useFakeTimers();
+  m.execute.mockImplementationOnce((arg: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+    arg.signal?.addEventListener('abort', () => reject(new FreeChainProviderError('ABORTED')), { once: true });
+  })).mockRejectedValueOnce(new FreeChainProviderError('NETWORK'));
+  const pending = buildFreeChainRouter(db, config('groq,cloudflare')).route(input());
+  await vi.advanceTimersByTimeAsync(7_000);
+  const result = await pending;
+  expect(result.ok).toBe(false);
+  expect(result.freeChain?.attempts.map(attempt => attempt.reason)).toEqual(['timeout:first-token:6000ms', 'network']);
+  expect(m.execute).toHaveBeenCalledTimes(2);
+  expect(m.paid).not.toHaveBeenCalled();
  });
 
  it('non-admin chain still skips open circuit without probing', async () => {

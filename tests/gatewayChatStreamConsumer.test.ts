@@ -46,9 +46,28 @@ describe('actual Free-chat consumer handles selected server error and EOF', () =
   });
   it('recognizes only explicit nonblank maintenance notices and bounds them', () => {
     expect(gatewayChatFailure({ maintenance: true, reply: 'Paused for maintenance' })).toEqual({ code: 'CHAT_MAINTENANCE', message: 'Paused for maintenance', partial: false });
+    expect(gatewayChatFailure({ statusUnavailable: true, reply: "We're experiencing high demand right now. Please try again in a few minutes.", maintenance: false })).toEqual({ code: 'CHAT_STATUS_UNAVAILABLE', message: "We're experiencing high demand right now. Please try again in a few minutes.", partial: false });
     expect(gatewayChatFailure({ maintenance: true, reply: '   ', error: 'Recovery in progress' })?.message).toBe('Recovery in progress');
     expect(gatewayChatFailure({ maintenance: true, reply: 'a'.repeat(5000) })?.message).toHaveLength(2000);
     for (const value of [{ maintenance: 'true', reply: 'fake' }, { reply: 'maintenance' }, { maintenance: true }, { maintenance: true, reply: '  ', error: 123 }]) expect(gatewayChatFailure(value)).toBeUndefined();
+  });
+
+  it.each([true, false])('returns a terminal partial result when the body read rejects (SSE=%s)', async sse => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({ start(value) { controller = value; } });
+    const update = vi.fn();
+    const pending = consumeChatResponseStream(body, sse, update);
+    controller.enqueue(new TextEncoder().encode(sse ? frame({ c: 'Partial answer' }) : 'Partial answer'));
+    await vi.waitFor(() => expect(update).toHaveBeenCalledWith('Partial answer'));
+    controller.error(new TypeError('Synthetic reader failure'));
+    expect(await pending).toEqual({ text: 'Partial answer', failure: {
+      code: 'STREAM_INTERRUPTED', message: 'The connection ended before the reply was complete. Please retry when the service is available.', partial: true,
+    } });
+    expect(body.locked).toBe(false);
+  });
+  it('does not hide a consumer callback defect as a network interruption', async () => {
+    const defect = new Error('Synthetic callback defect');
+    await expect(consumeChatResponseStream(stream(frame({ c: 'Answer' })), true, () => { throw defect; })).rejects.toBe(defect);
   });
 
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { SurplusBuildUnavailableError } from './buildSession';
 import { SurplusAccountingUnavailableError } from '../../AgentV3/providerRates';
-import { PublicBuildEngineError, PUBLIC_BUILD_ENGINE_UNAVAILABLE } from '../../lib/buildEngineError';
+import { PublicBuildEngineError, PUBLIC_BUILD_ENGINE_UNAVAILABLE, PUBLIC_BUILD_ENGINE_TIMEOUT, publicBuildEngineError, publicBuildEngineSafeReason } from '../../lib/buildEngineError';
 import { publishBuildException } from '../../AgentV3/BuildRequestCoordination';
 import { providerDebugTag } from '../../routes/agentv3';
 
@@ -58,4 +58,16 @@ describe('public build failure boundary', () => {
     expect(route).not.toContain('Decision trace:\\n${decisionTrace.format()}');
     expect(route).toContain('await persistDecisionTrace(decisionTrace, nowIso)');
   });
+
+  it('distinguishes turn timeout from generic unavailable without leaking the safe reason', () => {
+    const timed = publicBuildEngineError('turn_timeout');
+    expect(timed.message).toBe(PUBLIC_BUILD_ENGINE_TIMEOUT);
+    expect(publicBuildEngineSafeReason(timed)).toBe('turn_timeout');
+    expect(Object.getOwnPropertyNames(timed).sort()).toEqual(['message', 'name', 'stack']);
+    expect(JSON.stringify(timed)).not.toMatch(/turn_timeout|surplus/i);
+    const folded = publicBuildEngineError('terminal_fold');
+    expect(folded.message).toBe(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
+    expect(publicBuildEngineSafeReason(folded)).toBe('terminal_fold');
+  });
+
 });

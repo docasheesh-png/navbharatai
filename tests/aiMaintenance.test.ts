@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { mockReq, mockRes } from './helpers/routeTestUtils';
-import { AiMaintenanceStore, MAINTENANCE_MESSAGE, maintenanceState, isKimiQuotaFailure, type MaintenanceBackend, type MaintenanceState } from '../src/server/lib/aiMaintenance';
+import { AiMaintenanceStore, MAINTENANCE_MESSAGE, STATUS_UNAVAILABLE_MESSAGE, maintenanceState, isKimiQuotaFailure, type MaintenanceBackend, type MaintenanceState } from '../src/server/lib/aiMaintenance';
 import { gatewayChatFailure } from '../src/lib/chatResponseStream';
 import { aiMaintenanceGuard, maintenanceProtected } from '../src/server/lib/aiMaintenanceGuard';
 function fixture(initial: Partial<MaintenanceState> = {}) {
@@ -78,7 +78,11 @@ describe('real maintenance spending gate', () => {
       const before = factory.mock.calls.length;
       fail = true;
       const unavailable = await Promise.all([store.read(), store.read()]);
-      for (const state of unavailable) expect(state).toMatchObject({ enabled: true, unavailable: true });
+      for (const state of unavailable) {
+        // Cold: fail-closed (enabled latched). Warm recent known-off: fail-open (enabled stays false).
+        expect(state.unavailable).toBe(true);
+        expect(state.enabled).toBe(!warm);
+      }
       expect(factory).toHaveBeenCalledTimes(before + 1);
       fail = false;
       const recovered = await Promise.all([store.read(), store.read()]);
@@ -140,18 +144,60 @@ describe('real maintenance spending gate', () => {
       return { next, res };
     };
     expect((await request()).next).toHaveBeenCalledOnce();
+    // Recent known-off → fail-open: keep serving; do NOT pretend the admin paused AI.
     now += 2001; broken = true;
-    const unavailable = await request();
-    expect(unavailable.next).not.toHaveBeenCalled();
-    expect(unavailable.res.statusCode).toBe(503);
-    expect(unavailable.res.body).toMatchObject({ maintenance: true });
+    const unavailableOpen = await request();
+    expect(unavailableOpen.next).toHaveBeenCalledOnce();
     broken = false;
     expect((await request()).next).toHaveBeenCalledOnce();
     await store.set({ enabled: true });
     const paused = await request();
     expect(paused.next).not.toHaveBeenCalled();
     expect(paused.res.statusCode).toBe(503);
-    expect(paused.res.body).toMatchObject({ maintenance: true });
+    expect(paused.res.body).toMatchObject({ maintenance: true, error: MAINTENANCE_MESSAGE });
+  });
+
+  it('fails closed with a distinct status-unavailable message when there is no recent known-off', async () => {
+    const store = new AiMaintenanceStore(() => ({ read: async () => { throw Error('offline'); }, change: async () => { throw Error('offline'); } }));
+    const next = vi.fn(); const res = mockRes();
+    await aiMaintenanceGuard(store)({ ...mockReq(), method: 'POST', path: '/api/agentv3/chat' } as never, res as never, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toMatchObject({
+      error: STATUS_UNAVAILABLE_MESSAGE,
+      reply: STATUS_UNAVAILABLE_MESSAGE,
+      maintenance: false,
+      statusUnavailable: true,
+    });
+    expect(res.body.error).not.toBe(MAINTENANCE_MESSAGE);
+    expect(gatewayChatFailure(res.body)).toEqual({ code: 'CHAT_STATUS_UNAVAILABLE', message: STATUS_UNAVAILABLE_MESSAGE, partial: false });
+  });
+
+  it('fail-opens briefly after a recent successful known-off read, then fails closed once that window ages out', async () => {
+    let now = 100_000;
+    let broken = false;
+    const backend: MaintenanceBackend = {
+      read: vi.fn(async () => {
+        if (broken) throw new Error('offline');
+        return { enabled: false };
+      }),
+      change: async change => change(maintenanceState({ enabled: false })),
+    };
+    const store = new AiMaintenanceStore(() => backend, () => now);
+    expect(await store.read()).toMatchObject({ enabled: false });
+    now += 2_001; broken = true;
+    expect(await store.read()).toMatchObject({ enabled: false, unavailable: true });
+    const next = vi.fn(); const res = mockRes();
+    await aiMaintenanceGuard(store)({ ...mockReq(), method: 'POST', path: '/api/agentv3/chat' } as never, res as never, next);
+    expect(next).toHaveBeenCalledOnce();
+    // Age past the fail-open window (45s) — latch closed, but still not the maintenance sentence.
+    now += 45_001;
+    const closed = await store.read();
+    expect(closed).toMatchObject({ enabled: true, unavailable: true });
+    const next2 = vi.fn(); const res2 = mockRes();
+    await aiMaintenanceGuard(store)({ ...mockReq(), method: 'POST', path: '/api/agentv3/chat' } as never, res2 as never, next2);
+    expect(next2).not.toHaveBeenCalled();
+    expect(res2.body).toMatchObject({ statusUnavailable: true, maintenance: false, error: STATUS_UNAVAILABLE_MESSAGE });
   });
 
 });

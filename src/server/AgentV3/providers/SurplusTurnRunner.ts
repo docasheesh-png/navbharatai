@@ -1,5 +1,5 @@
 import { guardSurplusNarrative, withServiceIdentity } from './surplusNarrativeIdentity';
-import { PublicBuildEngineError } from '../../lib/buildEngineError';
+import { PublicBuildEngineError, publicBuildEngineError, type PublicBuildEngineSafeReason } from '../../lib/buildEngineError';
 import { assertAiAvailable, aiMaintenanceStore, AiMaintenanceError } from '../../lib/aiMaintenance';
 import type { RunTurnParams, TurnResult, TurnRunner, TurnUsage } from '../ClaudeClient';
 import { BuildStoppedError, onStop, raceStop, throwIfStopped } from '../stopSignal';
@@ -68,7 +68,7 @@ function publicError<T extends Error>(error: T): T {
   error.stack = `Error: ${error.message}`;
   return error;
 }
-const unavailable = () => new PublicBuildEngineError();
+const unavailable = (reason: PublicBuildEngineSafeReason = 'terminal_fold') => publicBuildEngineError(reason);
 const ENDPOINT = 'https://api.surplusintelligence.ai/min90/v1';
 const MAX_TURN_ATTEMPTS = 3;
 const validationReasons = new WeakMap<object, SurplusTurnFailure['reason']>();
@@ -147,7 +147,7 @@ function checkCompletion(completion: OpenAiCompletionLike, permit: SurplusTurnPe
 /** Native turns only. Bounded fallback is separately authorized, never an implicit model or cost guess. */
 export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRunner {
   const configuredMs = authority.timeoutMs ?? 120_000;
-  if (!Number.isFinite(configuredMs) || configuredMs <= 0) throw unavailable();
+  if (!Number.isFinite(configuredMs) || configuredMs <= 0) throw unavailable('misconfigured');
   return {
     async runTurn(params) {
       if (params.signal?.aborted) throw publicError(new BuildStoppedError());
@@ -162,12 +162,19 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
       let rejectMaintenance: (error: Error) => void = () => {};
       const maintenance = new Promise<never>((_, reject) => { rejectMaintenance = reject; });
       const offMaintenance = aiMaintenanceStore.onChange(state => {
-        if (state.enabled || state.unavailable) {
+        // Deliberate pause vs unreadable flag: both stop spend, but the user-facing string must differ.
+        if (state.unavailable && state.enabled) {
+          maintenanceError = new AiMaintenanceError({ unavailable: true });
+          active = false;
+          controller.abort();
+          rejectMaintenance(maintenanceError);
+        } else if (state.enabled) {
           maintenanceError = new AiMaintenanceError();
           active = false;
           controller.abort();
           rejectMaintenance(maintenanceError);
         }
+        // fail-open (unavailable && !enabled) does not abort an in-flight turn.
       });
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_, reject) => {
@@ -178,19 +185,19 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
             deadlineError = new Error(BUDGET_REACHED_MESSAGE);
             reject(deadlineError);
           } else {
-            reject(unavailable());
+            reject(unavailable('turn_timeout'));
           }
         }, bound.timeoutMs);
       });
       const assertActive = () => {
         throwIfStopped(params.signal);
         if (maintenanceError) throw maintenanceError;
-        if (!active) throw deadlineError ?? unavailable();
+        if (!active) throw deadlineError ?? unavailable('turn_timeout');
         if (Date.now() >= expiresAt) {
           active = false;
           controller.abort();
           if (bound.source === 'deadline') deadlineError = new Error(BUDGET_REACHED_MESSAGE);
-          throw deadlineError ?? unavailable();
+          throw deadlineError ?? unavailable('turn_timeout');
         }
       };
       const work = async (): Promise<TurnResult> => {
@@ -214,7 +221,7 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
         for (let attempt = 1; attempt <= MAX_TURN_ATTEMPTS; attempt++) {
           assertActive();
           checkPermit(permit, authorizedParams.maxTokens);
-          if (permit.buildId !== originalBuildId || usedCallIds.has(permit.callId)) throw unavailable();
+          if (permit.buildId !== originalBuildId || usedCallIds.has(permit.callId)) throw unavailable('terminal_fold');
           usedCallIds.add(permit.callId);
           const request: SurplusTurnRequest = {
             ...permit.requestRouting,
@@ -292,7 +299,7 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
           if (result.text) params.onText?.(result.text);
           return result;
         }
-        throw unavailable();
+        throw unavailable('attempts_exhausted');
       };
       try {
         return await raceStop(Promise.race([work(), timeout, maintenance]), params.signal);
@@ -301,10 +308,16 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
         if (params.signal?.aborted) throw publicError(new BuildStoppedError());
         let maintenanceBlocked = Boolean(maintenanceError);
         try { maintenanceBlocked ||= error instanceof AiMaintenanceError; } catch { /* hostile prototype: generic error */ }
-        if (maintenanceBlocked) throw publicError(new AiMaintenanceError());
+        if (maintenanceBlocked) {
+          const from = maintenanceError ?? (error instanceof AiMaintenanceError ? error : null);
+          throw publicError(new AiMaintenanceError(from?.statusUnavailable ? { unavailable: true } : undefined));
+        }
         if (deadlineError && error === deadlineError) throw publicError(new Error(BUDGET_REACHED_MESSAGE));
         // Never forward an upstream name, stack, cause, body, metadata, or even its error text.
-        throw unavailable();
+        // Preserve an already-tagged PublicBuildEngineError (timeout / attempts_exhausted); else fold.
+        if (error instanceof PublicBuildEngineError) throw publicError(error);
+        try { console.warn('[SURPLUS_TURN] folded provider/transport failure to public build-engine boundary'); } catch { /* best-effort */ }
+        throw unavailable('terminal_fold');
       } finally {
         active = false;
         controller.abort();

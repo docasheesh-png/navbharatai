@@ -19589,22 +19589,23 @@ async function noteBuildOutcome(
         result = await runner.run(buildPrompt);
       }
       // result is always set here (OneShot, escalation, or the loop above).
-      if (!result) result = await runner.run(buildPrompt);
       // Night A/B scrub path: AgentRunner catches PublicBuildEngineError and soft-returns
       // `{ok:false, summary:"Error: The build engine is temporarily unavailable…"}` — that
       // never re-enters wrapSurplusRunnerPreWriteFailOpen's catch. If Surplus was still live
-      // and Files=0, consume fail-open and retry once on Weak (wrap routes via state.dropped).
-      if (
-        result && result.ok === false
-        && !surplusPreWriteFailOpen.state.dropped
-        && isPublicBuildEngineUnavailableText(result.summary)
-        && modelAuthoredPaths(writtenFiles).length === 0
-      ) {
-        if (tryConsumeSurplusPreWriteFailOpen(surplusPreWriteFailOpen, result.summary ?? '')) {
-          try {
-            result = await runner.run(buildPrompt);
-          } catch { /* retry best-effort — original soft failure already recorded */ }
-        }
+      // and Files=0, consume fail-open and converge ONCE more (wrap routes via state.dropped
+      // to Weak). Same single convergence statement — no second builder call site
+      // (keeps aPlatformWriterIsNeverTheModel + buildOutcomeWiring census green).
+      for (let scrubRetry = 0; scrubRetry < 2; scrubRetry++) {
+        if (!result) result = await runner.run(buildPrompt);
+        if (
+          scrubRetry > 0
+          || !result || result.ok !== false
+          || surplusPreWriteFailOpen.state.dropped
+          || !isPublicBuildEngineUnavailableText(result.summary)
+          || modelAuthoredPaths(writtenFiles).length !== 0
+          || !tryConsumeSurplusPreWriteFailOpen(surplusPreWriteFailOpen, result.summary ?? '')
+        ) break;
+        result = undefined;
       }
       // …and the architect's loop, and with it OUR style pass, is over.
       closeStylePassWindow(stylePassWindow, Date.now());

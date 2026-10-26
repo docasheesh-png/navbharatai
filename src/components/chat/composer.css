@@ -50,3 +50,20 @@
   .nb-pro-expand-mobile { display: flex; }
 }
 @media (min-width: 640px) { .nb-pro-expand-mobile { display: none; } }
+
+/* Tiny 💡 sits in the upper-right gap of the Pro composer — outside the + expander. */
+.nb-composer-box[data-composer-surface="pro"] .nb-pro-suggestions-corner {
+  top: 6px; right: 48px; line-height: 0;
+}
+@media (min-width: 640px) {
+  .nb-composer-box[data-composer-surface="pro"] .nb-pro-suggestions-corner {
+    top: 8px; right: 56px;
+  }
+}
+@media (max-width: 639px) {
+  /* + strip: only the action buttons on one horizontal line — hide Search/Clear + Expand chrome. */
+  .nb-composer-tools-content[data-open="true"] > .order-0,
+  .nb-composer-tools-content[data-open="true"] .nb-pro-expand-mobile {
+    display: none !important;
+  }
+}

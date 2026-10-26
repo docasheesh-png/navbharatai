@@ -11356,9 +11356,13 @@ async function noteBuildOutcome(
       createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
         audit('AGENTV3_DISCOUNT_SCOPE_CALL', { ok: row.ok, model: row.model, latencyMs: row.latencyMs, inputTokens: row.inputTokens, outputTokens: row.outputTokens }, 'info');
       }));
-    // Owner CTA "Continue with Weak": user accepted the risk; do not divert this turn to guidance chat.
+    // Owner CTA "Continue with Weak": user accepted the risk — Weak coding begins (no guidance divert).
     const weakForceContinue = req.body?.weakForceContinue === true && powerLevelReqEffective === 'weak';
     const weakScopeBlocked = weakAdmissionBlocked(weakAdmission) && !weakForceContinue;
+    // Try hard for a correct app: force-continue uses Weak's capable (complex) ladder, not the cheap opener.
+    const weakAdmissionForBuild = (weakForceContinue && weakAdmissionBlocked(weakAdmission))
+      ? { scope: 'complex' as const, source: 'model' as const, usage: weakAdmission?.usage }
+      : weakAdmission;
     if (weakScopeBlocked) {
       intent = 'chat';
       setAdmittedSurplusScope(surplusSession, false);
@@ -13856,7 +13860,7 @@ async function noteBuildOutcome(
           && req.body?.confirmedFeatures == null && userAskedForAnAppToBeBuilt(prompt) && !userAskedForSmallScope(prompt)
           ? learnDomain(prompt)
           : null;
-      const promptComplexityDecision = await resolveWeakComplexity(weakAdmission, analysis?.complexityScore ?? 0, async () => scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
+      const promptComplexityDecision = await resolveWeakComplexity(weakAdmissionForBuild, analysis?.complexityScore ?? 0, async () => scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
         // The intent rides along so the router reads the request exactly as the analysis did (review of 303e8a6f).
         { prompt: planning.sizing, score: analysis?.complexityScore ?? 0, buildIntent: intent },
         (p) => AIRouterManager.getRouter('free')

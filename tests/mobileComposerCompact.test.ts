@@ -180,6 +180,10 @@ describe('mobile tools and desktop layout contract', () => {
     const toolsEnd = pro.indexOf('</MobileComposerTools>');
     expect(toolsEnd).toBeGreaterThan(pro.indexOf('<ChatToolbar', pro.indexOf('<MobileComposerTools')));
     expect(pro.indexOf('aria-label="Cancel request"', toolsEnd)).toBeGreaterThan(toolsEnd);
+    // 💡 sits outside the + expander (upper-right corner), not inside the tools strip.
+    expect(pro.indexOf('nb-pro-suggestions-corner', toolsEnd)).toBeGreaterThan(toolsEnd);
+    expect(pro.indexOf('<NextSuggestionsBulb', toolsEnd)).toBeGreaterThan(toolsEnd);
+    expect(pro.slice(pro.indexOf('<MobileComposerTools'), toolsEnd)).not.toContain('NextSuggestionsBulb');
     expect(pro).toContain("window.visualViewport?.addEventListener('resize', resize)");
     expect(pro).toContain('if (resizeMobileComposer(el))');
   });

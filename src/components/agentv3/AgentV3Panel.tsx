@@ -1792,7 +1792,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           const forceWeak = weakForceContinueRef.current;
           weakForceContinueRef.current = false;
           const request = start(msgText, {
-            userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: ticket.sessionId, userMessageTs, attachments,
+            userId, email, onlyOpus,
+            // Continue with Weak must actually start a Weak build — never the prior tier from a stale closure.
+            powerLevel: forceWeak ? 'weak' : powerLevel,
+            planFirst, thinking, sessionId: ticket.sessionId, userMessageTs, attachments,
             framework: fw, frameworkExplicit: frameworkExplicit || resolved, frameworkResolved: resolved, appSignature: appSignaturePref(),
             importUrl: pendingImportUrl || undefined,
             // 3-role model (FIX #6): Plan/Advise send the message down the read-only role lane instead of
@@ -5898,20 +5901,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   it opens the photo gallery/library. */}
               <input ref={screenshotInputRef} type="file" accept="image/*" className="hidden" onChange={handleScreenshotPicked} />
               </div>{/* /settings + attach row */}
-              {/* NEXT-BUILD SUGGESTIONS 💡 (admin 2026-08-14: "ek line me karo") — now lives on the SAME
-                  toolbar row, pushed to the far right with ml-auto, instead of its own second line below
-                  the input. After a build finishes it lights up with tailored "what to add next" ideas for
-                  THIS app (and the mega-app roadmap); tapping one fills the box for the user to review/send.
-                  Only a suggestion — nothing auto-runs. */}
-              <div className="ml-auto shrink-0">
+              </div>{/* /toolbar row (order-2): mode selector + settings + attach — below the input */}
+              </MobileComposerTools>
+              {/* 💡 OUTSIDE the + expander — tiny, upper-right corner of the composer box only.
+                  Fits existing space; does not enlarge the input pad. */}
+              <div className="nb-pro-suggestions-corner absolute z-20 pointer-events-auto" aria-label="Suggestions">
                 <NextSuggestionsBulb
+                  compact
                   workspaceId={expectedWorkspaceId()}
                   ready={!!state.done && !running}
                   onPick={(text) => { setPrompt(text); setTimeout(() => composerRef.current?.focus(), 0); }}
                 />
               </div>
-              </div>{/* /toolbar row (order-2): mode selector + settings + attach + 💡 — below the input */}
-              </MobileComposerTools>
               {/* LIVE IMPORT PROGRESS (admin report 2026-08-04). A 161 MB project takes minutes to
                   transfer, and the panel tracked `zipProgress` in state but rendered it NOWHERE — so the
                   screen showed one static "Importing…" line for minutes, which is indistinguishable from

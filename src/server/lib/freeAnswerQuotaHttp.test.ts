@@ -7,6 +7,7 @@ import { responseCompression } from './responseCompression';
 import { setServerDb } from './serverDb';
 import { FreeAnswerQuotaStore } from './freeAnswerQuotaStore';
 import { freeAnswerSignal, markFreeAnswer, withFreeAnswerQuota } from './freeAnswerQuota';
+import { chatAvailabilityMessage } from './chatAvailabilityMessage';
 
 function deferred() {
   let resolve!: () => void;
@@ -60,7 +61,7 @@ async function listen(run?: (req: Request, res: Response) => Promise<void>, uid:
   servers.push(server);
   return { port: (server.address() as { port: number }).port, dispatched: () => dispatched };
 }
-function question(port: number, message: string, id = randomUUID()) {
+function question(port: number, message: string, id = randomUUID(), input: Record<string, unknown> = {}) {
   return new Promise<{ status: number; body: Record<string, unknown>; headers: http.IncomingHttpHeaders }>((resolve, reject) => {
     const req = http.request({ hostname: '127.0.0.1', port, path: '/answer', method: 'POST', headers: {
       'content-type': 'application/json', 'accept-encoding': 'gzip', 'x-nb-guest': 'synthetic-settlement-http-guest', 'x-nb-answer-request': id,
@@ -74,7 +75,7 @@ function question(port: number, message: string, id = randomUUID()) {
       });
     });
     req.on('error', reject);
-    req.end(JSON.stringify({ message }));
+    req.end(JSON.stringify({ message, ...input }));
   });
 }
 it('publishes JSON completion only after durable settlement, then admits four immediate distinct guest turns', async () => {
@@ -203,3 +204,24 @@ it('does not execute a completed logical request twice through a second HTTP ent
   expect(duplicate.status).toBe(429); expect(duplicate.body.code).toBe('FREE_ANSWER_DUPLICATE');
   expect(first.dispatched() + second.dispatched()).toBe(1);
 });
+
+
+it.each(['hi', 'ta'].flatMap(replyLanguage => ['false', 'reject'].map(failure => ({ replyLanguage, failure }))))(
+  'localizes unconfirmed JSON settlement in $replyLanguage after $failure without publishing the staged answer', async ({ replyLanguage, failure }) => {
+    const db = database(); setServerDb(db as never);
+    const settle = vi.spyOn(FreeAnswerQuotaStore.prototype, 'settle');
+    if (failure === 'false') settle.mockResolvedValue(false);
+    else settle.mockRejectedValue(new Error('Synthetic API provider budget diagnostic'));
+    const server = await listen(async (req, res) => { markFreeAnswer(req); res.json({ reply: 'Synthetic answer that must stay staged.' }); });
+    const message = 'mujhe ek sawal poochna hai';
+    const reply = chatAvailabilityMessage('temporary', { message, replyLanguage });
+    const result = await question(server.port, message, randomUUID(), { replyLanguage });
+    expect(result.status).toBe(503);
+    expect(result.body).toEqual({ code: 'FREE_ANSWER_UNAVAILABLE', error: reply, reply });
+    expect(JSON.stringify(result.body)).not.toMatch(/API|provider|budget|diagnostic|stay staged|traffic|busy/i);
+    expect(settle).toHaveBeenCalledOnce(); expect(settle.mock.calls[0][1]).toBe('answered');
+    expect(server.dispatched()).toBe(1);
+    expect(await new FreeAnswerQuotaStore(db as never).status({ key: 'guest-device:synthetic-settlement-http-guest', limit: 5 }))
+      .toMatchObject({ used: 0, reserved: 1, inProgress: true });
+  },
+);

@@ -20,7 +20,7 @@ export async function confirmedFreeAnswerSettlement(settlement: Promise<boolean>
  * The handler must return after end(), not await its callback: publication follows handler cleanup.
  * This is deliberately NOT installed on the paid-wallet path, whose delivery/refund policy differs.
  */
-export function stageFreeAnswerCompletion(res: Response) {
+export function stageFreeAnswerCompletion(res: Response, unavailableMessage = 'NavBharatAI is temporarily unable to respond. Please try again shortly.') {
   const originalEnd = res.end;
   const originalWrite = res.write;
   const endedDescriptor = Object.getOwnPropertyDescriptor(res, 'writableEnded');
@@ -70,7 +70,7 @@ export function stageFreeAnswerCompletion(res: Response) {
       restore();
       if (pending) rejectedCallback(pending);
       if (res.destroyed || res.writableEnded) return;
-      const message = 'NavBharatAI is temporarily unable to respond. Please try again shortly.';
+      const message = unavailableMessage;
       const body = { code: 'FREE_ANSWER_UNAVAILABLE', error: message, reply: message };
       if (res.headersSent) {
         // Admitted streaming routes are SSE. Never emit their staged successful DONE on failure.

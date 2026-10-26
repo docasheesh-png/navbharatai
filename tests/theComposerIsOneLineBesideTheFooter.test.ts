@@ -64,7 +64,7 @@ describe('full screen (the column is back) ⇒ the two rows the admin sketched',
       expect(html).toContain('data-composer-layout="two-rows"');
       expect(html).toContain(COMPOSER_SEND_SLOT_CLASS);
       expect(html).toContain('data-composer-toolbar');
-      expect(html).toContain('flex-wrap');
+      expect(html).toContain('flex-nowrap');
     });
   }
 });

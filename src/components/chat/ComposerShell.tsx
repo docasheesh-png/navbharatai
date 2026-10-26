@@ -129,7 +129,7 @@ export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, s
       <div className={`${COMPOSER_BOX_CLASS} flex-1 min-w-0 cursor-text ${controls ? '' : 'nb-composer-no-tools'}`} ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick}>
         <div className="relative w-full min-w-0">{children}</div>
         <div className="flex items-end justify-between gap-2 px-2 pb-2" data-composer-toolbar="">
-          {controls ? <MobileComposerTools><div className="flex min-w-0 flex-wrap items-center gap-1">{controls}</div></MobileComposerTools> : <div className="nb-composer-controls" />}
+          {controls ? <MobileComposerTools><div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto">{controls}</div></MobileComposerTools> : <div className="nb-composer-controls" />}
           <div className={COMPOSER_SEND_SLOT_CLASS}>{send}</div>
         </div>
       </div>

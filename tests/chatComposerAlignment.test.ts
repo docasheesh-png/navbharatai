@@ -58,7 +58,7 @@ describe('the control row has its own line, under the text', () => {
   });
 
   it('the row is a normal flex row in the shell, never laid over the text', () => {
-    expect(SHELL).toContain('<div className="flex min-w-0 flex-wrap items-center gap-1">{controls}</div>');
+    expect(SHELL).toContain('<div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto">{controls}</div>');
     expect(SHELL).not.toMatch(/absolute right-\d/);
   });
 

@@ -20,7 +20,7 @@ function harness(overrides: Record<string, unknown> = {}) {
   const setter = (key: string) => (value: any) => { observed[key] = typeof value === 'function' ? value(observed[key]) : value; };
   const deps: Record<string, any> = {
     prompt: 'Build a notes app', files: [], running: false, isBusy: () => false, listening: false, importUrl: '',
-    sessionSwitchRef: { current: false }, queueClaimInFlightRef: { current: null }, queueContinuationAbortRef: { current: null },
+    sessionSwitchRef: { current: false }, queueClaimInFlightRef: { current: null }, queueContinuationAbortRef: { current: null }, weakForceContinueRef: { current: false },
     localSubmissionMessagesRef: { current: new Set<number>() }, submissionRef: { current: new SubmissionScope() }, sessionIdRef: { current: 'original' },
     state: { narration: [], checkpoints: [], activity: [], activityLog: [] }, userMsgs: [], agentHistory: [],
     autoContinueRef: {}, planContinuesRef: {}, lastPlanRemainingRef: {}, noProgressRef: {}, lastFilesWrittenRef: {},

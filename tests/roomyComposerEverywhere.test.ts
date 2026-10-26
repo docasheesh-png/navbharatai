@@ -22,7 +22,7 @@ describe('one roomy prompt card across NavBharatAI', () => {
     expect(source).toContain('mx-auto w-[calc(100%-1.5rem)] max-w-3xl');
     expect(source).toContain('${COMPOSER_TEXTAREA_CLASS} overflow-y-auto');
     expect(source).toContain('clampComposerHeight(el.scrollHeight, lineH, padY)');
-    expect(source).toContain('order-2 flex-wrap px-2 pb-2 pr-24');
+    expect(source).toContain('order-2 flex-nowrap overflow-x-auto px-2 pb-2 pr-24');
     expect(source).not.toContain('pl-4 pr-20 py-2.5 text-[15px]');
     expect(source).toContain("const composerBtnY = 'bottom-2'");
   });
@@ -40,7 +40,7 @@ describe('one roomy prompt card across NavBharatAI', () => {
     }));
     expect(html).toContain('mx-auto w-full max-w-3xl');
     expect(html.indexOf('</textarea>')).toBeLessThan(html.indexOf('data-composer-toolbar'));
-    expect(html).toContain('flex-wrap');
+    expect(html).toContain('flex-nowrap');
     expect(html).toContain('shrink-0 self-end');
     expect(html).not.toContain('one-line');
   });

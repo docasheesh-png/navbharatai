@@ -19,14 +19,19 @@ describe('Weak scope Switch module UX', () => {
     expect(isWeakScopeGuidanceCode(WEAK_SCOPE_STRONG)).toBe(true);
   });
 
-  it('card copy is calm product guidance, not a failure strip', () => {
+  it('card copy is calm product guidance with an honest Weak risk line', () => {
     const strong = weakScopeGuidanceCard(WEAK_SCOPE_STRONG);
     expect(strong.title).toMatch(/stronger module/i);
     expect(strong.hint).toContain('Nothing was charged');
-    expect(strong.body.toLowerCase()).not.toMatch(/fail|error|fix with ai/);
+    expect(strong.body).toMatch(/Continue with Weak/i);
+    expect(strong.body).toMatch(/Switch module/i);
+    expect(strong.body.toLowerCase()).not.toMatch(/fix with ai|error/);
+    expect(strong.risk.toLowerCase()).toMatch(/may fail|high chance of failure/);
     const unavailable = weakScopeGuidanceCard(WEAK_SCOPE_UNAVAILABLE);
     expect(unavailable.title).toMatch(/choose a module/i);
     expect(unavailable.hint).toContain('Nothing was charged');
+    expect(unavailable.body).toMatch(/Continue with Weak/i);
+    expect(unavailable.risk.toLowerCase()).toMatch(/may fail|high chance of failure/);
   });
 
   it('panel opens Build options via Switch module and never offers Fix with AI for those codes', () => {
@@ -44,10 +49,14 @@ describe('Weak scope Switch module UX', () => {
     const guidanceBranch = panel.slice(start, end);
     expect(guidanceBranch).toContain('Switch module');
     expect(guidanceBranch).toContain('openModulePicker');
-    expect(guidanceBranch).not.toContain('fixWithAI(');
+    expect(guidanceBranch).toContain('Continue with Weak');
+    expect(guidanceBranch).toContain('guide.risk');
+    expect(guidanceBranch).not.toContain("label: 'Normal'");
+    expect(guidanceBranch).not.toContain("label: 'Strong'");
+    expect(guidanceBranch).not.toContain('FixWithAI(');
     expect(guidanceBranch).not.toContain('CONTINUE_AND_FIX_BUILD_PROMPT');
-    expect(guidanceBranch).not.toContain('bg-amber-500/10');
-    // Ordinary broken builds still keep Fix with AI.
+    expect(guidanceBranch).not.toContain('AlertCircle');
+    // Ordinary broken builds still keep Fix with AI (amber failure strip outside this branch).
     expect(panel).toContain('fixWithAI(CONTINUE_AND_FIX_BUILD_PROMPT)');
   });
 
@@ -60,6 +69,7 @@ describe('Weak scope Switch module UX', () => {
       const text = weakAdmissionReply(scope);
       expect(text).toContain('Switch module');
       expect(text).toContain('Build options');
+      expect(text).toContain('Continue with Weak');
       expect(text).toContain('Nothing was charged');
       expect(text.toLowerCase()).not.toMatch(/fix with ai|beyond the weak tier/);
     }

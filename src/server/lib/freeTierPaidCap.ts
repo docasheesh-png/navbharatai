@@ -94,6 +94,8 @@ export class FreeTierPaidCapError extends Error {
 }
 
 export interface FreeTierPaidHold { reservation: PaidReservation; model: string }
+// Exact server-minted objects only. A copied/reused receipt never proves a new undispatched call.
+const undispatchedHolds = new WeakSet<FreeTierPaidHold>();
 
 /**
  * Reserve ONE physical Free-tier paid call against the shared owner budget. Null = do not dispatch.
@@ -115,7 +117,9 @@ export async function reserveFreeTierPaid(input: { surface: FreeTierPaidSurface;
     console.warn(`[FREE_PAID_CAP] daily Free-tier paid budget reached — ${input.model} on ${input.surface} skipped`);
     return null;
   }
-  return { reservation, model: input.model };
+  const hold = { reservation, model: input.model };
+  undispatchedHolds.add(hold);
+  return hold;
 }
 
 /** Settle with the provider-reported usage. Missing usage leaves the full hold booked (conservative). */
@@ -136,6 +140,29 @@ export function geminiUsage(um: any): { inputTokens?: number; outputTokens?: num
 export const FREE_TIER_PAID_OUTPUT_QUOTE = 8192;
 
 /**
+ * A confirmed hold with no adapter entry has a provable zero physical cost, not measured zero tokens.
+ * Only this private pre-dispatch branch may close it. Once adapter entry occurs, cancellation or
+ * missing usage remains uncertain and keeps the full hold. The existing store fences owner/day,
+ * retains its replay tombstone, and never refunds the request counter or any user wallet.
+ */
+async function abortBeforePaidDispatch(hold: FreeTierPaidHold, signal: AbortSignal): Promise<never> {
+  try { await store()?.settlePaid(hold.reservation, 0); }
+  catch { /* Unconfirmed cleanup retains the conservative hold; never invent a refund. */ }
+  throw signal.reason;
+}
+
+/** Own the adapter-entry boundary; cancellation can release only this exact, unused server hold. */
+export async function dispatchWithFreeTierPaidHold<T>(hold: FreeTierPaidHold | null, signal: AbortSignal | undefined, dispatch: () => Promise<T>): Promise<T> {
+  if (hold) {
+    if (!undispatchedHolds.delete(hold)) throw new Error('Paid hold is not available for dispatch');
+    if (signal?.aborted) return abortBeforePaidDispatch(hold, signal);
+  }
+  signal?.throwIfAborted();
+  // Marked consumed synchronously above. A throw, rejection or abort after entry never refunds it.
+  return dispatch();
+}
+
+/**
  * Wrap a slotted Free-tier paid rung so EVERY dispatch (execute AND stream) is budgeted at the source.
  * Registration-time decoration means a new caller of the Free ladder cannot forget the cap.
  */
@@ -148,14 +175,19 @@ export function cappedFreeTierRung(base: AIProvider, surface: FreeTierPaidSurfac
   };
   return {
     ...base,
-    execute: async (prompt, schema, modelOverride, systemPrompt, images): Promise<AIProviderResponse> => {
+    execute: async (prompt, schema, modelOverride, systemPrompt, images, signal): Promise<AIProviderResponse> => {
+      signal?.throwIfAborted();
       const hold = await reserve(prompt, systemPrompt);
-      const response = await base.execute(prompt, schema, modelOverride, systemPrompt, images);
+      const response = await dispatchWithFreeTierPaidHold(hold, signal, () => base.execute(prompt, schema, modelOverride, systemPrompt, images, signal));
       await settleFreeTierPaid(hold, response.usage);
       return response;
     },
     executeStream: base.executeStream
-      ? async (prompt, systemPrompt, onChunk, m, signal) => { await reserve(prompt, systemPrompt); return base.executeStream!(prompt, systemPrompt, onChunk, m, signal); }
+      ? async (prompt, systemPrompt, onChunk, m, signal) => {
+        signal?.throwIfAborted();
+        const hold = await reserve(prompt, systemPrompt);
+        return dispatchWithFreeTierPaidHold(hold, signal, () => base.executeStream!(prompt, systemPrompt, onChunk, m, signal));
+      }
       : undefined,
   };
 }

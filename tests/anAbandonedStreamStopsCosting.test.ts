@@ -82,8 +82,11 @@ describe('the signal reaches the provider from the route', () => {
 
   it('the sequential ladder passes it, watchdog or not', () => {
     const src = read('src/server/AI/Router/AIRouter.ts');
-    expect(src).toContain('await p.executeStream(prompt, systemPrompt, onChunk, undefined, signal)');
-    expect(src).toContain('p.executeStream!(prompt, systemPrompt, cb, undefined, signal)');
+    const sequential = src.slice(src.indexOf('private async streamSequential('), src.indexOf('async routeStream('));
+    expect(sequential).toContain('p.executeStream!(prompt, systemPrompt, (text) => {');
+    expect(sequential).toContain('}, undefined, signal)');
+    expect(sequential).toContain('await run(onChunk)');
+    expect(sequential).toMatch(/runWatchedStream\(\s*run,/);
   });
 
   it('the RACE passes it too — a raced turn pays two providers, so it has twice the reason to', () => {

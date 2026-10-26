@@ -7,7 +7,7 @@ import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type Surplu
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakScopeChatTerminal, weakScopeCatchResult } from '../AgentV3/weakScopeTerminal';
-import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction } from '../AgentV3/weakBuildPreflight';
+import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction, weakForceContinueDecision } from '../AgentV3/weakBuildPreflight';
 import { toSafeClientMessage } from '../lib/httpError';
 import { clarityGateEnabled, shouldJudgeClarity, judgeClarity, clarifyReply, categoryFromWords, bestGuessPrompt, type ClarityCategory, type QuickReply } from '../AgentV3/clarityGate';
 import { clarityJudgeAsk } from '../AgentV3/clarityJudgeAsk';
@@ -11356,13 +11356,9 @@ async function noteBuildOutcome(
       createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
         audit('AGENTV3_DISCOUNT_SCOPE_CALL', { ok: row.ok, model: row.model, latencyMs: row.latencyMs, inputTokens: row.inputTokens, outputTokens: row.outputTokens }, 'info');
       }));
-    // Owner CTA "Continue with Weak": user accepted the risk — Weak coding begins (no guidance divert).
-    const weakForceContinue = req.body?.weakForceContinue === true && powerLevelReqEffective === 'weak';
-    const weakScopeBlocked = weakAdmissionBlocked(weakAdmission) && !weakForceContinue;
-    // Try hard for a correct app: force-continue uses Weak's capable (complex) ladder, not the cheap opener.
-    const weakAdmissionForBuild = (weakForceContinue && weakAdmissionBlocked(weakAdmission))
-      ? { scope: 'complex' as const, source: 'model' as const, usage: weakAdmission?.usage }
-      : weakAdmission;
+    const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(
+      req.body.weakForceContinue, powerLevelReqEffective, weakAdmission,
+    );
     if (weakScopeBlocked) {
       intent = 'chat';
       setAdmittedSurplusScope(surplusSession, false);

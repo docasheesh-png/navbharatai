@@ -49,3 +49,15 @@ export function recordWeakAdmissionUsage(result: WeakAdmission | null, record: (
 export function allowWeakChatAction(blocked: boolean, allowed: boolean): boolean {
   return !blocked && allowed;
 }
+
+/** Owner CTA "Continue with Weak": accept risk, start Weak coding, prefer capable ladder. */
+export function weakForceContinueDecision(
+  bodyForce: unknown,
+  tier: string,
+  admission: WeakAdmission | null,
+): { blocked: boolean; admissionForBuild: WeakAdmission | null } {
+  const force = bodyForce === true && tier === 'weak';
+  const wasBlocked = weakAdmissionBlocked(admission);
+  if (!(force && wasBlocked)) return { blocked: wasBlocked && !force, admissionForBuild: admission };
+  return { blocked: false, admissionForBuild: { scope: 'complex', source: 'model', usage: admission?.usage } };
+}

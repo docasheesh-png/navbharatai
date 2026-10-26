@@ -17,10 +17,11 @@ describe('Continue with Weak actually starts a Weak build', () => {
   });
 
   it('server skips scope diversion and uses complex Weak ladder when force-continuing', () => {
-    expect(route).toContain('weakForceContinue');
+    expect(route).toContain('weakForceContinueDecision');
     expect(route).toContain('weakAdmissionForBuild');
-    expect(route).toContain("scope: 'complex'");
     expect(route).toContain('resolveWeakComplexity(weakAdmissionForBuild');
+    const preflight = readFileSync(resolve('src/server/AgentV3/weakBuildPreflight.ts'), 'utf8');
+    expect(preflight).toContain("scope: 'complex'");
     expect(weakAdmissionBlocked({ scope: 'strong', source: 'model' })).toBe(true);
     expect(weakAdmissionBlocked({ scope: null, source: 'unavailable' })).toBe(true);
     expect(weakAdmissionBlocked({ scope: 'complex', source: 'model' })).toBe(false);

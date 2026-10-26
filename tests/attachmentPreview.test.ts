@@ -129,7 +129,8 @@ describe('useChatEngine uses the shared helper, and still sends the full file', 
   it('what the MODEL receives is untouched — the preview was never the payload', () => {
     // The entire safety argument for shrinking the preview rests on this line existing. If a refactor
     // ever routes the payload through the preview, the model silently starts seeing 512px images.
-    expect(src).toContain('fileAttachments: files.length > 0 ? await filesToBase64(files) : undefined');
+    expect(src).toContain('const fileAttachments = files.length > 0 ? await filesToBase64(files) : undefined');
+    expect(src).toMatch(/body: JSON\.stringify\(\{[\s\S]*?fileAttachments,/);
   });
 });
 

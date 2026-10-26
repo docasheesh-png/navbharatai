@@ -16,7 +16,7 @@ describe('the chat hook sends the message exactly as typed', () => {
     }
   });
   it('sends the message itself and carries memory as its own field', () => {
-    expect(src).toMatch(/callGeminiFrontend\(message,/);
+    expect(src).toMatch(/callGeminiFrontend\(turn, message,/);
     expect(src).toMatch(/\.\.\.\(memorySummary \? \{ memorySummary \} : \{\}\)/);
   });
 });

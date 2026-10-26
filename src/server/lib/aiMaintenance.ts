@@ -71,7 +71,9 @@ export class AiMaintenanceStore {
     if (this.value && this.now() - this.readAt < 2_000) return this.value;
     if (this.pending) return this.pending;
     const generation = this.generation;
-    this.pending = (async () => {
+    // Assign the single-flight promise BEFORE invoking a factory/loader that can throw synchronously.
+    // Otherwise its finally clears pending first, then the outer assignment caches that failure forever.
+    this.pending = Promise.resolve().then(async () => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const data = await Promise.race([
@@ -84,7 +86,7 @@ export class AiMaintenanceStore {
       } catch {
         return { ...(this.value ?? defaults()), enabled: true, unavailable: true };
       } finally { if (timer) clearTimeout(timer); this.pending = null; }
-    })();
+    });
     return this.pending;
   }
   start(): void {

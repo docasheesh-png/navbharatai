@@ -17,6 +17,7 @@ export const SAFE_SURPLUS_ADMISSION_REASONS = [
   'stale_or_missing_snapshot',
   'no_eligible_90_percent_offer',
   'review_unavailable',
+  'admit_circuit_open',
   'other_safe',
 ] as const;
 export type SafeSurplusAdmissionReason = (typeof SAFE_SURPLUS_ADMISSION_REASONS)[number];
@@ -34,6 +35,7 @@ export function safeSurplusAdmissionReason(reason: string | undefined | null): S
   if (/stale_or_missing_snapshot|no observed models|metadata snapshot/i.test(raw)) return 'stale_or_missing_snapshot';
   if (/no_eligible_90_percent_offer/i.test(raw)) return 'no_eligible_90_percent_offer';
   if (/flag_off|builder is disabled/i.test(raw)) return 'flag_off';
+  if (/admit_circuit_open|circuit.?open|overload.?cool/i.test(raw)) return 'admit_circuit_open';
   // Known SurplusBuildUnavailableError allowlist reasons pass through when listed above; else fold.
   const known = new Set([
     'reviewed_capability_or_exact_route_contract_missing', 'invalid_build_scope', 'weak_model_not_authorized',

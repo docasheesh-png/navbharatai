@@ -73,3 +73,16 @@ describe('shared Free answer request admission', () => {
   expect(m.status).toHaveBeenCalledWith({key:'guest-device:22222222-2222-4222-8222-222222222222',limit:5,ipKey:'ip:203.0.113.9'},expect.any(Number));
  });
 });
+
+it('a timed-out durable settlement emits one failure, keeps its original outcome, and ignores late success', async () => {
+ vi.useFakeTimers(); const {req,res}=fixture(); const settlement=deferred<boolean>();
+ res.headersSent=true; res.writableEnded=false;
+ const end=vi.fn((_body: string)=>{res.writableEnded=true;return res;}); res.end=end; res.write=vi.fn(()=>true);
+ m.settle.mockReturnValueOnce(settlement.promise);
+ const pending=withFreeAnswerQuota(req,res,async()=>{markFreeAnswer(req);res.write('data: {"c":"partial"}\n\n');res.end('data: [DONE]\n\n');});
+ await flush(); expect(m.settle).toHaveBeenCalledOnce(); expect(end).not.toHaveBeenCalled();
+ await vi.advanceTimersByTimeAsync(5_000); await pending;
+ expect(end).toHaveBeenCalledOnce();expect(end.mock.calls[0][0]).toContain('FREE_ANSWER_UNAVAILABLE');expect(end.mock.calls[0][0]).not.toContain('[DONE]');
+ expect(m.settle.mock.calls[0][1]).toBe('answered');expect(freeAnswerSignal(req)).toBeUndefined();expect(vi.getTimerCount()).toBe(0);
+ settlement.resolve(true);await flush();expect(end).toHaveBeenCalledOnce();expect(m.settle).toHaveBeenCalledOnce();
+});

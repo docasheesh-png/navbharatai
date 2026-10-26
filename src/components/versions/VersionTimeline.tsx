@@ -38,6 +38,11 @@ export interface VersionTimelineProps {
   refreshKey?: unknown;
   /** The builder's History tab is a narrow column. */
   dense?: boolean;
+  /**
+   * Pro chat undo picker: the list IS the confirmation. One tap on Restore runs the restore
+   * immediately (server still saves "before" first). History / Time Machine keep the Yes/Cancel step.
+   */
+  oneTapRestore?: boolean;
 }
 
 function relativeTime(iso: string): string {
@@ -51,7 +56,7 @@ function relativeTime(iso: string): string {
   return new Date(t).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 }
 
-export function VersionTimeline({ historyKey, workspaceId, userId, email, onRestored, refreshKey, dense }: VersionTimelineProps) {
+export function VersionTimeline({ historyKey, workspaceId, userId, email, onRestored, refreshKey, dense, oneTapRestore }: VersionTimelineProps) {
   const [points, setPoints] = useState<TimelineVersion[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -216,13 +221,19 @@ export function VersionTimeline({ historyKey, workspaceId, userId, email, onRest
                           </div>
                         </div>
                         {canRestore && !confirming && (
-                          <button onClick={() => { setConfirmId(v.id); setNote(null); }} disabled={busy}
+                          <button
+                            onClick={() => {
+                              setNote(null);
+                              if (oneTapRestore) void restore(v);
+                              else setConfirmId(v.id);
+                            }}
+                            disabled={busy}
                             className="shrink-0 flex items-center gap-1 text-xs font-semibold text-success bg-emerald-500/15 border border-emerald-500/30 rounded-lg px-3 py-2 hover:bg-emerald-500/25 disabled:opacity-40">
                             <RotateCcw className="w-3.5 h-3.5" /> Restore
                           </button>
                         )}
                       </div>
-                      {confirming && (
+                      {confirming && !oneTapRestore && (
                         <div className="mt-2.5 pt-2.5 border-t border-line">
                           <p className="text-xs text-muted mb-2">Go back to this version? Your whole app will be put back to it. The app as it is now is saved first, so you can come forward again.</p>
                           <div className="flex gap-2">

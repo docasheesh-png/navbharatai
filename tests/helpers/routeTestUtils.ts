@@ -66,7 +66,9 @@ export interface MockResponse {
   /** Express's content-type shortcut. Modelled because real routes use it (a download that fails must
    *  answer a BROWSER in HTML, not JSON) — a mock missing it fails a route that is perfectly correct. */
   type(t: string): MockResponse;
-  end(): MockResponse;
+  /** A terminal payload is written before finish, including when a route installs its own writer. */
+  end(chunk?: string | Uint8Array | (() => void), encoding?: BufferEncoding | (() => void), callback?: () => void): MockResponse;
+  write?(chunk: string | Uint8Array, encoding?: BufferEncoding): boolean;
   /** Abrupt close, used when a stream fails after the headers have already gone out. */
   destroy(): MockResponse;
   headersSent?: boolean;
@@ -110,7 +112,15 @@ export function mockRes(): MockResponse {
     json(payload: any) { this.body = payload; complete(); return this; },
     send(payload: any) { this.sent = payload; this.body = payload; this.headersSent = true; complete(); return this; },
     type(t: string) { this.headers['content-type'] = t.includes('/') ? t : `text/${t}`; return this; },
-    end() { this.ended = true; complete(); return this; },
+    end(chunk, encoding, callback) {
+      const done = typeof chunk === 'function' ? chunk : typeof encoding === 'function' ? encoding : callback;
+      if (chunk !== undefined && typeof chunk !== 'function') {
+        if (this.write) this.write(chunk, typeof encoding === 'string' ? encoding : undefined);
+        else { this.sent = chunk; this.body = chunk; }
+      }
+      if (done) this.once('finish', done);
+      this.ended = true; complete(); return this;
+    },
     // An abrupt close: the connection goes away WITHOUT the response finishing ('close' only).
     destroy() { this.ended = true; if (!closed) { closed = true; res.emit('close'); } return this; },
     headersSent: false,

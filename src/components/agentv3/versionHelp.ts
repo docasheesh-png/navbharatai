@@ -39,4 +39,4 @@ export const HISTORY_TAB_NOTE =
 
 /** The one-line answer to "I made a mistake — how do I get my app back?" */
 export const HOW_TO_GO_BACK =
-  `Open Time Machine (${TIME_MACHINE_PATH}) or the builder's History tab, pick the version from before the change, and tap Restore. Nothing is deleted — your app as it is now is saved first, so you can come forward again.`;
+  `In NavBharatAI Pro, say undo / pehle wala / wapas — Pro shows your saved versions in chat; tap Restore on the one you want (one tap, no extra confirm). You can also open the builder's History tab. The same list lives in Time Machine (${TIME_MACHINE_PATH}). Nothing is deleted — your app as it is now is saved first, so you can come forward again.`;

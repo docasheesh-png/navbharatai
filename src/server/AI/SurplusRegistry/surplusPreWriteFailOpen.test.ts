@@ -1,4 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+
+const circuitMocks = vi.hoisted(() => ({
+  death: vi.fn(),
+  success: vi.fn(),
+}));
+vi.mock('./surplusAdmitCircuit', () => ({
+  recordSurplusMidBuildDeath: (...a: unknown[]) => circuitMocks.death(...a),
+  recordSurplusAdmitProbeSuccess: (...a: unknown[]) => circuitMocks.success(...a),
+}));
 import { PublicBuildEngineError, PUBLIC_BUILD_ENGINE_UNAVAILABLE, PUBLIC_BUILD_ENGINE_TIMEOUT } from '../../lib/buildEngineError';
 import { SurplusBuildTransportError } from './transport';
 import {
@@ -30,6 +39,8 @@ const params = (): RunTurnParams => ({
   tools: [],
   maxTokens: 64,
 });
+
+beforeEach(() => { circuitMocks.death.mockClear(); circuitMocks.success.mockClear(); });
 
 describe('shouldFailOpenSurplusPreWrite', () => {
   it('fail-opens on PublicBuildEngineError when no user files were written', () => {
@@ -103,7 +114,7 @@ describe('surplusPreWriteFailOpenReason', () => {
     const all = allSafeSurplusFailOpenReasons();
     expect(all).toEqual(expect.arrayContaining([
       'mid_build_timeout', 'mid_build_transport', 'mid_build_engine_unavailable',
-      'admission_timeout', 'flag_off',
+      'admission_timeout', 'flag_off', 'admit_circuit_open',
     ]));
   });
 });
@@ -124,6 +135,8 @@ describe('wrapSurplusRunnerPreWriteFailOpen', () => {
     expect(surplusRun).toHaveBeenCalledOnce();
     expect(weakRun).toHaveBeenCalledOnce();
     expect(onFailOpen).toHaveBeenCalledExactlyOnceWith('mid_build_engine_unavailable');
+    expect(circuitMocks.death).toHaveBeenCalledExactlyOnceWith('mid_build_engine_unavailable');
+    expect(circuitMocks.success).not.toHaveBeenCalled();
     expect(state.dropped).toBe(true);
   });
 
@@ -137,6 +150,8 @@ describe('wrapSurplusRunnerPreWriteFailOpen', () => {
     );
     await wrapped.runTurn(params());
     expect(weakFactory).not.toHaveBeenCalled();
+    expect(circuitMocks.success).toHaveBeenCalledOnce();
+    expect(circuitMocks.death).not.toHaveBeenCalled();
   });
 
   it('rethrows when user files already exist — no Weak restart after partial write', async () => {
@@ -188,6 +203,7 @@ describe('wrapSurplusRunnerPreWriteFailOpen', () => {
     );
     await expect(wrapped.runTurn(params())).resolves.toMatchObject({ text: 'ok' });
     expect(onFailOpen).toHaveBeenCalledExactlyOnceWith('mid_build_engine_unavailable');
+    expect(circuitMocks.death).toHaveBeenCalledExactlyOnceWith('mid_build_engine_unavailable');
     expect(weakRun).toHaveBeenCalledOnce();
   });
 });
@@ -247,5 +263,21 @@ describe('wrapSurplusRunnerPreWriteFailOpen after soft consume', () => {
     await wrapped.runTurn(params());
     expect(surplusRun).not.toHaveBeenCalled();
     expect(weakRun).toHaveBeenCalledOnce();
+  });
+});
+
+describe('wrapSurplusRunnerPreWriteFailOpen ↔ admit circuit', () => {
+  it('records probe success when Surplus turn completes', async () => {
+    const surplus = { runTurn: vi.fn(async () => ({ text: 'ok', usage: { inputTokens: 1, outputTokens: 1 } })) };
+    const weak = { runTurn: vi.fn() };
+    const wrapped = wrapSurplusRunnerPreWriteFailOpen(
+      surplus as never,
+      () => weak as never,
+      { state: { dropped: false }, userFilesWritten: () => 0 },
+    );
+    await wrapped.runTurn({} as never);
+    expect(circuitMocks.success).toHaveBeenCalledOnce();
+    expect(circuitMocks.death).not.toHaveBeenCalled();
+    expect(weak.runTurn).not.toHaveBeenCalled();
   });
 });

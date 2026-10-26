@@ -16,7 +16,7 @@ const deferred = <T,>() => {
   return { promise, resolve, reject };
 };
 function harness(overrides: Record<string, unknown> = {}) {
-  const observed: Record<string, any> = { userMsgs: [], agentHistory: [], checkpointHistory: [], submissionPhase: null, fwConflict: null, featureConfirm: null };
+  const observed: Record<string, any> = { userMsgs: [], agentHistory: [], checkpointHistory: [], submissionPhase: null, fwConflict: null, featureConfirm: null, versionUndoOpen: false };
   const setter = (key: string) => (value: any) => { observed[key] = typeof value === 'function' ? value(observed[key]) : value; };
   const deps: Record<string, any> = {
     prompt: 'Build a notes app', files: [], running: false, isBusy: () => false, listening: false, importUrl: '',
@@ -28,6 +28,8 @@ function harness(overrides: Record<string, unknown> = {}) {
     checkAttachmentSizes: () => ({ ok: true }), fileToAttachment: vi.fn(async () => ({ name: 'attachment' })),
     setUserMsgs: setter('userMsgs'), setAgentHistory: setter('agentHistory'), setCheckpointHistory: setter('checkpointHistory'),
     setSubmissionPhase: setter('submissionPhase'), setFwConflict: setter('fwConflict'), setFeatureConfirm: setter('featureConfirm'),
+    // Free variables the extracted send() now closes over (Pro undo picker). Default: never intercept.
+    setVersionUndoOpen: setter('versionUndoOpen'), wantsVersionUndo: () => false,
     setPrompt: vi.fn(), setFiles: vi.fn(), setImportUrl: vi.fn(), onBeforeBuild: undefined,
     nextUserMessageTs: (now: number) => now + 1, withoutStaleLiveStatus: (items: any[]) => items,
     userId: 'user', email: undefined, onlyOpus: false, powerLevel: 'medium', planFirst: false, thinking: true,
@@ -38,7 +40,7 @@ function harness(overrides: Record<string, unknown> = {}) {
     start: vi.fn(async () => undefined), ...overrides,
   };
   const send = new Function(...Object.keys(deps), compiled)(...Object.values(deps)) as (override?: { text: string; importUrl: string }) => Promise<void>;
-  const cancel = () => { deps.submissionRef.current.cancel(); observed.submissionPhase = null; observed.fwConflict = null; observed.featureConfirm = null; };
+  const cancel = () => { deps.submissionRef.current.cancel(); observed.submissionPhase = null; observed.fwConflict = null; observed.featureConfirm = null; observed.versionUndoOpen = false; };
   return { send, deps, observed, cancel };
 }
 const plan = { show: true, domain: 'notes', named: ['Notes'], suggested: ['Search'] };
@@ -211,3 +213,14 @@ describe('real Pro send preflight', () => {
     expect(panel).toContain('running || submissionRef.current.busy || queueClaimInFlightRef.current');
   });
 });
+
+  it('opens the version undo picker for undo intent and does not start a build', async () => {
+    const h = harness({
+      prompt: 'pehle wala',
+      wantsVersionUndo: (text: string) => /pehle wala|undo|wapas/i.test(text),
+    });
+    await h.send();
+    expect(h.observed.versionUndoOpen).toBe(true);
+    expect(h.deps.start).not.toHaveBeenCalled();
+    expect(h.observed.submissionPhase).toBeNull();
+  });

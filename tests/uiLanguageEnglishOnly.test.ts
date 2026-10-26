@@ -67,6 +67,9 @@ const ALLOWED: Record<string, string> = {
   // `useChatEngine.ts`: nothing here is ever printed, and removing the Hindi spellings would simply
   // stop this recognising a Hindi request to change a picture.
   'src/lib/imageEdit.ts': "input parsing of the user's own message, never rendered as UI",
+  // Matches undo / pehle wala / वापस intent in what the USER typed so Pro can open the version
+  // picker. Regex only — never rendered as a label (same category as useChatEngine / imageEdit).
+  'src/lib/versionUndoIntent.ts': "input parsing of the user's undo/go-back message, never rendered as UI",
 };
 
 function walk(dir: string, out: string[] = []): string[] {

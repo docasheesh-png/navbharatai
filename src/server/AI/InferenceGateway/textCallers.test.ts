@@ -66,10 +66,12 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); AIRouterManager.reset(); });
 
 describe('real text caller chokepoints', () => {
-  it('rollout OFF preserves the legacy route and exact system prompt', async () => {
-    const result = await runWithInferenceGatewayContext(context(), () => legacyRouter().route('user words', 'system rules'));
+  it.each([false, true])('rollout OFF preserves the legacy route, exact system prompt and caller signal (%s)', async withSignal => {
+    const controller = new AbortController(); const signal = withSignal ? controller.signal : undefined;
+    const result = await runWithInferenceGatewayContext(context(), () => legacyRouter().route('user words', 'system rules', undefined, undefined, signal));
     expect(result.response.content).toBe('legacy answer');
-    expect(m.legacy).toHaveBeenCalledWith('user words', undefined, undefined, 'system rules', undefined);
+    expect(m.legacy).toHaveBeenCalledWith('user words', undefined, undefined, 'system rules', undefined, signal);
+    if (signal) { expect(signal.aborted).toBe(false); controller.abort(); expect(m.legacy.mock.calls[0][5].aborted).toBe(true); }
     expect(m.gateway).not.toHaveBeenCalled();
   });
 

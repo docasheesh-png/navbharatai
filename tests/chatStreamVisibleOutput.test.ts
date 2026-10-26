@@ -128,14 +128,18 @@ describe('sequential chat commits one visible answer, not one resolved promise',
     vi.stubEnv('CHAT_STREAM_WATCHDOG', enabled);
     const controller = new AbortController();
     const router = new AIRouter('free');
+    let received: AbortSignal | undefined; const observedAbort = vi.fn();
     router.registerProvider(provider('GLM', 1, vi.fn(async (_p, _s, chunk, _model, signal) => {
-      expect(signal).toBe(controller.signal);
+      received = signal; signal?.addEventListener('abort', observedAbort, { once: true });
       chunk('Partial.'); controller.abort(); chunk('discarded'); return 'Partial.discarded';
     })));
     const fallback = vi.fn();
     router.registerProvider(provider('GROQ', 2, fallback));
     const chunks: string[] = [];
     expect(await router.routeStream('fixture', undefined, chunk => chunks.push(chunk), controller.signal)).toEqual({ ok: false, reason: 'aborted' });
+    expect(received).toBeInstanceOf(AbortSignal);
+    expect(received?.aborted).toBe(true); expect(received?.reason).toBe(controller.signal.reason);
+    expect(observedAbort).toHaveBeenCalledOnce();
     expect(chunks).toEqual(['Partial.']);
     expect(fallback).not.toHaveBeenCalled();
     expect(getProviderStats().GLM).toMatchObject({ inFlight: 0, circuitState: 'closed' });
@@ -146,8 +150,8 @@ describe('sequential chat commits one visible answer, not one resolved promise',
     vi.useFakeTimers();
     vi.stubEnv('CHAT_STREAM_FIRST_TOKEN_MS', '5000');
     const router = new AIRouter('free');
-    let late!: (text: string) => void;
-    router.registerProvider(provider('GLM', 1, vi.fn((_p, _s, chunk) => { late = chunk; return new Promise<string>(() => {}); })));
+    let late!: (text: string) => void; let finish!: () => void;
+    router.registerProvider(provider('GLM', 1, vi.fn((_p, _s, chunk) => { late = chunk; return new Promise<string>(resolve => { finish = () => resolve('late answer'); }); })));
     router.registerProvider(provider('GROQ', 2, vi.fn(async (_p, _s, chunk) => { chunk('Answer.'); return 'Answer.'; })));
     const chunks: string[] = [];
     const pending = router.routeStream('fixture', undefined, chunk => chunks.push(chunk));
@@ -158,6 +162,9 @@ describe('sequential chat commits one visible answer, not one resolved promise',
     late('stale answer');
     expect(chunks).toEqual(['Answer.']);
     expect(vi.getTimerCount()).toBe(0);
-    expect(getProviderStats().GLM.inFlight).toBe(0);
+    // The observer finished, but this uncooperative SDK still owns its physical slot.
+    expect(getProviderStats().GLM.inFlightByUniverse.free).toBe(1);
+    finish(); for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(getProviderStats().GLM.inFlightByUniverse.free).toBe(0);
   });
 });

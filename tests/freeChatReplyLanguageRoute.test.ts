@@ -34,6 +34,8 @@ describe('ordinary Free chat carries explicit script through the actual route', 
       await turn({ message, history, stream: true }, path);
       const call = m.stream.mock.calls.at(-1)!;
       expect(call[0]).toBe(message);
+      expect(call[3]).toContain('keep technical nouns (variable, function, error, loop, deploy, API) in English');
+      expect(call[3]).toContain('explain what an error means and what to change');
       if (history.length) {
         expect(call[3]).toContain('Hindi using Devanagari script');
         expect(call[7]).toMatchObject({ replyLanguage: 'hi' });

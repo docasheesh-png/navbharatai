@@ -56,7 +56,7 @@ describe('census: every batch is bounded', () => {
   const REVIEWED: Record<string, [number, string]> = {
     'src/server/lib/batchChunks.ts': [2, 'the chunking helper itself (SAFE_BATCH_WRITES = 400)'],
     'src/server/AgentV3/DiagnosticsStore.ts': [1, 'loop of limit(300) pages'],
-    'src/server/AgentV3/diagnosticsHistoryPersistence.ts': [1, 'exactly two writes: merge-only parent marker and one history document; asserted below'],
+    'src/server/AgentV3/diagnosticsHistoryPersistence.ts': [0, 'transaction only: two history/discovery writes plus at most one counter write; asserted below'],
     'src/server/AgentV3/WorkspaceAssetStore.ts': [1, 'slices of BATCH'],
     'src/server/AgentV3/AdminBuildReportStore.ts': [1, 'loop of limit(300) pages'],
     'src/server/AgentV3/WorkspaceFileStore.ts': [4, 'slices of BATCH, or limit(BATCH) pages; the merge store is called with slices'],
@@ -82,14 +82,17 @@ describe('census: every batch is bounded', () => {
     expect(readFileSync('src/server/lib/metricsTimeline.ts', 'utf8')).toMatch(/await deleteInChunks\(db, stale\.docs\.map/);
   });
 
-  it('history discovery commits exactly two writes, independent of report payload size', async () => {
+  it('history discovery transaction commits exactly two writes, independent of report payload size', async () => {
     for (const inProgress of [undefined, true, false]) {
       const writes: string[] = [];
       let commits = 0;
       const doc = (path: string): any => ({ path, collection: (name: string) => ({ doc: (id: string) => doc(`${path}/${name}/${id}`) }) });
       const db = {
         collection: (name: string) => ({ doc: (id: string) => doc(`${name}/${id}`) }),
-        batch: () => ({ set: (ref: { path: string }) => { writes.push(ref.path); }, commit: async () => { commits++; } }),
+        runTransaction: async (callback: (tx: any) => Promise<void>) => {
+          await callback({ get: async () => ({ exists: false, data: () => undefined }), set: (ref: { path: string }) => { writes.push(ref.path); } });
+          commits++;
+        },
       };
       const report = { startedAt: 100, issues: Array.from({ length: 600 }, () => ({ code: 'synthetic' })) };
       await commitDiagnosticsHistory(db as never, 'synthetic-workspace', report, 200, inProgress);
@@ -97,4 +100,19 @@ describe('census: every batch is bounded', () => {
       expect(commits).toBe(1);
     }
   });
+
+  it('number allocation adds at most one counter write to the history transaction', async () => {
+    const writes: string[] = [];
+    const doc = (path: string): any => ({ path, collection: (name: string) => ({ doc: (id: string) => doc(`${path}/${name}/${id}`) }) });
+    const db = {
+      collection: (name: string) => ({ doc: (id: string) => doc(`${name}/${id}`) }),
+      runTransaction: async (callback: (tx: any) => Promise<void>) => callback({
+        get: async (ref: { path: string }) => ({ exists: ref.path === 'admin_failed_report_numbers/counter', data: () => ref.path === 'admin_failed_report_numbers/counter' ? { nextNumber: 1 } : undefined }),
+        set: (ref: { path: string }) => { writes.push(ref.path); },
+      }),
+    };
+    await commitDiagnosticsHistory(db as never, 'synthetic-workspace', { startedAt: 100, endedAt: 200, ok: false }, 300);
+    expect(writes.sort()).toEqual(['admin_failed_report_numbers/counter', 'workspace_diagnostics_v3/synthetic-workspace', 'workspace_diagnostics_v3/synthetic-workspace/history/100'].sort());
+  });
+
 });

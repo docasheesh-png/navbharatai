@@ -9,7 +9,7 @@
 // Pattern mirrors WorkspaceFileStore: firebase-admin, VITEST-skip, best-effort, never throws.
 
 import * as admin from 'firebase-admin';
-import { commitDiagnosticsHistory } from './diagnosticsHistoryPersistence';
+import { commitDiagnosticsHistory, commitLatestDiagnostics } from './diagnosticsHistoryPersistence';
 import { getServerDb } from '../lib/serverDb';
 import { audit, truncateForAudit } from '../lib/audit';
 import { reportProblems, outcomeCodeOf, severityOfOutcome, appWasSeenRunning, stoppedByUser, type BuildDiagnosticsReport } from './BuildDiagnostics';
@@ -417,7 +417,7 @@ export async function saveDiagnostics(workspaceId: string, report: BuildDiagnost
     const db = getDb();
     if (!db) { reportSaveFailure('workspace', workspaceId, stored, new Error('Firestore unavailable (init failed)')); return; }
     const result = await persistWithRetry(async () => {
-      await db.collection(COLLECTION).doc(workspaceId).set({ report: stored, savedAt: Date.now() }, { merge: false });
+      await commitLatestDiagnostics(db, COLLECTION, workspaceId, stored, Date.now());
     });
     if (!result.ok) reportSaveFailure('workspace', workspaceId, stored, result.error);
   } catch (err) {
@@ -482,7 +482,7 @@ export async function saveLatestForUser(userId: string | null, report: BuildDiag
     const db = getDb();
     if (!db) { reportSaveFailure('user', uid, stored, new Error('Firestore unavailable (init failed)')); return; }
     const result = await persistWithRetry(async () => {
-      await db.collection(USER_COLLECTION).doc(uid).set({ report: stored, savedAt: Date.now() }, { merge: false });
+      await commitLatestDiagnostics(db, USER_COLLECTION, uid, stored, Date.now());
     });
     if (!result.ok) reportSaveFailure('user', uid, stored, result.error);
   } catch (err) {

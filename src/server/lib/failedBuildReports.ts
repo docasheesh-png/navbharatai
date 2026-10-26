@@ -1,7 +1,10 @@
+import { settledFailure } from './failedReportEligibility';
+export { settledFailure } from './failedReportEligibility';
 /** Read existing retained history; never add work to the build/write path. */
 import { FieldPath } from 'firebase-admin/firestore';
 import { createHash } from 'node:crypto';
 import { getServerDb } from './serverDb';
+import { numberBuildReports } from './buildReportNumbering';
 import { redactSecrets } from '../AgentV3/SourceSecretRedactor';
 import type { FailedBuildPage, FailedBuildRow, FailedBuildReadObservation } from '../../lib/failedBuildReports';
 
@@ -24,12 +27,6 @@ function cursorOf(raw?: unknown): Cursor {
 }
 function encodeCursor(c: Cursor): string {
   return Buffer.from(JSON.stringify({ v: 1, ...c })).toString('base64url');
-}
-export function settledFailure(raw: unknown): raw is Record<string, unknown> & { startedAt: number; endedAt: number } {
-  if (!raw || typeof raw !== 'object') return false;
-  const r = raw as Record<string, unknown>;
-  return r.ok === false && typeof r.startedAt === 'number' && Number.isFinite(r.startedAt) && r.startedAt > 0 &&
-    typeof r.endedAt === 'number' && Number.isFinite(r.endedAt) && r.endedAt >= r.startedAt;
 }
 /** Stored reports are already scrubbed; scrub again at this external export boundary. */
 export function redactFailedReport(value: unknown): unknown {
@@ -59,28 +56,12 @@ export function failedReportDigest(value: unknown): string {
 function validReportNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
 }
-/** Permanent failed-report number from the history document; never invent a page rank here. */
-function numberingOf(data: Record<string, unknown> | undefined, total: number | null): FailedBuildRow['numbering'] {
-  if (!data || !validReportNumber(data.reportNumber)) return undefined;
-  const stamped = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0;
-  const asOf = stamped(data.numberedAt) ? data.numberedAt : (stamped(data.savedAt) ? data.savedAt : null);
-  if (asOf === null) return undefined;
-  const ordinal = data.reportNumber;
-  const knownTotal = total !== null && total >= ordinal ? total : ordinal;
-  return { ordinal, total: knownTotal, asOf };
-}
-function row(workspaceId: string, historyId: string, r: Record<string, unknown> & { startedAt: number; endedAt: number }, data?: Record<string, unknown>, total: number | null = null): FailedBuildRow {
+function row(workspaceId: string, historyId: string, r: Record<string, unknown> & { startedAt: number; endedAt: number }, data?: Record<string, unknown>): FailedBuildRow {
   return redactFailedReport({ workspaceId, historyId, reportDigest: failedReportDigest(r), buildId: typeof r.buildId === 'string' ? r.buildId : null,
     startedAt: r.startedAt, endedAt: r.endedAt,
     appLabel: typeof r.prompt === 'string' ? r.prompt.split('\n')[0].slice(0, 180) : 'Untitled build',
     rootCause: typeof r.rootCause === 'string' ? r.rootCause.slice(0, 1000) : null,
-    numbering: numberingOf(data, total) }) as FailedBuildRow;
-}
-async function readFailedNumberTotal(db: NonNullable<ReturnType<typeof getServerDb>>): Promise<number | null> {
-  const snap = await db.collection('admin_failed_report_numbers').doc('counter').get();
-  const next = snap.data()?.nextNumber;
-  if (!validReportNumber(next) || next < 2) return validReportNumber(next) && next === 1 ? 0 : null;
-  return next - 1;
+    permanentReportId: validReportNumber(data?.reportNumber) ? data.reportNumber : undefined }) as FailedBuildRow;
 }
 /** Only an opaque deployment fingerprint crosses this private read boundary. */
 export function failedBuildReadObservation(): FailedBuildReadObservation {
@@ -105,12 +86,14 @@ export async function readFailedBuildPage(rawCursor?: unknown, rawLimit?: unknow
   if (!db) throw new Error('Report storage unavailable.');
   const reports: FailedBuildRow[] = [];
   let scanned = 0;
-  const total = await readFailedNumberTotal(db);
+  const page = async (nextCursor: string | null): Promise<FailedBuildPage> => ({
+    reports: await numberBuildReports('failed', reports, r => r.historyId), nextCursor, scanned, observation: failedBuildReadObservation(),
+  });
   for (let workspace = 0; workspace < MAX_WORKSPACES && scanned < MAX_SCANNED; workspace++) {
     let query = db.collection(COLLECTION).orderBy(FieldPath.documentId());
     if (c.w) query = c.after ? query.startAfter(c.w) : query.startAt(c.w);
     const parents = await query.limit(1).get();
-    if (parents.empty) return { reports, nextCursor: null, scanned, observation: failedBuildReadObservation() };
+    if (parents.empty) return page(null);
     const parent = parents.docs[0];
     if (parent.id !== c.w || c.after) c.b = '';
     c.w = parent.id; c.after = false;
@@ -120,10 +103,10 @@ export async function readFailedBuildPage(rawCursor?: unknown, rawLimit?: unknow
       const latest = parent.data().report;
       // Legacy latest-only reports remain readable, without duplicating their normal history row.
       if (settledFailure(latest) && !(await history.doc(String(latest.startedAt)).get()).exists) {
-        reports.push(row(parent.id, 'latest', latest, parent.data(), total));
+        reports.push(row(parent.id, 'latest', latest, parent.data()));
       }
       c.b = '0'; scanned++;
-      if (reports.length >= limit) return { reports, nextCursor: encodeCursor(c), scanned, observation: failedBuildReadObservation() };
+      if (reports.length >= limit) return page(encodeCursor(c));
     }
     const want = Math.min(50, MAX_SCANNED - scanned);
     if (want === 0) break;
@@ -131,13 +114,13 @@ export async function readFailedBuildPage(rawCursor?: unknown, rawLimit?: unknow
     for (const doc of entries.docs) {
       c.b = doc.id; scanned++;
       const r = doc.data().report;
-      if (settledFailure(r)) reports.push(row(parent.id, doc.id, r, doc.data(), total));
-      if (reports.length >= limit) return { reports, nextCursor: encodeCursor(c), scanned, observation: failedBuildReadObservation() };
+      if (settledFailure(r)) reports.push(row(parent.id, doc.id, r, doc.data()));
+      if (reports.length >= limit) return page(encodeCursor(c));
     }
     if (entries.size < want) { c.after = true; c.b = ''; }
     else workspace--; // continue the same workspace, still under the hard document budget
   }
-  return { reports, nextCursor: encodeCursor(c), scanned, observation: failedBuildReadObservation() };
+  return page(encodeCursor(c));
 }
 /** One stored read and one redaction pass bind the digest to the exact returned evidence. */
 export async function readFailedBuildWithDigest(workspaceId: string, historyId: string): Promise<{ report: unknown; reportDigest: string } | null> {

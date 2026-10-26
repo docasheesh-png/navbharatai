@@ -9,7 +9,7 @@ type Workspace = { report?: Report; savedAt?: number; history?: Record<string, R
 const failure = (startedAt: number): Report => ({ startedAt, endedAt: startedAt + 1, ok: false });
 function database(source: Record<string, Workspace>) {
   const reads: string[][] = [];
-  let transactions = 0;
+  let transactions = 0, activeReads = 0, peakReads = 0;
   const query = (rows: any[], offset = '', limit = Infinity, fields: string[] = []): any => ({
     rows, offset, take: limit, fields,
     orderBy: () => query(rows, offset, limit, fields),
@@ -23,11 +23,14 @@ function database(source: Record<string, Workspace>) {
     runTransaction: vi.fn(async (fn: (tx: any) => unknown, options: unknown) => {
       transactions++; expect(options).toEqual({ readOnly: true });
       return fn({ get: async (q: any) => {
+        activeReads++; peakReads = Math.max(peakReads, activeReads);
+        await Promise.resolve();
+        activeReads--;
         reads.push(q.fields);
         const docs = q.rows.filter((d: any) => d.id > q.offset).slice(0, q.take);
         return { docs, size: docs.length };
       } });
-    }), reads, transactionCount: () => transactions };
+    }), reads, peakReads: () => peakReads, transactionCount: () => transactions };
   return db;
 }
 const rows = (...entries: Array<[string, number, string?]>) => entries.map(([workspaceId, startedAt, historyId]) => ({ workspaceId, startedAt, historyId: historyId ?? String(startedAt) }));
@@ -107,8 +110,8 @@ describe('chronological numbers are complete-cohort metadata, not page positions
     const result = await number('failed', rows(['a', 100]));
     expect(result).toEqual([{ workspaceId: 'a', startedAt: 100, historyId: '100', numbering: { ordinal: null, total: null, asOf: null, reason: 'storage_unavailable' } }]);
   });
-  it('bounds workspace and document scans instead of numbering an incomplete prefix', async () => {
-    state.db = database(Object.fromEntries(Array.from({ length: 1001 }, (_, i) => [`a${i}`, { report: failure(i + 1), savedAt: i + 1 }])));
+  it('bounds document scans instead of numbering an incomplete prefix', async () => {
+    state.db = database(Object.fromEntries(Array.from({ length: 5001 }, (_, i) => [`a${i}`, { report: failure(i + 1), savedAt: i + 1 }])));
     expect((await number('latest', rows(['a0', 1])))[0].numbering.ordinal).toBeNull();
   });
   it('classifies elapsed wall-clock budget as timeout even before the timer callback runs', async () => {
@@ -145,41 +148,59 @@ describe('chronological numbers are complete-cohort metadata, not page positions
 });
 
 
-describe('failed cohort uses permanent persisted report numbers', () => {
-  function persistedDb(entries: Record<string, { reportNumber?: number; numberedAt?: number; startedAt: number }>, nextNumber = 1) {
-    const docs = new Map<string, any>();
-    docs.set('admin_failed_report_numbers/counter', { nextNumber });
-    for (const [key, value] of Object.entries(entries)) {
-      const [workspaceId, historyId] = key.split('/');
-      docs.set(`workspace_diagnostics_v3/${workspaceId}/history/${historyId}`, {
-        report: failure(value.startedAt),
-        savedAt: value.numberedAt ?? value.startedAt,
-        ...(value.reportNumber !== undefined ? { reportNumber: value.reportNumber, numberedAt: value.numberedAt ?? value.startedAt } : {}),
-      });
-    }
-    const snap = (path: string) => ({ exists: docs.has(path), data: () => docs.get(path) });
-    const ref = (path: string): any => ({
-      path,
-      get: async () => snap(path),
-      collection: (name: string) => ({ doc: (id: string) => ref(`${path}/${name}/${id}`) }),
-    });
-    return {
-      collection: (name: string) => ({ doc: (id: string) => ref(`${name}/${id}`) }),
-      runTransaction: vi.fn(),
-    };
-  }
-  it('returns the stored reportNumber and never invents chronology from request order', async () => {
-    state.db = persistedDb({ 'z/100': { reportNumber: 7, startedAt: 100 }, 'a/200': { reportNumber: 3, startedAt: 200 } }, 8);
-    const result = await number('failed', rows(['z', 100], ['a', 200]));
-    expect(result.map(r => r.numbering.ordinal)).toEqual([7, 3]);
-    expect(result[0].numbering.total).toBe(7);
-    expect(result[1].numbering.total).toBe(7);
+describe('failed chronological ranks include historical unnumbered reports', () => {
+  it('numbers old records from the full cohort independently of requested page order', async () => {
+    state.db = database({ z: { history: { '100': failure(100) } }, a: { history: { '200': failure(200) } } });
+    expect((await number('failed', rows(['a', 200], ['z', 100]))).map(r => r.numbering.ordinal)).toEqual([2, 1]);
+    expect((await number('failed', rows(['a', 200])))[0].numbering).toMatchObject({ ordinal: 2, total: 2 });
   });
-  it('marks legacy rows without a stored number as snapshot_miss without renumbering peers', async () => {
-    state.db = persistedDb({ 'a/100': { startedAt: 100 }, 'b/200': { reportNumber: 4, startedAt: 200 } }, 5);
-    const result = await number('failed', rows(['a', 100], ['b', 200]));
-    expect(result[0].numbering).toMatchObject({ ordinal: null, reason: 'snapshot_miss' });
-    expect(result[1].numbering).toMatchObject({ ordinal: 4, total: 4 });
+  it('completes a representative 1130-parent/2858-document cohort without the obsolete parent cutoff', async () => {
+    const source: Record<string, Workspace> = {};
+    for (let i = 0; i < 1130; i++) {
+      const history: Record<string, Report> = {};
+      if (i < 864) for (let j = 0; j < 2; j++) {
+        const startedAt = i * 2 + j + 1;
+        history[String(startedAt)] = { ...failure(startedAt), ok: !(i < 189 || (i < 419 && j === 0)) };
+      }
+      source[`app${String(i).padStart(4, '0')}`] = { history };
+    }
+    state.db = database(source);
+    const result = await number('failed', rows(['app0418', 837], ['app0000', 1]));
+    expect(result.map(r => r.numbering.ordinal)).toEqual([608, 1]);
+    expect(result[0].numbering.total).toBe(608);
+    expect(state.db.peakReads()).toBeLessThanOrEqual(8);
+    expect(state.db.reads).toHaveLength(1142); // 12 root pages + 1130 bounded history queries
+    for (const fields of state.db.reads) expect(fields).toEqual(['report.startedAt', 'report.endedAt', 'report.ok', 'savedAt']);
+  });
+  it('numbers All-builds latest reports beyond 1000 parent documents as well', async () => {
+    state.db = database(Object.fromEntries(Array.from({ length: 1130 }, (_, i) => [`app${String(i).padStart(4, '0')}`, { report: failure(i + 1), savedAt: i + 1 }])));
+    expect((await number('latest', rows(['app1129', 1130])))[0].numbering).toMatchObject({ ordinal: 1130, total: 1130 });
+  });
+  it('does not let unlisted discovery parents invalidate the All-builds cohort', async () => {
+    state.db = database(Object.fromEntries(Array.from({ length: 1130 }, (_, i) => [`app${String(i).padStart(4, '0')}`, i < 100 ? { report: failure(i + 1), savedAt: i + 1 } : {}])));
+    expect((await number('latest', rows(['app0099', 100])))[0].numbering).toMatchObject({ ordinal: 100, total: 100 });
+  });
+  it('still rejects an excessive query inventory without exposing a numbered prefix', async () => {
+    state.db = database(Object.fromEntries(Array.from({ length: 2001 }, (_, i) => [`app${i}`, { history: {} }])));
+    const response = await number('failed', rows(['app0', 1]));
+    expect(response[0].numbering).toMatchObject({ ordinal: null, reason: 'scan_limit' });
+    expect(state.db.reads.length).toBeLessThanOrEqual(2000);
+  });
+  it('includes latest-only failures, deduplicates matching history, and excludes unfinished/successful reports', async () => {
+    state.db = database({ a: { report: failure(100) }, b: { report: failure(200), history: { '200': failure(200), '300': { startedAt: 300 }, '400': { ...failure(400), ok: true } } } });
+    expect((await number('failed', rows(['a', 100, 'latest'], ['b', 200]))).map(r => r.numbering.ordinal)).toEqual([1, 2]);
+  });
+  it('ties are deterministic and a newly arriving older report refreshes global ranks', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(100000);
+    const source: Record<string, Workspace> = { b: { history: { '200': failure(200) } }, c: { history: { '200': failure(200) } } };
+    state.db = database(source);
+    expect((await number('failed', rows(['c', 200], ['b', 200]))).map(r => r.numbering.ordinal)).toEqual([2, 1]);
+    source.a = { history: { '100': failure(100) } };
+    vi.advanceTimersByTime(30001);
+    expect((await number('failed', rows(['a', 100], ['c', 200]))).map(r => r.numbering.ordinal)).toEqual([1, 3]);
+    delete source.b;
+    vi.advanceTimersByTime(600001);
+    expect((await number('failed', rows(['c', 200])))[0].numbering).toMatchObject({ ordinal: 2, total: 2 });
   });
 });
 

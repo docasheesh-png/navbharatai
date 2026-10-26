@@ -147,9 +147,12 @@ describe('the wiring', () => {
   const walletDebit = read('src/server/lib/walletDebit.ts');
 
   it('both debit paths clamp before converting to tokens', () => {
-    expect(walletDebit.split('floorCharge(w, tx.billedInr, tx.floorInr)').length - 1).toBe(2);
+    expect(walletDebit.split('floorCharge(w, tx.billedInr, tx.floorInr,').length - 1).toBe(2);
     expect(walletDebit).toContain('inrToDebitTokens(floored.chargedInr)');
-    expect(walletDebit).not.toMatch(/inrToDebitTokens\(tx\.billedInr\)/);
+    // Paid-only eligibility checks the original price, not a clamped zero that could make a purchase free.
+    expect(walletDebit).toContain("if (tx.spends === 'paid-only') {\n    const owed = inrToDebitTokens(tx.billedInr);");
+    expect(walletDebit).toContain('const owed = inrToDebitTokens(floored.chargedInr) + carriedIn');
+    expect(walletDebit).toContain('const owedForThis = inrToDebitTokens(floored.chargedInr)');
   });
 
   it('the configured floor reaches production from the I/O layer', () => {

@@ -10,7 +10,9 @@
  */
 import type { Express, Request, Response } from 'express';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Reads user_token_wallets (owner-only).
-import { doc, getDoc, getServerDb as getDb } from '../lib/serverDb';
+import { getServerDb as getDb } from '../lib/serverDb';
+import { firestoreWalletReader } from '../AgentV3/WalletBalance';
+import { maskWalletForView, freeProgramPaused } from '../lib/freeProgram';
 import { verifyFirebaseToken, verifyFirebaseIdentity, deleteAuthAccount, rateLimiter } from '../lib/authMiddleware';
 import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
 import { deleteUserDerivedIdData, LEGACY_HISTORY_ERASURE_LIMITATION, WORKSPACE_OWNERSHIP_ERASURE_LIMITATION } from '../lib/derivedIdErase';
@@ -400,8 +402,8 @@ async function fetchWallet(userId: string): Promise<any | null> {
   const db = getDb() as any;
   if (!db || !userId) return null;
   try {
-    const snap = await getDoc(doc(db, 'user_token_wallets', userId));
-    return snap.exists() ? snap.data() : null;
+    const wallet = await firestoreWalletReader(db)(userId);
+    return wallet ? maskWalletForView(wallet as Record<string, unknown>, await freeProgramPaused()) : null;
   } catch {
     return null;
   }

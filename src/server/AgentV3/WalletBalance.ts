@@ -14,7 +14,7 @@
 
 import { doc, getDoc, type Firestore } from '../lib/serverDb'; // admin-SDK binding — reads the owner-only wallet doc
 import { TOKENS_PER_RUPEE } from '../lib/payments';
-import { giftRemaining } from '../lib/giftSpend';
+import { unavailableGiftTokens } from '../lib/giftSpend';
 import { freeProgramPausedHint } from '../lib/freeProgramHint';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
 
@@ -36,7 +36,7 @@ export type WalletReader = (userId: string) => Promise<WalletDocData | null>;
  * missing/non-finite `remaining_balance` is also `null`. A real numeric balance (including a negative one,
  * within the overdraft tolerance) passes straight through.
  */
-export async function readWalletBalanceInr(read: WalletReader, userId: string): Promise<number | null> {
+export async function readWalletBalanceInr(read: WalletReader, userId: string, purpose: 'build' | 'usage' = 'usage'): Promise<number | null> {
   if (!userId) return null;
   let data: WalletDocData | null;
   try {
@@ -60,7 +60,7 @@ export async function readWalletBalanceInr(read: WalletReader, userId: string): 
   // FALLBACK (money-bleed fix, admin 2026-07-12): a doc with NEITHER numeric field stays null (→ fail-open).
   // FREE PROGRAM PAUSED (admin 2026-10-22: "only pay and use"): the gift is not spendable, so every gate judges the
   // user's OWN money only — whoever asks, a paying account included. Resuming the program restores the full balance.
-  const giftInr = freeProgramPausedHint() ? giftRemaining(data as never) / TOKENS_PER_RUPEE : 0;
+  const giftInr = unavailableGiftTokens(data as never, freeProgramPausedHint(), purpose === 'build') / TOKENS_PER_RUPEE;
   if (balNum != null && tokInr != null) return Math.max(balNum, tokInr) - giftInr;
   if (balNum != null) return balNum - giftInr; // ₹ present, no token mirror → ₹ as-is (preserves negative overdraft read)
   if (tokInr != null) return tokInr - giftInr; // token-only wallet → derived ₹

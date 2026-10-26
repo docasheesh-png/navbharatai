@@ -304,7 +304,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    */
   type PendingAdminAction =
     | { kind: 'ban'; userId: string; who: string; banned: boolean; after?: () => void }
-    | { kind: 'tokens'; userId: string; who: string; delta: number; balance: number | null }
+    | { kind: 'tokens'; requestId: string; userId: string; who: string; delta: number; balance: number | null }
     | { kind: 'message'; target: 'all' | 'user'; email: string; message: string };
   const [pendingAction, setPendingAction] = useState<PendingAdminAction | null>(null);
   const [pendingBusy, setPendingBusy] = useState(false);
@@ -1633,7 +1633,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const handleTokenAdjust = (userId: string, who: string, balance: number | null) => {
     const d = readTokenDelta(tokenDelta);
     if (!('delta' in d)) { toast(d.error); return; }
-    setPendingAction({ kind: 'tokens', userId, who, delta: d.delta, balance });
+    setPendingAction({ kind: 'tokens', requestId: crypto.randomUUID(), userId, who, delta: d.delta, balance });
   };
 
   /** Opens the confirmation for a ban (reason required) or for lifting one (reason optional). */
@@ -1654,7 +1654,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         else toast('Not done: ' + (r.error || 'unknown error'));
       } else if (a.kind === 'tokens') {
         setActionLoading(a.userId);
-        const r = await adminPost(`/api/admin/users/${a.userId}/tokens`, { delta: a.delta, reason });
+        const r = await adminPost(`/api/admin/users/${a.userId}/tokens`, { delta: a.delta, reason, requestId: a.requestId });
         if (r.ok) {
           toast(`Tokens adjusted: ${Number(r.previousBalance ?? 0).toLocaleString('en-IN')} → ${Number(r.newBalance ?? 0).toLocaleString('en-IN')}`);
           fetchUsers(); setTokenDelta(''); setSelectedUserId(''); setPendingAction(null);
@@ -1801,6 +1801,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           onCancel={() => { if (!pendingBusy) setPendingAction(null); }}
           onConfirm={(reason) => void runPendingAction(reason)}
         >
+          {pendingAction.kind === 'tokens' && pendingAction.delta > 0 && (
+            <p className="text-xs text-muted">These are gift credits for Weak app builds only, not purchased balance. They cannot fund Normal, Strong, or hosting.</p>
+          )}
           {pendingAction.kind === 'message' && (
             <div className="space-y-2">
               <p className="text-[11px] font-bold text-muted">

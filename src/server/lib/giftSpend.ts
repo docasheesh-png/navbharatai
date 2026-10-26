@@ -42,6 +42,10 @@ export interface GiftWalletView {
   tokenBalance?: unknown;
   /** Maintained by this module. ABSENT on every wallet written before 2026-09-13 — see `giftRemaining`. */
   giftTokensRemaining?: unknown;
+  /** Explicit admin-issued app-building credit; a subset of gift, never purchased cash. */
+  adminBuildTokensRemaining?: unknown;
+  /** Lifetime explicit grants, never real-money purchases; carried through account merges. */
+  adminBuildTokensTotalGranted?: unknown;
   /**
    * Gross ₹ the user has ever paid us. ⚠️ The real-money credit path writes `totalMoneySpent`
    * (camelCase); `total_money_spent` is only ever initialised to 0. Both are read, through
@@ -178,5 +182,35 @@ export function checkPlanPayable(
     paidTokens: paid,
     neededTokens: needed,
     shortfallTokens: Math.ceil(needed - paid),
+  };
+}
+
+/** Explicit provenance only: old generic gift/ledger rows never silently gain spending authority. */
+export function adminBuildRemaining(w: GiftWalletView | null | undefined): number {
+  return Math.min(giftRemaining(w), Math.max(0, num(w?.adminBuildTokensRemaining)));
+}
+
+/** Paused gift for this purpose. Typed admin credits are Weak-build-only, including after ordinary gift eligibility resumes. */
+export function unavailableGiftTokens(w: GiftWalletView | null | undefined, paused: boolean, build = false): number {
+  const admin = adminBuildRemaining(w);
+  return paused ? giftRemaining(w) - (build ? admin : 0) : (build ? 0 : admin);
+}
+
+/** Apply one ordinary usage charge to its provenance buckets, without resurrecting spent grants. */
+export function giftUsagePatch(w: GiftWalletView, tokens: number, paused: boolean, build: boolean): {
+  giftTokensRemaining: number; adminBuildTokensRemaining?: number;
+} {
+  const admin = adminBuildRemaining(w);
+  const gift = giftRemaining(w);
+  const spent = Math.max(0, num(tokens));
+  const ordinaryGiftSpent = paused ? 0 : Math.min(gift - admin, build ? Math.max(0, spent - admin) : spent);
+  const adminSpent = build ? Math.min(admin, Math.max(0, spent - ordinaryGiftSpent)) : 0;
+  const nextBalance = Math.max(0, num(w.tokenBalance) - spent);
+  const nextGift = Math.min(nextBalance, Math.max(0, gift - adminSpent - ordinaryGiftSpent));
+  return {
+    giftTokensRemaining: nextGift,
+    ...(w.adminBuildTokensRemaining !== undefined ? {
+      adminBuildTokensRemaining: Math.min(nextGift, Math.max(0, admin - adminSpent)),
+    } : {}),
   };
 }

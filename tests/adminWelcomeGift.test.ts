@@ -88,7 +88,10 @@ describe('rule 3 — once given, never again, however many presses', () => {
     expect(tx).toBeGreaterThan(0);
     expect(body.indexOf('welcomeGiftEligible(w)')).toBeGreaterThan(tx);
     expect(body).toMatch(/adminWelcomeGiftAt: nowIso/);
-    expect(body).toMatch(/mirroredCreditPatch\(w, ADMIN_WELCOME_GIFT_TOKENS, 'gift'\)/);
+    expect(body).toContain('adminCreditActivationRefusal(w)');
+    expect(body).toContain("creditSource: 'admin-build'");
+    expect(body).toContain('adminBuildTokensDelta: ADMIN_WELCOME_GIFT_TOKENS');
+    expect(body).toMatch(/mirroredCreditPatch\(w, ADMIN_WELCOME_GIFT_TOKENS, 'admin-build'\)/);
     expect(body).toMatch(/freeGiftedTokens: Number\(w\.freeGiftedTokens \|\| 0\) \+ ADMIN_WELCOME_GIFT_TOKENS/);
   });
 });

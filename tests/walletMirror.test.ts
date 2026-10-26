@@ -89,11 +89,12 @@ describe('Q-670 — a wallet in overdraft is neither forgiven by a credit nor ra
 
 describe('wiring — every wallet credit is transactional, and none of them assigns a view', () => {
   const admin = readFileSync(join(process.cwd(), 'src/server/routes/admin.ts'), 'utf8');
+  const adjustment = readFileSync(join(process.cwd(), 'src/server/lib/adminTokenAdjustment.ts'), 'utf8');
   const payment = readFileSync(join(process.cwd(), 'src/server/routes/payment.ts'), 'utf8');
 
   it('🔒 the admin adjustment no longer ASSIGNS the rupee view from the token view', () => {
     expect(admin).not.toContain('remaining_balance: TOKENS_PER_RUPEE > 0 ? newBalance / TOKENS_PER_RUPEE : 0');
-    expect(admin).toContain("mirroredCreditPatch(w, delta, 'gift')"); // CHANGED 2026-09-13: the source is now required, and an admin grant is a gift
+    expect(adjustment).toContain("mirroredCreditPatch(w, input.delta, 'admin-build')"); // Explicit build grant remains a gift, never a purchase.
   });
 
   it('🔒 the admin adjustment runs inside a transaction', () => {
@@ -102,8 +103,9 @@ describe('wiring — every wallet credit is transactional, and none of them assi
     // To the next route, not a fixed window: the reason check added before the transaction (admin panel
     // audit PR 1, 2026-10-04) moved it further down the handler.
     const block = admin.slice(at, admin.indexOf('\n  app.', at + 10));
-    expect(block).toContain('runTransaction(');
-    expect(block).toContain('await tx.get(walletRef)');
+    expect(block).toContain('adjustAdminBuildTokens(');
+    expect(adjustment).toContain('runTransaction(');
+    expect(adjustment).toContain('await tx.get(walletRef)');
     expect(block).not.toContain('await updateDoc(walletRef');
   });
 
@@ -136,6 +138,7 @@ describe('wiring — every wallet credit is transactional, and none of them assi
 });
 
 describe('store purchases — one purchase token can only ever credit once', () => {
+  const adjustment = readFileSync(join(process.cwd(), 'src/server/lib/adminTokenAdjustment.ts'), 'utf8');
   const payment = readFileSync(join(process.cwd(), 'src/server/routes/payment.ts'), 'utf8');
   const block = (() => {
     const at = payment.indexOf("app.post('/api/payment/store/verify'");

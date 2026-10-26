@@ -27,6 +27,7 @@ import {
   SAFE_SURPLUS_ADMISSION_REASONS,
   type SafeSurplusAdmissionReason,
 } from './admitOrFallback';
+import { recordSurplusMidBuildDeath, recordSurplusAdmitProbeSuccess } from './surplusAdmitCircuit';
 
 /** Safe mid-build reasons appended to the admission allowlist. Never secret/URL-bearing. */
 export const SURPLUS_PRE_WRITE_FAIL_OPEN_REASONS = [
@@ -120,7 +121,10 @@ export function wrapSurplusRunnerPreWriteFailOpen(
     async runTurn(params) {
       if (hooks.state.dropped) return getWeak().runTurn(params);
       try {
-        return await surplus.runTurn(params);
+        const result = await surplus.runTurn(params);
+        // Healthy Surplus turn clears a prior admit-circuit spike (HALF_OPEN → CLOSED).
+        try { recordSurplusAdmitProbeSuccess(); } catch { /* never block the turn */ }
+        return result;
       } catch (error) {
         let files = 0;
         try { files = hooks.userFilesWritten(); } catch { files = 0; }
@@ -129,6 +133,8 @@ export function wrapSurplusRunnerPreWriteFailOpen(
         }
         hooks.state.dropped = true;
         const reason = surplusPreWriteFailOpenReason(error);
+        // Spike signal for the admit circuit — next builds skip Surplus during cool-down.
+        try { recordSurplusMidBuildDeath(reason); } catch { /* never block fail-open */ }
         try { hooks.onFailOpen?.(reason); } catch { /* audit must never block fail-open */ }
         return getWeak().runTurn(params);
       }

@@ -1,4 +1,4 @@
-import { COMPOSER_BOX_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
+import { COMPOSER_BOX_CLASS, COMPOSER_TEXTAREA_CLASS, MobileComposerTools, resizeMobileComposer } from '../chat/ComposerShell';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ServiceRecommendationCard } from './ServiceRecommendationCard';
 import { offerWatchLive } from './earlyPreviewCue';
@@ -505,6 +505,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // 2026-07-12: "maine recharge kar liya fir bhi tiers locked" — the user recharges on the Wallet page and
   // comes back; without this refetch the tiers stayed 🔒 until a full page reload).
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [composerToolsOpen, setComposerToolsOpen] = useState(false);
   /** When Switch module opens Build options from Weak scope guidance, gently highlight the Power picker. */
   const [highlightPowerPicker, setHighlightPowerPicker] = useState(false);
   // The starter picker shows a short first screen and hides the rest behind "More templates" — the wall
@@ -724,8 +725,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // Auto-grow the composer to fit its content, capped at ~5 lines (then it scrolls internally). When
   // expanded, a CSS class drives the height instead, so we clear the inline height.
   useEffect(() => {
+    const resize = () => {
     const el = composerRef.current;
     if (!el) return;
+    if (resizeMobileComposer(el)) {
+      if (composerExpanded) el.style.height = `${Math.max(44, (window.visualViewport?.height ?? window.innerHeight) * 0.5)}px`;
+      return;
+    }
     if (composerExpanded) { el.style.height = ''; return; }
     el.style.height = 'auto';
     // Admin 2026-07-12 (82→44) + 2026-07-13 ("aur vertically chota") + 2026-07-18 (Android ~50% shorter)
@@ -740,6 +746,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
     // clampComposerHeight (pure, unit-tested): rest at 1 line, grow up to ~6 lines, then scroll.
     el.style.height = `${clampComposerHeight(el.scrollHeight, lineH, padY)}px`;
+    };
+    resize();
+    window.addEventListener('resize', resize);
+    window.visualViewport?.addEventListener('resize', resize);
+    return () => {
+      window.removeEventListener('resize', resize);
+      window.visualViewport?.removeEventListener('resize', resize);
+    };
   }, [prompt, composerExpanded]);
   // Actions belong to the card's bottom toolbar, never beside the text. The wrapping toolbar
   // reserves their width so Send / Stop stay reachable even in a narrow split pane.
@@ -5150,6 +5164,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 (() => {
                   const guide = weakScopeGuidanceCard(state.resultCode);
                   const openModulePicker = () => {
+                    setComposerToolsOpen(true);
                     setHighlightPowerPicker(true);
                     setSettingsOpen(true);
                     requestAnimationFrame(() => {
@@ -5616,14 +5631,43 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               </div>
             )}
             {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) below. */}
-            <div className={`relative mx-auto w-[calc(100%-1.5rem)] max-w-3xl my-3 flex flex-col gap-1.5 ${COMPOSER_BOX_CLASS}`} data-composer-surface="pro">
+            <div className={`relative mx-auto w-[calc(100%-1.5rem)] max-w-3xl my-3 flex flex-col gap-1.5 ${COMPOSER_BOX_CLASS}`} data-composer-surface="pro" data-steering={canSteerMidBuild(running, powerLevel, chatMode)} data-expanded={composerExpanded}>
               {/* OPTION A (admin 2026-07-19 — "input box gadbad, reposition + attractive"): the input now
                   sits on its OWN full-width row (order-1) and the Build/Plan/Advise MODE SELECTOR + settings
                   + attach sit in a slim toolbar row BELOW it (order-2, flex-wrap so more controls can be
                   added later without squeezing the input). CSS `order` reorders VISUALLY without touching
                   DOM order or any handler — same setChatMode, same dropups (still open upward, now over the
                   input), running dot, thread counts. Input is full-width again (the phone squish is gone). */}
-              <div className="flex min-h-11 items-center gap-1 order-2 flex-wrap px-2 pb-2 pr-24">
+              <MobileComposerTools open={composerToolsOpen} onOpenChange={setComposerToolsOpen}>
+              <div className="order-0 w-full px-3 pt-2">
+                <ChatToolbar
+                  /* Progress on the LEFT of the same row the actions live on. Scrollable, because a
+                     build can spawn several specialists and they must never push Send off a phone. */
+                  leftSlot={!showTeamHq(running, powerLevel) && agents.length > 0 ? (
+                    <div
+                      className="flex gap-1.5 overflow-x-auto overscroll-x-contain min-w-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                      style={{ WebkitOverflowScrolling: 'touch' }}
+                    >
+                      {agents.map((a) => <AgentChip key={a.agent} card={a} running={running} />)}
+                    </div>
+                  ) : undefined}
+                  messageCount={convo.length}
+                  sendOnEnter={sendOnEnter}
+                  onSendOnEnterChange={setSendOnEnter}
+                  searchQuery={chatSearchQuery}
+                  onSearchQueryChange={setChatSearchQuery}
+                  searchOpen={showChatSearch}
+                  onSearchOpenChange={setShowChatSearch}
+                  searchMatches={visibleConvo.length}
+                  onClear={running ? undefined : newChatFromHistory}
+                  charCount={prompt.length}
+                />
+              </div>
+                {!canSteerMidBuild(running, powerLevel, chatMode) && (
+                  <button type="button" className="nb-pro-expand-mobile items-center text-muted hover:text-ink"
+                    onClick={() => setComposerExpanded((value) => !value)}>{composerExpanded ? 'Minimize editor' : 'Expand editor'}</button>
+                )}
+              <div className="nb-pro-controls flex min-h-11 items-center gap-1 order-2 flex-wrap px-2 pb-2 pr-24">
               <div className="relative">
                 {modeMenuOpen && (
                   <>
@@ -5858,6 +5902,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 />
               </div>
               </div>{/* /toolbar row (order-2): mode selector + settings + attach + 💡 — below the input */}
+              </MobileComposerTools>
               {/* LIVE IMPORT PROGRESS (admin report 2026-08-04). A 161 MB project takes minutes to
                   transfer, and the panel tracked `zipProgress` in state but rendered it NOWHERE — so the
                   screen showed one static "Importing…" line for minutes, which is indistinguishable from
@@ -5874,30 +5919,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   rather than emptying the message array: a v5.0 thread owns a workspace, a build lock,
                   a preview and a report, and blanking only the bubbles would leave all of that live
                   underneath — the exact "+New chat leak" class this panel has been root-caused for twice. */}
-              <div className="order-0 w-full px-3 pt-2">
-                <ChatToolbar
-                  /* Progress on the LEFT of the same row the actions live on. Scrollable, because a
-                     build can spawn several specialists and they must never push Send off a phone. */
-                  leftSlot={!showTeamHq(running, powerLevel) && agents.length > 0 ? (
-                    <div
-                      className="flex gap-1.5 overflow-x-auto overscroll-x-contain min-w-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                      style={{ WebkitOverflowScrolling: 'touch' }}
-                    >
-                      {agents.map((a) => <AgentChip key={a.agent} card={a} running={running} />)}
-                    </div>
-                  ) : undefined}
-                  messageCount={convo.length}
-                  sendOnEnter={sendOnEnter}
-                  onSendOnEnterChange={setSendOnEnter}
-                  searchQuery={chatSearchQuery}
-                  onSearchQueryChange={setChatSearchQuery}
-                  searchOpen={showChatSearch}
-                  onSearchOpenChange={setShowChatSearch}
-                  searchMatches={visibleConvo.length}
-                  onClear={running ? undefined : newChatFromHistory}
-                  charCount={prompt.length}
-                />
-              </div>
               {/* Go-live PR 13: Buy/Connect card. Empty unless the server sent service_recommendation,
                   which it does only with AGENTV3_SERVICE_RECO on. Opens Wallet & Billing on the right door. */}
               {!running && state.serviceRecommendations.length > 0 && (
@@ -6033,7 +6054,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     type="button"
                     onClick={() => setComposerExpanded((v) => !v)}
                     title={composerExpanded ? 'Minimize' : 'Expand'}
-                    className={`absolute right-12 ${composerBtnY} h-9 w-9 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-raised`}
+                    className={`nb-pro-expand-desktop absolute right-12 ${composerBtnY} h-9 w-9 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-raised`}
                   >
                     {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                   </button>
@@ -6055,7 +6076,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   // revert, never silent — which is the trade this switch is for. Do not delete the
                   // branch to tidy up; it is what the gate returns to.
                   <>
-                    <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`absolute right-12 ${composerBtnY} h-9 w-9 flex items-center justify-center rounded-full text-danger hover:bg-raised`}>
+                    <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`nb-pro-stop absolute right-12 ${composerBtnY} h-9 w-9 flex items-center justify-center rounded-full text-danger hover:bg-raised`}>
                       <Square className="w-3.5 h-3.5 fill-current" />
                     </button>
                     <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>

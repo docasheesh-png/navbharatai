@@ -75,3 +75,8 @@ export function resolveChatReplyLanguage(message: unknown, history: unknown = []
   }
   return undefined;
 }
+
+/** Legacy settings values are a fallback only; direct conversation instructions still win. */
+export function chatReplyLanguageFromPicker(value: unknown): ChatReplyLanguage | undefined {
+  return value === 'hindi' ? 'hi' : value === 'english' ? 'en' : value === 'hinglish' ? 'hinglish' : undefined;
+}

@@ -1,6 +1,7 @@
+import { chatAvailabilityMessage } from './chatAvailabilityMessage';
 import type { RequestHandler } from 'express';
 import { rewriteVersionedPath } from '../routes/apiVersion';
-import { aiMaintenanceStore, MAINTENANCE_MESSAGE, STATUS_UNAVAILABLE_MESSAGE, type AiMaintenanceStore } from './aiMaintenance';
+import { aiMaintenanceStore, MAINTENANCE_MESSAGE, type AiMaintenanceStore } from './aiMaintenance';
 
 /** Maintenance pauses API work by default, including new AI tools and bot webhooks. The admin,
  * sign-in, payment settlement and health endpoints remain reachable so recovery never locks itself out. */
@@ -21,11 +22,12 @@ export function aiMaintenanceGuard(store: AiMaintenanceStore = aiMaintenanceStor
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Retry-After', '60');
     if (state.unavailable) {
-      // Fail-closed latch (enabled+unavailable): temporary high-demand copy, never deliberate-maintenance wording.
+      // An unreadable flag is not evidence of overload; keep its state and use a neutral notice.
+      const notice = chatAvailabilityMessage('temporary', { message: req.body?.message ?? req.body?.prompt, history: req.body?.history, replyLanguage: req.body?.replyLanguage });
       res.status(503).json({
-        error: STATUS_UNAVAILABLE_MESSAGE,
-        message: STATUS_UNAVAILABLE_MESSAGE,
-        reply: STATUS_UNAVAILABLE_MESSAGE,
+        error: notice,
+        message: notice,
+        reply: notice,
         maintenance: false,
         statusUnavailable: true,
       });

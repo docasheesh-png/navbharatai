@@ -26,7 +26,7 @@ const frame = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
 describe('real Free chat hook terminal request handling', () => {
   beforeEach(() => { vi.clearAllMocks(); mock.isCancel.mockReturnValue(false); vi.stubGlobal('fetch', vi.fn()); vi.spyOn(console, 'error').mockImplementation(() => {}); });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
-  it.each(['INFERENCE_GATEWAY_UNAVAILABLE', 'STRICT_FREE_UNAVAILABLE'])('does not turn JSON %s into another backend request', async code => {
+  it.each(['INFERENCE_GATEWAY_UNAVAILABLE', 'STRICT_FREE_UNAVAILABLE', 'CHAT_ROUTE_UNAVAILABLE'])('does not turn JSON %s into another backend request', async code => {
     mock.post.mockRejectedValue({ response: { status: 503, data: { code, reply: 'The selected route is unavailable.' } }, message: 'Request failed' });
     const f = fixture(); await f.engine().handleSend();
     expect(mock.post).toHaveBeenCalledOnce(); expect(fetch).not.toHaveBeenCalled();
@@ -54,12 +54,32 @@ describe('real Free chat hook terminal request handling', () => {
     const f = fixture(); await f.engine().handleSend();
     expect(mock.post).toHaveBeenCalledOnce(); expect(fetch).not.toHaveBeenCalled(); expect(f.deps.setIsLoading).toHaveBeenLastCalledWith(false);
   });
-  it.each(['INFERENCE_GATEWAY_UNAVAILABLE', 'STRICT_FREE_UNAVAILABLE'])('does not retry a non-OK streaming-path JSON %s response', async code => {
+  it.each(['INFERENCE_GATEWAY_UNAVAILABLE', 'STRICT_FREE_UNAVAILABLE', 'CHAT_ROUTE_UNAVAILABLE'])('does not retry a non-OK streaming-path JSON %s response', async code => {
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ code, reply: 'Unavailable' }), { status: 503, headers: { 'Content-Type': 'application/json' } }));
     const f = fixture(); f.deps.selectedModel = 'openai'; f.deps.keys = { openai: 'test' };
     await f.engine().handleSendForTab('studio');
     expect(fetch).toHaveBeenCalledOnce(); expect(mock.post).not.toHaveBeenCalled(); expect(f.deps.setIsLoading).toHaveBeenLastCalledWith(false);
     expect(f.messages().at(-1)?.text).toBe('Unavailable');
+  });
+  it.each(['axios', 'fetch-json', 'sse'])('does not turn an explicit HTTP200 route failure into success through %s', async transport => {
+    const reply = 'The AI service is temporarily unavailable. Please try again later.';
+    const failure = { ok: false, code: 'CHAT_ROUTE_UNAVAILABLE', reply };
+    const f = fixture();
+    if (transport === 'axios') mock.post.mockResolvedValue({ data: failure });
+    else {
+      f.deps.selectedModel = 'openai'; f.deps.keys = { openai: 'test' };
+      vi.mocked(fetch).mockResolvedValue(new Response(transport === 'sse'
+        ? frame({ c: reply }) + frame({ error: reply, code: failure.code, partial: false })
+        : JSON.stringify(failure), { headers: { 'Content-Type': transport === 'sse' ? 'text/event-stream' : 'application/json' } }));
+    }
+    await f.engine().handleSendForTab('studio');
+    expect(f.messages().filter(m => m.sender === 'ai')).toHaveLength(1);
+    expect(f.messages().at(-1)?.text).toBe(reply);
+    expect(f.deps.setErrorContext).toHaveBeenCalledWith(expect.objectContaining({ message: reply }));
+    expect(f.deps.addLog).not.toHaveBeenCalledWith(expect.stringContaining('AI Response received'), 'success');
+    expect(f.deps.setIsLoading).toHaveBeenLastCalledWith(false);
+    expect(transport === 'axios' ? mock.post : fetch).toHaveBeenCalledOnce();
+    expect(transport === 'axios' ? fetch : mock.post).not.toHaveBeenCalled();
   });
   it('does not retry an ambiguous fetch outcome before response headers', async () => {
     vi.mocked(fetch).mockRejectedValue(new TypeError('fetch failed'));

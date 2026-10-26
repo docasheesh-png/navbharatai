@@ -139,11 +139,14 @@ export function useChatEngine(deps: ChatEngineDeps) {
       
       clearTimeout(timeoutId);
       if (controller.signal.aborted || stoppedRef.current) throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The reply was stopped.', partial: false });
+      const terminal = gatewayChatFailure(response.data);
+      if (terminal) throw new ChatStreamTerminalError(terminal);
       return response.data.reply;
     } catch (error: any) {
       clearTimeout(timeoutId);
       console.error("AI REQUEST FAILURE", error);
 
+      if (error instanceof ChatStreamTerminalError) throw error;
       const terminal = gatewayChatFailure(error.response?.data);
       if (terminal) throw new ChatStreamTerminalError(terminal);
       if (axios.isCancel(error) || !error.response || error.response.status >= 500) {
@@ -520,7 +523,10 @@ export function useChatEngine(deps: ChatEngineDeps) {
         }
 
         // Fallback: JSON response
-        return await response.json();
+        const data = await response.json();
+        const terminal = gatewayChatFailure(data);
+        if (terminal) throw new ChatStreamTerminalError(terminal);
+        return data;
       };
 
       // Retry helper: up to 3 attempts with backoff, only before streaming starts

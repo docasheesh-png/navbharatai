@@ -1,3 +1,4 @@
+import { chatAvailabilityMessage } from '../lib/chatAvailabilityMessage';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../lib/chatReplyLanguage';
 import { FREE_CHAT_LANGUAGE_RULE, chatReplyLanguageInstruction } from '../lib/freeChatReplyLanguage';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
@@ -21,7 +22,6 @@ import { clientPlatform } from '../AppContext/iosPurchaseGuard';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { toSafeClientMessage } from '../lib/httpError';
 import { runVisionChain } from '../lib/visionChain';
-import { freeBusyMessage } from '../lib/freeBusyMessage';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { groundingStatusFor, firstTokenLog } from '../lib/chatGrounding';
 import { songcraftFor } from '../AI/songcraft';
@@ -667,10 +667,11 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         allowClaude: !isFree, // absolute rule: the Free universe NEVER uses Claude
         tier: isFree ? 'free' : 'paid', // Free: GLM → flash-lite → flash only, under the shared daily cap
       });
-      if (visionResult) {
-        console.log(`[CHAT/VISION] tier=${tier} provider=${visionResult.provider} files=${visionAttachments.length}`);
+      const answered = !!visionResult?.text.trim();
+      if (answered) {
+        console.log(`[CHAT/VISION] tier=${tier} provider=${visionResult!.provider} files=${visionAttachments.length}`);
       } else {
-        console.error(`[CHAT/VISION] tier=${tier} — every allowed provider failed for ${visionAttachments.length} file(s)`);
+        console.error(`[CHAT/VISION] tier=${tier} — no usable answer for ${visionAttachments.length} file(s)`);
       }
       if (visionResult?.inferenceGateway) {
         // Child vision usage is measured independently; the gateway marker prevents legacy tariff guesses.
@@ -678,14 +679,15 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           userId: currentInferenceGatewayContext()?.principalId || 'anonymous', tier, capability: 'vision-pdf',
           providerName: visionResult.provider, modelName: visionResult.model,
           ...usageLogFields(visionResult.usage), inferenceGateway: visionResult.inferenceGateway,
-          ok: true, streamed: false, createdAt: new Date().toISOString(),
+          ok: answered, ...(!answered ? { failureReason: 'empty-output' } : {}), streamed: false, createdAt: new Date().toISOString(),
         }).catch(() => {});
       }
       assertFreeAnswerActive(req);
-      if (visionResult?.text.trim()) markFreeAnswer(req);
-      const replyText = visionResult?.text
-        // Free: silent fallback to the busy line in the user's own language (cap reached or every rung down).
-        || (isFree ? freeBusyMessage(message) : 'Sorry, I could not read your image/file right now. Please try again in a moment, or paste the text directly.');
+      if (answered) markFreeAnswer(req);
+      // A missing/empty vision result is not an answer or evidence of traffic overload. Keep the
+      // terminal failure explicit while using the conversation's selected language for its notice.
+      const failure = answered ? null : unavailableChatReply(chatAvailabilityMessage('temporary', { message, history: req.body.history, replyLanguage }));
+      const replyText = visionResult?.text ?? '';
       if (req.body.stream === true) {
         if (!res.headersSent) {
           res.setHeader('Content-Type', 'text/event-stream');
@@ -694,8 +696,12 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           res.setHeader('X-Accel-Buffering', 'no');
           res.flushHeaders();
         }
-        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: replyText })}\n\n`);
-        if (!res.writableEnded) { res.end('data: [DONE]\n\n'); }
+        if (!res.writableEnded) {
+          if (failure) res.end(`data: ${JSON.stringify({ ...failure, c: failure.reply, error: failure.reply, partial: false })}\n\n`);
+          else { res.write(`data: ${JSON.stringify({ c: replyText })}\n\n`); res.end('data: [DONE]\n\n'); }
+        }
+      } else if (failure) {
+        res.status(503).json(failure);
       } else {
         res.json({ reply: replyText });
       }

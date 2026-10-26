@@ -264,3 +264,46 @@ it.each([true, false])('defers the actual Chat SSE terminal over HTTP with compr
     try { await complete; } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
   }
 });
+
+const visionCases = paths.flatMap(path => [true, false].flatMap(stream => ['image/png', 'application/pdf'].flatMap(type => [null, '', ' \n'].map(text => ({ path, stream, type, text })))));
+it.each(visionCases)('never reports unavailable vision as an answer at $path stream=$stream type=$type text=$text', async ({ path, stream, type, text }) => {
+  m.vision.mockResolvedValueOnce(text === null ? null : { text, provider: 'GLM' });
+  const res = response();
+  await route(path)(request({ message: 'Describe the supplied fixture.', stream, fileAttachments: [{ name: 'fixture', type, base64: 'AA==' }] }), res);
+  expect(m.vision).toHaveBeenCalledOnce();
+  expect(m.settle).toHaveBeenCalledExactlyOnceWith(expect.any(Object), 'provider-failed', expect.any(Number));
+  if (stream) {
+    expect((await parsed(res)).failure).toMatchObject({ code: 'CHAT_ROUTE_UNAVAILABLE', partial: false });
+    expect(res.chunks.join('')).not.toContain('[DONE]');
+  } else {
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toMatchObject({ ok: false, code: 'CHAT_ROUTE_UNAVAILABLE' });
+  }
+});
+it.each(paths.flatMap(path => [true, false].map(stream => ({ path, stream }))))('preserves a usable vision answer at $path stream=$stream', async ({ path, stream }) => {
+  m.vision.mockResolvedValueOnce({ text: 'The fixture contains a blue square.', provider: 'GLM' });
+  const res = response();
+  await route(path)(request({ message: 'Describe the supplied fixture.', stream, fileAttachments: [{ name: 'fixture.png', type: 'image/png', base64: 'AA==' }] }), res);
+  expect(m.settle).toHaveBeenCalledExactlyOnceWith(expect.any(Object), 'answered', expect.any(Number));
+  if (stream) expect(await parsed(res)).toEqual({ text: 'The fixture contains a blue square.' });
+  else { expect(res.statusCode).toBe(200); expect(res.body.reply).toBe('The fixture contains a blue square.'); }
+});
+
+
+it.each([true, false])('uses the chosen reply language for unavailable vision, stream=%s', async stream => {
+  m.vision.mockResolvedValueOnce(null);
+  const res = response();
+  await route()(request({ message: 'Describe the supplied fixture.', replyLanguage: 'ta', stream, fileAttachments: [{ name: 'fixture.pdf', type: 'application/pdf', base64: 'AA==' }] }), res);
+  const notice = stream ? (await parsed(res)).failure?.message : res.body.reply;
+  expect(notice).toContain('இப்போது');
+  expect(notice).not.toMatch(/provider|API|budget|quota|traffic|completion/i);
+});
+it('records empty selected vision output as unsuccessful while preserving real usage metadata', async () => {
+  m.vision.mockResolvedValueOnce({ text: ' \n', provider: 'GLM', model: 'synthetic-vision', usage: { inputTokens: 5, outputTokens: 0 }, inferenceGateway: { requestId: 'synthetic-request' } });
+  const res = response();
+  await route()(request({ message: 'Describe the supplied fixture.', fileAttachments: [{ name: 'fixture.png', type: 'image/png', base64: 'AA==' }] }), res);
+  expect(res.statusCode).toBe(503);
+  expect(m.add).toHaveBeenCalledOnce();
+  expect(m.add.mock.calls[0][1]).toMatchObject({ ok: false, failureReason: 'empty-output', capability: 'vision-pdf', inputTokens: 5, outputTokens: 0 });
+  expect(m.settle.mock.calls[0][1]).toBe('provider-failed');
+});

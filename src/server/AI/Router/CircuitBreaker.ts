@@ -42,6 +42,8 @@ export class CircuitBreaker {
   private consecutiveFailures = 0;
   /** Epoch ms; while OPEN and now < openedUntil, requests are blocked. */
   private openedUntil = 0;
+  /** Last failure label that opened/re-opened the breaker (no secrets). */
+  private lastOpenReason = '';
 
   constructor(options: CircuitBreakerOptions = {}) {
     this.opts = { ...DEFAULTS, ...options };
@@ -62,6 +64,7 @@ export class CircuitBreaker {
   recordSuccess(): void {
     this.consecutiveFailures = 0;
     this.openedUntil = 0;
+    this.lastOpenReason = '';
   }
 
   /**
@@ -71,8 +74,11 @@ export class CircuitBreaker {
    * (i.e. a failed trial probe) re-opens with the same escalation.
    * Returns the epoch-ms deadline the breaker is now open until.
    */
-  recordFailure(cooldownMs?: number, now: number = Date.now()): number {
+  recordFailure(cooldownMs?: number, now: number = Date.now(), reason?: string): number {
     this.consecutiveFailures += 1;
+    if (typeof reason === 'string' && reason.trim()) {
+      this.lastOpenReason = reason.trim().replace(/[^\w.:@/=+-]/g, '_').slice(0, 120);
+    }
     let ms = cooldownMs && cooldownMs > 0 ? cooldownMs : this.opts.baseCooldownMs;
     if (this.consecutiveFailures >= this.opts.failureThreshold) {
       const over = this.consecutiveFailures - this.opts.failureThreshold + 1; // 1, 2, 3…
@@ -83,20 +89,31 @@ export class CircuitBreaker {
   }
 
   /**
+   * Force HALF_OPEN so one trial can run while the breaker is still within a long
+   * OPEN window. Keeps consecutiveFailures + lastOpenReason for diagnostics.
+   */
+  allowProbe(now: number = Date.now()): void {
+    if (this.openedUntil > now) this.openedUntil = now;
+  }
+
+  /**
    * Honor a cooldown deadline observed from ANOTHER instance (cross-instance sync).
    * Never shortens a local cooldown; treats the provider as already failing so the
    * deadline sticks, but does not double-count toward escalation.
    */
-  honorRemoteOpenUntil(until: number): void {
+  honorRemoteOpenUntil(until: number, reason?: string): void {
     if (until > this.openedUntil) {
       this.openedUntil = until;
       if (this.consecutiveFailures === 0) this.consecutiveFailures = 1;
+      if (typeof reason === 'string' && reason.trim() && !this.lastOpenReason) {
+        this.lastOpenReason = reason.trim().replace(/[^\w.:@/=+-]/g, '_').slice(0, 120);
+      }
     }
   }
 
   /** Observability snapshot — never mutate. */
-  snapshot(now: number = Date.now()): { state: CircuitState; openedUntil: number; consecutiveFailures: number } {
-    return { state: this.state(now), openedUntil: this.openedUntil, consecutiveFailures: this.consecutiveFailures };
+  snapshot(now: number = Date.now()): { state: CircuitState; openedUntil: number; consecutiveFailures: number; lastOpenReason: string } {
+    return { state: this.state(now), openedUntil: this.openedUntil, consecutiveFailures: this.consecutiveFailures, lastOpenReason: this.lastOpenReason };
   }
 }
 

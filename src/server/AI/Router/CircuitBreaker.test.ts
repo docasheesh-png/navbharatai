@@ -97,11 +97,20 @@ describe('CircuitBreaker (P1.3)', () => {
   });
 
   describe('snapshot', () => {
-    it('reflects state, deadline, and failure count', () => {
+    it('reflects state, deadline, failure count, and last open reason', () => {
       const b = new CircuitBreaker();
-      b.recordFailure(10_000, T0);
+      b.recordFailure(10_000, T0, 'auth:http=401');
       const s = b.snapshot(T0);
-      expect(s).toEqual({ state: 'open', openedUntil: T0 + 10_000, consecutiveFailures: 1 });
+      expect(s).toEqual({ state: 'open', openedUntil: T0 + 10_000, consecutiveFailures: 1, lastOpenReason: 'auth:http=401' });
+    });
+    it('allowProbe forces half-open while keeping lastOpenReason', () => {
+      const b = new CircuitBreaker();
+      b.recordFailure(60_000, T0, 'quota_exhausted:http=402');
+      expect(b.isBlocking(T0)).toBe(true);
+      b.allowProbe(T0);
+      expect(b.isBlocking(T0)).toBe(false);
+      expect(b.state(T0)).toBe('half_open');
+      expect(b.snapshot(T0).lastOpenReason).toBe('quota_exhausted:http=402');
     });
   });
 

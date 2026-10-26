@@ -1,11 +1,11 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
-const m = vi.hoisted(() => ({ observeBudget: vi.fn(), setBudget: vi.fn(), execute: vi.fn(), registry: vi.fn(), reserve: vi.fn(), paid: vi.fn(), settle: vi.fn(), cooldown: vi.fn(), controls: vi.fn(), db: vi.fn(), strict: vi.fn(), maintenance: vi.fn(), set: vi.fn(), get: vi.fn(), quota: vi.fn(), spend: vi.fn(), cacheGet: vi.fn(), cachePut: vi.fn(), events: vi.fn(), where: vi.fn(), select: vi.fn(), limit: vi.fn() }));
+const m = vi.hoisted(() => ({ observeBudget: vi.fn(), setBudget: vi.fn(), execute: vi.fn(), registry: vi.fn(), reserve: vi.fn(), paid: vi.fn(), settle: vi.fn(), cooldown: vi.fn(), clearCooldown: vi.fn(), controls: vi.fn(), db: vi.fn(), strict: vi.fn(), maintenance: vi.fn(), set: vi.fn(), get: vi.fn(), quota: vi.fn(), spend: vi.fn(), cacheGet: vi.fn(), cachePut: vi.fn(), events: vi.fn(), where: vi.fn(), select: vi.fn(), limit: vi.fn() }));
 vi.mock('../../lib/serverDb', () => ({ getServerDb: m.db }));
 vi.mock('../../lib/aiMaintenance', () => ({ assertAiAvailable: m.maintenance }));
 vi.mock('../inferencePolicy', () => ({ strictFreeRequired: m.strict }));
 vi.mock('./control', () => ({ readControls: m.controls, readControlsForSelection: m.controls, writeControls: vi.fn(), controlRef: () => ({ collection: () => ({ doc: () => ({ set: m.set, get: m.get }), where: m.where, select: m.select, limit: m.limit, get: m.events }) }) }));
 vi.mock('./cache', async original => ({ ...(await original<typeof import('./cache')>()), FreeChainCache: class { get=m.cacheGet; put=m.cachePut; } }));
-vi.mock('./store', () => ({ FreeChainStore: class { observePaidBudgetPolicy = m.observeBudget; setPaidBudgetPolicy = m.setBudget; reserveQuota = m.reserve; reservePaid = m.paid; settlePaid = m.settle; cooldown = m.cooldown; quotaSnapshot = m.quota; spendSnapshot = m.spend; } }));
+vi.mock('./store', () => ({ FreeChainStore: class { observePaidBudgetPolicy = m.observeBudget; setPaidBudgetPolicy = m.setBudget; reserveQuota = m.reserve; reservePaid = m.paid; settlePaid = m.settle; cooldown = m.cooldown; clearCooldown = m.clearCooldown; quotaSnapshot = m.quota; spendSnapshot = m.spend; } }));
 vi.mock('./providers/openAiCompatProvider', () => ({
  OpenAiCompatProvider: class { constructor(readonly config: unknown) {} executeTurn(input: unknown) { return m.execute(input, this.config); } },
  FreeChainProviderError: class extends Error {
@@ -23,7 +23,7 @@ vi.mock('./telemetry', () => ({ logFreeChain: vi.fn() }));
 import { buildFreeChainRouter, maybeFreeChain, freeChainAdminView, freeChainAdminMetrics, controlFreeChainBudget, durationMs, shouldPersistFreeChainEvent, type FreeChainInput } from './runtime';
 import { FreeRoutingError } from '../LiveRegistry/dispatcher';
 import { freeChainConfig } from './config';
-import { resetAllBreakers } from '../Router/CircuitBreaker';
+import { getBreaker, resetAllBreakers } from '../Router/CircuitBreaker';
 import { FreeChainProviderError } from './providers/openAiCompatProvider';
 import { isFreeChainAdminView, isFreeChainAdminMetrics } from '../../../lib/freeChatChainView';
 m.observeBudget.mockImplementation(async (cap: number) => ({ capNanoUsd: cap, revision: 1 }));
@@ -40,7 +40,7 @@ beforeEach(() => {
  m.paid.mockReset(); m.settle.mockReset(); m.observeBudget.mockImplementation(async (cap: number) => ({ capNanoUsd: cap, revision: 1 }));
  m.controls.mockResolvedValue({ enabled: true, rolloutPercent: 100, disabledProviders: [] });
  m.reserve.mockResolvedValue({ allowed: true }); m.set.mockResolvedValue(undefined); m.get.mockResolvedValue({ data: () => undefined });
- m.cooldown.mockResolvedValue(true); m.strict.mockReturnValue(false); m.db.mockReturnValue(db); m.maintenance.mockResolvedValue(undefined);
+ m.cooldown.mockResolvedValue(true); m.clearCooldown.mockResolvedValue(true); m.strict.mockReturnValue(false); m.db.mockReturnValue(db); m.maintenance.mockResolvedValue(undefined);
  m.execute.mockImplementation(successful());
  m.quota.mockResolvedValue({ available: true, usage: { rpm: 1, rpd: 2, tpm: 3, tpd: 4, neuronsPerDay: 5 }, dailyResetAt: Date.now()+1000, minuteResetAt: Date.now()+1000, cooldownUntil: 0 });
  m.spend.mockResolvedValue({ available: true, capNanoUsd: 2e9, policyRevision: 3, heldNanoUsd: 0, spentNanoUsd: 0 });
@@ -218,6 +218,64 @@ describe('free chat chain central dispatch', () => {
   expect(result.ok).toBe(true);
   expect(result.provider).toBe('CHEAPERINFERENCE');
   expect(m.execute).toHaveBeenCalledTimes(1);
+ });
+ it('CHEAPERINFERENCE=admin probes past stale circuit and surfaces upstream HTTP', async () => {
+  vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  vi.stubEnv('FREE_CHAIN_MONTHLY_CAP_ENABLED', 'off');
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  // Seed a long AUTH-style open (1h) with last reason — this is what live showed as cheapinf:circuit.
+  const b = getBreaker('free-chat-chain:cheapinf');
+  b.recordFailure(3_600_000, Date.now(), 'auth:http=401');
+  expect(b.isBlocking()).toBe(true);
+  m.execute.mockRejectedValue(new FreeChainProviderError('QUOTA_EXHAUSTED', { status: 402 }));
+  const result = await maybeFreeChain({
+    ...input(),
+    message: 'probe please',
+    context: { ...input().context, isAdmin: true },
+  });
+  expect(m.execute).toHaveBeenCalledTimes(1);
+  expect(result?.ok).toBe(false);
+  expect(result?.content).toContain('[admin diagnostic]');
+  expect(result?.content).toMatch(/quota_exhausted:http=402|cheapinf:quota_exhausted/);
+  expect(result?.content).not.toMatch(/cheapinf:circuit(?!-probe)/);
+  // Owner exclusive cooldown is short (≤30s), not 1d.
+  const snap = getBreaker('free-chat-chain:cheapinf').snapshot();
+  expect(snap.lastOpenReason).toMatch(/quota_exhausted:http=402/);
+  expect(snap.openedUntil - Date.now()).toBeLessThanOrEqual(30_000 + 50);
+ });
+ it('CHEAPERINFERENCE=admin short circuit wait reports last open reason without probing', async () => {
+  vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  vi.stubEnv('FREE_CHAIN_MONTHLY_CAP_ENABLED', 'off');
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  const b = getBreaker('free-chat-chain:cheapinf');
+  b.recordFailure(20_000, Date.now(), 'auth:http=401');
+  const result = await maybeFreeChain({
+    ...input(),
+    message: 'wait',
+    context: { ...input().context, isAdmin: true },
+  });
+  expect(m.execute).not.toHaveBeenCalled();
+  expect(result?.ok).toBe(false);
+  expect(result?.content).toContain('[admin diagnostic]');
+  expect(result?.content).toMatch(/circuit:last=auth:http=401:remain=\d+s/);
+ });
+ it('non-admin chain still skips open circuit without probing', async () => {
+  vi.stubEnv('CHEAPERINFERENCE', 'all');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  const cfg = freeChainConfig({
+    FREE_CHAIN_ENABLED: 'on', FREE_CHAIN_ROLLOUT_PERCENT: '100', FREE_CHAIN_ORDER: 'cheapinf',
+    CHEAPERINFERENCE: 'all', CHEAPERINFERENCE_API_KEY: 'ci_live_test_key', FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off',
+  });
+  getBreaker('free-chat-chain:cheapinf').recordFailure(3_600_000, Date.now(), 'auth:http=401');
+  const result = await buildFreeChainRouter(db, cfg).route(input());
+  expect(m.execute).not.toHaveBeenCalled();
+  expect(result.ok).toBe(false);
+  expect(result.freeChain?.attempts[0].reason).toMatch(/^circuit:last=auth:http=401/);
+  expect(result.content).not.toContain('[admin diagnostic]');
  });
  it('OpenRouter account admission works with the real quota validator and transaction store', async () => {
  const real = await vi.importActual<typeof import('./store')>('./store');

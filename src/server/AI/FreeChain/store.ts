@@ -134,6 +134,20 @@ export class FreeChainStore {
       return true;
     } catch { return false; }
   }
+  /**
+   * Owner CHEAPERINFERENCE=admin exclusive probe: clear a stale Firestore cooldown so a
+   * long AUTH/402 open (1h/1d) cannot permanently hide the real upstream error.
+   */
+  async clearCooldown(provider: string): Promise<boolean> {
+    if (!this.db || !provider || provider.length > 128) return false;
+    try {
+      const ref = this.ref(`cooldown_${hash(provider)}`);
+      await this.db.runTransaction(async tx => {
+        tx.set(ref, { kind: 'cooldown', until: 0 });
+      });
+      return true;
+    } catch { return false; }
+  }
   async quotaSnapshot(input: QuotaScope, now = Date.now()): Promise<QuotaSnapshot> {
     if (!this.db) throw new Error('Free chat safety store unavailable');
     const refs = this.quotaRefs(input);

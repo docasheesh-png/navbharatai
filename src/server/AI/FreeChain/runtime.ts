@@ -176,7 +176,21 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       if (!prepared) { attempt.reason = 'context-capacity'; continue; }
       const attemptStarted = Date.now();
       const breakerName = `free-chat-chain:${id}`; const capacityName = `free-chat-chain:${accountId(id)}`; const breaker = getBreaker(breakerName);
-      if (breaker.isBlocking()) { attempt.reason = 'circuit'; continue; }
+      // Stale OPEN windows (AUTH=1h / QUOTA=1d) hide the real upstream status behind "circuit".
+      // CHEAPERINFERENCE=admin exclusive path: if remaining > 30s, force one probe so diagnostic
+      // shows auth/402/5xx; short remaining waits report lastOpenReason instead of hammering.
+      if (breaker.isBlocking()) {
+        const snap = breaker.snapshot();
+        const remainMs = Math.max(0, snap.openedUntil - Date.now());
+        const last = snap.lastOpenReason || 'unknown';
+        if (exclusiveAdmin && id === 'cheapinf' && remainMs > 30_000) {
+          breaker.allowProbe();
+          attempt.reason = `circuit-probe:last=${last}`;
+        } else {
+          attempt.reason = `circuit:last=${last}:remain=${Math.ceil(remainMs / 1000)}s`;
+          continue;
+        }
+      }
       // Real per-rung concurrency (GLM-4.5 Flash 2, GLM-4.7 Flash 1): busy → next rung, no wait.
       if (!tryAcquireRungSlot(cfg, id)) { attempt.reason = 'concurrency'; continue; }
       if (!acquireSlot(capacityName)) { releaseRungSlot(cfg, id); attempt.reason = 'capacity'; continue; }
@@ -194,8 +208,25 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         if (!control || control.enabled === false) { attempt.reason = 'disabled'; break; }
         if (control.disabledProviders.includes(id)) { attempt.reason = 'disabled'; continue; }
       }
-        const admission = await store.reserveQuota(quotaInput(rung, cfg, prepared.inputTokens));
-        if (!admission.allowed) { attempt.reason = admission.reason; if (typeof admission.resetAt === 'number' && admission.resetAt > Date.now()) breaker.honorRemoteOpenUntil(admission.resetAt); continue; }
+        let admission = await store.reserveQuota(quotaInput(rung, cfg, prepared.inputTokens));
+        // Owner exclusive: a prior AUTH/402 wrote a 1h/1d Firestore cooldown; clear once so the
+        // probe can reach CheaperInference and surface the real HTTP status.
+        if (!admission.allowed && exclusiveAdmin && id === 'cheapinf' && admission.reason === 'cooldown') {
+          const remainMs = typeof admission.resetAt === 'number' ? admission.resetAt - Date.now() : 0;
+          if (remainMs > 30_000) {
+            await store.clearCooldown(accountId(id)).catch(() => {});
+            admission = await store.reserveQuota(quotaInput(rung, cfg, prepared.inputTokens));
+          }
+        }
+        if (!admission.allowed) {
+          attempt.reason = admission.reason === 'cooldown' && breaker.snapshot().lastOpenReason
+            ? `cooldown:last=${breaker.snapshot().lastOpenReason}`
+            : admission.reason;
+          if (typeof admission.resetAt === 'number' && admission.resetAt > Date.now()) {
+            breaker.honorRemoteOpenUntil(admission.resetAt, admission.reason === 'cooldown' ? 'store-cooldown' : admission.reason);
+          }
+          continue;
+        }
         if (isPaidRung(id)) {
           // The complete model context is reserved, not an unverified character/token approximation.
           // One requestId may hold at most one paid reservation, so a second paid rung in the same
@@ -244,9 +275,14 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         attempt.reason = safe ? `${safe.code.toLowerCase()}${typeof safe.status === 'number' ? `:http=${safe.status}` : ''}` : 'unavailable';
         if (safe?.code === 'AUTH') warnOnce(`${rung.keyEnv}: authentication failed`);
         if (!['INVALID_REQUEST', 'SAFETY_REFUSAL', 'ABORTED'].includes(safe?.code ?? '')) {
-          const requestedCooldown = safe?.code === 'AUTH' ? 3600000 : safe?.retryAfterMs ?? (safe?.code === 'QUOTA_EXHAUSTED' ? 86400000 : 10000);
-          const until = Math.max(Date.now() + requestedCooldown, breaker.recordFailure(requestedCooldown));
-          breaker.honorRemoteOpenUntil(until);
+          // Ordinary rungs keep AUTH=1h / QUOTA=1d. Owner exclusive cheapinf caps at 30s so a bad
+          // key or empty wallet (dashboard aashishcpmt093@gmail.com) can be fixed and retried.
+          const openReason = attempt.reason; // already auth:http=401 / quota_exhausted:http=402 …
+          const requestedCooldown = (exclusiveAdmin && id === 'cheapinf')
+            ? Math.min(30_000, safe?.retryAfterMs && safe.retryAfterMs > 0 ? safe.retryAfterMs : 30_000)
+            : safe?.code === 'AUTH' ? 3600000 : safe?.retryAfterMs ?? (safe?.code === 'QUOTA_EXHAUSTED' ? 86400000 : 10000);
+          const until = Math.max(Date.now() + requestedCooldown, breaker.recordFailure(requestedCooldown, Date.now(), openReason));
+          breaker.honorRemoteOpenUntil(until, openReason);
           if (accountId(id) !== 'glm' || ['AUTH', 'RATE_LIMIT', 'QUOTA_EXHAUSTED'].includes(safe?.code ?? '')) await store.cooldown(accountId(id), until).catch(() => {}); recordProviderLatency(breakerName, 0, true);
         }
         // Never release an uncertain paid hold, and never mix replies after text commitment.

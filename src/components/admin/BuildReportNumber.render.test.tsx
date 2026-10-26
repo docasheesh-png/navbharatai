@@ -14,6 +14,13 @@ describe('report numbers on both private lists', () => {
     const html = renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: 12, total: 40, asOf: 1792540800000 }} kind="chronological" />);
     expect(html).toContain('#12'); expect(html).toContain('Chronological rank'); expect(html).not.toContain('Permanent failed-report');
   });
+  it('describes failed chronological ranks without confusing the latest-workspace cohort', () => {
+    const html = renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: 1, total: 10, asOf: 100 }} kind="failed-chronological" />);
+    expect(html).toContain('retained failed reports');
+    expect(html).toContain('late-arriving reports');
+    expect(html).not.toContain('latest-per-workspace');
+    expect(html).not.toContain('never renumbered');
+  });
   it('shows loading without blocking the report row', () => {
     expect(renderToStaticMarkup(<BuildReportNumber />)).toContain('…');
   });
@@ -23,9 +30,9 @@ describe('report numbers on both private lists', () => {
       expect(html).toContain('—'); expect(html).toContain('n/a'); expect(html).not.toContain('#0'); expect(html).not.toContain('#1');
     }
   });
-  it('explains legacy snapshot_miss without looking broken', () => {
+  it('does not misdiagnose every missing number as a legacy record', () => {
     const html = renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: null, total: null, asOf: null, reason: 'snapshot_miss' }} kind="permanent" />);
-    expect(html).toContain('—'); expect(html).toContain('n/a'); expect(html).toContain('Legacy'); expect(html).toContain('new failures get #N');
+    expect(html).toContain('—'); expect(html).toContain('n/a'); expect(html).not.toContain('written before numbering'); expect(html).toContain('current numbering snapshot');
     expect(html).not.toContain('#1');
     expect(isFailedBuildPage({ reports: [{ workspaceId: 'a', historyId: '1', startedAt: 1, endedAt: 2, appLabel: 'Synthetic', numbering: { ordinal: null, total: null, asOf: null, reason: 'private-server-error' } }], nextCursor: null, scanned: 1 })).toBe(false);
     expect(() => renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: null, total: null, asOf: null, reason: '__proto__' } as any} />)).not.toThrow();
@@ -39,9 +46,10 @@ describe('report numbers on both private lists', () => {
     const admin = readFileSync('src/components/AdminDashboard.tsx', 'utf8');
     const failed = readFileSync('src/components/admin/FailedBuildReportsPage.tsx', 'utf8');
     expect(admin).toContain('<BuildReportNumber numbering={b.numbering} kind="chronological" />');
-    expect(failed).toContain('<BuildReportNumber numbering={r.numbering} kind="permanent" />');
+    expect(failed).toContain('<BuildReportNumber numbering={r.numbering} kind="failed-chronological" />');
     expect(admin).toContain('before filters'); expect(failed).toContain('not just this batch');
-    expect(failed).toContain('Numbering is live'); expect(admin).toContain('permanent failed-report numbers on /failedbr');
+    expect(failed).toContain('Numbering is chronological'); expect(admin).toContain('retained-failure chronological ranks on /failedbr');
+    expect(failed).toContain('r.permanentReportId');
     const routes = readFileSync('src/server/routes/admin.ts', 'utf8');
     const section = routes.slice(routes.indexOf("app.get('/api/admin/all-builds',"), routes.indexOf("app.get('/api/admin/all-builds/:workspaceId',"));
     expect(section).toContain('verifyAdminToken');

@@ -1,7 +1,11 @@
+import { settledFailure } from './failedReportEligibility';
 /** Read-only, bounded metadata snapshots. No index deployment or build-path writes.
- * Cache is instance-local: another cold server instance pays its own bounded scan. At 410
- * workspaces / 604 histories, latest costs ~410 document reads and failed ~1,014 plus minimum
- * charges for empty history queries. No background refresh. Firestore read-only transactions
+ * Root traversal is bounded by the document/query/time budgets, not an independent
+ * smaller parent cap that can reject an otherwise safe complete inventory.
+ * Cache is instance-local: another cold server instance pays its own bounded scan.
+ * Complete snapshots include parents with no failed reports. A parent-only cutoff can
+ * reject an inventory that fits the existing cost budgets. Empty history queries incur reads.
+ * No background refresh. Firestore read-only transactions
  * make one attempt; counters also live outside the callback to bound any future retry behavior.
  */
 import { FieldPath, type Firestore, type Query, type Transaction } from 'firebase-admin/firestore';
@@ -11,7 +15,6 @@ import type { BuildReportNumbering, ReportNumberFailure } from '../../lib/buildR
 export type ReportNumberingCohort = 'latest' | 'failed';
 const COLLECTION = 'workspace_diagnostics_v3';
 const PAGE = 100;
-const MAX_WORKSPACES = 1000;
 const MAX_DOCUMENTS = 5000;
 const MAX_QUERIES = 2000;
 const MAX_MS = 30_000;
@@ -28,11 +31,6 @@ class NumberingScanError extends Error {
 }
 const keyOf = (workspaceId: string, historyId: string) => JSON.stringify([workspaceId, historyId]);
 const validTime = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0;
-function failed(report: Record<string, unknown> | undefined): boolean {
-  return !!report && report.ok === false && validTime(report.startedAt) &&
-    typeof report.endedAt === 'number' && Number.isFinite(report.endedAt) && report.endedAt >= report.startedAt;
-}
-
 async function scan(db: Firestore, cohort: ReportNumberingCohort, drained: () => void): Promise<Snapshot> {
   const asOf = Date.now();
   let cancelled = false, documents = 0, queries = 0;
@@ -50,11 +48,8 @@ async function scan(db: Firestore, cohort: ReportNumberingCohort, drained: () =>
     const candidates: Candidate[] = [];
     const roots = db.collection(COLLECTION).orderBy(FieldPath.documentId());
     let query: Query = roots;
-    let workspaces = 0;
     for (;;) {
       const parents = await read(query);
-      workspaces += parents.size;
-      if (workspaces > MAX_WORKSPACES) throw new NumberingScanError('scan_limit');
       // At most eight metadata history queries in flight; no full reports, prompts or identities.
       for (let offset = 0; offset < parents.docs.length; offset += 8) {
         const batch = parents.docs.slice(offset, offset + 8).map(async parent => {
@@ -74,12 +69,12 @@ async function scan(db: Firestore, cohort: ReportNumberingCohort, drained: () =>
             for (const doc of entries.docs) {
               if (doc.id === String(latest?.startedAt)) latestHasHistory = true;
               const report = doc.data().report as Record<string, unknown> | undefined;
-              if (failed(report)) candidates.push({ key: keyOf(parent.id, doc.id), startedAt: report!.startedAt as number });
+              if (settledFailure(report)) candidates.push({ key: keyOf(parent.id, doc.id), startedAt: report!.startedAt as number });
             }
             if (entries.size < PAGE) break;
             historyQuery = history.startAfter(entries.docs[entries.docs.length - 1]);
           }
-          if (!latestHasHistory && failed(latest)) candidates.push({ key: keyOf(parent.id, 'latest'), startedAt: latest!.startedAt as number });
+          if (!latestHasHistory && settledFailure(latest)) candidates.push({ key: keyOf(parent.id, 'latest'), startedAt: latest!.startedAt as number });
         });
         try { await Promise.all(batch); } catch (error) {
           cancelled = true;
@@ -103,51 +98,11 @@ async function scan(db: Firestore, cohort: ReportNumberingCohort, drained: () =>
   }
 }
 
-/** Failed cohort: read permanent reportNumber from history (assigned once on retain). No renumbering. */
-async function numberPersistedFailures<T extends { workspaceId: string; startedAt?: number }>(
-  rows: T[], historyId: (row: T) => string,
-): Promise<Array<T & { numbering: BuildReportNumbering }>> {
-  const db = getServerDb();
-  if (!db) return rows.map(row => ({ ...row, numbering: unavailable('storage_unavailable') }));
-  let total: number | null = null;
-  try {
-    const counter = await db.collection('admin_failed_report_numbers').doc('counter').get();
-    const next = counter.data()?.nextNumber;
-    total = typeof next === 'number' && Number.isSafeInteger(next) && next >= 2 ? next - 1 : null;
-  } catch {
-    return rows.map(row => ({ ...row, numbering: unavailable('storage_unavailable') }));
-  }
-  return Promise.all(rows.map(async (row) => {
-    const id = historyId(row);
-    if (!validTime(row.startedAt)) return { ...row, numbering: unavailable('invalid_timestamp') };
-    try {
-      const root = db.collection(COLLECTION).doc(row.workspaceId);
-      const snap = await (id === 'latest' ? root : root.collection('history').doc(id)).get();
-      const data = snap.data();
-      const report = (id === 'latest' ? data?.report : data?.report) as Record<string, unknown> | undefined;
-      const reportNumber = data?.reportNumber;
-      const numberedAt = data?.numberedAt ?? data?.savedAt;
-      if (typeof reportNumber !== 'number' || !Number.isSafeInteger(reportNumber) || reportNumber < 1 ||
-        typeof numberedAt !== 'number' || !Number.isFinite(numberedAt) || numberedAt <= 0) {
-        return { ...row, numbering: unavailable('snapshot_miss') };
-      }
-      if (report && validTime(report.startedAt) && report.startedAt !== row.startedAt) {
-        return { ...row, numbering: unavailable('snapshot_miss') };
-      }
-      const knownTotal = total !== null && total >= reportNumber ? total : reportNumber;
-      return { ...row, numbering: { ordinal: reportNumber, total: knownTotal, asOf: numberedAt } };
-    } catch {
-      return { ...row, numbering: unavailable('storage_unavailable') };
-    }
-  }));
-}
-
 /** Lazy authenticated-list reads only. A failure never replaces the report list or invents a rank. */
 export async function numberBuildReports<T extends { workspaceId: string; startedAt?: number }>(
   cohort: ReportNumberingCohort, rows: T[], historyId: (row: T) => string,
 ): Promise<Array<T & { numbering: BuildReportNumbering }>> {
   if (!rows.length) return [];
-  if (cohort === 'failed') return numberPersistedFailures(rows, historyId);
   const db = getServerDb();
   if (!db) return rows.map(row => ({ ...row, numbering: unavailable('storage_unavailable') }));
   let entries = cache.get(db);

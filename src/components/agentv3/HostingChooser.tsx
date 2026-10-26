@@ -3,11 +3,10 @@
 // One screen, three paths, kept 100% in sync where it matters (all three publish/store the SAME
 // workspace files):
 //   1. Host on NavBharatAI  — our own hosting (the platform-paid Firebase static host, id 'firebase').
-//                             One-click, no account, Free. Full app (backend + DB) is a later phase, so
-//                             for a full-stack app this hosts the frontend and says so honestly.
-//   2. Host somewhere else  — WE deploy to the user's own provider account (Vercel / Netlify /
-//                             Cloudflare / GitHub Pages) using a token they've connected. Free from us;
-//                             they pay their own provider.
+//                             Static hosting is immediate; server hosting is gated by real availability.
+//                             Database provisioning is a separate, explicit choice.
+//   2. Other configured hosts — the static adapters use platform-configured hosting accounts.
+//                             They do not read a user's vault key; never label them as BYO.
 //   3. I host it myself     — WE NEVER TOUCH HOSTING. NavBharatAI only writes code + opens a PR into
 //                             the user's own GitHub repo (own-repo git storage — GitStorageTarget /
 //                             UserGitHubClient / GitHubPrFlow), merging only when CI is green. The
@@ -36,8 +35,9 @@ import { ActionDot } from '../ActionDot';
 import { advancedPublishStartsOpen, ADVANCED_PUBLISH_LABEL, ADVANCED_PUBLISH_HINT } from '../../lib/advancedPublish';
 import { ResellHostingChoice } from './ResellHostingChoice';
 import { FREE_PUBLISHED_APPS } from '../../lib/hostingTiers';
+import { databaseProvisionResult, DATABASE_PROVISION_UNCONFIRMED } from '../../lib/databaseProvisionResult';
 import {
-  DEPLOY_BACKEND_FAILURE, PROVISION_DB_FAILURE, PUSH_APP_FAILURE, PUSH_APP_UNCONFIRMED_LINE,
+  DEPLOY_BACKEND_FAILURE, PUSH_APP_FAILURE, PUSH_APP_UNCONFIRMED_LINE,
   pushSavedLine, repoFactOf, type PushAppResult,
 } from './pushAppFeedback';
 
@@ -542,6 +542,8 @@ export function HostingChooser({
   // proceed anyway with their eyes open — a wall the user cannot pass is not a question.
   const [dataGate, setDataGate] = useState<DatabaseReadiness | null>(null);
   const [dbBusy, setDbBusy] = useState(false);
+  const dbCreateInFlight = useRef(false);
+  const [dbNeedsRecovery, setDbNeedsRecovery] = useState(false);
   const [dbNote, setDbNote] = useState<string | null>(null);
   /** True when the last attempt attached a database the user already had rather than creating one —
    *  which is what makes "create a separate one instead" a relevant follow-up rather than clutter. */
@@ -570,32 +572,41 @@ export function HostingChooser({
    * would be a fake success. `forceNew` is the escape hatch for an app whose data should stay apart.
    */
   const createDatabase = async (forceNew = false) => {
-    if (!authedFetch) return;
+    if (!authedFetch || dbCreateInFlight.current || dbNeedsRecovery) return;
+    dbCreateInFlight.current = true;
     setDbBusy(true); setDbNote(null); setDbReused(false);
+    let outcomeConfirmed = false;
     try {
       const res = await authedFetch('/api/integrations/supabase/provision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspaceId: workspaceId ?? '', forceNew }),
       }, LONG_REQUEST_TIMEOUT_MS.provisionDatabase);
-      const data = await res.json().catch(() => null);
-      // The server words these to tell the user what to do next (plan full, still starting up,
-      // reconnect); passing them through unchanged is more useful than any generic line here.
-      if (!res.ok) { setDbNote(data?.error || 'Your database could not be created just now.'); return; }
+      const result = databaseProvisionResult(res.status, await res.json().catch(() => null));
+      outcomeConfirmed = result.kind === 'connected' || result.kind === 'failed';
+      if (result.kind !== 'connected') {
+        setDbNote(result.message);
+        setDbNeedsRecovery(result.kind !== 'failed');
+        return;
+      }
+      const data = result.database;
       setDataGate((g) => (g ? { ...g, connected: true, provider: 'Supabase' } : g));
       if (data?.reused) {
         // Nothing was created, so nothing was migrated — this line must not borrow the wording of the
         // path that really did set tables up.
         setDbReused(true);
-        setDbNote(`${data.reusedNote || 'This app now uses a database you already made.'} You can publish now.`);
+        setDbNote(`${data.reusedNote || 'This app now uses a database you already made.'} ${data.asleepNote || 'You can publish now.'}`);
       } else {
         setDbNote(data?.schemaApplied === false
-          ? 'Database created and connected — its tables could not be set up yet, so ask me to run your migrations after publishing.'
+          ? 'Database created and connected — its tables could not be set up yet. Ask me to run the migrations on this existing database before publishing.'
           : 'Database created in your own account and connected. You can publish now.');
       }
-    } catch (e) {
-      setDbNote(fetchFailureLine(e, PROVISION_DB_FAILURE));
+    } catch {
+      setDbNote(DATABASE_PROVISION_UNCONFIRMED);
+      setDbNeedsRecovery(true);
     } finally {
+      // Keep the synchronous lock after an uncertain result, even before React renders the warning.
+      dbCreateInFlight.current = !outcomeConfirmed;
       setDbBusy(false);
     }
   };
@@ -991,11 +1002,11 @@ export function HostingChooser({
               {dataGate.canProvision && (
                 <button
                   onClick={() => void createDatabase()}
-                  disabled={dbBusy}
+                  disabled={dbBusy || dbNeedsRecovery}
                   className="flex-1 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-on-accent text-[11.5px] font-bold flex items-center justify-center gap-2 transition-colors"
                 >
                   {dbBusy ? <TirangaLoader size={14} /> : <Database className="w-3.5 h-3.5" />}
-                  {dbBusy ? 'Creating…' : 'Create one free in my account'}
+                  {dbBusy ? 'Creating…' : dbNeedsRecovery ? 'Creation needs checking' : 'Create one free in my account'}
                 </button>
               )}
               <button
@@ -1005,7 +1016,21 @@ export function HostingChooser({
                 Connect my own database
               </button>
             </div>
-            {dbReused && !dbBusy && (
+            {/* A question the user cannot answer "no" to is not a question. */}
+            {!proceedAnyway && (
+              <button
+                onClick={() => { setProceedAnyway(true); setBlocked(null); }}
+                className="text-[11px] text-faint hover:text-muted self-start underline underline-offset-2"
+              >
+                Publish without a database — I know data won&apos;t be saved
+              </button>
+            )}
+          </div>
+        )}
+        {dataGate?.connected && (dbNote || dbBusy) && (
+          <div className="mx-4 mt-4 rounded-xl border border-line bg-card p-3.5 flex flex-col gap-2.5">
+            <p className="text-[11.5px] text-warn leading-relaxed">{dbBusy ? 'Creating a separate database…' : dbNote}</p>
+            {dbReused && !dbBusy && !dbNeedsRecovery && (
               /* Offered only AFTER a reuse, so it answers what just happened. A separate database is a
                  real want — two apps that should not see each other's rows — and it spends one of the
                  user's two free project slots, which is why it is not the first button. */
@@ -1014,15 +1039,6 @@ export function HostingChooser({
                 className="text-[11px] text-faint hover:text-muted self-start underline underline-offset-2"
               >
                 Want this app to have its own separate database instead? Create a new one
-              </button>
-            )}
-            {/* A question the user cannot answer "no" to is not a question. */}
-            {!proceedAnyway && (
-              <button
-                onClick={() => { setProceedAnyway(true); setBlocked(null); }}
-                className="text-[11px] text-faint hover:text-muted self-start underline underline-offset-2"
-              >
-                Publish without a database — I know data won&apos;t be saved
               </button>
             )}
           </div>
@@ -1042,7 +1058,7 @@ export function HostingChooser({
             </p>
             <ul className="text-[11px] text-muted flex flex-col gap-1 mt-0.5">
               <li>• Instant publish — nothing to set up</li>
-              <li>• Frontend now · full app (backend + DB) coming soon</li>
+              <li>• Server hosting and databases depend on availability and your plan</li>
               {/* The NUMBER comes from the same constant the server enforces and the plan screen quotes
                   — never a literal. It read "5 apps free" while `publishedAppCap()` refused the FOURTH
                   publish, so this card and the error printed directly above it (admin's own capture,
@@ -1062,8 +1078,8 @@ export function HostingChooser({
             {/* A disabled button with no explanation is its own dead end — say why it's greyed out. */}
             {!hasOurHosting && (
               <p className="text-[11px] text-faint leading-relaxed">
-                NavBharatAI hosting isn&apos;t available right now — you can still publish to your own
-                provider or your own repo below.
+                NavBharatAI hosting isn&apos;t available right now — try another configured host
+                or use your own repo below.
               </p>
             )}
             {canConnectDomain && (
@@ -1401,19 +1417,23 @@ export function HostingChooser({
               <span className="flex items-center justify-between gap-2">
                 <span className="text-[13px] font-bold text-ink">{ADVANCED_PUBLISH_LABEL}</span>
                 <span className="flex items-center gap-1.5 shrink-0">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-muted bg-raised px-2 py-0.5 rounded-full">Your account</span>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-muted bg-raised px-2 py-0.5 rounded-full">More options</span>
                   <ChevronDown className={`w-3.5 h-3.5 text-faint transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
                 </span>
               </span>
               <span className="text-[11.5px] text-muted leading-relaxed">
-                {advancedOpen ? 'Keep it off NavBharatAI — your cloud, your bill, free from us.' : ADVANCED_PUBLISH_HINT}
+                {advancedOpen ? 'Choose a configured host, or connect your own hosting to GitHub.' : ADVANCED_PUBLISH_HINT}
               </span>
             </button>
 
             {advancedOpen && (<>
             {/* Sub-choice A — we deploy to the user's connected provider */}
             <div className="mt-0.5">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-faint mb-1.5">We deploy to your provider</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-faint mb-1.5">Other configured hosts</p>
+              <p className="text-[11px] text-faint leading-relaxed mb-2">
+                These use NavBharatAI&apos;s configured hosting accounts, not keys saved in your vault.
+                To use your own hosting account, connect it to your GitHub repo below.
+              </p>
               {byo.length > 0 ? (
                 <div className="flex flex-col gap-1.5">
                   {byo.map((p) => (
@@ -1431,8 +1451,8 @@ export function HostingChooser({
                 </div>
               ) : (
                 <p className="text-[11px] text-faint leading-relaxed">
-                  No provider connected yet. Connect Vercel, Netlify, Cloudflare, or GitHub Pages to publish
-                  to your own account.
+                  No other hosting service is configured here. Use the GitHub option below for your own
+                  hosting account.
                 </p>
               )}
             </div>
@@ -1539,7 +1559,7 @@ export function HostingChooser({
         <div className="px-4 pb-4 flex flex-col gap-2">
           <div className="flex items-start gap-2 text-[11px] text-warn bg-amber-500/10 border border-amber-900/40 rounded-lg px-3 py-2">
             <Server className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-            <span><b className="font-semibold">Full-stack hosting (running backend + database) on NavBharatAI is coming soon.</b> For now, apps with a backend keep it on your own database (Settings → Database) or your own provider.</span>
+            <span><b className="font-semibold">Server and database availability is checked for your account.</b> See the options above, or connect your own backend host and database.</span>
           </div>
           <div className="flex items-center justify-center gap-2 text-[11px] text-success">
             <span aria-hidden="true">↔</span>

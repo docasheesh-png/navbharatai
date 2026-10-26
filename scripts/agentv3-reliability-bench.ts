@@ -1,6 +1,8 @@
 /**
  * NavBharatAI — BUILD-RELIABILITY BENCHMARK runner (fix/build-reliability).
  *
+ * Requires BENCH_POWER_LEVEL explicitly; account defaults must never silently choose a tier.
+ * This request selection is not proof of the server-resolved tier or a hard supplier spend cap.
  * Runs the 15-prompt SMOKE set or the 50-prompt FULL set (scripts/fixtures/reliability-bench-prompts.json)
  * against a LIVE server, scores each build with the pure helpers in
  * src/server/AgentV3/reliability/benchHarness.ts, and writes one JSON result file. Compare two result
@@ -10,15 +12,16 @@
  * does a DRY RUN (lists what it would send) unless BENCH_CONFIRM=yes is set.
  *
  *   # baseline: server with every AGENTV3_* reliability flag OFF
- *   BENCH_LABEL=baseline BENCH_SET=smoke BENCH_USER_ID=<uid> BENCH_EMAIL=<email> BENCH_CONFIRM=yes npm run bench:reliability
+ *   BENCH_POWER_LEVEL=weak BENCH_LABEL=baseline BENCH_SET=smoke BENCH_USER_ID=<uid> BENCH_EMAIL=<email> BENCH_CONFIRM=yes npm run bench:reliability
  *   # candidate: restart the server with the flags ON, then
- *   BENCH_LABEL=flags-on BENCH_FLAGS=AGENTV3_STICKY_RUNG,AGENTV3_QUALITY_ESCALATE BENCH_SET=smoke … npm run bench:reliability
+ *   BENCH_POWER_LEVEL=weak BENCH_LABEL=flags-on BENCH_FLAGS=AGENTV3_STICKY_RUNG,AGENTV3_QUALITY_ESCALATE BENCH_SET=smoke … npm run bench:reliability
  *   npm run bench:compare -- scripts/bench-results/<baseline>.json scripts/bench-results/<candidate>.json
  *
  * Env: BENCH_BASE_URL (default http://localhost:8080), BENCH_LABEL, BENCH_SET (smoke|full, default smoke),
  *      BENCH_USER_ID / BENCH_EMAIL (a v3-enabled test account on the tier under test),
  *      BENCH_RUNS (attempts per prompt, default 1), BENCH_ONLY (comma ids), BENCH_FLAGS (comma, recorded only),
  *      BENCH_TIMEOUT_S (per build, default 1800), BENCH_AUTH_TOKEN (current ID token),
+ *      BENCH_POWER_LEVEL (required exact tier; this pilot uses weak),
  *      BENCH_OUTPUT_DIR (optional artifact directory), BENCH_CONFIRM=yes (actually run).
  */
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs';
@@ -28,7 +31,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { parseNdjson, metricsFromEvents, type BuildMetrics } from '../src/server/AgentV3/BakeoffMetrics';
 import { breakdown, buildSucceeded, formatEvidenceSummary, selectBenchPrompts, successRate, summarizeEvidence, validateBenchFixture, verifiedOutcome, type BenchResultFile, type BenchRun } from '../src/server/AgentV3/reliability/benchHarness';
-import { benchmarkEndpoint, benchmarkRequest, benchmarkToken } from './lib/reliabilityRequest';
+import { benchmarkEndpoint, benchmarkRequest, benchmarkToken, benchmarkTier } from './lib/reliabilityRequest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const env = process.env;
@@ -40,6 +43,7 @@ const ONLY = (env.BENCH_ONLY || '').split(',').map((s) => s.trim()).filter(Boole
 const FLAGS = (env.BENCH_FLAGS || '').split(',').map((s) => s.trim()).filter(Boolean);
 const TIMEOUT_MS = Math.max(60, parseInt(env.BENCH_TIMEOUT_S || '1800', 10) || 1800) * 1000;
 const CONFIRMED = env.BENCH_CONFIRM === 'yes';
+const REQUESTED_TIER = benchmarkTier(env.BENCH_POWER_LEVEL);
 
 const FAILED: BuildMetrics = { filesCreated: 0, ok: false, readinessScore: null, billedUsd: null, toolCalls: 0, toolErrors: 0, providerFallbacks: 0, geminiTrap: false, errored: true };
 
@@ -83,6 +87,7 @@ async function main(): Promise<void> {
   const out: BenchResultFile = {
     label: LABEL, set: SET, baseUrl: new URL(endpoint).origin, startedAt, flags: FLAGS, runs,
     execution: { status: 'running', plannedRuns: prompts.length * RUNS, sourceCommit, sourceDirty,
+      requestedTier: REQUESTED_TIER, resolvedTier: undefined,
       fixtureSha256: createHash('sha256').update(fixtureBytes).digest('hex'),
       promptIds: prompts.map((p) => p.id), repetitions: RUNS, nodeVersion: process.version },
   };
@@ -93,7 +98,7 @@ async function main(): Promise<void> {
   for (const p of prompts) {
     for (let attempt = 1; attempt <= RUNS; attempt++) {
       const t0 = Date.now();
-      const request = benchmarkRequest(p.prompt, token, env.BENCH_USER_ID, env.BENCH_EMAIL);
+      const request = benchmarkRequest(p.prompt, token, env.BENCH_USER_ID, env.BENCH_EMAIL, REQUESTED_TIER);
       const row = runs.length;
       runs.push({ id: p.id, lang: p.lang, complexity: p.complexity, attempt, seconds: null,
         metrics: FAILED, success: false, requestId: request.requestId, sessionId: request.sessionId,
@@ -108,14 +113,18 @@ async function main(): Promise<void> {
         console.log(`  ✗ ${p.id}#${attempt}: ${message} (remote outcome/cost may be unknown)`);
         metrics = FAILED;
       }
+      // An HTTP success without reported provider cost is still unknown financial liability.
+      if (!failure && (metrics.evidence?.realCostUsd == null || !Number.isFinite(metrics.evidence.realCostUsd))) {
+        failure = 'supplier-cost-unreconciled';
+      }
       const run: BenchRun = { id: p.id, lang: p.lang, complexity: p.complexity, attempt, seconds: (Date.now() - t0) / 1000, metrics, success: buildSucceeded(metrics),
         requestId: request.requestId, sessionId: request.sessionId, ...(failure ? { failure } : {}) };
       runs[row] = run;
       save();
-      if (failure === 'HTTP 401' || failure === 'HTTP 403') {
+      if (failure) {
         out.execution!.status = 'blocked';
         save();
-        throw new Error(`Benchmark authorization failed; refresh BENCH_AUTH_TOKEN. Partial evidence: ${file}`);
+        throw new Error(`Benchmark blocked after ${failure}; reconcile remote outcome and supplier spend before any further submission. Partial evidence: ${file}`);
       }
       const ev = metrics.evidence;
       console.log(`  ${run.success ? '✓' : '✗'} ${p.id}#${attempt} files=${metrics.filesCreated} ok=${metrics.ok} readiness=${metrics.readinessScore ?? 'n/a'} (${run.seconds}s) gate=${ev?.gateState ?? 'n/a'} preview=${ev?.previewEvidence ?? 'n/a'} calls=${ev?.llmCalls ?? 'n/a'} in=${ev?.inputTokens ?? 'n/a'} cached=${ev?.cachedInputTokens ?? 'n/a'} out=${ev?.outputTokens ?? 'n/a'} cost=$${ev?.realCostUsd ?? 'n/a'} → ${verifiedOutcome(metrics)}`);

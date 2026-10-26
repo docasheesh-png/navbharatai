@@ -1,3 +1,4 @@
+import type { PowerLevel } from '../powerLevel';
 /**
  * P1 — BUILD-RELIABILITY BENCHMARK HARNESS (fix/build-reliability). PURE helpers.
  *
@@ -90,6 +91,10 @@ export interface BenchResultFile {
     promptIds: string[];
     repetitions: number;
     nodeVersion: string;
+    /** Explicit request selection; not proof of server routing. Missing legacy fields remain unknown. */
+    requestedTier?: PowerLevel;
+    /** Set only after all runs have independently verified matching server-resolved tier evidence. */
+    resolvedTier?: PowerLevel;
   };
 }
 
@@ -138,6 +143,15 @@ export function comparisonGaps(baseline: BenchResultFile, candidate: BenchResult
     if (file.runs.some((r) => r.failure)) gaps.push(`${label} has unreconciled transport/auth failures`);
   }
   if (baseline.execution && candidate.execution && baseline.execution.fixtureSha256 !== candidate.execution.fixtureSha256) gaps.push('different fixture contents');
+  const knownTier = (value: unknown): value is PowerLevel => value === 'weak' || value === 'off' || value === 'mini';
+  for (const [label, file] of [['baseline', baseline], ['candidate', candidate]] as const) {
+    const requested = file.execution?.requestedTier;
+    const resolved = file.execution?.resolvedTier;
+    if (!knownTier(requested) || !knownTier(resolved)) gaps.push(`${label} tier provenance is missing or invalid`);
+    else if (requested !== resolved) gaps.push(`${label} requested and resolved tiers differ`);
+  }
+  if (baseline.execution?.requestedTier !== candidate.execution?.requestedTier
+    || baseline.execution?.resolvedTier !== candidate.execution?.resolvedTier) gaps.push('different benchmark tiers');
   return gaps;
 }
 

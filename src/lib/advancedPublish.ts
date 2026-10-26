@@ -52,4 +52,4 @@ export const ADVANCED_PUBLISH_LABEL = 'Host it somewhere else instead';
 
 /** The one line under the label, so the choice can be made without expanding it. */
 export const ADVANCED_PUBLISH_HINT =
-  'Publish to your own Vercel, Netlify, Cloudflare or GitHub Pages account, or keep hosting entirely yourself.';
+  'Use configured Vercel, Netlify or Cloudflare hosting, or connect your own host to GitHub.';

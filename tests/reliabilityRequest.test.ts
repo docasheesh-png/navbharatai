@@ -1,16 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { benchmarkEndpoint, benchmarkRequest, benchmarkToken } from '../scripts/lib/reliabilityRequest';
+import { benchmarkEndpoint, benchmarkRequest, benchmarkTier, benchmarkToken } from '../scripts/lib/reliabilityRequest';
 
 describe('authenticated reliability requests', () => {
   it('attaches the verified token separately from claimed identity and creates replay-safe request IDs', () => {
-    const a = benchmarkRequest('build a todo app', 'test-token', 'test-user');
-    const b = benchmarkRequest('build a todo app', 'test-token', 'test-user');
+    const a = benchmarkRequest('build a todo app', 'test-token', 'test-user', undefined, 'weak');
+    const b = benchmarkRequest('build a todo app', 'test-token', 'test-user', undefined, 'weak');
     expect(a.init.headers.Authorization).toBe('Bearer test-token');
     expect(a.init.redirect).toBe('error');
-    expect(JSON.parse(a.init.body)).toMatchObject({ userId: 'test-user', requestId: a.requestId, sessionId: a.sessionId, planFirst: false });
+    expect(JSON.parse(a.init.body)).toMatchObject({ userId: 'test-user', requestId: a.requestId, sessionId: a.sessionId, planFirst: false, powerLevel: 'weak' });
     expect(a.init.body).not.toContain('test-token');
     expect(a.requestId).not.toBe(b.requestId);
     expect(a.sessionId).not.toBe(b.sessionId);
+  });
+  it.each(['weak', 'off', 'mini'] as const)('sends the explicit tier %s unchanged', (tier) => {
+    expect(benchmarkTier(tier)).toBe(tier);
+    const request = benchmarkRequest('synthetic app', 'test-token', undefined, undefined, tier);
+    expect(JSON.parse(request.init.body).powerLevel).toBe(tier);
+  });
+  it.each([undefined, null, '', 'normal', 'strong', 'WEAK', ' weak ', 'max', false, {}, 0])('rejects an absent or invalid tier %s before request creation', (tier) => {
+    expect(() => benchmarkRequest('synthetic app', 'test-token', undefined, undefined, tier)).toThrow(/BENCH_POWER_LEVEL/);
   });
   it.each([undefined, '', 'Bearer token', 'token\r\nheader'])('refuses a missing or malformed token without echoing it', (token) => {
     expect(() => benchmarkToken(token)).toThrow('Set BENCH_AUTH_TOKEN');

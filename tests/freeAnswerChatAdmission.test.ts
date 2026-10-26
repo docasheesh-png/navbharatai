@@ -130,6 +130,20 @@ describe('real chat ingress enforces shared answer admission without changing pr
     expect(await consumeChatResponseStream(new Response(res.chunks.join('')).body!, true, vi.fn())).toEqual({ text: 'A useful answer.' });
     expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'answered', expect.any(Number));
   });
+  it.each([true, false, undefined])('records the actual streaming race outcome %s and reported zero usage', async raced => {
+    m.stream.mockImplementation(async (...args: any[]) => {
+      args[4]('A useful answer.');
+      return { ok: true, provider: 'synthetic', model: 'synthetic', latencyMs: 7,
+        ...(raced === undefined ? {} : { raced }), usage: { inputTokens: 0, outputTokens: 0 } };
+    });
+    await route()(request({ stream: true }), response());
+    expect(m.add).toHaveBeenCalledOnce();
+    const row = m.add.mock.calls[0][1];
+    expect(row).toMatchObject({ streamed: true, providerName: 'synthetic', modelName: 'synthetic',
+      latencyMs: 7, ok: true, usageMeasured: true, inputTokens: 0, outputTokens: 0 });
+    if (raced === undefined) expect(row).not.toHaveProperty('raced');
+    else expect(row.raced).toBe(raced);
+  });
   it('keeps the existing stalled-but-answered outcome distinct from a failed route', async () => {
     m.stream.mockImplementation(async (...args: any[]) => { args[4]('A genuine partial answer.'); return { ok: true, reason: 'stalled' }; });
     const res = response(); await route()(request({ stream: true }), res);

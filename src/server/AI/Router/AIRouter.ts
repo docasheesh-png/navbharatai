@@ -340,6 +340,22 @@ export class AIRouter {
       if (!p.executeStream) continue;
       if (!this.acquire(p.name)) continue;
       const t = Date.now();
+      let delivered = false;
+      let active = true;
+      let prefix = '';
+      // Commit only actual answer text. A whitespace/reasoning-only stream may safely
+      // fall back; once visible text is sent, this turn must never mix in another answer.
+      const run = (cb: (text: string) => void) => p.executeStream!(prompt, systemPrompt, (text) => {
+        if (!active || signal?.aborted || !text) return;
+        if (!delivered) {
+          prefix += text;
+          if (!prefix.trim()) return;
+          delivered = true;
+          text = prefix;
+          prefix = '';
+        }
+        cb(text);
+      }, undefined, signal);
       try {
         // 🔴 THE ONLY THING THAT COULD END A STREAMED TURN WAS THE CLIENT DISCONNECTING (2026-09-17).
         // This `await` had no bound of any kind, so a provider that accepted the connection and then
@@ -354,13 +370,14 @@ export class AIRouter {
         assertFreeAnswerDispatch(); signal?.throwIfAborted();
         const limits = watchdogLimits(process.env, this.universe);
         if (!limits) {
-          await p.executeStream(prompt, systemPrompt, onChunk, undefined, signal);
+          await run(onChunk);
         } else {
           const watched = await runWatchedStream(
-            (cb) => p.executeStream!(prompt, systemPrompt, cb, undefined, signal),
+            run,
             onChunk,
             limits,
           );
+          if (signal?.aborted) return { ok: false, reason: 'aborted' };
           if (watched.verdict === 'failed') throw watched.error ?? new Error('stream failed');
           if (mayTryNextRung(watched)) {
             // Nothing reached the user, so the next rung can answer with nothing duplicated. The
@@ -379,13 +396,20 @@ export class AIRouter {
             return { ok: true, provider: p.name, model: p.pinnedModel, latencyMs: Date.now() - t, raced: false, reason: 'stalled' };
           }
         }
+        if (signal?.aborted) return { ok: false, reason: 'aborted' };
+        if (!delivered) throw new Error('stream produced no content');
         recordProviderLatency(p.name, Date.now() - t, false);
         return { ok: true, provider: p.name, model: p.pinnedModel, latencyMs: Date.now() - t, raced: false };
       } catch (err: any) {
+        if (signal?.aborted) return { ok: false, reason: 'aborted' };
         noteProviderFailure(p.name, err);
         recordProviderLatency(p.name, 0, true);
+        if (delivered) {
+          console.warn(`[STREAM] ${p.name} failed after delivering — ending the turn`);
+          return { ok: true, provider: p.name, model: p.pinnedModel, latencyMs: Date.now() - t, raced: false, reason: 'stalled' };
+        }
         console.warn(`[STREAM] ${p.name} failed: ${String(err?.message).slice(0, 60)} — next rung`);
-      } finally { this.release(p.name); }
+      } finally { active = false; this.release(p.name); }
     }
     // Every rung failed. An HONEST refusal, never a silent escalation to something dearer — the same
     // posture `buildProfessionalFreeFallback` states for the free build path.

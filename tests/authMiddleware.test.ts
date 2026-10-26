@@ -3,8 +3,11 @@
  * Firebase auth is skipped in the test environment so these verify the
  * no-auth fast-paths and basic input validation.
  */
-import { describe, it, expect } from 'vitest';
-import { verifyFirebaseToken, requireUserMatch, buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, INBROWSER_PREVIEW_RATE, ZIP_CHUNK_RATE, PREVIEW_POLL_RATE, rateLimiter, verifyIdentityWithReason, adminAppOptions, type VerifierAuth } from '../src/server/lib/authMiddleware';
+import { describe, it, expect, afterEach } from 'vitest';
+import { verifyFirebaseToken, requireUserMatch, buildRateLimiter, buildRateLimitExempt, workspaceRateLimiter, inbrowserPreviewRateLimiter, INBROWSER_PREVIEW_RATE, ZIP_CHUNK_RATE, PREVIEW_POLL_RATE, rateLimiter, verifyIdentityWithReason, adminAppOptions, type VerifierAuth } from '../src/server/lib/authMiddleware';
+import { grantEmail } from '../src/server/AgentV3/featureFlag';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import type { Request, Response, NextFunction } from 'express';
 
 function makeReq(overrides: Partial<Request> = {}): Request {
@@ -144,6 +147,50 @@ describe('buildRateLimiter (VITEST-skip: always calls next)', () => {
       await middleware(req, res as any, () => {});
     }
     expect(res._status).toBeUndefined();
+  });
+});
+
+// ── buildRateLimitExempt (admin hourly build-cap bypass) ─────────────────────
+
+describe('buildRateLimitExempt — verified admins skip the 10 builds/hr cap', () => {
+  const prev = process.env.AGENTV3_REPORT_ADMINS;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTV3_REPORT_ADMINS;
+    else process.env.AGENTV3_REPORT_ADMINS = prev;
+  });
+
+  it('exempts the default admin addresses (verified GrantEmail only)', () => {
+    delete process.env.AGENTV3_REPORT_ADMINS;
+    expect(buildRateLimitExempt(grantEmail('doc.asheesh@icloud.com', true))).toBe(true);
+    expect(buildRateLimitExempt(grantEmail('aashishcpmt09@gmail.com', true))).toBe(true);
+  });
+
+  it('does NOT exempt a normal user or an unverified / empty address', () => {
+    delete process.env.AGENTV3_REPORT_ADMINS;
+    expect(buildRateLimitExempt(grantEmail('user@example.com', true))).toBe(false);
+    expect(buildRateLimitExempt(grantEmail('doc.asheesh@icloud.com', false))).toBe(false);
+    expect(buildRateLimitExempt(null)).toBe(false);
+    expect(buildRateLimitExempt(undefined)).toBe(false);
+  });
+
+  it('honours AGENTV3_REPORT_ADMINS override for a custom admin', () => {
+    process.env.AGENTV3_REPORT_ADMINS = 'chief@navbharatai.test';
+    expect(buildRateLimitExempt(grantEmail('chief@navbharatai.test', true))).toBe(true);
+    expect(buildRateLimitExempt(grantEmail('doc.asheesh@icloud.com', true))).toBe(false);
+  });
+
+  it('wires the admin bypass into buildRateLimiter (source contract)', () => {
+    // Live symptom: admin smoke hit "Rate limit exceeded: max 10 builds per hour" on /api/agentv3/chat.
+    // The bypass must stay on buildRateLimiter specifically (not every rateLimiter), using isAdminEmail.
+    const src = readFileSync(resolve(__dirname, '../src/server/lib/authMiddleware.ts'), 'utf8');
+    const fn = src.slice(src.indexOf('export function buildRateLimiter'), src.indexOf('export function enforceNotBanned'));
+    expect(fn).toContain('buildRateLimitExempt');
+    expect(fn).toContain('identityGrantEmail');
+    expect(fn).toContain('verifyFirebaseIdentity');
+    expect(fn).toContain('resolveGrantEmail');
+    // Non-admins still go through the shared 10/hr build bucket.
+    expect(fn).toContain("name: 'build'");
+    expect(fn).toContain('authed: 10');
   });
 });
 

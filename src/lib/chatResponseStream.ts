@@ -67,7 +67,7 @@ export function gatewayChatFailure(value: unknown): ChatStreamFailure | undefine
     const notice = [data.reply, data.error].find(value => typeof value === 'string' && value.trim());
     if (typeof notice === 'string') return { code: 'CHAT_MAINTENANCE', message: notice.slice(0, 2000), partial: false };
   }
-  if (typeof data.code !== 'string' || ![CHAT_ROUTE_UNAVAILABLE, 'CHAT_CAPACITY_EXHAUSTED', 'INFERENCE_GATEWAY_UNAVAILABLE', 'INFERENCE_GATEWAY_INTERRUPTED', 'STRICT_FREE_UNAVAILABLE', 'STRICT_FREE_INTERRUPTED', 'FREE_ANSWER_DAILY_LIMIT', 'FREE_ANSWER_BUSY', 'FREE_ANSWER_DUPLICATE', 'FREE_ANSWER_ATTEMPT_LIMIT', 'FREE_ANSWER_UNAVAILABLE'].includes(data.code)) return undefined;
+  if (typeof data.code !== 'string' || ![CHAT_ROUTE_UNAVAILABLE, 'CHAT_CAPACITY_EXHAUSTED', 'CHAT_REQUEST_IN_PROGRESS', 'INFERENCE_GATEWAY_UNAVAILABLE', 'INFERENCE_GATEWAY_INTERRUPTED', 'STRICT_FREE_UNAVAILABLE', 'STRICT_FREE_INTERRUPTED', 'FREE_ANSWER_DAILY_LIMIT', 'FREE_ANSWER_BUSY', 'FREE_ANSWER_DUPLICATE', 'FREE_ANSWER_ATTEMPT_LIMIT', 'FREE_ANSWER_UNAVAILABLE'].includes(data.code)) return undefined;
   const message = typeof data.reply === 'string' ? data.reply : typeof data.error === 'string' ? data.error : typeof data.c === 'string' ? data.c : 'The selected AI service is unavailable. Please try again later.';
   return { code: data.code, message: message.slice(0, 2000), partial: data.partial === true };
 }

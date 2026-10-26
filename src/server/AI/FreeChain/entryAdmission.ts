@@ -1,3 +1,5 @@
+import { freeChainAdmissionFailure } from './admissionFailure';
+import type { AdmissionDenial } from './admissionQueue';
 import { persistFreeChainSample } from './eventSample';
 import { randomUUID } from 'node:crypto';
 import type { Request, Response } from 'express';
@@ -23,9 +25,9 @@ export function entryAdmissionFor(req: Request): EntryAdmissionGrant | undefined
   const grant = heldByRequest.get(req);
   return grant && isEntryAdmission(grant, grant.uid) ? grant : undefined;
 }
-const BUSY = 'The AI service is temporarily busy. Please try again in 1-2 minutes. 🙏';
-function busy(req: Request, res: Response): void {
+function declineResponse(req: Request, res: Response, reason: AdmissionDenial): void {
   if (res.destroyed || res.writableEnded) return;
+  const failure = freeChainAdmissionFailure(reason, { message: req.body?.message, history: req.body?.history, replyLanguage: req.body?.replyLanguage });
   if (req.body?.stream === true) {
     if (!res.headersSent) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -34,9 +36,9 @@ function busy(req: Request, res: Response): void {
       res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders();
     }
-    res.write(`data: ${JSON.stringify({ c: BUSY })}\n\n`);
-    res.end('data: [DONE]\n\n');
-  } else res.json({ reply: BUSY });
+    // Keep the terminal payload inside end so the quota settlement barrier can withhold it.
+    res.end(`data: ${JSON.stringify({ ...failure.body, c: failure.body.reply, error: failure.body.reply, partial: false })}\n\n`);
+  } else res.status(failure.status).json(failure.body);
 }
 /**
  * Protect expensive ordinary FREE-chat prompt assembly, not just the final provider call.
@@ -74,7 +76,7 @@ export async function withFreeChainEntryAdmission<T>(req: Request, res: Response
           freeChain, createdAt: new Date().toISOString(),
         }).catch(() => {});
       } catch { /* Observability must not turn an honest busy response into an exception. */ }
-      if (reason !== 'aborted') busy(req, res);
+      if (reason !== 'aborted') declineResponse(req, res, reason);
     };
     usageDb = getServerDb();
     const cfg = freeChainConfig();

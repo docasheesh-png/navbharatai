@@ -1,3 +1,5 @@
+import { chatAvailabilityMessage } from '../../lib/chatAvailabilityMessage';
+import { freeChainAdmissionFailure } from './admissionFailure';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../../lib/chatReplyLanguage';
 import { chatReplyLanguageInstruction } from '../../lib/freeChatReplyLanguage';
 import { publishDeploymentPaidLimit } from './deploymentBudget';
@@ -35,18 +37,14 @@ import type { AIProviderResponse } from '../Router/ProviderTypes';
 import { readFreeChainBudgetAction, type FreeChainBudgetAction, type FreeChainBudgetResponse, FREE_CHAIN_METRICS_SCAN_LIMIT, FREE_CHAIN_PROVIDER_IDS, type FreeChainAdminMetrics, type FreeChainAdminView, type FreeChainControlAction } from '../../../lib/freeChatChainView';
 export interface FreeChainInput { message: string; history: unknown[]; systemPrompt?: string; signal?: AbortSignal; onChunk?: (text: string, source?: 'notice') => void; context: FreeChainContext }
 export type FreeChainResult = RoutedCall & { reason?: 'aborted' | 'no-provider' | 'all-failed' | 'stalled'; freeChain?: FreeChainTelemetry };
-const BUSY = 'The AI service is temporarily busy. Please try again in 1-2 minutes. 🙏';
-/** The one friendly final line after silent fallback is exhausted, in the user's own language. */
-export function busyMessage(message?: string): string {
-  const lang = message ? detectReplyLanguage(message) : 'en';
-  if (lang === 'hi') return 'अभी AI थोड़ा व्यस्त है, कृपया 1-2 मिनट बाद फिर कोशिश करें। 🙏';
-  if (lang === 'hinglish') return 'Abhi AI thoda busy hai, thodi der (1-2 minute) baad try karein. 🙏';
-  return BUSY;
+/** Compatibility export: exhausted fallbacks are neutral, not evidence of traffic overload. */
+export function busyMessage(message?: string, history?: unknown, replyLanguage?: unknown): string {
+  return chatAvailabilityMessage('temporary', { message, history, replyLanguage });
 }
 const names: Record<ProviderId, AIProviderResponse['provider']> = { glm47: 'GLM', glm45: 'GLM', gemini: 'GEMINI', groq: 'GROQ', cloudflare: 'CLOUDFLARE', openrouter: 'OPENROUTER', deepseek: 'DEEPSEEK',
   nvidia: 'NVIDIA', modelscope: 'MODELSCOPE', llm7: 'LLM7', bluesminds: 'BLUESMINDS', requesty: 'REQUESTY', glmflashx: 'GLM', gpt5nano: 'OPENAI', llama8b: 'DEEPINFRA', dsv4flash: 'DEEPINFRA', geminipaid: 'GEMINI', cheapinf: 'CHEAPERINFERENCE' };
-function empty(reason: FreeChainResult['reason'] = 'all-failed', message?: string, adminDetail?: string): FreeChainResult {
-  return { content: withAdminBusyDetail(busyMessage(message), adminDetail), provider: 'NONE', model: 'none', latencyMs: 0, ok: false, reason };
+function empty(reason: FreeChainResult['reason'] = 'all-failed', input?: FreeChainInput, adminDetail?: string, notice?: string): FreeChainResult {
+  return { content: withAdminBusyDetail(notice ?? busyMessage(input?.message, input?.history, input?.context.replyLanguage), adminDetail), provider: 'NONE', model: 'none', latencyMs: 0, ok: false, reason };
 }
 function adminDetailFor(
   input: FreeChainInput,
@@ -147,7 +145,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       return { ...result, latencyMs: trace.latencyMs, freeChain: trace };
     };
     try { await publishDeploymentPaidLimit(db, cfg.paidCapNanoUsd, () => store.observePaidBudgetPolicy(cfg.paidCapNanoUsd)); }
-    catch { return done(empty('all-failed', input.message, adminDetailFor(input, 'paid-budget-publish-failed'))); }
+    catch { return done(empty('all-failed', input, adminDetailFor(input, 'paid-budget-publish-failed'))); }
     const explicitLanguage = input.context.replyLanguage ?? resolveChatReplyLanguage(input.message, input.history);
     const language = replyLanguageFor(input);
     const languageInstruction = explicitLanguage ? chatReplyLanguageInstruction(explicitLanguage)
@@ -329,7 +327,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     }
     const lastTtft = [...trace.attempts].reverse().find(a => a.provider === 'cheapinf' && /timeout:/.test(a.reason));
     const ttftCapMs = lastTtft ? Number((/timeout:(?:first-token|idle|hard-cap|stream):(\d+)ms/.exec(lastTtft.reason) ?? [])[1]) : undefined;
-    const result = empty('all-failed', input.message, adminDetailFor(input, 'all-failed', trace.attempts, {
+    const result = empty('all-failed', input, adminDetailFor(input, 'all-failed', trace.attempts, {
       waitMs: Date.now() - started,
       ttftCapMs: Number.isFinite(ttftCapMs) ? ttftCapMs : undefined,
     })); input.onChunk?.(result.content, 'notice'); return done(result);
@@ -343,7 +341,9 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       : await freeChainAdmissionQueue.acquire({ uid: input.context.uid, signal: input.signal, ...cfg.queue });
     if (!admission.admitted) {
       const admReason = admission.reason === 'aborted' ? 'aborted' : 'no-provider';
-      const result = { ...empty(admReason, input.message, admReason === 'aborted' ? undefined : adminDetailFor(input, `admission:${admission.reason}`)), ...(admission.reason === 'aborted' ? { content: '' } : {}) };
+      const notice = freeChainAdmissionFailure(admission.reason, { message: input.message, history: input.history, replyLanguage: input.context.replyLanguage }).body.reply;
+      const detail = admReason === 'aborted' ? undefined : adminDetailFor(input, `admission:${admission.reason}`);
+      const result = { ...empty(admReason, input, detail, notice), ...(admReason === 'aborted' ? { content: '' } : {}) };
       const trace: FreeChainTelemetry = { requestId: randomUUID(), queueWaitMs: admission.waitedMs, admissionReason: admission.reason, rung: null, provider: 'NONE', model: 'none', attempts: [], fallbacks: 0, cacheHit: false, costUsdEstimate: null, ttftMs: null, latencyMs: admission.waitedMs, rolloutBucket: rolloutBucket(input.context.uid) };
       logFreeChain(trace);
       await persistFreeChainSample(db, trace, false);
@@ -359,7 +359,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         const early = strictFreeRequired() ? 'strict-free-required'
           : !current.enabled ? 'free-chain-disabled'
           : `config-errors:${current.errors.slice(0, 3).join(',')}`;
-        const result = empty('all-failed', input.message, adminDetailFor(input, early));
+        const result = empty('all-failed', input, adminDetailFor(input, early));
         input.onChunk?.(result.content, 'notice'); return result;
       }
       return await routeAdmitted(input, admission.waitedMs);
@@ -381,7 +381,7 @@ export async function maybeFreeChain(input: FreeChainInput): Promise<FreeChainRe
   // The existing strict router remains authoritative, including a policy change during assembly.
   if (strictFreeRequired()) return null;
   const unavailable = (earlyReason: string) => {
-    const result = empty('all-failed', input.message, adminDetailFor(input, earlyReason));
+    const result = empty('all-failed', input, adminDetailFor(input, earlyReason));
     input.onChunk?.(result.content, 'notice');
     return result;
   };

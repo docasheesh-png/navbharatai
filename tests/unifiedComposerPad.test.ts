@@ -1,4 +1,4 @@
-/** Unified pad: Type above, divider, action bar + Send outside Type (admin 2026-10-26). */
+/** Unified pad: Type with Send on its right edge; tools below; no divider (admin 2026-10-26). */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -7,21 +7,23 @@ import { COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_SLOT_CLASS } from '../src/compon
 const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
 
 describe('unified composer pad', () => {
-  it('shell keeps Type above an action bar that owns Send', () => {
+  it('shell keeps Send on the Type row, tools below without a divider', () => {
     const shell = read('src/components/chat/ComposerShell.tsx');
     const render = shell.slice(shell.indexOf('export function ComposerShell'));
-    expect(render.indexOf('{children}')).toBeLessThan(render.indexOf('data-composer-toolbar'));
-    expect(render.indexOf('data-composer-toolbar')).toBeLessThan(render.indexOf('{send}'));
+    expect(render.indexOf('{children}')).toBeLessThan(render.indexOf('{send}'));
+    expect(render.indexOf('{send}')).toBeLessThan(render.indexOf('data-composer-toolbar'));
     expect(COMPOSER_SEND_SLOT_CLASS).toContain('nb-composer-send-slot');
     expect(COMPOSER_TEXTAREA_CLASS).toContain('min-h-[40px]');
   });
 
-  it('CSS draws the pad divider and never overlays Send inside Type on phones', () => {
+  it('CSS puts Send on Type right edge and draws no pad divider', () => {
     const css = read('src/components/chat/composer.css');
-    expect(css).toContain('[data-composer-toolbar]');
-    expect(css).toContain('border-top: 1px solid');
     expect(css).toContain('nb-composer-send-slot');
-    expect(css).toContain('position: static !important');
+    expect(css).toContain('position: absolute !important');
+    expect(css).toContain('right: 8px !important');
+    expect(css).toContain('border-top: none !important');
+    expect(css).not.toMatch(/\[data-composer-toolbar\][^{]*\{[^}]*border-top:\s*1px solid/);
+    expect(css).not.toMatch(/\.nb-pro-controls[^{]*\{[^}]*border-top:\s*1px solid/);
     expect(css).toContain('nb-composer-tools-toggle { display: none !important; }');
     expect(css).toContain('position: fixed !important');
   });
@@ -30,7 +32,7 @@ describe('unified composer pad', () => {
     const css = read('src/components/chat/composer.css');
     expect(css).toContain('data-composer-surface="pro"] > .nb-composer-tools');
     expect(css).toMatch(/\[data-composer-surface="pro"\][\s\S]*nb-composer-tools-content[\s\S]*display: contents !important/);
-    expect(css).toMatch(/\[data-composer-surface="pro"\][\s\S]*\[data-route="chat"\][\s\S]*order: 1/);
+    expect(css).toMatch(/\[data-composer-surface="pro"\][\s\S]*\[data-tour="chat"\][\s\S]*order: 1/);
     expect(css).toMatch(/\[data-composer-surface="pro"\][\s\S]*\.nb-pro-controls[\s\S]*order: 2/);
   });
 
@@ -44,15 +46,18 @@ describe('unified composer pad', () => {
     expect(toolbar).toContain('Clear');
   });
 
-  it('Pro Send/Expand sit in the tools action bar, not absolute over Type', () => {
+  it('Pro Send sits inside the Type tour row, not the tools action bar', () => {
     const pro = read('src/components/agentv3/AgentV3Panel.tsx');
-    const tools = pro.slice(pro.indexOf('<MobileComposerTools'), pro.indexOf('</MobileComposerTools>'));
-    expect(tools).toContain('nb-pro-send-slot');
+    const toolsEnd = pro.indexOf('</MobileComposerTools>');
+    const tools = pro.slice(pro.indexOf('<MobileComposerTools'), toolsEnd);
+    expect(tools).not.toContain('nb-pro-send-slot');
     expect(tools).toContain('nb-pro-expand-desktop');
-    expect(tools).toContain('aria-label="Cancel request"');
-    const type = pro.slice(pro.indexOf('data-tour="chat"'), pro.indexOf('data-tour="chat"') + 5000);
-    expect(type).not.toContain('nb-pro-send-btn');
-    expect(type).not.toContain('absolute right-2');
+    const sendAt = pro.indexOf('nb-pro-send-slot');
+    expect(sendAt).toBeGreaterThan(pro.indexOf('data-tour="chat"'));
+    expect(sendAt).toBeGreaterThan(toolsEnd);
+    const sendBlock = pro.slice(sendAt, sendAt + 4000);
+    expect(sendBlock).toContain('nb-pro-send-btn');
+    expect(sendBlock).toContain('aria-label="Cancel request"');
   });
 
   it('AttachMenu stays iOS-safe for Free paperclip', () => {

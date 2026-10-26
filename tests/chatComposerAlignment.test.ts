@@ -109,10 +109,13 @@ describe('the tap targets did not shrink', () => {
     }
   });
 
-  it('in both layouts the slot pins Send to the bottom edge, so a growing message never moves it', () => {
-    expect(COMPOSER_SEND_SLOT_CLASS).toContain('self-end');
+  it('Send sits on the Type right edge (absolute) and never shrinks', () => {
+    expect(COMPOSER_SEND_SLOT_CLASS).toContain('nb-composer-send-slot');
     expect(COMPOSER_SEND_SLOT_CLASS).toContain('shrink-0');
     expect(COMPOSER_SEND_SLOT_CLASS).not.toMatch(/min-h-\[/);
+    const css = readFileSync(join(__dirname, '..', 'src/components/chat/composer.css'), 'utf8');
+    expect(css).toMatch(/\.nb-composer-send-slot[^{]*\{[^}]*position:\s*absolute/);
+    expect(css).toMatch(/\.nb-composer-send-slot[^{]*\{[^}]*right:\s*8px/);
   });
 
   it('the box at rest is taller than one rail button, so the rail (self-end) never overhangs it', () => {

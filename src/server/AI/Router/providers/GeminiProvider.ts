@@ -6,8 +6,9 @@ export class GeminiProvider implements AIProvider {
   name: 'GEMINI' = 'GEMINI';
   priority = 2;
 
-  async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string): Promise<AIProviderResponse> {
+  async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, _images?: string[], signal?: AbortSignal): Promise<AIProviderResponse> {
     assertLegacyInferenceAllowed('direct-text-provider');
+    signal?.throwIfAborted();
     console.log(`[GeminiProvider] Entry. Key present: ${!!process.env.GEMINI_API_KEY}, Length: ${process.env.GEMINI_API_KEY?.length}`);
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
     const startTime = Date.now();
@@ -16,6 +17,7 @@ export class GeminiProvider implements AIProvider {
 
     try {
         const config: any = {};
+        if (signal) config.abortSignal = signal;
         if (systemPrompt) config.systemInstruction = systemPrompt;
         if (schema) { config.responseMimeType = "application/json"; config.responseSchema = schema; }
         const result = await ai.models.generateContent({ model: model, contents: prompt, config: Object.keys(config).length ? config : undefined });

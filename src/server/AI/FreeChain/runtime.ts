@@ -212,6 +212,15 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       const controller = new AbortController(); const abort = () => controller.abort(); input.signal?.addEventListener('abort', abort, { once: true });
       if (input.signal?.aborted) abort();
       let content = ''; let response: AIProviderResponse | undefined; let completeUsage = false; let partial = false;
+      // The watchdog bounds observation, not provider lifetime. Transfer BOTH acquired slots to
+      // the original attempt promise, so an uncooperative SDK cannot free capacity by timing out.
+      let physical: Promise<void> | undefined;
+      let slotsReleased = false;
+      const releaseAcquiredSlots = () => {
+        if (slotsReleased) return;
+        slotsReleased = true;
+        releaseSlot(capacityName); releaseRungSlot(cfg, id);
+      };
       // Trusted watchdog metadata belongs to this attempt, not to the frozen provider error.
       let watchdogDetail: string | undefined;
       try {
@@ -256,24 +265,30 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           if (!reservation?.mayDispatch) { attempt.reason = 'budget'; continue; }
         }
         if (controller.signal.aborted) { attempt.reason = 'aborted'; break; }
-        const execute = async (chunk: (value: string) => void) => {
-          attempt.entered = true;
-          if (id === 'openrouter') {
-            const stickyRef = controlRef(db).collection('sticky').doc(input.context.conversationKey);
-            const sticky = (await stickyRef.get()).data();
-            response = await runRegistryRung({ ...prepared, maxOutputTokens: rung.maxOutputTokens, signal: controller.signal, onChunk: chunk }, cfg.openRouterModels, sticky && typeof sticky.expiresAt === 'number' && sticky.expiresAt > Date.now() && typeof sticky.model === 'string' ? sticky.model : undefined);
-            completeUsage = !!response.usage;
-            await stickyRef.set({ model: response.model, expiresAt: Date.now() + 86400000, expireAt: new Date(Date.now() + 86400000) });
-          } else {
-            const provider = new OpenAiCompatProvider({ provider: names[id] as ConstructorParameters<typeof OpenAiCompatProvider>[0]['provider'], key: rung.key, envName: rung.keyEnv, model: rung.model, baseURL: rung.baseURL, priority: cfg.order.indexOf(id), maxOutputTokens: rung.maxOutputTokens, timeoutMs: 90000, streamUsage: rung.streamUsage,
-              ...(id === 'gemini' || id === 'geminipaid' ? { extraBody: { reasoning_effort: 'none' } } : id === 'gpt5nano' ? { extraBody: { reasoning_effort: 'minimal' } }
-                // With the reply cap on, GLM thinking would spend the whole budget on hidden tokens.
-                : cfg.features.outputCap && (id === 'glm45' || id === 'glm47' || id === 'glmflashx') ? { extraBody: { thinking: { type: 'disabled' } } } : {}) });
-            const result = await provider.executeTurn({ ...prepared, signal: controller.signal, onChunk: chunk }); response = result; completeUsage = result.completeUsage;
-            if (typeof result.cachedInputTokens === 'number') trace.cachedInputTokens = result.cachedInputTokens;
-            const remaining = Number(result.rateLimitHeaders['x-ratelimit-remaining-requests']);
-            if (id === 'groq' && remaining === 0) await store.cooldown(accountId(id), Date.now() + durationMs(result.rateLimitHeaders['x-ratelimit-reset-requests'], 86400000));
-          }
+        const execute = (chunk: (value: string) => void): Promise<void> => {
+          physical = Promise.resolve().then(async () => {
+            if (controller.signal.aborted) throw new FreeChainProviderError('ABORTED');
+            attempt.entered = true;
+            if (id === 'openrouter') {
+              const stickyRef = controlRef(db).collection('sticky').doc(input.context.conversationKey);
+              const sticky = (await stickyRef.get()).data();
+              response = await runRegistryRung({ ...prepared, maxOutputTokens: rung.maxOutputTokens, signal: controller.signal, onChunk: chunk }, cfg.openRouterModels, sticky && typeof sticky.expiresAt === 'number' && sticky.expiresAt > Date.now() && typeof sticky.model === 'string' ? sticky.model : undefined);
+              completeUsage = !!response.usage;
+              await stickyRef.set({ model: response.model, expiresAt: Date.now() + 86400000, expireAt: new Date(Date.now() + 86400000) });
+            } else {
+              const provider = new OpenAiCompatProvider({ provider: names[id] as ConstructorParameters<typeof OpenAiCompatProvider>[0]['provider'], key: rung.key, envName: rung.keyEnv, model: rung.model, baseURL: rung.baseURL, priority: cfg.order.indexOf(id), maxOutputTokens: rung.maxOutputTokens, timeoutMs: 90000, streamUsage: rung.streamUsage,
+                ...(id === 'gemini' || id === 'geminipaid' ? { extraBody: { reasoning_effort: 'none' } } : id === 'gpt5nano' ? { extraBody: { reasoning_effort: 'minimal' } }
+                  // With the reply cap on, GLM thinking would spend the whole budget on hidden tokens.
+                  : cfg.features.outputCap && (id === 'glm45' || id === 'glm47' || id === 'glmflashx') ? { extraBody: { thinking: { type: 'disabled' } } } : {}) });
+              const result = await provider.executeTurn({ ...prepared, signal: controller.signal, onChunk: chunk }); response = result; completeUsage = result.completeUsage;
+              if (typeof result.cachedInputTokens === 'number') trace.cachedInputTokens = result.cachedInputTokens;
+              const remaining = Number(result.rateLimitHeaders['x-ratelimit-remaining-requests']);
+              if (id === 'groq' && remaining === 0) await store.cooldown(accountId(id), Date.now() + durationMs(result.rateLimitHeaders['x-ratelimit-reset-requests'], 86400000));
+            }
+          });
+          // Observe late rejection as well as success; never detach a rejecting finally promise.
+          void physical.then(releaseAcquiredSlots, releaseAcquiredSlots);
+          return physical;
         };
         // Beam (and other cheapinf models) may stream reasoning before delta.content.
           // Free-chat default FREE_CHAIN_TTFT_MS=6s was killing exclusive admin as cheapinf:timeout.
@@ -322,7 +337,11 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         if (partial || content) { trace.rung = id; if (!input.onChunk) content += '\n\nThe response was interrupted. Please try again.'; return done({ content, provider: names[id], model: response?.model ?? rung.model, latencyMs: 0, ok: true, reason: 'stalled' }); }
         if (safe?.code === 'SAFETY_REFUSAL' || safe?.code === 'INVALID_REQUEST' || safe?.code === 'POLICY_BLOCKED' || safe?.code === 'ABORTED' || input.signal?.aborted) break;
       } finally {
-        controller.abort(); input.signal?.removeEventListener('abort', abort); releaseSlot(capacityName); releaseRungSlot(cfg, id);
+        controller.abort(); input.signal?.removeEventListener('abort', abort);
+        if (!physical) releaseAcquiredSlots(); // a refusal before dispatch still owns both slots
+        // Only a newly granted, never-entered daily hold proves zero cost. A duplicate receipt may
+        // belong to an already-running call; an ambiguous/entered call remains fully booked.
+        if (reservation?.mayDispatch === true && !attempt.entered) await store.settlePaid(reservation, 0).catch(() => false);
         // Never-dispatched holds are released; a dispatched call with unknown cost stays fully booked.
         if (monthHold && !monthSettled) await settleMonthly(db, monthHold.month, monthHold.amount, attempt.entered ? null : 0);
       }

@@ -34,8 +34,9 @@ export class AnthropicProvider implements AIProvider {
     this.client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   }
 
-  async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[]): Promise<AIProviderResponse> {
+  async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[], signal?: AbortSignal): Promise<AIProviderResponse> {
     assertLegacyInferenceAllowed('direct-text-provider');
+    signal?.throwIfAborted();
     const startTime = Date.now();
     const model = modelOverride || this.modelId;
 
@@ -72,7 +73,7 @@ export class AnthropicProvider implements AIProvider {
       createParams.thinking = { type: 'enabled', budget_tokens: this.thinkingBudget };
     }
 
-    const response = await this.client.messages.create(createParams);
+    const response = await this.client.messages.create(createParams, signal ? { signal } : undefined);
 
     const textBlock = response.content.find((b: any) => b.type === 'text') as Anthropic.TextBlock | undefined;
     const content = textBlock?.text ?? '';

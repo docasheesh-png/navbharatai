@@ -76,7 +76,7 @@ export interface AIProvider {
    * Claude is reached only if the Grok/Gemini/Vertex race fails.
    */
   lastResort?: boolean;
-  execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[]): Promise<AIProviderResponse>;
+  execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[], signal?: AbortSignal): Promise<AIProviderResponse>;
   healthCheck(): Promise<boolean>;
   /**
    * Stream a reply.

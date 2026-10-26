@@ -51,6 +51,7 @@ import {
   ADMIN_WELCOME_GIFT_TOKENS, ADMIN_WELCOME_GIFT_RUPEES, BULK_WELCOME_GIFT_MAX, NEW_USER_MAX_DAYS,
 } from '../lib/adminWelcomeGift';
 import { audit } from '../lib/audit';
+import { previewAdminGiftReclassification, confirmAdminGiftReclassification, AdminGiftReclassificationError } from '../lib/adminGiftReclassification';
 import { readAdminReason, readTokenDelta, broadcastScopeConfirmed } from '../../lib/adminActionReason';
 import { isRestorableStatus, restoredStatusFor, ownerModerationTargets, MAX_OWNER_MODERATION, type OwnerAction } from '../../lib/adminAppModeration';
 import { WORKSPACE_UID_RE } from '../lib/workspaceIdentity';
@@ -2479,6 +2480,32 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     } catch (e: any) {
       console.error('[ADMIN] unified wallet sweep failed:', e?.message);
       res.status(500).json({ error: 'Internal server error.' });
+    }
+  });
+
+  // Separate from adding tokens: preview is read-only; confirmation changes existing gift eligibility only.
+  app.post('/api/admin/users/:userId/weak-credit/preview', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const { userId } = routeParams(req.params);
+      const preview = await previewAdminGiftReclassification(getDb(), userId, req.body?.amount);
+      res.json({ ok: true, preview });
+    } catch (e: any) {
+      res.status(e instanceof AdminGiftReclassificationError ? e.status : 500).json({ ok: false,
+        error: e instanceof AdminGiftReclassificationError ? e.message : 'Could not read this wallet. No balance or credit was changed.' });
+    }
+  });
+  app.post('/api/admin/users/:userId/weak-credit/confirm', verifyAdminToken, async (req: Request, res: Response) => {
+    const { userId } = routeParams(req.params);
+    try {
+      const outcome = await confirmAdminGiftReclassification(getDb(), { userId, amount: req.body?.amount,
+        fingerprint: req.body?.fingerprint, requestId: req.body?.requestId, reason: req.body?.reason }, new Date().toISOString());
+      audit('ADMIN_GIFT_RECLASSIFY', { admin: adminUsername(), userId, ...outcome, reason: req.body?.reason, result: 'ok', ip: req.ip });
+      res.json({ ok: true, ...outcome });
+    } catch (e: any) {
+      audit('ADMIN_GIFT_RECLASSIFY', { admin: adminUsername(), userId, result: 'failed', ip: req.ip });
+      res.status(e instanceof AdminGiftReclassificationError ? e.status : 500).json({ ok: false,
+        outcomeUnknown: !(e instanceof AdminGiftReclassificationError),
+        error: e instanceof AdminGiftReclassificationError ? e.message : 'Confirmation status is unknown. Retry the same request ID to check it safely.' });
     }
   });
 

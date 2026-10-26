@@ -20,6 +20,7 @@ const root = join(__dirname, '..');
 
 /** method + path → why it needs no audit line. Kept in step with adminActionsNeedAReason.test.ts. */
 const NO_AUDIT_NEEDED: Record<string, string> = {
+  'post /api/admin/users/:userId/weak-credit/preview': 'read-only canonical gift eligibility preview; runtime regression proves zero wallet/op writes; separate explicit confirmation remains audited',
   'post /api/admin/inference-gateway/setup/preview': 'read-only bounded review preview; prepare returns before transaction writes, with zero-write regression; the separate review commit remains audited',
   'post /api/admin/all-builds/numbers': 'read-only chronological metadata projection; no report, account or triage mutation',
   'post /api/admin/insights/query': 'computes an answer from live metrics; changes nothing',
@@ -64,6 +65,12 @@ describe('every admin-guarded write is audited, whichever file it lives in', () 
   it('has no admin decision without an audit line', () => {
     const missing = routes.filter((r) => !r.body.includes('audit(') && !(r.key in NO_AUDIT_NEEDED)).map((r) => `${r.file}: ${r.key}`);
     expect(missing).toEqual([]);
+  });
+
+  it('keeps existing-gift confirmation inside the mandatory audit census', () => {
+    const key = 'post /api/admin/users/:userId/weak-credit/confirm';
+    expect(NO_AUDIT_NEEDED).not.toHaveProperty(key);
+    expect(routes.find(r => r.key === key)?.body).toContain('audit(');
   });
 
   it('keeps no stale exemption', () => {

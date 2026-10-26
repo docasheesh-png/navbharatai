@@ -159,7 +159,7 @@ export function maskWalletForView(data: Record<string, unknown>, paused: boolean
       giftTokensRemaining: admin, adminBuildTokensRemaining: admin, freeGiftedTokens: 0,
       freeTrialEnded: false, freeTrialEndedMessage: undefined,
       walletLedger: ledger.filter((r) => r && typeof r.adminBuildTokensDelta === 'number' && r.adminBuildTokensDelta !== 0)
-        .map((r) => ({ ...r, amountCoinsOrTokens: r.adminBuildTokensDelta })),
+        .map((r) => ({ ...r, amountCoinsOrTokens: r.type === 'admin_reclassification' ? 0 : r.adminBuildTokensDelta })),
       // The mixed historical opening cannot be split safely. The statement reports unknown instead
       // of inventing a reconciliation for rolled-off promotional history.
       ledgerOpeningTokens: undefined,

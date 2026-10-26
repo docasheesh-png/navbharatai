@@ -4,6 +4,8 @@ const m = vi.hoisted(() => ({ reserve: vi.fn(), renew: vi.fn(), settle: vi.fn(),
 vi.mock('./freeAnswerQuotaStore', async original => ({ ...await original<typeof import('./freeAnswerQuotaStore')>(), FreeAnswerQuotaStore: class { reserve=m.reserve; renew=m.renew; settle=m.settle; status=m.status; } }));
 vi.mock('./authMiddleware', () => ({ verifyFirebaseToken: m.identify, rateLimiter: m.limiter }));
 import { FreeAnswerQuotaWindowChangedError } from './freeAnswerQuotaStore';
+import { chatAvailabilityMessage } from './chatAvailabilityMessage';
+import { consumeChatResponseStream } from '../../lib/chatResponseStream';
 import { withFreeAnswerQuota, markFreeAnswer, freeAnswerSignal, registerFreeAnswerQuotaRoutes } from './freeAnswerQuota';
 function fixture() { const req: any = { headers: {}, socket: { remoteAddress: '127.0.0.1' } }; const res: any = new EventEmitter(); res.status=vi.fn(() => res); res.json=vi.fn(); res.setHeader=vi.fn(); return {req,res}; }
 beforeEach(() => { vi.clearAllMocks(); m.identify.mockResolvedValue('verified'); m.renew.mockResolvedValue(true); m.settle.mockResolvedValue(true); m.limiter.mockImplementation(() => (_req: unknown, _res: unknown, next: () => void) => next()); m.reserve.mockImplementation(async()=>({ allowed:true, reservation:{id:'id',owner:'owner',startedAt:Date.now(),deadlineAt:Date.now()+90000,leaseExpiresAt:Date.now()+30000},status:{} })); });
@@ -124,4 +126,29 @@ it('classifies a midnight admission refusal internally without disclosing detail
   expect(res.json).toHaveBeenCalledWith(expect.objectContaining({code:'FREE_ANSWER_UNAVAILABLE'}));
   expect(JSON.stringify(res.json.mock.calls)).not.toContain('daily quota boundary');
  } finally {warning.mockRestore();}
+});
+
+
+it.each([
+ {name:'carried Hindi',replyLanguage:'hi',body:{message:'mujhe ek sawal poochna hai',replyLanguage:'hi'}},
+ {name:'carried Tamil',replyLanguage:'ta',body:{message:'mujhe ek sawal poochna hai',replyLanguage:'ta'}},
+ {name:'current Tamil override',replyLanguage:'ta',body:{message:'For this answer only, reply in Tamil',replyLanguage:'hi'}},
+ {name:'persistent Hindi history',replyLanguage:'hi',body:{message:'What next?',history:[{sender:'user',text:'Reply in Hindi'}]}},
+])('keeps a timed-out settlement terminal localized via $name with no successful DONE or replay', async ({replyLanguage,body}) => {
+ vi.useFakeTimers(); const {req,res}=fixture(); const settlement=deferred<boolean>();
+ req.body=body;
+ res.headersSent=true; res.writableEnded=false;
+ const end=vi.fn((_body: string)=>{res.writableEnded=true;return res;}); res.end=end; res.write=vi.fn(()=>true);
+ m.settle.mockReturnValueOnce(settlement.promise);
+ const pending=withFreeAnswerQuota(req,res,async()=>{markFreeAnswer(req);res.write('data: {"c":"partial"}\n\n');res.end('data: [DONE]\n\n');});
+ await flush(); expect(m.settle).toHaveBeenCalledOnce(); expect(end).not.toHaveBeenCalled();
+ await vi.advanceTimersByTimeAsync(5_000); await pending;
+ const reply=chatAvailabilityMessage('temporary',{replyLanguage});
+ expect(end).toHaveBeenCalledOnce();
+ const wire=end.mock.calls[0][0];
+ expect(wire).not.toMatch(/\[DONE\]|API|provider|budget|diagnostic|traffic|busy/i);
+ expect((await consumeChatResponseStream(new Response(wire).body!,true,vi.fn())).failure)
+  .toEqual({code:'FREE_ANSWER_UNAVAILABLE',message:reply,partial:true});
+ expect(m.settle.mock.calls[0][1]).toBe('answered');expect(vi.getTimerCount()).toBe(0);
+ settlement.resolve(true);await flush();expect(end).toHaveBeenCalledOnce();expect(m.settle).toHaveBeenCalledOnce();
 });

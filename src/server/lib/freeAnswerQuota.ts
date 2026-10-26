@@ -1,4 +1,5 @@
 import { confirmedFreeAnswerSettlement, stageFreeAnswerCompletion } from './freeAnswerCompletion';
+import { chatAvailabilityMessage } from './chatAvailabilityMessage';
 import { runWithFreeAnswerContext } from './freeAnswerQuotaContext';
 /** User answer credits are independent from provider usage, money holds and routing. */
 import { randomUUID } from 'node:crypto';
@@ -79,7 +80,10 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
     }
     const lease={controller,leaseUntil:reserved.reservation.leaseExpiresAt,answered:false,failed:false,disconnected};
     leases.set(req,lease);
-    const completion=stageFreeAnswerCompletion(res);
+    // Resolve once; only safe catalogue copy, not request/diagnostic data, crosses the terminal barrier.
+    const completion=stageFreeAnswerCompletion(res,chatAvailabilityMessage('temporary',{
+      message:req.body?.message,history:req.body?.history,replyLanguage:req.body?.replyLanguage,
+    }));
     let runCompleted=false;
     let renewing=false;
     let finished=false;

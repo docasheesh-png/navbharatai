@@ -8,12 +8,14 @@ vi.mock('./surplusAdmitCircuit', () => ({
   recordSurplusMidBuildDeath: (...a: unknown[]) => circuitMocks.death(...a),
   recordSurplusAdmitProbeSuccess: (...a: unknown[]) => circuitMocks.success(...a),
 }));
-import { PublicBuildEngineError, PUBLIC_BUILD_ENGINE_UNAVAILABLE } from '../../lib/buildEngineError';
+import { PublicBuildEngineError, PUBLIC_BUILD_ENGINE_UNAVAILABLE, PUBLIC_BUILD_ENGINE_TIMEOUT } from '../../lib/buildEngineError';
 import { SurplusBuildTransportError } from './transport';
 import {
   shouldFailOpenSurplusPreWrite,
   surplusPreWriteFailOpenReason,
   isSurplusPublicBuildEngineFailure,
+  isPublicBuildEngineUnavailableText,
+  tryConsumeSurplusPreWriteFailOpen,
   wrapSurplusRunnerPreWriteFailOpen,
   isSurplusPreWriteFailOpenReason,
   allSafeSurplusFailOpenReasons,
@@ -202,6 +204,64 @@ describe('wrapSurplusRunnerPreWriteFailOpen', () => {
     await expect(wrapped.runTurn(params())).resolves.toMatchObject({ text: 'ok' });
     expect(onFailOpen).toHaveBeenCalledExactlyOnceWith('mid_build_engine_unavailable');
     expect(circuitMocks.death).toHaveBeenCalledExactlyOnceWith('mid_build_engine_unavailable');
+    expect(weakRun).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe('isPublicBuildEngineUnavailableText (AgentRunner soft-scrub)', () => {
+  it('matches UNAVAILABLE, TIMEOUT, and Error: prefixed soft summaries', () => {
+    expect(isPublicBuildEngineUnavailableText(PUBLIC_BUILD_ENGINE_UNAVAILABLE)).toBe(true);
+    expect(isPublicBuildEngineUnavailableText(PUBLIC_BUILD_ENGINE_TIMEOUT)).toBe(true);
+    expect(isPublicBuildEngineUnavailableText(`Error: ${PUBLIC_BUILD_ENGINE_UNAVAILABLE}`)).toBe(true);
+    expect(isPublicBuildEngineUnavailableText('Stopped — the build was asked to stop')).toBe(false);
+  });
+});
+
+describe('tryConsumeSurplusPreWriteFailOpen (non-throw scrub path)', () => {
+  it('night A/B: soft summary string with Files=0 consumes mid_build_engine_unavailable once', () => {
+    const onFailOpen = vi.fn();
+    const hooks = { state: { dropped: false }, userFilesWritten: () => 0, onFailOpen };
+    const reason = tryConsumeSurplusPreWriteFailOpen(
+      hooks,
+      `Error: ${PUBLIC_BUILD_ENGINE_UNAVAILABLE}`,
+    );
+    expect(reason).toBe('mid_build_engine_unavailable');
+    expect(hooks.state.dropped).toBe(true);
+    expect(onFailOpen).toHaveBeenCalledExactlyOnceWith('mid_build_engine_unavailable');
+    expect(tryConsumeSurplusPreWriteFailOpen(hooks, `Error: ${PUBLIC_BUILD_ENGINE_UNAVAILABLE}`)).toBeNull();
+  });
+
+  it('does not consume when model-authored files already exist', () => {
+    const onFailOpen = vi.fn();
+    const hooks = { state: { dropped: false }, userFilesWritten: () => 2, onFailOpen };
+    expect(tryConsumeSurplusPreWriteFailOpen(hooks, new PublicBuildEngineError())).toBeNull();
+    expect(hooks.state.dropped).toBe(false);
+    expect(onFailOpen).not.toHaveBeenCalled();
+  });
+
+  it('duck-types DISCOUNT_BUILD_UNAVAILABLE when instanceof misses', () => {
+    const onFailOpen = vi.fn();
+    const hooks = { state: { dropped: false }, userFilesWritten: () => 0, onFailOpen };
+    const duck = Object.assign(new Error(PUBLIC_BUILD_ENGINE_UNAVAILABLE), { code: 'DISCOUNT_BUILD_UNAVAILABLE' });
+    expect(isSurplusPublicBuildEngineFailure(duck)).toBe(true);
+    expect(tryConsumeSurplusPreWriteFailOpen(hooks, duck)).toBe('mid_build_engine_unavailable');
+  });
+});
+
+describe('wrapSurplusRunnerPreWriteFailOpen after soft consume', () => {
+  it('routes subsequent turns to Weak once scrub path already dropped Surplus', async () => {
+    const surplusRun = vi.fn(async () => emptyTurn());
+    const weakRun = vi.fn(async () => emptyTurn());
+    const hooks = { state: { dropped: false }, userFilesWritten: () => 0 };
+    tryConsumeSurplusPreWriteFailOpen(hooks, `Error: ${PUBLIC_BUILD_ENGINE_UNAVAILABLE}`);
+    const wrapped = wrapSurplusRunnerPreWriteFailOpen(
+      { runTurn: surplusRun } as TurnRunner,
+      () => ({ runTurn: weakRun } as TurnRunner),
+      hooks,
+    );
+    await wrapped.runTurn(params());
+    expect(surplusRun).not.toHaveBeenCalled();
     expect(weakRun).toHaveBeenCalledOnce();
   });
 });

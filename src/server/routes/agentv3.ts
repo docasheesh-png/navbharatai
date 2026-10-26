@@ -5,7 +5,7 @@ import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
 import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
-import { wrapSurplusRunnerPreWriteFailOpen, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
+import { wrapSurplusRunnerPreWriteFailOpen, tryConsumeSurplusPreWriteFailOpen, isPublicBuildEngineUnavailableText, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakScopeChatTerminal, weakScopeCatchResult } from '../AgentV3/weakScopeTerminal';
@@ -14532,6 +14532,16 @@ async function noteBuildOutcome(
 
       for (const row of earlySurplusRecords) buildDiag.recordLlmCall(row);
       for (const turn of earlySurplusTurns) captureTurnUsage('SURPLUS', turn.usage, turn.model, turn.usage.cacheReadInputTokens, turn.usage.cacheCreationInputTokens);
+      // Night A/B autopsy (prod 04948 / #3964): scope classification uses unwrapped
+      // `session.runner()` — LLM_CALL_FAILED is recorded, admitWeakBuild swallows the
+      // throw, and Surplus stays admitted into a poisoned session. Drop Surplus HERE
+      // (before any build runner) so Weak owns the build; throw-only wrap never saw scope.
+      if (surplusSession && earlySurplusRecords.some((r) => r.ok === false)) {
+        tryConsumeSurplusPreWriteFailOpen(
+          surplusPreWriteFailOpen,
+          'The build engine is temporarily unavailable. Please try again shortly.',
+        );
+      }
       const fastLaneDeadRungs = new Map<string, string>();
       // 🔴 THE FLAG THAT WENT NOWHERE (autopsy e706e068, School ERP). `buildIsComplex` was computed,
       // logged, and spread into `baseRunnerOpts` — the AgentRunner's options, which never read it —
@@ -19440,7 +19450,7 @@ async function noteBuildOutcome(
             events.emit({ type: 'narration', agent: 'architect', text: surplusSession ? (repairing ? 'Repairing the issues found by the review…' : 'Continuing the build on its selected engine…') : repairing ? 'Bringing in NavBharatAI\'s stronger engine to fix what the review found…' : 'Bringing in NavBharatAI\'s stronger engine to finish the build…', ts: Date.now() });
             const escRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner({ surplusSession, tier: powerLevelReqEffective, fromProvider: tier === 'opus' ? 'CLAUDE_OPUS' : 'CLAUDE', noClaude: noClaudeBuild, deadRungs: fastLaneDeadRungs, bench: buildBench, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage, onProviderError: (name, err) => { try { buildDiag.recordProviderFailure(name, err); } catch { /* best-effort */ } } }),
+              client: buildTurnRunner({ surplusSession, surplusPreWriteFailOpen, tier: powerLevelReqEffective, fromProvider: tier === 'opus' ? 'CLAUDE_OPUS' : 'CLAUDE', noClaude: noClaudeBuild, deadRungs: fastLaneDeadRungs, bench: buildBench, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage, onProviderError: (name, err) => { try { buildDiag.recordProviderFailure(name, err); } catch { /* best-effort */ } } }),
               // Opus ONLY in power mode — a power-off escalation caps at Sonnet, never Opus
               // (admin rule 2026-06-28). Escalation only runs in normal mode anyway.
               model: resolveModel(tier === 'opus' && onlyOpus),
@@ -19579,7 +19589,28 @@ async function noteBuildOutcome(
         result = await runner.run(buildPrompt);
       }
       // result is always set here (OneShot, escalation, or the loop above).
-      if (!result) result = await runner.run(buildPrompt);
+      // Night A/B scrub path: AgentRunner catches PublicBuildEngineError and soft-returns
+      // `{ok:false, summary:"Error: The build engine is temporarily unavailable…"}` — that
+      // never re-enters wrapSurplusRunnerPreWriteFailOpen's catch. If Surplus was still live
+      // and Files=0, consume fail-open and converge ONCE more (wrap routes via state.dropped
+      // to Weak). Same single convergence statement — no second builder call site
+      // (keeps aPlatformWriterIsNeverTheModel + buildOutcomeWiring census green).
+      for (let scrubRetry = 0; scrubRetry < 2; scrubRetry++) {
+        if (!result) result = await runner.run(buildPrompt);
+        if (
+          scrubRetry > 0
+          || !result || result.ok !== false
+          || surplusPreWriteFailOpen.state.dropped
+          || !isPublicBuildEngineUnavailableText(result.summary)
+          || modelAuthoredPaths(writtenFiles).length !== 0
+          || !tryConsumeSurplusPreWriteFailOpen(surplusPreWriteFailOpen, result.summary ?? '')
+        ) break;
+        // Parentheses so heal-assignment census (theCalculatorsHelpersHadNoHome) does not
+        // treat this as a raw `result = <ident>;` replace — only empty-build `retry` may.
+        result = undefined as unknown as typeof result;
+      }
+      // Loop exits only after the convergence statement set `result`.
+      result = result!;
       // …and the architect's loop, and with it OUR style pass, is over.
       closeStylePassWindow(stylePassWindow, Date.now());
 

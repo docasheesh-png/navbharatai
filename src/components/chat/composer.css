@@ -40,7 +40,7 @@
   height: auto !important;
   min-height: 44px;
   padding: 6px 8px 8px !important;
-  border-top: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  border-top: 1px solid var(--color-line, var(--border-soft, #cbd5e1)) !important;
   overflow: visible;
 }
 
@@ -141,6 +141,19 @@
   gap: 0;
 }
 
+/*
+ * MobileComposerTools wraps ChatToolbar + tools BEFORE Type in the DOM. The shared
+ * .nb-composer-tools-content { display:flex } rule turns that wrapper into ONE flex
+ * item, so CSS order on .nb-pro-controls / [data-route=chat] never runs and desktop
+ * Pro stays tools-above-Type. Flatten the wrappers so order works (Type=1, tools=2).
+ */
+.nb-composer-box[data-composer-surface="pro"] > .nb-composer-tools,
+.nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content,
+.nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content[data-open="true"],
+.nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content[data-open="false"] {
+  display: contents !important;
+}
+
 .nb-composer-box[data-composer-surface="pro"] .nb-pro-controls {
   order: 2 !important;
   display: flex !important;
@@ -151,7 +164,7 @@
   min-height: 44px;
   max-width: none;
   padding: 6px 8px 8px !important;
-  border-top: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  border-top: 1px solid var(--color-line, var(--border-soft, #cbd5e1)) !important;
   overflow: visible !important;
 }
 
@@ -224,6 +237,12 @@
   }
   .nb-composer-box[data-composer-surface="pro"] .nb-composer-text {
     max-height: min(160px, 30dvh) !important;
+  }
+  /* Circular pad Send is the primary control — hide the duplicate ↵ Send chip on desktop.
+     Search / Clear chips stay. */
+  .nb-send-enter-toggle,
+  [data-send-enter-toggle] {
+    display: none !important;
   }
 }
 

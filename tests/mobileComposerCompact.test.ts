@@ -179,7 +179,9 @@ describe('mobile tools and desktop layout contract', () => {
     const pro = sourceText('src/components/agentv3/AgentV3Panel.tsx');
     const toolsStart = pro.indexOf('<MobileComposerTools');
     const toolsEnd = pro.indexOf('</MobileComposerTools>');
-    expect(toolsEnd).toBeGreaterThan(pro.indexOf('<ChatToolbar', toolsStart));
+    // Search/Clear sit above the pad (like Free); circular Send stays in the tools bar.
+    expect(pro.indexOf('<ChatToolbar')).toBeGreaterThan(-1);
+    expect(pro.indexOf('<ChatToolbar')).toBeLessThan(toolsStart);
     const toolsBlock = pro.slice(toolsStart, toolsEnd);
     expect(toolsBlock).toContain('nb-pro-send-slot');
     expect(toolsBlock).toContain('aria-label="Cancel request"');

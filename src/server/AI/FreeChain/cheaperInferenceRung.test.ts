@@ -50,6 +50,16 @@ describe('CheaperInference FreeChain paid rung (simple mode)', () => {
     expect(rung.reason).toBeUndefined();
   });
 
+  it('accepts the versioned Reflection beam catalog id', () => {
+    const rung = freeChainConfig({
+      CHEAPERINFERENCE: 'admin',
+      CHEAPERINFERENCE_API_KEY: 'ci_live_test_key',
+      CHEAPERINFERENCE_MODEL: 'beam-1.0-501b-a23b',
+    }).rungs.find(r => r.id === 'cheapinf')!;
+    expect(rung.reason).toBeUndefined();
+    expect(rung.model).toBe('beam-1.0-501b-a23b');
+  });
+
   it('rejects unknown CheaperInference model ids', () => {
     const rung = freeChainConfig({
       CHEAPERINFERENCE: 'all',

@@ -263,6 +263,37 @@ describe('free chat chain central dispatch', () => {
   expect(result?.content).toContain('[admin diagnostic]');
   expect(result?.content).toMatch(/circuit:last=auth:http=401:remain=\d+s/);
  });
+ it('CHEAPERINFERENCE=admin waits 60s for first content and labels timeout:first-token', async () => {
+  vi.useFakeTimers();
+  vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  vi.stubEnv('FREE_CHAIN_MONTHLY_CAP_ENABLED', 'off');
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  m.execute.mockImplementation(async (arg: { onChunk?: (s: string) => void; signal?: AbortSignal }) => {
+    await new Promise<never>((_resolve, reject) => {
+      const fail = () => reject(new FreeChainProviderError('ABORTED'));
+      if (arg.signal?.aborted) return fail();
+      arg.signal?.addEventListener('abort', fail, { once: true });
+    });
+  });
+  const pending = maybeFreeChain({
+    ...input(),
+    message: 'slow beam',
+    context: { ...input().context, isAdmin: true },
+  });
+  // Old FREE_CHAIN_TTFT_MS=6s would have failed here; exclusive admin must still be waiting.
+  await vi.advanceTimersByTimeAsync(7_000);
+  expect(m.execute).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(54_000); // 61s total ≥ 60s first-token cap
+  const result = await pending;
+  expect(result?.ok).toBe(false);
+  expect(result?.content).toContain('[admin diagnostic]');
+  expect(result?.content).toMatch(/timeout:first-token:60000ms/);
+  expect(result?.content).toMatch(/ttftCapMs=60000/);
+  expect(result?.content).toMatch(/waitMs=/);
+ });
+
  it('non-admin chain still skips open circuit without probing', async () => {
   vi.stubEnv('CHEAPERINFERENCE', 'all');
   vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');

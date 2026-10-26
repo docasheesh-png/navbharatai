@@ -18,7 +18,22 @@ import { isAdminEmail } from './adminEmails';
 import type { GrantEmail } from '../AgentV3/featureFlag';
 
 export const CHEAPERINFERENCE_BASE_URL = 'https://api.cheaperinference.com/v1';
-export const CHEAPERINFERENCE_CHAT_MODEL_CANDIDATES = ['beam', 'deepseek-v4.1-flash-1017'] as const;
+export const CHEAPERINFERENCE_CHAT_MODEL_CANDIDATES = ['beam', 'beam-1.0-501b-a23b', 'deepseek-v4.1-flash-1017'] as const;
+/**
+ * Beam (Reflection) is a reasoning model. Catalog TTFT p90 ~5s is for first provider byte;
+ * FreeChain only counts delta.content, so reasoning-before-content can burn the free-chat
+ * 6s TTFT watchdog and surface as cheapinf:timeout. Exclusive admin waits longer.
+ */
+export const CHEAPERINFERENCE_ADMIN_FIRST_TOKEN_MS = 60_000;
+/** Paid/all path still longer than free GLM/Groq, but not as patient as exclusive admin. */
+export const CHEAPERINFERENCE_PAID_FIRST_TOKEN_MS = 30_000;
+
+/** First-content grace for the cheapinf rung. Exclusive admin gets the long window. */
+export function cheapinfFirstTokenMs(exclusiveAdmin: boolean, freeChainTtftMs = 6_000): number {
+  const floor = exclusiveAdmin ? CHEAPERINFERENCE_ADMIN_FIRST_TOKEN_MS : CHEAPERINFERENCE_PAID_FIRST_TOKEN_MS;
+  const base = Number.isFinite(freeChainTtftMs) ? Math.max(0, Math.floor(freeChainTtftMs)) : 0;
+  return Math.max(floor, base);
+}
 export const CHEAPERINFERENCE_INDICATIVE_BEAM_USD_PER_MTOK = { input: 0.006, output: 0.022 } as const;
 
 export type CheaperInferenceMode = 'off' | 'admin' | 'all';

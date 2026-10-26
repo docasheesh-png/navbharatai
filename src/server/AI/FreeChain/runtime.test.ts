@@ -8,7 +8,14 @@ vi.mock('./cache', async original => ({ ...(await original<typeof import('./cach
 vi.mock('./store', () => ({ FreeChainStore: class { observePaidBudgetPolicy = m.observeBudget; setPaidBudgetPolicy = m.setBudget; reserveQuota = m.reserve; reservePaid = m.paid; settlePaid = m.settle; cooldown = m.cooldown; quotaSnapshot = m.quota; spendSnapshot = m.spend; } }));
 vi.mock('./providers/openAiCompatProvider', () => ({
  OpenAiCompatProvider: class { constructor(readonly config: unknown) {} executeTurn(input: unknown) { return m.execute(input, this.config); } },
- FreeChainProviderError: class extends Error { constructor(readonly code: string, readonly retryAfterMs?: number) { super(code); } },
+ FreeChainProviderError: class extends Error {
+   readonly status?: number; readonly retryAfterMs?: number; readonly credentialEnv?: string;
+   constructor(readonly code: string, details: { status?: number; retryAfterMs?: number; credentialEnv?: string } | number = {}) {
+     super(String(code));
+     if (typeof details === 'number') { this.retryAfterMs = details; }
+     else { this.status = details.status; this.retryAfterMs = details.retryAfterMs; this.credentialEnv = details.credentialEnv; }
+   }
+ },
 }));
 vi.mock('./providers/openRouterRegistryRung', () => ({ runRegistryRung: m.registry }));
 vi.mock('../Router/AIRouter', () => ({ acquireSlot: () => true, releaseSlot: vi.fn(), recordProviderLatency: vi.fn() }));
@@ -144,6 +151,55 @@ describe('free chat chain central dispatch', () => {
   expect(m.execute).toHaveBeenCalledTimes(1);
   expect(onChunk).toHaveBeenCalledWith('answer');
   expect(onChunk).not.toHaveBeenCalledWith(expect.stringMatching(/busy/i), 'notice');
+ });
+ it('CHEAPERINFERENCE=admin busy reply shows real reason; ordinary users stay friendly', async () => {
+  vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', ''); // missing key → early diagnostic
+  const adminOnChunk = vi.fn();
+  const admin = await maybeFreeChain({
+    ...input(),
+    message: 'नमस्ते',
+    context: { ...input().context, isAdmin: true },
+    onChunk: adminOnChunk,
+  });
+  expect(admin?.ok).toBe(false);
+  expect(admin?.content).toContain('अभी AI थोड़ा व्यस्त');
+  expect(admin?.content).toContain('[admin diagnostic]');
+  expect(admin?.content).toMatch(/cheapinf-key-missing-or-invalid|keyConfigured=no/);
+  expect(admin?.content).not.toMatch(/ci_live_|sk-|Bearer\s+\S{8,}/);
+  expect(adminOnChunk).toHaveBeenCalledWith(expect.stringContaining('[admin diagnostic]'), 'notice');
+
+  const userOnChunk = vi.fn();
+  // Non-admin with FreeChain OFF does not enter the chain at all when mode=admin.
+  const user = await maybeFreeChain({ ...input(), message: 'नमस्ते', onChunk: userOnChunk });
+  expect(user).toBeNull();
+ });
+ it('CHEAPERINFERENCE=admin surfaces provider HTTP failure in busy diagnostic', async () => {
+  vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  vi.stubEnv('FREE_CHAIN_MONTHLY_CAP_ENABLED', 'off');
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  m.execute.mockRejectedValue(new FreeChainProviderError('AUTH', { status: 401, credentialEnv: 'CHEAPERINFERENCE_API_KEY' }));
+  const onChunk = vi.fn();
+  const result = await maybeFreeChain({
+    ...input(),
+    message: 'hello admin',
+    context: { ...input().context, isAdmin: true },
+    onChunk,
+  });
+  expect(result?.ok).toBe(false);
+  expect(result?.content).toContain('[admin diagnostic]');
+  expect(result?.content).toMatch(/auth:http=401|cheapinf:auth/);
+  expect(result?.content).not.toContain('ci_live_test_key');
+  // Ordinary user content helper: friendly only
+  const userResult = await buildFreeChainRouter(db, freeChainConfig({
+    FREE_CHAIN_ENABLED: 'on', FREE_CHAIN_ROLLOUT_PERCENT: '100', FREE_CHAIN_ORDER: 'cheapinf',
+    CHEAPERINFERENCE: 'all', CHEAPERINFERENCE_API_KEY: 'ci_live_test_key', FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off',
+  })).route({ ...input(), message: 'hello' });
+  expect(userResult.ok).toBe(false);
+  expect(userResult.content).not.toContain('[admin diagnostic]');
  });
  it('CHEAPERINFERENCE=admin exclusive path answers private/profile turns', async () => {
   vi.stubEnv('CHEAPERINFERENCE', 'admin');

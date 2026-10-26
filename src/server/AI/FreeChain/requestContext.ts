@@ -27,8 +27,16 @@ export async function freeChainRequestContext(req: Request, input: { tier: strin
     if (identity) {
       uid = uid ?? identity.uid;
       isAdmin = isAdminEmail(identityGrantEmail(identity));
-      // FreeChain OFF: only the exclusive admin CheaperInference path may continue.
-      if (!entryAdmission && !freeChainOn && !cheaperInferenceExclusiveAdmin(identityGrantEmail(identity))) return undefined;
+      // FreeChain OFF: only verified admins under CHEAPERINFERENCE=admin continue (even when the
+      // API key is missing — maybeFreeChain then returns a busy line with the real reason).
+      // mode=all still needs the key + FreeChain OR exclusive-admin helper for non-admins.
+      if (!entryAdmission && !freeChainOn) {
+        if (mode === 'admin' && isAdmin) {
+          // keep going — diagnostic path
+        } else if (!cheaperInferenceExclusiveAdmin(identityGrantEmail(identity))) {
+          return undefined;
+        }
+      }
     } else {
       if (!uid) uid = await verifyFirebaseToken(req).catch(() => null);
       // Without a verified identity we cannot prove admin; exclusive path is closed.

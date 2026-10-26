@@ -1,5 +1,6 @@
 import { publishDeploymentPaidLimit } from './deploymentBudget';
 import { cheaperInferenceAdminStatus, cheaperInferenceMode } from '../../lib/cheaperInferencePolicy';
+import { adminBusyDetail, withAdminBusyDetail } from './adminBusyDetail';
 import { persistFreeChainSample } from './eventSample';
 export { shouldPersistFreeChainEvent } from './eventSample';
 import { sanitizeText } from '../../../lib/observability/sanitize';
@@ -42,7 +43,12 @@ export function busyMessage(message?: string): string {
 }
 const names: Record<ProviderId, AIProviderResponse['provider']> = { glm47: 'GLM', glm45: 'GLM', gemini: 'GEMINI', groq: 'GROQ', cloudflare: 'CLOUDFLARE', openrouter: 'OPENROUTER', deepseek: 'DEEPSEEK',
   nvidia: 'NVIDIA', modelscope: 'MODELSCOPE', llm7: 'LLM7', bluesminds: 'BLUESMINDS', requesty: 'REQUESTY', glmflashx: 'GLM', gpt5nano: 'OPENAI', llama8b: 'DEEPINFRA', dsv4flash: 'DEEPINFRA', geminipaid: 'GEMINI', cheapinf: 'CHEAPERINFERENCE' };
-function empty(reason: FreeChainResult['reason'] = 'all-failed', message?: string): FreeChainResult { return { content: busyMessage(message), provider: 'NONE', model: 'none', latencyMs: 0, ok: false, reason }; }
+function empty(reason: FreeChainResult['reason'] = 'all-failed', message?: string, adminDetail?: string): FreeChainResult {
+  return { content: withAdminBusyDetail(busyMessage(message), adminDetail), provider: 'NONE', model: 'none', latencyMs: 0, ok: false, reason };
+}
+function adminDetailFor(input: FreeChainInput, earlyReason?: string, attempts?: { provider: string; reason: string; entered?: boolean }[]): string | undefined {
+  return adminBusyDetail({ context: input.context, earlyReason, attempts });
+}
 /** Does a non-DeepSeek paid rung's reservation profile stay under the unchanged kimi-k2.7 free ceiling? */
 function verifiedPaidReservationRate(rung: RungConfig): boolean {
   if (!(rung.priceIn > 0) || !(rung.priceOut > 0)) return false;
@@ -130,7 +136,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       return { ...result, latencyMs: trace.latencyMs, freeChain: trace };
     };
     try { await publishDeploymentPaidLimit(db, cfg.paidCapNanoUsd, () => store.observePaidBudgetPolicy(cfg.paidCapNanoUsd)); }
-    catch { return done(empty('all-failed', input.message)); }
+    catch { return done(empty('all-failed', input.message, adminDetailFor(input, 'paid-budget-publish-failed'))); }
     const language = detectReplyLanguage(input.message);
     const languageInstruction = { hi: 'Reply in Hindi using Devanagari script.', hinglish: 'Reply in Hinglish using Roman script.', en: 'Reply in English.', other: 'Reply in the same language and script as the user.' }[language];
     // Master plan: stable cacheable prefix (dynamic parts last) and the compact core, both kill-switchable.
@@ -235,7 +241,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         return done({ ...response, content, ok: true });
       } catch (error) {
         controller.abort(); const safe = error instanceof FreeChainProviderError ? error : error instanceof FreeRoutingError ? new FreeChainProviderError(error.code === 'SAFETY_REFUSAL' ? 'SAFETY_REFUSAL' : error.code === 'REQUEST_ABORTED' ? 'ABORTED' : /^(INVALID_|UNVERIFIED_|TOOL_ENVELOPE_|HTTP_400$|HTTP_413$|HTTP_422$)/.test(error.code) ? 'INVALID_REQUEST' : error.code === 'FREE_BILLING_ANOMALY' ? 'POLICY_BLOCKED' : 'SERVER') : null;
-        attempt.reason = safe?.code.toLowerCase() ?? 'unavailable';
+        attempt.reason = safe ? `${safe.code.toLowerCase()}${typeof safe.status === 'number' ? `:http=${safe.status}` : ''}` : 'unavailable';
         if (safe?.code === 'AUTH') warnOnce(`${rung.keyEnv}: authentication failed`);
         if (!['INVALID_REQUEST', 'SAFETY_REFUSAL', 'ABORTED'].includes(safe?.code ?? '')) {
           const requestedCooldown = safe?.code === 'AUTH' ? 3600000 : safe?.retryAfterMs ?? (safe?.code === 'QUOTA_EXHAUSTED' ? 86400000 : 10000);
@@ -252,7 +258,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         if (monthHold && !monthSettled) await settleMonthly(db, monthHold.month, monthHold.amount, attempt.entered ? null : 0);
       }
     }
-    const result = empty('all-failed', input.message); input.onChunk?.(result.content, 'notice'); return done(result);
+    const result = empty('all-failed', input.message, adminDetailFor(input, 'all-failed', trace.attempts)); input.onChunk?.(result.content, 'notice'); return done(result);
   }
   return { async route(input: FreeChainInput): Promise<FreeChainResult> {
     const entry = input.context.entryAdmission;
@@ -262,7 +268,8 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       ? { admitted: true as const, waitedMs: entry!.waitedMs, release: () => {} }
       : await freeChainAdmissionQueue.acquire({ uid: input.context.uid, signal: input.signal, ...cfg.queue });
     if (!admission.admitted) {
-      const result = { ...empty(admission.reason === 'aborted' ? 'aborted' : 'no-provider'), ...(admission.reason === 'aborted' ? { content: '' } : {}) };
+      const admReason = admission.reason === 'aborted' ? 'aborted' : 'no-provider';
+      const result = { ...empty(admReason, input.message, admReason === 'aborted' ? undefined : adminDetailFor(input, `admission:${admission.reason}`)), ...(admission.reason === 'aborted' ? { content: '' } : {}) };
       const trace: FreeChainTelemetry = { requestId: randomUUID(), queueWaitMs: admission.waitedMs, admissionReason: admission.reason, rung: null, provider: 'NONE', model: 'none', attempts: [], fallbacks: 0, cacheHit: false, costUsdEstimate: null, ttftMs: null, latencyMs: admission.waitedMs, rolloutBucket: rolloutBucket(input.context.uid) };
       logFreeChain(trace);
       await persistFreeChainSample(db, trace, false);
@@ -275,7 +282,11 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       // but this gate still returned the busy notice before cheapinf could run.
       const exclusiveAdmin = input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
       if (strictFreeRequired() || (!exclusiveAdmin && (!current.enabled || current.errors.length))) {
-        const result = empty(); input.onChunk?.(result.content, 'notice'); return result;
+        const early = strictFreeRequired() ? 'strict-free-required'
+          : !current.enabled ? 'free-chain-disabled'
+          : `config-errors:${current.errors.slice(0, 3).join(',')}`;
+        const result = empty('all-failed', input.message, adminDetailFor(input, early));
+        input.onChunk?.(result.content, 'notice'); return result;
       }
       return await routeAdmitted(input, admission.waitedMs);
     } finally { admission.release(); }
@@ -295,24 +306,32 @@ export async function maybeFreeChain(input: FreeChainInput): Promise<FreeChainRe
   if (held && entry.signal.aborted) return { ...empty('aborted'), content: '' };
   // The existing strict router remains authoritative, including a policy change during assembly.
   if (strictFreeRequired()) return null;
-  const unavailable = () => { const result = empty(); input.onChunk?.(result.content, 'notice'); return result; };
-  if (cfg.errors.length && (cfg.enabled || held)) { warnOnce(`Invalid configuration: ${cfg.errors.join(', ')}`); return unavailable(); }
+  const unavailable = (earlyReason: string) => {
+    const result = empty('all-failed', input.message, adminDetailFor(input, earlyReason));
+    input.onChunk?.(result.content, 'notice');
+    return result;
+  };
+  if (cfg.errors.length && (cfg.enabled || held)) { warnOnce(`Invalid configuration: ${cfg.errors.join(', ')}`); return unavailable(`config-errors:${cfg.errors.slice(0, 3).join(',')}`); }
   // CHEAPERINFERENCE=admin + verified admin: exclusive cheapinf path (free ladder off for this reply).
   // Works even when FREE_CHAIN_ENABLED is off, so the owner can test with only CHEAPERINFERENCE=admin.
   const exclusiveAdmin = input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
   // OFF restores legacy for new requests (no db touch), never for a turn already admitted — unless exclusive admin.
-  if (!cfg.enabled && !exclusiveAdmin) return held ? unavailable() : null;
-  const db = getServerDb(); if (!db) return unavailable();
+  if (!cfg.enabled && !exclusiveAdmin) return held ? unavailable('free-chain-disabled') : null;
+  const db = getServerDb(); if (!db) return unavailable('firestore-unavailable');
   if (exclusiveAdmin) {
     const cheap = cfg.rungs.find(r => r.id === 'cheapinf');
-    if (!cheap || cheap.reason === 'disabled' || !cheap.configured) {
+    const status = cheaperInferenceAdminStatus();
+    if (!cheap || cheap.reason === 'disabled' || !cheap.configured || !status.apiKeyConfigured) {
       warnOnce('CHEAPERINFERENCE=admin but cheapinf is unconfigured (set CHEAPERINFERENCE_API_KEY)');
-      return unavailable();
+      const why = !status.apiKeyConfigured ? 'cheapinf-key-missing-or-invalid'
+        : !cheap ? 'cheapinf-rung-missing'
+        : `cheapinf-${cheap.reason || 'unconfigured'}`;
+      return unavailable(why);
     }
     return buildFreeChainRouter(db, cfg, freeChainConfig).route(input);
   }
-  const control = await readControlsForSelection(db, cfg).catch(() => null); if (!control) return unavailable();
-  if (!selectedForFreeChain(cfg, control, input.context.uid)) return held ? unavailable() : null;
+  const control = await readControlsForSelection(db, cfg).catch(() => null); if (!control) return unavailable('controls-unavailable');
+  if (!selectedForFreeChain(cfg, control, input.context.uid)) return held ? unavailable('not-selected-for-rollout') : null;
   return buildFreeChainRouter(db, cfg, freeChainConfig).route(input);
 }
 export async function controlFreeChain(action: FreeChainControlAction, actor: string): Promise<void> {

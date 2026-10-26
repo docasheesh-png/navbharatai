@@ -57,6 +57,38 @@ describe('free chat chain central dispatch', () => {
  const chunks: string[]=[]; const result = await buildFreeChainRouter(db, config()).route({ ...input(), onChunk: s=>chunks.push(s) });
  expect(result.provider).toBe('CLOUDFLARE'); expect(chunks).toEqual(['second']); expect(result.freeChain?.fallbacks).toBe(1); expect(m.cooldown).toHaveBeenCalled();
  });
+ it.each([false, true])('keeps the explicit script in every provider request, including quality=%s and history trim', async teachingTurn => {
+ const history = [{ sender: 'user', text: 'Please explain world trade.' }, { sender: 'ai', text: 'A Roman-script answer.' }, { sender: 'user', text: 'devnaagri me bataao' }, ...Array.from({ length: 10 }, (_, i) => ({ sender: 'user', text: `Follow-up ${i}` }))];
+ m.execute.mockRejectedValueOnce(new FreeChainProviderError('RATE_LIMIT')).mockImplementation(successful('A synthetic answer.'));
+ const result = await buildFreeChainRouter(db, config('groq,cloudflare')).route({ ...input(), message: 'aur batao', history, context: { ...input().context, teachingTurn } });
+ expect(result.ok).toBe(true); expect(m.execute).toHaveBeenCalledTimes(2);
+ for (const [request] of m.execute.mock.calls) {
+   expect(request.systemPrompt).toContain('Hindi using Devanagari script, not Romanized Hindi or Hinglish');
+   expect(request.systemPrompt).not.toContain('Reply in Hinglish using Roman script.');
+   expect(request.prompt).not.toContain('devnaagri me bataao'); // policy survives the six-turn history window
+ }
+ expect(m.paid).not.toHaveBeenCalled(); // no paid translation/rewrite hop
+ });
+ it('honors a current Roman-script override over an older Devanagari preference', async () => {
+ await buildFreeChainRouter(db, config('groq')).route({ ...input(), message: 'Please reply in Hinglish', history: [{ role: 'user', content: 'Answer in Hindi' }] });
+ expect(m.execute.mock.calls[0][0].systemPrompt).toContain('Hinglish using Roman script, not Devanagari');
+ expect(m.execute.mock.calls[0][0].systemPrompt).not.toContain('Reply in Hindi using Devanagari script');
+ });
+ it('uses the preference resolved at ingress when the source turn was trimmed already', async () => {
+ await buildFreeChainRouter(db, config('groq')).route({ ...input(), message: 'more detail please', context: { ...input().context, replyLanguage: 'hi' } });
+ expect(m.execute.mock.calls[0][0].systemPrompt).toContain('Hindi using Devanagari script');
+ });
+ it.each(['Tamil', 'French'])('honors an explicit %s request instead of the English input language', async language => {
+ const cfg = config('groq'); cfg.rungs.find(r => r.id === 'groq')!.languages = ['other'];
+ const result = await buildFreeChainRouter(db, cfg).route({ ...input(), message: `Please reply in ${language}`, history: [{ sender: 'user', text: 'Reply in Hindi' }] });
+ expect(result.ok).toBe(true); expect(m.execute).toHaveBeenCalledOnce();
+ expect(m.execute.mock.calls[0][0].systemPrompt).toContain(`explicit user choice): Reply in ${language}.`);
+ expect(m.execute.mock.calls[0][0].systemPrompt).not.toContain('Reply in English.');
+ });
+ it('keeps detection subordinate even for explicit phrasing outside the deterministic parser', async () => {
+ await buildFreeChainRouter(db, config('groq')).route({ ...input(), message: 'For my answers I would prefer the Hindi language.' });
+ expect(m.execute.mock.calls[0][0].systemPrompt).toContain('DEFAULT ONLY when this conversation has no explicit reply-language or script request');
+ });
  it('does not switch provider after text was committed', async () => {
  m.execute.mockImplementationOnce(async (arg) => { arg.onChunk('partial'); throw new FreeChainProviderError('NETWORK'); });
  const chunks: string[]=[]; const result = await buildFreeChainRouter(db, config()).route({ ...input(), onChunk:s=>chunks.push(s) });

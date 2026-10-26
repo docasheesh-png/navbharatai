@@ -1,3 +1,4 @@
+import type { ChatReplyLanguage } from '../../../lib/chatReplyLanguage';
 import type { EntryAdmissionGrant } from './entryAdmission';
 import { createHash } from 'node:crypto';
 import type { FreeChainConfig, ProviderId } from './config';
@@ -9,6 +10,8 @@ export interface FreeChainContext {
   privateTurn: boolean;
   healthTurn: boolean;
   cacheEligible: boolean;
+  /** Per-chat explicit choice resolved before history/context trimming; never account state. */
+  replyLanguage?: ChatReplyLanguage;
   /** Teacher/exam surface (server-derived from the request mode); routes to the quality model. */
   teachingTurn?: boolean;
   /** Opaque server-issued entry lease, never accepted from request JSON. */

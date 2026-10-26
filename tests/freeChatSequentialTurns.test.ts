@@ -133,6 +133,24 @@ describe('registered Free Chat routes with real user quota, admission queue and 
     expect(m.execute).toHaveBeenCalledTimes(2);
     expect(m.execute.mock.calls.map(call => call[1].provider)).toEqual(['GROQ', 'GROQ']);
   });
+  it('preserves a requested script through real-route follow-ups and provider fallback', async () => {
+    const history: Array<{ sender: string; text: string }> = [];
+    const messages = ['India ki rajdhani kya hai? Ek chhota jawab.', 'devnaagri me bataao', 'wahan ka ek prasiddh smarak batao.'];
+    for (let i = 0; i < messages.length; i++) {
+      if (i === 1) m.execute.mockRejectedValueOnce(new FreeChainProviderError('RATE_LIMIT'));
+      const res = new ResponseFixture();
+      await route()(request(i + 1, { message: messages[i], history, stream: true }), res);
+      expect(res.chunks.join('')).toContain('[DONE]');
+      history.push({ sender: 'user', text: messages[i] }, { sender: 'ai', text: 'A synthetic answer.' });
+    }
+    expect(m.execute).toHaveBeenCalledTimes(4);
+    expect(m.execute.mock.calls.map(call => call[1].provider)).toEqual(['GROQ', 'GROQ', 'CLOUDFLARE', 'CLOUDFLARE']);
+    for (const [input] of m.execute.mock.calls.slice(1)) {
+      expect(input.systemPrompt).toContain('Hindi using Devanagari script, not Romanized Hindi or Hinglish');
+      expect(input.systemPrompt).not.toContain('Reply in Hinglish using Roman script.');
+    }
+    expect(await status()).toMatchObject({ used: 3, reserved: 0, remaining: 17, inProgress: false });
+  });
   it('keeps the real streaming sibling available after its first completed reply', async () => {
     for (let n = 1; n <= 2; n++) {
       const res = new ResponseFixture(); await route()(request(n, { stream: true }), res);

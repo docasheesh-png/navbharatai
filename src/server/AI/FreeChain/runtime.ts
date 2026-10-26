@@ -1,3 +1,5 @@
+import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../../lib/chatReplyLanguage';
+import { chatReplyLanguageInstruction } from '../../lib/freeChatReplyLanguage';
 import { publishDeploymentPaidLimit } from './deploymentBudget';
 import { cheaperInferenceAdminStatus, cheaperInferenceMode } from '../../lib/cheaperInferencePolicy';
 import { adminBusyDetail, withAdminBusyDetail } from './adminBusyDetail';
@@ -103,12 +105,16 @@ function rungReason(rung: RungConfig, cfg: FreeChainConfig, input?: FreeChainInp
   }
   if (rung.id === 'openrouter' && !cfg.openRouterModels.length) return 'quality-allowlist-required';
   if (input && rung.id === 'gemini' && (!input.context.cacheEligible || !safeCacheKey({ message: input.message, history: input.history, eligible: true, language: 'public', systemPrompt: '', modelFamily: '' }))) return 'privacy-public-corpus-only';
-  if (input && !rung.languages.includes(detectReplyLanguage(input.message))) return 'language';
+  if (input && !rung.languages.includes(replyLanguageFor(input))) return 'language';
   if (input && (rung.id === 'gemini' || isPaidRung(rung.id)) && (input.context.privateTurn || input.context.healthTurn)) {
     // Exclusive CHEAPERINFERENCE=admin must answer every admin Free Chat turn, including profile/memory.
     if (!(rung.id === 'cheapinf' && input.context.isAdmin === true && cheaperInferenceMode() === 'admin')) return 'privacy';
   }
   return undefined;
+}
+function replyLanguageFor(input: FreeChainInput) {
+  const explicit = input.context.replyLanguage ?? resolveChatReplyLanguage(input.message, input.history);
+  return explicit ? chatReplyLanguageCategory(explicit) : detectReplyLanguage(input.message);
 }
 function accountId(id: ProviderId): string { return id === 'glm47' || id === 'glm45' ? 'glm' : id; }
 function quotaInput(rung: RungConfig, cfg: FreeChainConfig, inputTokens: number) {
@@ -137,8 +143,10 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     };
     try { await publishDeploymentPaidLimit(db, cfg.paidCapNanoUsd, () => store.observePaidBudgetPolicy(cfg.paidCapNanoUsd)); }
     catch { return done(empty('all-failed', input.message, adminDetailFor(input, 'paid-budget-publish-failed'))); }
-    const language = detectReplyLanguage(input.message);
-    const languageInstruction = { hi: 'Reply in Hindi using Devanagari script.', hinglish: 'Reply in Hinglish using Roman script.', en: 'Reply in English.', other: 'Reply in the same language and script as the user.' }[language];
+    const explicitLanguage = input.context.replyLanguage ?? resolveChatReplyLanguage(input.message, input.history);
+    const language = replyLanguageFor(input);
+    const languageInstruction = explicitLanguage ? chatReplyLanguageInstruction(explicitLanguage)
+      : `DEFAULT ONLY when this conversation has no explicit reply-language or script request: ${{ hi: 'Reply in Hindi using Devanagari script.', hinglish: 'Reply in Hinglish using Roman script.', en: 'Reply in English.', other: 'Reply in the same language and script as the user.' }[language]}`;
     // Master plan: stable cacheable prefix (dynamic parts last) and the compact core, both kill-switchable.
     const system = `${preparedSystemPrompt(cfg, input.systemPrompt ?? '')}\n\n${languageInstruction}`;
     const cacheKey = cfg.cacheEnabled ? safeCacheKey({ message: input.message, history: input.history, eligible: input.context.cacheEligible, language, systemPrompt: system, modelFamily: JSON.stringify(cfg.rungs.map(r => [r.id, r.model])), faq: cfg.features.faqCache && faqCacheable(input.message) }) : null;

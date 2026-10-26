@@ -695,7 +695,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
       // The user pressed Stop — this is NOT an error. Keep whatever streamed so far (marked stopped) and
       // stay silent: showing "connection failed" for a deliberate cancel is exactly the confusing behaviour
       // the Stop button exists to fix.
-      if (turn.stopped || error?.name === 'AbortError') {
+      if (turn.stopped) {
         markStopped(turn);
         return; // finally still clears this turn's loading state
       }

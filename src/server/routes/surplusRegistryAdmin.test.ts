@@ -1,8 +1,11 @@
 import type { Express, Request, Response, RequestHandler } from 'express';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-const mocks = vi.hoisted(() => ({ read: vi.fn(), control: vi.fn(), sync: vi.fn(), audit: vi.fn(), limiter: vi.fn(), connectionStatus: vi.fn(), connectionTest: vi.fn(), credentialCheck: vi.fn() }));
-vi.mock('../AI/SurplusRegistry/runtime', () => ({ readSurplusObservations: mocks.read, controlSurplusModel: mocks.control, refreshSurplusRegistry: mocks.sync }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), control: vi.fn(), sync: vi.fn(), approve: vi.fn(), audit: vi.fn(), limiter: vi.fn(), connectionStatus: vi.fn(), connectionTest: vi.fn(), credentialCheck: vi.fn() }));
+vi.mock('../AI/SurplusRegistry/runtime', () => ({
+  readSurplusObservations: mocks.read, controlSurplusModel: mocks.control, refreshSurplusRegistry: mocks.sync,
+  approveObservedSurplusModels: mocks.approve, APPROVE_OBSERVED_CONFIRM: 'approve-observed-coding',
+}));
 vi.mock('../AI/SurplusRegistry/connectionTest', () => ({ getSurplusConnectionTestStatus: mocks.connectionStatus, runSurplusConnectionTest: mocks.connectionTest, runSurplusCredentialCheck: mocks.credentialCheck }));
 vi.mock('../lib/adminAuth', () => ({ adminUsername: () => 'verified-owner' }));
 vi.mock('../lib/audit', () => ({ audit: mocks.audit }));
@@ -34,7 +37,7 @@ beforeEach(() => { vi.clearAllMocks(); mocks.control.mockResolvedValue(undefined
 describe('admin-only discounted paid registry', () => {
   it('mounts next to the existing verified-admin registry and keeps auth before rate limits and I/O', () => {
     const { auth, routes } = setup();
-    expect(routes.size).toBe(6);
+    expect(routes.size).toBe(7);
     for (const handlers of routes.values()) { expect(handlers[0]).toBe(auth); expect(handlers).toHaveLength(3); }
     expect(mocks.limiter).toHaveBeenCalledWith(expect.objectContaining({ limit: 30, windowMs: 60_000 }));
     expect(mocks.limiter).toHaveBeenCalledWith(expect.objectContaining({ limit: 6, windowMs: 60_000 }));
@@ -98,6 +101,40 @@ describe('admin-only discounted paid registry', () => {
   });
 });
 
+
+describe('admin approve-observed coding unlock', () => {
+  it('records durable approval with confirm token and never claims canDispatch', async () => {
+    const { call, response } = setup();
+    mocks.approve.mockResolvedValue({ approvedModels: ['glm-5.3'], offerPairs: 1, qualitySource: 'firestore', expiresAt: 9 });
+    await call('POST', '/approve-observed', { confirm: 'approve-observed-coding', reason: 'Owner approved observed Surplus coding offers' });
+    expect(mocks.approve).toHaveBeenCalledExactlyOnceWith({
+      reason: 'Owner approved observed Surplus coding offers',
+      confirm: 'approve-observed-coding',
+    });
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({ ok: true, canDispatch: false, approvedModels: ['glm-5.3'] }));
+    expect(mocks.audit).toHaveBeenCalledWith('ADMIN_SURPLUS_APPROVE_OBSERVED', expect.objectContaining({ admin: 'verified-owner', result: 'ok' }));
+  });
+  it.each([
+    { confirm: 'wrong', reason: 'Owner approved observed Surplus coding offers' },
+    { confirm: 'approve-observed-coding', reason: 'short' },
+    { confirm: 'approve-observed-coding', reason: 'x'.repeat(501) },
+    { confirm: 'approve-observed-coding', reason: 'Owner approved observed Surplus coding offers', extra: true },
+  ])('rejects invalid approve body %j', async patch => {
+    const { call, response } = setup();
+    const body: Record<string, unknown> = { confirm: patch.confirm, reason: patch.reason };
+    if ('extra' in patch) body.apiKey = 'not-accepted';
+    await call('POST', '/approve-observed', body);
+    expect(response.status).toHaveBeenCalledWith(400);
+    expect(mocks.approve).not.toHaveBeenCalled();
+  });
+  it('maps stale snapshot to 409 without inventing approval', async () => {
+    const { call, response } = setup();
+    mocks.approve.mockRejectedValue(new Error('STALE_SNAPSHOT'));
+    await call('POST', '/approve-observed', { confirm: 'approve-observed-coding', reason: 'Owner approved observed Surplus coding offers' });
+    expect(response.status).toHaveBeenCalledWith(409);
+    expect(mocks.audit).toHaveBeenCalledWith('ADMIN_SURPLUS_APPROVE_OBSERVED_FAILED', expect.objectContaining({ result: 'stale' }));
+  });
+});
 
 describe('independent admin connection checks', () => {
   const ready = { status: 'ready', environmentConfigured: true, productionFlagsOff: true, latencyMs: null, actualCostUsd: null, expectedResponse: 'not_checked' };

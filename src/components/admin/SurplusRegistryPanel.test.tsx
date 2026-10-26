@@ -19,7 +19,7 @@ function offer(): Observation {
     sourceUrl: 'https://api.surplusintelligence.ai/api/markets/glm-5.3' };
 }
 function fixture(): SurplusManagerView {
-  return { status: 'observed', enabled: true, canDispatch: false, configuredUniverse: ['glm-5.3'], intervalMs: 300_000, freshnessMs: 300_000, maxModels: 15,
+  return { status: 'observed', enabled: true, canDispatch: false, liveBuilderAdmission: false, qualitySource: 'none', configuredUniverse: ['glm-5.3'], intervalMs: 300_000, freshnessMs: 300_000, maxModels: 15,
     version, controlRevision: 4, fetchedAt: 1000, expiresAt: 301000, lastAttemptAt: 1000, lastSuccessAt: 1000, nextAllowedAt: 301000, lastError: null,
     workload: { input: 10000, output: 2000, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
     models: [{ modelId: 'glm-5.3', disabled: false, qualityReviewStatus: 'unreviewed', blockedReasons: ['coding_quality_unreviewed'], observations: [offer()], estimatedCandidate: null }],
@@ -55,6 +55,8 @@ describe('paid manager validates server data before rendering claims', () => {
   it('accepts bounded honest views and rejects dispatch authority in a manager response', () => {
     expect(isSurplusManagerView(fixture())).toBe(true);
     expect(isSurplusManagerView({ ...fixture(), canDispatch: true })).toBe(false);
+    expect(isSurplusManagerView({ ...fixture(), liveBuilderAdmission: 'yes' as unknown as boolean })).toBe(false);
+    expect(isSurplusManagerView({ ...fixture(), qualitySource: 'magic' as 'none' })).toBe(false);
     expect(isSurplusManagerView({ ...fixture(), models: [{ ...fixture().models[0], observations: [{ ...offer(), rates: { input: 'NaN' } }] }] })).toBe(false);
     expect(isSurplusManagerView({ ...fixture(), workload: { input: 1 } })).toBe(false);
     expect(isSurplusManagerView({ ...fixture(), controlRevision: -1 })).toBe(false);
@@ -94,6 +96,43 @@ describe('paid manager validates server data before rendering claims', () => {
     const fetch = vi.fn(async () => response(fixture())); await mount(fetch); await vi.advanceTimersByTimeAsync(30000);
     expect(fetch).toHaveBeenCalledTimes(2);
     for (const [url, options] of fetch.mock.calls as unknown as [string, RequestInit][]) { expect(url).toBe('/api/v1/admin/surplus-registry'); expect(options.method).toBeUndefined(); }
+  });
+  it('live synthesis view shows admission active instead of forever-unreviewed', async () => {
+    const view = fixture();
+    view.liveBuilderAdmission = true;
+    view.qualitySource = 'live_synthesis';
+    view.models[0] = { ...view.models[0], qualityReviewStatus: 'reviewed', blockedReasons: ['dispatch_authority_not_evaluated'], estimatedCandidate: { model: 'glm-5.3', providerId: 'provider-1', offerId: 'offer-1', estimatedMicroUsd: '0.140000', qualityArtifact: 'a'.repeat(64) } };
+    await mount(vi.fn(async () => response(view)));
+    const html = renderToStaticMarkup(root());
+    expect(html).toContain('Live builder admission is ACTIVE');
+    expect(html).toContain('Live builder admission — coding quality synthesized');
+    expect(html).not.toContain('Not independently approved');
+    expect(html).toContain('Approve observed for coding');
+  });
+  it('Approve observed for coding posts confirm token and reason', async () => {
+    const approvedView = { ...fixture(), qualitySource: 'firestore' as const, models: [{ ...fixture().models[0], qualityReviewStatus: 'reviewed' as const, blockedReasons: ['dispatch_authority_not_evaluated'], estimatedCandidate: null }] };
+    const fetch = vi.fn(async (url: string, options?: RequestInit) => {
+      if (String(url).endsWith('/approve-observed') && options?.method === 'POST') {
+        return response({ ok: true, canDispatch: false, approvedModels: ['glm-5.3'], offerPairs: 1, qualitySource: 'firestore', expiresAt: 9_999_999 });
+      }
+      if (String(url).includes('/connection-test') || String(url).includes('/credential-check')) {
+        return response({ status: 'blocked_configuration', environmentConfigured: false, productionFlagsOff: true, latencyMs: null, actualCostUsd: null, expectedResponse: 'not_checked' });
+      }
+      return response(approvedView);
+    });
+    await mount(fetch);
+    button(root(), 'Approve observed for coding').props.onClick();
+    let tree = root();
+    const textarea = elements(tree).find(e => e.type === 'textarea')!;
+    textarea.props.onChange({ target: { value: 'Owner approved observed Surplus coding offers' } });
+    tree = root();
+    const form = elements(tree).find(e => e.type === 'form' && e.props['aria-label'] === 'Approve observed models for coding')!;
+    form.props.onSubmit({ preventDefault: () => {} });
+    await settle();
+    const approveCall = (fetch.mock.calls as unknown as [string, RequestInit][]).find(([url, options]) => String(url).endsWith('/approve-observed') && options?.method === 'POST');
+    expect(approveCall).toBeTruthy();
+    expect(JSON.parse(approveCall![1].body as string)).toEqual({ confirm: 'approve-observed-coding', reason: 'Owner approved observed Surplus coding offers' });
+    expect(renderToStaticMarkup(root())).toContain('Observed models approved for coding');
   });
   it('Sync metadata now posts the dedicated sync route and never claims inference', async () => {
     const fetch = vi.fn()

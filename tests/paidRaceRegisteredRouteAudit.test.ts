@@ -17,7 +17,7 @@ vi.mock('../src/server/lib/liveSearchContext', () => ({ liveSearchContext: m.liv
 vi.mock('../src/server/lib/visionChain', () => ({ runVisionChain: m.vision }));
 vi.mock('../src/server/lib/attachmentText', () => ({ buildDocumentContext: m.document }));
 vi.mock('../src/server/lib/serverDb', async original => ({ ...await original<typeof import('../src/server/lib/serverDb')>(), getServerDb: () => null, collection: () => ({}), addDoc: m.add }));
-vi.mock('../src/server/lib/freeAnswerQuotaStore', () => ({ FREE_ANSWER_LEASE_MS: 30_000, FREE_ANSWER_REQUEST_MS: 90_000, FreeAnswerQuotaStore: class {
+vi.mock('../src/server/lib/freeAnswerQuotaStore', async original => ({ ...await original<typeof import('../src/server/lib/freeAnswerQuotaStore')>(), FREE_ANSWER_LEASE_MS: 30_000, FREE_ANSWER_REQUEST_MS: 90_000, FreeAnswerQuotaStore: class {
   reserve = m.reserve; renew = m.renew; settle = m.settle; status = m.status;
 } }));
 vi.mock('../src/server/lib/imageEditRun', () => ({ checkEditable: () => ({ ok: false, outcome: { badInput: 'Test edit cannot be completed.' } }), runImageEdit: vi.fn() }));
@@ -67,7 +67,7 @@ beforeEach(() => {
   m.live.mockResolvedValue(''); m.document.mockResolvedValue('document text'); m.oldContext.mockResolvedValue(undefined); m.add.mockResolvedValue(undefined);
   m.detailed.mockImplementation(() => { throw new Error('Non-streaming router was not configured'); });
   m.stream.mockImplementation(() => { throw new Error('Streaming router was not configured'); });
-  m.reserve.mockImplementation(async (_subject, _id, now) => ({ allowed: true, reservation: { id: 'a'.repeat(64), owner: requestId, principalHash: 'b'.repeat(64), day: '2026-10-23', startedAt: now, deadlineAt: now + 90_000, leaseExpiresAt: now + 30_000 }, status: { limit: 20, used: 0, reserved: 1, remaining: 19, inProgress: true, day: '2026-10-23', resetsAt: now + 100_000 } }));
+  m.reserve.mockImplementation(async (_subject, _id, now = Date.now()) => ({ allowed: true, reservation: { id: 'a'.repeat(64), owner: requestId, principalHash: 'b'.repeat(64), day: '2026-10-23', startedAt: now, deadlineAt: now + 90_000, leaseExpiresAt: now + 30_000 }, status: { limit: 20, used: 0, reserved: 1, remaining: 19, inProgress: true, day: '2026-10-23', resetsAt: now + 100_000 } }));
   m.renew.mockResolvedValue(true); m.settle.mockResolvedValue(true);
   vi.spyOn(console, 'log').mockImplementation(() => {}); vi.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -104,7 +104,7 @@ describe('registered chat aliases → existing race override → real router →
     expect(firstCall).toHaveBeenCalledOnce();expect(secondCall).toHaveBeenCalledOnce();
     expect.soft(await parsed(res)).toEqual({text:'Rescue answer.'});
     expect.soft(m.add.mock.calls[0][1]).toMatchObject({ok:true,providerName:'GROQ',raced:true,usageMeasured:false});
-    expect.soft(m.settle).toHaveBeenCalledExactlyOnceWith(expect.any(Object),'answered',expect.any(Number));
+    expect.soft(m.settle).toHaveBeenCalledExactlyOnceWith(expect.any(Object),'answered');
   });
 
   it.each(cases)('committed rejection must be disclosed before DONE and in usage at $path / watchdog $watchdog',async({path,watchdog})=>{
@@ -117,7 +117,7 @@ describe('registered chat aliases → existing race override → real router →
     expect.soft(actual.text).toBe('One partial answer.\n\n_(NavBharatAI’s engine went quiet before finishing this answer, so it stops here. Ask again and it will pick the thread back up.)_');
     expect(actual.failure).toBeUndefined();expect(res.chunks.join('')).toContain('[DONE]');
     expect.soft(m.add.mock.calls[0][1]).toMatchObject({ok:true,stalled:true,providerName:'GLM',raced:true,usageMeasured:false});
-    expect(m.settle).toHaveBeenCalledExactlyOnceWith(expect.any(Object),'answered',expect.any(Number));
+    expect(m.settle).toHaveBeenCalledExactlyOnceWith(expect.any(Object),'answered');
     expect(res.chunks.join('')).not.toMatch(/GLM|GROQ|synthetic-model/);
   });
 
@@ -129,7 +129,7 @@ describe('registered chat aliases → existing race override → real router →
     expect((await parsed(res)).failure).toMatchObject({code:'CHAT_ROUTE_UNAVAILABLE',partial:false});
     expect(res.chunks.join('')).not.toContain('[DONE]');
     expect(m.add.mock.calls[0][1]).toMatchObject({ok:false,failureReason:'all-failed',usageMeasured:false});
-    expect(m.settle).toHaveBeenCalledExactlyOnceWith(expect.any(Object),'provider-failed',expect.any(Number));
+    expect(m.settle).toHaveBeenCalledExactlyOnceWith(expect.any(Object),'provider-failed');
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -147,7 +147,7 @@ describe('registered chat aliases → existing race override → real router →
     expect(firstCall).toHaveBeenCalledOnce();expect(secondCall).toHaveBeenCalledOnce();
     res.destroyed=true;res.emit('close');await pending;
     expect(res.chunks).toEqual(['data: {"c":"Partial answer."}\n\n']);
-    expect(m.settle).toHaveBeenCalledExactlyOnceWith(expect.any(Object),'answered',expect.any(Number));
+    expect(m.settle).toHaveBeenCalledExactlyOnceWith(expect.any(Object),'answered');
     expect(vi.getTimerCount()).toBe(0);
   });
 });

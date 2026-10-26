@@ -278,6 +278,15 @@ describe('free image also uses a daily text message (own switch)', () => {
     expect(imageCountsAgainstText({ UNIFIED_WALLET_ENABLED: '1' })).toBe(false);
     expect(imageCountsAgainstText({ UNIFIED_WALLET_IMAGE_COUNTS_TEXT: '1' })).toBe(true);
   });
+  it('lets ordinary image-text accounting use the store live clock, retaining an explicit fixture seam', async () => {
+    const reservation = { id: 'synthetic-reservation' };
+    const reserve = vi.fn(async () => ({ allowed: true, reservation }));
+    const settle = vi.fn(async () => true);
+    const store = { reserve, settle } as unknown as FreeAnswerQuotaStore;
+    expect(await countDeliveredFreeImage('synthetic-user', { UNIFIED_WALLET_IMAGE_COUNTS_TEXT: '1' }, store)).toBe(true);
+    expect(reserve).toHaveBeenCalledWith({ key: 'user:synthetic-user', limit: 20 }, expect.any(String), undefined);
+    expect(settle).toHaveBeenCalledWith(reservation, 'answered', undefined);
+  });
   it('counts only after delivery, so no failure path (timeout, abort, async) can strand a unit', async () => {
     const { db } = fixture(); const store = new FreeAnswerQuotaStore(db as any);
     const t = Date.parse(NOW); const env = { UNIFIED_WALLET_IMAGE_COUNTS_TEXT: '1', UNIFIED_WALLET_FREE_LIMIT: '1' };

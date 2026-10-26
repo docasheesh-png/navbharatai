@@ -162,12 +162,19 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
       let rejectMaintenance: (error: Error) => void = () => {};
       const maintenance = new Promise<never>((_, reject) => { rejectMaintenance = reject; });
       const offMaintenance = aiMaintenanceStore.onChange(state => {
-        if (state.enabled || state.unavailable) {
+        // Deliberate pause vs unreadable flag: both stop spend, but the user-facing string must differ.
+        if (state.unavailable && state.enabled) {
+          maintenanceError = new AiMaintenanceError({ unavailable: true });
+          active = false;
+          controller.abort();
+          rejectMaintenance(maintenanceError);
+        } else if (state.enabled) {
           maintenanceError = new AiMaintenanceError();
           active = false;
           controller.abort();
           rejectMaintenance(maintenanceError);
         }
+        // fail-open (unavailable && !enabled) does not abort an in-flight turn.
       });
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_, reject) => {
@@ -301,7 +308,10 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
         if (params.signal?.aborted) throw publicError(new BuildStoppedError());
         let maintenanceBlocked = Boolean(maintenanceError);
         try { maintenanceBlocked ||= error instanceof AiMaintenanceError; } catch { /* hostile prototype: generic error */ }
-        if (maintenanceBlocked) throw publicError(new AiMaintenanceError());
+        if (maintenanceBlocked) {
+          const from = maintenanceError ?? (error instanceof AiMaintenanceError ? error : null);
+          throw publicError(new AiMaintenanceError(from?.statusUnavailable ? { unavailable: true } : undefined));
+        }
         if (deadlineError && error === deadlineError) throw publicError(new Error(BUDGET_REACHED_MESSAGE));
         // Never forward an upstream name, stack, cause, body, metadata, or even its error text.
         throw unavailable();

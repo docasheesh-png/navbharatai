@@ -6,6 +6,7 @@
  */
 import { resolveProBuildSurplusAdmission, safeSurplusAdmissionReason, type SafeSurplusAdmissionReason } from './admitOrFallback';
 import type { SurplusBuildSession } from './buildSession';
+import { shouldSkipSurplusAdmit, SURPLUS_ADMIT_CIRCUIT_OPEN_REASON } from './surplusAdmitCircuit';
 
 export type SurplusAdmissionDiag = {
   code: 'SURPLUS_ADMITTED' | 'SURPLUS_FALLBACK';
@@ -35,6 +36,20 @@ export async function runWeakSurplusAdmissionForChat(options: {
   // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders.
   if (!(options.powerLevel === 'weak' && (options.intent !== 'chat' || options.hasImportIntent))) {
     return { ok: true, session: undefined, diag: undefined };
+  }
+
+  // Overload cool-down: recent mid-build Surplus deaths after SURPLUS_ADMITTED → skip admit, Weak ladder.
+  if (shouldSkipSurplusAdmit()) {
+    const safe = SURPLUS_ADMIT_CIRCUIT_OPEN_REASON;
+    const diag: SurplusAdmissionDiag = { code: 'SURPLUS_FALLBACK', reason: safe };
+    try {
+      options.audit('AGENTV3_SURPLUS_FALLBACK_TO_WEAK', { reason: safe, phase: 'admit_circuit' }, 'warn');
+      console.warn(`[AGENT_STEP] Surplus admit circuit open (${safe}); continuing on Weak/CHEAP_FLOOR ladder.`);
+    } catch { /* best-effort audit */ }
+    if (!options.tierEngineAvailable()) {
+      return { ok: false, diag, afterSurplusFallback: true };
+    }
+    return { ok: true, session: undefined, diag };
   }
 
   let diag: SurplusAdmissionDiag | undefined;

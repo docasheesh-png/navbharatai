@@ -2,7 +2,7 @@ import type { Express, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import { audit } from '../lib/audit';
 import { adminUsername } from '../lib/adminAuth';
-import { controlSurplusModel, readSurplusObservations, refreshSurplusRegistry } from '../AI/SurplusRegistry/runtime';
+import { APPROVE_OBSERVED_CONFIRM, approveObservedSurplusModels, controlSurplusModel, readSurplusObservations, refreshSurplusRegistry } from '../AI/SurplusRegistry/runtime';
 import { isSurplusModelId } from '../AI/SurplusRegistry/config';
 import { getSurplusConnectionTestStatus, runSurplusConnectionTest, runSurplusCredentialCheck } from '../AI/SurplusRegistry/connectionTest';
 
@@ -72,6 +72,46 @@ export function registerSurplusRegistryAdminRoutes(app: Express, verifyAdminToke
     } catch {
       audit('ADMIN_SURPLUS_METADATA_SYNC_FAILED', { admin: adminUsername(), result: 'unavailable' });
       res.status(503).json({ error: 'Metadata sync failed. Previous observations are retained; empty or stale status cannot authorize paid Surplus admission.' });
+    }
+  });
+  /**
+   * Persist coding quality + request-time floor for currently observed offers.
+   * Explicit confirm token + audit reason required. Never flips production flags or budgets.
+   */
+  app.post('/api/admin/surplus-registry/approve-observed', verifyAdminToken, writes, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const body: unknown = req.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      res.status(400).json({ error: 'Provide confirm and a 10–500 character reason.' }); return;
+    }
+    const { reason, confirm } = body as Record<string, unknown>;
+    if (Object.keys(body).some(key => !['reason', 'confirm'].includes(key))
+      || typeof reason !== 'string' || reason.trim().length < 10 || reason.length > 500
+      || confirm !== APPROVE_OBSERVED_CONFIRM) {
+      res.status(400).json({ error: `Provide confirm="${APPROVE_OBSERVED_CONFIRM}" and a 10–500 character reason.` }); return;
+    }
+    try {
+      const result = await approveObservedSurplusModels({ reason: reason.trim(), confirm: APPROVE_OBSERVED_CONFIRM });
+      audit('ADMIN_SURPLUS_APPROVE_OBSERVED', {
+        admin: adminUsername(),
+        models: result.approvedModels.length,
+        offerPairs: result.offerPairs,
+        result: 'ok',
+      });
+      res.json({ ok: true, canDispatch: false, ...result });
+    } catch (error) {
+      const code = error instanceof Error ? error.message : '';
+      const map: Record<string, [number, string, string]> = {
+        REGISTRY_DISABLED: [400, 'disabled', 'Observation service is disabled or misconfigured.'],
+        INVALID_APPROVE_CONFIRM: [400, 'invalid', 'Confirm token was not accepted.'],
+        INVALID_APPROVE_REASON: [400, 'invalid', 'Provide a 10–500 character reason.'],
+        NO_OBSERVED_SNAPSHOT: [409, 'empty', 'No observed snapshot is available. Sync metadata first.'],
+        STALE_SNAPSHOT: [409, 'stale', 'Observations are stale. Sync metadata, then approve again.'],
+        NO_ELIGIBLE_OBSERVED_OFFERS: [409, 'empty', 'No healthy trusted observed offers to approve.'],
+      };
+      const mapped = map[code] ?? [503, 'unconfirmed', 'Approval could not be confirmed. Refresh status before retrying.'];
+      audit('ADMIN_SURPLUS_APPROVE_OBSERVED_FAILED', { admin: adminUsername(), result: mapped[1] });
+      res.status(mapped[0]).json({ error: mapped[2] });
     }
   });
   app.post('/api/admin/surplus-registry/models/action', verifyAdminToken, writes, async (req, res) => {

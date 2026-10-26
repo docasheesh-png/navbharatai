@@ -146,3 +146,26 @@ independent coding/capability evidence, current price and usage mappings, accoun
 bounded pilot approval, official billing references and the Builder receipt gates described
 in [SURPLUS_BUILDER.md](SURPLUS_BUILDER.md). Metadata prices and local tests do not prove live
 routing, invoice settlement, coding quality or production deployment.
+
+## Live builder admission vs this manager (2026-10-26)
+
+Production Weak builds admit Surplus when `SURPLUS_API_KEY` + `AGENTV3_SURPLUS_BUILDER`
+are on. The production adapter synthesizes coding-quality + request-time-floor reviews
+in-process from the live key and the current metadata snapshot — it does **not** require
+a Firestore `surplus-builder-reviews` seed.
+
+The Discounted PAID Builder Manager previously always read that empty Firestore document,
+so every model showed **Not independently approved** even while live admission was working.
+The manager now overlays live synthesis when the builder is live (`qualitySource:
+live_synthesis`, `liveBuilderAdmission: true`) so the admin screen matches production.
+
+Admin **Approve observed for coding** (`POST /api/admin/surplus-registry/approve-observed`
+with `confirm: "approve-observed-coding"` and a 10–500 character reason) writes a durable
+Firestore coding/floor seed for currently healthy observed offers. It does **not** flip
+production flags, raise budgets, or set `canDispatch`. Use it when you want the manager/
+preview path to show reviewed quality without relying on live synthesis, or to record an
+explicit owner approval.
+
+Mid-build Surplus transport/LLM failures with Files still 0 fail-open to the Weak/
+CHEAP_FLOOR ladder (`surplusPreWriteFailOpen`) so builds are not stranded after
+`SURPLUS_ADMITTED`. That is best-effort reliability, not a literal 100% uptime claim.

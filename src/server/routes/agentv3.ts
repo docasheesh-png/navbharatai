@@ -5,6 +5,7 @@ import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
 import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
+import { wrapSurplusRunnerPreWriteFailOpen, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakScopeChatTerminal, weakScopeCatchResult } from '../AgentV3/weakScopeTerminal';
@@ -3478,12 +3479,33 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
   bench?: BuildBenchRegistry;
   /** P4 (fix/build-reliability) — sticky start; see MultiProviderOptions.sticky. Omitted ⇒ unchanged. */
   sticky?: { remember: boolean };
+  /**
+   * After SURPLUS_ADMITTED, ANY Surplus public build-engine failure (LLM_CALL_FAILED scrub,
+   * transport, turn_timeout, …) with Files still 0 must fail-open to the Weak ladder (same spirit
+   * as admission fail-open). Shared `state` across every runner this build constructs so fail-open
+   * happens once. Omitted ⇒ Surplus-only (legacy) behaviour.
+   */
+  surplusPreWriteFailOpen?: SurplusPreWriteFailOpenHooks;
 }): TurnRunner {
   if (opts.surplusSession) {
-    return opts.surplusSession.runner({
+    const surplusRunner = opts.surplusSession.runner({
       onProviderUsed: () => opts.onProviderUsed?.('SURPLUS', []),
       onTurnComplete: (result) => opts.onTurnComplete?.('SURPLUS', result.usage, result.model, result.usage.cacheReadInputTokens),
     });
+    if (!opts.surplusPreWriteFailOpen) return surplusRunner;
+    // Drop Surplus from the recursive Weak factory so we never wrap Surplus again after fail-open.
+    return wrapSurplusRunnerPreWriteFailOpen(
+      surplusRunner,
+      // Explicit tier + onTurnComplete so heal/tier static guards see attribution through the spread.
+      () => buildTurnRunner({
+        ...opts,
+        surplusSession: undefined,
+        surplusPreWriteFailOpen: undefined,
+        tier: opts.tier,
+        onTurnComplete: opts.onTurnComplete,
+      }),
+      opts.surplusPreWriteFailOpen,
+    );
   }
   const level = toPowerLevel(opts.tier as PowerLevel | boolean | string | undefined | null);
   const parsed = tierLadder(level);
@@ -14483,6 +14505,31 @@ async function noteBuildOutcome(
        * turn "slow for this build" into "blacklisted for everybody".
        */
       recordSurplusAdmissionDiag(buildDiag, surplusAdmissionDiag);
+      // Mid-build Surplus → Weak fail-open when Surplus dies BEFORE any user code is written.
+      // Covers ANY folded public failure after SURPLUS_ADMITTED — sub-second LLM_CALL_FAILED
+      // scrub (bench A) as well as ~60s turn_timeout / transport (bench B/C) — not timeout-only.
+      // Admission already fail-opens; this is the post-admit sibling. Shared state so every
+      // Surplus-wrapped runner (main / fast / plan / heal) drops once together.
+      const surplusPreWriteFailOpen: SurplusPreWriteFailOpenHooks = {
+        state: { dropped: false },
+        userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
+        onFailOpen: (reason) => {
+          const dropped = surplusSession;
+          surplusSession = undefined;
+          if (dropped) setAdmittedSurplusScope(dropped, false);
+          const safe = asSafeSurplusAdmissionReason(reason);
+          try {
+            audit('AGENTV3_SURPLUS_FALLBACK_TO_WEAK', { reason: safe, phase: 'mid_build_pre_write' }, 'warn');
+            console.warn(`[AGENT_STEP] Surplus mid-build unavailable (${safe}); continuing on Weak/CHEAP_FLOOR ladder.`);
+            buildDiag.record({
+              phase: 'provider', severity: 'warning', code: 'SURPLUS_FALLBACK', autoResolved: true,
+              message: `Surplus unavailable mid-build before any user file — continuing on Weak ladder (reason: ${safe}).`,
+              detail: String(safe),
+            });
+          } catch { /* audit/diagnostics must never block fail-open */ }
+        },
+      };
+
       for (const row of earlySurplusRecords) buildDiag.recordLlmCall(row);
       for (const turn of earlySurplusTurns) captureTurnUsage('SURPLUS', turn.usage, turn.model, turn.usage.cacheReadInputTokens, turn.usage.cacheCreationInputTokens);
       const fastLaneDeadRungs = new Map<string, string>();
@@ -14496,6 +14543,7 @@ async function noteBuildOutcome(
       // (autopsy 6a5fb04b: the roadmap planner reasoned its whole 4,000-token allowance away).
       const makeFastTextRunner = (onUsed?: (used: string) => void, heal = false, manualUsage = false): TurnRunner => withAnswerNotDeliberation(withStopSignal(buildTurnRunner({
         surplusSession,
+        surplusPreWriteFailOpen,
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         heal,
@@ -14519,6 +14567,7 @@ async function noteBuildOutcome(
       // build ladder: they rewrite code, which is the work that ladder is ordered for.
       const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => withAnswerNotDeliberation(withStopSignal(buildTurnRunner({
         surplusSession,
+        surplusPreWriteFailOpen,
         tier: powerLevelReqEffective,
         noClaude: noClaudeBuild,
         plan: true,
@@ -14563,6 +14612,7 @@ async function noteBuildOutcome(
       };
       const client = buildTurnRunner({
         surplusSession,
+        surplusPreWriteFailOpen,
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         complex: buildIsComplex, // a complex app opens on KIMI, not the flash rung — see makeFastTextRunner
@@ -14628,6 +14678,7 @@ async function noteBuildOutcome(
        */
       const healRunnerOpts = () => ({
         surplusSession,
+        surplusPreWriteFailOpen,
         tier: powerLevelReqEffective,
         heal: true, // the tier's ladder minus its leading flash rung (admin 2026-08-13)
         noClaude: noClaudeBuild,

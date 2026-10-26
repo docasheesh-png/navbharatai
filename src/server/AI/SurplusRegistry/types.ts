@@ -86,6 +86,9 @@ export type Plan = {
   selection?: { model: string; providerId: string; offerId: string; estimatedMicroUsd: string; qualityArtifact: string };
 };
 
+/** Where the manager derived coding-quality / floor evidence for display. */
+export type SurplusQualitySource = 'none' | 'firestore' | 'live_synthesis';
+
 /** Admin-only read contract. An observation or estimate never authorizes paid execution. */
 export interface SurplusManagerModel {
   modelId: string;
@@ -99,6 +102,10 @@ export interface SurplusManagerView {
   status: 'disabled' | 'invalid_configuration' | 'unavailable' | 'empty' | 'observed' | 'stale';
   enabled: boolean;
   canDispatch: false;
+  /** True when SURPLUS_API_KEY + AGENTV3_SURPLUS_BUILDER admit via in-process synthesis. */
+  liveBuilderAdmission: boolean;
+  /** Source of quality/floor evidence shown in this manager view. */
+  qualitySource: SurplusQualitySource;
   configuredUniverse: string[];
   intervalMs: number;
   freshnessMs: number;

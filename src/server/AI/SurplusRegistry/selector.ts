@@ -97,7 +97,7 @@ export interface SurplusRequestFloorContract {
  * Origin generation time remains null; no synthetic timestamp is inserted into the snapshot.
  */
 export function planSurplusDispatchCandidate(
-  snapshot: Snapshot | null, reviews: Reviews, workload: Workload, now: number, contract: SurplusRequestFloorContract,
+  snapshot: Snapshot | null, reviews: Reviews, workload: Workload, now: number, contract: SurplusRequestFloorContract | undefined,
 ): Plan {
   try {
     if (!contract || contract.kind !== 'observation-only-provider-request-time-floor'

@@ -4477,7 +4477,7 @@ or protect against upgrades/external account traffic.
 | --- | --- |
 | `FREE_CHAIN_ENABLED` | OFF. Deployment gate; saved admin controls cannot override OFF. |
 | `CHEAPERINFERENCE` (alias `CheaperInference`) | `off` (default) \| `admin` \| `all`. Simple owner switch for CheaperInference (`https://api.cheaperinference.com/v1`). `off` = never use. `admin` = ONLY verified admin Free Chat replies (via `isAdminEmail` / `AGENTV3_REPORT_ADMINS`); free-chain ladder OFF for those replies so every admin answer comes from CheaperInference. `all` = first eligible paid Free Chat rung for everyone (free providers still first). Unknown values fail closed to `off`. Do not set `all` without owner approval. |
-| `CHEAPERINFERENCE_API_KEY` | Secret, unset. One server-side key (`ci_live_…`). Comma lists rejected. Never put in the frontend. Required for `admin` and `all`. |
+| `CHEAPERINFERENCE_API_KEY` | Secret, unset. One server-side key (`ci_live_…`). Comma lists rejected. Never put in the frontend. Required for `admin` and `all`. **OWNER:** CheaperInference dashboard login is `aashishcpmt093@gmail.com` (platform.cheaperinference.com). Do not invent another account. |
 | `CHEAPERINFERENCE_MODEL` | `beam` default; allow-list `beam`, `deepseek-v4.1-flash-1017`. |
 | `FREE_CHAIN_CHEAPINF_PRICE_IN_PER_MTOK` / `_PRICE_OUT_PER_MTOK` | Indicative Beam defaults 0.006 / 0.022 USD per 1M tokens (owner brief). Env may RAISE, never lower, the reservation floor. Shares the Free Chat $10/day IST paid cap. |
 | `FREE_CHAIN_MAX_ATTEMPTS` | 4; integer 1–6. Max physical provider calls per Free chat turn; skipped rungs do not count. See `docs/FREE_CHAT_TIERS.md`. |

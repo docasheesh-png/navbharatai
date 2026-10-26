@@ -186,3 +186,5 @@ Env: `CHEAPERINFERENCE=off|admin|all` (default `off`).
 
 Requires `CHEAPERINFERENCE_API_KEY`. Base URL: `https://api.cheaperinference.com/v1`. Shares the $10/day IST paid cap. Doctor AI / App Builder unchanged. Do not set `all` without owner approval.
 
+**OWNER:** CheaperInference dashboard login is `aashishcpmt093@gmail.com` (platform.cheaperinference.com). Do not invent another account.
+

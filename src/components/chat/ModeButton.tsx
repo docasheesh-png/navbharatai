@@ -1,3 +1,4 @@
+import { COPY } from '../../lib/copy';
 // THE MODE BUTTON — one definition, so every chat surface offers the same way out.
 //
 // THE ASK (admin 2026-09-21): *"navbharatai free chat me mode selector show hota hai, par jab ek bar
@@ -58,7 +59,7 @@ export function ModeButton({ onOpen, size = 'inline', className = '' }: ModeButt
         onClick={onOpen}
         aria-label="Choose AI mode"
         aria-haspopup="dialog"
-        title="Choose AI mode — NavBharatAI FREE, Image Generator AI or any expert"
+        title={`Choose AI mode — ${COPY.branding.aiChatName}, Image Generator AI or any expert`}
         className={`${RAIL_BUTTON_CLASS} ${className}`}
       >
         <Layers className="w-4 h-4 shrink-0" />
@@ -73,7 +74,7 @@ export function ModeButton({ onOpen, size = 'inline', className = '' }: ModeButt
       onClick={onOpen}
       aria-label="Choose AI mode"
       aria-haspopup="dialog"
-      title="Choose AI mode — NavBharatAI FREE, Image Generator AI or any expert"
+      title={`Choose AI mode — ${COPY.branding.aiChatName}, Image Generator AI or any expert`}
       className={`${box} shrink-0 flex items-center gap-1.5 rounded-2xl border border-line bg-card font-bold text-muted hover:text-ink hover:border-indigo-500 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${className}`}
     >
       <Layers className={size === 'inline' ? 'w-3.5 h-3.5' : 'w-3 h-3'} />

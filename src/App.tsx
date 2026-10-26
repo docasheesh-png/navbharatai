@@ -1,3 +1,4 @@
+import { COPY } from './lib/copy';
 import UpdateBanner from './components/UpdateBanner';
 import { usePublicFlags } from './lib/publicFlags';
 import { startWarmingBackend } from './lib/warmBackend';
@@ -2519,7 +2520,7 @@ export default function App() {
   // Task 2.7 — memoized: static array, rebuilt only once
   const menuItems = useMemo(() => [
     { id: 'home',         label: 'Home',              icon: Bot },
-    { id: 'nbi_chat',     label: 'NavBharatAI FREE',  icon: MessageSquare },
+    { id: 'nbi_chat',     label: COPY.branding.aiChatName,  icon: MessageSquare },
     { id: 'nbi_pro_chat', label: 'NavBharatAI Pro', icon: Bot },
     { id: 'professionals', label: 'Professionals',    icon: Briefcase, status: 'New' },
     // Other AI opens its OWN header tab like Free/Pro/Professionals (admin 2026-07-23): without a menuItems

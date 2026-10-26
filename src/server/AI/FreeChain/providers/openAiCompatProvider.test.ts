@@ -211,6 +211,24 @@ describe('one pinned dispatch, usage and policy boundary', () => {
     }
   });
 
+  it('CHEAPERINFERENCE pulses empty chunks on reasoning without delivering the private text', async () => {
+    stream([
+      { choices: [{ delta: { reasoning_content: 'Private beam thought' }, finish_reason: null }] },
+      { choices: [{ delta: { content: 'Visible answer' }, finish_reason: 'stop' }], usage: { prompt_tokens: 8, completion_tokens: 2 } },
+    ], {}, false);
+    const onChunk = vi.fn();
+    const result = await new OpenAiCompatProvider(config({
+      provider: 'CHEAPERINFERENCE',
+      baseURL: 'https://api.cheaperinference.com/v1',
+      model: 'beam',
+      envName: 'CHEAPERINFERENCE_API_KEY',
+      streamUsage: true,
+    })).executeTurn({ prompt: 'hello', onChunk });
+    expect(onChunk.mock.calls).toEqual([[''], ['Visible answer']]);
+    expect(result).toMatchObject({ content: 'Visible answer', provider: 'CHEAPERINFERENCE', model: 'beam' });
+    expect(JSON.stringify(result)).not.toContain('Private beam');
+  });
+
   it('GLM never emits reasoning_content and reads bounded reported cached input tokens', async () => {
     stream([
       { choices: [{ delta: { reasoning_content: 'Private reasoning must not leave this adapter' }, finish_reason: null }] },

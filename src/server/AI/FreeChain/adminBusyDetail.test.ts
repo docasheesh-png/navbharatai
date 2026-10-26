@@ -40,6 +40,20 @@ describe('adminBusyDetail', () => {
     expect(detail).not.toContain('ci_live_SHOULD');
   });
 
+  it('includes waitMs and ttftCapMs for timeout diagnosis', () => {
+    const detail = adminBusyDetail({
+      context: adminCtx(),
+      earlyReason: 'all-failed',
+      attempts: [{ provider: 'cheapinf', reason: 'timeout:first-token:60000ms' }],
+      waitMs: 60123,
+      ttftCapMs: 60000,
+      env: { CHEAPERINFERENCE: 'admin', CHEAPERINFERENCE_API_KEY: 'ci_live_x', CHEAPERINFERENCE_MODEL: 'beam' },
+    })!;
+    expect(detail).toContain('waitMs=60123');
+    expect(detail).toContain('ttftCapMs=60000');
+    expect(detail).toContain('timeout:first-token:60000ms');
+  });
+
   it('redacts a key that somehow lands in the detail string', () => {
     const wrapped = withAdminBusyDetail('busy', 'leak ci_live_abcdefg123 and Bearer tokensecret');
     expect(wrapped).toContain('[admin diagnostic]');

@@ -157,7 +157,7 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
     const blocked = (TERMS_BLOCKED_IDS as readonly string[]).includes(id); const unverified = (TERMS_UNVERIFIED_IDS as readonly string[]).includes(id);
     const writtenApproval = (blocked || unverified) && parseEnvFlag(env[`FREE_CHAIN_${prefix}_WRITTEN_APPROVAL`]) === true;
     const model = (env[modelEnv] ?? MODELS[id]).trim();
-    const cheapinfModels = ['beam', 'deepseek-v4.1-flash-1017'];
+    const cheapinfModels = ['beam', 'beam-1.0-501b-a23b', 'deepseek-v4.1-flash-1017'];
     const allowed = id === 'gemini' ? ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.8-flash'].includes(model)
       : id === 'groq' ? ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'].includes(model)
       : id === 'geminipaid' ? ['gemini-2.5-flash-lite'].includes(model)
@@ -207,7 +207,7 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
   });
   const config: FreeChainConfig = { enabled: flag('FREE_CHAIN_ENABLED'), rolloutPercent: num('FREE_CHAIN_ROLLOUT_PERCENT', 0, 0, 100),
     allowUids: list(env.FREE_CHAIN_ALLOW_UIDS), order: order as ProviderId[], skipGemini, privacyApproved,
-    ttftMs: num('FREE_CHAIN_TTFT_MS', 6000, 1000, 30000), cacheEnabled: flag('FREE_CHAIN_CACHE_ENABLED', true), cacheTtlS: num('FREE_CHAIN_CACHE_TTL_S', 86400, 60, 86400),
+    ttftMs: num('FREE_CHAIN_TTFT_MS', 6000, 1000, 90000), cacheEnabled: flag('FREE_CHAIN_CACHE_ENABLED', true), cacheTtlS: num('FREE_CHAIN_CACHE_TTL_S', 86400, 60, 86400),
     paidCapNanoUsd: money('FREE_CHAIN_PAID_DAILY_CAP_USD', DEFAULT_PAID_CAP_NANO_USD / NANO_USD, 0, OWNER_PAID_DAILY_CEILING_NANO_USD / NANO_USD),
     queue: { maxActive: num('FREE_CHAIN_MAX_ACTIVE', 8, 1, 64), maxQueued: num('FREE_CHAIN_MAX_QUEUED', 64, 0, 1000), maxWaitMs: num('FREE_CHAIN_MAX_WAIT_MS', DEFAULT_ADMISSION_QUEUE_LIMITS.maxWaitMs, 100, 10000), perUserActive: num('FREE_CHAIN_PER_USER_ACTIVE', 1, 1, 8), perUserQueued: num('FREE_CHAIN_PER_USER_QUEUED', 1, 0, 16) },
     paidPerUserDaily: num('FREE_CHAIN_PAID_PER_USER_DAILY', 20, 0, 1000), safetyMargin: num('FREE_CHAIN_QUOTA_MARGIN', .9, .1, .95, false),

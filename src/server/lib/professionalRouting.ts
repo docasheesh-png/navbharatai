@@ -4,6 +4,9 @@ import type { AIProviderResponse } from '../AI/Router/ProviderTypes';
 import { isGatewayRouteSelected, isGatewayTerminalError } from '../AI/InferenceGateway/runtime';
 // Shared Professional-AI model routing (admin 2026-07-24: "Other AI ki API call = Professional AI").
 //
+// CheaperInference (CHEAPERINFERENCE=off|admin|all) is Free Chat only in this change.
+// Doctor AI and App Builder stay on their own routes. Do not mix Chat / Professional / App Builder budgets.
+//
 // WHY THIS EXISTS: the 70+ config-driven professionals (Doctor AI, Lawyer AI, …) answer through one
 // resilient model chain, while the "Other AI" tools (AI Debugger, Design pass, …) used the flat 'free'
 // router. The admin wants the Other-AI tools to use the SAME AI as Professional AI. Rather than copy the

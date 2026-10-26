@@ -13,6 +13,11 @@ export interface FreeChainContext {
   teachingTurn?: boolean;
   /** Opaque server-issued entry lease, never accepted from request JSON. */
   entryAdmission?: EntryAdmissionGrant;
+  /**
+   * Verified admin (isAdminEmail on the Firebase-verified grant email). Set only by
+   * freeChainRequestContext — never from body. Used for CHEAPERINFERENCE=admin exclusive path.
+   */
+  isAdmin?: boolean;
 }
 export function rolloutBucket(uid: string): number { return parseInt(createHash('sha256').update(`free-chat-chain:v1:${uid}`).digest('hex').slice(0, 8), 16) % 10000; }
 export function selectedForFreeChain(config: FreeChainConfig, control: FreeChainControl, uid: string | undefined): boolean {

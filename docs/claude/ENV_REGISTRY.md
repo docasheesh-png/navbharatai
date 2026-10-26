@@ -4476,6 +4476,10 @@ or protect against upgrades/external account traffic.
 | Name | Code default / interpretation |
 | --- | --- |
 | `FREE_CHAIN_ENABLED` | OFF. Deployment gate; saved admin controls cannot override OFF. |
+| `CHEAPERINFERENCE` (alias `CheaperInference`) | `off` (default) \| `admin` \| `all`. Simple owner switch for CheaperInference (`https://api.cheaperinference.com/v1`). `off` = never use. `admin` = ONLY verified admin Free Chat replies (via `isAdminEmail` / `AGENTV3_REPORT_ADMINS`); free-chain ladder OFF for those replies so every admin answer comes from CheaperInference. `all` = first eligible paid Free Chat rung for everyone (free providers still first). Unknown values fail closed to `off`. Do not set `all` without owner approval. |
+| `CHEAPERINFERENCE_API_KEY` | Secret, unset. One server-side key (`ci_live_…`). Comma lists rejected. Never put in the frontend. Required for `admin` and `all`. |
+| `CHEAPERINFERENCE_MODEL` | `beam` default; allow-list `beam`, `deepseek-v4.1-flash-1017`. |
+| `FREE_CHAIN_CHEAPINF_PRICE_IN_PER_MTOK` / `_PRICE_OUT_PER_MTOK` | Indicative Beam defaults 0.006 / 0.022 USD per 1M tokens (owner brief). Env may RAISE, never lower, the reservation floor. Shares the Free Chat $10/day IST paid cap. |
 | `FREE_CHAIN_MAX_ATTEMPTS` | 4; integer 1–6. Max physical provider calls per Free chat turn; skipped rungs do not count. See `docs/FREE_CHAT_TIERS.md`. |
 | `FREE_CHAIN_STICKY_SPREAD` | OFF. Rotates equal-cost free Tier-1 rungs by a stable uid hash (continuity + load spread). Never moves a paid rung. |
 | `FREE_CHAIN_GLMX_API_KEY` / `FREE_CHAIN_DEEPINFRA_API_KEY` / `FREE_CHAIN_OPENAI_API_KEY` | Secret, unset. One key each for paid Tier-3 rungs GLM-4.7-FlashX, Nemotron 3 Nano (DeepInfra), GPT-5 Nano. Comma lists rejected. |
@@ -4488,7 +4492,7 @@ or protect against upgrades/external account traffic.
 | `FREE_CHAIN_LLM7_FREE_VERIFIED_UNTIL` | Unset. Free-plan attestation for LLM7 (also requires written approval). |
 | `FREE_CHAIN_ROLLOUT_PERCENT` | 0; whole integer 0–100. Used when no saved admin override exists. |
 | `FREE_CHAIN_ALLOW_UIDS` | Empty comma-separated verified UID allowlist. Allowlisted users can be selected even at 0%. Never include secrets. |
-| `FREE_CHAIN_ORDER` | `glm47,glm45,groq,openrouter,cloudflare,gemini,deepseek`; unique known IDs, omitted rungs allowed, paid rung must remain last when present. Empty/unset uses default, not an empty chain. |
+| `FREE_CHAIN_ORDER` | Default includes `cheapinf` first among paid (`glm45,glm47,groq,cloudflare,openrouter,cheapinf,llama8b,…`). Unique known IDs, omitted rungs allowed; no paid rung may precede a free rung. Empty/unset uses default, not an empty chain. |
 | `FREE_CHAIN_SKIP_GEMINI` | ON. Leave on pending current account/privacy/audience/geography review. |
 | `FREE_CHAIN_GEMINI_PRIVACY_APPROVED` | OFF. Does not expand runtime beyond the exact public-safe corpus or authorize ordinary private conversations. |
 | `FREE_CHAIN_TTFT_MS` | 6000; integer 1000–30000. Time-to-first-content watchdog, not a provider SLA. |

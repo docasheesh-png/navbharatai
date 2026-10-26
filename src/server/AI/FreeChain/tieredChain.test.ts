@@ -51,9 +51,9 @@ function tiered(order: string, extra: Record<string, string> = {}) {
 describe('owner tiered free chat module (Tier 1 → Tier 2 → Tier 3)', () => {
  it('default order is free-first and every paid rung sits after every free rung', () => {
   const cfg = freeChainConfig({});
-  const firstPaid = cfg.order.findIndex(id => ['llama8b', 'dsv4flash', 'glmflashx', 'gpt5nano', 'geminipaid', 'deepseek'].includes(id));
+  const firstPaid = cfg.order.findIndex(id => ['cheapinf', 'llama8b', 'dsv4flash', 'glmflashx', 'gpt5nano', 'geminipaid', 'deepseek'].includes(id));
   expect(cfg.order.slice(0, firstPaid)).toEqual(['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter']);
-  expect(cfg.order.slice(firstPaid)).toEqual(['llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
+  expect(cfg.order.slice(firstPaid)).toEqual(['cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
   expect(cfg.maxAttempts).toBe(4); expect(cfg.stickySpread).toBe(false);
   expect(cfg.rungs.find(r => r.id === 'gemini')?.model).toBe('gemini-2.5-flash-lite');
  });

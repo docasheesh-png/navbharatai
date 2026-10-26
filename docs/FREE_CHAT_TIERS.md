@@ -184,7 +184,7 @@ Env: `CHEAPERINFERENCE=off|admin|all` (default `off`).
 | `admin` | Verified admins only (`isAdminEmail`). Free-chain ladder OFF for those replies — every admin Free Chat answer comes from CheaperInference. |
 | `all` | First paid FreeChain rung for everyone; free providers still tried first. |
 
-Requires `CHEAPERINFERENCE_API_KEY`. Base URL: `https://api.cheaperinference.com/v1`. Shares the $10/day IST paid cap. Doctor AI / App Builder unchanged. Do not set `all` without owner approval.
+Requires `CHEAPERINFERENCE_API_KEY`. Base URL: `https://api.cheaperinference.com/v1`. Shares the $10/day IST paid cap. Doctor AI / App Builder unchanged. Do not set `all` without owner approval. Admin exclusive path: stale `cheapinf:circuit` (from prior AUTH/402) force-probes after 30s remaining and surfaces upstream HTTP in `[admin diagnostic]`; owner dashboard login `aashishcpmt093@gmail.com`.
 
 **OWNER:** CheaperInference dashboard login is `aashishcpmt093@gmail.com` (platform.cheaperinference.com). Do not invent another account.
 

@@ -175,13 +175,15 @@ describe('mobile tools and desktop layout contract', () => {
     expect(css).toContain('flex-wrap: nowrap');
     expect(css).toContain('overflow-y: visible');
   });
-  it('keeps Pro actions outside the tools menu and resizes across breakpoints', () => {
+  it('keeps Pro Send in the tools row (outside Type) and resizes across breakpoints', () => {
     const pro = sourceText('src/components/agentv3/AgentV3Panel.tsx');
+    const toolsStart = pro.indexOf('<MobileComposerTools');
     const toolsEnd = pro.indexOf('</MobileComposerTools>');
-    expect(toolsEnd).toBeGreaterThan(pro.indexOf('<ChatToolbar', pro.indexOf('<MobileComposerTools')));
-    expect(pro.indexOf('aria-label="Cancel request"', toolsEnd)).toBeGreaterThan(toolsEnd);
-    // 💡 lives at the end of the always-visible Pro tools row (OLD layout) — not a new corner.
-    const toolsBlock = pro.slice(pro.indexOf('<MobileComposerTools'), toolsEnd);
+    expect(toolsEnd).toBeGreaterThan(pro.indexOf('<ChatToolbar', toolsStart));
+    // Send/Stop live in the tools row — outside the Type textarea — so the phone arrow is not inside Type.
+    const toolsBlock = pro.slice(toolsStart, toolsEnd);
+    expect(toolsBlock).toContain('nb-pro-send-slot');
+    expect(toolsBlock).toContain('aria-label="Cancel request"');
     expect(toolsBlock).toContain('NextSuggestionsBulb');
     expect(pro).not.toContain('nb-pro-suggestions-corner');
     expect(pro).toContain("window.visualViewport?.addEventListener('resize', resize)");
@@ -192,7 +194,11 @@ describe('mobile tools and desktop layout contract', () => {
     expect(css).toContain('.nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-toggle');
     expect(css).toContain('display: none !important');
     expect(css).toContain('.nb-composer-box[data-composer-surface="pro"] .nb-pro-controls');
-    expect(css).toContain('order: 0');
+    expect(css).toContain('order: 0 !important');
+    expect(css).toContain('nb-pro-send-slot');
+    expect(css).toContain('max-height: min(72px, 14dvh) !important');
+    expect(css).toContain('position: fixed !important');
+    expect(css).toContain('nb-send-enter-toggle');
     // Desktop contract untouched: tools default to display:contents outside the phone media query.
     expect(css.split('@media')[0]).toContain('.nb-composer-tools, .nb-composer-tools-content { display: contents; }');
   });

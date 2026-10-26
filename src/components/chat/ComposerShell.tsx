@@ -159,8 +159,16 @@ export function MobileComposerTools({ children, open: controlledOpen, onOpenChan
       const viewport = window.visualViewport;
       const height = viewport?.height ?? window.innerHeight;
       const inset = Math.max(0, window.innerHeight - height - (viewport?.offsetTop ?? 0));
-      root.current?.style.setProperty('--nb-composer-menu-max-height', `${Math.max(44, height - 80)}px`);
-      root.current?.style.setProperty('--nb-composer-menu-bottom', `${inset + 60}px`);
+      const menuMax = `${Math.max(44, height - 80)}px`;
+      // Clear the mobile footer + composer tools so Build/Settings popovers sit above both.
+      const menuBottom = `${inset + 72}px`;
+      const applyMenuVars = (el: HTMLElement | null | undefined) => {
+        el?.style.setProperty('--nb-composer-menu-max-height', menuMax);
+        el?.style.setProperty('--nb-composer-menu-bottom', menuBottom);
+      };
+      applyMenuVars(root.current);
+      // Pro mobile uses display:contents on tools — also stamp the box so menus inherit reliably.
+      applyMenuVars(root.current?.closest('.nb-composer-box') as HTMLElement | null);
     };
     const outside = (event: PointerEvent) => {
       if (!root.current?.contains(event.target as Node)) setOpen(false);

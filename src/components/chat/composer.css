@@ -32,18 +32,21 @@
     overflow-x: auto; overflow-y: visible; max-width: 100%;
     padding-right: 8px !important; min-height: 44px;
   }
-  /* Build options / mode menus: escape the tools strip so they are never cropped. */
+  /* Build options / mode menus: escape the tools strip so they are never cropped.
+     !important beats Tailwind `absolute` / `left-0` / `w-56` that otherwise leave a thin gray strip. */
   .nb-composer-tools-content .absolute.bottom-full {
-    position: fixed; left: 12px; right: 12px; bottom: var(--nb-composer-menu-bottom, 60px);
-    width: auto !important; min-width: 0; max-width: calc(100vw - 24px);
-    max-height: var(--nb-composer-menu-max-height, 50dvh); overflow-y: auto;
-    z-index: 80;
+    position: fixed !important; left: 12px !important; right: 12px !important;
+    bottom: var(--nb-composer-menu-bottom, 72px) !important;
+    width: auto !important; min-width: min(18rem, calc(100vw - 24px)) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: var(--nb-composer-menu-max-height, 50dvh) !important; overflow-y: auto !important;
+    z-index: 80 !important;
   }
   .nb-composer-box[data-composer-surface="pro"] { margin-top: 4px; margin-bottom: 4px; gap: 0; }
   [data-composer-surface="pro"] .nb-pro-controls { padding: 0; }
-  [data-composer-surface="pro"] [data-tour="chat"] > button,
-  [data-composer-surface="pro"] [data-tour="chat"] > .nb-pro-actions > button { width: 44px; height: 44px; bottom: 4px; right: 4px; }
-  [data-composer-surface="pro"] [data-tour="chat"] > .nb-pro-stop { right: 48px; }
+  [data-composer-surface="pro"] [data-route="chat"] > button,
+  [data-composer-surface="pro"] [data-route="chat"] > .nb-pro-actions > button { width: 44px; height: 44px; bottom: 4px; right: 4px; }
+  [data-composer-surface="pro"] [data-route="chat"] > .nb-pro-stop { right: 48px; }
   [data-composer-surface="pro"][data-steering="true"] .nb-composer-text { padding-right: 100px; }
   [data-composer-surface="pro"] .nb-pro-expand-desktop { display: none; }
   [data-composer-surface="pro"][data-expanded="true"] .nb-composer-text { max-height: 50dvh !important; }
@@ -54,6 +57,20 @@
 /* Desktop Pro: 💡 stays in the tools row (end) — no extra corner chrome. */
 @media (min-width: 640px) {
   .nb-composer-box[data-composer-surface="pro"] .nb-pro-suggestions-corner { display: none; }
+  /* Send lives in the tools row in the DOM; pin it back to the Type corner on desktop. */
+  .nb-composer-box[data-composer-surface="pro"] .nb-pro-send-slot {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    z-index: 5;
+    margin: 0;
+  }
+  .nb-composer-box[data-composer-surface="pro"] .nb-pro-send-btn {
+    position: static;
+  }
+  .nb-composer-box[data-composer-surface="pro"] .nb-pro-send-btn--stop {
+    /* Stop sits left of Send when both show (steering). */
+  }
 }
 @media (max-width: 639px) {
   /* Non-Pro + strip: hide Search/Clear + Expand chrome when open. */
@@ -64,7 +81,7 @@
 
   /*
    * Pro mobile (match OLD good screenshot): NO + button.
-   * Build|settings|attach|mic|speaker is an always-visible clear row ABOVE Type.
+   * Build|settings|attach|mic|speaker|Send is an always-visible clear row ABOVE Type.
    * Desktop rules above are unchanged (display:contents on tools at min-width default).
    */
   .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools {
@@ -91,9 +108,9 @@
     border: 0;
     background: transparent;
   }
-  /* Tools ABOVE Type (textarea is order-1). */
+  /* Tools ABOVE Type (textarea is order-1). !important beats Tailwind `order-2`. */
   .nb-composer-box[data-composer-surface="pro"] .nb-pro-controls {
-    order: 0;
+    order: 0 !important;
     display: flex !important;
     flex-wrap: nowrap !important;
     align-items: center;
@@ -102,6 +119,7 @@
     min-height: 36px;
     max-width: none;
     padding: 2px 8px 6px !important;
+    padding-right: 8px !important; /* Send is in-row now — no absolute reserve */
     overflow: visible !important;
   }
   /* Natural button size — do not force 44px which cramps the Build label. */
@@ -112,8 +130,37 @@
     overflow: visible;
     flex-shrink: 0;
   }
+  /* Send sits in the tools row — clearly OUTSIDE the Type field. */
+  .nb-composer-box[data-composer-surface="pro"] .nb-pro-send-slot {
+    position: static;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .nb-composer-box[data-composer-surface="pro"] .nb-pro-send-btn {
+    position: static !important;
+    width: 36px !important;
+    height: 36px !important;
+    right: auto !important;
+    bottom: auto !important;
+  }
+  /*
+   * Type height ≈ 1/3 of the old phone void (~half-screen / ~160px max).
+   * Beat Tailwind min-h-[72px] / pt-4 so the empty box stays one compact line.
+   */
   .nb-composer-box[data-composer-surface="pro"] .nb-composer-text {
-    padding-left: 16px;
+    min-height: 40px !important;
+    max-height: min(72px, 14dvh) !important;
+    padding: 8px 12px !important;
+    padding-right: 44px !important; /* room for expand only — Send is outside Type */
+  }
+  .nb-composer-box[data-composer-surface="pro"][data-expanded="true"] .nb-composer-text {
+    max-height: 50dvh !important;
+    height: auto !important;
+  }
+  /* Duplicate ↵ Send pill inside the card — hide on Pro phone (real Send is the arrow). */
+  .nb-composer-box[data-composer-surface="pro"] .nb-send-enter-toggle,
+  .nb-composer-box[data-composer-surface="pro"] [data-send-enter-toggle] {
+    display: none !important;
   }
   /* Expand lives inside the Type box (like OLD), not in the tools row. */
   .nb-composer-box[data-composer-surface="pro"] .nb-pro-expand-mobile {
@@ -121,14 +168,19 @@
   }
   .nb-composer-box[data-composer-surface="pro"] .nb-pro-expand-desktop {
     display: flex !important;
+    right: 8px !important; /* Send left the Type corner */
   }
-  /* Dropdowns must not be clipped — keep fixed escape. */
-  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content .absolute.bottom-full {
-    position: fixed;
-    left: 12px; right: 12px;
-    bottom: var(--nb-composer-menu-bottom, 60px);
-    width: auto !important; min-width: 0; max-width: calc(100vw - 24px);
-    max-height: var(--nb-composer-menu-max-height, 50dvh); overflow-y: auto;
-    z-index: 80;
+  /* Dropdowns must not be clipped — keep fixed escape; !important beats Tailwind. */
+  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content .absolute.bottom-full,
+  .nb-composer-box[data-composer-surface="pro"] .nb-pro-controls .absolute.bottom-full {
+    position: fixed !important;
+    left: 12px !important; right: 12px !important;
+    bottom: var(--nb-composer-menu-bottom, 72px) !important;
+    width: auto !important;
+    min-width: min(18rem, calc(100vw - 24px)) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: var(--nb-composer-menu-max-height, 50dvh) !important;
+    overflow-y: auto !important;
+    z-index: 80 !important;
   }
 }

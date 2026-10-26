@@ -5909,6 +5909,45 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   onPick={(text) => { setPrompt(text); setTimeout(() => composerRef.current?.focus(), 0); }}
                 />
               </div>
+              <div className="nb-pro-send-slot shrink-0 flex items-center gap-1" data-pro-send="">
+                {chatMode !== 'build' ? (
+                  // Plan/Advise are read-only lanes: ALWAYS a Send button (even while a build runs) — they
+                  // never take the build lock, so they must be sendable anytime. Disabled only while THEIR
+                  // own turn is streaming.
+                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className={`nb-pro-send-btn h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
+                    {roleBusy ? <TirangaLoader className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" strokeWidth={2.5} />}
+                  </button>
+                ) : canSteerMidBuild(running, powerLevel, chatMode) ? (
+                  // Fix 60, ungated to every tier by A1: the composer stays LIVE mid-build — Send
+                  // messages the working team (server /steer); Stop moves to the smaller slot so it
+                  // stays one tap away. The `running ? Stop` branch below is the fallback if the admin
+                  // reverts with AGENTV3_STEER_ALL_TIERS=off: the client cannot see that env, so a
+                  // non-max user would still get this composer and the server would refuse the message
+                  // with its honest FULL_TEAM_ONLY error rendered in the thread. Ugly on an emergency
+                  // revert, never silent — which is the trade this switch is for. Do not delete the
+                  // branch to tidy up; it is what the gate returns to.
+                  <>
+                    <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`nb-pro-stop nb-pro-send-btn nb-pro-send-btn--stop h-9 w-9 flex items-center justify-center rounded-full text-danger hover:bg-raised`}>
+                      <Square className="w-3.5 h-3.5 fill-current" />
+                    </button>
+                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`nb-pro-send-btn h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
+                      <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
+                    </button>
+                  </>
+                ) : submissionPhase && !running ? (
+                  <button onClick={cancelSubmission} aria-label="Cancel request" title="Cancel request" className={`nb-pro-send-btn h-9 w-9 flex items-center justify-center bg-ink hover:opacity-90 rounded-full text-surface transition-all`}>
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                  </button>
+                ) : running ? (
+                  <button onClick={stop} title="Stop" className={`nb-pro-send-btn h-9 w-9 flex items-center justify-center bg-ink hover:opacity-90 rounded-full text-surface transition-all`}>
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                  </button>
+                ) : (
+                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className={`nb-pro-send-btn h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
+                    <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
+                  </button>
+                )}
+              </div>
               </div>{/* /settings + attach row */}
               </div>{/* /toolbar row (order-2): mode selector + settings + attach + 💡 */}
               </MobileComposerTools>
@@ -6066,43 +6105,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     className={`nb-pro-expand-desktop absolute right-12 ${composerBtnY} h-9 w-9 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-raised`}
                   >
                     {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                  </button>
-                )}
-                {chatMode !== 'build' ? (
-                  // Plan/Advise are read-only lanes: ALWAYS a Send button (even while a build runs) — they
-                  // never take the build lock, so they must be sendable anytime. Disabled only while THEIR
-                  // own turn is streaming.
-                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
-                    {roleBusy ? <TirangaLoader className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" strokeWidth={2.5} />}
-                  </button>
-                ) : canSteerMidBuild(running, powerLevel, chatMode) ? (
-                  // Fix 60, ungated to every tier by A1: the composer stays LIVE mid-build — Send
-                  // messages the working team (server /steer); Stop moves to the smaller slot so it
-                  // stays one tap away. The `running ? Stop` branch below is the fallback if the admin
-                  // reverts with AGENTV3_STEER_ALL_TIERS=off: the client cannot see that env, so a
-                  // non-max user would still get this composer and the server would refuse the message
-                  // with its honest FULL_TEAM_ONLY error rendered in the thread. Ugly on an emergency
-                  // revert, never silent — which is the trade this switch is for. Do not delete the
-                  // branch to tidy up; it is what the gate returns to.
-                  <>
-                    <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`nb-pro-stop absolute right-12 ${composerBtnY} h-9 w-9 flex items-center justify-center rounded-full text-danger hover:bg-raised`}>
-                      <Square className="w-3.5 h-3.5 fill-current" />
-                    </button>
-                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
-                      <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
-                    </button>
-                  </>
-                ) : submissionPhase && !running ? (
-                  <button onClick={cancelSubmission} aria-label="Cancel request" title="Cancel request" className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-ink hover:opacity-90 rounded-full text-surface transition-all`}>
-                    <Square className="w-3.5 h-3.5 fill-current" />
-                  </button>
-                ) : running ? (
-                  <button onClick={stop} title="Stop" className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-ink hover:opacity-90 rounded-full text-surface transition-all`}>
-                    <Square className="w-3.5 h-3.5 fill-current" />
-                  </button>
-                ) : (
-                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
-                    <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
                   </button>
                 )}
               </div>

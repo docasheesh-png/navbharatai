@@ -19607,7 +19607,7 @@ async function noteBuildOutcome(
         ) break;
         // Parentheses so heal-assignment census (theCalculatorsHelpersHadNoHome) does not
         // treat this as a raw `result = <ident>;` replace — only empty-build `retry` may.
-        result = (undefined as typeof result);
+        result = undefined as unknown as typeof result;
       }
       // Loop exits only after the convergence statement set `result`.
       result = result!;

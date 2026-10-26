@@ -310,7 +310,8 @@ export function registerWalletRoutes(app: Express): void {
       const maskedWallet = maskWalletForView(rawWallet, await freeProgramPaused());
       // Only a never-paid wallet's history is hidden. A paying account's statement stays the whole truth (its rows and its
       // real balance agree); the gift is not SPENDABLE while paused, which the debit side enforces.
-      const statement = buildWalletStatement((maskedWallet as { freeTrialEnded?: boolean }).freeTrialEnded === true ? maskedWallet : rawWallet);
+      const statement = buildWalletStatement((maskedWallet as { freeTrialEnded?: boolean }).freeTrialEnded === true
+        || (rawWallet.adminBuildTokensRemaining !== undefined && maskedWallet.walletLedger !== rawWallet.walletLedger) ? maskedWallet : rawWallet);
       return res.json({ ok: true, exists: true, ...statement });
     } catch (e) {
       return sendSafeError(res, 500, 'Could not build your statement.', e, 'wallet:statement');

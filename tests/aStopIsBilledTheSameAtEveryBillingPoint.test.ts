@@ -411,7 +411,7 @@ describe('3 — the watchdog waiver describes the final settled bill, not an int
       .toBe(decideMarkupOnProof({ decidedBilledUsd: 2, realCostUsd: 0.4, sandboxUsd: 0.1, previewProven: false, expectsArtifacts: true }).reason);
     expect(result.order.indexOf('MARKUP_WAIVED_NO_PREVIEW')).toBeGreaterThan(result.order.indexOf('billing'));
     expect(result.debits).toEqual([['synthetic-db', 'synthetic-user', {
-      billedInr: 50, buildRef: `synthetic-workspace_${STOP_AT - 10_000}`, feature: 'build', description: 'NavBharatAI Pro build (time-capped)',
+      billedInr: 50, buildRef: `synthetic-workspace_${STOP_AT - 10_000}`, feature: 'build', adminCreditEligible: false, description: 'NavBharatAI Pro build (time-capped)',
     }]]);
   });
 

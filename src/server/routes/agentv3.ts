@@ -3942,7 +3942,7 @@ export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, promp
       // totalMoneySpent) AND the balance math below (doc's remaining_balance via the same pure reader).
       // An anonymous caller (userId null) has no wallet to read → balance-unknown → fail-open proceed.
       const walletDoc = userId ? await firestoreWalletReader(getDb())(userId).catch(() => null) : null;
-      const balanceInr = userId ? await readWalletBalanceInr(async () => walletDoc, userId) : null;
+      const balanceInr = userId ? await readWalletBalanceInr(async () => walletDoc, userId, powerLevelReqEffective === 'weak' ? 'build' : 'usage') : null;
       if (userId) onFreeTier(isFreeTierUser(walletDoc));
       // Slice F (admin routing plan §1 row 6): POWER MODE (Only Opus) is for PAYING accounts only —
       // a user who has never purchased cannot spend the most expensive engine. Refused pre-stream,
@@ -13278,6 +13278,7 @@ async function noteBuildOutcome(
                 billedInr: watchdogBilledUsd * usdInrRate(),
                 buildRef: coordination.billingRef(`${workspaceId}_${billingCtx.buildStartedAt}`),
                 feature: 'build',
+                adminCreditEligible: powerLevelReqEffective === 'weak',
                 description: 'NavBharatAI Pro build (time-capped)',
               });
               if (debitRes.ok) watchdogWalletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance };
@@ -26987,6 +26988,7 @@ async function noteBuildOutcome(
             billedInr: effectiveBilledUsd * usdInrRate(),
             buildRef: coordination.billingRef(`${workspaceId}_${buildStartedAt}`),
             feature: 'build',
+            adminCreditEligible: powerLevelReqEffective === 'weak',
             description: 'NavBharatAI Pro build',
           });
           if (debitRes.ok) {

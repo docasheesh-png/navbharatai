@@ -27,7 +27,7 @@
 import { getServerDb, type Firestore } from './serverDb';
 import { hasEverPaid } from '../AgentV3/FreeTierBuildRouting';
 import { setFreeProgramPausedHint } from './freeProgramHint';
-import { giftRemaining } from './giftSpend';
+import { giftRemaining, adminBuildRemaining } from './giftSpend';
 import { TOKENS_PER_RUPEE } from './payments';
 
 export const FREE_PROGRAM_COLLECTION = 'platform_settings';
@@ -143,17 +143,39 @@ const BALANCE_FIELDS = ['remaining_balance', 'total_balance', 'tokenBalance', 'f
  */
 export function maskWalletForView(data: Record<string, unknown>, paused: boolean): Record<string, unknown> {
   if (!paused) return data;
+  const admin = adminBuildRemaining(data);
+  if (!hasEverPaid(data as never) && data.adminBuildTokensRemaining !== undefined) {
+    // While paused, the explicit grant remains usable for app building, never purchases. A resume restores ordinary gift usage.
+    // Only provenance-tagged movements are shown; old generic gifts are not unpaused by this grant.
+    const ledger = Array.isArray(data.walletLedger) ? data.walletLedger : [];
+    return {
+      ...data,
+      tokenBalance: admin, remaining_balance: admin / TOKENS_PER_RUPEE,
+      total_balance: typeof data.adminBuildTokensTotalGranted === 'number' && Number.isFinite(data.adminBuildTokensTotalGranted)
+        ? Math.max(0, data.adminBuildTokensTotalGranted) / TOKENS_PER_RUPEE : 0,
+      totalTokensPurchased: 0, totalMoneySpent: 0, total_money_spent: 0,
+      walletStatementProjection: 'admin-build',
+
+      giftTokensRemaining: admin, adminBuildTokensRemaining: admin, freeGiftedTokens: 0,
+      freeTrialEnded: false, freeTrialEndedMessage: undefined,
+      walletLedger: ledger.filter((r) => r && typeof r.adminBuildTokensDelta === 'number' && r.adminBuildTokensDelta !== 0)
+        .map((r) => ({ ...r, amountCoinsOrTokens: r.adminBuildTokensDelta })),
+      // The mixed historical opening cannot be split safely. The statement reports unknown instead
+      // of inventing a reconciliation for rolled-off promotional history.
+      ledgerOpeningTokens: undefined,
+    };
+  }
   if (hasEverPaid(data as never)) {
     // A paying account sees its OWN money only: the gift part is not spendable while the program is paused, so it is not
     // shown either (and the debit side never touches it — walletDebit, WalletBalance). No "free trial" wording: it paid.
-    const gift = giftRemaining(data as never);
+    const gift = giftRemaining(data as never) - admin;
     if (!(gift > 0)) return data;
     const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
     return {
       ...data,
       tokenBalance: num(data.tokenBalance) - gift,
       remaining_balance: Math.round((num(data.remaining_balance) - gift / TOKENS_PER_RUPEE) * 100) / 100,
-      giftTokensRemaining: 0,
+      giftTokensRemaining: admin,
       freeGiftedTokens: 0,
     };
   }

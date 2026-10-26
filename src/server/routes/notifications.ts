@@ -4,6 +4,7 @@ import { listNotificationsForUser, markNotificationsRead, dismissNotifications }
 import { listSocialInbox, updateSocialInbox } from '../lib/appMartSocialStore';
 import { isSocialInboxId } from '../lib/appMartSocialRules';
 import { freeProgramPaused, freeTrialEndedNotification } from '../lib/freeProgram';
+import { adminBuildRemaining } from '../lib/giftSpend';
 import { hasEverPaid } from '../AgentV3/FreeTierBuildRouting';
 import { firestoreWalletReader } from '../AgentV3/WalletBalance';
 import { getServerDb } from '../lib/serverDb';
@@ -50,7 +51,7 @@ export function registerNotificationRoutes(app: Express): void {
     try {
       if (await freeProgramPaused()) {
         const wallet = await firestoreWalletReader(getServerDb() as never)(uid).catch(() => null);
-        if (!hasEverPaid(wallet)) notifications.unshift(freeTrialEndedNotification(Date.now()) as never);
+        if (!hasEverPaid(wallet) && adminBuildRemaining(wallet) <= 0) notifications.unshift(freeTrialEndedNotification(Date.now()) as never);
       }
     } catch { /* the inbox still answers */ }
     res.json({ notifications, unread: notifications.filter((n) => !n.read).length });

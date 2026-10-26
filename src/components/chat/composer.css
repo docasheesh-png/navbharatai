@@ -1,134 +1,235 @@
-/* Desktop remains a full-width editor with its original wrapping toolbar. */
+/*
+ * Unified composer pad (admin 2026-10-26 mockup):
+ *   ┌─ Type (compact) ─────────────┐
+ *   ├─ thin divider ───────────────┤
+ *   │ tools …              (Send)  │
+ *   └──────────────────────────────┘
+ * Same structure on phone and desktop. Send lives in the action bar — never
+ * overlaid inside the Type field. Popovers escape with position:fixed.
+ */
+
 .nb-composer-tools, .nb-composer-tools-content { display: contents; }
-.nb-composer-tools-toggle { display: none; }
-@media (max-width: 639px) {
-  .nb-composer-box { position: relative; min-height: 52px; border-radius: 26px; }
-  .nb-composer-box .nb-composer-text {
-    display: block; min-height: 44px; height: 44px; max-height: 160px;
-    max-height: min(160px, 30dvh) !important; padding: 10px 52px;
-    font-size: 16px; line-height: 24px; transition: none; overflow-y: auto;
-  }
-  .nb-composer-box.nb-composer-no-tools .nb-composer-text { padding-left: 16px; }
-  .nb-composer-box [data-composer-toolbar] { padding: 0; height: 0; }
-  .nb-composer-send-slot { position: absolute; right: 4px; bottom: 4px; }
-  .nb-composer-send-slot > button { width: 44px; height: 44px; }
-  .nb-composer-controls { display: contents; }
-  .nb-composer-tools { display: block; position: absolute; inset: auto 0 4px; height: 44px; pointer-events: none; z-index: 30; }
-  .nb-composer-tools-toggle { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin-left: 4px; border-radius: 50%; font-size: 24px; pointer-events: auto; }
-  .nb-composer-tools-content { display: none; }
-  /* One clean horizontal line of actions; overflow-x scrolls — overflow-y must stay visible
-     so Build options (absolute/fixed) is not cropped on the phone. */
-  .nb-composer-tools-content[data-open="true"] {
-    display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; position: absolute;
-    bottom: 52px; left: 0; right: 0; width: auto; max-width: calc(100vw - 16px);
-    padding: 8px; border-radius: 16px;
-    background: var(--surface-card); border: 1px solid var(--border-soft); pointer-events: auto;
-    max-height: none; overflow-x: auto; overflow-y: visible;
-    -webkit-overflow-scrolling: touch; scrollbar-width: thin;
-  }
-  .nb-composer-tools-content button { min-height: 44px; min-width: 44px; flex-shrink: 0; }
-  .nb-composer-tools-content .nb-pro-controls {
-    display: flex; flex-wrap: nowrap; align-items: center; gap: 4px;
-    overflow-x: auto; overflow-y: visible; max-width: 100%;
-    padding-right: 8px !important; min-height: 44px;
-  }
-  /* Build options / mode menus: escape the tools strip so they are never cropped. */
-  .nb-composer-tools-content .absolute.bottom-full {
-    position: fixed; left: 12px; right: 12px; bottom: var(--nb-composer-menu-bottom, 60px);
-    width: auto !important; min-width: 0; max-width: calc(100vw - 24px);
-    max-height: var(--nb-composer-menu-max-height, 50dvh); overflow-y: auto;
-    z-index: 80;
-  }
-  .nb-composer-box[data-composer-surface="pro"] { margin-top: 4px; margin-bottom: 4px; gap: 0; }
-  [data-composer-surface="pro"] .nb-pro-controls { padding: 0; }
-  [data-composer-surface="pro"] [data-tour="chat"] > button,
-  [data-composer-surface="pro"] [data-tour="chat"] > .nb-pro-actions > button { width: 44px; height: 44px; bottom: 4px; right: 4px; }
-  [data-composer-surface="pro"] [data-tour="chat"] > .nb-pro-stop { right: 48px; }
-  [data-composer-surface="pro"][data-steering="true"] .nb-composer-text { padding-right: 100px; }
-  [data-composer-surface="pro"] .nb-pro-expand-desktop { display: none; }
-  [data-composer-surface="pro"][data-expanded="true"] .nb-composer-text { max-height: 50dvh !important; }
-  .nb-pro-expand-mobile { display: flex; }
-}
-@media (min-width: 640px) { .nb-pro-expand-mobile { display: none; } }
+.nb-composer-tools-toggle { display: none !important; }
 
-/* Desktop Pro: 💡 stays in the tools row (end) — no extra corner chrome. */
+.nb-composer-box {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: visible;
+}
+
+/* Type row — compact resting height (~1/3 of the old tall phone void). */
+.nb-composer-box .nb-composer-text {
+  display: block;
+  min-height: 40px !important;
+  max-height: min(120px, 22dvh) !important;
+  padding: 10px 14px !important;
+  font-size: 16px;
+  line-height: 24px;
+  transition: none;
+  overflow-y: auto;
+  resize: none;
+}
+
+/* Action bar under Type — thin top divider, Send pinned right. */
+.nb-composer-box [data-composer-toolbar] {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: auto !important;
+  min-height: 44px;
+  padding: 6px 8px 8px !important;
+  border-top: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  overflow: visible;
+}
+
+.nb-composer-controls { display: contents; }
+
+.nb-composer-send-slot {
+  position: static !important;
+  right: auto !important;
+  bottom: auto !important;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  align-self: center;
+}
+
+.nb-composer-send-slot > button {
+  width: 36px;
+  height: 36px;
+}
+
+/* Tools always visible in the action bar (no + disclosure). */
+.nb-composer-tools {
+  display: contents;
+  position: static;
+  height: auto;
+  inset: auto;
+  pointer-events: auto;
+  z-index: auto;
+}
+
+.nb-composer-tools-content,
+.nb-composer-tools-content[data-open="true"],
+.nb-composer-tools-content[data-open="false"] {
+  display: flex !important;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  position: static !important;
+  inset: auto !important;
+  width: auto;
+  max-width: none;
+  max-height: none;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  overflow-x: auto;
+  overflow-y: visible !important;
+  pointer-events: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.nb-composer-tools-content button {
+  min-height: 32px;
+  min-width: 32px;
+  flex-shrink: 0;
+}
+
+/*
+ * Build / Settings / Attach menus — escape the pad so they are never a thin
+ * clipped gray strip. !important beats Tailwind `absolute` / `left-0` / `w-56`.
+ */
+.nb-composer-box .absolute.bottom-full,
+.nb-composer-tools-content .absolute.bottom-full,
+.nb-pro-controls .absolute.bottom-full {
+  position: fixed !important;
+  left: 12px !important;
+  right: 12px !important;
+  bottom: var(--nb-composer-menu-bottom, 72px) !important;
+  width: auto !important;
+  min-width: min(18rem, calc(100vw - 24px)) !important;
+  max-width: calc(100vw - 24px) !important;
+  max-height: var(--nb-composer-menu-max-height, 50dvh) !important;
+  overflow-y: auto !important;
+  z-index: 80 !important;
+}
+
+@media (max-width: 639px) {
+  [data-attach-menu] {
+    position: fixed !important;
+    left: 12px !important;
+    right: 12px !important;
+    bottom: var(--nb-composer-menu-bottom, 72px) !important;
+    width: auto !important;
+    min-width: min(18rem, calc(100vw - 24px)) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: var(--nb-composer-menu-max-height, 50dvh) !important;
+    overflow-y: auto !important;
+    z-index: 80 !important;
+  }
+}
+
+/* —— Pro surface: Type first, action bar (tools + Send) below —— */
+.nb-composer-box[data-composer-surface="pro"] {
+  margin-top: 4px;
+  margin-bottom: 4px;
+  gap: 0;
+}
+
+.nb-composer-box[data-composer-surface="pro"] .nb-pro-controls {
+  order: 2 !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 44px;
+  max-width: none;
+  padding: 6px 8px 8px !important;
+  border-top: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  overflow: visible !important;
+}
+
+.nb-composer-box[data-composer-surface="pro"] [data-route="chat"] {
+  order: 1 !important;
+  position: relative;
+  width: 100%;
+}
+
+.nb-composer-box[data-composer-surface="pro"] .nb-composer-text {
+  min-height: 40px !important;
+  max-height: min(72px, 14dvh) !important;
+  padding: 10px 14px !important;
+  padding-right: 14px !important;
+}
+
+.nb-composer-box[data-composer-surface="pro"][data-expanded="true"] .nb-composer-text {
+  max-height: 50dvh !important;
+}
+
+.nb-composer-box[data-composer-surface="pro"] .nb-pro-send-slot {
+  position: static !important;
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nb-composer-box[data-composer-surface="pro"] .nb-pro-send-btn {
+  position: static !important;
+  width: 36px !important;
+  height: 36px !important;
+  right: auto !important;
+  bottom: auto !important;
+}
+
+/* Duplicate ↵ Send pill inside the Pro pad — hide; real Send is the arrow. */
+.nb-composer-box[data-composer-surface="pro"] .nb-send-enter-toggle,
+.nb-composer-box[data-composer-surface="pro"] [data-send-enter-toggle] {
+  display: none !important;
+}
+
+.nb-composer-box[data-composer-surface="pro"] .nb-pro-expand-mobile {
+  display: none !important;
+}
+
+.nb-composer-box[data-composer-surface="pro"] .nb-pro-expand-desktop {
+  display: flex !important;
+  position: static !important;
+  right: auto !important;
+  bottom: auto !important;
+}
+
+.nb-composer-box[data-composer-surface="pro"] .nb-pro-suggestions-corner {
+  display: none;
+}
+
+/* ChatToolbar row inside Pro tools — compact, no extra chrome height. */
+.nb-composer-box[data-composer-surface="pro"] .order-0 {
+  order: 0;
+  width: 100%;
+  padding: 4px 8px 0 !important;
+}
+
 @media (min-width: 640px) {
-  .nb-composer-box[data-composer-surface="pro"] .nb-pro-suggestions-corner { display: none; }
-}
-@media (max-width: 639px) {
-  /* Non-Pro + strip: hide Search/Clear + Expand chrome when open. */
-  .nb-composer-tools-content[data-open="true"] > .order-0,
-  .nb-composer-tools-content[data-open="true"] .nb-pro-expand-mobile {
-    display: none !important;
-  }
-
-  /*
-   * Pro mobile (match OLD good screenshot): NO + button.
-   * Build|settings|attach|mic|speaker is an always-visible clear row ABOVE Type.
-   * Desktop rules above are unchanged (display:contents on tools at min-width default).
-   */
-  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools {
-    display: contents;
-    position: static;
-    height: auto;
-    inset: auto;
-    pointer-events: auto;
-    z-index: auto;
-  }
-  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-toggle {
-    display: none !important;
-  }
-  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content,
-  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content[data-open="true"],
-  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content[data-open="false"] {
-    display: contents;
-    position: static;
-    overflow: visible;
-    max-height: none;
-    width: auto;
-    max-width: none;
-    padding: 0;
-    border: 0;
-    background: transparent;
-  }
-  /* Tools ABOVE Type (textarea is order-1). */
-  .nb-composer-box[data-composer-surface="pro"] .nb-pro-controls {
-    order: 0;
-    display: flex !important;
-    flex-wrap: nowrap !important;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-    min-height: 36px;
-    max-width: none;
-    padding: 2px 8px 6px !important;
-    overflow: visible !important;
-  }
-  /* Natural button size — do not force 44px which cramps the Build label. */
-  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content button {
-    min-height: 32px;
-    min-width: 32px;
-    height: auto;
-    overflow: visible;
-    flex-shrink: 0;
+  .nb-pro-expand-mobile { display: none; }
+  .nb-composer-box .nb-composer-text {
+    max-height: min(160px, 30dvh) !important;
   }
   .nb-composer-box[data-composer-surface="pro"] .nb-composer-text {
-    padding-left: 16px;
+    max-height: min(160px, 30dvh) !important;
   }
-  /* Expand lives inside the Type box (like OLD), not in the tools row. */
-  .nb-composer-box[data-composer-surface="pro"] .nb-pro-expand-mobile {
-    display: none !important;
-  }
-  .nb-composer-box[data-composer-surface="pro"] .nb-pro-expand-desktop {
-    display: flex !important;
-  }
-  /* Dropdowns must not be clipped — keep fixed escape. */
-  .nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content .absolute.bottom-full {
-    position: fixed;
-    left: 12px; right: 12px;
-    bottom: var(--nb-composer-menu-bottom, 60px);
-    width: auto !important; min-width: 0; max-width: calc(100vw - 24px);
-    max-height: var(--nb-composer-menu-max-height, 50dvh); overflow-y: auto;
-    z-index: 80;
-  }
+}
+
+@media (max-width: 639px) {
+  .nb-composer-box { border-radius: 22px; }
+  .nb-composer-box.nb-composer-no-tools .nb-composer-text { padding-left: 16px !important; }
+  /* Free/shared: no Search/Clear chrome crowding the action bar. */
+  .nb-composer-tools-content > .order-0 { display: none !important; }
 }

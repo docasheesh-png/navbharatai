@@ -116,8 +116,9 @@ export function ChatToolbar({
             onClick={toggleSend}
             title={sendToggleTitle(sendOnEnter)}
             aria-pressed={sendOnEnter}
+            data-send-enter-toggle=""
             // BLUE while Enter sends, GRAY while Enter starts a new line — the colour is the state.
-            className={sendOnEnter ? PILL_SEND_ON : PILL_SEND_OFF}
+            className={`nb-send-enter-toggle ${sendOnEnter ? PILL_SEND_ON : PILL_SEND_OFF}`}
           >
             {sendToggleLabel(sendOnEnter)}
           </button>

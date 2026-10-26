@@ -1,3 +1,4 @@
+import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
 /**
  * MCP TRANSPORT — the thin, guarded layer that actually talks to a connected server.
  *
@@ -84,6 +85,7 @@ export async function readBodyCapped(resp: globalThis.Response, cap: number): Pr
  * gap between "was safe" and "is safe".
  */
 async function rpc(cfg: McpServerConfig, method: string, params: unknown): Promise<McpCallResult> {
+  assertCanaryLegacyAllowed('external-mcp');
   const safe = await assertPublicHttpUrl(cfg.url).catch(() => ({ ok: false, reason: 'Could not check that address.' }));
   if (!safe.ok) {
     // The server's own reason is logged, not returned: a precise answer would turn this into a

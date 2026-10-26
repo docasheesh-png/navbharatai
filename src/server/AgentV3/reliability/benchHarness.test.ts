@@ -55,13 +55,18 @@ describe('success + comparison', () => {
 
   it('compares, lists fixed/broke, and refuses to call an overlap a win', () => {
     const run = (id: string, success: boolean): BenchRun => ({ id, lang: 'hinglish', complexity: 'simple', attempt: 1, seconds: 1, metrics: M({ ok: success }), success });
-    const file = (label: string, runs: BenchRun[]): BenchResultFile => ({ label, set: 'smoke', baseUrl: '', startedAt: '', flags: [], runs });
+    const file = (label: string, runs: BenchRun[]): BenchResultFile => ({ label, set: 'smoke', baseUrl: '', startedAt: '', flags: [], runs, execution: { status: 'complete', plannedRuns: runs.length, sourceCommit: 'test', sourceDirty: false, fixtureSha256: 'same', promptIds: runs.map(r => r.id), repetitions: 1, nodeVersion: 'test', requestedTier: 'weak', resolvedTier: 'weak' } });
     const base = file('base', [run('a', false), run('b', true), run('c', true)]);
     const cand = file('cand', [run('a', true), run('b', false), run('c', true)]);
     const cmp = compareBench(base, cand);
     expect(cmp.fixed).toEqual(['a']);
     expect(cmp.broke).toEqual(['b']);
     expect(cmp.verdict).toMatch(/Not distinguishable/);
+    expect(compareBench(base, { ...cand, execution: undefined }).verdict).toMatch(/Not comparable.*tier provenance/);
+    expect(compareBench(base, { ...cand, execution: { ...cand.execution!, resolvedTier: undefined } }).verdict).toMatch(/Not comparable.*tier provenance/);
+    expect(compareBench(base, { ...cand, execution: { ...cand.execution!, requestedTier: 'off', resolvedTier: 'off' } }).verdict).toMatch(/Not comparable.*different benchmark tiers/);
+    expect(compareBench(base, { ...cand, execution: { ...cand.execution!, resolvedTier: 'mini' } }).verdict).toMatch(/Not comparable.*requested and resolved tiers differ/);
+    expect(compareBench(base, { ...cand, execution: { ...cand.execution!, requestedTier: 'invalid' as any } }).verdict).toMatch(/Not comparable.*tier provenance/);
     expect(compareBench(base, { ...cand, runs: cand.runs.slice(1) }).verdict).toMatch(/Not comparable.*different prompts/);
     expect(compareBench(base, { ...cand, runs: cand.runs.map((r) => ({ ...r, failure: 'HTTP 401' })) }).verdict).toMatch(/Not comparable.*unreconciled/);
   });

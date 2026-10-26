@@ -1,3 +1,4 @@
+import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
 import { createSurplusScopeAsk } from '../AI/SurplusRegistry/scopeAdmission';
 import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibility';
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
@@ -2656,7 +2657,7 @@ export function openAiCompatRunners(
         // becomes the hang signal (openAiStream.ts); the runner is handed the same number, so the pair
         // stays honest in both modes. Flag off ⇒ this is the old line to the byte.
         const sdkTimeoutMs = buildStreamingEnabled() ? Math.max(timeoutMs, streamHardCapMs()) : timeoutMs;
-        const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0 });
+        const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0, fetch: canaryFetch() });
         const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts, timeoutMs }), floorMaxPromptChars), name);
         out.push(k === 0
           ? { name, runner, modelId: model }
@@ -2921,7 +2922,7 @@ function openAiJudgeCandidate(
   if (!(apiKey || '').trim()) return null;
   try {
     // The judge chain owns fallback. SDK retries would hide a second deterministic billing HTTP 429.
-    const client = new OpenAI({ apiKey, baseURL, timeout, maxRetries: 0 });
+    const client = new OpenAI({ apiKey, baseURL, timeout, maxRetries: 0, fetch: canaryFetch() });
     const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
       assertLegacyInferenceAllowed('builder-review-judge');
       const r = await client.chat.completions.create({

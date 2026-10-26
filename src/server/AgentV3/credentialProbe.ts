@@ -1,3 +1,4 @@
+import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
 // DOES THIS KEY ACTUALLY WORK? — the read-only credential probe (admin 2026-08-17, slice 3).
 //
 // Slices 1 and 2 got the user to the right console page and warned them about the two ways a correct
@@ -314,6 +315,7 @@ export async function probeSmtpCredential(
   // somebody's live mail server is a probe that does not get exercised.
   doProbe: typeof probeSmtp = probeSmtp,
 ): Promise<ProbeVerdict | null> {
+  assertCanaryLegacyAllowed('external-credential-probe');
   const host = lookup(values, 'SMTP_HOST');
   const user = lookup(values, 'SMTP_USER');
   // Providers disagree on the name, and our own catalogue lists both.
@@ -353,6 +355,7 @@ export async function probeCredentials(
   budgetMs = PROBE_BUDGET_MS,
   doSmtpProbe: typeof probeSmtp = probeSmtp,
 ): Promise<ProbeVerdict[]> {
+  assertCanaryLegacyAllowed('external-credential-probe');
   const planned = probesFor(values || {});
   // SMTP rides the same budget but not the same transport, so it is raced alongside rather than folded
   // into `planned` — a mail handshake has nothing in common with an HTTPS GET but the deadline.
@@ -431,6 +434,7 @@ export async function probeCredentials(
  * for one) cannot bounce this server's authenticated request to a host we never allowed.
  */
 export const realProbeFetch: ProbeFetch = async (url, init) => {
+  assertCanaryLegacyAllowed('external-credential-probe');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
   try {

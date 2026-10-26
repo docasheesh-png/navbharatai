@@ -1,3 +1,4 @@
+import { assertCanaryLegacyAllowed } from '../../AgentV3/reliability/canarySpendGuard';
 /** Server-only composition. OFF is the only route back to a legacy text path. */
 import { gatewayRollout, gatewayRolloutAllowsUid } from './rollout';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -196,6 +197,7 @@ export async function maybeGatewayVision(payload: GatewayVisionPayload, options:
   return await auxiliary(payload.attachments.some(a => a.mimeType === 'application/pdf') ? 'vision-pdf' : 'vision-image', () => runGatewayInvocation({ ...payload, signal: options.signal })) as GatewayTextResult | null;
 }
 async function runGatewayInvocation(input: GatewayInvocationInput): Promise<GatewayInvocationResult | null> {
+  assertCanaryLegacyAllowed('inference-gateway');
   const state = contexts.getStore();
   if (!state?.selected) return null;
   const context = state.context;

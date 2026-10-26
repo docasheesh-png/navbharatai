@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 const execute = promisify(execFile);
 
 describe('live benchmark protocol against a local scripted server (no provider calls)', () => {
-  it.each([200, 401])('authenticates, checkpoints and records the truthful outcome for HTTP %s', async (status) => {
+  it.each([200, 201, 401, 500, 0])('authenticates, checkpoints and records the truthful outcome for HTTP %s', async (status) => {
     const output = await mkdtemp(join(tmpdir(), 'reliability-runner-'));
     const requests: Array<{ authorization: string | undefined; body: any; pending: any }> = [];
     const server = createServer(async (req, res) => {
@@ -20,10 +20,11 @@ describe('live benchmark protocol against a local scripted server (no provider c
       const checkpointFiles = await readdir(output);
       const checkpoint = JSON.parse(await readFile(join(output, checkpointFiles[0]), 'utf8'));
       requests.push({ authorization: req.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString()), pending: checkpoint.runs[0] });
+      if (status === 0) { req.socket.destroy(); return; }
       res.writeHead(status, { 'Content-Type': 'text/plain' });
-      res.end(status === 200 ? [
+      res.end(status === 200 || status === 201 ? [
         { type: 'file_changed', change: { path: 'src/App.tsx' } },
-        { type: 'result', ok: false },
+        { type: 'result', ok: false, ...(status === 201 ? { diagnostics: { billing: { realCostUsd: 0.02 } } } : {}) },
         { type: 'done', ok: true },
       ].map((e) => JSON.stringify(e)).join('\n') : 'Do not copy this response into artifacts');
     });
@@ -36,12 +37,13 @@ describe('live benchmark protocol against a local scripted server (no provider c
           cwd: resolve(__dirname, '..'),
           env: { ...process.env, BENCH_BASE_URL: `http://127.0.0.1:${address.port}`, BENCH_AUTH_TOKEN: 'test-only-token',
             BENCH_USER_ID: 'test-only-user', BENCH_CONFIRM: 'yes', BENCH_ONLY: 'todo-hinglish',
-            BENCH_SET: 'smoke', BENCH_RUNS: status === 401 ? '3' : '1', BENCH_OUTPUT_DIR: output },
+            BENCH_SET: 'smoke', BENCH_POWER_LEVEL: 'weak', BENCH_RUNS: status === 201 ? '1' : '3', BENCH_OUTPUT_DIR: output },
         });
       } catch { failed = true; }
-      expect(failed).toBe(status === 401);
+      expect(failed).toBe(status !== 201);
       expect(requests).toHaveLength(1); // Authentication refusal must stop a batch, not poison every row.
       expect(requests[0].authorization).toBe('Bearer test-only-token');
+      expect(requests[0].body.powerLevel).toBe('weak');
       expect(requests[0].pending).toMatchObject({ requestId: requests[0].body.requestId,
         sessionId: requests[0].body.sessionId, failure: 'request-in-progress', success: false, seconds: null });
       expect(requests[0].pending.metrics.billedUsd).toBeNull();
@@ -51,12 +53,15 @@ describe('live benchmark protocol against a local scripted server (no provider c
       expect(bytes).not.toContain('test-only-token');
       expect(bytes).not.toContain('Do not copy this response');
       const artifact = JSON.parse(bytes);
-      expect(artifact.execution.status).toBe(status === 200 ? 'complete' : 'blocked');
+      expect(artifact.execution.status).toBe(status === 201 ? 'complete' : 'blocked');
+      expect(artifact.execution.requestedTier).toBe('weak');
+      expect(artifact.execution.resolvedTier).toBeUndefined();
+      if (status === 200) expect(artifact.runs[0].failure).toBe('supplier-cost-unreconciled');
       expect(artifact.execution.fixtureSha256).toMatch(/^[a-f0-9]{64}$/);
       expect(artifact.execution.sourceCommit).toMatch(/^[a-f0-9]{40}$/);
       expect(artifact.runs[0]).toMatchObject({ success: false,
         requestId: requests[0].body.requestId, sessionId: requests[0].body.sessionId });
-      if (status === 401) expect(artifact.runs[0].metrics.billedUsd).toBeNull();
+      if (status !== 200) expect(artifact.runs[0].metrics.billedUsd).toBeNull();
     } finally {
       await new Promise<void>((done) => server.close(() => done()));
       await rm(output, { recursive: true, force: true });

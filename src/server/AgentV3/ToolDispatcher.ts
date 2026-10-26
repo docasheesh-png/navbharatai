@@ -1,3 +1,4 @@
+import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
 import { randomUUID } from 'node:crypto';
 import { entryShadowNote } from './entryShadow';
 import { bannedInstallRefusal, bannedPackageGuardEnabled, stripBannedDeps, strippedDepsNote } from './reliability/bannedPackages';
@@ -4101,6 +4102,7 @@ export class ToolDispatcher {
   }
 
   async dispatch(call: ToolUse, agent: AgentRole = 'architect', opts?: { signal?: AbortSignal }): Promise<ToolResult> {
+    assertCanaryLegacyAllowed('builder-function-tools');
     if (opts?.signal) return runWithToolSignal(opts.signal, () => this.dispatch(call, agent));
     // Secret redaction (R1.1, roadmap §3.2): tool_call input and tool_result summaries are
     // streamed to the user's screen, so a command/output that inlines an API key, a .env value

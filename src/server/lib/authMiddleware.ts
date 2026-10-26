@@ -13,6 +13,7 @@
  * buildRateLimiter() — Express middleware for hot build endpoints:
  *   - Authenticated users (valid Bearer token): 10 builds per hour
  *   - Anonymous (no token): 5 builds per hour (keyed by IP)
+ *   - Verified admin emails (isAdminEmail / AGENTV3_REPORT_ADMINS): no hourly build cap
  *   Returns 429 when over limit. VITEST-skipped.
  */
 import type { Request, Response, NextFunction } from 'express';
@@ -25,7 +26,8 @@ import { getServerDb, doc, getDoc } from './serverDb';
 import { readBanStatus, suspendedMessage } from './banGate';
 import { audit } from './audit';
 import { routeParam } from './expressCompat';
-import { grantEmail, type GrantEmail } from '../AgentV3/featureFlag';
+import { grantEmail, identityGrantEmail, type GrantEmail } from '../AgentV3/featureFlag';
+import { isAdminEmail } from './adminEmails';
 
 /**
  * firebase-admin init options. Passes an EXPLICIT projectId when the environment provides one, so the
@@ -585,10 +587,41 @@ export function requireRole(...allowed: UserRole[]) {
   };
 }
 
+/**
+ * Should this VERIFIED grant email skip the AgentV3 build hourly rate limit?
+ *
+ * Admins (isAdminEmail / AGENTV3_REPORT_ADMINS) smoke and autopsy builds without the 10/hr cap that
+ * blocks legitimate chief-dev testing. Non-admins keep the existing 10/hr (authed) / 5/hr (anon) budget.
+ * NEVER call with a client-supplied email — only a GrantEmail from the verified token / Admin SDK.
+ */
+export function buildRateLimitExempt(email: GrantEmail | null | undefined): boolean {
+  return isAdminEmail(email);
+}
+
 /** Hot build endpoint (`/chat`): 10 builds/hr authed, 5/hr per anon IP, and a durable 100/hr GLOBAL
- *  anon ceiling so a botnet rotating IPs still can't exceed the whole-platform anonymous budget. */
+ *  anon ceiling so a botnet rotating IPs still can't exceed the whole-platform anonymous budget.
+ *  Verified admins bypass the hourly cap (buildRateLimitExempt) so admin smoke is not blocked at 10/hr;
+ *  the per-account concurrent build lock is unchanged. */
 export function buildRateLimiter() {
-  return rateLimiter({ name: 'build', authed: 10, anon: 5, noun: 'builds', anonGlobalPerHour: 100 });
+  const limiter = rateLimiter({ name: 'build', authed: 10, anon: 5, noun: 'builds', anonGlobalPerHour: 100 });
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (process.env.VITEST) { next(); return; }
+    try {
+      const identity = await verifyFirebaseIdentity(req);
+      if (identity) {
+        // Prefer the verified email on the ID token; fall back to the Admin SDK account email when the
+        // token omitted it (same pattern as free-list / grant checks — never a body/query email).
+        const email = identityGrantEmail(identity) ?? await resolveGrantEmail(identity.uid);
+        if (buildRateLimitExempt(email)) {
+          next();
+          return;
+        }
+      }
+    } catch {
+      // Fail into the normal limiter — an identity lookup error must never grant an admin bypass.
+    }
+    return limiter(req, res, next);
+  };
 }
 
 /**

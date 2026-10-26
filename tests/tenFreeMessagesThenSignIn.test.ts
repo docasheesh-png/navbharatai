@@ -175,6 +175,21 @@ describe('the client', () => {
     expect(await guestLimitReached(new Response('{}', { status: 500 }))).toBeNull();
   });
 
+  it('does not open sign-in when the request became stale during refusal parsing', async () => {
+    let finish!: (value: unknown) => void;
+    let active = true;
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal('window', { dispatchEvent });
+    try {
+      const response = { status: 403, clone: () => ({ json: () => new Promise(resolve => { finish = resolve; }) }) };
+      const pending = guestLimitReached(response as Response, () => active);
+      active = false;
+      finish({ code: GUEST_LIMIT_CODE, error: 'Sign in' });
+      expect(await pending).toBeNull();
+      expect(dispatchEvent).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('🔴 free chat sends the account token now — without it every signed-in user would be counted as a guest', () => {
     const engine = read('src/hooks/useChatEngine.ts');
     // (the platform header rides along since Q-123 — the account token is what is guarded)
@@ -184,7 +199,7 @@ describe('the client', () => {
 
   it('the refusal is read BEFORE the 401 branch that signs the user out', () => {
     const engine = read('src/hooks/useChatEngine.ts');
-    const guest = engine.indexOf('const guestLimit = await guestLimitReached(response);');
+    const guest = engine.indexOf('const guestLimit = await guestLimitReached(response,');
     const signOut = engine.indexOf('if (response.status === 401) {', guest - 400);
     expect(guest).toBeGreaterThan(0);
     expect(signOut).toBeGreaterThan(guest);

@@ -28,9 +28,9 @@ const CLUSTER = [
 ];
 
 describe('Core AI Chat — real navigation labels exist in code', () => {
-  it('Free Chat gate: menu "NavBharatAI FREE" + Home "Start Free Chat"', () => {
-    expect(app).toContain("label: 'NavBharatAI FREE'");
-    expect(home).toContain('Start Free Chat');
+  it('AI chat gate: menu and Home share the display name', () => {
+    expect(app).toContain('label: COPY.branding.aiChatName');
+    expect(home).toContain('btnLabel: `Start ${COPY.branding.aiChatName}`');
   });
   it('Pro builder gate: Home "Open Pro Builder" + menu "NavBharatAI Pro"', () => {
     // CORRECTED 2026-09-12. This asserted the sidebar row "App Builder v5.0" — whose destination

@@ -1,4 +1,4 @@
-import { resolveChatReplyLanguage } from '../lib/chatReplyLanguage';
+import { chatReplyLanguageFromPicker, resolveChatReplyLanguage } from '../lib/chatReplyLanguage';
 import { newFreeAnswerRequestId, notifyFreeAnswerChanged } from '../lib/freeAnswerStatus';
 // useChatEngine — the free (NBI) chat engine, lifted out of the App.tsx God component (P3.1, behavior-
 // preserving). Owns the send pipeline: handleSendForTab (the core turn handler — intent routing, GitHub
@@ -131,7 +131,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
         message: prompt,
         preferredModel: selectedModel === 'auto' ? 'gemini' : selectedModel,
         history: history,
-        replyLanguage: resolveChatReplyLanguage('', history),
+        replyLanguage: resolveChatReplyLanguage(prompt, history) ?? chatReplyLanguageFromPicker(preferredLanguage),
         mode: mode,
         intent: intent,
         target: target,
@@ -473,7 +473,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
           body: JSON.stringify({
             message: messageToSend,
             preferredModel: isNbi ? 'gemini' : selectedModel,
-            replyLanguage: resolveChatReplyLanguage('', historyForAPI),
+            replyLanguage: resolveChatReplyLanguage(messageToSend, historyForAPI) ?? chatReplyLanguageFromPicker(preferredLanguage),
             history: historyForAPI.slice(-40).map(m => ({ sender: m.sender, text: String(m.text || '').slice(0, 2000) })),
             memorySummary: memorySummary || undefined,
             agent: currentAgent,
@@ -723,7 +723,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
       
       const errorMessage: Message = {
         id: `reply-${answerRequestId}`,
-        text: "We're having trouble reaching the AI right now. This can happen during high traffic or local network issues.",
+        text: "NavBharatAI is temporarily unable to respond. Please try again shortly.",
         sender: 'ai',
         timestamp: new Date(),
       };

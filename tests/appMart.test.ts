@@ -189,7 +189,7 @@ describe('the phone layout the admin drew: 2-up squares, App Mart 2x1 across the
   it('button labels are SHORT on a phone, because a truncated label reads as a broken screen', () => {
     // "Explore Professionals" rendered as "EXPLORE PROF…" in a 1x1 tile — the finding that created
     // btnLabelShort. That card now lives in the Mode picker, but the rule stays for the cards left.
-    expect(home).toContain("btnLabelShort: 'Free Chat'");
+    expect(home).toContain('btnLabelShort: COPY.branding.aiChatName');
     expect(home).toContain('btnLabelShort ?? card.btnLabel');
   });
 

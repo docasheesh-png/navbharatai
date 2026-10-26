@@ -78,22 +78,11 @@ export function ModePickerSheet({
     </span>
   );
 
-  // 'navbharatai "free" — free bold me alag style me dikhe' (admin 2026-08-25). The styling belongs to
-  // the WORD, so the recent row gets it too when the open AI happens to be the free chat — otherwise the
-  // same name would be painted two different ways in one list.
-  const rowLabel = (e: ModeEntry) => {
-    // A second FREE window is "NavBharatAI FREE (2)" — still the free chat, still painted as one.
-    if (e.name.startsWith('NavBharatAI FREE')) {
-      return (
-        <span className="text-[13px] text-ink">
-          NavBharatAI{' '}
-          <span className="font-black italic tracking-tight bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">FREE</span>
-          {e.name.slice('NavBharatAI FREE'.length)}
-        </span>
-      );
-    }
-    return <span className="text-[13px] font-semibold text-ink">{e.name}</span>;
-  };
+  // Product names are display copy. Render the same name for new and recent windows without
+  // interpreting label text as a mode identifier (or treating the former name as a free-tier claim).
+  const rowLabel = (e: ModeEntry) => (
+    <span className="text-[13px] font-semibold text-ink">{e.name}</span>
+  );
 
   const groupHeading = (text: string) => (
     <p className="px-3 pt-2 pb-1 text-[10px] font-black uppercase tracking-widest text-muted">{text}</p>

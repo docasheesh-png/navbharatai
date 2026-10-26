@@ -25,6 +25,8 @@ function observation(value: unknown): value is Observation {
 export function isSurplusManagerView(value: unknown): value is SurplusManagerView {
   if (!record(value) || !['disabled', 'invalid_configuration', 'unavailable', 'empty', 'observed', 'stale'].includes(String(value.status))
     || typeof value.enabled !== 'boolean' || value.canDispatch !== false
+    || typeof value.liveBuilderAdmission !== 'boolean'
+    || !['none', 'firestore', 'live_synthesis'].includes(String(value.qualitySource))
     || !strings(value.configuredUniverse, 15) || !value.configuredUniverse.every(id) || new Set(value.configuredUniverse).size !== value.configuredUniverse.length
     || !Number.isSafeInteger(value.intervalMs) || (value.intervalMs as number) < 300_000 || (value.intervalMs as number) > 600_000
     || !Number.isSafeInteger(value.freshnessMs) || (value.freshnessMs as number) <= 0 || (value.freshnessMs as number) > 600_000
@@ -68,6 +70,8 @@ export function SurplusRegistryPanel({ adminToken }: { adminToken: string }): Re
   const [now, setNow] = useState(Date.now);
   const [pending, setPending] = useState<Control | null>(null);
   const [reason, setReason] = useState('');
+  const [approveOpen, setApproveOpen] = useState(false);
+  const [approveReason, setApproveReason] = useState('');
   const mounted = useRef(false), mutationLock = useRef(false);
   const session = useRef(0), readSequence = useRef(0);
   const readRequest = useRef<AbortController | null>(null), writeRequest = useRef<AbortController | null>(null);
@@ -99,7 +103,7 @@ export function SurplusRegistryPanel({ adminToken }: { adminToken: string }): Re
 
   useEffect(() => {
     mounted.current = true; mutationLock.current = false;
-    setView(null); setPending(null); setError(''); setNotice(''); setBusy(false);
+    setView(null); setPending(null); setApproveOpen(false); setApproveReason(''); setError(''); setNotice(''); setBusy(false);
     void load();
     const clock = setInterval(() => setNow(Date.now()), 1000);
     const refresh = setInterval(() => { void load(); }, 30_000);
@@ -176,6 +180,44 @@ export function SurplusRegistryPanel({ adminToken }: { adminToken: string }): Re
     }
   };
 
+  /** Persist coding quality + floor for currently observed offers. Never flips production flags or budgets. */
+  const approveObserved = async () => {
+    if (!view?.enabled || busy || loading || mutationLock.current) return;
+    if (approveReason.trim().length < 10 || approveReason.length > 500) return;
+    mutationLock.current = true; setBusy(true); setNotice(''); setError('');
+    const currentSession = session.current;
+    readSequence.current++; readRequest.current?.abort(); setLoading(false);
+    const controller = new AbortController(); writeRequest.current = controller;
+    const deadline = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const response = await fetch(`${ROOT}/approve-observed`, {
+        method: 'POST',
+        headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: 'approve-observed-coding', reason: approveReason.trim() }),
+        signal: controller.signal,
+      });
+      if (!mounted.current || currentSession !== session.current) return;
+      if (!response.ok) {
+        throw new ManagerUiError(response.status === 401 || response.status === 403
+          ? 'Admin sign-in or authorization required.'
+          : response.status === 409
+            ? 'Observations are missing or stale. Sync metadata, then approve again.'
+            : `Approve observed was not confirmed (HTTP ${response.status}).`);
+      }
+      const body: unknown = await response.json();
+      if (!mounted.current || currentSession !== session.current) return;
+      if (!record(body) || body.ok !== true || body.canDispatch !== false) throw new ManagerUiError('Approve response was unreadable.');
+      setApproveOpen(false); setApproveReason('');
+      setNotice('Observed models approved for coding in the durable review seed. Manager canDispatch stays false. Live Weak builds still require SURPLUS_API_KEY + AGENTV3_SURPLUS_BUILDER; mid-build failures fail-open to Weak.');
+      await load(true);
+    } catch (failure) {
+      if (mounted.current && currentSession === session.current) setError(`${failure instanceof ManagerUiError ? failure.message : 'Approve outcome is uncertain.'} Refresh paid status before retrying.`);
+    } finally {
+      clearTimeout(deadline);
+      if (mounted.current && currentSession === session.current) { mutationLock.current = false; setBusy(false); }
+    }
+  };
+
   const controlForm = pending && <form aria-label="Review paid candidate control" onSubmit={event => { event.preventDefault(); void control(); }} className="rounded-lg border border-line bg-well p-4 space-y-3">
       <h3 className="font-bold text-ink">{pending.action === 'disable' ? 'Block paid candidate' : 'Remove manual candidate block'}</h3>
       <p className="text-sm text-body break-all">{pending.modelId}</p>
@@ -187,10 +229,11 @@ export function SurplusRegistryPanel({ adminToken }: { adminToken: string }): Re
 
   return <section aria-label="Discounted PAID Builder Manager" className="rounded-xl border-2 border-line bg-card p-4 space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><h2 className="text-lg font-bold text-ink">Discounted PAID Builder Manager</h2><p className="text-sm text-muted">Separate from OpenRouter STRICT_FREE. Discounted offers are paid, never free. Manager controls change candidate blocks only. Live Surplus needs SURPLUS_API_KEY + AGENTV3_SURPLUS_BUILDER (and SURPLUS_REGISTRY_ENABLED for metadata); the connection check is optional and never activates production.</p></div>
+      <div><h2 className="text-lg font-bold text-ink">Discounted PAID Builder Manager</h2><p className="text-sm text-muted">Separate from OpenRouter STRICT_FREE. Discounted offers are paid, never free. Manager controls change candidate blocks only. Live Surplus admits Weak builds when SURPLUS_API_KEY + AGENTV3_SURPLUS_BUILDER are on (in-process coding quality synthesis). SURPLUS_REGISTRY_ENABLED keeps metadata fresh. Connection check is optional and never activates production.</p></div>
       <div className="flex flex-wrap gap-2">
         <button type="button" className={button} disabled={busy || loading} onClick={() => void load()}>{loading ? 'Reading manager…' : 'Refresh paid status'}</button>
         <button type="button" className={button} disabled={!view?.enabled || busy || loading} onClick={() => void syncMetadata()}>{busy ? 'Working…' : 'Sync metadata now'}</button>
+        <button type="button" className={button} disabled={!view?.enabled || busy || loading || view.status !== 'observed'} onClick={() => { setApproveOpen(true); setApproveReason(''); setNotice(''); }}>{busy ? 'Working…' : 'Approve observed for coding'}</button>
       </div>
     </div>
     <p className="text-sm text-body">Status is read every 30 seconds while open. Refresh paid status only re-reads saved observations. Sync metadata now asks the server to refresh public marketplace metadata under the shared five-minute lease; it never runs paid inference. The separate connection test below requires an explicit action and its own server-side safeguards.</p>
@@ -201,7 +244,12 @@ export function SurplusRegistryPanel({ adminToken }: { adminToken: string }): Re
       <dl className="grid sm:grid-cols-2 gap-3 text-sm text-body">
         <div><dt className="font-bold">Observation service</dt><dd>{view.status.replaceAll('_', ' ')} · {view.enabled ? 'Configured on' : 'Disabled by server configuration'}</dd></div>
         <div><dt className="font-bold">Configured candidate universe</dt><dd>{view.configuredUniverse.length} of at most {view.maxModels}; not a benchmark ranking or quality approval</dd></div>
-        <div><dt className="font-bold">Paid dispatch authority</dt><dd>Not granted by this manager. Independent builder safeguards still apply.</dd></div>
+        <div><dt className="font-bold">Paid dispatch authority</dt><dd>{view.liveBuilderAdmission
+          ? 'Not granted by this manager. Live builder admission is ACTIVE (key + AGENTV3_SURPLUS_BUILDER) — Weak builds synthesize coding quality in-process.'
+          : view.qualitySource === 'firestore'
+            ? 'Not granted by this manager. Durable Firestore coding approval is recorded; enable SURPLUS_API_KEY + AGENTV3_SURPLUS_BUILDER for live Weak admission.'
+            : 'Not granted by this manager. Models show unreviewed until live admission is on or you Approve observed for coding.'}</dd></div>
+        <div><dt className="font-bold">Quality evidence source</dt><dd>{view.qualitySource === 'live_synthesis' ? 'Live in-process synthesis' : view.qualitySource === 'firestore' ? 'Durable Firestore approval seed' : 'None — approve observed or enable live builder'}</dd></div>
         <div><dt className="font-bold">Discount and spending safeguards</dt><dd>90% minimum discount retained. No budget increase or production activation control.</dd></div>
         <div><dt className="font-bold">Metadata sync target / freshness limit</dt><dd>{view.intervalMs / 1000} / {view.freshnessMs / 1000} seconds; not an instantaneous quote</dd></div>
         <div><dt className="font-bold">Last successful sync</dt><dd>{timestamp(view.lastSuccessAt)}</dd></div>
@@ -213,21 +261,39 @@ export function SurplusRegistryPanel({ adminToken }: { adminToken: string }): Re
       {stale && <p role="status" className="text-sm text-warn">Stale observations or unconfirmed clock. Availability and candidate eligibility are unconfirmed until a fresh snapshot is published.</p>}
       {view.lastError && <p className="text-sm text-warn">Last sync state: {view.lastError.replaceAll('_', ' ')}. No successful refresh is implied.</p>}
       <details><summary className="cursor-pointer font-bold text-sm text-ink">Verification limitations</summary><ul className="list-disc pl-5 text-sm text-muted">{view.limitations.map((item, index) => <li key={index}>{item}</li>)}</ul></details>
+      {approveOpen && <form aria-label="Approve observed models for coding" onSubmit={event => { event.preventDefault(); void approveObserved(); }} className="rounded-lg border border-line bg-well p-4 space-y-3">
+        <h3 className="font-bold text-ink">Approve all currently observed offers for coding</h3>
+        <p className="text-sm text-body">Writes a durable coding-quality + request-time-floor seed for healthy trusted observed offers. Does not flip AGENTV3_SURPLUS_BUILDER, raise budgets, or set manager canDispatch. Live Weak admission still needs the API key + builder flag; mid-build Surplus failures fail-open to Weak.</p>
+        <label className="block text-sm text-body">Audit reason (10–500 characters; no secrets)<textarea required minLength={10} maxLength={500} rows={3} value={approveReason} disabled={busy} onChange={event => setApproveReason(event.target.value)} className={`${input} block w-full mt-1`} /></label>
+        <div className="flex flex-wrap gap-2">
+          <button type="submit" className={button} disabled={busy || approveReason.trim().length < 10 || approveReason.length > 500}>{busy ? 'Recording approval…' : 'Confirm approve observed'}</button>
+          <button type="button" className={button} disabled={busy} onClick={() => setApproveOpen(false)}>Cancel</button>
+        </div>
+      </form>}
       {view.models.length === 0 && <p className="text-sm text-muted">No verified candidate details are available in this manager view.</p>}
-      {view.models.map(model => <div key={model.modelId} className="space-y-2"><SurplusModelCard model={model} now={now} fresh={readable && !stale && view.status === 'observed'} controlsAvailable={controlsAvailable} onControl={() => openControl(model)} />{pending?.modelId === model.modelId && controlForm}</div>)}
+      {view.models.map(model => <div key={model.modelId} className="space-y-2"><SurplusModelCard model={model} now={now} fresh={readable && !stale && view.status === 'observed'} qualitySource={view.qualitySource} liveBuilderAdmission={view.liveBuilderAdmission} controlsAvailable={controlsAvailable} onControl={() => openControl(model)} />{pending?.modelId === model.modelId && controlForm}</div>)}
     </>}
     <SurplusConnectionTestPanel adminToken={adminToken} />
   </section>;
 }
 
-export function SurplusModelCard({ model, now, fresh, controlsAvailable, onControl }: { model: SurplusManagerModel; now: number; fresh: boolean; controlsAvailable: boolean; onControl: () => void }): React.ReactElement {
+export function SurplusModelCard({ model, now, fresh, controlsAvailable, onControl, qualitySource = 'none', liveBuilderAdmission = false }: { model: SurplusManagerModel; now: number; fresh: boolean; controlsAvailable: boolean; onControl: () => void; qualitySource?: 'none' | 'firestore' | 'live_synthesis'; liveBuilderAdmission?: boolean }): React.ReactElement {
   const available = model.observations.some(offer => offer.available);
   const candidate = fresh && !model.disabled && model.qualityReviewStatus === 'reviewed' && model.blockedReasons.every(reason => reason === 'dispatch_authority_not_evaluated') ? model.estimatedCandidate : null;
+  const qualityLabel = !fresh ? 'Unconfirmed from current status'
+    : model.qualityReviewStatus === 'reviewed'
+      ? (liveBuilderAdmission || qualitySource === 'live_synthesis'
+        ? 'Live builder admission — coding quality synthesized for observed offers; manager still does not grant canDispatch'
+        : qualitySource === 'firestore'
+          ? 'Durable admin coding approval recorded at last status read; live admission still needs key + builder flag'
+          : 'Independent review recorded at last status read; dispatch checks remain')
+      : model.qualityReviewStatus === 'expired' ? 'Review expired'
+      : 'Not independently approved — enable live builder (key + AGENTV3_SURPLUS_BUILDER) or Approve observed for coding';
   return <article className="rounded-lg border border-line p-4 space-y-2">
     <h3 className="font-bold text-ink break-all">{model.modelId}</h3>
     <dl className="grid sm:grid-cols-2 gap-2 text-sm text-body">
       <div><dt className="font-bold">Configured candidate</dt><dd>Yes; {model.disabled ? 'manual block recorded' : fresh ? 'no manual block recorded at last read' : 'manual block state unconfirmed'}</dd></div>
-      <div><dt className="font-bold">Independent quality approval</dt><dd>{!fresh ? 'Unconfirmed from current status' : model.qualityReviewStatus === 'reviewed' ? 'Independent review recorded at last status read; dispatch checks remain' : model.qualityReviewStatus === 'expired' ? 'Review expired' : 'Not independently approved'}</dd></div>
+      <div><dt className="font-bold">Independent quality approval</dt><dd>{qualityLabel}</dd></div>
       <div><dt className="font-bold">Provider-reported availability</dt><dd>{!fresh ? 'Unconfirmed / stale' : model.observations.length === 0 ? 'Unknown; no qualifying observation' : available ? 'Reported available; not a reservation or dispatch guarantee' : 'Reported unavailable'}</dd></div>
       <div><dt className="font-bold">Candidate eligibility</dt><dd>{candidate ? `Estimate only: ${candidate.estimatedMicroUsd} micro-USD for the displayed workload. Not dispatch permission.` : 'Not confirmed eligible; paid dispatch is not authorized here'}</dd></div>
     </dl>

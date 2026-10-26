@@ -1,3 +1,4 @@
+import { COPY } from '../../lib/copy';
 import { FreeAnswerStatusBadge } from '../chat/FreeAnswerStatusBadge';
 import React from 'react';
 import { SURFACE_TITLE_CLASS } from '../chat/conversation';
@@ -94,7 +95,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
         {/* A quiet title bar (admin 2026-10-13, "claude jaisa"): the name in the serif, no caps, no ping. */}
         <div className="flex items-center justify-between px-4 py-2 border-b border-line text-sm text-muted">
           <div className="flex items-center gap-2">
-            <span className={SURFACE_TITLE_CLASS}>NavBharatAI</span>
+            <span className={SURFACE_TITLE_CLASS}>{COPY.branding.aiChatName}</span>
           </div>
           <div className="flex items-center gap-2">
             {/* START A NEW CHAT (admin 2026-08-23: "free me new chat kaise start hogi? koi option

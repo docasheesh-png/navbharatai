@@ -62,7 +62,7 @@ describe('modePickerEntries — what the Mode button offers', () => {
 
   it('the recent group names the FREE chat when that tab is open', () => {
     const entries = modePickerEntries({ hideMedical: false, activeView: 'nbi_chat', openViews: ['nbi_chat'] });
-    expect(entries[0]).toMatchObject({ id: recentModeId('nbi_chat'), kind: 'recent', name: 'NavBharatAI FREE', view: 'nbi_chat' });
+    expect(entries[0]).toMatchObject({ id: recentModeId('nbi_chat'), kind: 'recent', name: 'AI chat', view: 'nbi_chat' });
     // …and the row beneath it is still the NEW free chat. Same words, different jobs — which is why
     // the sheet puts them under different group headings.
     expect(entries[1]).toMatchObject({ id: FREE_MODE_ID, kind: 'free' });
@@ -77,7 +77,7 @@ describe('modePickerEntries — what the Mode button offers', () => {
     ];
     const recent = recentModeEntries({ hideMedical: false, activeView: 'lawyer_ai', openViews: ['nbi_chat', 'sda_chat', 'teacher_ai', 'lawyer_ai', 'settings'], openChats });
     expect(recent.map((e) => [e.id, e.name])).toEqual([
-      [recentModeId('nbi_chat'), 'NavBharatAI FREE'],
+      [recentModeId('nbi_chat'), 'AI chat'],
       [recentModeId('sda_chat'), 'Doctor AI'],
       [recentModeId('teacher_ai', 't1'), 'Teacher AI (1)'],
       [recentModeId('lawyer_ai', 'l1'), PROFESSIONAL_CHATS.lawyer_ai.name],
@@ -344,10 +344,9 @@ describe('ModePickerSheet — the rows say which is which', () => {
     expect(sheet).toContain('activeModeId(activeView, activeChatId, activeViewWindowId)');
   });
 
-  it('the FREE styling follows the NAME, so the same chat is painted the same way in both rows', () => {
-    expect(sheet).toContain("e.name.startsWith('NavBharatAI FREE')");
-    // The old branch keyed on kind, which would have left the recent row's "NavBharatAI FREE" plain
-    // while the row beneath it kept the gradient — one chat, two looks, in one list.
+  it('new and recent names render without deriving mode identity from display text', () => {
+    expect(sheet).toContain('>{e.name}</span>');
+    expect(sheet).not.toContain('e.name.startsWith');
     expect(sheet).not.toContain("e.kind === 'free' || e.kind === 'free_new'");
   });
 

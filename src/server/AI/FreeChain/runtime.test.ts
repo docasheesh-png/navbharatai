@@ -176,7 +176,7 @@ describe('free chat chain central dispatch', () => {
   expect(result?.model).toBe('beam');
   expect(m.execute).toHaveBeenCalledTimes(1);
   expect(onChunk).toHaveBeenCalledWith('answer');
-  expect(onChunk).not.toHaveBeenCalledWith(expect.stringMatching(/busy/i), 'notice');
+  expect(onChunk).not.toHaveBeenCalledWith(expect.any(String), 'notice');
  });
  it('CHEAPERINFERENCE=admin busy reply shows real reason; ordinary users stay friendly', async () => {
   vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
@@ -190,7 +190,7 @@ describe('free chat chain central dispatch', () => {
     onChunk: adminOnChunk,
   });
   expect(admin?.ok).toBe(false);
-  expect(admin?.content).toContain('अभी AI थोड़ा व्यस्त');
+  expect(admin?.content).toContain('अभी जवाब नहीं दे पा रहा');
   expect(admin?.content).toContain('[admin diagnostic]');
   expect(admin?.content).toMatch(/cheapinf-key-missing-or-invalid|keyConfigured=no/);
   expect(admin?.content).not.toMatch(/ci_live_|sk-|Bearer\s+\S{8,}/);

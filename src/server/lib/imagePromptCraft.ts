@@ -33,7 +33,14 @@
  * can act on beats a beautiful image with a misspelled shop name on it.
  */
 
-import { indianPeopleDirective } from './imagePeople';
+import {
+  indianPeopleDirective,
+  namesOtherOrigin,
+  NO_PEOPLE_DIRECTION,
+  NO_PEOPLE_NEGATIVE,
+  INDIAN_PEOPLE_DIRECTION,
+  INDIAN_PEOPLE_NEGATIVE,
+} from './imagePeople';
 
 export type ImagePurpose =
   | 'icon' | 'logo' | 'banner' | 'avatar' | 'background'
@@ -106,13 +113,13 @@ const PURPOSE_DIRECTION: Record<Exclude<ImagePurpose, 'general'>, string> = {
 
 /** What ruins each kind of image — added to the universal negatives below. */
 const PURPOSE_NEGATIVE: Record<Exclude<ImagePurpose, 'general'>, string> = {
-  icon: 'photographic background, complex scene, small details, thin lines, text, multiple subjects',
-  logo: 'photorealistic, 3D render, gradients that muddy at small size, drop shadow, clutter, mockup frame',
-  banner: 'text, headline, letters, centred subject blocking the copy space, tight crop',
+  icon: 'photographic background, complex scene, small details, thin lines, text, multiple subjects, people, person, face, portrait, human',
+  logo: 'photorealistic, 3D render, gradients that muddy at small size, drop shadow, clutter, mockup frame, people, person, face, portrait, human, floating head',
+  banner: 'text, headline, letters, centred subject blocking the copy space, tight crop, unwanted face, portrait',
   avatar: 'full body, busy background, harsh shadows, subject off to the edge, cropped forehead',
-  background: 'central subject, high contrast focal point, text, harsh detail, vignette',
+  background: 'central subject, high contrast focal point, text, harsh detail, vignette, people, person, face, portrait',
   illustration: 'inconsistent style, muddy colours, unfinished sketch lines',
-  screenshot: 'lorem ipsum gibberish, misaligned elements, unrealistic proportions, blurry text',
+  screenshot: 'lorem ipsum gibberish, misaligned elements, unrealistic proportions, blurry text, people, person, face, portrait, human',
   thumbnail: 'tiny details, low contrast, empty margins, cluttered composition',
 };
 
@@ -400,23 +407,27 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
   const styleSpec = STYLE_DIRECTION[String(input.style ?? '')];
   const { purpose, styleDropped, realismChip, realism, realismLoses } = resolveImageBrief(input);
 
-  // 🇮🇳 EVERY PERSON IS INDIAN UNLESS THE USER NAMED SOMEBODY ELSE (admin 2026-09-30: "jab tak
-  // specific bola na jaye kisi aur face ke bare me, tab tak 100% indian face hi banna chahiye").
-  // Placed straight after the subject because image models weigh the opening of a prompt most: said
-  // after the art direction, it lost to the model's own default face. A UI screenshot and a
-  // background are left alone — there a word like "student" or "patient" names a DOMAIN, and the
-  // sentence would invite a stranger into a dashboard. See `imagePeople.ts`.
+  // 🇮🇳 EVERY PERSON IS INDIAN UNLESS THE USER NAMED SOMEBODY ELSE (admin 2026-09-30) — AND
+  // 🚫 NO FACE UNLESS ASKED (admin 2026-10-26: "face tabhi bane jab bola jaye, ya need ho!!!").
   //
-  // 🔴 CORRECTED 2026-10-01 — IT REACHED ONLY THE BRIEFS THAT NAMED A PERSON IN SO MANY WORDS, AND IT
-  // CARRIED NO NEGATIVE AT ALL. `wantsIndianPeopleDefault` is a word list that leaves out `worker`,
-  // `driver`, `cook`, `seller`, `model` and a bare `portrait` on purpose, so "delivery worker in a
-  // mask" got nothing; and the `negative` array below was assembled from four other sources with not
-  // one word of this rule in it, so a positive sentence went up alone against the model's own face
-  // prior and lost. Both halves are fixed in `imagePeople.ts`: the CONDITIONAL wording cannot invent a
-  // person, so it rides on every brief, and the negative finally says what to avoid.
+  // The Oct-01 "If any person appears…" conditional rode on EVERY brief and named facial features
+  // even for "Clinic logo", so the model invented a floating head. That sentence is retired as a
+  // default. Now: person named → Indian default + ethnicity negatives; nobody named → explicit
+  // no-people direction + negatives; avatar with nobody named → still Indian (an avatar needs a
+  // face); other origin named → leave the user's words alone.
   const indian = indianPeopleDirective(base, { emphaticAllowed: purpose !== 'screenshot' && purpose !== 'background' });
-  const indianPeople = !!indian?.named;
-  if (indian) parts.push(indian.direction);
+  const otherOrigin = namesOtherOrigin(base);
+  // An avatar is a person by definition even when the brief is "friendly founder" with no person word.
+  const avatarNeedsFace = purpose === 'avatar' && !otherOrigin && !indian;
+  const forbidPeople = !indian && !avatarNeedsFace && !otherOrigin;
+  const indianPeople = !!indian?.named || avatarNeedsFace;
+  if (indian) {
+    parts.push(indian.direction);
+  } else if (avatarNeedsFace) {
+    parts.push(INDIAN_PEOPLE_DIRECTION);
+  } else if (forbidPeople) {
+    parts.push(NO_PEOPLE_DIRECTION);
+  }
 
   // 🔴 THE USER'S EXPLICIT ASK BEATS A CHIP THEY NEVER TOUCHED. This module already states that
   // principle, in `styleConflictsWithPrompt`'s own words — "the user's typed intent is the stronger
@@ -497,10 +508,11 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
   const negative = [
     BASE_NEGATIVE,
     purpose !== 'general' ? PURPOSE_NEGATIVE[purpose] : '',
-    // 🇮🇳 The other half of the Indian-people rule. Placed with the negatives rather than inside the
-    // direction because a diffusion model weighs the two on different axes — which is why the
-    // positive sentence alone kept losing (admin 2026-10-01).
-    indian ? indian.negative : '',
+    // 🇮🇳 Ethnicity negatives ONLY when a person was asked for — never on a logo/product brief
+    // (admin 2026-10-26: naming "face" five times in Avoid invited one into "Clinic logo").
+    indian ? indian.negative : (avatarNeedsFace ? INDIAN_PEOPLE_NEGATIVE : ''),
+    // 🚫 No-people negatives when nobody was asked for (and it is not an avatar / other-origin brief).
+    forbidPeople ? NO_PEOPLE_NEGATIVE : '',
     // Realism drifts toward illustration unless it is told not to — see PHOTO_NEGATIVE.
     photoApplied ? PHOTO_NEGATIVE : '',
     photoApplied && realismChip && String(input.style) === 'cinematic' ? CINEMATIC_NEGATIVE : '',

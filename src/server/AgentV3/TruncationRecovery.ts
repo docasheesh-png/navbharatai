@@ -51,9 +51,16 @@ export function lostTruncatedOutput(turn: TruncatableTurn, resumeEnabled: boolea
   written: Record<string, string>;
   truncatedToolPaths: string[];
   textMarkerPaths: string[];
+  /**
+   * A write_files_batch whose `files` array never arrived (empty or missing) on a cut-off turn
+   * (autopsy bd20f9b2). No path can be salvaged, but the batch itself was thrown away — the next
+   * turn must write ONE small file with write_file instead of retrying the same empty batch.
+   */
+  emptyBatchTruncated: boolean;
 } {
   const written: Record<string, string> = {};
   const truncatedToolPaths: string[] = [];
+  let emptyBatchTruncated = false;
   for (const tu of turn.toolUses ?? []) {
     // Cover write_file AND write_files_batch — a batch write is just as truncatable.
     if (tu.name === 'write_file') {
@@ -64,20 +71,31 @@ export function lostTruncatedOutput(turn: TruncatableTurn, resumeEnabled: boolea
     } else if (tu.name === 'write_files_batch') {
       const b = tu.input as { files?: unknown } | null | undefined;
       if (Array.isArray(b?.files)) {
-        for (const f of b.files) {
-          const ff = f as { path?: unknown; content?: unknown };
-          if (typeof ff?.path === 'string' && typeof ff?.content === 'string') written[ff.path] = ff.content;
-          else if (typeof ff?.path === 'string' && ff?.content === undefined) truncatedToolPaths.push(ff.path);
+        if (b.files.length === 0) {
+          // Cut off before any file path arrived — nothing to salvage by path (autopsy bd20f9b2).
+          emptyBatchTruncated = true;
+        } else {
+          for (const f of b.files) {
+            const ff = f as { path?: unknown; content?: unknown };
+            if (typeof ff?.path === 'string' && typeof ff?.content === 'string') written[ff.path] = ff.content;
+            else if (typeof ff?.path === 'string' && ff?.content === undefined) truncatedToolPaths.push(ff.path);
+          }
         }
+      } else {
+        // `files` missing entirely — same class as an empty array on a cut-off turn.
+        emptyBatchTruncated = true;
       }
     }
   }
   // A path also written whole is not lost.
   const writtenPaths = new Set(Object.keys(written));
+  // An empty batch that also wrote something whole (unusual) is not "lost".
+  if (Object.keys(written).length > 0) emptyBatchTruncated = false;
   return {
     written,
     truncatedToolPaths: truncatedToolPaths.filter((p) => !writtenPaths.has(p)),
     textMarkerPaths: textMarkerFilePaths(turn.text).filter((p) => !writtenPaths.has(p)),
+    emptyBatchTruncated,
   };
 }
 
@@ -92,7 +110,7 @@ export function lostTruncatedOutput(turn: TruncatableTurn, resumeEnabled: boolea
 export function turnDiscardedTruncatedOutput(turn: TruncatableTurn | null | undefined, resumeEnabled: boolean = resumeTruncatedEnabled()): boolean {
   if (!turn || !(turn.truncated || turn.stopReason === 'max_tokens')) return false;
   const lost = lostTruncatedOutput(turn, resumeEnabled);
-  return lost.truncatedToolPaths.length + lost.textMarkerPaths.length > 0;
+  return lost.truncatedToolPaths.length + lost.textMarkerPaths.length > 0 || lost.emptyBatchTruncated;
 }
 
 /**
@@ -109,6 +127,11 @@ export function truncationRecoverySteer(input: {
   /** Files whose write_file TOOL CALL was cut off mid-arguments — the path survived (salvaged) but the
    *  `content` did not, so nothing was written. The bare "Unterminated string in JSON" case, now named. */
   truncatedToolPaths?: readonly string[];
+  /**
+   * A write_files_batch arrived with an empty or missing `files` array on a cut-off turn — no path
+   * survived to name (autopsy bd20f9b2). Steer the model onto write_file for one small file.
+   */
+  emptyBatchTruncated?: boolean;
   /**
    * Paths this guard has ALREADY steered a rewrite of, earlier in the same run.
    *
@@ -129,6 +152,7 @@ export function truncationRecoverySteer(input: {
   const brokenJs = input.brokenJs ?? [];
   const textMarkerPaths = input.textMarkerPaths ?? [];
   const truncatedToolPaths = input.truncatedToolPaths ?? [];
+  const emptyBatchTruncated = input.emptyBatchTruncated === true;
   const seenBefore = new Set(input.previouslyTruncatedPaths ?? []);
   const brokenSet = new Set(brokenJs.map((b) => b.path));
   // A file that BOTH failed to parse and was in the text markers is listed once, under "broken".
@@ -136,7 +160,7 @@ export function truncationRecoverySteer(input: {
   // A salvaged truncated tool write already covered by a broken/text entry is not repeated.
   const textSet = new Set(textMarkerPaths);
   const truncatedOnly = truncatedToolPaths.filter((p) => !brokenSet.has(p) && !textSet.has(p));
-  if (brokenJs.length === 0 && lostOnly.length === 0 && truncatedOnly.length === 0) return null;
+  if (brokenJs.length === 0 && lostOnly.length === 0 && truncatedOnly.length === 0 && !emptyBatchTruncated) return null;
 
   const lines: string[] = [];
   const repeats: string[] = [];
@@ -154,6 +178,9 @@ export function truncationRecoverySteer(input: {
   }
   for (const p of truncatedOnly.slice(0, 15)) {
     note(p, 'your write_file call was cut off mid-content, so it was NOT saved');
+  }
+  if (emptyBatchTruncated) {
+    lines.push('- write_files_batch — cut off before any file path arrived (empty/missing files array), so nothing was saved');
   }
 
   // 🔑 THE SECOND ATTEMPT GETS DIFFERENT ADVICE, because repeating the first is a guaranteed loop.

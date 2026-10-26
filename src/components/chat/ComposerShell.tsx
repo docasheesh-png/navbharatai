@@ -25,7 +25,7 @@ export const COMPOSER_BOX_CLASS =
  * zooming the page on focus.
  */
 export const COMPOSER_TEXTAREA_CLASS =
-  'nb-composer-text w-full bg-transparent text-ink placeholder:text-muted px-4 pt-4 pb-2 outline-none transition-all resize-none min-h-[72px] leading-relaxed text-[16px]';
+  'nb-composer-text w-full bg-transparent text-ink placeholder:text-muted px-3.5 pt-2.5 pb-2 outline-none transition-all resize-none min-h-[40px] leading-relaxed text-[16px]';
 
 /** A quiet icon control in the bottom row (attach, mic, voice, star). 36px. */
 export const COMPOSER_ICON_CLASS =
@@ -128,7 +128,7 @@ export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, s
       {rail}
       <div className={`${COMPOSER_BOX_CLASS} flex-1 min-w-0 cursor-text ${controls ? '' : 'nb-composer-no-tools'}`} ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick}>
         <div className="relative w-full min-w-0">{children}</div>
-        <div className="flex items-end justify-between gap-2 px-2 pb-2" data-composer-toolbar="">
+        <div className="nb-composer-actionbar flex items-center justify-between gap-2" data-composer-toolbar="">
           {controls ? <MobileComposerTools><div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto">{controls}</div></MobileComposerTools> : <div className="nb-composer-controls" />}
           <div className={COMPOSER_SEND_SLOT_CLASS}>{send}</div>
         </div>
@@ -159,8 +159,14 @@ export function MobileComposerTools({ children, open: controlledOpen, onOpenChan
       const viewport = window.visualViewport;
       const height = viewport?.height ?? window.innerHeight;
       const inset = Math.max(0, window.innerHeight - height - (viewport?.offsetTop ?? 0));
-      root.current?.style.setProperty('--nb-composer-menu-max-height', `${Math.max(44, height - 80)}px`);
-      root.current?.style.setProperty('--nb-composer-menu-bottom', `${inset + 60}px`);
+      const menuMax = `${Math.max(44, height - 80)}px`;
+      const menuBottom = `${inset + 72}px`;
+      const apply = (el: HTMLElement | null | undefined) => {
+        el?.style.setProperty('--nb-composer-menu-max-height', menuMax);
+        el?.style.setProperty('--nb-composer-menu-bottom', menuBottom);
+      };
+      apply(root.current);
+      apply(root.current?.closest('.nb-composer-box') as HTMLElement | null);
     };
     const outside = (event: PointerEvent) => {
       if (!root.current?.contains(event.target as Node)) setOpen(false);

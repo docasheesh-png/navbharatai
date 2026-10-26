@@ -169,31 +169,36 @@ describe('mobile tools and desktop layout contract', () => {
     expect(css.split('@media')[0]).toContain('display: contents');
     expect(css).toContain('font-size: 16px');
     expect(css).toContain('transition: none');
-    expect(css).toContain('width: 44px; height: 44px');
+    expect(css).toContain('nb-composer-send-slot');
     expect(css).toContain('max-height: var(--nb-composer-menu-max-height');
     expect(css).toContain('bottom: var(--nb-composer-menu-bottom');
     expect(css).toContain('flex-wrap: nowrap');
     expect(css).toContain('overflow-y: visible');
   });
-  it('keeps Pro actions outside the tools menu and resizes across breakpoints', () => {
+  it('keeps Pro Send in the action bar (outside Type) and resizes across breakpoints', () => {
     const pro = sourceText('src/components/agentv3/AgentV3Panel.tsx');
+    const toolsStart = pro.indexOf('<MobileComposerTools');
     const toolsEnd = pro.indexOf('</MobileComposerTools>');
-    expect(toolsEnd).toBeGreaterThan(pro.indexOf('<ChatToolbar', pro.indexOf('<MobileComposerTools')));
-    expect(pro.indexOf('aria-label="Cancel request"', toolsEnd)).toBeGreaterThan(toolsEnd);
-    // 💡 lives at the end of the always-visible Pro tools row (OLD layout) — not a new corner.
-    const toolsBlock = pro.slice(pro.indexOf('<MobileComposerTools'), toolsEnd);
+    expect(toolsEnd).toBeGreaterThan(pro.indexOf('<ChatToolbar', toolsStart));
+    const toolsBlock = pro.slice(toolsStart, toolsEnd);
+    expect(toolsBlock).toContain('nb-pro-send-slot');
+    expect(toolsBlock).toContain('aria-label="Cancel request"');
     expect(toolsBlock).toContain('NextSuggestionsBulb');
+    expect(toolsBlock).toContain('nb-pro-expand-desktop');
     expect(pro).not.toContain('nb-pro-suggestions-corner');
     expect(pro).toContain("window.visualViewport?.addEventListener('resize', resize)");
     expect(pro).toContain('if (resizeMobileComposer(el))');
   });
-  it('Pro mobile CSS shows tools above Type without a + disclosure', () => {
+  it('unified pad CSS: Type above, action bar below, no + disclosure, menus fixed', () => {
     const css = sourceText('src/components/chat/composer.css');
-    expect(css).toContain('.nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-toggle');
-    expect(css).toContain('display: none !important');
-    expect(css).toContain('.nb-composer-box[data-composer-surface="pro"] .nb-pro-controls');
-    expect(css).toContain('order: 0');
-    // Desktop contract untouched: tools default to display:contents outside the phone media query.
+    expect(css).toContain('nb-composer-tools-toggle { display: none !important; }');
+    expect(css).toContain('[data-composer-toolbar]');
+    expect(css).toContain('border-top: 1px solid');
+    expect(css).toContain('nb-pro-send-slot');
+    expect(css).toContain('position: fixed !important');
+    expect(css).toContain('order: 1 !important'); // Type
+    expect(css).toContain('order: 2 !important'); // action bar
+    expect(css).toContain('max-height: min(72px, 14dvh) !important');
     expect(css.split('@media')[0]).toContain('.nb-composer-tools, .nb-composer-tools-content { display: contents; }');
   });
 });

@@ -11,6 +11,15 @@ import { zipAccept } from '../lib/zipPicker';
 //   • Choose photo/video → accept="image/*,video/*"               → opens the gallery.
 //   • Choose file        → the caller's own `accept` (docs, code, zip, …) → opens Files.
 // On desktop `capture` is ignored and every option opens a normal file dialog — graceful everywhere.
+//
+// iOS Safari (admin 2026-10-26 phone report: Free paperclip "does nothing"):
+//   1) `display:none` / Tailwind `hidden` file inputs ignore programmatic .click().
+//   2) setTimeout(.click) drops the user-gesture, so the picker never opens.
+// Both are fixed below: visually-hidden inputs + synchronous click in the same tap.
+
+/** Visually hidden but still "visible" to iOS Safari's file-picker gesture rules. */
+export const ATTACH_FILE_INPUT_CLASS =
+  'nb-attach-file-input absolute top-0 left-0 h-px w-px opacity-0 overflow-clip';
 
 export interface AttachMenuProps {
   /** Called with the picked files from whichever option the user chose. */
@@ -66,20 +75,21 @@ export function AttachMenu({
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('touchstart', onDown);
+    // pointerdown covers mouse + touch without the touchstart-then-click race that could
+    // dismiss the sheet before a menu item's click fires on some iOS WebKit builds.
+    document.addEventListener('pointerdown', onDown);
     document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('touchstart', onDown);
+      document.removeEventListener('pointerdown', onDown);
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
 
   const pick = (ref: React.RefObject<HTMLInputElement | null>) => {
+    // MUST stay in the same user-gesture turn as the tap — no setTimeout.
+    // iOS Safari silently ignores file-input .click() once the gesture is gone.
+    ref.current?.click();
     setOpen(false);
-    // Let the menu close before the native picker opens (iOS is picky about this ordering).
-    setTimeout(() => ref.current?.click(), 0);
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -113,7 +123,8 @@ export function AttachMenu({
       {open && (
         <div
           role="menu"
-          className="absolute bottom-full left-0 mb-2 z-[60] min-w-[220px] rounded-2xl border border-line bg-card shadow-2xl overflow-hidden"
+          data-attach-menu=""
+          className="absolute bottom-full left-0 mb-2 z-[60] min-w-[220px] rounded-2xl border border-line bg-card shadow-2xl overflow-hidden max-sm:fixed max-sm:left-3 max-sm:right-3 max-sm:bottom-[calc(var(--nb-composer-menu-bottom,72px))] max-sm:mb-0 max-sm:z-[80] max-sm:max-h-[min(50dvh,320px)] max-sm:overflow-y-auto max-sm:w-auto max-sm:min-w-0 max-sm:max-w-[calc(100vw-24px)]"
         >
           {OPTIONS.map((o) => (
             <button
@@ -156,17 +167,20 @@ export function AttachMenu({
         </div>
       )}
 
-      {/* Real, separate inputs — each offers a different native source. Hidden; triggered by the menu. */}
-      <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleChange} />
-      <input ref={galleryRef} type="file" accept="image/*,video/*" multiple={multiple} className="hidden" onChange={handleChange} />
-      <input ref={fileRef} type="file" accept={fileAccept} multiple={multiple} className="hidden" onChange={handleChange} />
+      {/* Real, separate inputs — each offers a different native source.
+          Visually hidden (NOT display:none) so iOS Safari still honors .click(). */}
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" className={ATTACH_FILE_INPUT_CLASS} tabIndex={-1} aria-hidden="true" onChange={handleChange} />
+      <input ref={galleryRef} type="file" accept="image/*,video/*" multiple={multiple} className={ATTACH_FILE_INPUT_CLASS} tabIndex={-1} aria-hidden="true" onChange={handleChange} />
+      <input ref={fileRef} type="file" accept={fileAccept} multiple={multiple} className={ATTACH_FILE_INPUT_CLASS} tabIndex={-1} aria-hidden="true" onChange={handleChange} />
       {/* Project import — its OWN single-file picker, routed to onZipProject (never onFiles), so a
           project can never re-enter the attachment/base64 path that capped it at 18 MB. */}
       <input
         ref={zipRef}
         type="file"
         accept={zipAccept()}
-        className="hidden"
+        className={ATTACH_FILE_INPUT_CLASS}
+        tabIndex={-1}
+        aria-hidden="true"
         onChange={(e) => {
           const f = e.target.files?.[0];
           e.target.value = '';

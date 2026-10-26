@@ -291,10 +291,13 @@ export async function maybeFreeChain(input: FreeChainInput): Promise<FreeChainRe
   if (strictFreeRequired()) return null;
   const unavailable = () => { const result = empty(); input.onChunk?.(result.content, 'notice'); return result; };
   if (cfg.errors.length && (cfg.enabled || held)) { warnOnce(`Invalid configuration: ${cfg.errors.join(', ')}`); return unavailable(); }
-  const db = getServerDb(); if (!db) return unavailable();
   // CHEAPERINFERENCE=admin + verified admin: exclusive cheapinf path (free ladder off for this reply).
   // Works even when FREE_CHAIN_ENABLED is off, so the owner can test with only CHEAPERINFERENCE=admin.
-  if (input.context.isAdmin === true && cheaperInferenceMode() === 'admin') {
+  const exclusiveAdmin = input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
+  // OFF restores legacy for new requests (no db touch), never for a turn already admitted — unless exclusive admin.
+  if (!cfg.enabled && !exclusiveAdmin) return held ? unavailable() : null;
+  const db = getServerDb(); if (!db) return unavailable();
+  if (exclusiveAdmin) {
     const cheap = cfg.rungs.find(r => r.id === 'cheapinf');
     if (!cheap || cheap.reason === 'disabled' || !cheap.configured) {
       warnOnce('CHEAPERINFERENCE=admin but cheapinf is unconfigured (set CHEAPERINFERENCE_API_KEY)');
@@ -302,8 +305,6 @@ export async function maybeFreeChain(input: FreeChainInput): Promise<FreeChainRe
     }
     return buildFreeChainRouter(db, cfg, freeChainConfig).route(input);
   }
-  // OFF restores legacy for new requests, never for a turn already admitted to this chain.
-  if (!cfg.enabled) return held ? unavailable() : null;
   const control = await readControlsForSelection(db, cfg).catch(() => null); if (!control) return unavailable();
   if (!selectedForFreeChain(cfg, control, input.context.uid)) return held ? unavailable() : null;
   return buildFreeChainRouter(db, cfg, freeChainConfig).route(input);

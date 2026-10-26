@@ -212,6 +212,8 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       const controller = new AbortController(); const abort = () => controller.abort(); input.signal?.addEventListener('abort', abort, { once: true });
       if (input.signal?.aborted) abort();
       let content = ''; let response: AIProviderResponse | undefined; let completeUsage = false; let partial = false;
+      // Trusted watchdog metadata belongs to this attempt, not to the frozen provider error.
+      let watchdogDetail: string | undefined;
       try {
       // A new runtime OFF stops new physical attempts; never silently returns to paid legacy mid-turn.
       // Exclusive CHEAPERINFERENCE=admin path ignores the FreeChain stop switch so the owner can
@@ -289,9 +291,8 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
               : watch.verdict === 'idle-timeout' ? 'idle'
               : watch.verdict === 'hard-cap' ? 'hard-cap'
               : 'stream';
-            const err = new FreeChainProviderError(watch.verdict === 'first-token-timeout' || watch.verdict === 'idle-timeout' || watch.verdict === 'hard-cap' ? 'TIMEOUT' : 'NETWORK');
-            (err as FreeChainProviderError & { watchdogDetail?: string }).watchdogDetail = `${kind}:${firstTokenMs}ms`;
-            throw err;
+            watchdogDetail = `${kind}:${firstTokenMs}ms`;
+            throw new FreeChainProviderError(watch.verdict === 'first-token-timeout' || watch.verdict === 'idle-timeout' || watch.verdict === 'hard-cap' ? 'TIMEOUT' : 'NETWORK');
           }
         if (!response || !content.trim()) throw new FreeChainProviderError('EMPTY_RESPONSE');
         if (reservation && completeUsage && response.usage) await store.settlePaid(reservation, quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung));
@@ -302,16 +303,13 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         return done({ ...response, content, ok: true });
       } catch (error) {
         controller.abort(); const safe = error instanceof FreeChainProviderError ? error : error instanceof FreeRoutingError ? new FreeChainProviderError(error.code === 'SAFETY_REFUSAL' ? 'SAFETY_REFUSAL' : error.code === 'REQUEST_ABORTED' ? 'ABORTED' : /^(INVALID_|UNVERIFIED_|TOOL_ENVELOPE_|HTTP_400$|HTTP_413$|HTTP_422$)/.test(error.code) ? 'INVALID_REQUEST' : error.code === 'FREE_BILLING_ANOMALY' ? 'POLICY_BLOCKED' : 'SERVER') : null;
-        const watchdogDetail = safe && typeof (safe as FreeChainProviderError & { watchdogDetail?: string }).watchdogDetail === 'string'
-          ? (safe as FreeChainProviderError & { watchdogDetail?: string }).watchdogDetail
-          : undefined;
         attempt.reason = safe
           ? `${safe.code.toLowerCase()}${typeof safe.status === 'number' ? `:http=${safe.status}` : ''}${watchdogDetail ? `:${watchdogDetail}` : ''}`
           : 'unavailable';
         if (safe?.code === 'AUTH') warnOnce(`${rung.keyEnv}: authentication failed`);
         if (!['INVALID_REQUEST', 'SAFETY_REFUSAL', 'ABORTED'].includes(safe?.code ?? '')) {
           // Ordinary rungs keep AUTH=1h / QUOTA=1d. Owner exclusive cheapinf caps at 30s so a bad
-          // key or empty wallet (dashboard aashishcpmt093@gmail.com) can be fixed and retried.
+          // key or empty wallet can be fixed and retried.
           const openReason = attempt.reason; // already auth:http=401 / quota_exhausted:http=402 …
           const requestedCooldown = (exclusiveAdmin && id === 'cheapinf')
             ? Math.min(30_000, safe?.retryAfterMs && safe.retryAfterMs > 0 ? safe.retryAfterMs : 30_000)

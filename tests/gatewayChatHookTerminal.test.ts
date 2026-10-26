@@ -302,4 +302,71 @@ describe('real Free chat hook terminal request handling', () => {
     expect(new Set(f.messages().map(message => message.id)).size).toBe(f.messages().length);
   });
 
+  it.each(['network', 'timeout', 'abort'].flatMap(kind => [true, false].flatMap(sse => [true, false].map(partial => ({ kind, sse, partial })))))
+    ('finalizes one honest bubble after a reader failure: $kind, SSE=$sse, partial=$partial', async ({ kind, sse, partial }) => {
+      mock.post.mockResolvedValue({ data: { reply: 'First answer' } });
+      const f = fixture(); await f.engine().handleSend('First question');
+      f.deps.keys = { openai: 'test' }; f.deps.selectedModel = 'openai';
+      let controller!: ReadableStreamDefaultController<Uint8Array>;
+      const body = new ReadableStream<Uint8Array>({ start(value) { controller = value; } });
+      vi.mocked(fetch).mockResolvedValueOnce(new Response(body, { headers: { 'Content-Type': sse ? 'text/event-stream' : 'text/plain' } }));
+      const pending = f.engine().handleSendForTab('studio', 'Second question');
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+      if (partial) {
+        controller.enqueue(new TextEncoder().encode(sse ? frame({ c: 'Second partial answer' }) : 'Second partial answer'));
+        await vi.waitFor(() => expect(f.messages().at(-1)?.text).toContain('Second partial answer'));
+      }
+      controller.error(kind === 'network' ? new TypeError('Transport failed') : new DOMException('Transport ended', kind === 'timeout' ? 'TimeoutError' : 'AbortError'));
+      await pending;
+      const answers = f.messages().filter(message => message.sender === 'ai');
+      expect(answers).toHaveLength(2);
+      expect(answers[1].text).toContain('The connection ended before the reply was complete.');
+      if (partial) expect(answers[1].text).toContain('Second partial answer');
+      expect(answers[1].text).not.toMatch(/▋|\(stopped\)/);
+      expect(new Set(f.messages().map(message => message.id)).size).toBe(f.messages().length);
+      expect(f.deps.isLoading).toBe(false);
+      expect(body.locked).toBe(false);
+      expect(f.deps.setErrorContext).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('connection ended') }));
+      expect(vi.mocked(f.deps.addLog).mock.calls.filter(([message, level]) => message.includes('AI Response received') && level === 'success')).toHaveLength(1);
+      expect(fetch).toHaveBeenCalledOnce(); expect(mock.post).toHaveBeenCalledOnce();
+      vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ reply: 'Manual successor answer' }), { headers: { 'Content-Type': 'application/json' } }));
+      await f.engine().handleSendForTab('studio', 'Manual retry');
+      expect(f.messages().at(-1)?.text).toBe('Manual successor answer');
+      expect(fetch).toHaveBeenCalledTimes(2);
+    });
+
+  it.each([false, true])('a stopped reader cannot overwrite its successor or closed-chat navigation (navigate=%s)', async navigate => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let finishSuccessor!: (response: Response) => void;
+    const body = new ReadableStream<Uint8Array>({ start(value) { controller = value; } });
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(body, { headers: { 'Content-Type': 'text/event-stream' } }))
+      .mockImplementationOnce(() => new Promise(resolve => { finishSuccessor = resolve; }));
+    const f = fixture(); f.deps.keys = { openai: 'test' }; f.deps.selectedModel = 'openai';
+    const firstEngine = f.engine(); const first = firstEngine.handleSendForTab('studio', 'First question');
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    controller.enqueue(new TextEncoder().encode(frame({ c: 'Stopped partial' })));
+    await vi.waitFor(() => expect(f.messages().at(-1)?.text).toContain('Stopped partial'));
+    firstEngine.stop();
+    expect(f.messages().at(-1)?.text).toBe('Stopped partial ⏹ (stopped)');
+    if (navigate) {
+      // Closing the active Free window calls Stop before replacing the conversation in App.tsx.
+      f.deps.currentSessionId = 'synthetic-new-conversation';
+      f.deps.setMessages([]);
+    }
+    const second = f.engine().handleSendForTab('studio', 'Successor question');
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    const before = structuredClone(f.messages());
+    const errorsBefore = vi.mocked(f.deps.setErrorContext).mock.calls.length;
+    controller.error(new DOMException('Aborted transport settled late', 'AbortError')); await first;
+    expect(f.messages()).toEqual(before); expect(f.deps.isLoading).toBe(true);
+    expect(vi.mocked(f.deps.setErrorContext).mock.calls).toHaveLength(errorsBefore);
+    expect(body.locked).toBe(false);
+    finishSuccessor(new Response(JSON.stringify({ reply: 'Successor answer' }), { headers: { 'Content-Type': 'application/json' } }));
+    await second;
+    expect(f.messages().at(-1)?.text).toBe('Successor answer');
+    expect(f.deps.isLoading).toBe(false);
+    expect(new Set(f.messages().map(message => message.id)).size).toBe(f.messages().length);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
 });

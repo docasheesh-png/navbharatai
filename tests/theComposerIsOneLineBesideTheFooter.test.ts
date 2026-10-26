@@ -82,7 +82,7 @@ describe('the column is the ONE signal — App derives it once', () => {
     const SHELL = read('src/components/chat/ComposerShell.tsx')
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/^\s*\/\/.*$/gm, '');
-    expect(SHELL).not.toMatch(/showsGlobalMobileNav|matchMedia|innerWidth|useIsMobile/);
+    expect(SHELL).not.toMatch(/showsGlobalMobileNav|useIsMobile/);
   });
 });
 

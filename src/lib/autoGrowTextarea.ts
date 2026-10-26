@@ -15,8 +15,25 @@ export function growHeightPx(scrollHeight: number, maxPx: number): number {
   return Math.min(h, max);
 }
 
+/** Apply the compact phone sizing only to shared chat editors, never unrelated textareas. */
+export function resizeMobileComposer(el: HTMLTextAreaElement): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function'
+    || !window.matchMedia('(max-width: 639px)').matches
+    || !el.classList?.contains('nb-composer-text')) return false;
+  const viewportHeight = window.visualViewport?.height || window.innerHeight;
+  const maxHeight = Math.max(44, Math.min(160, viewportHeight * 0.3));
+  // Collapse before measuring so deleting or replacing a long draft can shrink it too.
+  // Empty placeholders may wrap, but must not enlarge the initial editor.
+  el.style.height = '0px';
+  const contentHeight = el.value ? el.scrollHeight : 44;
+  const height = Math.max(44, Math.min(contentHeight, maxHeight));
+  el.style.height = `${height}px`;
+  return true;
+}
+
 /** Fit the textarea to its content, bounded at maxPx (beyond that it scrolls internally). */
 export function autoGrow(el: HTMLTextAreaElement, maxPx: number): void {
+  if (resizeMobileComposer(el)) return;
   el.style.height = 'auto';
   const h = growHeightPx(el.scrollHeight, maxPx);
   el.style.height = h > 0 ? `${h}px` : '';
@@ -24,5 +41,6 @@ export function autoGrow(el: HTMLTextAreaElement, maxPx: number): void {
 
 /** Return the textarea to its natural 1-line height (used when the value is cleared on send). */
 export function resetGrow(el: HTMLTextAreaElement): void {
+  if (resizeMobileComposer(el)) return;
   el.style.height = '';
 }

@@ -1,3 +1,4 @@
+import { autoGrow } from '../../lib/autoGrowTextarea';
 import { draftAfterFailedSend } from '../../lib/draftAfterSend';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { imageAllowanceLine } from '../../lib/imageAllowanceLine';
@@ -651,8 +652,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
   useEffect(() => {
     const ta = taRef.current;
     if (!ta) return;
-    ta.style.height = 'auto';
-    ta.style.height = `${Math.min(ta.scrollHeight, 128)}px`;
+    autoGrow(ta, 128);
   }, [prompt]);
 
   const selectedSize = SIZES.find(s => s.id === size) || SIZES[0];
@@ -1063,6 +1063,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
                 }}
                 placeholder={reference ? 'What should change? e.g. make the background blue' : 'Describe your image...'}
                 className={COMPOSER_TEXTAREA_CLASS}
+                style={{ maxHeight: '128px' }}
               />
             </ComposerShell>
             {promptLimit.near && (

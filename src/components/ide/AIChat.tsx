@@ -1,3 +1,4 @@
+import { autoGrow, resizeMobileComposer } from '../../lib/autoGrowTextarea';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { COPY } from '../../lib/copy';
 import { chatBuildView } from '../../lib/chatBuildMeta';
@@ -361,7 +362,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   // Fix 1: reset textarea height when input is cleared after send
   useEffect(() => {
     if (!input && textareaRef.current) {
-      textareaRef.current.style.height = '40px';
+      if (!resizeMobileComposer(textareaRef.current)) textareaRef.current.style.height = '40px';
     }
   }, [input]);
 
@@ -427,8 +428,7 @@ export const AIChat: React.FC<AIChatProps> = ({
     useCallback((text: string) => {
       onInputChange(text);
       if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 240)}px`;
+        autoGrow(textareaRef.current, 240);
       }
     }, [onInputChange]),
   );
@@ -1326,8 +1326,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                     value={input}
                     onChange={(e) => {
                       onInputChange(e.target.value);
-                      e.target.style.height = 'auto';
-                      e.target.style.height = `${Math.min(e.target.scrollHeight, 240)}px`;
+                      autoGrow(e.target, 240);
                     }}
                     onKeyDown={(e) => {
                       // Shared rule (lib/chatToolbar): it also honours the toggle being OFF — where

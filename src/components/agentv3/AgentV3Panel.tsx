@@ -5744,7 +5744,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   type="button"
                   onClick={() => setModeMenuOpen((v) => !v)}
                   title="Chat mode — Build / Plan / Advise"
-                  className={`h-7 min-w-[80px] flex items-center justify-between gap-1 px-2 rounded border text-xs font-semibold ${modeMenuOpen ? 'border-indigo-500 text-accent-text' : 'border-line text-muted hover:text-ink'}`}
+                  className={`h-8 min-w-[84px] flex items-center justify-between gap-1 px-2.5 py-1 rounded border text-xs font-semibold leading-none overflow-visible ${modeMenuOpen ? 'border-indigo-500 text-accent-text' : 'border-line text-muted hover:text-ink'}`}
                 >
                   <span className="flex items-center gap-1">
                     <span>{chatMode === 'build' ? '🔨' : chatMode === 'planner' ? '🧠' : '🔍'}</span>
@@ -5900,19 +5900,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   (the glowing template button and the Attach-menu option). accept=image/* (no capture) so
                   it opens the photo gallery/library. */}
               <input ref={screenshotInputRef} type="file" accept="image/*" className="hidden" onChange={handleScreenshotPicked} />
-              </div>{/* /settings + attach row */}
-              </div>{/* /toolbar row (order-2): mode selector + settings + attach — below the input */}
-              </MobileComposerTools>
-              {/* 💡 OUTSIDE the + expander — tiny, upper-right corner of the composer box only.
-                  Fits existing space; does not enlarge the input pad. */}
-              <div className="nb-pro-suggestions-corner absolute z-20 pointer-events-auto" aria-label="Suggestions">
+              {/* NEXT-BUILD SUGGESTIONS 💡 — end of the tools row (OLD layout). Only renders when
+                  there is something to suggest; no extra corner chrome. */}
+              <div className="ml-auto shrink-0" aria-label="Suggestions">
                 <NextSuggestionsBulb
-                  compact
                   workspaceId={expectedWorkspaceId()}
                   ready={!!state.done && !running}
                   onPick={(text) => { setPrompt(text); setTimeout(() => composerRef.current?.focus(), 0); }}
                 />
               </div>
+              </div>{/* /settings + attach row */}
+              </div>{/* /toolbar row (order-2): mode selector + settings + attach + 💡 */}
+              </MobileComposerTools>
               {/* LIVE IMPORT PROGRESS (admin report 2026-08-04). A 161 MB project takes minutes to
                   transfer, and the panel tracked `zipProgress` in state but rendered it NOWHERE — so the
                   screen showed one static "Importing…" line for minutes, which is indistinguishable from

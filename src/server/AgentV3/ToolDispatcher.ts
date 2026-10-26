@@ -8,6 +8,7 @@ import { repeatedReadNotice, READ_LOOP_LIMIT, repeatedCommandNotice, commandKey 
 import { repeatedEditNotice } from './repeatedEdits';
 import { missingMembers, declaredMembers, relativeImports, resolveCandidates, memberListNote, RECIPE_LIBRARY_PATH, type MissingMember } from './typeMembers';
 import { fixNodeModulesTypo } from './nodeModulesTypo';
+import { fixSandboxWorkspaceCd } from './sandboxWorkspaceCd';
 import { healWouldOscillate } from './HealLedger';
 import { contractRenamesFromSource, contractRenameHealEnabled, fixRecordedTypeRenames, errorsAfterTypeRenames, typeRenameHealNote, valueUsedAsTypeName, type ContractRename } from './contractRenames';
 import { CONTRACT_PATH_CANDIDATES } from './contractLocation';
@@ -5715,7 +5716,8 @@ export class ToolDispatcher {
           if (refusal) throw new Error(refusal);
         }
         const typoFix = fixNodeModulesTypo(rawCommand);
-        const command = typoFix.command;
+        const cdFix = fixSandboxWorkspaceCd(typoFix.command);
+        const command = cdFix.command;
         // Scaffold guard: create-* generators (`npm create vite`, `npx create-*`,
         // `npm init <gen>`) require a newer Node than the fixed-version sandbox and
         // FAIL — after which the agent tends to improvise a nested project subdir.
@@ -6334,6 +6336,7 @@ export class ToolDispatcher {
         // whether or not tsc failed, and that used to be recorded as "TypeScript already checked CLEAN".
         if (looksLikeTypecheckCommand(command) && exitCode === 0) this.noteCompileOutput(`${stdout}\n${stderr}`, command);
         if (typoFix.fixed) out = `(Ran it as ./node_modules/… — the folder is node_modules, with no leading dot.)\n${out}`;
+        if (cdFix.fixed) out = `(Ran it under the sandbox project root — there is no /workspace folder here.)\n${out}`;
         // A compile whose exit code already said it failed still tells the done check it has errors
         // (autopsy 33812996) — it can never mark anything clean.
         if (looksLikeTypecheckCommand(command) && exitCode !== 0) this.noteTypeErrorCount(`${stdout}\n${stderr}`, true);

@@ -11,6 +11,25 @@ describe('analyzeRequirementGaps', () => {
     expect(g.clarifyingQuestions.length).toBeLessThanOrEqual(6); // never over-ask (the admin's rule)
   });
 
+  it('a local trades directory that lists doctor beside plumber/electrician is NOT healthcare (autopsy f19ae208)', () => {
+    // Real failed BR: the model was handed EMR / clinic / appointment features for a contacts directory.
+    const g = analyzeRequirementGaps(
+      'Mujhe ek app banani hai jisse main jaha rehta hoon unke profession k hisab se details and contact numbers mile jaise k doctor plumber electrician etc',
+    );
+    expect(g.domain).not.toBe('healthcare');
+    expect(g.likelyMissing).not.toContain('patient records (EMR) with privacy');
+    expect(g.likelyMissing).not.toContain('appointment / scheduling flow');
+  });
+
+  it('a real clinic / hospital prompt that also names a plumber stays healthcare', () => {
+    // Precision: directory strip must not steal a genuine EMR when hospital/clinic/patient fire.
+    const g = analyzeRequirementGaps(
+      'Build a clinic EMR for doctors with patient records and appointments; also keep a plumber on-call contact.',
+    );
+    expect(g.domain).toBe('healthcare');
+  });
+
+
   it('marks a feature MENTIONED when the prompt already covers it', () => {
     const g = analyzeRequirementGaps('A hospital system with staff roles and an audit log of every change');
     expect(g.mentioned).toContain('role-based access (staff / doctor / admin)');

@@ -1,4 +1,5 @@
 import { parseEnvFlag } from '../../lib/envFlag';
+import { cheaperInferenceMode, cheaperInferenceApiKeyConfigured } from '../../lib/cheaperInferencePolicy';
 import { usdToNanoUsd, DEFAULT_PAID_CAP_NANO_USD, OWNER_PAID_DAILY_CEILING_NANO_USD, NANO_USD } from './spendCap';
 import { dailyWindow } from './quota';
 import { DEFAULT_ADMISSION_QUEUE_LIMITS } from './admissionQueue';
@@ -21,11 +22,12 @@ export const PROVIDER_IDS = [
   'glm47', 'glm45', 'groq', 'gemini', 'cloudflare', 'nvidia',
   // Tier 2 — limited free gateways
   'openrouter', 'modelscope', 'bluesminds', 'requesty', 'llm7',
-  // Tier 3 — cheapest paid, shared owner budget; always after every free rung
-  'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid', 'deepseek',
+  // Tier 3 — cheapest paid, shared owner budget; always after every free rung.
+  // cheapinf (CheaperInference) is first among paid when CHEAPERINFERENCE=all (or exclusive admin path).
+  'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid', 'deepseek',
 ] as const;
 /** Paid rungs. Each reserves against the one shared owner-funded daily budget before dispatch. */
-export const PAID_PROVIDER_IDS = ['llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid', 'deepseek'] as const;
+export const PAID_PROVIDER_IDS = ['cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid', 'deepseek'] as const;
 /** Free/gateway providers whose published terms forbid production or third-party serving. */
 export const TERMS_BLOCKED_IDS = ['nvidia', 'modelscope', 'llm7'] as const;
 /** Gateways whose free-tier terms/limits could not be verified from official docs. */
@@ -36,7 +38,7 @@ export const TERMS_UNVERIFIED_IDS = ['bluesminds', 'requesty'] as const;
  * DeepSeek-V4-Flash-0731; backups GPT-5 Nano → GLM FlashX → Gemini 2.5 Flash-Lite (paid tier).
  * Free-tier Gemini is no longer in the default order (privacy); Nemotron Nano was removed.
  */
-export const DEFAULT_ORDER = ['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid'] as const;
+export const DEFAULT_ORDER = ['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid'] as const;
 export function isPaidRung(id: string): boolean { return (PAID_PROVIDER_IDS as readonly string[]).includes(id); }
 export type ProviderId = typeof PROVIDER_IDS[number];
 export type ReplyLanguage = 'hi' | 'hinglish' | 'en' | 'other';
@@ -84,19 +86,22 @@ const MODELS: Record<ProviderId, string> = {
   // Tier 3 paid (verified 2026-10-23 from official price pages, see docs).
   glmflashx: 'glm-4.7-flashx', gpt5nano: 'gpt-5-nano',
   llama8b: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo', dsv4flash: 'deepseek-ai/DeepSeek-V4-Flash-0731', geminipaid: 'gemini-2.5-flash-lite',
+  // CheaperInference default candidate (owner screenshot). Live catalog rates must be re-attested before enable.
+  cheapinf: 'beam',
 };
 /** Official list prices, USD / 1M tokens (in, out). Env may RAISE, never lower, a reservation price. */
-const PAID_PRICES: Record<string, [number, number]> = { glmflashx: [0.07, 0.40], gpt5nano: [0.05, 0.40], llama8b: [0.02, 0.04], dsv4flash: [0.06, 0.18], geminipaid: [0.10, 0.40] };
+const PAID_PRICES: Record<string, [number, number]> = { cheapinf: [0.006, 0.022], glmflashx: [0.07, 0.40], gpt5nano: [0.05, 0.40], llama8b: [0.02, 0.04], dsv4flash: [0.06, 0.18], geminipaid: [0.10, 0.40] };
 const BASE_URLS: Partial<Record<ProviderId, string>> = {
   nvidia: 'https://integrate.api.nvidia.com/v1', modelscope: 'https://api-inference.modelscope.cn/v1',
   llm7: 'https://api.llm7.io/v1', bluesminds: 'https://api.bluesminds.com/v1', requesty: 'https://router.requesty.ai/v1',
   glmflashx: 'https://api.z.ai/api/paas/v4', gpt5nano: 'https://api.openai.com/v1',
   llama8b: 'https://api.deepinfra.com/v1/openai', dsv4flash: 'https://api.deepinfra.com/v1/openai', geminipaid: 'https://generativelanguage.googleapis.com/v1beta/openai',
+  cheapinf: 'https://api.cheaperinference.com/v1',
 };
 const PREFIX: Record<ProviderId, string> = { glm47: 'GLM', glm45: 'GLM', gemini: 'GEMINI', groq: 'GROQ', cloudflare: 'CF', openrouter: 'OPENROUTER', deepseek: 'DEEPSEEK',
   nvidia: 'NVIDIA', modelscope: 'MODELSCOPE', llm7: 'LLM7', bluesminds: 'BLUESMINDS', requesty: 'REQUESTY', glmflashx: 'GLMX', gpt5nano: 'OPENAI',
   // Settings prefixes are per rung; the two DeepInfra rungs share ONE official key (KEY_PREFIX).
-  llama8b: 'DI_LLAMA8B', dsv4flash: 'DI_DSV4', geminipaid: 'GEMINIPAID' };
+  llama8b: 'DI_LLAMA8B', dsv4flash: 'DI_DSV4', geminipaid: 'GEMINIPAID', cheapinf: 'CHEAPINF' };
 /** One official key per provider account: both DeepInfra rungs read FREE_CHAIN_DEEPINFRA_API_KEY. */
 const KEY_PREFIX: Partial<Record<ProviderId, string>> = { llama8b: 'DEEPINFRA', dsv4flash: 'DEEPINFRA' };
 const DEFAULT_LIMITS: Record<ProviderId, [number, number, number, number]> = {
@@ -109,6 +114,7 @@ const DEFAULT_LIMITS: Record<ProviderId, [number, number, number, number]> = {
   // Paid rungs: the money cap is the real limit; these only bound bursts per instance pool.
   glmflashx: [60, 50000, 2000000, 100000000], gpt5nano: [60, 50000, 2000000, 100000000],
   llama8b: [600, 1000000, 20000000, 2000000000], dsv4flash: [300, 500000, 10000000, 1000000000], geminipaid: [60, 50000, 2000000, 100000000],
+  cheapinf: [120, 100000, 4000000, 200000000],
 };
 function list(value: string | undefined): string[] { return (value ?? '').split(',').map(v => v.trim()).filter(Boolean); }
 export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChainConfig {
@@ -141,17 +147,21 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
   const skipGemini = flag('FREE_CHAIN_SKIP_GEMINI', true);
   const privacyApproved = flag('FREE_CHAIN_GEMINI_PRIVACY_APPROVED');
   const rungs = PROVIDER_IDS.map((id): RungConfig => {
-    const prefix = PREFIX[id]; const keyEnv = id === 'openrouter' ? 'OPENROUTER_API_KEY' : `FREE_CHAIN_${KEY_PREFIX[id] ?? prefix}_${id === 'cloudflare' ? 'API_TOKEN' : 'API_KEY'}`;
+    const prefix = PREFIX[id]; const keyEnv = id === 'openrouter' ? 'OPENROUTER_API_KEY'
+      : id === 'cheapinf' ? 'CHEAPERINFERENCE_API_KEY'
+      : `FREE_CHAIN_${KEY_PREFIX[id] ?? prefix}_${id === 'cloudflare' ? 'API_TOKEN' : 'API_KEY'}`;
     // One key per provider account. A comma/space list is rejected: rotating several free accounts to
     // multiply a free allowance violates every provider's terms (see docs: "Why no key pooling").
     const rawKey = (env[keyEnv] ?? '').trim(); const validKey = !!rawKey && !/[\s,]/.test(rawKey);
-    const modelEnv = `FREE_CHAIN_${id === 'glm47' ? 'GLM47' : id === 'glm45' ? 'GLM45' : prefix}_MODEL`;
+    const modelEnv = id === 'cheapinf' ? 'CHEAPERINFERENCE_MODEL' : `FREE_CHAIN_${id === 'glm47' ? 'GLM47' : id === 'glm45' ? 'GLM45' : prefix}_MODEL`;
     const blocked = (TERMS_BLOCKED_IDS as readonly string[]).includes(id); const unverified = (TERMS_UNVERIFIED_IDS as readonly string[]).includes(id);
     const writtenApproval = (blocked || unverified) && parseEnvFlag(env[`FREE_CHAIN_${prefix}_WRITTEN_APPROVAL`]) === true;
     const model = (env[modelEnv] ?? MODELS[id]).trim();
+    const cheapinfModels = ['beam', 'deepseek-v4.1-flash-1017'];
     const allowed = id === 'gemini' ? ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.8-flash'].includes(model)
       : id === 'groq' ? ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'].includes(model)
-      : id === 'geminipaid' ? ['gemini-2.5-flash-lite'].includes(model) : model === MODELS[id];
+      : id === 'geminipaid' ? ['gemini-2.5-flash-lite'].includes(model)
+      : id === 'cheapinf' ? cheapinfModels.includes(model) : model === MODELS[id];
     const verifiedUntil = Date.parse(env[`FREE_CHAIN_${prefix}_FREE_VERIFIED_UNTIL`] ?? '');
     const langs = list(env[`FREE_CHAIN_${prefix}_LANGS`]);
     if (langs.some(v => !['hi', 'hinglish', 'en', 'other'].includes(v))) errors.push(`FREE_CHAIN_${prefix}_LANGS`);
@@ -169,11 +179,18 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
     if (id === 'gemini' && (skipGemini || !privacyApproved)) reason = 'privacy';
     if (blocked && !writtenApproval) reason = 'terms-non-production';
     if (unverified && !writtenApproval) reason = 'terms-unverified';
+    // CheaperInference: one mode CHEAPERINFERENCE=off|admin|all. Config marks the rung usable when
+    // mode is admin|all and a key is set; runtime still restricts admin-mode to verified admins only
+    // (exclusive path) and mode=all to the shared paid ladder. mode=off ⇒ disabled.
+    if (id === 'cheapinf') {
+      const mode = cheaperInferenceMode(env);
+      if (mode === 'off' || !cheaperInferenceApiKeyConfigured(env)) reason = 'disabled';
+    }
     const paidPrice = PAID_PRICES[id];
     const priceIn = paidPrice ? num(`FREE_CHAIN_${prefix}_PRICE_IN_PER_MTOK`, paidPrice[0], paidPrice[0], 1000, false) : 0;
     const priceOut = paidPrice ? num(`FREE_CHAIN_${prefix}_PRICE_OUT_PER_MTOK`, paidPrice[1], paidPrice[1], 1000, false) : 0;
-    // A paid rate card is an owner attestation with an expiry, like the free-plan attestation.
-    if (paidPrice && !(Date.parse(env[`FREE_CHAIN_${prefix}_RATE_VERIFIED_UNTIL`] ?? '') > Date.now()) && !reason) reason = 'rate-card-unverified';
+    // Rate-card attestation for paid rungs except cheapinf (owner simple mode: key + CHEAPERINFERENCE is enough).
+    if (paidPrice && id !== 'cheapinf' && !(Date.parse(env[`FREE_CHAIN_${prefix}_RATE_VERIFIED_UNTIL`] ?? '') > Date.now()) && !reason) reason = 'rate-card-unverified';
     const limits = DEFAULT_LIMITS[id];
     const defaultZone = id === 'gemini' ? 'America/Los_Angeles' : ['glm47', 'glm45', 'groq'].includes(id) ? 'rolling24h' : 'UTC';
     const timeZone = env[`FREE_CHAIN_${prefix}_TIME_ZONE`] ?? defaultZone;

@@ -1,4 +1,5 @@
 import { publishDeploymentPaidLimit } from './deploymentBudget';
+import { cheaperInferenceAdminStatus, cheaperInferenceMode } from '../../lib/cheaperInferencePolicy';
 import { persistFreeChainSample } from './eventSample';
 export { shouldPersistFreeChainEvent } from './eventSample';
 import { sanitizeText } from '../../../lib/observability/sanitize';
@@ -40,7 +41,7 @@ export function busyMessage(message?: string): string {
   return BUSY;
 }
 const names: Record<ProviderId, AIProviderResponse['provider']> = { glm47: 'GLM', glm45: 'GLM', gemini: 'GEMINI', groq: 'GROQ', cloudflare: 'CLOUDFLARE', openrouter: 'OPENROUTER', deepseek: 'DEEPSEEK',
-  nvidia: 'NVIDIA', modelscope: 'MODELSCOPE', llm7: 'LLM7', bluesminds: 'BLUESMINDS', requesty: 'REQUESTY', glmflashx: 'GLM', gpt5nano: 'OPENAI', llama8b: 'DEEPINFRA', dsv4flash: 'DEEPINFRA', geminipaid: 'GEMINI' };
+  nvidia: 'NVIDIA', modelscope: 'MODELSCOPE', llm7: 'LLM7', bluesminds: 'BLUESMINDS', requesty: 'REQUESTY', glmflashx: 'GLM', gpt5nano: 'OPENAI', llama8b: 'DEEPINFRA', dsv4flash: 'DEEPINFRA', geminipaid: 'GEMINI', cheapinf: 'CHEAPERINFERENCE' };
 function empty(reason: FreeChainResult['reason'] = 'all-failed', message?: string): FreeChainResult { return { content: busyMessage(message), provider: 'NONE', model: 'none', latencyMs: 0, ok: false, reason }; }
 /** Does a non-DeepSeek paid rung's reservation profile stay under the unchanged kimi-k2.7 free ceiling? */
 function verifiedPaidReservationRate(rung: RungConfig): boolean {
@@ -86,7 +87,14 @@ function rungReason(rung: RungConfig, cfg: FreeChainConfig, input?: FreeChainInp
   if (rung.reason) return rung.reason;
   if (['glm47', 'glm45', 'gemini', 'groq', 'cloudflare'].includes(rung.id) && rung.verifiedUntil <= Date.now()) return 'free-plan-review-required';
   if (rung.id === 'deepseek' && !verifiedDeepseekReservationRate(rung, cfg)) return 'rate-card-unverified';
-  if (isPaidRung(rung.id) && rung.id !== 'deepseek' && !verifiedPaidReservationRate(rung)) return 'rate-card-unverified';
+  // cheapinf skips the Kimi ceiling / rate-card gate under the simple CHEAPERINFERENCE mode.
+  if (isPaidRung(rung.id) && rung.id !== 'deepseek' && rung.id !== 'cheapinf' && !verifiedPaidReservationRate(rung)) return 'rate-card-unverified';
+  if (rung.id === 'cheapinf') {
+    const mode = cheaperInferenceMode();
+    if (mode === 'off') return 'disabled';
+    if (mode === 'admin' && !input?.context.isAdmin) return 'disabled';
+    // mode=all: eligible for any FreeChain caller (key already checked in config).
+  }
   if (rung.id === 'openrouter' && !cfg.openRouterModels.length) return 'quality-allowlist-required';
   if (input && rung.id === 'gemini' && (!input.context.cacheEligible || !safeCacheKey({ message: input.message, history: input.history, eligible: true, language: 'public', systemPrompt: '', modelFamily: '' }))) return 'privacy-public-corpus-only';
   if (input && !rung.languages.includes(detectReplyLanguage(input.message))) return 'language';
@@ -139,11 +147,13 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       const cap = spend?.capNanoUsd ?? cfg.paidCapNanoUsd;
       if (spend && cap > 0 && spend.committedNanoUsd * 100 >= cap * cfg.features.throttlePercent) routed = routeTurn(cfg, { message: input.message, history: input.history, teachingMode: input.context.teachingTurn, throttled: true });
     }
-    const baseOrder = orderForUser(cfg, input.context.uid);
-    let route: TurnRoute = routed.route;
-    let order = orderForRoute(baseOrder, route);
+    // CHEAPERINFERENCE=admin: free-chain ladder OFF for verified admins — only cheapinf answers.
+    const exclusiveAdmin = input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
+    const baseOrder = exclusiveAdmin ? (['cheapinf'] as ProviderId[]) : orderForUser(cfg, input.context.uid);
+    let route: TurnRoute = exclusiveAdmin ? 'normal' : routed.route;
+    let order = exclusiveAdmin ? baseOrder : orderForRoute(baseOrder, route);
     // A routed order with no usable rung (keys not configured yet, privacy) falls back to the plain order.
-    if (order !== baseOrder && !order.some(oid => { const r = cfg.rungs.find(x => x.id === oid); return !!r && !rungReason(r, cfg, input); })) { order = baseOrder; route = 'normal'; }
+    if (!exclusiveAdmin && order !== baseOrder && !order.some(oid => { const r = cfg.rungs.find(x => x.id === oid); return !!r && !rungReason(r, cfg, input); })) { order = baseOrder; route = 'normal'; }
     trace.route = route; trace.routeReason = routed.reason;
     for (const id of order) {
       if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
@@ -168,9 +178,13 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       let content = ''; let response: AIProviderResponse | undefined; let completeUsage = false; let partial = false;
       try {
       // A new runtime OFF stops new physical attempts; never silently returns to paid legacy mid-turn.
+      // Exclusive CHEAPERINFERENCE=admin path ignores the FreeChain stop switch so the owner can
+      // test CI without the free ladder (and without needing FREE_CHAIN_ENABLED).
       const control = await readControls(db, cfg).catch(() => null);
-      if (!control || control.enabled === false) { attempt.reason = 'disabled'; break; }
-      if (control.disabledProviders.includes(id)) { attempt.reason = 'disabled'; continue; }
+      if (!exclusiveAdmin) {
+        if (!control || control.enabled === false) { attempt.reason = 'disabled'; break; }
+        if (control.disabledProviders.includes(id)) { attempt.reason = 'disabled'; continue; }
+      }
         const admission = await store.reserveQuota(quotaInput(rung, cfg, prepared.inputTokens));
         if (!admission.allowed) { attempt.reason = admission.reason; if (typeof admission.resetAt === 'number' && admission.resetAt > Date.now()) breaker.honorRemoteOpenUntil(admission.resetAt); continue; }
         if (isPaidRung(id)) {
@@ -277,9 +291,20 @@ export async function maybeFreeChain(input: FreeChainInput): Promise<FreeChainRe
   if (strictFreeRequired()) return null;
   const unavailable = () => { const result = empty(); input.onChunk?.(result.content, 'notice'); return result; };
   if (cfg.errors.length && (cfg.enabled || held)) { warnOnce(`Invalid configuration: ${cfg.errors.join(', ')}`); return unavailable(); }
-  // OFF restores legacy for new requests, never for a turn already admitted to this chain.
-  if (!cfg.enabled) return held ? unavailable() : null;
+  // CHEAPERINFERENCE=admin + verified admin: exclusive cheapinf path (free ladder off for this reply).
+  // Works even when FREE_CHAIN_ENABLED is off, so the owner can test with only CHEAPERINFERENCE=admin.
+  const exclusiveAdmin = input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
+  // OFF restores legacy for new requests (no db touch), never for a turn already admitted — unless exclusive admin.
+  if (!cfg.enabled && !exclusiveAdmin) return held ? unavailable() : null;
   const db = getServerDb(); if (!db) return unavailable();
+  if (exclusiveAdmin) {
+    const cheap = cfg.rungs.find(r => r.id === 'cheapinf');
+    if (!cheap || cheap.reason === 'disabled' || !cheap.configured) {
+      warnOnce('CHEAPERINFERENCE=admin but cheapinf is unconfigured (set CHEAPERINFERENCE_API_KEY)');
+      return unavailable();
+    }
+    return buildFreeChainRouter(db, cfg, freeChainConfig).route(input);
+  }
   const control = await readControlsForSelection(db, cfg).catch(() => null); if (!control) return unavailable();
   if (!selectedForFreeChain(cfg, control, input.context.uid)) return held ? unavailable() : null;
   return buildFreeChainRouter(db, cfg, freeChainConfig).route(input);
@@ -318,7 +343,9 @@ export async function freeChainAdminView(): Promise<FreeChainAdminView> {
   return { order: cfg.order, enabled: cfg.enabled, runtimeEnabled: control.enabled, rolloutPercent: control.rolloutPercent, allowListConfigured: cfg.allowUids.length > 0, providers,
     paid: { policyState: spend.available ? 'initialized' : 'uninitialized', configuredCapUsd: cfg.errors.includes('FREE_CHAIN_PAID_DAILY_CAP_USD') ? null : cfg.paidCapNanoUsd / 1e9, capUsd: spend.capNanoUsd === null ? null : spend.capNanoUsd / 1e9, policyRevision: spend.policyRevision, reservedUsd: spend.available ? spend.heldNanoUsd / 1e9 : null, reportedUsd: spend.available ? spend.spentNanoUsd / 1e9 : null },
 
-    limitations: [`Configured quota limits use a ${cfg.safetyMargin * 100}% admission margin.`, 'Preview only until owner verifies account tiers, quotas, privacy and model quality. No live account verification was performed.', 'Metrics are a uniform 1-in-64 request sample in a bounded 4096-slot ring of the last 24 hours, not exhaustive totals; shares and quantiles describe the sample only, not exact traffic rates or production p95. Circuit state is local; durable cooldowns protect other instances.', 'Only the verified direct DeepSeek Flash profile can pass the peak-rate reservation and unchanged free-tier price ceiling gates; privacy, quota and shared-budget checks still apply. No live paid request was verified.', 'Environment OFF restores the legacy ladder unless strict-free policy applies. It is not a global spending kill switch.', 'Context and token quota admission use an estimate, not a model-matched tokenizer. Cloudflare neuron admission reserves the entire documented 24000-token input context plus capped output.', 'Free-plan attestations expire; local quotas cannot see unrelated account traffic. Tokens, latency and availability are not guaranteed.', ...cfg.errors.map(e => `Invalid environment variable: ${e}`)] };
+    limitations: [
+      (() => { const s = cheaperInferenceAdminStatus(); return `CheaperInference (${s.defaultModel} @ ${s.baseUrl}): mode=${s.mode}, key=${s.apiKeyConfigured ? 'configured' : 'missing'} (off|admin|all). Default off; admin = exclusive for verified admins; all = first paid rung for everyone.`.slice(0, 500); })(),
+      `Configured quota limits use a ${cfg.safetyMargin * 100}% admission margin.`, 'Preview only until owner verifies account tiers, quotas, privacy and model quality. No live account verification was performed.', 'Metrics are a uniform 1-in-64 request sample in a bounded 4096-slot ring of the last 24 hours, not exhaustive totals; shares and quantiles describe the sample only, not exact traffic rates or production p95. Circuit state is local; durable cooldowns protect other instances.', 'Only the verified direct DeepSeek Flash profile can pass the peak-rate reservation and unchanged free-tier price ceiling gates; privacy, quota and shared-budget checks still apply. No live paid request was verified.', 'Environment OFF restores the legacy ladder unless strict-free policy applies. It is not a global spending kill switch.', 'Context and token quota admission use an estimate, not a model-matched tokenizer. Cloudflare neuron admission reserves the entire documented 24000-token input context plus capped output.', 'Free-plan attestations expire; local quotas cannot see unrelated account traffic. Tokens, latency and availability are not guaranteed.', ...cfg.errors.map(e => `Invalid environment variable: ${e}`)] };
 }
 
 /** Deliberate admin refresh only. No controls/quota cache and no provider requests. */

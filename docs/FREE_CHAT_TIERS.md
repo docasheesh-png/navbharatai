@@ -172,3 +172,19 @@ All features below are **default ON** and individually killable with `=off`. The
 
 Daily owner ceiling raised to $17 (`FREE_CHAIN_PAID_DAILY_CAP_USD=17`); the default stays $10.
 Health/private turns still never reach paid rungs (privacy gate wins over the router).
+
+
+## CheaperInference (2026-10-26) — simple mode
+
+Env: `CHEAPERINFERENCE=off|admin|all` (default `off`).
+
+| Mode | Behaviour |
+| --- | --- |
+| `off` | Never use. |
+| `admin` | Verified admins only (`isAdminEmail`). Free-chain ladder OFF for those replies — every admin Free Chat answer comes from CheaperInference. |
+| `all` | First paid FreeChain rung for everyone; free providers still tried first. |
+
+Requires `CHEAPERINFERENCE_API_KEY`. Base URL: `https://api.cheaperinference.com/v1`. Shares the $10/day IST paid cap. Doctor AI / App Builder unchanged. Do not set `all` without owner approval.
+
+**OWNER:** CheaperInference dashboard login is `aashishcpmt093@gmail.com` (platform.cheaperinference.com). Do not invent another account.
+

@@ -3,7 +3,7 @@ import { assertLegacyInferenceAllowed, StrictFreeCapabilityError } from '../../i
 import type { AIProvider, AIProviderResponse, ProviderUsage } from '../../Router/ProviderTypes';
 
 export type AdapterConfig = {
-  provider: 'GLM' | 'GEMINI' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK' | 'OPENAI' | 'DEEPINFRA' | 'NVIDIA' | 'MODELSCOPE' | 'LLM7' | 'BLUESMINDS' | 'REQUESTY';
+  provider: 'GLM' | 'GEMINI' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK' | 'OPENAI' | 'DEEPINFRA' | 'NVIDIA' | 'MODELSCOPE' | 'LLM7' | 'BLUESMINDS' | 'REQUESTY' | 'CHEAPERINFERENCE';
   model: string;
   key: string;
   baseURL: string;
@@ -86,12 +86,15 @@ const ENDPOINTS: Record<AdapterConfig['provider'], RegExp> = {
   LLM7: /^https:\/\/api\.llm7\.io\/v1\/?$/,
   BLUESMINDS: /^https:\/\/api\.bluesminds\.com\/v1\/?$/,
   REQUESTY: /^https:\/\/router\.requesty\.ai\/v1\/?$/,
+  // Official OpenAI-compatible base URL from https://api.cheaperinference.com/docs
+  CHEAPERINFERENCE: /^https:\/\/api\.cheaperinference\.com\/v1\/?$/,
 };
 const DEFAULT_ENV: Record<AdapterConfig['provider'], string> = {
   GLM: 'GLM_API_KEY', GEMINI: 'GEMINI_API_KEY', GROQ: 'GROQ_API_KEY',
   CLOUDFLARE: 'CLOUDFLARE_API_TOKEN', DEEPSEEK: 'DEEPSEEK_API_KEY',
   OPENAI: 'FREE_CHAIN_OPENAI_API_KEY', DEEPINFRA: 'FREE_CHAIN_DEEPINFRA_API_KEY', NVIDIA: 'FREE_CHAIN_NVIDIA_API_KEY',
   MODELSCOPE: 'FREE_CHAIN_MODELSCOPE_API_KEY', LLM7: 'FREE_CHAIN_LLM7_API_KEY', BLUESMINDS: 'FREE_CHAIN_BLUESMINDS_API_KEY', REQUESTY: 'FREE_CHAIN_REQUESTY_API_KEY',
+  CHEAPERINFERENCE: 'CHEAPERINFERENCE_API_KEY',
 };
 const FINISH_REASONS = new Set<FreeChainFinishReason>(['stop', 'length', 'content_filter', 'tool_calls', 'function_call']);
 const COUNTER_HEADERS = [
@@ -196,7 +199,7 @@ function sanitizeError(error: unknown, signal: AbortSignal | undefined, credenti
   let code: FreeChainErrorCode;
   if (source?.name === 'AbortError' || source?.name === 'APIUserAbortError') code = 'ABORTED';
   else if (has('content_filter', 'content_policy_violation', 'safety', 'safety_refusal', 'prohibited_content') || glmCode('1301') || source?.name === 'ContentFilterFinishReasonError') code = 'SAFETY_REFUSAL';
-  else if (has('insufficient_quota', 'quota_exceeded', 'quota_exhausted', 'billing_hard_limit_reached') || glmCode('1113', '1308', '1310', '1313') || (provider === 'DEEPSEEK' && status === 402)) code = 'QUOTA_EXHAUSTED';
+  else if (has('insufficient_quota', 'quota_exceeded', 'quota_exhausted', 'billing_hard_limit_reached', 'insufficient_balance') || glmCode('1113', '1308', '1310', '1313') || ((provider === 'DEEPSEEK' || provider === 'CHEAPERINFERENCE') && status === 402)) code = 'QUOTA_EXHAUSTED';
   else if (glmCode('1305')) code = 'SERVER';
   else if (status === 401 || status === 403 || has('invalid_api_key', 'authentication_error', 'permission_denied')) code = 'AUTH';
   else if (status === 429 || has('rate_limit_exceeded', 'resource_exhausted') || glmCode('1302')) code = 'RATE_LIMIT';

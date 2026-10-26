@@ -1,3 +1,4 @@
+import { COPY } from '../../lib/copy';
 import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS } from '../chat/ComposerShell';
 import { autoGrow } from '../../lib/autoGrowTextarea';
 import { useState, useEffect, useRef } from 'react';
@@ -593,7 +594,7 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
           {/* Tab bar — AI switcher: Free / Pro v5 / Professional / Team (scrolls on small phones) */}
           <div className="flex items-center gap-1 px-2 py-1.5 border-b border-line bg-card">
             <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-              {([{ key: 'free', label: 'Free', icon: Sparkles }, { key: 'pro', label: 'Pro v5', icon: Zap }, { key: 'professional', label: 'Professional', icon: Briefcase }, { key: 'code', label: 'Code', icon: Code2 }, { key: 'team', label: 'Team', icon: Users }] as { key: RoomTab; label: string; icon: any }[]).map(t => {
+              {([{ key: 'free', label: COPY.branding.aiChatName, icon: Sparkles }, { key: 'pro', label: 'Pro v5', icon: Zap }, { key: 'professional', label: 'Professional', icon: Briefcase }, { key: 'code', label: 'Code', icon: Code2 }, { key: 'team', label: 'Team', icon: Users }] as { key: RoomTab; label: string; icon: any }[]).map(t => {
                 const Icon = t.icon; const active = roomTab === t.key; const online = onlineCount;
                 return (
                   <button key={t.key} onClick={() => setRoomTab(t.key)} className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${active ? 'bg-blue-600 text-on-accent' : 'text-muted hover:text-ink hover:bg-raised'}`}>
@@ -660,7 +661,7 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="flex items-center gap-2 px-3 py-2 border-b border-line bg-card">
               <Sparkles className="w-3.5 h-3.5 text-info" />
-              <span className="text-xs text-muted">NavBharatAI Free — shared</span>
+              <span className="text-xs text-muted">{COPY.branding.aiChatName} — shared</span>
               <span className="text-[9px] text-faint ml-auto hidden sm:inline">Everyone pays for their own asks</span>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3">

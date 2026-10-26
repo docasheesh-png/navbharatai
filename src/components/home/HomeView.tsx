@@ -109,15 +109,15 @@ const PRODUCT_CARDS = [
     iconColor: 'text-warn',
     Icon: MessageSquare,
     title: 'NavBharatAI Chat',
-    subtitle: 'Free Chat',
+    subtitle: COPY.branding.aiChatName,
     lead: 'subtitle' as const,
     description: 'Ask anything in Hindi, English, or Hinglish — instant answers, explanations, ideas, creative writing, and everyday help. Your free AI companion to learn and get things done. (For building apps, use NavBharatAI Pro.)',
     features: ['Chat in Hindi, English & Hinglish', 'Instant answers, research & learning', 'Creative writing, summaries & translation'],
     featureIcon: CheckCircle2,
     featureColor: 'text-warn',
     btnClass: 'bg-accent hover:brightness-110 text-on-accent',
-    btnLabel: 'Start Free Chat',
-    btnLabelShort: 'Free Chat',
+    btnLabel: `Start ${COPY.branding.aiChatName}`,
+    btnLabelShort: COPY.branding.aiChatName,
     btnIcon: MessageSquare,
   },
   {
@@ -430,7 +430,7 @@ export const HomeView = ({
                   {/* Title + description */}
                   <div className="flex flex-col gap-1">
                     <h2 className={cn('font-black text-ink leading-tight', leadIsSubtitle ? LINE_SMALL : LINE_BIG)}>{card.title}</h2>
-                    <p className={cn('font-bold uppercase tracking-wider sm:tracking-widest leading-tight', leadIsSubtitle ? LINE_BIG : LINE_SMALL, card.iconColor)}>{card.subtitle}</p>
+                    <p className={cn('font-bold tracking-wider sm:tracking-widest leading-tight', card.id !== 'free' && 'uppercase', leadIsSubtitle ? LINE_BIG : LINE_SMALL, card.iconColor)}>{card.subtitle}</p>
                   </div>
 
                   {(card as { phoneTagline?: string }).phoneTagline && (
@@ -458,7 +458,8 @@ export const HomeView = ({
                   <span
                     className={cn(
                       'w-full flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 sm:py-3 rounded-lg sm:rounded-2xl',
-                      'font-black text-[10px] sm:text-xs uppercase tracking-wider sm:tracking-widest transition-all duration-200',
+                      'font-black text-[10px] sm:text-xs tracking-wider sm:tracking-widest transition-all duration-200',
+                      card.id !== 'free' && 'uppercase',
                       'select-none mt-auto',
                       comingSoon && 'opacity-70',
                       card.btnClass

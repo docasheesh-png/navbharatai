@@ -31,7 +31,7 @@ function cardBlock(id: string): string {
 describe('the big line is what the card DOES', () => {
   const cases: Array<[string, string, string]> = [
     // id,       small line (brand),   large line (what it does)
-    ['free', 'NavBharatAI Chat', 'Free Chat'],
+    ['free', 'NavBharatAI Chat', 'AI chat'],
     ['pro', 'NavBharatAI Pro', 'App Builder'],
     ['tools', 'Other', 'Tools'],
   ];
@@ -40,7 +40,7 @@ describe('the big line is what the card DOES', () => {
     it(`'${id}' reads "${does}" large and "${brand}" small`, () => {
       const block = cardBlock(id);
       expect(block).toContain(`title: '${brand}',`);
-      expect(block).toContain(`subtitle: '${does}',`);
+      expect(block).toContain(id === 'free' ? 'subtitle: COPY.branding.aiChatName,' : `subtitle: '${does}',`);
       // The flag is what makes the swap happen — the strings alone would render at the old sizes.
       expect(block).toContain("lead: 'subtitle' as const,");
     });

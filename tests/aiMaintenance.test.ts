@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { mockReq, mockRes } from './helpers/routeTestUtils';
 import { AiMaintenanceStore, MAINTENANCE_MESSAGE, maintenanceState, isKimiQuotaFailure, type MaintenanceBackend, type MaintenanceState } from '../src/server/lib/aiMaintenance';
+import { gatewayChatFailure } from '../src/lib/chatResponseStream';
 import { aiMaintenanceGuard, maintenanceProtected } from '../src/server/lib/aiMaintenanceGuard';
 function fixture(initial: Partial<MaintenanceState> = {}) {
   let value = maintenanceState(initial);
@@ -56,6 +57,38 @@ describe('real maintenance spending gate', () => {
     expect(await store.read()).toMatchObject({ enabled: true, unavailable: true });
     await expect(store.set({ enabled: false })).rejects.toThrow('offline');
   });
+  it.each(['factory-sync', 'read-sync', 'read-async'] as const)('recovers from %s without caching unavailable or breaking single-flight reads', async failure => {
+    for (const warm of [false, true]) {
+      let now = 100_000;
+      let fail = false;
+      const backend: MaintenanceBackend = {
+        read: vi.fn(() => {
+          if (fail && failure === 'read-sync') throw new Error('Temporary read setup failure');
+          if (fail && failure === 'read-async') return Promise.reject(new Error('Temporary storage failure'));
+          return Promise.resolve({ enabled: false });
+        }),
+        change: async change => change(maintenanceState({ enabled: false })),
+      };
+      const factory = vi.fn(() => {
+        if (fail && failure === 'factory-sync') throw new Error('Temporary initialization failure');
+        return backend;
+      });
+      const store = new AiMaintenanceStore(factory, () => now);
+      if (warm) { expect((await store.read()).enabled).toBe(false); now += 2001; }
+      const before = factory.mock.calls.length;
+      fail = true;
+      const unavailable = await Promise.all([store.read(), store.read()]);
+      for (const state of unavailable) expect(state).toMatchObject({ enabled: true, unavailable: true });
+      expect(factory).toHaveBeenCalledTimes(before + 1);
+      fail = false;
+      const recovered = await Promise.all([store.read(), store.read()]);
+      for (const state of recovered) {
+        expect(state.enabled).toBe(false);
+        expect(state.unavailable).toBeUndefined();
+      }
+      expect(factory).toHaveBeenCalledTimes(before + 2);
+    }
+  });
   it('does not let a stale read reverse a manual pause', async () => {
     let done!: (v: unknown) => void;
     const f = fixture(); f.backend.read = () => new Promise(resolve => { done = resolve; });
@@ -83,4 +116,42 @@ describe('real maintenance spending gate', () => {
     for (const p of ['/api/chat/navbharat', '/api/agentv3/chat', '/api/sda-chat', '/api/image/generate', '/api/professional/doctor/chat', '/api/v1/new-ai-tool', '/api/bots/telegram/webhook']) expect(maintenanceProtected('POST', p)).toBe(true);
     expect(maintenanceProtected('OPTIONS', '/api/agentv3/chat')).toBe(false);
   });
+  it.each(['/api/chat/navbharatai', '/api/chat/navbharat', '/api/free-answers/status'])('preserves the actual maintenance guard outcome for %s', async path => {
+    const f = fixture({ enabled: true });
+    const next = vi.fn(); const res = mockRes();
+    await aiMaintenanceGuard(f.store)({ ...mockReq(), method: path.endsWith('/status') ? 'GET' : 'POST', path } as never, res as never, next);
+    expect(res.statusCode).toBe(503);
+    expect(next).not.toHaveBeenCalled();
+    expect(gatewayChatFailure(res.body)).toEqual({ code: 'CHAT_MAINTENANCE', message: MAINTENANCE_MESSAGE, partial: false });
+  });
+
+  it.each(['/api/chat/navbharatai', '/api/chat/navbharat', '/api/free-answers/status'])('recovers %s after warm storage failure without bypassing a real pause', async path => {
+    let now = 100_000;
+    let broken = false;
+    const backend: MaintenanceBackend = { read: async () => ({ enabled: false }), change: async change => change(maintenanceState({ enabled: false })) };
+    const store = new AiMaintenanceStore(() => {
+      if (broken) throw new Error('Temporary initialization failure');
+      return backend;
+    }, () => now);
+    const guard = aiMaintenanceGuard(store);
+    const request = async () => {
+      const next = vi.fn(); const res = mockRes();
+      await guard({ ...mockReq(), method: path.endsWith('/status') ? 'GET' : 'POST', path } as never, res as never, next);
+      return { next, res };
+    };
+    expect((await request()).next).toHaveBeenCalledOnce();
+    now += 2001; broken = true;
+    const unavailable = await request();
+    expect(unavailable.next).not.toHaveBeenCalled();
+    expect(unavailable.res.statusCode).toBe(503);
+    expect(unavailable.res.body).toMatchObject({ maintenance: true });
+    broken = false;
+    expect((await request()).next).toHaveBeenCalledOnce();
+    await store.set({ enabled: true });
+    const paused = await request();
+    expect(paused.next).not.toHaveBeenCalled();
+    expect(paused.res.statusCode).toBe(503);
+    expect(paused.res.body).toMatchObject({ maintenance: true });
+  });
+
 });

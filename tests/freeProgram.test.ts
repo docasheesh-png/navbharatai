@@ -72,6 +72,39 @@ describe('the switch fails SAFE: absent, unreadable or unknown all mean PAUSED',
     expect(store.pausedNow()).toBe(false);
     expect((await store.read()).paused).toBe(false);
   });
+  it.each(['factory-sync', 'read-sync', 'read-async'] as const)('recovers from %s without caching paused-unavailable or breaking single-flight reads', async failure => {
+    for (const warm of [false, true]) {
+      let now = 100_000;
+      let fail = false;
+      const backend = {
+        read: vi.fn(() => {
+          if (fail && failure === 'read-sync') throw new Error('Temporary read setup failure');
+          if (fail && failure === 'read-async') return Promise.reject(new Error('Temporary storage failure'));
+          return Promise.resolve({ paused: false });
+        }),
+        write: async () => {},
+      };
+      const factory = vi.fn(() => {
+        if (fail && failure === 'factory-sync') throw new Error('Temporary initialization failure');
+        return backend;
+      });
+      const store = new fp.FreeProgramStore(factory, () => now, () => true);
+      if (warm) { expect((await store.read()).paused).toBe(false); now += 2001; }
+      const before = factory.mock.calls.length;
+      fail = true;
+      const unavailable = await Promise.all([store.read(), store.read()]);
+      for (const state of unavailable) expect(state).toMatchObject({ paused: true, unavailable: true });
+      expect(factory).toHaveBeenCalledTimes(before + 1);
+      fail = false;
+      const recovered = await Promise.all([store.read(), store.read()]);
+      for (const state of recovered) {
+        expect(state.paused).toBe(false);
+        expect(state.unavailable).toBeUndefined();
+      }
+      expect(store.pausedNow()).toBe(false);
+      expect(factory).toHaveBeenCalledTimes(before + 2);
+    }
+  });
   it('a failed save throws — never a fake success', async () => {
     const store = new fp.FreeProgramStore(() => ({ read: async () => ({}), write: async () => { throw new Error('nope'); } }), Date.now, () => true);
     await expect(store.setPaused(false)).rejects.toThrow();

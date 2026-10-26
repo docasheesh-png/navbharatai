@@ -44,11 +44,12 @@ export function guestId(): string {
  * If this response is the server's "daily guest messages are used up" refusal, open sign-in and return the
  * sentence to show; otherwise `null`. Reads a CLONE, so a caller that gets `null` can still read the body.
  */
-export async function guestLimitReached(res: Response): Promise<string | null> {
+export async function guestLimitReached(res: Response, isActive: () => boolean = () => true): Promise<string | null> {
   if (res.status !== 403) return null;
   let body: { code?: unknown; error?: unknown } = {};
   try { body = await res.clone().json(); } catch { return null; }
-  if (body.code !== GUEST_LIMIT_CODE) return null;
+  // A stopped chat may have yielded while parsing the body; it must not open login over its successor.
+  if (!isActive() || body.code !== GUEST_LIMIT_CODE) return null;
   openSignIn();
   return typeof body.error === 'string' && body.error
     ? body.error

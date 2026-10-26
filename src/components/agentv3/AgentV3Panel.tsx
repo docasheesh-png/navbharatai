@@ -506,6 +506,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // comes back; without this refetch the tiers stayed 🔒 until a full page reload).
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [composerToolsOpen, setComposerToolsOpen] = useState(false);
+  /** One-shot: next Weak send may proceed despite scope guidance (user accepted the risk). */
+  const weakForceContinueRef = useRef(false);
   /** When Switch module opens Build options from Weak scope guidance, gently highlight the Power picker. */
   const [highlightPowerPicker, setHighlightPowerPicker] = useState(false);
   // The starter picker shows a short first screen and hides the rest behind "More templates" — the wall
@@ -1787,6 +1789,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           setCheckpointHistory((h) => [...h, ...state.checkpoints]);
         }
         try {
+          const forceWeak = weakForceContinueRef.current;
+          weakForceContinueRef.current = false;
           const request = start(msgText, {
             userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: ticket.sessionId, userMessageTs, attachments,
             framework: fw, frameworkExplicit: frameworkExplicit || resolved, frameworkResolved: resolved, appSignature: appSignaturePref(),
@@ -1795,6 +1799,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             // the builder — same session, same workspace, so proposed steps land in THIS app's queue.
             chatRole: chatMode === 'build' ? undefined : chatMode,
             confirmedFeatures,
+            weakForceContinue: forceWeak || undefined,
           });
           // Execution owns a synchronous lock now, even before React renders running=true.
           // Release preflight immediately so a fast result cannot strand it through an open tail.
@@ -5185,39 +5190,43 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                           <p className="text-[12px] text-muted leading-relaxed">{guide.body}</p>
                           <p className="text-[10px] text-faint">{guide.hint}</p>
                           {!running && (
-                            <div className="flex flex-wrap items-center gap-2 pt-1.5">
-                              <button
-                                type="button"
-                                onClick={openModulePicker}
-                                title="Open Build options — Power: Weak, Normal, Strong"
-                                className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-on-accent bg-indigo-600 hover:bg-indigo-500 rounded-lg px-3 py-2 shadow-sm transition-colors"
-                              >
-                                <Settings className="w-3.5 h-3.5" aria-hidden />
-                                Switch module
-                              </button>
-                              {powerUnlocked && (
-                                <div className="flex items-center gap-1.5">
-                                  {([
-                                    { key: 'off' as const, label: 'Normal' },
-                                    { key: 'mini' as const, label: 'Strong' },
-                                  ]).map((opt) => (
-                                    <button
-                                      key={opt.key}
-                                      type="button"
-                                      onClick={() => { setPowerLevel(opt.key); openModulePicker(); }}
-                                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium border border-line bg-raised text-muted hover:border-indigo-500/60 hover:text-accent-text transition-colors"
-                                    >
-                                      {opt.label}
-                                    </button>
-                                  ))}
-                                </div>
+                            <div className="flex flex-col gap-2 pt-1.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={openModulePicker}
+                                  title="Open Build options — full Power and framework picker"
+                                  className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-on-accent bg-indigo-600 hover:bg-indigo-500 rounded-lg px-3 py-2 shadow-sm transition-colors"
+                                >
+                                  <Settings className="w-3.5 h-3.5" aria-hidden />
+                                  Switch module
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPowerLevel('weak');
+                                    const last = [...convo].reverse().find((m) => m.role === 'user' && (m.text || '').trim());
+                                    const text = (last?.text || '').trim();
+                                    if (!text) {
+                                      setTimeout(() => composerRef.current?.focus(), 0);
+                                      return;
+                                    }
+                                    weakForceContinueRef.current = true;
+                                    void send({ text, importUrl: '' });
+                                  }}
+                                  title="Continue building on Weak — app building may fail"
+                                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold border border-amber-500/50 bg-amber-500/10 text-warn hover:border-amber-400 hover:bg-amber-500/15 transition-colors"
+                                >
+                                  Continue with Weak
+                                </button>
+                              </div>
+                              <p className="text-[11px] text-warn/90 leading-snug">{guide.risk}</p>
+                              {!powerUnlocked && (
+                                <p className="text-[10px] text-faint">
+                                  Other modules unlock with any wallet recharge — or shrink the first version and stay on Weak.
+                                </p>
                               )}
                             </div>
-                          )}
-                          {!powerUnlocked && !running && (
-                            <p className="text-[10px] text-faint pt-0.5">
-                              Normal and Strong unlock with any wallet recharge — or shrink the first version and stay on Weak.
-                            </p>
                           )}
                         </div>
                       </div>
@@ -5667,7 +5676,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   <button type="button" className="nb-pro-expand-mobile items-center text-muted hover:text-ink"
                     onClick={() => setComposerExpanded((value) => !value)}>{composerExpanded ? 'Minimize editor' : 'Expand editor'}</button>
                 )}
-              <div className="nb-pro-controls flex min-h-11 items-center gap-1 order-2 flex-wrap px-2 pb-2 pr-24">
+              <div className="nb-pro-controls flex min-h-11 items-center gap-1 order-2 flex-nowrap overflow-x-auto px-2 pb-2 pr-24">
               <div className="relative">
                 {modeMenuOpen && (
                   <>

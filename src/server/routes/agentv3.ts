@@ -11356,7 +11356,9 @@ async function noteBuildOutcome(
       createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
         audit('AGENTV3_DISCOUNT_SCOPE_CALL', { ok: row.ok, model: row.model, latencyMs: row.latencyMs, inputTokens: row.inputTokens, outputTokens: row.outputTokens }, 'info');
       }));
-    const weakScopeBlocked = weakAdmissionBlocked(weakAdmission);
+    // Owner CTA "Continue with Weak": user accepted the risk; do not divert this turn to guidance chat.
+    const weakForceContinue = req.body?.weakForceContinue === true && powerLevelReqEffective === 'weak';
+    const weakScopeBlocked = weakAdmissionBlocked(weakAdmission) && !weakForceContinue;
     if (weakScopeBlocked) {
       intent = 'chat';
       setAdmittedSurplusScope(surplusSession, false);

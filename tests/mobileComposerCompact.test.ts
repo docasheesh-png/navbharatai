@@ -172,6 +172,8 @@ describe('mobile tools and desktop layout contract', () => {
     expect(css).toContain('width: 44px; height: 44px');
     expect(css).toContain('max-height: var(--nb-composer-menu-max-height');
     expect(css).toContain('bottom: var(--nb-composer-menu-bottom');
+    expect(css).toContain('flex-wrap: nowrap');
+    expect(css).toContain('overflow-y: visible');
   });
   it('keeps Pro actions outside the tools menu and resizes across breakpoints', () => {
     const pro = sourceText('src/components/agentv3/AgentV3Panel.tsx');
@@ -193,7 +195,7 @@ describe('Switch module reveals the compact tools before opening Build options',
     expect(html).toContain('data-open="true"');
     expect(html).toContain('Build options');
   });
-  it('opens the outer disclosure first for the CTA and quick tier choices', () => {
+  it('opens the outer disclosure first for Switch module; Continue with Weak stays on Weak', () => {
     const pro = sourceText('src/components/agentv3/AgentV3Panel.tsx');
     const start = pro.indexOf('const openModulePicker = () => {');
     const body = pro.slice(start, pro.indexOf('requestAnimationFrame', start));
@@ -201,6 +203,9 @@ describe('Switch module reveals the compact tools before opening Build options',
     expect(body.indexOf('setComposerToolsOpen(true)')).toBeLessThan(body.indexOf('setSettingsOpen(true)'));
     expect(pro).toContain('<MobileComposerTools open={composerToolsOpen} onOpenChange={setComposerToolsOpen}>');
     expect(pro).toContain('onClick={openModulePicker}');
-    expect(pro).toContain('setPowerLevel(opt.key); openModulePicker();');
+    expect(pro).toContain('Continue with Weak');
+    expect(pro).toContain("setPowerLevel('weak')");
+    expect(pro).toContain('weakForceContinueRef');
+    expect(pro).not.toContain('setPowerLevel(opt.key); openModulePicker();');
   });
 });

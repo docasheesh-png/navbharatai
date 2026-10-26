@@ -6,7 +6,7 @@ import type { Express, Request, Response } from 'express';
 import { verifyFirebaseToken, rateLimiter } from './authMiddleware';
 import { addressRateKey } from './clientAddress';
 import { GUEST_ID_HEADER, readGuestId } from './guestDailyQuota';
-import { FreeAnswerQuotaStore, type FreeAnswerQuotaSubject } from './freeAnswerQuotaStore';
+import { FreeAnswerQuotaStore, FreeAnswerQuotaWindowChangedError, type FreeAnswerQuotaSubject } from './freeAnswerQuotaStore';
 import { getServerDb } from './serverDb';
 import { unifiedWalletConfig, signedInDailyLimit, surfaceIsCharged, type ChatSurface, detectLang, insufficientBalanceMessage, lowBalanceNotice, rateLimitedMessage } from './unifiedWallet/policy';
 import { UnifiedWalletGate, holdChatMessage, closeChatHold } from './unifiedWallet/store';
@@ -67,7 +67,7 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
         reject(res,'duplicate'); return;
       }
     }
-    const reserved=await store.reserve(subject,requestId,Date.now());
+    const reserved=await store.reserve(subject,requestId);
     if (!reserved.allowed) {
       // UNIFIED WALLET: a signed-in user past today's free messages pays 0.1 credit from the ONE wallet
       // that also pays for Pro builds. Guests have no wallet — they get main's refusal.
@@ -90,7 +90,7 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
       if(renewing || controller.signal.aborted) return;
       renewing=true;
       const renewStartedAt=Date.now();
-      void store.renew(reserved.reservation,renewStartedAt).then(ok=>{
+      void store.renew(reserved.reservation).then(ok=>{
         if (finished) return;
         const expiresAt=Math.min(renewStartedAt+30_000,reserved.reservation.deadlineAt);
         if(!ok || Date.now()>=expiresAt) controller.abort(); else {lease.leaseUntil=expiresAt; armExpiry();}
@@ -109,7 +109,7 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
       // No timeout refund: uncertainty is still consumed; expired owners cannot affect successors.
       const outcome=lease.answered ? 'answered' : lease.failed || (!lease.disconnected && !controller.signal.aborted) ? 'provider-failed' : 'uncertain';
       let settled=false;
-      try { settled=await confirmedFreeAnswerSettlement(store.settle(reserved.reservation,outcome,Date.now())); }
+      try { settled=await confirmedFreeAnswerSettlement(store.settle(reserved.reservation,outcome)); }
       catch { /* Synchronous adapter failures are also unconfirmed, never successful completion. */ }
       leases.delete(req);
       try {
@@ -121,6 +121,7 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
       } finally { completion.restore(); }
     }
   } catch(error) {
+    if (error instanceof FreeAnswerQuotaWindowChangedError) console.warn(JSON.stringify({ event: 'free_answer_admission', code: 'day_window_changed' }));
     reject(res,'unavailable');
     // The route owns its error detail. This boundary never switches to a paid handler.
     if(res.headersSent && !res.writableEnded && !res.destroyed) res.end();
@@ -167,7 +168,7 @@ async function runWalletPaidTurn<T>(req: Request, res: Response, run: () => Prom
 export function registerFreeAnswerQuotaRoutes(app: Express): void {
   app.get('/api/free-answers/status',rateLimiter({name:'free-answer-status',authed:1200,anon:600,noun:'status checks',durable:false}),async(req,res)=>{
     res.setHeader('Cache-Control','no-store');
-    try { const subject=await subjectFor(req,{}); const status=await new FreeAnswerQuotaStore().status(subject,Date.now()); res.json(status); }
+    try { const subject=await subjectFor(req,{}); const status=await new FreeAnswerQuotaStore().status(subject); res.json(status); }
     catch {reject(res,'unavailable');}
   });
 }

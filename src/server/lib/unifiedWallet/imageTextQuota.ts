@@ -15,11 +15,11 @@ export function imageCountsAgainstText(env: Env = process.env): boolean {
 }
 
 /** Call once, after the image was delivered. Returns whether a text unit was used. Never throws. */
-export async function countDeliveredFreeImage(uid: string, env: Env = process.env, store = new FreeAnswerQuotaStore(), clock: () => number = Date.now): Promise<boolean> {
+export async function countDeliveredFreeImage(uid: string, env: Env = process.env, store = new FreeAnswerQuotaStore(), clock?: () => number): Promise<boolean> {
   if (!uid || !imageCountsAgainstText(env)) return false;
   try {
-    const r = await store.reserve({ key: `user:${uid}`, limit: signedInDailyLimit(env) }, randomUUID(), clock());
+    const r = await store.reserve({ key: `user:${uid}`, limit: signedInDailyLimit(env) }, randomUUID(), clock?.());
     if (!r.allowed) return false;
-    return await store.settle(r.reservation, 'answered', clock());
+    return await store.settle(r.reservation, 'answered', clock?.());
   } catch { return false; }
 }

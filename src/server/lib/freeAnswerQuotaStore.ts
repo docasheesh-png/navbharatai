@@ -93,6 +93,37 @@ function identity(subject: FreeAnswerQuotaSubject): string {
   return hash(subject.key);
 }
 
+/** A delayed admission must not change its recorded day or extend its original request deadline. */
+export class FreeAnswerQuotaWindowChangedError extends Error {
+  constructor() { super('Free answer admission crossed the daily quota boundary'); this.name = 'FreeAnswerQuotaWindowChangedError'; }
+}
+
+/** An explicit timestamp is a fixed fixture seam; production samples trusted time after reads. */
+function transactionClock(fixedNow?: number) {
+  const startedAt = fixedNow === undefined ? Date.now() : fixedNow; time(startedAt);
+  let latest = startedAt;
+  return { startedAt, read: () => {
+    const now = fixedNow === undefined ? Date.now() : fixedNow; time(now);
+    demand(now >= latest); latest = now;
+    return now;
+  } };
+}
+
+/** Reselect dated documents before any writes if reads cross midnight. Never mix two daily ledgers. */
+async function readCurrentDay<T>(clock: ReturnType<typeof transactionClock>, read: (day: string) => Promise<T>, deadlineAt?: number) {
+  let before = clock.read();
+  for (let pass = 0; pass < 2; pass++) {
+    demand(deadlineAt === undefined || before < deadlineAt);
+    const day = windowFor(before).day;
+    const result = await read(day);
+    const now = clock.read();
+    demand(deadlineAt === undefined || now < deadlineAt);
+    if (windowFor(now).day === day) return { result, day, now };
+    before = now;
+  }
+  throw new Error('Free answer quota day changed during repeated reads');
+}
+
 /**
  * A single transaction holds one answer and one renewable owner lease. Failed provider replies may
  * restore the USER credit only. No provider account/quota/money ledger is imported or modified here.
@@ -105,16 +136,23 @@ export class FreeAnswerQuotaStore {
     if (!this.db) throw new Error('Free answer quota storage unavailable');
     return this.db.doc(`${COLLECTION}/${id}`);
   }
-  async reserve(subject: FreeAnswerQuotaSubject, requestId: string, now = Date.now()): Promise<FreeAnswerQuotaDecision> {
-    const principalHash = identity(subject); const { day } = windowFor(now); demand(uuid.test(requestId));
+  async reserve(subject: FreeAnswerQuotaSubject, requestId: string, fixedNow?: number): Promise<FreeAnswerQuotaDecision> {
+    const principalHash = identity(subject); const clock = transactionClock(fixedNow); demand(uuid.test(requestId));
     const id = hash(`${principalHash}:${requestId.toLowerCase()}`);
-    const refs = { principal: this.ref(`principal_${principalHash}`), day: this.ref(`day_${principalHash}_${day}`),
-      attempt: this.ref(`attempt_${id}`), ip: subject.ipKey ? this.ref(`ip_${hash(subject.ipKey)}_${day}`) : null };
-    // Mint once outside the transaction callback; SDK retries keep the same reservation owner.
-    const reservation: FreeAnswerReservation = { id, owner: randomUUID(), principalHash, day, startedAt: now,
-      deadlineAt: now + FREE_ANSWER_REQUEST_MS, leaseExpiresAt: now + FREE_ANSWER_LEASE_MS };
+    const principalRef = this.ref(`principal_${principalHash}`); const attemptRef = this.ref(`attempt_${id}`);
+    // Retries retain owner identity AND the original request deadline; database delay buys no extra time.
+    const owner = randomUUID(); const deadlineAt = clock.startedAt + FREE_ANSWER_REQUEST_MS;
     return this.db!.runTransaction(async tx => {
-      const [ps, ds, as, ips] = await Promise.all([tx.get(refs.principal), tx.get(refs.day), tx.get(refs.attempt), refs.ip ? tx.get(refs.ip) : null]);
+      const { result, day, now } = await readCurrentDay(clock, async day => {
+        const dayRef = this.ref(`day_${principalHash}_${day}`);
+        const ipRef = subject.ipKey ? this.ref(`ip_${hash(subject.ipKey)}_${day}`) : null;
+        const [ps, ds, as, ips] = await Promise.all([tx.get(principalRef), tx.get(dayRef), tx.get(attemptRef), ipRef ? tx.get(ipRef) : null]);
+        return { dayRef, ipRef, ps, ds, as, ips };
+      }, deadlineAt);
+      // Older deployed readers require day === windowFor(startedAt). Keep that format and the
+      // original 90-second deadline: a midnight-crossing admission retries as a new request, uncharged.
+      if (day !== windowFor(clock.startedAt).day) throw new FreeAnswerQuotaWindowChangedError();
+      const { dayRef, ipRef, ps, ds, as, ips } = result;
       const p = principal(readData(ps)); const d = daily(readData(ds), day); const a = attempt(readData(as));
       const ip = ips ? daily(readData(ips), day) : null;
       const status = snapshot(subject, p, d, now);
@@ -122,44 +160,49 @@ export class FreeAnswerQuotaStore {
       if (live(p, now)) return { allowed: false, reason: 'busy', status };
       if (d.consumed >= subject.limit) return { allowed: false, reason: 'daily-limit', status };
       if (d.attempts >= subject.limit * ATTEMPTS_PER_CREDIT || (ip && ip.attempts >= IP_ATTEMPT_LIMIT)) return { allowed: false, reason: 'attempt-limit', status };
+      const reservation: FreeAnswerReservation = { id, owner, principalHash, day, startedAt: clock.startedAt,
+        deadlineAt, leaseExpiresAt: Math.min(now + FREE_ANSWER_LEASE_MS, deadlineAt) };
       const next: Day = { ...d, consumed: d.consumed + 1, attempts: d.attempts + 1 };
       const purgeAfterMs = Date.parse(`${day}T00:00:00Z`) + 8 * DAY_MS;
       const nextPrincipal: Principal = { version: 1, active: reservation, principalHash, purgeAfterMs };
       // Daily/idempotency docs are dated. Reusable principals never use Firestore TTL: scheduled
       // retention atomically rechecks purgeAfterMs and active ownership before removing them.
       const expireAt = new Date(purgeAfterMs);
-      tx.set(refs.principal, nextPrincipal); tx.set(refs.day, { ...next, expireAt, principalHash, purgeAfterMs });
-      tx.set(refs.attempt, { ...reservation, version: 1, state: 'held', expireAt, purgeAfterMs } satisfies Attempt);
-      if (refs.ip && ip) tx.set(refs.ip, { ...ip, attempts: ip.attempts + 1, expireAt, purgeAfterMs });
+      tx.set(principalRef, nextPrincipal); tx.set(dayRef, { ...next, expireAt, principalHash, purgeAfterMs });
+      tx.set(attemptRef, { ...reservation, version: 1, state: 'held', expireAt, purgeAfterMs } satisfies Attempt);
+      if (ipRef && ip) tx.set(ipRef, { ...ip, attempts: ip.attempts + 1, expireAt, purgeAfterMs });
       return { allowed: true, reservation, status: snapshot(subject, nextPrincipal, next, now) };
     });
   }
-  async status(subject: FreeAnswerQuotaSubject, now = Date.now()): Promise<FreeAnswerQuotaStatus> {
-    const h = identity(subject); const { day } = windowFor(now);
-    const p = this.ref(`principal_${h}`); const d = this.ref(`day_${h}_${day}`);
+  async status(subject: FreeAnswerQuotaSubject, fixedNow?: number): Promise<FreeAnswerQuotaStatus> {
+    const h = identity(subject); const clock = transactionClock(fixedNow);
+    const p = this.ref(`principal_${h}`);
     return this.db!.runTransaction(async tx => {
-      const [ps, ds] = await Promise.all([tx.get(p), tx.get(d)]);
+      const { result: [ps, ds], day, now } = await readCurrentDay(clock, day =>
+        Promise.all([tx.get(p), tx.get(this.ref(`day_${h}_${day}`))]));
       return snapshot(subject, principal(readData(ps)), daily(readData(ds), day), now);
     });
   }
-  async renew(reservation: FreeAnswerReservation, now = Date.now()): Promise<boolean> {
-    time(now); if (!validReservation(reservation)) return false;
+  async renew(reservation: FreeAnswerReservation, fixedNow?: number): Promise<boolean> {
+    const clock = transactionClock(fixedNow); if (!validReservation(reservation)) return false;
     const ref = this.ref(`principal_${reservation.principalHash}`);
     return this.db!.runTransaction(async tx => {
       const p = principal(readData(await tx.get(ref)));
+      const now = clock.read();
       if (!sameOwner(p.active, reservation) || !live(p, now) || now < reservation.startedAt) return false;
       tx.set(ref, { ...p, version: 1, active: { ...p.active!, leaseExpiresAt: Math.min(now + FREE_ANSWER_LEASE_MS, reservation.deadlineAt) } } satisfies Principal);
       return true;
     });
   }
-  async settle(reservation: FreeAnswerReservation, outcome: FreeAnswerOutcome, now = Date.now()): Promise<boolean> {
-    time(now); if (!validReservation(reservation)) return false;
+  async settle(reservation: FreeAnswerReservation, outcome: FreeAnswerOutcome, fixedNow?: number): Promise<boolean> {
+    const clock = transactionClock(fixedNow); if (!validReservation(reservation)) return false;
     demand(['answered', 'provider-failed', 'uncertain'].includes(outcome));
     const pRef = this.ref(`principal_${reservation.principalHash}`); const aRef = this.ref(`attempt_${reservation.id}`);
     const dRef = this.ref(`day_${reservation.principalHash}_${reservation.day}`);
     return this.db!.runTransaction(async tx => {
       const [ps, as, ds] = await Promise.all([tx.get(pRef), tx.get(aRef), tx.get(dRef)]);
       const p = principal(readData(ps)); const a = attempt(readData(as)); const d = daily(readData(ds), reservation.day);
+      const now = clock.read();
       if (!a || !sameOwner(a, reservation)) return false;
       if (a.state !== 'held') return a.state === outcome;
       if (!sameOwner(p.active, reservation) || !live(p, now) || now < reservation.startedAt) return false;

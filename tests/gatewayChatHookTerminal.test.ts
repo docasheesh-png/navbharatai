@@ -10,6 +10,7 @@ vi.mock('../src/lib/vialMemory', () => ({ loadVials: () => ({}), saveVial: vi.fn
 import { useRef } from 'react';
 import { useChatEngine, type ChatEngineDeps } from '../src/hooks/useChatEngine';
 import type { Message } from '../src/types';
+import { chatAvailabilityMessage } from '../src/server/lib/chatAvailabilityMessage';
 function fixture() {
   let messages: Message[] = [];
   const deps: ChatEngineDeps = {
@@ -34,6 +35,58 @@ const frame = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
 describe('real Free chat hook terminal request handling', () => {
   beforeEach(() => { vi.clearAllMocks(); mock.isCancel.mockReturnValue(false); mock.authHeader.mockResolvedValue({}); vi.stubGlobal('fetch', vi.fn()); vi.spyOn(console, 'error').mockImplementation(() => {}); });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+  it.each(['axios', 'fetch-json', 'sse'])('preserves selected-language capacity failure without retry or success through %s', async transport => {
+    const reply = chatAvailabilityMessage('capacity', { message: 'mujhe madad chahiye', replyLanguage: 'hi' });
+    const failure = { code: 'CHAT_CAPACITY_EXHAUSTED', reply, error: reply };
+    const f = fixture();
+    if (transport === 'axios') mock.post.mockRejectedValue({ response: { status: 503, data: failure }, message: 'synthetic provider detail' });
+    else {
+      f.deps.selectedModel = 'openai'; f.deps.keys = { openai: 'test' };
+      vi.mocked(fetch).mockResolvedValue(new Response(transport === 'sse' ? frame(failure) : JSON.stringify(failure), {
+        status: transport === 'sse' ? 200 : 503, headers: { 'Content-Type': transport === 'sse' ? 'text/event-stream' : 'application/json' },
+      }));
+    }
+    await f.engine().handleSendForTab('studio');
+    expect(f.messages().filter(m => m.sender === 'ai')).toHaveLength(1);
+    expect(f.messages().at(-1)?.text).toBe(reply);
+    expect(f.deps.setErrorContext).toHaveBeenCalledWith(expect.objectContaining({ message: reply }));
+    expect(f.deps.addLog).not.toHaveBeenCalledWith(expect.stringContaining('AI Response received'), 'success');
+    expect(f.deps.setIsLoading).toHaveBeenLastCalledWith(false);
+    expect(transport === 'axios' ? mock.post : fetch).toHaveBeenCalledOnce();
+    expect(transport === 'axios' ? fetch : mock.post).not.toHaveBeenCalled();
+  });
+  it('keeps an unexpected failure neutral while retaining its diagnostic error internally', async () => {
+    const f = fixture(); f.deps.incrementDailyUsage = () => { throw new Error('synthetic provider budget failure'); };
+    await f.engine().handleSend();
+    expect(f.messages().at(-1)?.text).toBe('NavBharatAI is temporarily unable to respond. Please try again shortly.');
+    expect(f.messages().at(-1)?.text).not.toMatch(/traffic|load|provider|budget/i);
+    expect(f.deps.setErrorContext).toHaveBeenCalledWith(expect.objectContaining({ message: 'synthetic provider budget failure' }));
+    expect(f.deps.addLog).not.toHaveBeenCalledWith(expect.stringContaining('AI Response received'), 'success');
+  });
+  it.each(['axios', 'fetch'])('carries current instruction then history then picker preference through %s without changing settings', async transport => {
+    const cases = [
+      { input: 'mujhe madad chahiye', picker: 'hindi', history: [], expected: 'hi' },
+      { input: 'mujhe madad chahiye', picker: 'english', history: [], expected: 'en' },
+      { input: 'Hello', picker: 'hinglish', history: [], expected: 'hinglish' },
+      { input: 'Hello', picker: 'auto', history: [], expected: undefined },
+      { input: 'Hello', picker: 'hindi', history: ['Reply in Tamil'], expected: 'ta' },
+      { input: 'For this answer only, reply in English', picker: 'hindi', history: ['Reply in Tamil'], expected: 'en' },
+    ];
+    for (const example of cases) {
+      const f = fixture(); f.deps.input = example.input; f.deps.preferredLanguage = example.picker;
+      f.deps.messages = example.history.map((text, n) => ({ id: `language-${n}`, text, sender: 'user' as const, timestamp: new Date() }));
+      if (transport === 'axios') mock.post.mockResolvedValue({ data: { reply: 'Answer' } });
+      else {
+        f.deps.selectedModel = 'openai'; f.deps.keys = { openai: 'test' };
+        vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ reply: 'Answer' }), { headers: { 'Content-Type': 'application/json' } }));
+      }
+      await f.engine().handleSendForTab('studio');
+      const body = transport === 'axios' ? mock.post.mock.calls.at(-1)![1] : JSON.parse(String(vi.mocked(fetch).mock.calls.at(-1)![1]?.body));
+      expect(body.replyLanguage).toBe(example.expected);
+      expect(body.message).toBe(example.input);
+      expect(f.deps.setPreferredLanguage).not.toHaveBeenCalled();
+    }
+  });
   it.each(['INFERENCE_GATEWAY_UNAVAILABLE', 'STRICT_FREE_UNAVAILABLE', 'CHAT_ROUTE_UNAVAILABLE'])('does not turn JSON %s into another backend request', async code => {
     mock.post.mockRejectedValue({ response: { status: 503, data: { code, reply: 'The selected route is unavailable.' } }, message: 'Request failed' });
     const f = fixture(); await f.engine().handleSend();
@@ -159,7 +212,7 @@ describe('real Free chat hook terminal request handling', () => {
     expect(f.deps.setPreferredLanguage).not.toHaveBeenCalled();
     expect(f.deps.preferredLanguage).toBe('english');
     const next = fixture(); await next.engine().handleSend('A new conversation');
-    expect(mock.post.mock.calls.at(-1)![1].replyLanguage).toBeUndefined();
+    expect(mock.post.mock.calls.at(-1)![1].replyLanguage).toBe('en'); // Fresh chat uses the unchanged picker, not the previous chat's Hindi.
   });
   it('keeps a script request after a failed response and before client history text trimming', async () => {
     mock.post.mockRejectedValueOnce({ response: { status: 503, data: { code: 'CHAT_ROUTE_UNAVAILABLE', reply: 'Unavailable' } } })

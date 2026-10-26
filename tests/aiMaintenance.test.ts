@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { mockReq, mockRes } from './helpers/routeTestUtils';
 import { AiMaintenanceStore, MAINTENANCE_MESSAGE, STATUS_UNAVAILABLE_MESSAGE, maintenanceState, isKimiQuotaFailure, type MaintenanceBackend, type MaintenanceState } from '../src/server/lib/aiMaintenance';
+import { chatAvailabilityMessage } from '../src/server/lib/chatAvailabilityMessage';
 import { gatewayChatFailure } from '../src/lib/chatResponseStream';
 import { aiMaintenanceGuard, maintenanceProtected } from '../src/server/lib/aiMaintenanceGuard';
 function fixture(initial: Partial<MaintenanceState> = {}) {
@@ -171,6 +172,20 @@ describe('real maintenance spending gate', () => {
     });
     expect(res.body.error).not.toBe(MAINTENANCE_MESSAGE);
     expect(gatewayChatFailure(res.body)).toEqual({ code: 'CHAT_STATUS_UNAVAILABLE', message: STATUS_UNAVAILABLE_MESSAGE, partial: false });
+  });
+
+  it('localizes unreadable status neutrally without pretending it is overload or maintenance', async () => {
+    const store = new AiMaintenanceStore(() => ({ read: async () => { throw Error('synthetic status backend detail'); }, change: async () => { throw Error('offline'); } }));
+    const next = vi.fn(); const res = mockRes();
+    const body = { message: 'mujhe batao kya hua', replyLanguage: 'hi' };
+    await aiMaintenanceGuard(store)({ ...mockReq({ body }), method: 'POST', path: '/api/chat' } as never, res as never, next);
+    const reply = chatAvailabilityMessage('temporary', body);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toMatchObject({ error: reply, reply, maintenance: false, statusUnavailable: true });
+    expect(res.body.reply).not.toBe(chatAvailabilityMessage('capacity', body));
+    expect(res.body.reply).not.toContain('synthetic status backend detail');
+    expect(gatewayChatFailure(res.body)).toEqual({ code: 'CHAT_STATUS_UNAVAILABLE', message: reply, partial: false });
   });
 
   it('fail-opens briefly after a recent successful known-off read, then fails closed once that window ages out', async () => {

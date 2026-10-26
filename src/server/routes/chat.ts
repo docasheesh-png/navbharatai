@@ -2,6 +2,7 @@ import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { withFreeAnswerQuota, assertFreeAnswerActive, markFreeAnswer, freeAnswerSignal } from '../lib/freeAnswerQuota';
 import { withFreeChainEntryAdmission } from '../AI/FreeChain/entryAdmission';
 import { freeChainRequestContext } from '../AI/FreeChain/requestContext';
+import { unavailableChatReply } from '../../lib/chatRouteOutcome';
 import { usageLogFields } from '../AI/Router/usageLogFields';
 import { freeModuleInferenceScope, runAdmittedLegacyImageEdit } from '../AI/inferencePolicy';
 import { strictFreeRequired, StrictFreeCapabilityError } from '../AI/inferencePolicy';
@@ -815,13 +816,17 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         // has a habit of being forgotten, which is why it is now written down here.
         let outcome: Awaited<ReturnType<typeof aiRouter.routeStream>> | null = null;
         let streamedText = '';
+        let streamedAnswer = false;
         try {
           assertFreeAnswerActive(req);
           outcome = await aiRouter.routeStream(
             contextualMessage, history, tier, systemPrompt,
             (chunk: string, source?: 'notice') => {
               assertFreeAnswerActive(req);
-              if (source !== 'notice' && chunk.trim() && !res.destroyed && !res.writableEnded) markFreeAnswer(req);
+              if (source !== 'notice' && chunk.trim() && !res.destroyed && !res.writableEnded) {
+                streamedAnswer = true;
+                markFreeAnswer(req);
+              }
               streamedText += chunk;
               if (!res.writableEnded) {
                 if (firstTokenAt === null) {
@@ -861,15 +866,25 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         // would say it twice.
         assertFreeAnswerActive(req);
         if (!res.writableEnded) {
-          if (outcome?.reason === 'stalled') {
+          if (outcome?.ok === false) {
+            const failure = unavailableChatReply(streamedAnswer
+              ? 'This reply was interrupted. Please retry when the service is available.' : streamedText);
+            // Keep a notice already sent; add one only for empty or genuinely interrupted output.
             res.write(`data: ${JSON.stringify({
-              c: '\n\n_(NavBharatAI\u2019s engine went quiet before finishing this answer, so it stops here. Ask again and it will pick the thread back up.)_',
+              ...(streamedAnswer ? { c: `\n\n${failure.reply}` } : !streamedText.trim() ? { c: failure.reply } : {}),
+              error: failure.reply, code: failure.code, partial: streamedAnswer,
             })}\n\n`);
+          } else {
+            if (outcome?.reason === 'stalled') {
+              res.write(`data: ${JSON.stringify({
+                c: '\n\n_(NavBharatAI\u2019s engine went quiet before finishing this answer, so it stops here. Ask again and it will pick the thread back up.)_',
+              })}\n\n`);
+            }
+            // FREE_CHAT_ANSWER_ALL: exactly one Pro line on an app request, even if the model left it out.
+            const proTail = appAsk && outcome?.reason !== 'stalled' && streamedText.trim() ? missingProLine(streamedText, message) : '';
+            if (proTail) res.write(`data: ${JSON.stringify({ c: proTail })}\n\n`);
+            res.write('data: [DONE]\n\n');
           }
-          // FREE_CHAT_ANSWER_ALL: exactly one Pro line on an app request, even if the model left it out.
-          const proTail = appAsk && outcome?.reason !== 'stalled' && streamedText.trim() ? missingProLine(streamedText, message) : '';
-          if (proTail) res.write(`data: ${JSON.stringify({ c: proTail })}\n\n`);
-          res.write('data: [DONE]\n\n');
           res.end();
         }
         // The SAME shape the non-streaming branch writes, so one collection answers for both paths and
@@ -939,6 +954,10 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           createdAt: new Date().toISOString(),
         }).catch(() => {});
         assertFreeAnswerActive(req);
+        if (routed.ok === false) {
+          res.status(503).json(unavailableChatReply(routed.content));
+          return;
+        }
         if (routed.ok && routed.content.trim()) markFreeAnswer(req);
         const proTail = appAsk && routed.ok && routed.content ? missingProLine(routed.content, message) : '';
         res.json({ reply: `${routed.content}${proTail}` });

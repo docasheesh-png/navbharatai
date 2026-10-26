@@ -16,6 +16,7 @@ vi.mock('../src/server/lib/imageEditRun', () => ({ checkEditable: () => ({ ok: f
 import { registerChatRoutes } from '../src/server/routes/chat';
 import { currentInferenceGatewayContext } from '../src/server/AI/InferenceGateway/runtime';
 import { firestoreGuestUsageStore } from '../src/server/lib/guestDailyQuota';
+import { consumeChatResponseStream, gatewayChatFailure } from '../src/lib/chatResponseStream';
 
 const requestId = '11111111-1111-4111-8111-111111111111';
 function response() {
@@ -82,16 +83,76 @@ describe('real chat ingress enforces shared answer admission without changing pr
     expect(m.settle).toHaveBeenCalledWith(expect.any(Object),'provider-failed',expect.any(Number));
     expect(m.legacy).not.toHaveBeenCalled(); expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled(); expect(m.add).not.toHaveBeenCalled();
   });
-  it('restores credit on a provider failure represented as HTTP200 reply text', async () => {
+  it.each(['/api/chat/navbharat', '/api/chat/navbharatai'])('%s preserves a failed outcome in JSON without changing quota settlement', async path => {
     m.detailed.mockResolvedValue({ ok: false, content: 'AI service temporarily busy.', reason: 'all-failed' });
-    await route()(request(), response());
+    const res = response(); await route(path)(request(), res);
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toEqual({ ok: false, code: 'CHAT_ROUTE_UNAVAILABLE', reply: 'AI service temporarily busy.' });
+    expect(gatewayChatFailure(res.body)).toMatchObject({ code: 'CHAT_ROUTE_UNAVAILABLE', partial: false });
     expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'provider-failed', expect.any(Number));
   });
-  it('does not count synthetic streamed notices as a useful answer', async () => {
+  it.each(['/api/chat/navbharat', '/api/chat/navbharatai'])('%s sends a terminal failure, never DONE, for an unavailable stream', async path => {
     m.stream.mockImplementation(async (...args: any[]) => { args[4]('AI service temporarily busy.', 'notice'); return { ok: false, reason: 'all-failed' }; });
-    const res = response(); await route()(request({ stream: true }), res);
-    expect(res.chunks.join('')).toContain('temporarily busy');
+    const res = response(); await route(path)(request({ stream: true }), res);
+    const wire = res.chunks.join('');
+    expect(wire).not.toContain('[DONE]');
+    const parsed = await consumeChatResponseStream(new Response(wire).body!, true, vi.fn());
+    expect(parsed).toEqual({ text: 'AI service temporarily busy.', failure: { code: 'CHAT_ROUTE_UNAVAILABLE', message: 'AI service temporarily busy.', partial: false } });
     expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'provider-failed', expect.any(Number));
+    expect(m.add).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ ok: false, failureReason: 'all-failed' }));
+  });
+  it('adds a nonblank failure notice when the stream returned no text', async () => {
+    m.stream.mockResolvedValue({ ok: false, reason: 'no-provider' });
+    const res = response(); await route()(request({ stream: true }), res);
+    const parsed = await consumeChatResponseStream(new Response(res.chunks.join('')).body!, true, vi.fn());
+    expect(parsed.text).toContain('temporarily unavailable');
+    expect(parsed.failure).toMatchObject({ code: 'CHAT_ROUTE_UNAVAILABLE', partial: false });
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'provider-failed', expect.any(Number));
+  });
+  it.each(['', '   '])('keeps an empty JSON failure nonblank without claiming an AI answer', async content => {
+    m.detailed.mockResolvedValue({ ok: false, content, reason: 'no-provider' });
+    const res = response(); await route()(request(), res);
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toMatchObject({ ok: false, code: 'CHAT_ROUTE_UNAVAILABLE', reply: expect.stringContaining('temporarily unavailable') });
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'provider-failed', expect.any(Number));
+  });
+  it('keeps genuine partial output and its existing settlement while reporting interruption', async () => {
+    m.stream.mockImplementation(async (...args: any[]) => { args[4]('A genuine partial answer.'); return { ok: false, reason: 'aborted' }; });
+    const res = response(); await route()(request({ stream: true }), res);
+    const parsed = await consumeChatResponseStream(new Response(res.chunks.join('')).body!, true, vi.fn());
+    expect(parsed.text).toBe('A genuine partial answer.\n\nThis reply was interrupted. Please retry when the service is available.');
+    expect(parsed.failure).toMatchObject({ code: 'CHAT_ROUTE_UNAVAILABLE', partial: true });
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'answered', expect.any(Number));
+  });
+  it('leaves successful streaming completion and its existing settlement unchanged', async () => {
+    const res = response(); await route()(request({ stream: true }), res);
+    expect(res.chunks.join('')).toContain('[DONE]');
+    expect(await consumeChatResponseStream(new Response(res.chunks.join('')).body!, true, vi.fn())).toEqual({ text: 'A useful answer.' });
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'answered', expect.any(Number));
+  });
+  it.each([true, false, undefined])('records the actual streaming race outcome %s and reported zero usage', async raced => {
+    m.stream.mockImplementation(async (...args: any[]) => {
+      args[4]('A useful answer.');
+      return { ok: true, provider: 'synthetic', model: 'synthetic', latencyMs: 7,
+        ...(raced === undefined ? {} : { raced }), usage: { inputTokens: 0, outputTokens: 0 } };
+    });
+    await route()(request({ stream: true }), response());
+    expect(m.add).toHaveBeenCalledOnce();
+    const row = m.add.mock.calls[0][1];
+    expect(row).toMatchObject({ streamed: true, providerName: 'synthetic', modelName: 'synthetic',
+      latencyMs: 7, ok: true, usageMeasured: true, inputTokens: 0, outputTokens: 0 });
+    if (raced === undefined) expect(row).not.toHaveProperty('raced');
+    else expect(row.raced).toBe(raced);
+  });
+  it('keeps the existing stalled-but-answered outcome distinct from a failed route', async () => {
+    m.stream.mockImplementation(async (...args: any[]) => { args[4]('A genuine partial answer.'); return { ok: true, reason: 'stalled' }; });
+    const res = response(); await route()(request({ stream: true }), res);
+    const wire = res.chunks.join('');
+    expect(wire).toContain('[DONE]');
+    const parsed = await consumeChatResponseStream(new Response(wire).body!, true, vi.fn());
+    expect(parsed.text).toContain('went quiet before finishing');
+    expect(parsed.failure).toBeUndefined();
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'answered', expect.any(Number));
   });
   it('keeps a partially delivered answer charged and holds the slot until upstream settles after disconnect', async () => {
     const res = response(); let finish!: () => void;

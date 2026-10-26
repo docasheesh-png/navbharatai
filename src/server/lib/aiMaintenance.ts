@@ -86,7 +86,7 @@ export class AiMaintenanceStore {
         if (generation !== this.generation && this.value) return this.value;
         return this.accept(maintenanceState(data));
       } catch {
-        // Honest unavailable: never claim the admin paused AI when the flag itself could not be read.
+        // Unreadable flag: never claim the admin paused AI. User copy is temporary high-demand (not technical).
         // Fail-open only when a recent successful read said enabled===false (no deliberate pause).
         const last = this.value;
         const age = last ? this.now() - this.readAt : Number.POSITIVE_INFINITY;

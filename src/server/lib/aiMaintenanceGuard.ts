@@ -21,7 +21,7 @@ export function aiMaintenanceGuard(store: AiMaintenanceStore = aiMaintenanceStor
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Retry-After', '60');
     if (state.unavailable) {
-      // Fail-closed latch (enabled+unavailable) or any unavailable block: honest message, not "maintenance".
+      // Fail-closed latch (enabled+unavailable): temporary high-demand copy, never deliberate-maintenance wording.
       res.status(503).json({
         error: STATUS_UNAVAILABLE_MESSAGE,
         message: STATUS_UNAVAILABLE_MESSAGE,

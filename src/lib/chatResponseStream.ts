@@ -49,6 +49,11 @@ export function gatewayChatFailure(value: unknown): ChatStreamFailure | undefine
   const data = value as Record<string, unknown>;
   // The global maintenance guard answers before chat/quota routing, without a route code. Preserve
   // that explicit state instead of treating its 503 as an ambiguous provider dispatch and hiding it.
+  // statusUnavailable is DISTINCT from deliberate maintenance — do not relabel it as CHAT_MAINTENANCE.
+  if (data.statusUnavailable === true) {
+    const notice = [data.reply, data.error].find(value => typeof value === 'string' && value.trim());
+    if (typeof notice === 'string') return { code: 'CHAT_STATUS_UNAVAILABLE', message: notice.slice(0, 2000), partial: false };
+  }
   if (data.maintenance === true) {
     const notice = [data.reply, data.error].find(value => typeof value === 'string' && value.trim());
     if (typeof notice === 'string') return { code: 'CHAT_MAINTENANCE', message: notice.slice(0, 2000), partial: false };

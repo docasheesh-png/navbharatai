@@ -26,7 +26,7 @@ import { metricsStore } from '../lib/metricsStore';
 import { isServerReady } from './health';
 import { aiMaintenanceStore } from '../lib/aiMaintenance';
 
-export interface WarmStep { step: string; ok: boolean; ms: number; error?: string }
+export interface WarmStep { step: string; ok: boolean; ms: number; error?: string; enabled?: boolean; unavailable?: boolean }
 export interface WarmReport {
   warm: true;
   serverReady: boolean;
@@ -77,7 +77,22 @@ export async function runWarmup(): Promise<WarmReport> {
     // turn after a cold start used to pay for in front of the user, none of which is a model call:
     //   • the maintenance setting that every AI call checks before it starts (a Firestore read, 1.5 s bound on a cold read);
     //   • the lazily imported safety and auth modules the chat handler loads on its first message.
-    warmStep('chat:maintenanceSetting', () => aiMaintenanceStore.read()),
+    (async (): Promise<WarmStep> => {
+      const t0 = Date.now();
+      try {
+        const state = await aiMaintenanceStore.read();
+        return {
+          step: 'chat:maintenanceSetting',
+          ok: true,
+          ms: Date.now() - t0,
+          enabled: state.enabled === true,
+          unavailable: state.unavailable === true,
+        };
+      } catch (e) {
+        console.warn('[WARM] step "chat:maintenanceSetting" failed:', String((e as Error)?.message ?? e).slice(0, 300));
+        return { step: 'chat:maintenanceSetting', ok: false, ms: Date.now() - t0, error: 'failed' };
+      }
+    })(),
     warmStep('chat:lazyModules', () => Promise.all([
       import('../lib/promptSafety'), import('../lib/authMiddleware'), import('../lib/audit'),
     ])),

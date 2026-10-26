@@ -35,8 +35,7 @@ function busy(req: Request, res: Response): void {
       res.flushHeaders();
     }
     res.write(`data: ${JSON.stringify({ c: BUSY })}\n\n`);
-    res.write('data: [DONE]\n\n');
-    res.end();
+    res.end('data: [DONE]\n\n');
   } else res.json({ reply: BUSY });
 }
 /**

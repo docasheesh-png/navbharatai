@@ -75,7 +75,7 @@ class ResponseFixture extends EventEmitter {
   flushHeaders() { this.headersSent = true; }
   write(chunk: string) { this.chunks.push(chunk); return true; }
   json(value: unknown) { this.body = value; this.headersSent = true; return this.end(); }
-  end() { this.writableFinished = true; this.writableEnded = true; this.emit('finish'); this.emit('close'); return this; }
+  end(chunk?: string) { if (chunk !== undefined) this.write(chunk); this.writableFinished = true; this.writableEnded = true; this.emit('finish'); this.emit('close'); return this; }
   disconnect() { this.destroyed = true; this.emit('close'); }
 }
 const requestId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;

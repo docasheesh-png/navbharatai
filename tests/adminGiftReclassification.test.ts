@@ -38,7 +38,9 @@ const confirm = async (amount=500, requestId='reclass-test-0001') => {
 
 describe('admin-only explicit reclassification of existing gifts', () => {
   it('preview performs no writes and exposes only account-specific eligibility facts', async () => {
+    const before = structuredClone(state.docs.get(PATH));
     const p=await previewAdminGiftReclassification({},UID,500);
+    expect(state.docs.get(PATH)).toEqual(before); // Includes ledger, all counters and carry.
     expect(state.writes).toEqual([]); expect(p.balanceTokens).toBe(1200);expect(p.availableGiftTokens).toBe(1000);
     expect(p.afterAdminTokens).toBe(500);expect(p.fingerprint).toMatch(/^[a-f0-9]{64}$/);
     expect(Object.keys(p).sort()).toEqual(['requestedUserId','canonicalUserId','accountEmail','amount','balanceTokens','remainingInr','giftTokens','adminTokens','availableGiftTokens','afterAdminTokens','fingerprint'].sort());

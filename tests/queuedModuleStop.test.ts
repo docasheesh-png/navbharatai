@@ -5,12 +5,18 @@ import { serializeQueue } from '../src/server/AgentV3/BuildQueue';
 import { WORKSPACE_BUILD_LEASE_COLLECTION } from '../src/server/AgentV3/workspaceBuildLease';
 
 const verify = vi.hoisted(() => vi.fn(async (token: string) => {
-  if (token === 'owner-token') return { uid: 'owner', email: 'owner@example.test' };
-  if (token === 'other-token') return { uid: 'other', email: 'other@example.test' };
+  if (token === 'owner-token') return { uid: 'owner', email: 'owner@example.test', auth_time: 10 };
+  if (token === 'other-token') return { uid: 'other', email: 'other@example.test', auth_time: 10 };
   throw Error('invalid signature');
 }));
 const conversationGet = vi.hoisted(() => vi.fn(async () => null));
+const cutoff = vi.hoisted(() => vi.fn(async () => 0));
 vi.mock('../src/server/lib/firebaseAdminModule', () => ({ loadFirebaseAdmin: async () => ({ apps: [{}], auth: () => ({ verifyIdToken: verify }) }) }));
+// Synthetic account authority: keep the real verifier/ownership checks, never read live Firestore.
+vi.mock('../src/server/lib/sessionRevocation', async (original) => ({
+  ...await original<typeof import('../src/server/lib/sessionRevocation')>(),
+  readSessionCutoff: cutoff,
+}));
 vi.mock('../src/server/AgentV3/sharedConversationStore', () => ({ getConversationStore: () => ({ get: conversationGet }) }));
 
 const WS = 'agentv3-owner-session123';
@@ -27,6 +33,7 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.stubEnv('VITEST', ''); vi.stubEnv('AGENTV3_ENABLED', 'true'); vi.stubEnv('AGENTV3_ALLOWLIST', '');
   vi.clearAllMocks();
+  cutoff.mockReset().mockResolvedValue(0);
 });
 afterEach(() => {
   if (local) { local.exited = true; vi.stubEnv('VITEST', 'true'); setRunningBuild('owner', null); local = undefined; }
@@ -71,7 +78,7 @@ describe('registered Stop cancels owner-authorized handoffs as well as active se
     expect((await stop(WS, 'owner-token')).body).toEqual({ stopped: true });
     expect(await f.store.load(WS)).toMatchObject({ paused: true, items: [{ id: 'A', status: 'failed' }, { id: 'B', status: 'pending' }] });
     expect((await f.store.load(WS)).items[0].continuation).toBeUndefined();
-    expect(verify).toHaveBeenCalledWith('owner-token');
+    expect(verify).toHaveBeenCalledWith('owner-token', true);
   });
 
   it('always cancels the durable pending handoff even when a local running build was stopped', async () => {
@@ -103,6 +110,15 @@ describe('registered Stop cancels owner-authorized handoffs as well as active se
     const f = fixture(); const before = structuredClone([...f.docs]);
     const res = await stop(WS, token);
     expect(res.body).toEqual({ stopped: false });
+    expect([...f.docs]).toEqual(before);
+  });
+
+  it.each(['revoked', 'unavailable'])('cannot stop a private handoff when session authority is %s', async (authority) => {
+    const f = fixture(); const before = structuredClone([...f.docs]);
+    if (authority === 'revoked') cutoff.mockResolvedValue(11);
+    else cutoff.mockRejectedValue(new Error('Synthetic cutoff unavailable'));
+    expect((await stop(WS, 'owner-token')).body).toEqual({ stopped: false });
+    expect(cutoff).toHaveBeenCalledWith('owner');
     expect([...f.docs]).toEqual(before);
   });
 

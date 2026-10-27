@@ -3,7 +3,19 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // --- Primitives ---
-    function isSignedIn() { return request.auth != null; }
+    // A valid signature alone does not invalidate an already-issued token after global logout.
+    // Only the server writes this monotonic cutoff; absent/zero markers preserve existing accounts.
+    function sessionIsCurrent() {
+      let cutoff = get(/databases/$(database)/documents/session_revocations/$(request.auth.uid)).data.revokeTime;
+      return cutoff is int && cutoff >= 0 && (cutoff == 0
+        || (request.auth.token.auth_time >= cutoff
+          && (request.auth.token.firebase.sign_in_provider != 'custom' || 'session_auth_time' in request.auth.token)
+          && (!('session_auth_time' in request.auth.token) || request.auth.token.session_auth_time >= cutoff)));
+    }
+    function isSignedIn() {
+      return request.auth != null
+        && (!exists(/databases/$(database)/documents/session_revocations/$(request.auth.uid)) || sessionIsCurrent());
+    }
     function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
     function incoming() { return request.resource.data; }
@@ -188,12 +200,12 @@ service cloud.firestore {
       // approves (status→approved) or kicks (delete). A user may delete their own doc (leave).
       match /members/{memberId} {
         // Owner + approved members see the full roster; a requester can always read their OWN doc.
-        allow read: if canAccessCollab(roomId) || memberId == request.auth.uid;
+        allow read: if canAccessCollab(roomId) || isOwner(memberId);
         allow create: if isSignedIn() && memberId == request.auth.uid
                          && incoming().status in ['pending', 'approved']
                          && (incoming().status == 'approved' ? collabOwner(roomId) : true);
         allow update: if collabOwner(roomId); // only the owner approves/changes a member
-        allow delete: if collabOwner(roomId) || memberId == request.auth.uid; // owner kicks; a user can leave
+        allow delete: if collabOwner(roomId) || isOwner(memberId); // owner kicks; a user can leave
       }
 
       // Live cursors — approval-gated read; you may only write your OWN presence doc.

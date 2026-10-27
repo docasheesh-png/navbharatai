@@ -119,12 +119,17 @@ const FIREBASE_LOCAL_STORE_KEY = /firebaseLocalStorage/i;
  * from localStorage plus the admin session (localStorage flag + sessionStorage token). Kept in
  * ONE place so the three logout sites can never drift again. Best-effort throughout.
  */
-export function defaultClearAuthStorage(): void {
+export function clearAccountAuthStorage(): void {
   try {
     for (const k of Object.keys(localStorage)) {
       if (FIREBASE_AUTH_KEY.test(k) || FIREBASE_LOCAL_STORE_KEY.test(k)) localStorage.removeItem(k);
     }
   } catch { /* storage may be unavailable — reload still signs out */ }
+}
+
+/** Historical explicit current-device logout also clears this device's administrator login. */
+export function defaultClearAuthStorage(): void {
+  clearAccountAuthStorage();
   try {
     localStorage.removeItem('navbharat_admin_v1');
     localStorage.removeItem('admin_token');

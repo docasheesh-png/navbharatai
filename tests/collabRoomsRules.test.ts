@@ -89,7 +89,7 @@ describe('firestore.rules — collab_rooms OWNER APPROVAL + KICK (access control
     // approve / change status → owner only
     expect(mem).toMatch(/allow update: if collabOwner\(roomId\)/);
     // kick (owner) or leave (self)
-    expect(mem).toMatch(/allow delete: if collabOwner\(roomId\) \|\| memberId == request\.auth\.uid/);
+    expect(mem).toMatch(/allow delete: if collabOwner\(roomId\) \|\| isOwner\(memberId\)/);
   });
 
   it('code / chat / AI / presence reads are all approval-gated', () => {

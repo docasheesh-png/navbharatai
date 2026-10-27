@@ -8,6 +8,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 
 process.env.VITEST = 'true';
+vi.mock('../src/server/lib/authMiddleware', async original => ({
+  ...await original<typeof import('../src/server/lib/authMiddleware')>(),
+  verifyFirebaseSession: async () => ({ token: { uid: 'u1', auth_time: 1000 }, reason: 'ok' }),
+}));
 
 const SAVED: Array<{ uid: string; token: string; platform: string }> = [];
 const REMOVED: Array<{ uid: string; token: string }> = [];

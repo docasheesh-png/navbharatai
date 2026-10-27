@@ -221,7 +221,8 @@ export function buildWalletStatement(wallet: Record<string, unknown> | null | un
   const hiddenRows = num(w[LEDGER_DROPPED_FIELD]);
   // An account whose ledger is FULL and which carries no opening record predates this accounting.
   // Its oldest rows are genuinely gone, so the opening is an assumption, not a fact.
-  const openingIsAssumed = w[LEDGER_OPENING_FIELD] === undefined && ledger.length >= MAX_WALLET_LEDGER_ENTRIES;
+  const projected = w.walletStatementProjection === 'admin-build';
+  const openingIsAssumed = projected || (w[LEDGER_OPENING_FIELD] === undefined && ledger.length >= MAX_WALLET_LEDGER_ENTRIES);
 
   let running = openingTokens;
   let creditTokens = 0;
@@ -252,7 +253,9 @@ export function buildWalletStatement(wallet: Record<string, unknown> | null | un
     ? 'unknown'
     : differenceTokens === 0 ? 'balanced' : 'off';
 
-  if (openingIsAssumed) {
+  if (projected) {
+    notes.push('This view shows explicit admin-credit movements only. Its historical opening is not separately recorded, so it cannot be fully reconciled against the current balance.');
+  } else if (openingIsAssumed) {
     notes.push(
       `This statement begins at the oldest entry still held. ${hiddenRows > 0 ? `${hiddenRows} earlier entries` : 'Earlier entries'} rolled off before opening balances were recorded, so the total below cannot be checked against the balance.`,
     );
@@ -268,7 +271,9 @@ export function buildWalletStatement(wallet: Record<string, unknown> | null | un
 
   const carryTokens = num(w[TOKEN_CARRY_FIELD]);
   if (carryTokens > 0) {
-    notes.push('A charge smaller than ₹0.01 is carried to your next charge rather than rounded up, so it is not shown as a line yet.');
+    notes.push(w.adminBuildTokensRemaining !== undefined
+      ? 'Unbilled fractional charges are carried separately by eligible funding source. Merged accounts may carry more than one token; unpaid amounts are retained, never silently dropped.'
+      : 'A charge smaller than ₹0.01 is carried to your next charge rather than rounded up, so it is not shown as a line yet.');
   }
 
   // The ₹ view. It may legitimately differ — a Pass buyer's two views differ by the Pass price,

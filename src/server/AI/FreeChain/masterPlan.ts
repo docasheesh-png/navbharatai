@@ -3,7 +3,7 @@
  * runtime.ts. Every feature here is default ON with an env kill switch (see FreeChainFeatures).
  * Never logs prompts, keys or user text.
  */
-import { LANGUAGE_RULE } from '../../AgentV3/systemPrompt';
+import { FREE_CHAT_LANGUAGE_RULE } from '../../lib/freeChatReplyLanguage';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../../lib/prompts';
 import { freeChatModeGuide } from '../../lib/freeChatModeGuide';
 import { FREE_ANSWER_ALL_RULES } from '../../lib/freeChatReplies';
@@ -100,7 +100,7 @@ const RECENCY_RE = /CURRENT DATE & RECENCY \(MANDATORY\):[\s\S]*?(?=\n\n|$)/u;
  */
 export function compactCore(answerAll: boolean): string {
   return `You are NavBharatAI — India's own friendly AI companion (by NavBharat team).
-${LANGUAGE_RULE}
+${FREE_CHAT_LANGUAGE_RULE}
 
 STYLE: warm, respectful, culturally aware Indian friend; crisp and accurate; match the user's mood. Use जी/ज़रूर naturally and sparingly. Never repeat the same opener. Never mention memory or profile.
 GREETINGS: if the user greets, reply once with the SAME greeting style (राम-राम → राम-राम!, नमस्ते → नमस्ते!, Salam → वअलैकुम अस्सलाम!, Sat Sri Akal → सत श्री अकाल जी!, Hi → Hi!). A direct question gets NO greeting — just the answer.

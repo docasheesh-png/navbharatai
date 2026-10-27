@@ -15,6 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { braceBlock, codeOnly } from './helpers/sourceSlice';
 import { AIRouter } from '../src/server/AI/Router/AIRouter';
 import type { AIProvider } from '../src/server/AI/Router/ProviderTypes';
 
@@ -82,12 +83,19 @@ describe('the signal reaches the provider from the route', () => {
 
   it('the sequential ladder passes it, watchdog or not', () => {
     const src = read('src/server/AI/Router/AIRouter.ts');
-    expect(src).toContain('await p.executeStream(prompt, systemPrompt, onChunk, undefined, signal)');
-    expect(src).toContain('p.executeStream!(prompt, systemPrompt, cb, undefined, signal)');
+    const sequential = src.slice(src.indexOf('private async streamSequential('), src.indexOf('async routeStream('));
+    expect(sequential).toContain('p.executeStream!(prompt, systemPrompt, (text) => {');
+    expect(sequential).toContain('AbortSignal.any([signal, attempt.signal])');
+    expect(sequential).toContain('}, undefined, attemptSignal)');
+    expect(sequential).toContain('attempt.abort(new Error(watched.verdict))');
+    expect(sequential).toContain('await run(onChunk)');
+    expect(sequential).toMatch(/runWatchedStream\(\s*run,/);
   });
 
   it('the RACE passes it too — a raced turn pays two providers, so it has twice the reason to', () => {
-    expect(read('src/server/AI/Router/AIRouter.ts')).toContain('}, undefined, signal).then(() => {');
+    const race = braceBlock(codeOnly(read('src/server/AI/Router/AIRouter.ts')), 'const runStream =');
+    expect(race).toContain('await p.executeStream!(prompt, systemPrompt, (chunk) => {');
+    expect(race).toContain('}, undefined, signal);');
   });
 
   it('chat.ts still aborts its controller when the client goes (the first half, not undone)', () => {

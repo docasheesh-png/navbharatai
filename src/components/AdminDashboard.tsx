@@ -28,6 +28,7 @@ import {
   tabBarBadges, tabHint, type AdminTabId, type AdminPageId,
 } from '../lib/adminTabs';
 import { banCopy, tokenAdjustCopy, broadcastCopy, readTokenDelta, readAdminReason, ALL_USERS_SCOPE } from '../lib/adminActionReason';
+import type { AdminGiftReclassificationPreview } from '../lib/adminGiftReclassification';
 import { adminMfaWarning } from '../lib/adminMfaWarning';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon, RotateCcw } from 'lucide-react';
@@ -304,7 +305,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    */
   type PendingAdminAction =
     | { kind: 'ban'; userId: string; who: string; banned: boolean; after?: () => void }
-    | { kind: 'tokens'; userId: string; who: string; delta: number; balance: number | null }
+    | { kind: 'tokens'; requestId: string; userId: string; who: string; delta: number; balance: number | null }
+    | { kind: 'reclassify'; userId: string; requestId: string; preview: AdminGiftReclassificationPreview }
     | { kind: 'message'; target: 'all' | 'user'; email: string; message: string };
   const [pendingAction, setPendingAction] = useState<PendingAdminAction | null>(null);
   const [pendingBusy, setPendingBusy] = useState(false);
@@ -1633,7 +1635,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const handleTokenAdjust = (userId: string, who: string, balance: number | null) => {
     const d = readTokenDelta(tokenDelta);
     if (!('delta' in d)) { toast(d.error); return; }
-    setPendingAction({ kind: 'tokens', userId, who, delta: d.delta, balance });
+    setPendingAction({ kind: 'tokens', requestId: crypto.randomUUID(), userId, who, delta: d.delta, balance });
+  };
+
+  /** Existing gift eligibility is a different action from Add tokens. Always fetch a fresh preview. */
+  const handleGiftReclassification = async (userId: string) => {
+    const raw = window.prompt('How many EXISTING gift tokens should become Weak-build-only credits? This does not add tokens or money.');
+    if (raw === null) return;
+    const amount = Number(raw);
+    if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 10_000_000) { toast('Enter a positive whole-token amount up to 10,000,000.'); return; }
+    setActionLoading(userId + '_reclassify');
+    try {
+      const r = await adminPost(`/api/admin/users/${encodeURIComponent(userId)}/weak-credit/preview`, { amount });
+      if (!r.ok) { toast('Not changed: ' + (r.error || 'Could not read this wallet.')); return; }
+      setPendingAction({ kind: 'reclassify', userId, requestId: crypto.randomUUID(), preview: r.preview });
+    } catch { toast('Could not read this wallet. No balance or credit was changed.'); }
+    finally { setActionLoading(null); }
   };
 
   /** Opens the confirmation for a ban (reason required) or for lifting one (reason optional). */
@@ -1654,11 +1671,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         else toast('Not done: ' + (r.error || 'unknown error'));
       } else if (a.kind === 'tokens') {
         setActionLoading(a.userId);
-        const r = await adminPost(`/api/admin/users/${a.userId}/tokens`, { delta: a.delta, reason });
+        const r = await adminPost(`/api/admin/users/${a.userId}/tokens`, { delta: a.delta, reason, requestId: a.requestId });
         if (r.ok) {
           toast(`Tokens adjusted: ${Number(r.previousBalance ?? 0).toLocaleString('en-IN')} → ${Number(r.newBalance ?? 0).toLocaleString('en-IN')}`);
           fetchUsers(); setTokenDelta(''); setSelectedUserId(''); setPendingAction(null);
         } else toast('Not done: ' + (r.error || 'unknown error'));
+      } else if (a.kind === 'reclassify') {
+        try {
+          const r = await adminPost(`/api/admin/users/${encodeURIComponent(a.userId)}/weak-credit/confirm`, {
+            amount: a.preview.amount, fingerprint: a.preview.fingerprint, requestId: a.requestId, reason,
+          });
+          if (r.ok) {
+            toast(`${Number(r.reclassifiedTokens).toLocaleString('en-IN')} existing gift tokens enabled for Weak builds. Total balance unchanged; no new credit.`);
+            fetchUsers(); setPendingAction(null);
+          } else toast((r.outcomeUnknown ? 'Status unknown: ' : 'Not changed: ') + (r.error || 'Refresh the preview before retrying.'));
+        } catch {
+          // Preserve the same request ID: a lost response is not proof that the transaction failed.
+          toast('Confirmation status unknown. Retry this same confirmation to check it safely; do not start a new adjustment.');
+        }
       } else {
         const r = await adminPost('/api/admin/announcement', {
           message: a.message,
@@ -1796,11 +1826,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
             ? banCopy(pendingAction.who, pendingAction.banned)
             : pendingAction.kind === 'tokens'
               ? tokenAdjustCopy(pendingAction.who, pendingAction.delta, pendingAction.balance)
-              : broadcastCopy(pendingAction.target, pendingAction.email)}
+              : pendingAction.kind === 'reclassify'
+                ? { title: 'Reclassify existing gift tokens?', consequence: 'This is a new eligibility decision on existing tracked gifts, not proof of an old grant and not a new deposit. These tokens will work only for Weak app builds, not Normal, Strong or hosting purchases.', confirmLabel: 'Reclassify — no new credit', reasonRequired: true, danger: true }
+                : broadcastCopy(pendingAction.target, pendingAction.email)}
           busy={pendingBusy}
           onCancel={() => { if (!pendingBusy) setPendingAction(null); }}
           onConfirm={(reason) => void runPendingAction(reason)}
         >
+          {pendingAction.kind === 'reclassify' && (
+            <div className="text-xs text-body space-y-1 break-words">
+              <p>Account: {pendingAction.preview.accountEmail || 'Email not recorded'}</p>
+              <p>Canonical wallet: {pendingAction.preview.canonicalUserId}</p>
+              <p>Existing available gifts: {pendingAction.preview.availableGiftTokens.toLocaleString('en-IN')} tokens</p>
+              <p>Weak-only credits: {pendingAction.preview.adminTokens.toLocaleString('en-IN')} → {pendingAction.preview.afterAdminTokens.toLocaleString('en-IN')}</p>
+              <p>Total stays {pendingAction.preview.balanceTokens.toLocaleString('en-IN')} tokens / ₹{pendingAction.preview.remainingInr.toFixed(2)}. Purchased funds and pending charges do not change.</p>
+            </div>
+          )}
+          {pendingAction.kind === 'tokens' && pendingAction.delta > 0 && (
+            <p className="text-xs text-muted">These are gift credits for Weak app builds only, not purchased balance. They cannot fund Normal, Strong, or hosting.</p>
+          )}
           {pendingAction.kind === 'message' && (
             <div className="space-y-2">
               <p className="text-[11px] font-bold text-muted">
@@ -2394,6 +2438,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                       hover underline and a tooltip so it still reads as clickable. */}
                                   <button onClick={() => { setSelectedUserId(u.userId); setTokenDelta(''); }} className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[9px] font-black text-warn uppercase hover:bg-amber-500/20 transition-all">
                                     Tokens
+                                  </button>
+                                  <button onClick={() => void handleGiftReclassification(u.userId)} disabled={actionLoading === u.userId + '_reclassify'} title="Preview reclassifying existing tracked gifts; adds no tokens or money" className="px-2 py-1 bg-well border border-line rounded-lg text-[9px] font-black text-ink uppercase">
+                                    Existing gifts → Weak
                                   </button>
                                   <button onClick={() => handleBan(u.userId, !u.banned, u.email || u.name || u.userId)} disabled={actionLoading === u.userId + '_ban'} className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-all border ${u.banned ? 'bg-emerald-500/10 border-emerald-500/20 text-success hover:bg-emerald-500/20' : 'bg-red-500/10 border-red-500/20 text-danger hover:bg-red-500/20'}`}>
                                     {actionLoading === u.userId + '_ban' ? '...' : u.banned ? 'Unban' : 'Ban'}
@@ -4831,7 +4878,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   )}
                 />
                 <p className="text-[10px] text-muted">
-                  Numbers run oldest (1) to newest across all retained latest-per-workspace reports, before filters. Existing ranks may use a 10-minute snapshot; new builds refresh it after a short cooldown. Temporary failures retry twice. Retention can change numbers. Showing {allBuilds.length}
+                  Chronological ranks (#1 oldest → newest) across retained latest-per-workspace reports, before filters — separate from the retained-failure chronological ranks on /failedbr; existing permanent IDs are shown separately. Existing ranks may use a 10-minute snapshot; new builds refresh after a short cooldown. Temporary failures retry twice. Retention can change these ranks. Missing ranks show — n/a. Showing {allBuilds.length}
                   {allBuildsFetched && allBuildsFetched.fetched >= allBuildsFetched.limit
                     /* Honest about the fetch ceiling: at the limit there may be OLDER builds this
                        list has not looked at, so "0 failed" must not read as "none exist". */
@@ -4849,7 +4896,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         onClick={() => void expandWorkspaceBuilds(b.workspaceId)}
                         className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-raised"
                       >
-                        <BuildReportNumber numbering={b.numbering} />
+                        <BuildReportNumber numbering={b.numbering} kind="chronological" />
                         <span className={`shrink-0 w-2 h-2 rounded-full ${b.ok === true ? 'bg-emerald-400' : b.ok === false ? 'bg-rose-400' : 'bg-faint'}`} />
                         <span className="flex-1 min-w-0">
                           <span className="block text-[12px] font-bold text-ink truncate">{b.prompt || b.summary || b.workspaceId}</span>

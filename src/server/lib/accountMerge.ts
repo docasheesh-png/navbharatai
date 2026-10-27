@@ -1,3 +1,4 @@
+import { mergeCarryPatch } from './walletCarry';
 // Account/wallet MERGE — the money-critical core of "one person = one wallet" (admin 2026-07-16).
 //
 // When two wallets are PROVEN to belong to the same person (via account-linking — NEVER from merely
@@ -14,6 +15,7 @@
 // (which would double the welcome bonus and mis-handle a partially-spent bonus). PURE + unit-tested; the
 // CALLER owns the "is this really the same person?" proof — this module never decides identity.
 
+import { adminBuildRemaining, giftRemaining } from './giftSpend';
 import { TOKENS_PER_RUPEE, welcomeBonusTokens } from './payments';
 import { MAX_WALLET_LEDGER_ENTRIES } from './walletDebit';
 
@@ -66,7 +68,20 @@ export function mergeWallets(into: Wallet, other: Wallet, nowIso: string): Merge
   const totalUsed = num(into.totalTokensUsed) + num(other.totalTokensUsed);
 
   // Balance from first principles — this is what prevents welcome-farming AND carries debt.
-  const mergedTokenBalance = realPurchased + welcomeGranted - totalUsed;
+  const explicitAdminCredit = into.adminBuildTokensRemaining !== undefined || other.adminBuildTokensRemaining !== undefined;
+  if (explicitAdminCredit && [into, other].some(w => Array.isArray(w.walletLedger)
+    && w.walletLedger.some((row: any) => Array.isArray(row?.openHolds) && row.openHolds.length > 0))) {
+    throw new Error('Finish pending wallet reservations before merging these accounts. No balance changed.');
+  }
+  // Explicit grants are NOT purchases. Reconstructing only from purchased totals would erase them
+  // (and re-add reversed money). For wallets with this provenance, preserve actual settled balances,
+  // retaining the same one-welcome anti-farming subtraction and every rupee of debt.
+  const mergedTokenBalance = explicitAdminCredit
+    ? num(into.tokenBalance) + num(other.tokenBalance) - (bothHadWelcome ? welcome : 0)
+    : realPurchased + welcomeGranted - totalUsed;
+  const mergedGift = Math.max(0, Math.min(mergedTokenBalance,
+    giftRemaining(into) + giftRemaining(other) - (bothHadWelcome ? welcome : 0)));
+  const mergedAdmin = Math.min(mergedGift, adminBuildRemaining(into) + adminBuildRemaining(other));
   const mergedRemainingInr = Math.round((mergedTokenBalance / TOKENS_PER_RUPEE) * 100) / 100;
 
   const outputUsed = num(into.total_output_tokens_used) + num(other.total_output_tokens_used);
@@ -94,6 +109,7 @@ export function mergeWallets(into: Wallet, other: Wallet, nowIso: string): Merge
 
   const mergeEntry = {
     type: 'admin_adjustment' as const,
+    ...(explicitAdminCredit ? { adminBuildTokensDelta: mergedAdmin - adminBuildRemaining(into) - adminBuildRemaining(other) } : {}),
     amountCoinsOrTokens: mergedTokenBalance - num(into.tokenBalance),
     moneySpent: 0,
     timestamp: nowIso,
@@ -129,6 +145,12 @@ export function mergeWallets(into: Wallet, other: Wallet, nowIso: string): Merge
       + Math.max(0, (Array.isArray(into.walletLedger) ? into.walletLedger.length : 0)
         + (Array.isArray(other.walletLedger) ? other.walletLedger.length : 0) + 1 - ledger.length),
     tokenBalance: mergedTokenBalance,
+    ...(explicitAdminCredit ? {
+      ...mergeCarryPatch(into, other),
+      giftTokensRemaining: mergedGift,
+      adminBuildTokensRemaining: mergedAdmin,
+      adminBuildTokensTotalGranted: num(into.adminBuildTokensTotalGranted) + num(other.adminBuildTokensTotalGranted),
+    } : {}),
     remaining_balance: mergedRemainingInr,
     total_balance: mergedRemainingInr,
     totalTokensPurchased: purchasedTotal,

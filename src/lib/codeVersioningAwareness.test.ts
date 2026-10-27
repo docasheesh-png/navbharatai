@@ -5,6 +5,8 @@ import { APP_KNOWLEDGE_BASE } from '../server/AppContext/AppKnowledgeBase';
 // Admin 2026-07-24: make every AI aware of Code Versioning and, whenever a user expresses the INTENT to
 // undo / go back / reverse a change (in ANY wording, not one literal phrase), guide them to restore an
 // earlier version. These tests lock the intent-based awareness across Free / Pro (the Offline AI was deleted in #2948).
+// Admin 2026-10-26: In Pro, undo is handled in-chat via the version picker — KB must not send Pro users
+// to Other → Versioning for that intent.
 
 const cv = APP_KNOWLEDGE_BASE.find(f => f.id === 'code_versioning');
 
@@ -43,4 +45,9 @@ describe('Code Versioning — intent-based undo awareness', () => {
     }
   });
 
+  it('Pro howToUse tells the AI to handle undo in Pro — not to send users to Versioning menu', () => {
+    expect(cv!.howToUse).toMatch(/NavBharatAI Pro/i);
+    expect(cv!.howToUse).toMatch(/picker|History tab|tap Restore/i);
+    expect(cv!.description).toMatch(/Do NOT tell a Pro user to open Other/i);
+  });
 });

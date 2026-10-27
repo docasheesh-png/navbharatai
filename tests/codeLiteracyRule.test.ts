@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { CODE_LITERACY_RULE, planSystemPrompt } from '../src/server/AgentV3/systemPrompt';
+import { FREE_CHAT_LANGUAGE_RULE } from '../src/server/lib/freeChatReplyLanguage';
 
 /**
  * CODE LITERACY IN THE USER'S LANGUAGE (ROADMAP 9.1a–c) — the rule, and where it must hold.
@@ -17,9 +18,8 @@ import { CODE_LITERACY_RULE, planSystemPrompt } from '../src/server/AgentV3/syst
  *    just quietly turn into translated Hindi and the feature damages the trust it was built to earn.
  *
  * 2. THE SURFACES (9.1a/b). A prompt rule only holds on prompts that carry it. The composition
- *    sites are string concatenations inside a route file that cannot be executed in a unit test, so
- *    they are pinned at source level — the same honest trade as the cache-prefix and realism-tier
- *    pins, and recorded here for the same reason.
+ *    sites are pinned at source level here; freeChatReplyLanguageRoute.test.ts additionally captures
+ *    the actual Free chat router request so moving the shared rule cannot silently drop it.
  */
 
 describe('the rule itself', () => {
@@ -59,7 +59,9 @@ describe('the surfaces that must carry it', () => {
 
   it('the free chat carries the register + explain-errors halves', () => {
     const chat = readFileSync(join(process.cwd(), 'src/server/routes/chat.ts'), 'utf8');
-    expect(chat).toContain('never translate technical terms into Hindi words');
-    expect(chat).toContain('what it means and what to change');
+    expect(chat).toContain('const LANGUAGE_RULE = FREE_CHAT_LANGUAGE_RULE;');
+    expect(chat.match(/\$\{LANGUAGE_RULE\}/g)).toHaveLength(4);
+    expect(FREE_CHAT_LANGUAGE_RULE).toContain('keep technical nouns (variable, function, error, loop, deploy, API) in English');
+    expect(FREE_CHAT_LANGUAGE_RULE).toContain('explain what an error means and what to change');
   });
 });

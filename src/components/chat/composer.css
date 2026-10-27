@@ -1,0 +1,260 @@
+/*
+ * Unified composer pad (admin 2026-10-26, revised):
+ *   ┌─ Type ………………… (Send) ─┐
+ *   │ tools …                    │
+ *   └────────────────────────────┘
+ * No horizontal divider cutting the pad in two. Send sits on the Type
+ * field's right edge (mobile + desktop). Popovers escape with position:fixed.
+ */
+
+.nb-composer-tools, .nb-composer-tools-content { display: contents; }
+.nb-composer-tools-toggle { display: none !important; }
+
+.nb-composer-box {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: visible;
+}
+
+/* Type row — compact resting height; right padding clears the Send circle. */
+.nb-composer-box .nb-composer-text {
+  display: block;
+  min-height: 40px !important;
+  max-height: min(120px, 22dvh) !important;
+  padding: 10px 52px 10px 14px !important;
+  font-size: 16px;
+  line-height: 24px;
+  transition: none;
+  overflow-y: auto;
+  resize: none;
+}
+
+/* Tools row under Type — no divider line. */
+.nb-composer-box [data-composer-toolbar] {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  height: auto !important;
+  min-height: 44px;
+  padding: 4px 8px 8px !important;
+  border-top: none !important;
+  overflow: visible;
+}
+
+.nb-composer-controls { display: contents; }
+
+/* Send on the Type field's right edge. */
+.nb-composer-send-slot {
+  position: absolute !important;
+  right: 8px !important;
+  top: 50% !important;
+  bottom: auto !important;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: 0;
+  z-index: 2;
+}
+
+.nb-composer-send-slot > button {
+  width: 36px;
+  height: 36px;
+}
+
+/* Tools always visible in the action bar (no + disclosure). */
+.nb-composer-tools {
+  display: contents;
+  position: static;
+  height: auto;
+  inset: auto;
+  pointer-events: auto;
+  z-index: auto;
+}
+
+.nb-composer-tools-content,
+.nb-composer-tools-content[data-open="true"],
+.nb-composer-tools-content[data-open="false"] {
+  display: flex !important;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  position: static !important;
+  inset: auto !important;
+  width: auto;
+  max-width: none;
+  max-height: none;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  overflow-x: auto;
+  overflow-y: visible !important;
+  pointer-events: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.nb-composer-tools-content button {
+  min-height: 32px;
+  min-width: 32px;
+  flex-shrink: 0;
+}
+
+/*
+ * Build / Settings / Attach menus — escape the pad so they are never a thin
+ * clipped gray strip. !important beats Tailwind `absolute` / `left-0` / `w-56`.
+ */
+.nb-composer-box .absolute.bottom-full,
+.nb-composer-tools-content .absolute.bottom-full,
+.nb-pro-controls .absolute.bottom-full {
+  position: fixed !important;
+  left: 12px !important;
+  right: 12px !important;
+  bottom: var(--nb-composer-menu-bottom, 72px) !important;
+  width: auto !important;
+  min-width: min(18rem, calc(100vw - 24px)) !important;
+  max-width: calc(100vw - 24px) !important;
+  max-height: var(--nb-composer-menu-max-height, 50dvh) !important;
+  overflow-y: auto !important;
+  z-index: 80 !important;
+}
+
+@media (max-width: 639px) {
+  [data-attach-menu] {
+    position: fixed !important;
+    left: 12px !important;
+    right: 12px !important;
+    bottom: var(--nb-composer-menu-bottom, 72px) !important;
+    width: auto !important;
+    min-width: min(18rem, calc(100vw - 24px)) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: var(--nb-composer-menu-max-height, 50dvh) !important;
+    overflow-y: auto !important;
+    z-index: 80 !important;
+  }
+}
+
+/* —— Pro surface: Type first (with Send on its right), tools below, no divider —— */
+.nb-composer-box[data-composer-surface="pro"] {
+  margin-top: 4px;
+  margin-bottom: 4px;
+  gap: 0;
+}
+
+/*
+ * MobileComposerTools wraps ChatToolbar + tools BEFORE Type in the DOM. Flatten
+ * wrappers so CSS order works (Type=1, tools=2) on desktop too.
+ */
+.nb-composer-box[data-composer-surface="pro"] > .nb-composer-tools,
+.nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content,
+.nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content[data-open="true"],
+.nb-composer-box[data-composer-surface="pro"] .nb-composer-tools-content[data-open="false"] {
+  display: contents !important;
+}
+
+.nb-composer-box[data-composer-surface="pro"] .nb-pro-controls {
+  order: 2 !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 44px;
+  max-width: none;
+  padding: 4px 8px 8px !important;
+  border-top: none !important;
+  overflow: visible !important;
+}
+
+.nb-composer-box[data-composer-surface="pro"] [data-tour="chat"] {
+  order: 1 !important;
+  position: relative;
+  width: 100%;
+}
+
+.nb-composer-box[data-composer-surface="pro"] .nb-composer-text {
+  min-height: 40px !important;
+  max-height: min(72px, 14dvh) !important;
+  padding: 10px 92px 10px 14px !important; /* room for Stop+Send while steering */
+}
+
+.nb-composer-box[data-composer-surface="pro"][data-expanded="true"] .nb-composer-text {
+  max-height: 50dvh !important;
+}
+
+/* Pro Send on Type right edge (same rule as Free). */
+.nb-composer-box[data-composer-surface="pro"] .nb-pro-send-slot {
+  position: absolute !important;
+  right: 8px !important;
+  top: 50% !important;
+  bottom: auto !important;
+  transform: translateY(-50%);
+  margin-left: 0;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 2;
+}
+
+.nb-composer-box[data-composer-surface="pro"] .nb-pro-send-btn {
+  position: static !important;
+  width: 36px !important;
+  height: 36px !important;
+  right: auto !important;
+  bottom: auto !important;
+}
+
+/* Duplicate ↵ Send pill inside the Pro pad — hide; real Send is the arrow. */
+.nb-composer-box[data-composer-surface="pro"] .nb-send-enter-toggle,
+.nb-composer-box[data-composer-surface="pro"] [data-send-enter-toggle] {
+  display: none !important;
+}
+
+.nb-composer-box[data-composer-surface="pro"] .nb-pro-expand-mobile {
+  display: none !important;
+}
+
+.nb-composer-box[data-composer-surface="pro"] .nb-pro-expand-desktop {
+  display: flex !important;
+  position: static !important;
+  right: auto !important;
+  bottom: auto !important;
+  margin-left: auto;
+}
+
+.nb-composer-box[data-composer-surface="pro"] .nb-pro-suggestions-corner {
+  display: none;
+}
+
+/* ChatToolbar row inside Pro tools — compact, no extra chrome height. */
+.nb-composer-box[data-composer-surface="pro"] .order-0 {
+  order: 0;
+  width: 100%;
+  padding: 4px 8px 0 !important;
+}
+
+@media (min-width: 640px) {
+  .nb-pro-expand-mobile { display: none; }
+  .nb-composer-box .nb-composer-text {
+    max-height: min(160px, 30dvh) !important;
+  }
+  .nb-composer-box[data-composer-surface="pro"] .nb-composer-text {
+    max-height: min(160px, 30dvh) !important;
+  }
+  /* Circular pad Send is the primary control — hide the duplicate ↵ Send chip on desktop.
+     Search / Clear chips stay. */
+  .nb-send-enter-toggle,
+  [data-send-enter-toggle] {
+    display: none !important;
+  }
+}
+
+@media (max-width: 639px) {
+  .nb-composer-box { border-radius: 22px; }
+  .nb-composer-box.nb-composer-no-tools .nb-composer-text { padding-left: 16px !important; }
+  /* Free/shared: no Search/Clear chrome crowding the action bar. */
+  .nb-composer-tools-content > .order-0 { display: none !important; }
+}

@@ -1,15 +1,26 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   resolve: vi.fn(),
   safe: vi.fn((r: string) => r),
+  skip: vi.fn(() => false),
 }));
 vi.mock('./admitOrFallback', () => ({
   resolveProBuildSurplusAdmission: mocks.resolve,
   safeSurplusAdmissionReason: mocks.safe,
 }));
+vi.mock('./surplusAdmitCircuit', () => ({
+  shouldSkipSurplusAdmit: () => mocks.skip(),
+  SURPLUS_ADMIT_CIRCUIT_OPEN_REASON: 'admit_circuit_open',
+}));
 
 import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag } from './surplusChatAdmission';
+
+beforeEach(() => {
+  mocks.skip.mockReturnValue(false);
+  mocks.resolve.mockReset();
+  mocks.safe.mockImplementation((r: string) => r);
+});
 
 describe('runWeakSurplusAdmissionForChat (Weak-only, chat-handler budget)', () => {
   it('skips Normal/Strong and plain chat without calling admission', async () => {
@@ -61,6 +72,35 @@ describe('runWeakSurplusAdmissionForChat (Weak-only, chat-handler budget)', () =
       tierEngineAvailable: () => true, audit,
     });
     expect(gate).toMatchObject({ ok: true, session: undefined, diag: { code: 'SURPLUS_FALLBACK', reason: 'stale_or_missing_snapshot' } });
+  });
+
+  it('skips Surplus admit when the overload circuit is open (SURPLUS_FALLBACK admit_circuit_open)', async () => {
+    mocks.skip.mockReturnValue(true);
+    const audit = vi.fn();
+    const gate = await runWeakSurplusAdmissionForChat({
+      powerLevel: 'weak', intent: 'build', hasImportIntent: false, prompt: 'Build X', buildId: 'b-circuit',
+      tierEngineAvailable: () => true, audit,
+    });
+    expect(gate).toMatchObject({
+      ok: true, session: undefined,
+      diag: { code: 'SURPLUS_FALLBACK', reason: 'admit_circuit_open' },
+    });
+    expect(mocks.resolve).not.toHaveBeenCalled();
+    expect(audit).toHaveBeenCalledWith(
+      'AGENTV3_SURPLUS_FALLBACK_TO_WEAK',
+      { reason: 'admit_circuit_open', phase: 'admit_circuit' },
+      'warn',
+    );
+  });
+
+  it('hard-fails when admit circuit is open AND Weak ladder is unavailable', async () => {
+    mocks.skip.mockReturnValue(true);
+    const gate = await runWeakSurplusAdmissionForChat({
+      powerLevel: 'weak', intent: 'build', hasImportIntent: false, prompt: 'Build X', buildId: 'b-circuit-hard',
+      tierEngineAvailable: () => false, audit: vi.fn(),
+    });
+    expect(gate).toMatchObject({ ok: false, afterSurplusFallback: true, diag: { code: 'SURPLUS_FALLBACK', reason: 'admit_circuit_open' } });
+    expect(mocks.resolve).not.toHaveBeenCalled();
   });
 });
 

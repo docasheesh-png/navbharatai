@@ -1,7 +1,11 @@
+import { chatAvailabilityMessage } from '../lib/chatAvailabilityMessage';
+import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../lib/chatReplyLanguage';
+import { FREE_CHAT_LANGUAGE_RULE, chatReplyLanguageInstruction } from '../lib/freeChatReplyLanguage';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { withFreeAnswerQuota, assertFreeAnswerActive, markFreeAnswer, freeAnswerSignal } from '../lib/freeAnswerQuota';
 import { withFreeChainEntryAdmission } from '../AI/FreeChain/entryAdmission';
 import { freeChainRequestContext } from '../AI/FreeChain/requestContext';
+import { unavailableChatReply } from '../../lib/chatRouteOutcome';
 import { usageLogFields } from '../AI/Router/usageLogFields';
 import { freeModuleInferenceScope, runAdmittedLegacyImageEdit } from '../AI/inferencePolicy';
 import { strictFreeRequired, StrictFreeCapabilityError } from '../AI/inferencePolicy';
@@ -18,7 +22,6 @@ import { clientPlatform } from '../AppContext/iosPurchaseGuard';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { toSafeClientMessage } from '../lib/httpError';
 import { runVisionChain } from '../lib/visionChain';
-import { freeBusyMessage } from '../lib/freeBusyMessage';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { groundingStatusFor, firstTokenLog } from '../lib/chatGrounding';
 import { songcraftFor } from '../AI/songcraft';
@@ -114,8 +117,7 @@ async function withChatTextGateway<T>(req: Request, res: Response, handler: () =
         res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders();
       }
-      res.write(`data: ${JSON.stringify({ c: reply, error: reply, code })}\n\n`);
-      res.end();
+      res.end(`data: ${JSON.stringify({ c: reply, error: reply, code })}\n\n`);
     } else if (!res.headersSent) res.status(503).json({ code, reply });
   }
 }
@@ -127,13 +129,7 @@ async function withChatTextGateway<T>(req: Request, res: Response, handler: () =
  * deprecated/removed. Routing to providers is delegated to the shared aiRouter.
  */
 export function registerChatRoutes(app: Express, chatLimiter: RateLimitRequestHandler): void {
-  const LANGUAGE_RULE = `
-LANGUAGE RULE (MANDATORY):
-- Detect the language/tone/style the user is writing in
-- Reply in EXACTLY the same language, tone, and emotion — Hindi, English, Hinglish, Tamil, Telugu, Bengali, Marathi, Punjabi, or any other language
-- If user writes casually → you write casually; if formally → formally; if with emojis → with emojis
-- EXCEPTION: All code (variable names, comments, function names, strings) must ALWAYS be in professional English regardless of conversation language
-- EXPLAINING CODE OR AN ERROR in Hindi/Hinglish/another Indian language: keep every technical noun in ENGLISH (variable, function, error, loop, deploy, API) inside the user's grammar — never translate technical terms into Hindi words. And never show an error without immediately saying, in the user's language, what it means and what to change`;
+  const LANGUAGE_RULE = FREE_CHAT_LANGUAGE_RULE;
 
   const SYSTEM_PROMPT_EDIT = `You are NavBharatAI — world's best AI App Editor.
 ${LANGUAGE_RULE}
@@ -353,6 +349,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // Bounded BEFORE any extraction or provider call (chatInputLimits.ts, forensic audit 2026-10-04).
     const limits = checkChatInput({ message, fileAttachments, history });
     if (!limits.ok) return res.status(limits.status).json({ reply: limits.reply });
+    // Resolve from user text before attachment injection and history trimming.
+    const replyLanguage = resolveChatReplyLanguage(message, history, req.body.replyLanguage);
     history = limits.history;
 
     // Process attached files
@@ -432,7 +430,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       if (answerAll) {
         systemPrompt = systemPrompt.replace(/APP BUILDING — LEAD WITH NavBharatAI Pro[\s\S]*?(?=\nHARD LIMITS:)/, `${FREE_ANSWER_ALL_RULES}\n`)
           .replace('(guide them to NavBharatAI Pro instead, per the rule above)', '(for an app request, explain the idea instead, per the rule above)');
-        if (appAsk) systemPrompt = `${systemPrompt}\n\n${appRequestDirective(detectReplyLanguage(message))}`;
+        if (appAsk) systemPrompt = `${systemPrompt}\n\n${appRequestDirective(replyLanguage ? chatReplyLanguageCategory(replyLanguage) : detectReplyLanguage(message))}`;
       }
     } else if (hasCanvas) {
       systemPrompt = SYSTEM_PROMPT_EDIT;
@@ -484,7 +482,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
             res.flushHeaders();
           }
           if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: direct })}\n\n`);
-          if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+          if (!res.writableEnded) { res.end('data: [DONE]\n\n'); }
         } else {
           res.json({ reply: direct });
         }
@@ -519,6 +517,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // change. It is not a judgement that paid answers read better unshaped — widening it is this one
     // condition, deliberately left for them to ask for rather than taken on their behalf.
     if (isFree) systemPrompt = `${systemPrompt}${answerShapeFor(message)}`;
+
+    systemPrompt += chatReplyLanguageInstruction(replyLanguage);
 
     // Every chat tier credits its creators consistently (single source of truth).
     systemPrompt = `${systemPrompt}\n\n${CREATOR_IDENTITY}`;
@@ -587,7 +587,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
             res.flushHeaders();
           }
           if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: reply })}\n\n`);
-          if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+          if (!res.writableEnded) { res.end('data: [DONE]\n\n'); }
         } else {
           res.json({ reply });
         }
@@ -667,10 +667,11 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         allowClaude: !isFree, // absolute rule: the Free universe NEVER uses Claude
         tier: isFree ? 'free' : 'paid', // Free: GLM → flash-lite → flash only, under the shared daily cap
       });
-      if (visionResult) {
-        console.log(`[CHAT/VISION] tier=${tier} provider=${visionResult.provider} files=${visionAttachments.length}`);
+      const answered = !!visionResult?.text.trim();
+      if (answered) {
+        console.log(`[CHAT/VISION] tier=${tier} provider=${visionResult!.provider} files=${visionAttachments.length}`);
       } else {
-        console.error(`[CHAT/VISION] tier=${tier} — every allowed provider failed for ${visionAttachments.length} file(s)`);
+        console.error(`[CHAT/VISION] tier=${tier} — no usable answer for ${visionAttachments.length} file(s)`);
       }
       if (visionResult?.inferenceGateway) {
         // Child vision usage is measured independently; the gateway marker prevents legacy tariff guesses.
@@ -678,14 +679,15 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           userId: currentInferenceGatewayContext()?.principalId || 'anonymous', tier, capability: 'vision-pdf',
           providerName: visionResult.provider, modelName: visionResult.model,
           ...usageLogFields(visionResult.usage), inferenceGateway: visionResult.inferenceGateway,
-          ok: true, streamed: false, createdAt: new Date().toISOString(),
+          ok: answered, ...(!answered ? { failureReason: 'empty-output' } : {}), streamed: false, createdAt: new Date().toISOString(),
         }).catch(() => {});
       }
       assertFreeAnswerActive(req);
-      if (visionResult?.text.trim()) markFreeAnswer(req);
-      const replyText = visionResult?.text
-        // Free: silent fallback to the busy line in the user's own language (cap reached or every rung down).
-        || (isFree ? freeBusyMessage(message) : 'Sorry, I could not read your image/file right now. Please try again in a moment, or paste the text directly.');
+      if (answered) markFreeAnswer(req);
+      // A missing/empty vision result is not an answer or evidence of traffic overload. Keep the
+      // terminal failure explicit while using the conversation's selected language for its notice.
+      const failure = answered ? null : unavailableChatReply(chatAvailabilityMessage('temporary', { message, history: req.body.history, replyLanguage }));
+      const replyText = visionResult?.text ?? '';
       if (req.body.stream === true) {
         if (!res.headersSent) {
           res.setHeader('Content-Type', 'text/event-stream');
@@ -694,8 +696,12 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           res.setHeader('X-Accel-Buffering', 'no');
           res.flushHeaders();
         }
-        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: replyText })}\n\n`);
-        if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+        if (!res.writableEnded) {
+          if (failure) res.end(`data: ${JSON.stringify({ ...failure, c: failure.reply, error: failure.reply, partial: false })}\n\n`);
+          else { res.write(`data: ${JSON.stringify({ c: replyText })}\n\n`); res.end('data: [DONE]\n\n'); }
+        }
+      } else if (failure) {
+        res.status(503).json(failure);
       } else {
         res.json({ reply: replyText });
       }
@@ -729,7 +735,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
             res.flushHeaders();
           }
           if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: reply })}\n\n`);
-          if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+          if (!res.writableEnded) { res.end('data: [DONE]\n\n'); }
         } else {
           res.json({ reply });
         }
@@ -774,7 +780,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         }
       } catch (error) { if (isGatewayTerminalError(error)) throw error; /* legacy search is best-effort */ }
 
-      const freeChainContext = isGatewayRouteSelected() ? undefined : await freeChainRequestContext(req, { tier, message: contextualMessage, history, attachments: attachments.length, hasProfile: !!userProfile, hasMemory, grounded: !!groundingStatus });
+      const freeChainContext = isGatewayRouteSelected() ? undefined : await freeChainRequestContext(req, { tier, message: contextualMessage, history, replyLanguage, attachments: attachments.length, hasProfile: !!userProfile, hasMemory, grounded: !!groundingStatus });
 
       if (req.body.stream === true) {
         // SSE stream — proper format so proxies/load balancers don't drop idle connections.
@@ -815,13 +821,17 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         // has a habit of being forgotten, which is why it is now written down here.
         let outcome: Awaited<ReturnType<typeof aiRouter.routeStream>> | null = null;
         let streamedText = '';
+        let streamedAnswer = false;
         try {
           assertFreeAnswerActive(req);
           outcome = await aiRouter.routeStream(
             contextualMessage, history, tier, systemPrompt,
             (chunk: string, source?: 'notice') => {
               assertFreeAnswerActive(req);
-              if (source !== 'notice' && chunk.trim() && !res.destroyed && !res.writableEnded) markFreeAnswer(req);
+              if (source !== 'notice' && chunk.trim() && !res.destroyed && !res.writableEnded) {
+                streamedAnswer = true;
+                markFreeAnswer(req);
+              }
               streamedText += chunk;
               if (!res.writableEnded) {
                 if (firstTokenAt === null) {
@@ -842,8 +852,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           if (!res.writableEnded && !res.destroyed) {
             const notice = streamedText ? '\n\nThis reply was interrupted. Please retry when the service is available.' : strictFreeRequired() ? 'No verified free model is currently available. Please try again later.' : 'The AI service is temporarily unavailable. Please try again later.';
             res.write(`data: ${JSON.stringify({ c: notice })}\n\n`);
-            res.write(`data: ${JSON.stringify({ error: strictFreeRequired() ? 'No paid fallback was used.' : 'The selected AI route stopped.', code: strictFreeRequired() ? 'STRICT_FREE_INTERRUPTED' : 'INFERENCE_GATEWAY_INTERRUPTED', partial: !!streamedText })}\n\n`);
-            res.end();
+            res.end(`data: ${JSON.stringify({ error: strictFreeRequired() ? 'No paid fallback was used.' : 'The selected AI route stopped.', code: strictFreeRequired() ? 'STRICT_FREE_INTERRUPTED' : 'INFERENCE_GATEWAY_INTERRUPTED', partial: !!streamedText })}\n\n`);
           }
           return;
         } finally {
@@ -861,16 +870,25 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         // would say it twice.
         assertFreeAnswerActive(req);
         if (!res.writableEnded) {
-          if (outcome?.reason === 'stalled') {
-            res.write(`data: ${JSON.stringify({
-              c: '\n\n_(NavBharatAI\u2019s engine went quiet before finishing this answer, so it stops here. Ask again and it will pick the thread back up.)_',
+          if (outcome?.ok === false) {
+            const failure = unavailableChatReply(streamedAnswer
+              ? 'This reply was interrupted. Please retry when the service is available.' : streamedText);
+            // Keep a notice already sent; add one only for empty or genuinely interrupted output.
+            res.end(`data: ${JSON.stringify({
+              ...(streamedAnswer ? { c: `\n\n${failure.reply}` } : !streamedText.trim() ? { c: failure.reply } : {}),
+              error: failure.reply, code: failure.code, partial: streamedAnswer,
             })}\n\n`);
+          } else {
+            if (outcome?.reason === 'stalled') {
+              res.write(`data: ${JSON.stringify({
+                c: '\n\n_(NavBharatAI\u2019s engine went quiet before finishing this answer, so it stops here. Ask again and it will pick the thread back up.)_',
+              })}\n\n`);
+            }
+            // FREE_CHAT_ANSWER_ALL: exactly one Pro line on an app request, even if the model left it out.
+            const proTail = appAsk && outcome?.reason !== 'stalled' && streamedText.trim() ? missingProLine(streamedText, message, replyLanguage ? chatReplyLanguageCategory(replyLanguage) : undefined) : '';
+            if (proTail) res.write(`data: ${JSON.stringify({ c: proTail })}\n\n`);
+            res.end('data: [DONE]\n\n');
           }
-          // FREE_CHAT_ANSWER_ALL: exactly one Pro line on an app request, even if the model left it out.
-          const proTail = appAsk && outcome?.reason !== 'stalled' && streamedText.trim() ? missingProLine(streamedText, message) : '';
-          if (proTail) res.write(`data: ${JSON.stringify({ c: proTail })}\n\n`);
-          res.write('data: [DONE]\n\n');
-          res.end();
         }
         // The SAME shape the non-streaming branch writes, so one collection answers for both paths and
         // no reader has to know which one served. Missing provider usage stays unmeasured and has
@@ -939,21 +957,24 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           createdAt: new Date().toISOString(),
         }).catch(() => {});
         assertFreeAnswerActive(req);
+        if (routed.ok === false) {
+          res.status(503).json(unavailableChatReply(routed.content));
+          return;
+        }
         if (routed.ok && routed.content.trim()) markFreeAnswer(req);
-        const proTail = appAsk && routed.ok && routed.content ? missingProLine(routed.content, message) : '';
+        const proTail = appAsk && routed.ok && routed.content ? missingProLine(routed.content, message, replyLanguage ? chatReplyLanguageCategory(replyLanguage) : undefined) : '';
         res.json({ reply: `${routed.content}${proTail}` });
       }
     } catch(e: any) {
       console.error(`Error for tier ${tier}:`, e.message);
       if (freeAnswerSignal(req)?.aborted && !res.writableEnded && !res.destroyed) {
         const message='This answer was interrupted. Please check the partial reply before trying again.';
-        if (res.headersSent) {res.write(`data: ${JSON.stringify({c:`\n\n${message}`,error:message,code:'FREE_ANSWER_UNAVAILABLE'})}\n\n`);res.end();}
+        if (res.headersSent) {res.end(`data: ${JSON.stringify({c:`\n\n${message}`,error:message,code:'FREE_ANSWER_UNAVAILABLE'})}\n\n`);}
         else res.status(503).json({error:message,reply:message,code:'FREE_ANSWER_UNAVAILABLE'});
         return;
       }
       if (res.headersSent && isGatewayTerminalError(e) && !res.writableEnded && !res.destroyed) {
-        res.write(`data: ${JSON.stringify({ c: 'The AI service is temporarily unavailable. Please try again later.', code: 'INFERENCE_GATEWAY_UNAVAILABLE' })}\n\n`);
-        res.end();
+        res.end(`data: ${JSON.stringify({ c: 'The AI service is temporarily unavailable. Please try again later.', code: 'INFERENCE_GATEWAY_UNAVAILABLE' })}\n\n`);
       }
       if (!res.headersSent) {
         // Never leak the raw inference error (may name a provider/model) to the client.

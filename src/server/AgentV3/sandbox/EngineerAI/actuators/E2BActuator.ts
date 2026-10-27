@@ -1,3 +1,5 @@
+import { assertNotCanaryWorkspace } from '../../../reliability/canaryIsolation';
+import { assertCanaryLegacyAllowed } from '../../../reliability/canarySpendGuard';
 import { manifestRangeRepairEnabled, repairUnavailableRanges, manifestRepairNote } from '../../../manifestRangeRepair';
 import { missingRanges, latestVersionsCommand, isSafePackageName } from '../../../npmVersionHint';
 import { shouldSeedStarter } from './seedStarter';
@@ -181,7 +183,7 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
 
 // Directories excluded from listFiles — dependency/build/VCS output the agent never edits.
 // ONE list for every copy in the repo: see lib/generatedDirs.ts for why it had to stop being ten
-// (autopsy e1c21ad8 — a `backend/venv` of ~1,900 files was listed, saved and pushed as source).
+// .
 const IGNORED_LIST_DIRS: ReadonlySet<string> = new Set(LIST_PRUNE_DIRS);
 
 /** True if a workspace-relative path lives under an ignored dir (any path segment matches).
@@ -191,16 +193,14 @@ export function isIgnoredListPath(relPath: string): boolean {
 }
 
 /**
- * PRUNE IN THE SANDBOX, NOT ON THE WIRE (Mitrify report a876b7bb, 2026-08-15).
+ * PRUNE IN THE SANDBOX, NOT ON THE WIRE .
  *
  * `listFiles` used to call `sb.files.list(root, { depth: 10 })` — which enumerates EVERYTHING,
  * `node_modules` included — and only then dropped the ignored dirs with a client-side `.filter`. After
  * an `npm install` that directory holds tens of thousands of entries, so we paid to enumerate and
  * transfer a tree whose every path we were about to throw away.
  *
- * That report shows the cost: 226 SECONDS of main-thread silence between "import SUCCEEDED" and the
- * build's first model call, while the background boot's `npm install` was filling `node_modules` and
- * this listing walked it. It is a per-TURN tax on every large app — the File Guardian calls
+ * Enumerating installed dependencies can delay the first model call while background installation is running. It is a per-TURN tax on every large app — the File Guardian calls
  * `collectWorkspaceFiles` (→ `listFiles`) before the agent edits anything — not an import-only cost.
  *
  * 🔒 THIS IS THE FOURTH INSTANCE OF ONE BUG CLASS: doing per-file work over a network for files we do
@@ -257,7 +257,7 @@ const CONSOLE_LOG = `${TOOLS_DIR}/console.log`;
 /**
  * WAIT FOR THE APP TO PAINT, NOT FOR A CLOCK — the in-sandbox snippet, shared by every capture path.
  *
- * ROOT CAUSE (admin field report 2026-08-12): all three capture paths waited a FIXED number of
+ * ROOT CAUSE : all three capture paths waited a FIXED number of
  * milliseconds and then looked. A fixed sleep has exactly one failure mode — an app slower than the
  * guess is captured mid-load. The screenshot then shows a spinner or a blank page, the DOM scan finds
  * no elements, the preview verdict reads an empty `<div id="root">` and declares the app crashed, and
@@ -272,7 +272,7 @@ const CONSOLE_LOG = `${TOOLS_DIR}/console.log`;
  * `networkidle` is not an option and never was: a Vite/CRA dev server's HMR socket never goes idle.
  */
 //
-// 🆕 THE FRAME IS NOT THE PAGE (queue Q-147). A nav bar paints first; a page that returns `null` while its
+// 🆕 THE FRAME IS NOT THE PAGE . A nav bar paints first; a page that returns `null` while its
 // data loads leaves `<main>` empty for a moment. Stopping at the first content photographed that moment,
 // and a check that reads an empty main as "only the frame rendered" would then accuse a working app. So
 // after the first paint, an EMPTY main region gets up to BROWSE_MAIN_GRACE_MS more to fill — inside the
@@ -356,7 +356,7 @@ ${paintWaitJs('page')}
 // out on purpose (auth/probing is routinely intentional and would be noise).
 
 /**
- * THE PUBLISH PATH IS THE THIRD DOOR (deep re-autopsy of build 9cca1fd5, 2026-09-17).
+ * THE PUBLISH PATH IS THE THIRD DOOR .
  *
  * `injectPreviewBridge` writes NavBharatAI's console mirror into the SANDBOX's `index.html` so the live
  * preview can report runtime errors. Vite then copies that same document into `dist/`, and `dist/` is
@@ -388,7 +388,7 @@ export function stripBridgeFromBuiltFile(relPath: string, bytes: Buffer): Buffer
 }
 
 /**
- * 🔴 THE CONSOLE LISTENER LIVED ON ONE BROWSER LANE OF THREE (autopsy, 2026-09-21).
+ * 🔴 THE CONSOLE LISTENER LIVED ON ONE BROWSER LANE OF THREE .
  *
  * `CONSOLE_LOG` is the ONLY thing `getConsoleErrors` reads, and until now the only script that ever
  * wrote to it was the agent-driven CDP daemon below — which starts solely when the MODEL calls the
@@ -414,7 +414,7 @@ const CONSOLE_RECORDER_JS = `
 const __nbaiFs=require('fs');
 const __nbaiLog=${JSON.stringify(CONSOLE_LOG)};
 function rec(kind,text,stack){ try{ __nbaiFs.appendFileSync(__nbaiLog, JSON.stringify({t:Date.now(),kind,text:String(text).slice(0,500),stack:stack?String(stack).slice(0,1200):undefined})+'\\n'); }catch(e){} }
-// A CLEAN APP AND A BROWSER THAT NEVER RAN MUST NOT LOOK THE SAME (autopsy 9cca1fd5, 2026-09-17).
+// A CLEAN APP AND A BROWSER THAT NEVER RAN MUST NOT LOOK THE SAME .
 // \`rec\` only fires ON AN ERROR, so without this the log is absent for a perfectly clean app too and
 // getConsoleErrors reads that absence as \`captured:false\` — "we never looked". Append, never
 // truncate: a second lane must not erase what the first one recorded.
@@ -457,7 +457,7 @@ ${record ? attachConsoleJs('p').trimEnd() : ''}
   await p.goto(${JSON.stringify(url)},{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
 ${paintWaitJs('p')}
 ${record ? '  if(painted) recSessionExisted();' : ''}
-  // DID ANY OF THE APP'S OWN STYLING REACH THE PAGE? (renderStyle.ts, admin 2026-09-28.) Measured only
+  // DID ANY OF THE APP'S OWN STYLING REACH THE PAGE? (renderStyle.ts). Measured only
   // on a painted page, printed BEFORE the paint marker so splitPaintMarker's html slice never sees it.
   if(painted){var styleEv=await p.evaluate(${STYLE_EVIDENCE_JS}).catch(function(){return null;});if(styleEv)console.log(${JSON.stringify(STYLE_MARKER)}+JSON.stringify(styleEv));}
   console.log('NBAI_PAINTED:'+painted);
@@ -478,7 +478,7 @@ ${dropBridgeJs('p')}
  * marker, never by position.
  */
 //
-// ⚖️ AND VITE'S DEV CSS, ONLY WHEN THE PAGE WOULD NOT FIT (admin-approved 2026-09-27). In dev, Vite
+// ⚖️ AND VITE'S DEV CSS, ONLY WHEN THE PAGE WOULD NOT FIT . In dev, Vite
 // inlines every stylesheet as `<style data-vite-dev-id>` — ~10 KB on that app, more on a CSS-heavy
 // one — ahead of the body. Every reader that looks at this DOM strips `<style>` anyway (PreviewVerify,
 // FeaturePresence), so its text buys nothing and costs the body. It is emptied ONLY when the page is
@@ -559,13 +559,8 @@ const {chromium}=require('playwright');
   // interaction (BENCHMARK #2/#3 + the restart-button fix, 2026-08-12) — so the model could never
   // verify a click and fell back to claiming PASS it had not confirmed. The TS side reads the bytes.
   require('fs').writeFileSync('${TOOLS_DIR}/last-action.png', buf);
-  // …AND SO DOES THE META, for exactly the same reason (admin report 2026-08-25). The comment above
-  // fixed the screenshot half and left this line on stdout, where the 64KB cap still applies. It is
-  // not a small payload: on a complex page a Playwright failure dumps candidate selectors and DOM
-  // context into \`result\`, blows past 65536, and the JSON arrives truncated — which is precisely the
-  // "Unterminated string in JSON at position 65536" the admin saw TWICE in one build (twice because
-  // withDaemonRetry retried the same doomed call). The engine lost its ability to interact with the
-  // app it had just built, on the builds most likely to need it.
+  // Metadata also belongs in a file: verbose browser errors can exceed the stdout limit.
+  // Bound the payload so transport truncation cannot masquerade as an action failure.
   //
   // Capped as well as re-routed: an error message longer than this is useless to a model, and a cap
   // means a future channel with its own limit cannot resurrect the same bug.
@@ -581,11 +576,8 @@ const {chromium}=require('playwright');
 /**
  * Read a browser action's metadata, and NEVER throw a raw parser error at the model.
  *
- * ⚠️ THE UNGUARDED `JSON.parse` THIS REPLACES cost the admin two dead tool calls in one build. It sat
- * one line above a comment explaining that stdout is capped at 64KB — the screenshot had been moved to
- * a file for exactly that reason and the meta had not. A truncated payload therefore surfaced as
- * "Unterminated string in JSON at position 65536", twice (the retry re-ran the same doomed call), and
- * the model was told its BROWSER was broken when the browser had worked perfectly.
+ * Metadata may exceed the stdout limit even when the browser action succeeds.
+ * Read bounded metadata from its file and distinguish parsing failures from action failures.
  *
  * That distinction is the whole point of this function: a parse failure means WE could not read the
  * answer, not that the action failed. Reported as such, in a sentence a model can act on. PURE.
@@ -654,7 +646,7 @@ function extractDevPort(command: string): number {
   if (/\bserve\b/.test(command) && !/npm/.test(command)) return 3000; // http-server/serve
   // A direct Node server launcher (`tsx server/index.ts`, `node dist/server.js`, `nodemon app.js`) carries
   // no framework keyword, so it used to fall through to Vite's 5173 while the Express/Fastify server bound
-  // a Node port — the exact Mitrify "did not come up on port 5173" import failure. Treat it as a Node port.
+  // a Node port rather than the framework default. Treat it as a Node port.
   if (isNodeServerCommand(command)) return 3000;
   return 5173; // Vite default
 }
@@ -781,8 +773,7 @@ export class E2BActuator implements IEngineerActuator {
     const template = resolveTemplateId(framework);
     return {
       timeoutMs: sandboxLifetimeMs(),
-      // 🔒 PAUSE, NEVER KILL, WHEN THE HOUR RUNS OUT (admin 2026-09-08: "2-3 din bad preview band ho
-      // jana. kitna bhi wake up karo, wapas preview nahi chalna").
+      // 🔒 PAUSE, NEVER KILL, WHEN THE HOUR RUNS OUT (retain snapshots across idle timeouts).
       //
       // E2B's default action at `timeoutMs` is to DELETE the sandbox. Our two sweeps pause an idle
       // machine long before that — but a machine both of them miss (a deploy-orphan whose pause was
@@ -827,7 +818,7 @@ export class E2BActuator implements IEngineerActuator {
         .run(EMPTY_MANIFEST_EVIDENCE_COMMAND, { cwd: WORKSPACE_ROOT, timeoutMs: 10_000 })
         .then((r) => `${r.stdout}${r.stderr}`)
         .catch(() => '');
-      // 🔒 NEVER OUR STARTER OVER SOMEONE'S PROJECT (autopsy d0b2fcd6, Q-740). Both copies can be stale —
+      // 🔒 NEVER OUR STARTER OVER SOMEONE'S PROJECT . Both copies can be stale —
       // the cache missed a bulk landing, the durable index missed a timed-out save — and both then held our
       // starter's manifest, which was written over an imported app. In a workspace holding a real project
       // (more files than any starter has), the starter manifest is not a candidate: an empty file fails
@@ -856,7 +847,7 @@ export class E2BActuator implements IEngineerActuator {
   /**
    * The install running in each sandbox, so a second one WAITS for it instead of starting beside it.
    *
-   * 🔴 THE LOCK THAT WAS NOT ONE (autopsy d0b2fcd6, Q-739). `_npmInstallLocked` only TOUCHED the marker —
+   * 🔴 THE LOCK THAT WAS NOT ONE . `_npmInstallLocked` only TOUCHED the marker —
    * it never waited for someone else's. The marker held off the typecheck, but two of our own installs (the
    * import's migration step and the dev-server health check, both through `_npmInstall`) still ran into one
    * `node_modules` at once: `ENOTEMPTY: directory not empty, rename …/node_modules/@babel/…` twice, and the
@@ -879,7 +870,7 @@ export class E2BActuator implements IEngineerActuator {
       .run(`_nbw=0; while ${NPM_INSTALL_LOCK_FRESH} && [ $_nbw -lt ${INSTALL_WAIT_SECONDS} ]; do sleep 1; _nbw=$((_nbw+1)); done`,
         { timeoutMs: (INSTALL_WAIT_SECONDS + 5) * 1000 })
       .catch(() => {});
-    // 🔒 THE INSTALL SAYS IT IS RUNNING (autopsy 120eb52f). A typecheck that found the tree "stale" used to
+    // 🔒 THE INSTALL SAYS IT IS RUNNING . A typecheck that found the tree "stale" used to
     // start its own `npm install` into the same node_modules as this one, and `typescript` came out torn.
     // `TSC_ENSURE` waits while this marker is fresh. Best-effort both ways: a marker we could not write
     // only means the old behaviour, and one we could not remove goes stale in minutes.
@@ -920,7 +911,7 @@ export class E2BActuator implements IEngineerActuator {
     } catch { /* warm-primer is best-effort — never blocks the real install below */ }
 
     /**
-     * SECURITY REMEDIATION (admin 2026-08-12). npm has just told us, in this very log, how many known
+     * SECURITY REMEDIATION . npm has just told us, in this very log, how many known
      * vulnerabilities the tree carries. When high/critical ones are present and the admin has switched
      * this on, apply npm's OWN SemVer-compatible fixes — never `--force`, which applies breaking major
      * upgrades and is a way to break a working app while claiming to secure it (see npmAuditFix.ts).
@@ -949,7 +940,7 @@ export class E2BActuator implements IEngineerActuator {
     // A successful install stamps node_modules, so `[ package.json -nt node_modules ]` — the stale test
     // every install decision reads — goes quiet once the tree is reconciled. An "up to date" npm install
     // changes nothing in the directory itself, so without the stamp a package.json rewritten by an edit
-    // read as stale for the rest of the build (autopsy "Lekhan Sahyak", 2026-09-27).
+    // read as stale for the rest of the build .
     const settled = async (r: { success: boolean; log: string }): Promise<{ success: boolean; log: string }> => {
       if (r.success) await sandbox.commands.run('touch node_modules', { cwd: WORKSPACE_ROOT, timeoutMs: 5_000 }).catch(() => {});
       return r;
@@ -979,9 +970,7 @@ export class E2BActuator implements IEngineerActuator {
     const installLog = install.stdout + install.stderr;
     if (install.exitCode === 0) return settled({ success: true, log: await withAuditFix(installLog) });
 
-    // Step 2.5: TRANSIENT FS RACE (Mitrify report a876b7bb — `ENOTEMPTY … rmdir node_modules/yargs/…`,
-    // exit 217, on overlayfs, with nothing wrong in the project; the identical install succeeded
-    // seconds later). One plain retry, only for the fs-race errno classes the pure predicate names —
+    // Step 2.5: TRANSIENT FS RACE (transient overlay-filesystem errors). One plain retry, only for the fs-race errno classes the pure predicate names —
     // a deterministic failure (ERESOLVE/404/EINTEGRITY) is never retried here, it falls through to its
     // own handling. This is the upstream half of the migration-skip heal: with the install no longer
     // failing on the race, the migration never gets skipped in the first place.
@@ -994,7 +983,7 @@ export class E2BActuator implements IEngineerActuator {
       // Fell through: let the ERESOLVE branch below look at the ORIGINAL log too.
     }
 
-    // Step 2.6: A DECLARED VERSION THAT DOES NOT EXIST (ETARGET) — manifestRangeRepair.ts, autopsy b4173fb7.
+    // Step 2.6: A DECLARED VERSION THAT DOES NOT EXIST (ETARGET) — see manifestRangeRepair.ts.
     // Running the same install again cannot succeed; only a confirmed registry version permits a manifest
     // repair and retry. Failed or inconclusive lookups leave it unchanged. Same repair as the build's
     // own bare `npm install`, for every path that funnels through here (preview boot, hydration, publish).
@@ -1120,7 +1109,7 @@ export class E2BActuator implements IEngineerActuator {
   /**
    * A real person is looking at this app right now — treat that as activity.
    *
-   * THE GAP THIS CLOSES (admin report 2026-08-23, a finished app dying under its user after ~5 min):
+   * THE GAP THIS CLOSES :
    * idle is measured from the last SANDBOX operation, and somebody using their app performs none —
    * their browser talks to the sandbox host, never to us. The Live tab's watchdog papered over that
    * only while our own preview pane was the visible surface; a popped-out preview tab had none of our
@@ -1131,6 +1120,8 @@ export class E2BActuator implements IEngineerActuator {
    * Returns whether this instance is the one holding the sandbox, for honest diagnostics only.
    */
   noteUserActivity(workspaceId: string): boolean {
+    assertCanaryLegacyAllowed('sandbox-infrastructure');
+    assertNotCanaryWorkspace(workspaceId);
     if (!workspaceId) return false;
     const now = Date.now();
     this._lastActivity.set(workspaceId, now);
@@ -1234,7 +1225,7 @@ export class E2BActuator implements IEngineerActuator {
   /**
    * Sandbox OPERATIONS in flight per workspace — a command, an install, a dev-server launch.
    *
-   * 🔒 THE TORN node_modules (admin 2026-09-08: "kitna bhi wake up karo, wapas preview nahi chalna").
+   * 🔒 THE TORN node_modules (preserve paused snapshots).
    * Idle is measured from the last sandbox operation's START, and a single `npm install` on a cold
    * machine runs longer than the five-minute idle window. The build path was protected by the build
    * flag; the WAKE path held that flag only for as long as its own 90-second wait, then released it
@@ -1499,6 +1490,8 @@ export class E2BActuator implements IEngineerActuator {
    * with a shape `isDeadSandboxError` catches so `getSandbox` reconnects and resumes).
    */
   private _extendLifetime(workspaceId: string, sandbox: Sandbox, force = false): void {
+    assertCanaryLegacyAllowed('sandbox-infrastructure');
+    assertNotCanaryWorkspace(workspaceId);
     const now = Date.now();
     if (!force && !shouldExtendLifetime(this._lastLifetimeExtend.get(workspaceId), now)) return;
     this._lastLifetimeExtend.set(workspaceId, now);
@@ -1525,6 +1518,8 @@ export class E2BActuator implements IEngineerActuator {
   }
 
   private async getSandbox(workspaceId: string, resumeSandboxId?: string, framework?: string): Promise<Sandbox> {
+    assertCanaryLegacyAllowed('sandbox-infrastructure');
+    assertNotCanaryWorkspace(workspaceId);
     // Refresh activity FIRST so any in-flight operation protects its sandbox from
     // the idle sweep for its full window.
     this._lastActivity.set(workspaceId, Date.now());
@@ -1537,7 +1532,7 @@ export class E2BActuator implements IEngineerActuator {
       this._touchDurable(workspaceId, existing.sandboxId);
       // A WARM SANDBOX STILL NEEDS A START TIME, and its absence was costing real money.
       //
-      // ROOT CAUSE (admin's own build reports, 2026-08-23 vs 2026-08-24). `_sandboxStartedAt` was
+      // ROOT CAUSE . `_sandboxStartedAt` was
       // stamped ONLY on the create/connect path below. The idle sweep DELETES it when it pauses a
       // sandbox — but leaves the sandbox in `this.sandboxes`, so every later build for that workspace
       // returns right here and never re-stamps. `sandboxHeldSeconds` then returns null, which is
@@ -1593,12 +1588,13 @@ export class E2BActuator implements IEngineerActuator {
    * refuses without creating or restoring a replacement.
    */
   private async _createSandbox(workspaceId: string, resumeSandboxId?: string, framework?: string): Promise<Sandbox> {
+    assertCanaryLegacyAllowed('sandbox-infrastructure');
+    assertNotCanaryWorkspace(workspaceId);
     // Every create/connect is bounded by SANDBOX_CREATE_TIMEOUT_MS so a slow E2B can
     // never hang the build silently — on timeout we throw and the caller surfaces it.
     let sandbox: Sandbox;
     let freshCreate = false;
-    // 🔒 A COLD INSTANCE MUST NOT INVENT A NEW MACHINE (admin 2026-08-22 — E2B's "no service running on
-    // port 3000"). `this.sandboxes` is THIS server instance's memory: empty after every deploy, every
+    // 🔒 A COLD INSTANCE MUST NOT INVENT A NEW MACHINE . `this.sandboxes` is THIS server instance's memory: empty after every deploy, every
     // recycle, and on every other instance behind the load balancer. The workspace's real sandbox id was
     // durable the whole time; only the wake route ever read it. Without this, a cold instance fell
     // through to `Sandbox.create()` — a brand-new EMPTY machine, with an empty replay cache to match.
@@ -1681,18 +1677,13 @@ export class E2BActuator implements IEngineerActuator {
   /**
    * Put the workspace's app back into a machine that came up EMPTY.
    *
-   * ── THE BUG THIS CLOSES (admin 2026-09-11) ────────────────────────────────────────────────────
-   * *"bas starting ke 24hr tak hi live rahte hai, uske bad 2-3 din wapas wapas live preview chalao
-   * nahi chalta hai. aur isko aap bhi 50+ bar fix kiye ho. nahi hua"* — and they were right, about
-   * both halves.
+   * Restore durable project files whenever a replacement machine starts empty.
    *
    * This line used to replay `_fileCache` and nothing else. That cache is in this instance's MEMORY:
    * the idle sweep DELETES it when it pauses a workspace, and it dies with its Cloud Run instance on
    * every deploy. So in the one situation that matters — days later, another instance, the paused
    * snapshot gone from the vendor — the restore source was empty, the machine stayed empty, and every
-   * retry re-ran the same nothing. That is why fifty symptom-level fixes could not work: each was
-   * trying to wake a machine, when the real failure was that the app was never written into the
-   * machine we had just made.
+   * retry re-ran the same nothing. Restoring a process cannot substitute for restoring the durable project files.
    *
    * The app itself was never at risk. `WorkspaceFileStore` is Firestore, has no TTL, and is written on
    * every build and every edit. Two paths already read it before touching a sandbox — publish and
@@ -1787,7 +1778,7 @@ export class E2BActuator implements IEngineerActuator {
   }
 
   /**
-   * ONE workspace setup at a time per workspace (autopsy 2a7fa4b0, 2026-09-25).
+   * ONE workspace setup at a time per workspace .
    *
    * 🔴 THE RACE. `ensureWorkspace` treats "the workspace directory exists" as "the workspace is ready",
    * and it creates that directory BEFORE it writes the template into it. So a second caller arriving
@@ -1814,7 +1805,7 @@ export class E2BActuator implements IEngineerActuator {
   }
 
   /**
-   * 🔴 A STALE HANDLE MADE A WORKING BUILD "SANDBOX UNAVAILABLE" (autopsy a9f8d186, 2026-09-30).
+   * 🔴 A STALE HANDLE MADE A WORKING BUILD "SANDBOX UNAVAILABLE" .
    *
    * This instance still held the workspace's machine from an earlier build, and E2B had since let it
    * go ("The sandbox was not found … sandbox timeout"). The first operation of setup hit that corpse
@@ -1837,7 +1828,7 @@ export class E2BActuator implements IEngineerActuator {
   }
 
   private async _ensureWorkspaceAttempt(workspaceId: string, projectType?: string, resumeSandboxId?: string, seedStarter = true): Promise<void> {
-    // Per SETUP, not per machine (autopsy 3d1bfe2a): a second build on the same machine reprinted the
+    // Per SETUP, not per machine : a second build on the same machine reprinted the
     // first build's "completed 11 missing template file(s)" although this setup put back nothing.
     this._starterCompleted.delete(workspaceId);
     // AB-1: pass the framework so the FIRST sandbox create for this workspace can route a polyglot
@@ -1849,7 +1840,7 @@ export class E2BActuator implements IEngineerActuator {
     const exists = await withTimeout(sandbox.files.exists(WORKSPACE_ROOT), 15_000, 'files.exists');
     if (exists) {
       // Resumed sandbox already has the workspace — just ensure browser tooling is warming up.
-      // 🔴 …unless what is there is only a PIECE of our own starter (autopsy 19641ab5, starterFragment.ts):
+      // 🔴 …unless what is there is only a PIECE of our own starter :
       // "the directory exists" is not "the project is set up". Best-effort and bounded; a failure here is
       // today's behaviour exactly.
       // An import's workspace is the user's project — never completed into our starter (build d62bf22d).
@@ -1933,7 +1924,7 @@ export class E2BActuator implements IEngineerActuator {
     await withTimeout(sandbox.files.writeFiles(
       Object.entries(files).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${p}`, data: content })),
     ), 30_000, 'files.writeFiles(starter fragment)');
-    // 🔴 THE WHOLE STARTER IS REMEMBERED, NOT ONLY THE PART WRITTEN NOW (autopsy 31254f9a). The route saves
+    // 🔴 THE WHOLE STARTER IS REMEMBERED, NOT ONLY THE PART WRITTEN NOW . The route saves
     // this map to the durable store, and it used to hold only the MISSING files — so a workspace that had
     // our `index.html` and gained the other ten was saved without its `index.html`. The next fresh machine
     // is refilled from that store, finds `package.json`, and is "set up" with no entry document. The
@@ -2027,7 +2018,7 @@ export class E2BActuator implements IEngineerActuator {
       // shapes too, so the next getSandbox recreates (and replays the cached source files).
       if (e instanceof Error && (isDeadSandboxError(e.message) || / timed out after /.test(e.message)) && this.sandboxes.get(workspaceId) === sandbox) {
         this._dropSandbox(workspaceId);
-        // 🔴 THE CALL THAT FOUND THE CORPSE WAS LOST (autopsy 6ae30b33, 2026-09-30). Dropping the handle
+        // 🔴 THE CALL THAT FOUND THE CORPSE WAS LOST . Dropping the handle
         // fixes the NEXT call, but this one threw. An architect's `edit_file` on `src/index.css` came
         // back "Error: fetch failed"; the model moved on, the styles were never written, 23 classes
         // shipped undefined and a 64-second repair pass wrote them afterwards. A fast dead-connection
@@ -2046,7 +2037,7 @@ export class E2BActuator implements IEngineerActuator {
   async writeFile(workspaceId: string, filePath: string, content: string): Promise<void> {
     const rel = safeRelPath(filePath);
     // GREEN FREEZE — refuse to overwrite a file on a verified-working app unless an allowlisted pass is
-    // doing it (admin 2026-08-12). Checked at the ONE place every sandbox write passes through, before
+    // doing it . Checked at the ONE place every sandbox write passes through, before
     // disk is touched, so a corrupting post-green pass is a no-op rather than damage. Throws, which the
     // caller's write-then-record idiom skips cleanly (sandbox + writtenFiles + durable save together).
     assertWriteAllowed(workspaceId, rel);
@@ -2272,9 +2263,7 @@ export class E2BActuator implements IEngineerActuator {
       } catch { /* no package.json / parse error — keep the raw command (unchanged behaviour) */ }
       const framework: DevFramework = detectDevFramework(resolvedCommand);
       const port = extractDevPort(resolvedCommand);
-      // ⚠️ COMPUTED HERE — ABOVE `armKeepalive` AND THE FAST PATH — ON PURPOSE (admin build report
-      // 2026-08-28, Hospital Emergency Management: three TOOL_ERRORs "Cannot access 'devCommand'
-      // before initialization"). This block used to sit ~60 lines further down, below the already-up
+      // ⚠️ COMPUTED HERE — ABOVE `armKeepalive` AND THE FAST PATH — ON PURPOSE . This block used to sit ~60 lines further down, below the already-up
       // fast path — but `armKeepalive` closes over `devCommand`, and the fast path calls it first. So
       // on exactly the path the keepalive fix was written for (a server we ADOPTED rather than
       // started), the closure hit the temporal dead zone and threw: the fast path died, the adopted
@@ -2287,7 +2276,7 @@ export class E2BActuator implements IEngineerActuator {
         // `--port … --strictPort`, which it ignores, and the health check then watched the wrong port.
         disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(strippedForResolve, framework, resolvedCommand), port, framework, resolvedCommand)),
       );
-      // LOAD .env INTO THE DEV-SERVER ENV (Mitrify autopsy 2026-08-02): a Drizzle/Express app that reads
+      // LOAD .env INTO THE DEV-SERVER ENV : a Drizzle/Express app that reads
       // process.env.DATABASE_URL directly (no dotenv) crashes on boot even though .env holds the value —
       // the launch never loaded it. Auto-export every KEY=value from .env into the process env before
       // starting, so ANY app (dotenv or not) sees its env. `set -a` auto-exports; sourcing is guarded with
@@ -2304,7 +2293,7 @@ export class E2BActuator implements IEngineerActuator {
       // to the full, proven sequence below — never worse than today. AGENTV3_DEVSERVER_FASTPATH=off bypasses.
       // ARM THE KEEPALIVE — from ONE place, so a path cannot quietly skip it.
       //
-      // ROOT CAUSE (admin build transcript 2026-08-12). The watchdog was armed only after a FRESH
+      // ROOT CAUSE . The watchdog was armed only after a FRESH
       // launch. The fast path below — "already healthy on port N, reused it" — returned a healthy
       // verdict and armed nothing, so a server we adopted rather than started had no keepalive at all.
       // It then died mid-build with nothing watching, the preview went to the host's closed-port page,
@@ -2324,7 +2313,7 @@ export class E2BActuator implements IEngineerActuator {
         if (alreadyUp) {
           const stale = await sandbox.commands.run(buildDepsStaleCheckCommand(), { cwd: WORKSPACE_ROOT, timeoutMs: 8000 })
             .then((r) => r.stdout.includes('STALE')).catch(() => false);
-          // A package installed after the running server pre-bundled its dependencies (autopsy 981ce4cc):
+          // A package installed after the running server pre-bundled its dependencies :
           // the server keeps serving the OLD copy, so it is relaunched with its cache cleared.
           const prebundleStale = await sandbox.commands.run(buildPrebundleStaleCheckCommand(), { cwd: WORKSPACE_ROOT, timeoutMs: 8000 })
             .then((r) => r.stdout.includes('PREBUNDLE_STALE')).catch(() => false);
@@ -2362,11 +2351,10 @@ export class E2BActuator implements IEngineerActuator {
       // request … is not allowed". This last-line net reads the on-disk config and, only if it lacks
       // allowedHosts AND can be safely patched, writes it back — so the very next preview loads.
       // Best-effort: a read/write hiccup must never block the dev server from starting.
-      // DETECTION-INDEPENDENT (admin 2026-07-06): patch whenever a vite config EXISTS on disk — NOT only
+      // DETECTION-INDEPENDENT : patch whenever a vite config EXISTS on disk — NOT only
       // when the framework label is 'vite' or the command literally contains "vite". An IMPORTED app (or
       // any app whose dev script is just `npm run dev`) runs Vite with NEITHER signal, so its config was
-      // being skipped here and the preview 502'd with "Blocked request … is not allowed" (the admin hit
-      // this on port 3000). The per-file exists() check below is the real gate — this whole block is a
+      // being skipped here and the preview 502'd with "Blocked request … is not allowed" . The per-file exists() check below is the real gate — this whole block is a
       // cheap no-op (a handful of exists() probes) for a non-Vite app that has no vite config.
       {
         for (const cfg of ['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.cjs', 'vite.config.mts', 'vite.config.cts']) {
@@ -2400,7 +2388,7 @@ export class E2BActuator implements IEngineerActuator {
       // are untouched; a reboot or a second update_preview re-injects if the model rewrote the
       // document meanwhile; and any failure at all just means today's behaviour.
       //
-      // 🔴 CORRECTION (deep re-autopsy of 9cca1fd5, 2026-09-17). The paragraph above used to carry a
+      // 🔴 CORRECTION . The paragraph above used to carry a
       // third clause, asserting that a download and a publish never see the bridge either.
       // **The download and the publish DID see it.** Vite copies this very `index.html` into `dist/`,
       // `downloadDistFiles` reads `dist/` back verbatim, and that Map is what a publish uploads and
@@ -2513,7 +2501,7 @@ export class E2BActuator implements IEngineerActuator {
       const MAX_RECOVERY = 2;
       for (let attempt = 1; !portUp && attempt <= MAX_RECOVERY; attempt++) {
         devLog = await readDevLog();
-        // ROOT CAUSE (mitrify autopsy 2026-08-04, buildId ca5a4ca8): this used to call
+        // ROOT CAUSE : this used to call
         // planDevServerRecovery(devLog, attempt, MAX_RECOVERY), which escalates to `give_up` as soon as
         // `attempt >= maxAttempts`. With MAX_RECOVERY = 2 that made the LAST attempt do NOTHING: it was
         // diagnosed, then broke out before the recovery ran. So "2 recovery attempts" only ever performed
@@ -2530,7 +2518,7 @@ export class E2BActuator implements IEngineerActuator {
           break;
         }
         // A LIVING server with a clean log is still starting — give it more time on the SAME process
-        // before any restart (autopsy 2720e553: two restarts killed a server that came up 17 s later).
+        // before any restart .
         // A process that has exited answers PROC_GONE within a second, so a real crash restarts as before.
         if (shouldWaitOnStartingServer(diag.cause, lastLaunchPid)) {
           const w = await sandbox.commands
@@ -2545,7 +2533,7 @@ export class E2BActuator implements IEngineerActuator {
         }
         stdout += `\n[health-check] attempt ${attempt} — ${diag.detail}`;
         if (diag.recovery === 'reinstall') {
-          // PARTIAL-INSTALL REPAIR (mitrify autopsy 2026-08-04): when the log proves ONE package
+          // PARTIAL-INSTALL REPAIR : when the log proves ONE package
           // installed only partially (its own file could not resolve a sibling — e.g. lucide-react's
           // barrel importing ./icons/*.js that never landed), a plain `npm install` is a NO-OP: the
           // dependency is already in package.json and the directory already exists, so npm has nothing
@@ -2561,7 +2549,7 @@ export class E2BActuator implements IEngineerActuator {
           if (dep.manifestNote) stdout += `\n${dep.manifestNote}\n`;
           stdout += dep.success ? ' (dependencies reinstalled).' : ' (reinstall reported errors — retrying anyway).';
         }
-        // DB reaped/never-started (EstateNest autopsy 2026-07-20): a from-scratch Prisma+Postgres app can
+        // DB reaped/never-started : a from-scratch Prisma+Postgres app can
         // preview many minutes after the build began, by which point the sandbox Postgres has been reaped —
         // `npm run dev` then crashes on boot with P1001 and a blind restart can never revive it. Restart the
         // DB itself (provisionBackend is idempotent: it re-runs `pg_ctlcluster … start` in the same sandbox,
@@ -2570,7 +2558,7 @@ export class E2BActuator implements IEngineerActuator {
         if (diag.recovery === 'reprovision_db') {
           try {
             const prov = await this.provisionBackend(workspaceId, ['db']);
-            // FIRST-TIME provision (Mitrify autopsy 2026-08-02): a from-scratch Drizzle/Express app was never
+            // FIRST-TIME provision : a from-scratch Drizzle/Express app was never
             // provisioned, so there is no DATABASE_URL anywhere. provisionBackend restarted Postgres AND
             // returned the URL — write it into .env (merge, preserving the user's other vars) so the app can
             // read it. For a previously-provisioned app whose DB was merely reaped, .env already has the same
@@ -2581,9 +2569,7 @@ export class E2BActuator implements IEngineerActuator {
               const current = await sandbox.files.read(envPath).catch(() => '');
               await sandbox.files.write(envPath, mergeEnvVar(current, 'DATABASE_URL', url)).catch(() => {});
             }
-            // The Mitrify build printed "provisioned + written" here while the app's very next connect
-            // got ECONNREFUSED — because a URL existed either way. The shared note says only what the
-            // SELECT 1 actually proved (admin task 1, 2026-08-05).
+            // Report verified database reachability, not merely the presence of a URL.
             stdout += ` ${provisionOutcomeNote({ verified: prov?.dbVerified === true, failure: prov?.dbVerifyFailure ?? 'no-output' })}`;
           } catch (error) {
             rethrowSandboxRecoveryUnavailable(error);
@@ -2594,7 +2580,7 @@ export class E2BActuator implements IEngineerActuator {
         // — AND, when the log named a DIFFERENT port as the occupied one, free that one too. Without it
         // the recovery frees the port we watch while the orphan sits on the port the app actually binds,
         // so every attempt reproduces the same EADDRINUSE and "recovery exhausted" is guaranteed before
-        // the first restart runs (mitrify autopsy 2026-08-05). conflictPort is read from the error text
+        // the first restart runs . conflictPort is read from the error text
         // only, and never names an infrastructure port we must not kill (PROTECTED_PORTS).
         const killPorts = diag.conflictPort && diag.conflictPort !== port ? [port, diag.conflictPort] : port;
         await sandbox.commands.run(buildPreKillPortCommand(killPorts), { timeoutMs: 5000 }).catch(() => {});
@@ -2669,7 +2655,7 @@ export class E2BActuator implements IEngineerActuator {
           livePort = found;
           /**
            * Ask the app which of its OWN ports this is before announcing that it "moved" — the sweep's
-           * summary used to assert a move on every full-stack app (autopsy `1a7f4a58`). One bounded
+           * summary used to assert a move on every full-stack app . One bounded
            * read of package.json, and only on the sweep path, which already only runs when the expected
            * port missed; a healthy build still pays nothing. Unreadable ⇒ null ⇒ today's wording.
            */
@@ -2773,7 +2759,7 @@ export class E2BActuator implements IEngineerActuator {
       // forever, so the network is NEVER idle → goto times out at 15s and p.content() captures the
       // un-hydrated shell (root #root empty) — the exact false "Present: none" from deep-test build #2.
       //
-      // WAIT FOR THE APP TO PAINT, NOT FOR A CLOCK (admin field report 2026-08-12). The previous fix
+      // WAIT FOR THE APP TO PAINT, NOT FOR A CLOCK . The previous fix
       // for that was `waitForTimeout(1800)` — a guess, and a guess has exactly one failure mode: an app
       // that takes longer than the guess is snapshotted BLANK. PreviewVerify then reads the empty
       // `<div id="root"></div>` and declares "a runtime error likely crashed it before render", the
@@ -2796,7 +2782,7 @@ export class E2BActuator implements IEngineerActuator {
       // There is no URL for which it worked, so THE BROWSER PATH HAS NEVER RUN: every call landed in
       // the `source: 'curl'` fallback below, which is the platform's own documented
       // `PREVIEW_UNVERIFIED` — "fetched without running its JavaScript". The fallback is what kept it
-      // invisible. Same bug, same file, found via the deploy failure the admin reported.
+      // invisible. Apply the same rendering checks across browser lanes.
       // Unique per call, for the same reason downloadDistFiles is (see its comment): a fixed name is
       // shared by every run in a sandbox that lives for days, and it only has to become un-writable
       // once for every later browse to fail. A browse that fails here falls back to the curl path,
@@ -2805,7 +2791,7 @@ export class E2BActuator implements IEngineerActuator {
       // cannot resolve and this path fails 100% of the time. See `toolsScriptPath`.
       const browsePath = toolsScriptPath('browse'); // TOOLS_DIR, never /tmp — see toolsScriptPath.
       //
-      // 🎧 AND IT LISTENS (autopsy 2026-09-21 — see CONSOLE_RECORDER_JS). This navigation is the one
+      // 🎧 AND IT LISTENS . This navigation is the one
       // the platform makes on essentially every build; attaching the SHARED listeners costs nothing
       // (the browser is already launching) and is what turns `RUNTIME_UNCHECKED` back into a real
       // measurement instead of the structural default. The listeners must be attached BEFORE `goto`,
@@ -2866,7 +2852,7 @@ export class E2BActuator implements IEngineerActuator {
    * source: its class string (greppable verbatim), text, position, computed colours, and the
    * `data-nbai-src` stamp when the preview provides one.
    *
-   * WHY (mitrify autopsy 2026-08-04): the agent could screenshot a page but had no pixel→file path, so
+   * WHY : the agent could screenshot a page but had no pixel→file path, so
    * a request to remove a small green dot became ~30 blind greps over 20 minutes and then a destructive
    * guess. This is the missing half — see UiElementFinder.ts for the matching + the honest
    * proof-of-absence. Bounded and best-effort: an unavailable browser returns an empty list, and the
@@ -3216,7 +3202,7 @@ ${paintWaitJs('p')}
   async getSandboxId(workspaceId: string): Promise<string | null> {
     const sandbox = this.sandboxes.get(workspaceId);
     if (sandbox) return sandbox.sandboxId;
-    // MEMORY IS NOT THE RECORD (admin 2026-08-22). Returning null here on a cold instance is what
+    // MEMORY IS NOT THE RECORD . Returning null here on a cold instance is what
     // silenced the preview health probe: it gates on this id, so `livePortUp` stayed unknown, the app
     // was never classified as stopped, and the auto-restore never fired — the user just got E2B's
     // closed-port page and every reload repeated it. The durable store knew the answer all along.
@@ -3403,7 +3389,7 @@ ${paintWaitJs('p')}
 
   async downloadDistFiles(workspaceId: string): Promise<Map<string, Buffer>> {
     const sandbox = await this.getSandbox(workspaceId);
-    // WHERE THE SITE ACTUALLY IS — asked of the project, not assumed (admin 2026-08-25).
+    // WHERE THE SITE ACTUALLY IS — asked of the project, not assumed .
     //
     // This used to be exactly two paths, `dist` then `out`. Every framework that writes anywhere else
     // — Create React App and SvelteKit (`build/`), Nuxt (`.output/public`), Remix (`build/client`),
@@ -3429,10 +3415,7 @@ ${paintWaitJs('p')}
     // `Could not read the built site: exit status 1`.
     //
     // WORKSPACE_ROOT is a constant, so there was no input for which this worked: the deploy step could
-    // only ever fail. That is very likely the unexplained half of the 2026-08-09 autopsy (build
-    // aed2906d), where deploy "succeeded" twice, emitted no URL, and left the agent running `ls -la
-    // dist/` trying to understand why — that fix made the failure VISIBLE by throwing, but never found
-    // this cause. Reported for real by the admin on 2026-08-19, on the fourth attempt of one publish.
+    // only ever fail. Keep shell quoting out of script execution.
     //
     // Writing the script to a file removes the shell from the path entirely, so the whole class of
     // quoting bug cannot come back — not by adding a path, a quote, a newline, or an apostrophe.
@@ -3442,14 +3425,7 @@ ${paintWaitJs('p')}
     // message that looks nothing like its cause. This is the same lesson one layer along.
     // 🔒 A FRESH PATH PER CALL — THE SECOND PUBLISH USED TO FAIL BECAUSE OF THE FIRST.
     //
-    // These two were fixed names: /tmp/nb_read_dist.cjs and /tmp/nb_dist.json. The admin published an
-    // app, edited it, published again, and the second publish reported (2026-08-27):
-    //
-    //     Error: Could not read the built site: 500: error opening file:
-    //     open /tmp/nb_read_dist.cjs: permission denied.
-    //     Run "npm run build" first so a dist/ directory exists.
-    //
-    // The first publish had left that file behind. A sandbox is long-lived and is resumed across
+    // Reusing fixed temporary paths can inherit unwritable files from an earlier publish. A sandbox is long-lived and is resumed across
     // sessions, so whatever ownership or mode the leftover ended up with is what the next publish
     // inherits — and it only has to be un-writable ONCE for every later publish of that app to fail.
     // The advice in the message was wrong too: the build had already succeeded; nothing about running
@@ -3482,8 +3458,7 @@ ${paintWaitJs('p')}
     if (result.exitCode !== 0) {
       // EXIT 2 IS OUR OWN SCRIPT SAYING "there is nothing here". ANY OTHER EXIT IS OUR TOOLING FAILING,
       // and telling that user to run a build they already ran successfully is advice that cannot work —
-      // it is what turned the /tmp permission failure above into fifteen minutes of the admin rebuilding
-      // an app that was never the problem. Two situations, two messages.
+      // distinguish missing output from tooling failures instead of recommending an unrelated rebuild.
       const noise = (result.stderr || result.stdout).slice(0, 300);
       if (result.exitCode === 2) {
         throw new Error(
@@ -3527,8 +3502,7 @@ ${paintWaitJs('p')}
     let dbDiagnostics = '';
     if (features.includes('db')) {
       // Install PostgreSQL if missing, start it, create the app database — then prove it with a REAL
-      // `SELECT 1` over the exact URL the app is handed (admin task 1, 2026-08-05; script + parser in
-      // dbProvisionVerify.ts, where the Mitrify false-success story lives). pg_isready remains the
+      // `SELECT 1` over the exact URL the app is handed (script and parser in dbProvisionVerify.ts). pg_isready remains the
       // WAIT; SELECT 1 is the only thing allowed to declare success — pg_isready cannot see a missing
       // database or broken auth, and it is not what the app experiences.
       const pgResult = await sandbox.commands.run(

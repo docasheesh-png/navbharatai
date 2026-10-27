@@ -1,14 +1,14 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
-const m = vi.hoisted(() => ({ observeBudget: vi.fn(), setBudget: vi.fn(), execute: vi.fn(), registry: vi.fn(), reserve: vi.fn(), paid: vi.fn(), settle: vi.fn(), cooldown: vi.fn(), controls: vi.fn(), db: vi.fn(), strict: vi.fn(), maintenance: vi.fn(), set: vi.fn(), get: vi.fn(), quota: vi.fn(), spend: vi.fn(), cacheGet: vi.fn(), cachePut: vi.fn(), events: vi.fn(), where: vi.fn(), select: vi.fn(), limit: vi.fn() }));
+const m = vi.hoisted(() => ({ observeBudget: vi.fn(), setBudget: vi.fn(), execute: vi.fn(), registry: vi.fn(), reserve: vi.fn(), paid: vi.fn(), settle: vi.fn(), cooldown: vi.fn(), clearCooldown: vi.fn(), controls: vi.fn(), db: vi.fn(), strict: vi.fn(), maintenance: vi.fn(), set: vi.fn(), get: vi.fn(), quota: vi.fn(), spend: vi.fn(), cacheGet: vi.fn(), cachePut: vi.fn(), events: vi.fn(), where: vi.fn(), select: vi.fn(), limit: vi.fn() }));
 vi.mock('../../lib/serverDb', () => ({ getServerDb: m.db }));
 vi.mock('../../lib/aiMaintenance', () => ({ assertAiAvailable: m.maintenance }));
 vi.mock('../inferencePolicy', () => ({ strictFreeRequired: m.strict }));
 vi.mock('./control', () => ({ readControls: m.controls, readControlsForSelection: m.controls, writeControls: vi.fn(), controlRef: () => ({ collection: () => ({ doc: () => ({ set: m.set, get: m.get }), where: m.where, select: m.select, limit: m.limit, get: m.events }) }) }));
 vi.mock('./cache', async original => ({ ...(await original<typeof import('./cache')>()), FreeChainCache: class { get=m.cacheGet; put=m.cachePut; } }));
-vi.mock('./store', () => ({ FreeChainStore: class { observePaidBudgetPolicy = m.observeBudget; setPaidBudgetPolicy = m.setBudget; reserveQuota = m.reserve; reservePaid = m.paid; settlePaid = m.settle; cooldown = m.cooldown; quotaSnapshot = m.quota; spendSnapshot = m.spend; } }));
-vi.mock('./providers/openAiCompatProvider', () => ({
+vi.mock('./store', () => ({ FreeChainStore: class { observePaidBudgetPolicy = m.observeBudget; setPaidBudgetPolicy = m.setBudget; reserveQuota = m.reserve; reservePaid = m.paid; settlePaid = m.settle; cooldown = m.cooldown; clearCooldown = m.clearCooldown; quotaSnapshot = m.quota; spendSnapshot = m.spend; } }));
+vi.mock('./providers/openAiCompatProvider', async original => ({
+ ...await original<typeof import('./providers/openAiCompatProvider')>(),
  OpenAiCompatProvider: class { constructor(readonly config: unknown) {} executeTurn(input: unknown) { return m.execute(input, this.config); } },
- FreeChainProviderError: class extends Error { constructor(readonly code: string, readonly retryAfterMs?: number) { super(code); } },
 }));
 vi.mock('./providers/openRouterRegistryRung', () => ({ runRegistryRung: m.registry }));
 vi.mock('../Router/AIRouter', () => ({ acquireSlot: () => true, releaseSlot: vi.fn(), recordProviderLatency: vi.fn() }));
@@ -16,9 +16,10 @@ vi.mock('./telemetry', () => ({ logFreeChain: vi.fn() }));
 import { buildFreeChainRouter, maybeFreeChain, freeChainAdminView, freeChainAdminMetrics, controlFreeChainBudget, durationMs, shouldPersistFreeChainEvent, type FreeChainInput } from './runtime';
 import { FreeRoutingError } from '../LiveRegistry/dispatcher';
 import { freeChainConfig } from './config';
-import { resetAllBreakers } from '../Router/CircuitBreaker';
+import { getBreaker, resetAllBreakers } from '../Router/CircuitBreaker';
 import { FreeChainProviderError } from './providers/openAiCompatProvider';
 import { isFreeChainAdminView, isFreeChainAdminMetrics } from '../../../lib/freeChatChainView';
+import type { ChatReplyLanguage } from '../../../lib/chatReplyLanguage';
 m.observeBudget.mockImplementation(async (cap: number) => ({ capNanoUsd: cap, revision: 1 }));
 const db = {} as Parameters<typeof buildFreeChainRouter>[0];
 function config(order = 'groq,cloudflare,deepseek') {
@@ -33,7 +34,7 @@ beforeEach(() => {
  m.paid.mockReset(); m.settle.mockReset(); m.observeBudget.mockImplementation(async (cap: number) => ({ capNanoUsd: cap, revision: 1 }));
  m.controls.mockResolvedValue({ enabled: true, rolloutPercent: 100, disabledProviders: [] });
  m.reserve.mockResolvedValue({ allowed: true }); m.set.mockResolvedValue(undefined); m.get.mockResolvedValue({ data: () => undefined });
- m.cooldown.mockResolvedValue(true); m.strict.mockReturnValue(false); m.db.mockReturnValue(db); m.maintenance.mockResolvedValue(undefined);
+ m.cooldown.mockResolvedValue(true); m.clearCooldown.mockResolvedValue(true); m.strict.mockReturnValue(false); m.db.mockReturnValue(db); m.maintenance.mockResolvedValue(undefined);
  m.execute.mockImplementation(successful());
  m.quota.mockResolvedValue({ available: true, usage: { rpm: 1, rpd: 2, tpm: 3, tpd: 4, neuronsPerDay: 5 }, dailyResetAt: Date.now()+1000, minuteResetAt: Date.now()+1000, cooldownUntil: 0 });
  m.spend.mockResolvedValue({ available: true, capNanoUsd: 2e9, policyRevision: 3, heldNanoUsd: 0, spentNanoUsd: 0 });
@@ -49,6 +50,38 @@ describe('free chat chain central dispatch', () => {
  m.execute.mockRejectedValueOnce(new FreeChainProviderError('RATE_LIMIT')).mockImplementation(successful('second'));
  const chunks: string[]=[]; const result = await buildFreeChainRouter(db, config()).route({ ...input(), onChunk: s=>chunks.push(s) });
  expect(result.provider).toBe('CLOUDFLARE'); expect(chunks).toEqual(['second']); expect(result.freeChain?.fallbacks).toBe(1); expect(m.cooldown).toHaveBeenCalled();
+ });
+ it.each([false, true])('keeps the explicit script in every provider request, including quality=%s and history trim', async teachingTurn => {
+ const history = [{ sender: 'user', text: 'Please explain world trade.' }, { sender: 'ai', text: 'A Roman-script answer.' }, { sender: 'user', text: 'devnaagri me bataao' }, ...Array.from({ length: 10 }, (_, i) => ({ sender: 'user', text: `Follow-up ${i}` }))];
+ m.execute.mockRejectedValueOnce(new FreeChainProviderError('RATE_LIMIT')).mockImplementation(successful('A synthetic answer.'));
+ const result = await buildFreeChainRouter(db, config('groq,cloudflare')).route({ ...input(), message: 'aur batao', history, context: { ...input().context, teachingTurn } });
+ expect(result.ok).toBe(true); expect(m.execute).toHaveBeenCalledTimes(2);
+ for (const [request] of m.execute.mock.calls) {
+   expect(request.systemPrompt).toContain('Hindi using Devanagari script, not Romanized Hindi or Hinglish');
+   expect(request.systemPrompt).not.toContain('Reply in Hinglish using Roman script.');
+   expect(request.prompt).not.toContain('devnaagri me bataao'); // policy survives the six-turn history window
+ }
+ expect(m.paid).not.toHaveBeenCalled(); // no paid translation/rewrite hop
+ });
+ it('honors a current Roman-script override over an older Devanagari preference', async () => {
+ await buildFreeChainRouter(db, config('groq')).route({ ...input(), message: 'Please reply in Hinglish', history: [{ role: 'user', content: 'Answer in Hindi' }] });
+ expect(m.execute.mock.calls[0][0].systemPrompt).toContain('Hinglish using Roman script, not Devanagari');
+ expect(m.execute.mock.calls[0][0].systemPrompt).not.toContain('Reply in Hindi using Devanagari script');
+ });
+ it('uses the preference resolved at ingress when the source turn was trimmed already', async () => {
+ await buildFreeChainRouter(db, config('groq')).route({ ...input(), message: 'more detail please', context: { ...input().context, replyLanguage: 'hi' } });
+ expect(m.execute.mock.calls[0][0].systemPrompt).toContain('Hindi using Devanagari script');
+ });
+ it.each(['Tamil', 'French'])('honors an explicit %s request instead of the English input language', async language => {
+ const cfg = config('groq'); cfg.rungs.find(r => r.id === 'groq')!.languages = ['other'];
+ const result = await buildFreeChainRouter(db, cfg).route({ ...input(), message: `Please reply in ${language}`, history: [{ sender: 'user', text: 'Reply in Hindi' }] });
+ expect(result.ok).toBe(true); expect(m.execute).toHaveBeenCalledOnce();
+ expect(m.execute.mock.calls[0][0].systemPrompt).toContain(`explicit user choice): Reply in ${language}.`);
+ expect(m.execute.mock.calls[0][0].systemPrompt).not.toContain('Reply in English.');
+ });
+ it('keeps detection subordinate even for explicit phrasing outside the deterministic parser', async () => {
+ await buildFreeChainRouter(db, config('groq')).route({ ...input(), message: 'For my answers I would prefer the Hindi language.' });
+ expect(m.execute.mock.calls[0][0].systemPrompt).toContain('DEFAULT ONLY when this conversation has no explicit reply-language or script request');
  });
  it('does not switch provider after text was committed', async () => {
  m.execute.mockImplementationOnce(async (arg) => { arg.onChunk('partial'); throw new FreeChainProviderError('NETWORK'); });
@@ -121,6 +154,23 @@ describe('free chat chain central dispatch', () => {
  const controller=new AbortController();controller.abort();const onChunk=vi.fn();
  const result=await buildFreeChainRouter(db,config()).route({...input(),signal:controller.signal,onChunk});expect(result.reason).toBe('aborted');expect(m.execute).not.toHaveBeenCalled();expect(onChunk).not.toHaveBeenCalled();
  });
+ it.each([true, false])('abort during daily reserve closes only a newly dispatchable hold (mayDispatch=%s)', async mayDispatch => {
+ const controller = new AbortController();
+ const reservation = { id: 'synthetic-held', day: '2026-10-26', uidHash: 'synthetic-owner', maxCostNanoUsd: 315801600, createdAt: 0, mayDispatch };
+ m.paid.mockImplementation(async () => { controller.abort(); return reservation; });
+ m.settle.mockResolvedValue(true);
+ const result = await buildFreeChainRouter(db, config('deepseek')).route({ ...input(), signal: controller.signal });
+ expect(result.ok).toBe(false); expect(m.execute).not.toHaveBeenCalled(); expect(m.paid).toHaveBeenCalledOnce();
+ if (mayDispatch) expect(m.settle).toHaveBeenCalledExactlyOnceWith(reservation, 0);
+ else expect(m.settle).not.toHaveBeenCalled();
+ });
+ it('daily hold stays conservative when cancellation occurs after adapter entry', async () => {
+ const controller = new AbortController();
+ m.paid.mockResolvedValue({ id: 'synthetic-held', day: '2026-10-26', uidHash: 'synthetic-owner', maxCostNanoUsd: 315801600, createdAt: 0, mayDispatch: true });
+ m.execute.mockImplementation(async () => { controller.abort(); throw new FreeChainProviderError('ABORTED'); });
+ expect((await buildFreeChainRouter(db, config('deepseek')).route({ ...input(), signal: controller.signal })).ok).toBe(false);
+ expect(m.execute).toHaveBeenCalledOnce(); expect(m.settle).not.toHaveBeenCalled();
+ });
  it('streams a clear busy response when every rung is unavailable', async () => {
  const cfg=config();cfg.rungs.forEach(r=>{r.reason='unconfigured';});const onChunk=vi.fn();
  const result=await buildFreeChainRouter(db,cfg).route({...input(),onChunk});expect(result.ok).toBe(false);expect(onChunk).toHaveBeenCalledWith(result.content, 'notice');
@@ -128,6 +178,194 @@ describe('free chat chain central dispatch', () => {
  it('defaults OFF and strict-free bypasses the chain', async () => {
  vi.stubEnv('FREE_CHAIN_ENABLED','off');expect(await maybeFreeChain(input())).toBeNull();expect(m.db).not.toHaveBeenCalled();
  vi.stubEnv('FREE_CHAIN_ENABLED','on');m.strict.mockReturnValue(true);expect(await maybeFreeChain(input())).toBeNull();expect(m.execute).not.toHaveBeenCalled();
+ });
+ it('CHEAPERINFERENCE=admin still serves when FREE_CHAIN_ENABLED is off (owner exclusive path)', async () => {
+  vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  vi.stubEnv('FREE_CHAIN_MONTHLY_CAP_ENABLED', 'off');
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  m.settle.mockResolvedValue(undefined);
+  const onChunk = vi.fn();
+  const result = await maybeFreeChain({ ...input(), context: { ...input().context, isAdmin: true }, onChunk });
+  expect(result?.ok).toBe(true);
+  expect(result?.provider).toBe('CHEAPERINFERENCE');
+  expect(result?.model).toBe('beam');
+  expect(m.execute).toHaveBeenCalledTimes(1);
+  expect(onChunk).toHaveBeenCalledWith('answer');
+  expect(onChunk).not.toHaveBeenCalledWith(expect.any(String), 'notice');
+ });
+ it('CHEAPERINFERENCE=admin busy reply shows real reason; ordinary users stay friendly', async () => {
+  vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', ''); // missing key → early diagnostic
+  const adminOnChunk = vi.fn();
+  const admin = await maybeFreeChain({
+    ...input(),
+    message: 'नमस्ते',
+    context: { ...input().context, isAdmin: true },
+    onChunk: adminOnChunk,
+  });
+  expect(admin?.ok).toBe(false);
+  expect(admin?.content).toContain('अभी जवाब नहीं दे पा रहा');
+  expect(admin?.content).toContain('[admin diagnostic]');
+  expect(admin?.content).toMatch(/cheapinf-key-missing-or-invalid|keyConfigured=no/);
+  expect(admin?.content).not.toMatch(/ci_live_|sk-|Bearer\s+\S{8,}/);
+  expect(adminOnChunk).toHaveBeenCalledWith(expect.stringContaining('[admin diagnostic]'), 'notice');
+
+  const userOnChunk = vi.fn();
+  // Non-admin with FreeChain OFF does not enter the chain at all when mode=admin.
+  const user = await maybeFreeChain({ ...input(), message: 'नमस्ते', onChunk: userOnChunk });
+  expect(user).toBeNull();
+ });
+ it('CHEAPERINFERENCE=admin surfaces provider HTTP failure in busy diagnostic', async () => {
+  vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  vi.stubEnv('FREE_CHAIN_MONTHLY_CAP_ENABLED', 'off');
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  m.execute.mockRejectedValue(new FreeChainProviderError('AUTH', { status: 401, credentialEnv: 'CHEAPERINFERENCE_API_KEY' }));
+  const onChunk = vi.fn();
+  const result = await maybeFreeChain({
+    ...input(),
+    message: 'hello admin',
+    context: { ...input().context, isAdmin: true },
+    onChunk,
+  });
+  expect(result?.ok).toBe(false);
+  expect(result?.content).toContain('[admin diagnostic]');
+  expect(result?.content).toMatch(/auth:http=401|cheapinf:auth/);
+  expect(result?.content).not.toContain('ci_live_test_key');
+  // Ordinary user content helper: friendly only
+  const userResult = await buildFreeChainRouter(db, freeChainConfig({
+    FREE_CHAIN_ENABLED: 'on', FREE_CHAIN_ROLLOUT_PERCENT: '100', FREE_CHAIN_ORDER: 'cheapinf',
+    CHEAPERINFERENCE: 'all', CHEAPERINFERENCE_API_KEY: 'ci_live_test_key', FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off',
+  })).route({ ...input(), message: 'hello' });
+  expect(userResult.ok).toBe(false);
+  expect(userResult.content).not.toContain('[admin diagnostic]');
+ });
+ it('CHEAPERINFERENCE=admin exclusive path answers private/profile turns', async () => {
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  const cfg = freeChainConfig({
+    FREE_CHAIN_ENABLED: 'on', FREE_CHAIN_ROLLOUT_PERCENT: '100', FREE_CHAIN_ORDER: 'cheapinf',
+    CHEAPERINFERENCE: 'admin', CHEAPERINFERENCE_API_KEY: 'ci_live_test_key',
+    FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off', FREE_CHAIN_OUTPUT_CAP_ENABLED: 'off',
+  });
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  m.settle.mockResolvedValue(undefined);
+  const result = await buildFreeChainRouter(db, cfg).route({
+    ...input(),
+    context: { ...input().context, isAdmin: true, privateTurn: true, cacheEligible: false },
+  });
+  expect(result.ok).toBe(true);
+  expect(result.provider).toBe('CHEAPERINFERENCE');
+  expect(m.execute).toHaveBeenCalledTimes(1);
+ });
+ it('CHEAPERINFERENCE=admin probes past stale circuit and surfaces upstream HTTP', async () => {
+  vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  vi.stubEnv('FREE_CHAIN_MONTHLY_CAP_ENABLED', 'off');
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  // Seed a long AUTH-style open (1h) with last reason — this is what live showed as cheapinf:circuit.
+  const b = getBreaker('free-chat-chain:cheapinf');
+  b.recordFailure(3_600_000, Date.now(), 'auth:http=401');
+  expect(b.isBlocking()).toBe(true);
+  m.execute.mockRejectedValue(new FreeChainProviderError('QUOTA_EXHAUSTED', { status: 402 }));
+  const result = await maybeFreeChain({
+    ...input(),
+    message: 'probe please',
+    context: { ...input().context, isAdmin: true },
+  });
+  expect(m.execute).toHaveBeenCalledTimes(1);
+  expect(result?.ok).toBe(false);
+  expect(result?.content).toContain('[admin diagnostic]');
+  expect(result?.content).toMatch(/quota_exhausted:http=402|cheapinf:quota_exhausted/);
+  expect(result?.content).not.toMatch(/cheapinf:circuit(?!-probe)/);
+  // Owner exclusive cooldown is short (≤30s), not 1d.
+  const snap = getBreaker('free-chat-chain:cheapinf').snapshot();
+  expect(snap.lastOpenReason).toMatch(/quota_exhausted:http=402/);
+  expect(snap.openedUntil - Date.now()).toBeLessThanOrEqual(30_000 + 50);
+ });
+ it('CHEAPERINFERENCE=admin short circuit wait reports last open reason without probing', async () => {
+  vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  vi.stubEnv('FREE_CHAIN_MONTHLY_CAP_ENABLED', 'off');
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  const b = getBreaker('free-chat-chain:cheapinf');
+  b.recordFailure(20_000, Date.now(), 'auth:http=401');
+  const result = await maybeFreeChain({
+    ...input(),
+    message: 'wait',
+    context: { ...input().context, isAdmin: true },
+  });
+  expect(m.execute).not.toHaveBeenCalled();
+  expect(result?.ok).toBe(false);
+  expect(result?.content).toContain('[admin diagnostic]');
+  expect(result?.content).toMatch(/circuit:last=auth:http=401:remain=\d+s/);
+ });
+ it('CHEAPERINFERENCE=admin waits 60s for first content and labels timeout:first-token', async () => {
+  // Keep the real immutable error contract: an unfrozen mock hid a failed metadata assignment.
+  expect(Object.isFrozen(new FreeChainProviderError('TIMEOUT'))).toBe(true);
+  vi.useFakeTimers();
+  vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  vi.stubEnv('FREE_CHAIN_MONTHLY_CAP_ENABLED', 'off');
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  m.execute.mockImplementation(async (arg: { onChunk?: (s: string) => void; signal?: AbortSignal }) => {
+    await new Promise<never>((_resolve, reject) => {
+      const fail = () => reject(new FreeChainProviderError('ABORTED'));
+      if (arg.signal?.aborted) return fail();
+      arg.signal?.addEventListener('abort', fail, { once: true });
+    });
+  });
+  const pending = maybeFreeChain({
+    ...input(),
+    message: 'slow beam',
+    context: { ...input().context, isAdmin: true },
+  });
+  // Old FREE_CHAIN_TTFT_MS=6s would have failed here; exclusive admin must still be waiting.
+  await vi.advanceTimersByTimeAsync(7_000);
+  expect(m.execute).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(54_000); // 61s total ≥ 60s first-token cap
+  const result = await pending;
+  expect(result?.ok).toBe(false);
+  expect(result?.content).toContain('[admin diagnostic]');
+  expect(result?.content).toMatch(/timeout:first-token:60000ms/);
+  expect(result?.content).toMatch(/ttftCapMs=60000/);
+  expect(result?.content).toMatch(/waitMs=/);
+ });
+
+ it('keeps watchdog metadata local to the timed-out attempt and preserves the real error contract', async () => {
+  vi.useFakeTimers();
+  m.execute.mockImplementationOnce((arg: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+    arg.signal?.addEventListener('abort', () => reject(new FreeChainProviderError('ABORTED')), { once: true });
+  })).mockRejectedValueOnce(new FreeChainProviderError('NETWORK'));
+  const pending = buildFreeChainRouter(db, config('groq,cloudflare')).route(input());
+  await vi.advanceTimersByTimeAsync(7_000);
+  const result = await pending;
+  expect(result.ok).toBe(false);
+  expect(result.freeChain?.attempts.map(attempt => attempt.reason)).toEqual(['timeout:first-token:6000ms', 'network']);
+  expect(m.execute).toHaveBeenCalledTimes(2);
+  expect(m.paid).not.toHaveBeenCalled();
+ });
+
+ it('non-admin chain still skips open circuit without probing', async () => {
+  vi.stubEnv('CHEAPERINFERENCE', 'all');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  const cfg = freeChainConfig({
+    FREE_CHAIN_ENABLED: 'on', FREE_CHAIN_ROLLOUT_PERCENT: '100', FREE_CHAIN_ORDER: 'cheapinf',
+    CHEAPERINFERENCE: 'all', CHEAPERINFERENCE_API_KEY: 'ci_live_test_key', FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off',
+  });
+  getBreaker('free-chat-chain:cheapinf').recordFailure(3_600_000, Date.now(), 'auth:http=401');
+  const result = await buildFreeChainRouter(db, cfg).route(input());
+  expect(m.execute).not.toHaveBeenCalled();
+  expect(result.ok).toBe(false);
+  expect(result.freeChain?.attempts[0].reason).toMatch(/^circuit:last=auth:http=401/);
+  expect(result.content).not.toContain('[admin diagnostic]');
  });
  it('OpenRouter account admission works with the real quota validator and transaction store', async () => {
  const real = await vi.importActual<typeof import('./store')>('./store');
@@ -164,6 +402,42 @@ describe('free chat chain central dispatch', () => {
  const result=await buildFreeChainRouter(db,cfg).route({...input(),message:'what is photosynthesis',context:{...input().context,cacheEligible:true}});
  expect(result.provider).toBe('GROQ');expect(result.freeChain?.cacheHit).toBe(false);expect(m.execute).toHaveBeenCalledOnce();
  });
+ it('bypasses response caching for historical language preferences even on a public corpus prompt', async () => {
+  const cfg = config('groq'); cfg.cacheEnabled = true;
+  const router = buildFreeChainRouter(db, cfg);
+  for (const [index, preference] of ['devnaagri me bataao', 'Reply in English'].entries()) {
+   const result = await router.route({ ...input(), message: 'photosynthesis kya hai',
+    history: [{ role: 'user', content: preference }],
+    context: { ...input().context, uid: `public-user-${index}`, conversationKey: `chat-${index}`, cacheEligible: true } });
+   expect(result.ok).toBe(true); expect(result.freeChain?.cacheHit).toBe(false);
+  }
+  expect(m.cacheGet).not.toHaveBeenCalled(); expect(m.cachePut).not.toHaveBeenCalled();
+  expect(m.execute).toHaveBeenCalledTimes(2);
+ });
+ it.each<[ChatReplyLanguage, ChatReplyLanguage]>([['hi', 'en'], ['hi', 'hinglish'], ['ta', 'fr'], ['hi-latn', 'hinglish']])(
+  'separates public response-cache keys for %s and %s across users and conversations', async (firstLanguage, secondLanguage) => {
+   const cfg = config('groq'); cfg.cacheEnabled = true;
+   cfg.rungs.find(r => r.id === 'groq')!.languages = ['hi', 'hinglish', 'en', 'other'];
+   const entries = new Map<string, { content: string; provider: string; model: string }>();
+   m.cacheGet.mockImplementation(async key => entries.get(key) ?? null);
+   m.cachePut.mockImplementation(async (key, value) => { entries.set(key, value); });
+   m.execute.mockImplementationOnce(successful('first requested language answer'))
+    .mockImplementationOnce(successful('second requested language answer'));
+   const router = buildFreeChainRouter(db, cfg);
+   const turn = (replyLanguage: ChatReplyLanguage, identity: string) => router.route({ ...input(), message: 'photosynthesis kya hai',
+    context: { ...input().context, uid: identity, conversationKey: `chat-${identity}`, cacheEligible: true, replyLanguage } });
+   const first = await turn(firstLanguage, 'first-public-user');
+   const second = await turn(secondLanguage, 'second-public-user');
+   const repeat = await turn(firstLanguage, 'third-public-user');
+   expect(first.content).toBe('first requested language answer'); expect(first.freeChain?.cacheHit).toBe(false);
+   expect(second.content).toBe('second requested language answer'); expect(second.freeChain?.cacheHit).toBe(false);
+   expect(repeat.content).toBe(first.content); expect(repeat.freeChain?.cacheHit).toBe(true);
+   const keys = m.cacheGet.mock.calls.map(([key]) => key);
+   expect(keys).toHaveLength(3); expect(keys.every(key => /^[a-f0-9]{64}$/.test(key))).toBe(true);
+   expect(keys[0]).not.toBe(keys[1]); expect(keys[2]).toBe(keys[0]);
+   expect(m.cachePut.mock.calls.map(([key]) => key)).toEqual(keys.slice(0, 2));
+   expect(m.execute).toHaveBeenCalledTimes(2); expect(m.paid).not.toHaveBeenCalled();
+  });
  it('does not confuse two GLM model identities when one cached model is disabled',async()=>{
  const cfg=config('glm47,glm45');cfg.cacheEnabled=true;cfg.rungs.filter(r=>r.id.startsWith('glm')).forEach(r=>{r.reason=undefined;r.key='single-key';});
  m.controls.mockResolvedValue({enabled:true,rolloutPercent:100,disabledProviders:['glm45']});m.cacheGet.mockResolvedValue({content:'old',provider:'GLM',model:'glm-4.5-flash'});
@@ -185,10 +459,10 @@ describe('free chat chain central dispatch', () => {
  it('status never scans event history and reuses the Flash account quota only within each response', async () => {
  const first = await freeChainAdminView();
  expect(first).not.toHaveProperty('metrics'); expect(m.events).not.toHaveBeenCalled(); expect(m.where).not.toHaveBeenCalled();
- expect(m.quota).toHaveBeenCalledTimes(16);
+ expect(m.quota).toHaveBeenCalledTimes(17);
  expect(m.quota.mock.calls.filter(([scope]) => scope.provider === 'glm')).toHaveLength(1);
  expect(first.providers.find(p => p.id === 'glm47')?.usage).toEqual(first.providers.find(p => p.id === 'glm45')?.usage);
- await freeChainAdminView(); expect(m.quota).toHaveBeenCalledTimes(32); expect(m.controls).toHaveBeenCalledTimes(2); expect(m.spend).toHaveBeenCalledTimes(2);
+ await freeChainAdminView(); expect(m.quota).toHaveBeenCalledTimes(34); expect(m.controls).toHaveBeenCalledTimes(2); expect(m.spend).toHaveBeenCalledTimes(2);
  });
  it('explicit metrics are time-filtered and projected with a hard 4096-document query limit', async () => {
  vi.useFakeTimers(); vi.setSystemTime(100_000_000);

@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { appNeedsDatabase, databaseReadiness } from '../src/server/AgentV3/databaseNeed';
 import { ALL_DB_ENV_VARS } from '../src/lib/dbProviders';
+import { databaseProvisionResult } from '../src/lib/databaseProvisionResult';
 
 /**
  * THE ONE DATABASE QUESTION, ASKED AT THE ONE MOMENT IT MATTERS (admin 2026-08-06).
@@ -162,6 +163,9 @@ describe('The Publish screen asks once, says why, and takes no for an answer', (
   });
 
   it('a provisioning failure passes the server\'s own words through', () => {
-    expect(ui).toContain("data?.error || 'Your database could not be created just now.'");
+    const error = 'Reconnect your database account before creating a project.';
+    expect(databaseProvisionResult(401, { error })).toEqual({ kind: 'failed', message: error });
+    expect(ui).toContain('databaseProvisionResult(res.status,');
+    expect(ui).toContain('setDbNote(result.message)');
   });
 });

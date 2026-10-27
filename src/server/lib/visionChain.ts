@@ -21,7 +21,7 @@ import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 // honest message — never a fake result).
 
 import { claudeVisionAnswerModel, glmVisionModels, grokVisionModels, geminiVisionModels, vertexVisionModels, type VisionTier } from './visionModels';
-import { estimateTextTokens, geminiUsage, reserveFreeTierPaid, settleFreeTierPaid, FREE_TIER_PAID_OUTPUT_QUOTE } from './freeTierPaidCap';
+import { dispatchWithFreeTierPaidHold, estimateTextTokens, geminiUsage, reserveFreeTierPaid, settleFreeTierPaid, FREE_TIER_PAID_OUTPUT_QUOTE } from './freeTierPaidCap';
 import { nextPoolKey } from './keyPool';
 import { vertexGenAI } from './vertexGenAI';
 
@@ -151,11 +151,11 @@ async function tryVertex(atts: VisionAttachment[], o: VisionOptions): Promise<st
     if (!budget.ok) return null; // Free daily cap reached → no further paid call (silent)
     try {
       const result = await withTimeout(
-        vertex.models.generateContent({
+        dispatchWithFreeTierPaidHold(budget.hold, o.signal, () => vertex.models.generateContent({
           model: modelId,
           contents: [{ role: 'user', parts }],
           ...((o.systemPrompt || o.signal) ? { config: { ...(o.systemPrompt ? { systemInstruction: o.systemPrompt } : {}), ...(o.signal ? { abortSignal:o.signal } : {}) } } : {}),
-        }),
+        })),
         o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         `Vertex vision (${modelId})`,
       );
@@ -185,7 +185,7 @@ async function tryGeminiKey(atts: VisionAttachment[], o: VisionOptions): Promise
     if (!budget.ok) return null; // Free daily cap reached → no further paid call (silent)
     try {
       const result: any = await withTimeout(
-        ai.models.generateContent({ model: modelId, contents: [{ parts }], config }),
+        dispatchWithFreeTierPaidHold(budget.hold, o.signal, () => ai.models.generateContent({ model: modelId, contents: [{ parts }], config })),
         o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         `Gemini vision (${modelId})`,
       );

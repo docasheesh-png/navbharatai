@@ -41,9 +41,14 @@ const PEOPLE_WORDS: readonly string[] = [
   'chefs', 'policeman', 'policewoman', 'police officer', 'soldier', 'soldiers', 'engineer', 'engineers', 'scientist',
   'scientists', 'villager', 'villagers', 'priest', 'pandit', 'sadhu', 'monk', 'princess', 'warrior', 'warriors',
   'influencer', 'vlogger', 'youtuber', 'entrepreneur', 'lawyer', 'tailor', 'barber', 'mechanic', 'musician',
-  // ⚠️ Left out on purpose: player (a media player icon), worker (a service worker), cook (a cook book),
-  // seller (best seller), driver / pilot / officer / artist / king / queen — each is a product or a
-  // thing as often as a person, and a false "yes" puts a stranger into a picture of an object.
+  // Roles that were left out until 2026-10-26 — the conditional "If any person appears…" used to cover
+  // them, but that sentence itself invited faces into logo briefs (admin clinic-logo screenshot). Now
+  // these roles are detected as people; product false-positives are stripped in depictsPeople below.
+  'worker', 'workers', 'driver', 'drivers', 'vendor', 'vendors', 'hawker', 'hawkers',
+  'cook', 'cooks', 'seller', 'sellers', 'officer', 'officers', 'artist', 'artists',
+  'portrait', 'portraits',
+  // ⚠️ Still left out: player (media player), pilot / king / queen / model (3D model) — product as often
+  // as person. "service worker", "best seller", "cookbook" are stripped below.
   // Hinglish (romanised)
   'ladka', 'ladki', 'ladke', 'ladkiyan', 'ladkiyaan', 'aadmi', 'admi', 'aurat', 'auratein', 'aurten', 'mahila',
   'purush', 'bachcha', 'bacha', 'bachche', 'bache', 'bachchi', 'bachi', 'insaan', 'insan', 'dadi', 'dada', 'nani',
@@ -135,10 +140,17 @@ function namesAPersonsFace(p: string): boolean {
   return false;
 }
 
+/**
+ * Phrases that LOOK like a person word but name a product or a tech concept. Stripped before the
+ * word list is read, so "service worker diagram" and "best seller badge" stay non-person briefs.
+ */
+const PEOPLE_FALSE_POSITIVE_RE = /\b(?:service\s+workers?|best\s+sellers?|cook\s*books?|device\s+drivers?|print(?:er)?\s+drivers?|3d\s+models?|role\s+models?)\b/giu;
+
 /** Does this brief put a PERSON in the picture? PURE. */
 export function depictsPeople(prompt: string | null | undefined): boolean {
-  const p = String(prompt ?? '').normalize('NFKC');
-  if (!p.trim()) return false;
+  const raw = String(prompt ?? '').normalize('NFKC');
+  if (!raw.trim()) return false;
+  const p = raw.replace(PEOPLE_FALSE_POSITIVE_RE, ' ');
   if (PEOPLE_RE.test(p) || namesAPersonsFace(p)) return true;
   return PEOPLE_SUBSTRINGS.some((w) => p.includes(w));
 }
@@ -158,45 +170,43 @@ export const INDIAN_PEOPLE_DIRECTION =
   + 'facial features and a natural Indian skin tone.';
 
 /**
- * 🔑 THE SAME RULE, PHRASED SO IT CANNOT INVENT A PERSON (admin 2026-10-01, verbatim: *"jab tak
- * specific kaha na jaye, tab tak indian face banane chahiye … result me 100% indian human ana
- * chahiye … yeh un breckbale rule hai"*).
+ * 🔴 RETIRED AS A DEFAULT (admin 2026-10-26, clinic-logo screenshot: prompt "Clinic logo" → floating
+ * man's head + "CLINIC"). The Oct-01 conditional — "If any person appears, they are Indian … facial
+ * features …" — was meant to constrain a person who was already there without inventing one. In
+ * practice diffusion models read the mention of a person and of facial features as an invitation to
+ * DRAW a face, so logos, products and scenes grew strangers nobody asked for.
  *
- * THE DEFECT THIS CLOSES, and it is a RECALL defect, not a wording one. `depictsPeople` is a word
- * list, and that list deliberately LEAVES OUT the commonest words in a real Indian picture request —
- * `worker`, `driver`, `cook`, `seller`, `player`, `officer`, `artist`, `model`, a bare `portrait` —
- * because each is a product or a thing as often as a person ("service worker", "media player", "best
- * seller", "3D model"), and the EMPHATIC sentence above would then put a stranger into a picture of
- * an object. So "delivery worker in a mask" reached the engine with nothing about who the person is,
- * and the model filled the gap with its own default face. That is the admin's screenshot.
- *
- * Widening the list is whack-a-mole: every new word needs its own exception, and the next report
- * finds the word nobody thought of. The CONDITIONAL form removes the reason the list had to be narrow
- * at all — "IF any person appears" constrains a person who is already there and can never add one, so
- * it is safe on a cat, a face-wash bottle, a dashboard and an empty logo brief alike. It therefore
- * goes on EVERY brief the user has not already answered, and the word list stops being a gate on
- * coverage: it only decides which of the two wordings is used.
+ * Kept exported so old tests and docs that quote the wording still compile; the craft layer no
+ * longer puts it on every brief. Coverage for "delivery worker" / "portrait" etc. now comes from a
+ * wider `depictsPeople` word list (with product false-positives stripped), not from this sentence.
  */
 export const INDIAN_PEOPLE_CONDITIONAL =
   'If any person appears in this image, they are Indian — a real person from India, with authentic '
   + 'Indian (South Asian) facial features and a natural Indian skin tone, never any other ethnicity.';
 
 /**
- * The NEGATIVE half — the one that was missing entirely (admin: *"clear 'indian face cut' likh kar
- * bhejo"*).
- *
- * A positive sentence alone loses to a diffusion model's own face prior, which is exactly what the
- * reports show: the direction was in the prompt and the face still came out East Asian. A negative is
- * weighed on a different axis, so the two together are far stronger than either. Kept SHORT on
- * purpose — this module's own history records a suspicion that long inline negatives cost sharpness,
- * and these five items are the ones the failures were actually made of.
- *
- * ⚠️ Inert where there is no face: a negative for a concept the picture does not contain changes
- * nothing, which is what lets it ride along with the conditional direction on every brief.
+ * The NEGATIVE half of the Indian-people rule — ethnicity only, and ONLY when a person was asked for.
+ * Putting these on a logo brief (as the conditional used to) named "face" five times in the Avoid
+ * list and helped invite one.
  */
 export const INDIAN_PEOPLE_NEGATIVE =
   'east asian face, chinese facial features, korean facial features, japanese facial features, '
   + 'white or european face';
+
+/**
+ * 🔑 FACE ONLY WHEN ASKED (admin 2026-10-26): *"face tabhi bane jab bola jaye, ya need ho!!!"*
+ *
+ * When the brief does NOT ask for a person, say so in plain words AND in the negatives. A positive
+ * "no people" alone loses to a model's face prior on a vague subject; the two together are what
+ * stop a clinic logo from growing a stranger's head.
+ */
+export const NO_PEOPLE_DIRECTION =
+  'No people, no person, no human, no face, no portrait, no headshot and no body parts — objects, '
+  + 'marks, products and scenes only.';
+
+export const NO_PEOPLE_NEGATIVE =
+  'people, person, human, humans, man, woman, boy, girl, child, face, faces, portrait, headshot, '
+  + 'selfie, crowd, body, hands holding, floating head';
 
 /** Should the EMPHATIC direction speak for this brief — i.e. is a person actually named? PURE. */
 export function wantsIndianPeopleDefault(prompt: string | null | undefined): boolean {
@@ -214,12 +224,14 @@ export interface IndianPeopleDirective {
 }
 
 /**
- * THE ONE DECISION. Returns null ONLY when the user named somebody else — their words always win,
- * which is the half of this rule that has never changed.
+ * THE ONE DECISION for WHEN a person was asked for.
  *
- * `emphaticAllowed` is false for a UI screenshot and a background, where a word like "student" or
- * "patient" names a DOMAIN rather than a person. Those briefs still get the CONDITIONAL sentence —
- * which is strictly more than they got before, and still cannot invite a stranger into a dashboard.
+ * Returns the Indian default only when a person is actually named (and the purpose allows an
+ * emphatic sentence). Returns null when:
+ *   • the user named another origin (their words win — never changed);
+ *   • nobody is in the picture (craft layer then applies `NO_PEOPLE_*` instead);
+ *   • `emphaticAllowed` is false (UI screenshot / background — "student" names a domain; craft
+ *     applies no-people there too, so a dashboard never grows a stranger).
  *
  * PURE.
  */
@@ -228,10 +240,11 @@ export function indianPeopleDirective(
   opts: { emphaticAllowed?: boolean } = {},
 ): IndianPeopleDirective | null {
   if (namesOtherOrigin(prompt)) return null;
-  const named = depictsPeople(prompt) && opts.emphaticAllowed !== false;
+  if (!depictsPeople(prompt)) return null;
+  if (opts.emphaticAllowed === false) return null;
   return {
-    direction: named ? INDIAN_PEOPLE_DIRECTION : INDIAN_PEOPLE_CONDITIONAL,
+    direction: INDIAN_PEOPLE_DIRECTION,
     negative: INDIAN_PEOPLE_NEGATIVE,
-    named,
+    named: true,
   };
 }

@@ -1,3 +1,4 @@
+import { assertCanaryLegacyAllowed } from '../../AgentV3/reliability/canarySpendGuard';
 import { assertFreeAnswerDispatch } from '../../lib/freeAnswerQuotaContext';
 /** Tiny server-only boundary, separate from runtime to avoid provider/router import cycles. */
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -16,6 +17,7 @@ export function runWithGatewaySelection<T>(selected: boolean, run: () => T): T {
 }
 export function isGatewayDispatchSelected(): boolean { return selection.getStore() === true; }
 export function assertNoUnclaimedGatewayDispatch(capability: string): void {
+  assertCanaryLegacyAllowed(capability);
   assertFreeAnswerDispatch();
   // Image routes retain their own existing quota/payment policy and were expressly excluded.
   if (capability === 'image-generation' || capability === 'image-edit' || capability === 'image-enhancement') return;

@@ -1,3 +1,4 @@
+import ts from 'typescript';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -24,6 +25,25 @@ import { join } from 'path';
 const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
 const surface = readFileSync(join(process.cwd(), 'src/components/agentv3/PreviewSurface.tsx'), 'utf8');
 const actuator = readFileSync(join(process.cwd(), 'src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts'), 'utf8');
+
+/** Structural method boundary: comments/guards cannot move an invariant beyond an arbitrary slice. */
+function methodBody(name: string, source = actuator): string {
+  const file = ts.createSourceFile('actuator.ts', source, ts.ScriptTarget.Latest, true);
+  const bodies: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isMethodDeclaration(node) && node.name.getText(file) === name && node.body) bodies.push(node.body.getText(file));
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  expect(bodies, `exactly one method ${name}`).toHaveLength(1);
+  return bodies[0];
+}
+it('method extraction survives long guards/comments without including a sibling method', () => {
+  const body = methodBody('noteUserActivity', `class Example { noteUserActivity() { /* ${'padding '.repeat(300)} */ const USER_ACTIVITY_WRITE_MS = 1; } sibling() { this._touchDurable(); } }`);
+  expect(body).toContain('USER_ACTIVITY_WRITE_MS');
+  expect(body).not.toContain('this._touchDurable(');
+});
+
 
 describe('1. NavBharatAI no longer hands out a shareable preview link', () => {
   it('the preview toolbar offers no way to open the app outside the app', () => {
@@ -118,13 +138,7 @@ describe('4. the sweep respects activity it did not see itself', () => {
   it('reads the durable record before pausing', () => {
     // A ping can land on ANY Cloud Run instance; the sweep runs on whichever holds the sandbox. Without
     // this read, a keep-alive that landed elsewhere protects nothing and the app still dies.
-    const i = actuator.indexOf('private async _sweepIdleSandboxes');
-    expect(i).toBeGreaterThan(-1);
-    // Bounded by the next method, not a character count — a count drifts the first time a line is
-    // added to the sweep (2026-09-11, twice in one day across two test files).
-    const end = actuator.indexOf('private async _sweepOrphanSandboxes(', i);
-    expect(end).toBeGreaterThan(i);
-    const body = actuator.slice(i, end);
+    const body = methodBody('_sweepIdleSandboxes');
     expect(body).toContain('sandboxStore.getRecord(workspaceId)');
     const check = body.indexOf('sandboxStore.getRecord');
     const pause = body.indexOf('await this.pauseSandbox');
@@ -134,15 +148,15 @@ describe('4. the sweep respects activity it did not see itself', () => {
   it('user activity writes durably on its own throttle, not the build hot path’s', () => {
     // `_touchDurable` is throttled to 5 minutes — exactly the idle limit it would have to beat.
     expect(actuator).toContain('const USER_ACTIVITY_WRITE_MS = 60_000;');
-    const i = actuator.indexOf('noteUserActivity(workspaceId: string): boolean');
-    const body = actuator.slice(i, i + 900);
+    const body = methodBody('noteUserActivity');
     expect(body).toContain('USER_ACTIVITY_WRITE_MS');
     expect(body).not.toContain('this._touchDurable(');
   });
 
   it('the build-in-flight skip still comes first, so a live build is never reached', () => {
-    const i = actuator.indexOf('private async _sweepIdleSandboxes');
-    const body = actuator.slice(i, i + 1800);
+    const body = methodBody('_sweepIdleSandboxes');
+    expect(body.indexOf('_buildInFlight')).toBeGreaterThan(-1);
+    expect(body.indexOf('sandboxStore.getRecord')).toBeGreaterThan(-1);
     expect(body.indexOf('_buildInFlight')).toBeLessThan(body.indexOf('sandboxStore.getRecord'));
   });
 });

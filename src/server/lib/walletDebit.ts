@@ -1,6 +1,7 @@
+import { materializeWalletCharge, chargePurpose, walletCarries, carryPatch } from './walletCarry';
 import { doc, getDoc, runTransaction } from './serverDb'; // admin-SDK binding (bypasses rules) — see serverDb.ts
 import { inrToDebitTokens, TOKENS_PER_RUPEE } from './payments';
-import { giftAfterSpend, giftRemaining, paidSpendableTokens } from './giftSpend';
+import { giftAfterSpend, giftRemaining, paidSpendableTokens, giftUsagePatch, unavailableGiftTokens, adminBuildRemaining } from './giftSpend';
 import { freeProgramPausedHint } from './freeProgramHint';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
 import { WALLET_OPS, walletOpId } from './walletOps';
@@ -54,6 +55,8 @@ export interface WalletDebitTx {
    * it — see `walletFeature.ts`.
    */
   feature?: WalletFeature;
+  /** Server-resolved Weak tier only. Never taken from an unverified client entitlement. */
+  adminCreditEligible?: boolean;
   /**
    * How far below zero this wallet may go, in ₹.
    *
@@ -98,6 +101,7 @@ export interface DebitedWallet {
    * it in full. Nothing was applied. Only a hold can see this; an ordinary debit clamps instead.
    */
   refused?: boolean;
+  refusalReason?: 'fractional-hold-provenance';
   /**
    * 🔴 WHAT WAS ACTUALLY TAKEN (r6–r10 autopsy, 2026-10-18). When the overdraft floor caps a charge, the
    * caller used to report the PRE-cap bill as "charged". These say what left the wallet (₹, derived from the
@@ -125,12 +129,14 @@ export interface DebitedWallet {
  * Tokens, not `remaining_balance`: tokens are the unit the balance is actually kept in, so a floor
  * measured against them can never disagree with the number the gates read.
  */
-function floorCharge(w: Record<string, any>, billedInr: number, floorInr: number | undefined) {
+function floorCharge(w: Record<string, any>, billedInr: number, floorInr: number | undefined, build = false) {
   const bal = typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0;
+  const protectedTokens = w.adminBuildTokensRemaining !== undefined
+    ? unavailableGiftTokens(w, freeProgramPausedHint(), build) : 0;
   return clampChargeToFloor({
-    balanceInr: bal / TOKENS_PER_RUPEE,
+    balanceInr: (bal - protectedTokens) / TOKENS_PER_RUPEE,
     billedInr,
-    floorInr: Number.isFinite(floorInr as number) ? (floorInr as number) : DEFAULT_OVERDRAFT_FLOOR_INR,
+    floorInr: protectedTokens > 0 ? 0 : Number.isFinite(floorInr as number) ? (floorInr as number) : DEFAULT_OVERDRAFT_FLOOR_INR,
   });
 }
 
@@ -161,11 +167,11 @@ export function computeDebitedWallet(
   // 🔴 THE FLOOR, APPLIED BEFORE ANYTHING IS CONVERTED TO TOKENS (admin 2026-09-13, on a real account
   // at −₹506 and another at −₹1,198). A build that was legitimately allowed to start at ₹1 used to
   // settle for whatever it had cost, in one debit, with nothing bounding it.
-  const floored = floorCharge(w, tx.billedInr, tx.floorInr);
+  const floored = floorCharge(w, tx.billedInr, tx.floorInr, tx.feature === 'build' && tx.adminCreditEligible === true);
   // A purchase may not dip into the welcome gift. Refuse the whole charge — do not take part of it
   // from the gift and do not push the gift balance negative to "cover" it.
   if (tx.spends === 'paid-only') {
-    const owed = inrToDebitTokens(floored.chargedInr);
+    const owed = inrToDebitTokens(tx.billedInr);
     if (owed > paidSpendableTokens(w) + 1e-9) {
       return { wallet: w, tokensDebited: 0, applied: false, refused: true };
     }
@@ -174,12 +180,20 @@ export function computeDebitedWallet(
   // ⚠️ The CARRY follows what was actually CHARGED, never what was owed. Carrying the absorbed part
   // would quietly re-bill on the next charge the very rupees we just said we would eat.
   const owed = inrToDebitTokens(floored.chargedInr) + carriedIn;
-  const tokens = Math.floor(owed);
-  const carryOut = Math.round((owed - tokens) * 1e6) / 1e6; // keep the remainder free of float dust
+  const adminEligible = tx.feature === 'build' && tx.adminCreditEligible === true;
+  const paused = freeProgramPausedHint();
+  const protectedTokens = unavailableGiftTokens(w, paused, adminEligible);
+  const capacity = tx.spends === 'paid-only' ? paidSpendableTokens(w)
+    : Math.max(0, n(w.tokenBalance) - protectedTokens + (protectedTokens > 0 ? 0 : (Number.isFinite(tx.floorInr) && tx.floorInr! >= 0 ? tx.floorInr! : DEFAULT_OVERDRAFT_FLOOR_INR) * TOKENS_PER_RUPEE));
+  const tracked = w.adminBuildTokensRemaining === undefined ? null
+    : materializeWalletCharge(w, inrToDebitTokens(floored.chargedInr), chargePurpose(adminEligible, paused, tx.spends === 'paid-only'), capacity);
+  const tokens = tracked?.tokens ?? Math.floor(owed);
+  const carryOut = tracked ? tracked.patch[TOKEN_CARRY_FIELD] : Math.round((owed - tokens) * 1e6) / 1e6; // keep the remainder free of float dust
   const billedInr = Math.round((tokens / TOKENS_PER_RUPEE) * 100) / 100;
 
   const ledgerEntry = {
     type: 'usage',
+    ...(w.adminBuildTokensRemaining !== undefined ? { adminBuildTokensDelta: tx.spends !== 'paid-only' ? (giftUsagePatch(w, tokens, freeProgramPausedHint(), tx.feature === 'build' && tx.adminCreditEligible === true).adminBuildTokensRemaining ?? 0) - adminBuildRemaining(w) : 0 } : {}),
     amountCoinsOrTokens: -tokens,
     moneySpent: 0,
     timestamp: now,
@@ -187,7 +201,9 @@ export function computeDebitedWallet(
     // cannot account for — it really was charged, just on their next one.
     description: tokens > 0
       ? `${tx.description} — ${tokens.toLocaleString()} tokens (₹${billedInr.toFixed(2)})`
-      : `${tx.description} — under ₹0.01, carried to your next charge`,
+      : tracked
+        ? `${tx.description} — no whole tokens charged now; pending amount retained for this funding purpose`
+        : `${tx.description} — under ₹0.01, carried to your next charge`,
     buildRef: tx.buildRef,
     ...(tx.feature ? { feature: tx.feature } : {}),
     // Our own loss, on the row that caused it — never folded into the user's number.
@@ -207,13 +223,18 @@ export function computeDebitedWallet(
     ? Math.max(0, Math.min(giftRemaining(w), nextBalance))
     : Math.max(0, Math.min(giftAfterSpend(w, tokens, freeProgramPausedHint()), nextBalance));
 
+  const provenance = w.adminBuildTokensRemaining === undefined ? {} : tx.spends === 'paid-only'
+    ? { adminBuildTokensRemaining: Math.min(adminBuildRemaining(w), nextGift) }
+    : giftUsagePatch(w, tokens, freeProgramPausedHint(), tx.feature === 'build' && tx.adminCreditEligible === true);
   const wallet: Record<string, any> = {
     ...w,
     tokenBalance: nextBalance,
     totalTokensUsed: n(w.totalTokensUsed) + tokens,
     remaining_balance: Math.round((n(w.remaining_balance) - billedInr) * 100) / 100,
     [TOKEN_CARRY_FIELD]: carryOut,
+    ...(tracked?.patch ?? {}),
     giftTokensRemaining: nextGift,
+    ...provenance,
     walletLedger: nextLedger,
     [LEDGER_OPENING_FIELD]: appended.openingTokens,
     [LEDGER_DROPPED_FIELD]: appended.droppedCount,
@@ -257,6 +278,7 @@ export interface OpenHold {
   id: string;
   owed: number;
   gift: number;
+  adminBuild?: number;
 }
 
 /**
@@ -301,6 +323,12 @@ export function computeRolledUpDebit(
     return { wallet: w, tokensDebited: 0, applied: false };
   }
 
+  // Whole-token holds are exactly reversible regardless of the carried fractional remainder.
+  // A fractional hold needs source-aware refundable carry; fail closed rather than turn a returned
+  // admin gift into purchased money. AgentV3 builds settle after the result and do not use holds.
+  if (w.adminBuildTokensRemaining !== undefined && tx.holdId && !Number.isInteger(inrToDebitTokens(tx.billedInr))) {
+    return { wallet: w, tokensDebited: 0, applied: false, refused: true, refusalReason: 'fractional-hold-provenance' };
+  }
   const ledger: any[] = Array.isArray(w.walletLedger) ? w.walletLedger : [];
   const existingIndex = ledger.findIndex((e) => e && e.rollupRef === tx.rollupRef);
   const existingHolds = existingIndex >= 0 ? openHoldsOf(ledger[existingIndex]) : [];
@@ -311,7 +339,7 @@ export function computeRolledUpDebit(
 
   // The same floor, for the same reason — see computeDebitedWallet. A rollup can cross it just as a
   // build can: many small assistant charges in one day add up exactly like one large one.
-  const floored = floorCharge(w, tx.billedInr, tx.floorInr);
+  const floored = floorCharge(w, tx.billedInr, tx.floorInr, false);
   // An all-or-nothing charge is never partly taken: if the floor would bite, nothing moves at all.
   if (tx.allOrNothing && floored.clamped) {
     return { wallet: w, tokensDebited: 0, applied: false, refused: true };
@@ -324,8 +352,14 @@ export function computeRolledUpDebit(
   const carriedIn = Math.min(Math.max(n(w[TOKEN_CARRY_FIELD]), 0), 1);
   const owedForThis = inrToDebitTokens(floored.chargedInr);
   const owed = owedForThis + carriedIn;
-  const tokens = Math.floor(owed);
-  const carryOut = Math.round((owed - tokens) * 1e6) / 1e6;
+  const paused = freeProgramPausedHint();
+  const protectedTokens = unavailableGiftTokens(w, paused, false);
+  const capacity = Math.max(0, n(w.tokenBalance) - protectedTokens
+    + (protectedTokens > 0 ? 0 : (Number.isFinite(tx.floorInr) && tx.floorInr! >= 0 ? tx.floorInr! : DEFAULT_OVERDRAFT_FLOOR_INR) * TOKENS_PER_RUPEE));
+  const tracked = w.adminBuildTokensRemaining === undefined ? null
+    : materializeWalletCharge(w, owedForThis, chargePurpose(false, paused), capacity, !!tx.holdId);
+  const tokens = tracked?.tokens ?? Math.floor(owed);
+  const carryOut = tracked ? tracked.patch[TOKEN_CARRY_FIELD] : Math.round((owed - tokens) * 1e6) / 1e6;
 
   const priorTokens = existingIndex >= 0 ? Math.abs(n(ledger[existingIndex]?.amountCoinsOrTokens)) : 0;
   const bucketTokens = priorTokens + tokens;
@@ -333,15 +367,18 @@ export function computeRolledUpDebit(
   const chargeInr = Math.round((tokens / TOKENS_PER_RUPEE) * 100) / 100;
 
   const rollupBalance = n(w.tokenBalance) - tokens;
-  const nextGift = Math.max(0, Math.min(giftAfterSpend(w, tokens, freeProgramPausedHint()), rollupBalance));
+  const provenance = w.adminBuildTokensRemaining === undefined ? null
+    : giftUsagePatch(w, tokens, freeProgramPausedHint(), false);
+  const nextGift = provenance?.giftTokensRemaining ?? Math.max(0, Math.min(giftAfterSpend(w, tokens, freeProgramPausedHint()), rollupBalance));
   // Open holds ride along on EVERY rewrite of the row, a plain charge included — a row rewritten without
   // them would make an in-flight hold impossible to give back.
   const holds = tx.holdId
-    ? [...existingHolds, { id: tx.holdId, owed: owedForThis, gift: Math.max(0, giftRemaining(w) - nextGift) }]
+    ? [...existingHolds, { id: tx.holdId, owed: owedForThis, gift: Math.max(0, giftRemaining(w) - nextGift), adminBuild: provenance ? Math.max(0, adminBuildRemaining(w) - (provenance.adminBuildTokensRemaining ?? 0)) : 0 }]
     : existingHolds;
 
   const row = {
     type: 'usage',
+    ...(provenance ? { adminBuildTokensDelta: n(ledger[existingIndex]?.adminBuildTokensDelta) + (provenance.adminBuildTokensRemaining ?? 0) - adminBuildRemaining(w) } : {}),
     amountCoinsOrTokens: -bucketTokens,
     moneySpent: 0,
     timestamp: now,
@@ -365,9 +402,11 @@ export function computeRolledUpDebit(
     totalTokensUsed: n(w.totalTokensUsed) + tokens,
     remaining_balance: Math.round((n(w.remaining_balance) - chargeInr) * 100) / 100,
     [TOKEN_CARRY_FIELD]: carryOut,
+    ...(tracked?.patch ?? {}),
     // A chat turn is ordinary spending, so it eats the gift first — there is deliberately no
     // `paid-only` option here: a rollup can only ever be assistant usage, never a plan.
     giftTokensRemaining: nextGift,
+    ...(provenance ?? {}),
     walletLedger: nextLedger,
     [LEDGER_OPENING_FIELD]: rolled.openingTokens,
     [LEDGER_DROPPED_FIELD]: rolled.droppedCount,
@@ -431,9 +470,13 @@ export function computeRolledUpRelease(
 
   // Give back exactly what was owed. The debit took floor(owed + carry) whole tokens and kept the rest
   // as carry; the inverse returns the smallest whole number of tokens that, with the carry, repays it.
-  const carriedIn = Math.min(Math.max(n(w[TOKEN_CARRY_FIELD]), 0), 1);
-  const tokens = Math.max(0, Math.ceil(hold.owed - carriedIn - 1e-9));
-  const carryOut = Math.min(Math.max(Math.round((carriedIn + tokens - hold.owed) * 1e6) / 1e6, 0), 0.999999);
+  const trackedCarries = w.adminBuildTokensRemaining === undefined ? null : walletCarries(w);
+  const independent = !!trackedCarries && Number.isInteger(hold.owed);
+  const carriedIn = trackedCarries ? trackedCarries.cash : Math.min(Math.max(n(w[TOKEN_CARRY_FIELD]), 0), 1);
+  const tokens = independent ? hold.owed : Math.max(0, Math.ceil(hold.owed - carriedIn - 1e-9));
+  const remainingCarry = Math.max(0, Math.round((carriedIn + tokens - hold.owed) * 1e6) / 1e6);
+  const releasedCarry = trackedCarries ? carryPatch({ ...trackedCarries, cash: independent ? trackedCarries.cash : remainingCarry }) : null;
+  const carryOut = releasedCarry ? releasedCarry[TOKEN_CARRY_FIELD] : Math.min(remainingCarry, 0.999999);
 
   const priorTokens = Math.abs(n(row.amountCoinsOrTokens));
   const bucketTokens = Math.max(0, priorTokens - tokens);
@@ -443,6 +486,7 @@ export function computeRolledUpRelease(
 
   const nextRow = {
     type: 'usage',
+    ...(w.adminBuildTokensRemaining !== undefined ? { adminBuildTokensDelta: n(row.adminBuildTokensDelta) + Math.min(n(hold.adminBuild), tokens) } : {}),
     amountCoinsOrTokens: -bucketTokens,
     moneySpent: 0,
     timestamp: now,
@@ -461,7 +505,11 @@ export function computeRolledUpRelease(
     totalTokensUsed: Math.max(0, n(w.totalTokensUsed) - tokens),
     remaining_balance: Math.round((n(w.remaining_balance) + returnedInr) * 100) / 100,
     [TOKEN_CARRY_FIELD]: carryOut,
+    ...(releasedCarry ?? {}),
     giftTokensRemaining: Math.max(0, Math.min(giftRemaining(w) + Math.min(hold.gift, tokens), nextBalance)),
+    ...(w.adminBuildTokensRemaining !== undefined ? {
+      adminBuildTokensRemaining: Math.min(nextBalance, adminBuildRemaining(w) + Math.min(n(hold.adminBuild), tokens)),
+    } : {}),
     walletLedger: rolled.ledger,
     [LEDGER_OPENING_FIELD]: rolled.openingTokens,
     [LEDGER_DROPPED_FIELD]: rolled.droppedCount,
@@ -676,6 +724,9 @@ export async function holdWalletRolledUp(
       return result;
     });
     const tokenBalance = typeof held.wallet.tokenBalance === 'number' ? held.wallet.tokenBalance : 0;
+    if (held.refusalReason === 'fractional-hold-provenance') {
+      return { ok: false, insufficient: false, error: 'This fractional-token reservation is not supported for admin-credit wallets. No credits were charged.' };
+    }
     if (held.refused) {
       return { ok: false, insufficient: true, balanceInr: tokenBalance / TOKENS_PER_RUPEE, error: 'Balance does not cover the charge' };
     }

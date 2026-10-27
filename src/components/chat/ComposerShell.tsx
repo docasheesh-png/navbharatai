@@ -3,6 +3,9 @@
 // a full-width row, with controls below. Each caller retains its own handlers and live state.
 
 import React from 'react';
+import { autoGrow, resizeMobileComposer } from '../../lib/autoGrowTextarea';
+import './composer.css';
+export { resizeMobileComposer } from '../../lib/autoGrowTextarea';
 import { HistoryButton } from './HistoryButton';
 import { ModeButton } from './ModeButton';
 import { CONVERSATION_COLUMN_CLASS } from './conversation';
@@ -11,7 +14,7 @@ export const COMPOSER_PANEL_CLASS = 'px-3 pt-2 pb-2 sm:pt-3 sm:pb-3 bg-surface s
 
 /** The rounded message box: a soft pill on the card surface; focus lifts the shadow and tints the border. */
 export const COMPOSER_BOX_CLASS =
-  'bg-card border border-line rounded-[1.5rem] shadow-[0_2px_16px_rgba(0,0,0,0.06)] focus-within:border-accent focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.10)] transition-all';
+  'nb-composer-box bg-card border border-line rounded-[1.5rem] shadow-[0_2px_16px_rgba(0,0,0,0.06)] focus-within:border-accent focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.10)] transition-all';
 
 /**
  * The textarea: the box's WHOLE top row (admin 2026-09-23, with a phone screenshot of the box squeezed
@@ -22,16 +25,15 @@ export const COMPOSER_BOX_CLASS =
  * zooming the page on focus.
  */
 export const COMPOSER_TEXTAREA_CLASS =
-  'w-full bg-transparent text-ink placeholder:text-muted px-4 pt-4 pb-2 outline-none transition-all resize-none min-h-[72px] leading-relaxed text-[16px]';
+  'nb-composer-text w-full bg-transparent text-ink placeholder:text-muted px-3.5 pt-2.5 pb-2 outline-none transition-all resize-none min-h-[40px] leading-relaxed text-[16px]';
 
 /** A quiet icon control in the bottom row (attach, mic, voice, star). 36px. */
 export const COMPOSER_ICON_CLASS =
   'p-2.5 rounded-full text-muted hover:text-ink hover:bg-raised transition-colors flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed';
 
 /**
- * Send — a filled circle at the box's bottom-right corner, an arrow pointing up. 36px, so it stays a
- * real thumb target, and set apart from the voice button by the box's own gap so a reach for Send
- * cannot land on a paid control. Its non-shrinking slot pins it to the bottom edge, so a message that grows to several lines keeps Send where the thumb already is.
+ * Send — a filled circle on the Type field's right edge, an arrow pointing up. 36px thumb target.
+ * Tools stay on their own row below; Send never lives in that tools row.
  */
 export const COMPOSER_SEND_CLASS =
   'h-9 w-9 rounded-full bg-accent text-on-accent disabled:opacity-30 disabled:cursor-not-allowed hover:brightness-110 transition-all flex items-center justify-center active:scale-95';
@@ -40,8 +42,8 @@ export const COMPOSER_SEND_CLASS =
 export const COMPOSER_STOP_CLASS =
   'h-9 w-9 rounded-full bg-ink text-surface hover:opacity-90 transition-all flex items-center justify-center active:scale-95';
 
-/** Send never shrinks or competes with the writing row. */
-export const COMPOSER_SEND_SLOT_CLASS = 'shrink-0 self-end';
+/** Send sits on the Type field's right edge and never shrinks. */
+export const COMPOSER_SEND_SLOT_CLASS = 'nb-composer-send-slot shrink-0';
 
 export interface ComposerShellProps {
   /** Opens chat history. Absent ⇒ no History half in the left column. */
@@ -52,7 +54,7 @@ export interface ComposerShellProps {
   children: React.ReactNode;
   /** The quiet controls for the wrapping bottom row: attach, mic, voice, star. */
   controls: React.ReactNode;
-  /** The Send / Stop button, at the bottom-right of the toolbar. */
+  /** The Send / Stop button, on the right edge of the Type field. */
   send: React.ReactNode;
 }
 
@@ -83,6 +85,22 @@ function focusComposerText(box: HTMLElement | null): void {
 
 function useWholeBoxInput() {
   const boxRef = React.useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => {
+    const text = boxRef.current?.querySelector('textarea');
+    if (text) resizeMobileComposer(text);
+  });
+  React.useEffect(() => {
+    const resize = () => {
+      const text = boxRef.current?.querySelector('textarea');
+      if (text) autoGrow(text, parseFloat(getComputedStyle(text).maxHeight) || 240);
+    };
+    window.addEventListener('resize', resize);
+    window.visualViewport?.addEventListener('resize', resize);
+    return () => {
+      window.removeEventListener('resize', resize);
+      window.visualViewport?.removeEventListener('resize', resize);
+    };
+  }, []);
   const onMouseDown = (e: React.MouseEvent) => {
     if (tapFocusesComposerText(e.target, boxRef.current)) e.preventDefault();
   };
@@ -107,13 +125,78 @@ export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, s
   return (
     <div className={`${CONVERSATION_COLUMN_CLASS} flex items-end gap-2`} data-composer-layout="two-rows">
       {rail}
-      <div className={`${COMPOSER_BOX_CLASS} flex-1 min-w-0 cursor-text`} ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick}>
-        <div className="relative w-full min-w-0">{children}</div>
-        <div className="flex items-end justify-between gap-2 px-2 pb-2" data-composer-toolbar="">
-          <div className="flex min-w-0 flex-wrap items-center gap-1">{controls}</div>
+      <div className={`${COMPOSER_BOX_CLASS} flex-1 min-w-0 cursor-text ${controls ? '' : 'nb-composer-no-tools'}`} ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick}>
+        <div className="relative w-full min-w-0">
+          {children}
           <div className={COMPOSER_SEND_SLOT_CLASS}>{send}</div>
         </div>
+        {controls ? (
+          <div className="nb-composer-actionbar flex items-center justify-between gap-2" data-composer-toolbar="">
+            <MobileComposerTools><div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto">{controls}</div></MobileComposerTools>
+          </div>
+        ) : null}
       </div>
     </div>
   );
+}
+
+/** Mobile disclosure only; desktop keeps the original control layout and mounted state. */
+export function MobileComposerTools({ children, open: controlledOpen, onOpenChange }: {
+  children: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const [internalOpen, setInternalOpen] = React.useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = React.useCallback((next: boolean) => {
+    setInternalOpen(next);
+    onOpenChange?.(next);
+  }, [onOpenChange]);
+  const root = React.useRef<HTMLDivElement>(null);
+  const toggle = React.useRef<HTMLButtonElement>(null);
+  const id = React.useId();
+  React.useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)');
+    const resize = () => {
+      if (!mq.matches) setOpen(false);
+      const viewport = window.visualViewport;
+      const height = viewport?.height ?? window.innerHeight;
+      const inset = Math.max(0, window.innerHeight - height - (viewport?.offsetTop ?? 0));
+      const menuMax = `${Math.max(44, height - 80)}px`;
+      const menuBottom = `${inset + 72}px`;
+      const apply = (el: HTMLElement | null | undefined) => {
+        el?.style.setProperty('--nb-composer-menu-max-height', menuMax);
+        el?.style.setProperty('--nb-composer-menu-bottom', menuBottom);
+      };
+      apply(root.current);
+      apply(root.current?.closest('.nb-composer-box') as HTMLElement | null);
+    };
+    const outside = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (mq.matches && open && event.key === 'Escape' && !event.defaultPrevented) {
+        setOpen(false);
+        toggle.current?.focus();
+      }
+    };
+    resize();
+    window.addEventListener('resize', resize);
+    window.visualViewport?.addEventListener('resize', resize);
+    window.visualViewport?.addEventListener('scroll', resize);
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    return () => {
+      window.removeEventListener('resize', resize);
+      window.visualViewport?.removeEventListener('resize', resize);
+      window.visualViewport?.removeEventListener('scroll', resize);
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [open, setOpen]);
+  return <div ref={root} className="nb-composer-tools">
+    <button ref={toggle} type="button" className="nb-composer-tools-toggle text-muted hover:text-ink hover:bg-raised"
+      aria-label="Composer tools" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>+</button>
+    <div id={id} className="nb-composer-tools-content" data-open={open}>{children}</div>
+  </div>;
 }

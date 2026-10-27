@@ -22,7 +22,7 @@ describe('FREE-chain configuration is explicit and fail-closed', () => {
     const cfg = freeChainConfig({});
     expect(cfg).toMatchObject({ enabled: false, rolloutPercent: 0, cacheEnabled: true, skipGemini: true,
       privacyApproved: false, paidCapNanoUsd: 10_000_000_000, paidPerUserDaily: 20, safetyMargin: .9, errors: [] });
-    expect(cfg.order).toEqual(['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
+    expect(cfg.order).toEqual(['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
     expect(cfg.rungs.find(r => r.id === 'gemini')).toMatchObject({ rpm: 0, rpd: 0, tpm: 0, tpd: 0, reason: 'privacy' });
   });
   it('pins GLM free models to one isolated key and shared zero-until-verified quota settings', () => {

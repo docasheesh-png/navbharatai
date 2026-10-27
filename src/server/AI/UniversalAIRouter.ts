@@ -1,3 +1,4 @@
+import { currentFreeAnswerSignal } from '../lib/freeAnswerQuotaContext';
 import type { FreeChainContext } from './FreeChain/rollout';
 import type { FreeChainTelemetry } from './FreeChain/telemetry';
 import { strictFreeChat } from './LiveRegistry/runtime';
@@ -76,6 +77,8 @@ export class UniversalAIRouter {
     signal?: AbortSignal,
     freeChainContext?: FreeChainContext,
   ): Promise<RoutedCall> {
+    const quotaSignal = currentFreeAnswerSignal();
+    signal = signal && quotaSignal ? AbortSignal.any([signal, quotaSignal]) : signal ?? quotaSignal;
     if (!isGatewayRouteSelected() && tier === 'navbharat' && freeChainContext) {
       const { maybeFreeChain } = await import('./FreeChain/runtime');
       const chain = await maybeFreeChain({ message, history, systemPrompt, signal, context: freeChainContext });
@@ -89,14 +92,24 @@ export class UniversalAIRouter {
       return { ...result, ok: true };
     }
     const router = AIRouterManager.getRouter(ns);
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new AbortController();
+    const bounded = !strictFreeRequired() && !isGatewayRouteSelected();
+    const requestSignal = bounded ? (signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal) : signal;
     try {
-      const timeout = strictFreeRequired() || isGatewayRouteSelected() ? undefined : new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('timeout')), this.TIMEOUT_MS)
-      );
-      const call = isGatewayRouteSelected()
-        ? router.route(fullPrompt, systemPrompt, undefined, undefined, signal)
-        : router.route(fullPrompt, systemPrompt);
+      requestSignal?.throwIfAborted();
+      // Abort the physical request as well as bounding the observer. A provider that ignores
+      // cancellation still owns its AIRouter slot until its promise actually settles.
+      const timeout = bounded ? new Promise<never>((_, reject) => {
+        deadlineTimer = setTimeout(() => {
+          const error = new Error('timeout');
+          deadline.abort(error);
+          reject(error);
+        }, this.TIMEOUT_MS);
+      }) : undefined;
+      const call = router.route(fullPrompt, systemPrompt, undefined, undefined, requestSignal);
       const { response, telemetry } = await (timeout ? Promise.race([call, timeout]) : call);
+      requestSignal?.throwIfAborted();
       // 🔒 THE PROVIDER NAME COMES FROM TELEMETRY, NOT FROM THE RESPONSE. When every provider fails,
       // AIRouter still returns a response object stamped `provider: 'GEMINI', model: 'fallback'` so the
       // caller has a shape to read — but nothing from Gemini ran. Its telemetry says `provider: 'NONE'`
@@ -121,6 +134,8 @@ export class UniversalAIRouter {
         content: 'The AI service is temporarily busy. Please try again in 1-2 minutes. 🙏',
         provider: 'NONE', model: 'none', latencyMs: 0, ok: false,
       };
+    } finally {
+      if (deadlineTimer) clearTimeout(deadlineTimer);
     }
   }
 

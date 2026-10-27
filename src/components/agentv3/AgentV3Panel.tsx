@@ -1,4 +1,4 @@
-import { COMPOSER_BOX_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
+import { COMPOSER_BOX_CLASS, COMPOSER_TEXTAREA_CLASS, MobileComposerTools, resizeMobileComposer } from '../chat/ComposerShell';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ServiceRecommendationCard } from './ServiceRecommendationCard';
 import { offerWatchLive } from './earlyPreviewCue';
@@ -45,7 +45,6 @@ import { usePreviewDwell } from '../../hooks/usePreviewDwell';
 import { ActionDot } from '../ActionDot';
 import { rememberPublishIntent, takePublishIntent, browserIntentStore } from '../../lib/publishResume';
 import { getStoredMotionMode, resolveReduceMotion, systemPrefersReducedMotion } from '../../lib/a11y';
-import {  } from '../../lib/authHeaders';
 import { authedFetch } from '../../lib/authedFetch';
 const ConnectedServices = lazy(() => import('./ConnectedServices').then((m) => ({ default: m.ConnectedServices })));
 import { importProjectArchive, importProjectFolder, pickProjectFolder, type MasterImportResult } from '../../lib/masterZipImport';
@@ -62,6 +61,8 @@ import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages, filterSe
 import { HISTORY_TAB_NOTE } from './versionHelp';
 import { VersionTimeline } from '../versions/VersionTimeline';
 import { historyKeyFor } from '../../lib/versionRestoreClient';
+import { VersionUndoCard } from './VersionUndoCard';
+import { wantsVersionUndo } from '../../lib/versionUndoIntent';
 import { toggleCompareSelection, compareOrder, type CheckpointDiffResponse } from './checkpointCompare';
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
 import type { ReportPickerItem } from '../../lib/reportPicker';
@@ -505,6 +506,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // 2026-07-12: "maine recharge kar liya fir bhi tiers locked" — the user recharges on the Wallet page and
   // comes back; without this refetch the tiers stayed 🔒 until a full page reload).
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [composerToolsOpen, setComposerToolsOpen] = useState(false);
+  /** One-shot: next Weak send may proceed despite scope guidance (user accepted the risk). */
+  const weakForceContinueRef = useRef(false);
   /** When Switch module opens Build options from Weak scope guidance, gently highlight the Power picker. */
   const [highlightPowerPicker, setHighlightPowerPicker] = useState(false);
   // The starter picker shows a short first screen and hides the rest behind "More templates" — the wall
@@ -724,8 +728,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // Auto-grow the composer to fit its content, capped at ~5 lines (then it scrolls internally). When
   // expanded, a CSS class drives the height instead, so we clear the inline height.
   useEffect(() => {
+    const resize = () => {
     const el = composerRef.current;
     if (!el) return;
+    if (resizeMobileComposer(el)) {
+      if (composerExpanded) el.style.height = `${Math.max(44, (window.visualViewport?.height ?? window.innerHeight) * 0.5)}px`;
+      return;
+    }
     if (composerExpanded) { el.style.height = ''; return; }
     el.style.height = 'auto';
     // Admin 2026-07-12 (82→44) + 2026-07-13 ("aur vertically chota") + 2026-07-18 (Android ~50% shorter)
@@ -740,10 +749,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
     // clampComposerHeight (pure, unit-tested): rest at 1 line, grow up to ~6 lines, then scroll.
     el.style.height = `${clampComposerHeight(el.scrollHeight, lineH, padY)}px`;
+    };
+    resize();
+    window.addEventListener('resize', resize);
+    window.visualViewport?.addEventListener('resize', resize);
+    return () => {
+      window.removeEventListener('resize', resize);
+      window.visualViewport?.removeEventListener('resize', resize);
+    };
   }, [prompt, composerExpanded]);
   // Actions belong to the card's bottom toolbar, never beside the text. The wrapping toolbar
   // reserves their width so Send / Stop stay reachable even in a narrow split pane.
-  const composerBtnY = 'bottom-2';
   // Framework selector + import
   const [framework, setFramework] = useState('vite-react');
   // True once the user DELIBERATELY chose a framework (picker) or a reopened session carries one — that
@@ -759,6 +775,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // The feature card shown before the first build of a new app (featurePlan.ts). `launch` resumes the
   // paused send with the user's answer.
   const [featureConfirm, setFeatureConfirm] = useState<{ plan: FeaturePlanView; launch: (answer?: { include: string[]; exclude: string[] }) => void } | null>(null);
+  // Undo / pehle wala / reverse in Pro chat → in-chat version picker (never auto-restore; never send to Other → Versioning).
+  const [versionUndoOpen, setVersionUndoOpen] = useState(false);
   const submissionRef = useRef(new SubmissionScope());
   // Optimistic messages cancelled before launch must never purge the previous server turn.
   const localSubmissionMessagesRef = useRef(new Set<number>());
@@ -768,6 +786,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     setSubmissionPhase(null);
     setFwConflict(null);
     setFeatureConfirm(null);
+    setVersionUndoOpen(false);
   }, []);
   const reset = useCallback(() => {
     cancelSubmission();
@@ -1743,6 +1762,20 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
         try { await onBeforeBuild(); } catch { /* flush is best-effort */ }
         if (!isCurrent()) return;
       }
+      // VERSION UNDO PICKER (admin 2026-10-26): undo / reverse / pehle wala / wapas → show the same
+      // restore-point list as History / Time Machine inside Pro. Selection required; nothing restores yet.
+      // Never route the user to Other → Versioning for this intent.
+      if (
+        wantsVersionUndo(msgText)
+        && !pendingImportUrl
+        && !(attachments && attachments.length > 0)
+      ) {
+        setFwConflict(null);
+        setFeatureConfirm(null);
+        setVersionUndoOpen(true);
+        finishSubmission();
+        return;
+      }
       // Run the build with a concrete framework. `resolved` marks the choice as final so neither the client
       // nor the server re-prompts on the same conflict.
       const startBuild = (fw: string, resolved: boolean, confirmedFeatures?: { include: string[]; exclude: string[] }) => {
@@ -1773,14 +1806,20 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           setCheckpointHistory((h) => [...h, ...state.checkpoints]);
         }
         try {
+          const forceWeak = weakForceContinueRef.current;
+          weakForceContinueRef.current = false;
           const request = start(msgText, {
-            userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: ticket.sessionId, userMessageTs, attachments,
+            userId, email, onlyOpus,
+            // Continue with Weak must actually start a Weak build — never the prior tier from a stale closure.
+            powerLevel: forceWeak ? 'weak' : powerLevel,
+            planFirst, thinking, sessionId: ticket.sessionId, userMessageTs, attachments,
             framework: fw, frameworkExplicit: frameworkExplicit || resolved, frameworkResolved: resolved, appSignature: appSignaturePref(),
             importUrl: pendingImportUrl || undefined,
             // 3-role model (FIX #6): Plan/Advise send the message down the read-only role lane instead of
             // the builder — same session, same workspace, so proposed steps land in THIS app's queue.
             chatRole: chatMode === 'build' ? undefined : chatMode,
             confirmedFeatures,
+            weakForceContinue: forceWeak || undefined,
           });
           // Execution owns a synchronous lock now, even before React renders running=true.
           // Release preflight immediately so a fast result cannot strand it through an open tail.
@@ -5150,6 +5189,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 (() => {
                   const guide = weakScopeGuidanceCard(state.resultCode);
                   const openModulePicker = () => {
+                    setComposerToolsOpen(true);
                     setHighlightPowerPicker(true);
                     setSettingsOpen(true);
                     requestAnimationFrame(() => {
@@ -5170,39 +5210,43 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                           <p className="text-[12px] text-muted leading-relaxed">{guide.body}</p>
                           <p className="text-[10px] text-faint">{guide.hint}</p>
                           {!running && (
-                            <div className="flex flex-wrap items-center gap-2 pt-1.5">
-                              <button
-                                type="button"
-                                onClick={openModulePicker}
-                                title="Open Build options — Power: Weak, Normal, Strong"
-                                className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-on-accent bg-indigo-600 hover:bg-indigo-500 rounded-lg px-3 py-2 shadow-sm transition-colors"
-                              >
-                                <Settings className="w-3.5 h-3.5" aria-hidden />
-                                Switch module
-                              </button>
-                              {powerUnlocked && (
-                                <div className="flex items-center gap-1.5">
-                                  {([
-                                    { key: 'off' as const, label: 'Normal' },
-                                    { key: 'mini' as const, label: 'Strong' },
-                                  ]).map((opt) => (
-                                    <button
-                                      key={opt.key}
-                                      type="button"
-                                      onClick={() => { setPowerLevel(opt.key); openModulePicker(); }}
-                                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium border border-line bg-raised text-muted hover:border-indigo-500/60 hover:text-accent-text transition-colors"
-                                    >
-                                      {opt.label}
-                                    </button>
-                                  ))}
-                                </div>
+                            <div className="flex flex-col gap-2 pt-1.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={openModulePicker}
+                                  title="Open Build options — full Power and framework picker"
+                                  className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-on-accent bg-indigo-600 hover:bg-indigo-500 rounded-lg px-3 py-2 shadow-sm transition-colors"
+                                >
+                                  <Settings className="w-3.5 h-3.5" aria-hidden />
+                                  Switch module
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPowerLevel('weak');
+                                    const last = [...convo].reverse().find((m) => m.role === 'user' && (m.text || '').trim());
+                                    const text = (last?.text || '').trim();
+                                    if (!text) {
+                                      setTimeout(() => composerRef.current?.focus(), 0);
+                                      return;
+                                    }
+                                    weakForceContinueRef.current = true;
+                                    void send({ text, importUrl: '' });
+                                  }}
+                                  title="Continue building on Weak — app building may fail"
+                                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold border border-amber-500/50 bg-amber-500/10 text-warn hover:border-amber-400 hover:bg-amber-500/15 transition-colors"
+                                >
+                                  Continue with Weak
+                                </button>
+                              </div>
+                              <p className="text-[11px] text-warn/90 leading-snug">{guide.risk}</p>
+                              {!powerUnlocked && (
+                                <p className="text-[10px] text-faint">
+                                  Other modules unlock with any wallet recharge — or shrink the first version and stay on Weak.
+                                </p>
                               )}
                             </div>
-                          )}
-                          {!powerUnlocked && !running && (
-                            <p className="text-[10px] text-faint pt-0.5">
-                              Normal and Strong unlock with any wallet recharge — or shrink the first version and stay on Weak.
-                            </p>
                           )}
                         </div>
                       </div>
@@ -5246,6 +5290,20 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   setFeatureConfirm(null);
                 }}
                 onCancel={cancelSubmission}
+              />
+            )}
+            {versionUndoOpen && (
+              <VersionUndoCard
+                historyKey={historyKeyFor(state.workspaceId, userId)}
+                workspaceId={state.workspaceId}
+                userId={userId}
+                email={email}
+                onDismiss={() => setVersionUndoOpen(false)}
+                onRestored={(files, message) => {
+                  handleVersionRestored(files);
+                  setUserMsgs((c) => [...c, { role: 'agent', text: message, ts: Date.now() }]);
+                  setVersionUndoOpen(false);
+                }}
               />
             )}
             {fwConflict && (
@@ -5616,14 +5674,38 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               </div>
             )}
             {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) below. */}
-            <div className={`relative mx-auto w-[calc(100%-1.5rem)] max-w-3xl my-3 flex flex-col gap-1.5 ${COMPOSER_BOX_CLASS}`} data-composer-surface="pro">
-              {/* OPTION A (admin 2026-07-19 — "input box gadbad, reposition + attractive"): the input now
-                  sits on its OWN full-width row (order-1) and the Build/Plan/Advise MODE SELECTOR + settings
-                  + attach sit in a slim toolbar row BELOW it (order-2, flex-wrap so more controls can be
-                  added later without squeezing the input). CSS `order` reorders VISUALLY without touching
-                  DOM order or any handler — same setChatMode, same dropups (still open upward, now over the
-                  input), running dot, thread counts. Input is full-width again (the phone squish is gone). */}
-              <div className="flex min-h-11 items-center gap-1 order-2 flex-wrap px-2 pb-2 pr-24">
+            {/* Search/Clear above the pad (same as Free) — not inside the white Type box. */}
+            <div className="relative mx-auto w-[calc(100%-1.5rem)] max-w-3xl px-0.5">
+              <ChatToolbar
+                leftSlot={!showTeamHq(running, powerLevel) && agents.length > 0 ? (
+                  <div
+                    className="flex gap-1.5 overflow-x-auto overscroll-x-contain min-w-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    style={{ WebkitOverflowScrolling: 'touch' }}
+                  >
+                    {agents.map((a) => <AgentChip key={a.agent} card={a} running={running} />)}
+                  </div>
+                ) : undefined}
+                messageCount={convo.length}
+                sendOnEnter={sendOnEnter}
+                onSendOnEnterChange={setSendOnEnter}
+                searchQuery={chatSearchQuery}
+                onSearchQueryChange={setChatSearchQuery}
+                searchOpen={showChatSearch}
+                onSearchOpenChange={setShowChatSearch}
+                searchMatches={visibleConvo.length}
+                onClear={running ? undefined : newChatFromHistory}
+                charCount={prompt.length}
+              />
+            </div>
+            <div className={`relative mx-auto w-[calc(100%-1.5rem)] max-w-3xl my-3 flex flex-col gap-1.5 ${COMPOSER_BOX_CLASS}`} data-composer-surface="pro" data-steering={canSteerMidBuild(running, powerLevel, chatMode)} data-expanded={composerExpanded}>
+              {/* Unified pad: Type on top (order-1) with Send on its right edge; tools below (order-2), no divider. CSS
+                  flattens MobileComposerTools so order wins on desktop too. */}
+              <MobileComposerTools open={composerToolsOpen} onOpenChange={setComposerToolsOpen}>
+                {!canSteerMidBuild(running, powerLevel, chatMode) && (
+                  <button type="button" className="nb-pro-expand-mobile items-center text-muted hover:text-ink"
+                    onClick={() => setComposerExpanded((value) => !value)}>{composerExpanded ? 'Minimize editor' : 'Expand editor'}</button>
+                )}
+              <div className="nb-pro-controls flex min-h-11 items-center gap-1 order-2 flex-nowrap overflow-x-auto px-2 pb-2">
               <div className="relative">
                 {modeMenuOpen && (
                   <>
@@ -5688,7 +5770,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   type="button"
                   onClick={() => setModeMenuOpen((v) => !v)}
                   title="Chat mode — Build / Plan / Advise"
-                  className={`h-7 min-w-[80px] flex items-center justify-between gap-1 px-2 rounded border text-xs font-semibold ${modeMenuOpen ? 'border-indigo-500 text-accent-text' : 'border-line text-muted hover:text-ink'}`}
+                  className={`h-8 min-w-[84px] flex items-center justify-between gap-1 px-2.5 py-1 rounded border text-xs font-semibold leading-none overflow-visible ${modeMenuOpen ? 'border-indigo-500 text-accent-text' : 'border-line text-muted hover:text-ink'}`}
                 >
                   <span className="flex items-center gap-1">
                     <span>{chatMode === 'build' ? '🔨' : chatMode === 'planner' ? '🧠' : '🔍'}</span>
@@ -5844,20 +5926,29 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   (the glowing template button and the Attach-menu option). accept=image/* (no capture) so
                   it opens the photo gallery/library. */}
               <input ref={screenshotInputRef} type="file" accept="image/*" className="hidden" onChange={handleScreenshotPicked} />
-              </div>{/* /settings + attach row */}
-              {/* NEXT-BUILD SUGGESTIONS 💡 (admin 2026-08-14: "ek line me karo") — now lives on the SAME
-                  toolbar row, pushed to the far right with ml-auto, instead of its own second line below
-                  the input. After a build finishes it lights up with tailored "what to add next" ideas for
-                  THIS app (and the mega-app roadmap); tapping one fills the box for the user to review/send.
-                  Only a suggestion — nothing auto-runs. */}
-              <div className="ml-auto shrink-0">
+              {/* NEXT-BUILD SUGGESTIONS 💡 — end of the tools row (OLD layout). Only renders when
+                  there is something to suggest; no extra corner chrome. */}
+              <div className="ml-auto shrink-0" aria-label="Suggestions">
                 <NextSuggestionsBulb
                   workspaceId={expectedWorkspaceId()}
                   ready={!!state.done && !running}
                   onPick={(text) => { setPrompt(text); setTimeout(() => composerRef.current?.focus(), 0); }}
                 />
               </div>
-              </div>{/* /toolbar row (order-2): mode selector + settings + attach + 💡 — below the input */}
+              {/* Expand stays in the tools row; Send lives on Type's right edge. */}
+                {!canSteerMidBuild(running, powerLevel, chatMode) && (
+                  <button
+                    type="button"
+                    onClick={() => setComposerExpanded((v) => !v)}
+                    title={composerExpanded ? 'Minimize' : 'Expand'}
+                    className="nb-pro-expand-desktop h-8 w-8 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-raised"
+                  >
+                    {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                  </button>
+                )}
+              </div>{/* /settings + attach row */}
+              </div>{/* /toolbar row (order-2): mode selector + settings + attach + 💡 */}
+              </MobileComposerTools>
               {/* LIVE IMPORT PROGRESS (admin report 2026-08-04). A 161 MB project takes minutes to
                   transfer, and the panel tracked `zipProgress` in state but rendered it NOWHERE — so the
                   screen showed one static "Importing…" line for minutes, which is indistinguishable from
@@ -5874,30 +5965,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   rather than emptying the message array: a v5.0 thread owns a workspace, a build lock,
                   a preview and a report, and blanking only the bubbles would leave all of that live
                   underneath — the exact "+New chat leak" class this panel has been root-caused for twice. */}
-              <div className="order-0 w-full px-3 pt-2">
-                <ChatToolbar
-                  /* Progress on the LEFT of the same row the actions live on. Scrollable, because a
-                     build can spawn several specialists and they must never push Send off a phone. */
-                  leftSlot={!showTeamHq(running, powerLevel) && agents.length > 0 ? (
-                    <div
-                      className="flex gap-1.5 overflow-x-auto overscroll-x-contain min-w-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                      style={{ WebkitOverflowScrolling: 'touch' }}
-                    >
-                      {agents.map((a) => <AgentChip key={a.agent} card={a} running={running} />)}
-                    </div>
-                  ) : undefined}
-                  messageCount={convo.length}
-                  sendOnEnter={sendOnEnter}
-                  onSendOnEnterChange={setSendOnEnter}
-                  searchQuery={chatSearchQuery}
-                  onSearchQueryChange={setChatSearchQuery}
-                  searchOpen={showChatSearch}
-                  onSearchOpenChange={setShowChatSearch}
-                  searchMatches={visibleConvo.length}
-                  onClear={running ? undefined : newChatFromHistory}
-                  charCount={prompt.length}
-                />
-              </div>
               {/* Go-live PR 13: Buy/Connect card. Empty unless the server sent service_recommendation,
                   which it does only with AGENTV3_SERVICE_RECO on. Opens Wallet & Billing on the right door. */}
               {!running && state.serviceRecommendations.length > 0 && (
@@ -6026,23 +6093,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     }
                   }}
                 />
-                {/* Expand / minimize the composer so a long message can be read & edited.
-                    Hidden while mid-build steering is live — Stop takes this slot then (Fix 60). */}
-                {!canSteerMidBuild(running, powerLevel, chatMode) && (
-                  <button
-                    type="button"
-                    onClick={() => setComposerExpanded((v) => !v)}
-                    title={composerExpanded ? 'Minimize' : 'Expand'}
-                    className={`absolute right-12 ${composerBtnY} h-9 w-9 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-raised`}
-                  >
-                    {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                  </button>
-                )}
+
+              <div className="nb-pro-send-slot shrink-0 flex items-center gap-1" data-pro-send="">
                 {chatMode !== 'build' ? (
                   // Plan/Advise are read-only lanes: ALWAYS a Send button (even while a build runs) — they
                   // never take the build lock, so they must be sendable anytime. Disabled only while THEIR
                   // own turn is streaming.
-                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
+                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className={`nb-pro-send-btn h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
                     {roleBusy ? <TirangaLoader className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" strokeWidth={2.5} />}
                   </button>
                 ) : canSteerMidBuild(running, powerLevel, chatMode) ? (
@@ -6055,26 +6112,27 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   // revert, never silent — which is the trade this switch is for. Do not delete the
                   // branch to tidy up; it is what the gate returns to.
                   <>
-                    <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`absolute right-12 ${composerBtnY} h-9 w-9 flex items-center justify-center rounded-full text-danger hover:bg-raised`}>
+                    <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`nb-pro-stop nb-pro-send-btn nb-pro-send-btn--stop h-9 w-9 flex items-center justify-center rounded-full text-danger hover:bg-raised`}>
                       <Square className="w-3.5 h-3.5 fill-current" />
                     </button>
-                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
+                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`nb-pro-send-btn h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
                       <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
                     </button>
                   </>
                 ) : submissionPhase && !running ? (
-                  <button onClick={cancelSubmission} aria-label="Cancel request" title="Cancel request" className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-ink hover:opacity-90 rounded-full text-surface transition-all`}>
+                  <button onClick={cancelSubmission} aria-label="Cancel request" title="Cancel request" className={`nb-pro-send-btn h-9 w-9 flex items-center justify-center bg-ink hover:opacity-90 rounded-full text-surface transition-all`}>
                     <Square className="w-3.5 h-3.5 fill-current" />
                   </button>
                 ) : running ? (
-                  <button onClick={stop} title="Stop" className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-ink hover:opacity-90 rounded-full text-surface transition-all`}>
+                  <button onClick={stop} title="Stop" className={`nb-pro-send-btn h-9 w-9 flex items-center justify-center bg-ink hover:opacity-90 rounded-full text-surface transition-all`}>
                     <Square className="w-3.5 h-3.5 fill-current" />
                   </button>
                 ) : (
-                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className={`absolute right-2 ${composerBtnY} h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
+                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className={`nb-pro-send-btn h-9 w-9 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
                     <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
                   </button>
                 )}
+              </div>
               </div>
             </div>
           </div>

@@ -1,3 +1,4 @@
+import { assertCanaryLegacyAllowed } from '../../AgentV3/reliability/canarySpendGuard';
 import { PublicBuildEngineError } from '../../lib/buildEngineError';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { BuildStoppedError } from '../../AgentV3/stopSignal';
@@ -97,6 +98,7 @@ export function createSurplusBuildTransport(env: NodeJS.ProcessEnv = process.env
   const key = env.SURPLUS_API_KEY?.trim();
   if (!key || key.startsWith('inf_admin_') || key === 'replace_with_your_surplus_api_key' || /[\r\n]/.test(key)) throw new SurplusBuildTransportError('configuration');
   return async (request: Record<string, unknown>, signal: AbortSignal): Promise<SurplusBuildTransportResponse> => {
+    assertCanaryLegacyAllowed('surplus-builder');
     try {
       if (signal.aborted) throw stoppedError();
       if (parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) !== true) throw new SurplusBuildTransportError('configuration');

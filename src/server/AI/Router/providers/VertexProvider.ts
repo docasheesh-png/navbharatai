@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { assertLegacyInferenceAllowed } from '../../inferencePolicy';
 import 'dotenv/config';
 import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
@@ -24,8 +25,9 @@ export class VertexProvider implements AIProvider {
         }
     }
 
-    async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string): Promise<AIProviderResponse> {
+    async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, _images?: string[], signal?: AbortSignal): Promise<AIProviderResponse> {
     assertLegacyInferenceAllowed('direct-text-provider');
+    signal?.throwIfAborted();
         const ai = vertexGenAI();
         if (!ai) {
             throw new Error("Vertex AI not configured");
@@ -37,12 +39,13 @@ export class VertexProvider implements AIProvider {
         const maxRetries = 2;
 
         while (true) {
+            signal?.throwIfAborted();
             // The timeout ABORTS the request (Q-769). It used to race a timer against the call, so a slow
             // answer was abandoned by us while the connection stayed open behind it.
             const timer = new AbortController();
             const t = setTimeout(() => timer.abort(), VERTEX_TIMEOUT_MS);
             try {
-                const config: Record<string, unknown> = { abortSignal: timer.signal };
+                const config: Record<string, unknown> = { abortSignal: signal ? AbortSignal.any([timer.signal, signal]) : timer.signal };
                 if (systemPrompt) config.systemInstruction = systemPrompt;
                 const result = await ai.models.generateContent({
                     model: modelName,
@@ -57,12 +60,13 @@ export class VertexProvider implements AIProvider {
                     usage: readProviderUsage(result.usageMetadata),
                 };
             } catch (error: any) {
+                signal?.throwIfAborted();
                 const err = timer.signal.aborted ? new Error('Vertex AI Timeout') : error;
                 retries++;
                 if (retries > maxRetries || !isRateLimited(err)) {
                     throw this.normalizeError(err);
                 }
-                await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retries)));
+                await delay(1000 * Math.pow(2, retries), undefined, { signal });
             } finally {
                 clearTimeout(t);
             }

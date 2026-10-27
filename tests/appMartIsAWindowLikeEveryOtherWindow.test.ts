@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { COPY } from '../src/lib/copy';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 
@@ -43,8 +44,8 @@ function menuEntries(): Array<{ id: string; label: string; icon: string }> {
   const start = app.indexOf('const menuItems = useMemo');
   expect(start, 'menuItems must still exist in App.tsx').toBeGreaterThan(-1);
   const block = app.slice(start, app.indexOf('], []);', start));
-  return [...block.matchAll(/\{\s*id:\s*'([a-z_0-9]+)',\s*label:\s*'([^']+)',\s*icon:\s*([A-Za-z0-9_]+)/g)]
-    .map((m) => ({ id: m[1]!, label: m[2]!, icon: m[3]! }));
+  return [...block.matchAll(/\{\s*id:\s*'([a-z_0-9]+)',\s*label:\s*('[^']+'|COPY\.branding\.aiChatName),\s*icon:\s*([A-Za-z0-9_]+)/g)]
+    .map((m) => ({ id: m[1]!, label: m[2] === 'COPY.branding.aiChatName' ? COPY.branding.aiChatName : m[2]!.slice(1, -1), icon: m[3]! }));
 }
 
 describe('App Mart is a window like every other window', () => {

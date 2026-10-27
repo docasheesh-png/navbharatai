@@ -19,6 +19,7 @@ import { isAgentV3FreeUser, type GrantEmail } from '../AgentV3/featureFlag';
 import { firestoreWalletReader } from '../AgentV3/WalletBalance';
 import { hasEverPaid } from '../AgentV3/FreeTierBuildRouting';
 import { getServerDb } from './serverDb';
+import { adminBuildRemaining } from './giftSpend';
 import { audit } from './audit';
 
 export interface FreeProgramGateDeps {
@@ -45,7 +46,8 @@ export function enforceFreeProgramPause(deps: FreeProgramGateDeps = defaultDeps)
       const uid = await deps.uid(req);
       if (!uid) { next(); return; }
       if (deps.isFreeListed(uid, await deps.email(uid))) { next(); return; }
-      if (hasEverPaid((await deps.wallet(uid)) as never)) { next(); return; }
+      const wallet = await deps.wallet(uid);
+      if (hasEverPaid(wallet as never) || adminBuildRemaining(wallet as never) > 0) { next(); return; }
       audit('AGENTV3_FREE_PROGRAM_PAUSED_REFUSAL', { userId: uid }, 'info');
       res.status(402).json({ error: FREE_TRIAL_ENDED_MESSAGE, code: FREE_TRIAL_ENDED_CODE, balanceInr: 0, balanceTokens: 0 });
     } catch {

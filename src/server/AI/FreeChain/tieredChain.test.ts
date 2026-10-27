@@ -13,6 +13,7 @@ vi.mock('./providers/openAiCompatProvider', () => ({
 vi.mock('./providers/openRouterRegistryRung', () => ({ runRegistryRung: m.registry }));
 vi.mock('../Router/AIRouter', () => ({ acquireSlot: () => true, releaseSlot: vi.fn(), recordProviderLatency: vi.fn() }));
 vi.mock('./telemetry', () => ({ logFreeChain: vi.fn() }));
+import { chatAvailabilityMessage } from '../../lib/chatAvailabilityMessage';
 import { buildFreeChainRouter, busyMessage, orderForUser, type FreeChainInput } from './runtime';
 import { freeChainConfig } from './config';
 import { resetAllBreakers } from '../Router/CircuitBreaker';
@@ -51,9 +52,9 @@ function tiered(order: string, extra: Record<string, string> = {}) {
 describe('owner tiered free chat module (Tier 1 → Tier 2 → Tier 3)', () => {
  it('default order is free-first and every paid rung sits after every free rung', () => {
   const cfg = freeChainConfig({});
-  const firstPaid = cfg.order.findIndex(id => ['llama8b', 'dsv4flash', 'glmflashx', 'gpt5nano', 'geminipaid', 'deepseek'].includes(id));
+  const firstPaid = cfg.order.findIndex(id => ['cheapinf', 'llama8b', 'dsv4flash', 'glmflashx', 'gpt5nano', 'geminipaid', 'deepseek'].includes(id));
   expect(cfg.order.slice(0, firstPaid)).toEqual(['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter']);
-  expect(cfg.order.slice(firstPaid)).toEqual(['llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
+  expect(cfg.order.slice(firstPaid)).toEqual(['cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
   expect(cfg.maxAttempts).toBe(4); expect(cfg.stickySpread).toBe(false);
   expect(cfg.rungs.find(r => r.id === 'gemini')?.model).toBe('gemini-2.5-flash-lite');
  });
@@ -120,7 +121,7 @@ describe('owner tiered free chat module (Tier 1 → Tier 2 → Tier 3)', () => {
   m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
   const r = await buildFreeChainRouter(db, tiered('groq')).route({ ...input(), message: 'mujhe ek kahani sunao yaar' });
   expect(r.content).toBe(busyMessage('mujhe ek kahani sunao yaar')); expect(r.content).toContain('thodi der');
-  expect(busyMessage('मुझे कहानी सुनाओ')).toContain('कृपया'); expect(busyMessage('Please explain how photosynthesis works in green plants.')).toContain('temporarily busy');
+  expect(busyMessage('मुझे कहानी सुनाओ')).toContain('कृपया'); expect(busyMessage('Please explain how photosynthesis works in green plants.')).toContain('temporarily unable to respond');
  });
  it('private or health turns never reach a paid third-party rung', async () => {
   m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
@@ -152,5 +153,29 @@ describe('master plan routing through the live chain', () => {
   expect(m.execute.mock.calls[0][1]).toMatchObject({ maxOutputTokens: 80 });
   m.execute.mockClear(); await buildFreeChainRouter(db, tiered('glm45')).route(input());
   expect(m.execute.mock.calls[0][1]).toMatchObject({ extraBody: { thinking: { type: 'disabled' } } });
+ });
+});
+
+
+describe('exhausted FreeChain notices respect explicit language and do not invent overload', () => {
+ it.each([
+  { message:'mujhe ek kahani sunao',history:[],carried:'hi' as const,expected:'hi' as const },
+  { message:'Reply in Tamil. mujhe madad chahiye',history:[],carried:'en' as const,expected:'ta' as const },
+  { message:'More detail please',history:[{sender:'user',text:'Reply in Tamil'}],carried:undefined,expected:'ta' as const },
+ ])('uses $expected without changing the unsuccessful outcome',async ({message,history,carried,expected})=>{
+  m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
+  const onChunk=vi.fn();const request={...input(),message,history,onChunk,context:{...input().context,replyLanguage:carried}};
+  const result=await buildFreeChainRouter(db,tiered('groq')).route(request);
+  expect(result).toMatchObject({ok:false,reason:'all-failed',provider:'NONE'});
+  expect(result.content).toBe(chatAvailabilityMessage('temporary',{replyLanguage:expected}));
+  expect(onChunk).toHaveBeenLastCalledWith(result.content,'notice');
+  expect(result.content).not.toMatch(/provider|API|budget|traffic|CHEAPERINFERENCE/i);
+ });
+ it('keeps budget exhaustion neutral and uncharged without hiding the internal reason',async()=>{
+  m.paid.mockResolvedValue(null);
+  const result=await buildFreeChainRouter(db,tiered('llama8b')).route({...input(),context:{...input().context,replyLanguage:'en'}});
+  expect(result.content).toBe(chatAvailabilityMessage('temporary'));
+  expect(result.freeChain?.attempts.map(a=>a.reason)).toEqual(['budget']);
+  expect(result.ok).toBe(false);expect(m.execute).not.toHaveBeenCalled();expect(m.settle).not.toHaveBeenCalled();
  });
 });

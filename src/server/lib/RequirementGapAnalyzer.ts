@@ -593,6 +593,12 @@ export function stripNonDomainUses(input: string): string {
   // gateway's own product and record names, not a statement that the app sells anything — unless
   // something else says goods are sold, in which case every word is kept. See PAYMENT_GATEWAY_CONTEXT.
   if (PAYMENT_GATEWAY_CONTEXT.test(raw) && !SELLS_GOODS.test(raw)) out = out.replace(GATEWAY_COMMERCE_WORDS, ' ');
+  // Same shape for "doctor" / "medical": in a LOCAL TRADES DIRECTORY they are yellow-pages entries
+  // (autopsy f19ae208). Hospital, clinic, patient, EMR keep their meaning in any context.
+  if (LOCAL_TRADE_NOUN.test(raw) && LOCAL_DIRECTORY_INTENT.test(raw)) {
+    out = out.replace(DIRECTORY_HEALTHCARE_WORDS, ' ');
+    out = out.replace(/डॉक्टर/g, ' ');
+  }
   return withoutDeclinedSentences(out);
 }
 
@@ -628,6 +634,20 @@ export function withoutDeclinedSentences(text: string): string {
 const AI_ASSISTANT_CONTEXT = /\b(?:(?:personal\s+)?ai[\s-]+(?:assistant|companion|chatbot|tutor|helper)|chat\s*bot|virtual\s+assistant|personal\s+assistant)\b/i;
 /** Evidence people talk to each other, which makes an assistant app social after all. */
 const PEOPLE_CHAT = /\bgroup\s+chats?\b|\bchat\s+(?:with|between)\s+(?:friends|users|people|members|each\s+other|other\s+users)\b|\b(?:users|members|people)\s+(?:can\s+)?(?:chat|message|talk)\b|\b(?:friends?|followers?|dm|direct\s+messages?)\b/i;
+
+
+/**
+ * Evidence the prompt is a LOCAL TRADES / PROFESSIONAL DIRECTORY (yellow pages), not a clinic
+ * (autopsy f19ae208, 2026-10-02). "jaha rehta hoon … profession … doctor plumber electrician"
+ * matched healthcare on the bare word `doctor` and the builder was told to INCLUDE patient records
+ * (EMR), clinic management, appointments and staff roles — for a contacts directory. Trades listed
+ * beside each other plus a directory/contact intent are the evidence; a hospital/clinic/EMR prompt
+ * keeps every healthcare word because it does not name those other trades.
+ */
+const LOCAL_TRADE_NOUN = /\b(?:plumbers?|electricians?|carpenters?|mechanics?|painters?|welders?|masons?|tailors?|barbers?|drivers?|pandits?|halwais?|ac\s*-?\s*repair(?:ers?)?|appliance\s+repair(?:ers?)?)\b/i;
+const LOCAL_DIRECTORY_INTENT = /\b(?:professions?|contacts?|contact\s+numbers?|directory|yellow\s*pages|local\s+services?|nearby|area\s+ke|jaha(?:an)?\s+rehta|mere\s+(?:area|ilake|ilah?qe|city|shehar)|profession\s+k(?:e|i)?\s+hisab)\b/i;
+/** Words that, in a trades directory, meant a yellow-pages entry — never an EMR. Hospital/clinic/patient/emr stay. */
+const DIRECTORY_HEALTHCARE_WORDS = /\b(?:doctors?|medical)\b/gi;
 
 /** Evidence that the prompt is about studying, so a bare "book" is a textbook (autopsy e7baf61d). */
 /** A prompt about trading markets. The strip it gates is a strip of two words, never a domain decision. */

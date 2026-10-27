@@ -466,14 +466,16 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
             <p className="text-sm text-muted border-t border-line pt-3">{profile.bio}</p>
           )}
 
-          {/* Connected accounts */}
-          <div className="flex items-center gap-3 border-t border-line pt-3">
+          {/* Connected accounts — 2×2 grid so pills don't overflow right on narrow widths */}
+          <div className="border-t border-line pt-3 space-y-2">
             <span className="text-[10px] font-bold text-faint uppercase tracking-widest">Connected:</span>
-            {user.providerData.map(p => (
-              <span key={p.providerId} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-raised text-[10px] font-bold text-muted border border-line">
-                {p.providerId === 'google.com' ? '🔵 Google' : p.providerId === 'github.com' ? '⚫ GitHub' : p.providerId}
-              </span>
-            ))}
+            <div className="grid grid-cols-2 gap-2">
+              {user.providerData.map(p => (
+                <span key={p.providerId} className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-xl bg-raised text-[10px] font-bold text-muted border border-line min-w-0 truncate">
+                  {p.providerId === 'google.com' ? '🔵 Google' : p.providerId === 'github.com' ? '⚫ GitHub' : p.providerId}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
 

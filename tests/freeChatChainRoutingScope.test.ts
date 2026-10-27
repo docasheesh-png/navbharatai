@@ -30,13 +30,17 @@ describe('Free Chat Chain scope is ordinary chat plus explicit server context', 
     expect(result).toMatchObject({ content: 'legacy answer', ok: true, provider: 'GEMINI', model: 'legacy-model' });
     expect(mocks.chain).not.toHaveBeenCalled();
     expect(mocks.getRouter).toHaveBeenCalledWith('free');
-    expect(mocks.legacy).toHaveBeenCalledWith('hello', undefined);
+    expect(mocks.legacy).toHaveBeenCalledWith('hello', undefined, undefined, undefined, expect.any(AbortSignal));
+    expect(mocks.legacy.mock.calls[0][4].aborted).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('legacy string-returning helper remains outside the new chain', async () => {
     expect(await new UniversalAIRouter().route('hello', history, 'navbharat', undefined, 'system')).toBe('legacy answer');
     expect(mocks.chain).not.toHaveBeenCalled();
-    expect(mocks.legacy).toHaveBeenCalledWith('User: earlier question\nAssistant: earlier answer\nUser: hello', 'system');
+    expect(mocks.legacy).toHaveBeenCalledWith('User: earlier question\nAssistant: earlier answer\nUser: hello', 'system', undefined, undefined, expect.any(AbortSignal));
+    expect(mocks.legacy.mock.calls[0][4].aborted).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('legacy streaming callers without server context preserve the signal and original router', async () => {

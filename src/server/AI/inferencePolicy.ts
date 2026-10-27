@@ -1,3 +1,4 @@
+import { assertCanaryLegacyAllowed } from '../AgentV3/reliability/canarySpendGuard';
 import type { RequestHandler } from 'express';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { parseEnvFlag } from '../lib/envFlag';
@@ -37,6 +38,7 @@ export class StrictFreeCapabilityError extends Error {
 }
 /** Every legacy network path must opt out before dispatch, not after provider billing. */
 export function assertLegacyInferenceAllowed(capability: string): void {
+  assertCanaryLegacyAllowed(capability);
   assertNoUnclaimedGatewayDispatch(capability);
   if (surplusBuild.getStore()?.enabled === true && !SURPLUS_MEDIA_EXCEPTIONS.has(capability)) throw new SurplusLegacyFallbackError();
   if (capability === 'image-edit' && scopes.getStore()?.scope === 'free-modules' && admittedImageEdit.getStore() === true) return;

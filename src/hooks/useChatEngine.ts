@@ -1,3 +1,4 @@
+import { chatReplyLanguageFromPicker, resolveChatReplyLanguage } from '../lib/chatReplyLanguage';
 import { newFreeAnswerRequestId, notifyFreeAnswerChanged } from '../lib/freeAnswerStatus';
 // useChatEngine — the free (NBI) chat engine, lifted out of the App.tsx God component (P3.1, behavior-
 // preserving). Owns the send pipeline: handleSendForTab (the core turn handler — intent routing, GitHub
@@ -69,6 +70,13 @@ export interface ChatEngineDeps {
   updatePreview: (files: any) => void;
 }
 
+interface ChatTurnScope {
+  controller: AbortController | null;
+  stopped: boolean;
+  finished: boolean;
+  streamingMessageId: string | null;
+}
+
 export function useChatEngine(deps: ChatEngineDeps) {
   const {
     input, messages, isLoading, sessions, currentSessionId, activeAgent, mode, activeView, activeIntent,
@@ -80,14 +88,24 @@ export function useChatEngine(deps: ChatEngineDeps) {
     addLog, incrementDailyUsage, learnFromMessage, updatePreview,
   } = deps;
 
-  // STOP support (admin 2026-08-13: "koi galat search rukti nahi"). Every AI here streams a reply over one
-  // fetch; without a user-controllable AbortController the only way to end it was the 90s timeout. These
-  // refs give the UI a real Stop: `abortRef` aborts the in-flight fetch, and `stoppedRef` marks it a
-  // DELIBERATE stop so the catch keeps the partial reply instead of showing a scary "connection failed".
-  const abortRef = useRef<AbortController | null>(null);
-  const stoppedRef = useRef(false);
+  // Every asynchronous continuation belongs to its own turn. Stop may allow a successor before the
+  // old transport settles; the old turn must never reset its state, append a notice or replace its controller.
+  const activeTurnRef = useRef<ChatTurnScope | null>(null);
+  const ownsTurn = (turn: ChatTurnScope) => activeTurnRef.current === turn;
+  const assertActiveTurn = (turn: ChatTurnScope) => {
+    if (!ownsTurn(turn) || turn.stopped) throw new DOMException('Stopped', 'AbortError');
+  };
+  const markStopped = (turn: ChatTurnScope) => {
+    const id = turn.streamingMessageId;
+    if (!id) return;
+    setMessages(prev => prev.map(message => {
+      if (message.id !== id || String(message.text || '').endsWith('⏹ (stopped)')) return message;
+      return { ...message, text: `${String(message.text || '').replace(/▋$/, '').trimEnd()} ⏹ (stopped)`.trim() };
+    }));
+  };
 
   const callGeminiFrontend = async (
+    turn: ChatTurnScope,
     prompt: string, 
     enableSearch: boolean = false, 
     history: Message[] = [], 
@@ -101,15 +119,19 @@ export function useChatEngine(deps: ChatEngineDeps) {
     let endpoint = '/api/chat/navbharatai';
 
     const controller = new AbortController();
-    abortRef.current = controller;
+    assertActiveTurn(turn);
+    turn.controller = controller;
     const timeoutId = setTimeout(() => controller.abort(), 95000);
 
     try {
+      const headers = { ...(await authHeader()) };
+      assertActiveTurn(turn);
       notifyFreeAnswerChanged();
       const response = await axios.post(endpoint, {
         message: prompt,
         preferredModel: selectedModel === 'auto' ? 'gemini' : selectedModel,
         history: history,
+        replyLanguage: resolveChatReplyLanguage(prompt, history) ?? chatReplyLanguageFromPicker(preferredLanguage),
         mode: mode,
         intent: intent,
         target: target,
@@ -121,7 +143,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
         headers: {
           // The account token (or, signed out, this device's guest id): the server counts a guest's daily
           // messages and must recognise a signed-in user as one. This route used to receive neither.
-          ...(await authHeader()),
+          ...headers,
           ...(answerRequestId ? { 'x-nb-answer-request': answerRequestId } : {}),
           'x-gemini-key': keys.gemini,
           'x-groq-key': keys.groq,
@@ -138,12 +160,17 @@ export function useChatEngine(deps: ChatEngineDeps) {
       });
       
       clearTimeout(timeoutId);
-      if (controller.signal.aborted || stoppedRef.current) throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The reply was stopped.', partial: false });
+      assertActiveTurn(turn);
+      if (controller.signal.aborted) throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The reply was stopped.', partial: false });
+      const terminal = gatewayChatFailure(response.data);
+      if (terminal) throw new ChatStreamTerminalError(terminal);
       return response.data.reply;
     } catch (error: any) {
       clearTimeout(timeoutId);
+      assertActiveTurn(turn);
       console.error("AI REQUEST FAILURE", error);
 
+      if (error instanceof ChatStreamTerminalError) throw error;
       const terminal = gatewayChatFailure(error.response?.data);
       if (terminal) throw new ChatStreamTerminalError(terminal);
       if (axios.isCancel(error) || !error.response || error.response.status >= 500) {
@@ -156,7 +183,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
       if (error.response?.status === 403 && error.response?.data?.code === GUEST_LIMIT_CODE) {
         openSignIn();
         const notice = String(error.response.data.error || 'Please sign in to keep chatting.');
-        setMessages(prev => [...prev, { id: `guest-limit-${Date.now()}`, text: notice, sender: 'ai', timestamp: new Date() }]);
+        setMessages(prev => ownsTurn(turn) && !turn.stopped ? [...prev, { id: `guest-limit-${answerRequestId}`, text: notice, sender: 'ai', timestamp: new Date() }] : prev);
         throw Object.assign(new Error(notice), { guestLimit: true });
       }
 
@@ -176,6 +203,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
   };
 
   const runFrontendPipeline = async (
+    turn: ChatTurnScope,
     message: string, 
     enableSearch: boolean = false, 
     history: Message[] = [], 
@@ -204,7 +232,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
     const activeSession = sessions.find(s => s.id === currentSessionId);
 
     // Switch to a single high-speed call for near-instant response
-    const response = await callGeminiFrontend(message, enableSearch || (intent === 'security'), history, intent, target, agent, mode, activeSession?.memorySummary, answerRequestId);
+    const response = await callGeminiFrontend(turn, message, enableSearch || (intent === 'security'), history, intent, target, agent, mode, activeSession?.memorySummary, answerRequestId);
     
     return { 
       reply: response, 
@@ -222,15 +250,20 @@ export function useChatEngine(deps: ChatEngineDeps) {
     const restoredMessages = asMessageArray(activeSession?.restoredMessages);
     const memorySummary = activeSession?.memorySummary || '';
     const historyForAPI = [...restoredMessages, ...asMessageArray(currentMessages)];
-    const setMessagesForTab = setMessages;
+    let turn: ChatTurnScope | undefined;
+    const current = () => !turn || ownsTurn(turn);
+    const setMessagesForTab: typeof setMessages = value => {
+      if (current()) setMessages(prev => current() ? (typeof value === 'function' ? value(prev) : value) : prev);
+    };
     const setInputForTab = setInput;
-    const setIsLoadingForTab = setIsLoading;
+    const setIsLoadingForTab: typeof setIsLoading = value => { if (current()) setIsLoading(value); };
     const setIntentForTab = setActiveIntent;
     const currentAgent = activeAgent;
     const currentMode = mode;
 
     const msgInput = typeof overrideMessage === 'string' ? overrideMessage : '';
-    if (!msgInput && !input.trim() && !errorContext?.lastInput && files.length === 0 || isLoading) return;
+    if (!msgInput && !input.trim() && !errorContext?.lastInput && files.length === 0 || isLoading
+      || (activeTurnRef.current && !activeTurnRef.current.finished && !activeTurnRef.current.stopped)) return;
 
     const messageToSend = msgInput || currentInput.trim() || errorContext?.lastInput || '';
 
@@ -261,66 +294,70 @@ export function useChatEngine(deps: ChatEngineDeps) {
       }
     }
 
-    // 11.1 — The guest daily limit is the SERVER's (guestDailyQuota.ts): one count across every AI surface,
-    // which a browser counter could neither see nor keep. The old localStorage gate is gone; the local
-    // tally below stays only as usage bookkeeping for this device.
-    incrementDailyUsage('message');
-    trackEvent('message_sent', { tab: tabId, agent: activeAgent, isGuest: !user });
-
-    // Capture GitHub PAT if mentioned (e.g. "token asheeshgithubkeys")
-    const patMatch = messageToSend.match(/(?:token|key)\s+([a-zA-Z0-9_]{30,})/i) || messageToSend.trim().match(/^([a-zA-Z0-9_]{30,})$/);
-    if (patMatch) {
-      const newToken = patMatch[1];
-      setGithubToken(newToken);
-      localStorage.setItem('gh_token', newToken);
-      rememberGithubOwner(auth.currentUser?.uid);
-      addLog('GitHub: PAT detected and saved.', 'success');
-    }
-
-    // Capture Repo if mentioned (e.g. "repo asheesh/my-app")
-    const repoMatch = messageToSend.match(/(?:repo|repository)\s+([a-zA-Z0-9-]+\/[a-zA-Z0-9-_.]+)/i);
-    if (repoMatch) {
-      const [owner, name] = repoMatch[1].split('/');
-      setGithubRepoContext({ token: githubToken || '', owner, repo: name, branch: 'main' });
-      addLog(`GitHub: Target repository set to ${repoMatch[1]}`, 'info');
-    }
-
-    // Fast heuristic for Indian greetings
-    const greetings = /^(ram ram|namaste|hello|hi|namaskar|sat sri akal|salam|radhe radhe|jai shri ram|kya haal hai|kaise ho)$/i;
-    const isBasicGreeting = greetings.test(messageToSend.trim());
-
-    // Attachment previews for the chat bubble — DOWNSCALED, and that word is the whole fix.
-    //
-    // This used to `readAsDataURL` the FULL file and keep the result in the message object, which is
-    // never trimmed. Base64 inflates ~1.37x and a data URL is an ordinary JS string, so ten phone
-    // photos retained ~55 MB for the session — a rising P90 against a flat P50, which is exactly the
-    // leak signal Google's Feb-2027 memory metric looks for.
-    //
-    // Shrinking it loses nothing, and that is verified rather than assumed: the attachment is sent to
-    // the backend SEPARATELY a few lines below (`fileAttachments: await filesToBase64(files)`), so
-    // this value only ever reached a 64x64 bubble and a lightbox. The model sees exactly what it saw
-    // before. See lib/attachmentPreview.ts for why one shared helper replaced two hand-rolled copies.
-    const attachmentPreviews: import('../types').MessageAttachment[] =
-      await Promise.all(files.map(previewAttachment));
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      text: messageToSend || '',
-      sender: 'user',
-      timestamp: new Date(),
-      ...(attachmentPreviews.length > 0 ? { attachments: attachmentPreviews } : {}),
-    };
-
-    setMessagesForTab((prev) => [...prev, userMessage]);
-    addLog(isBasicGreeting ? 'Responding to greeting...' : 'Detecting intent...', 'info');
-    setInputForTab('');
+    turn = { controller: null, stopped: false, finished: false, streamingMessageId: null };
+    activeTurnRef.current = turn;
+    // Lock before attachment preparation yields, not only after the first await.
     setIsLoadingForTab(true);
-    stoppedRef.current = false; // a fresh turn — clear any previous Stop
-    setErrorContext(null);
-
-    const isRealTime = /today|current|latest|now|news|weather|time|date|day|aaj|samachar|update/i.test(messageToSend);
-
     try {
+      // 11.1 — The guest daily limit is the SERVER's (guestDailyQuota.ts): one count across every AI surface,
+      // which a browser counter could neither see nor keep. The old localStorage gate is gone; the local
+      // tally below stays only as usage bookkeeping for this device.
+      incrementDailyUsage('message');
+      trackEvent('message_sent', { tab: tabId, agent: activeAgent, isGuest: !user });
+
+      // Capture GitHub PAT if mentioned (e.g. "token asheeshgithubkeys")
+      const patMatch = messageToSend.match(/(?:token|key)\s+([a-zA-Z0-9_]{30,})/i) || messageToSend.trim().match(/^([a-zA-Z0-9_]{30,})$/);
+      if (patMatch) {
+        const newToken = patMatch[1];
+        setGithubToken(newToken);
+        localStorage.setItem('gh_token', newToken);
+        rememberGithubOwner(auth.currentUser?.uid);
+        addLog('GitHub: PAT detected and saved.', 'success');
+      }
+
+      // Capture Repo if mentioned (e.g. "repo asheesh/my-app")
+      const repoMatch = messageToSend.match(/(?:repo|repository)\s+([a-zA-Z0-9-]+\/[a-zA-Z0-9-_.]+)/i);
+      if (repoMatch) {
+        const [owner, name] = repoMatch[1].split('/');
+        setGithubRepoContext({ token: githubToken || '', owner, repo: name, branch: 'main' });
+        addLog(`GitHub: Target repository set to ${repoMatch[1]}`, 'info');
+      }
+
+      // Fast heuristic for Indian greetings
+      const greetings = /^(ram ram|namaste|hello|hi|namaskar|sat sri akal|salam|radhe radhe|jai shri ram|kya haal hai|kaise ho)$/i;
+      const isBasicGreeting = greetings.test(messageToSend.trim());
+
+      // Attachment previews for the chat bubble — DOWNSCALED, and that word is the whole fix.
+      //
+      // This used to `readAsDataURL` the FULL file and keep the result in the message object, which is
+      // never trimmed. Base64 inflates ~1.37x and a data URL is an ordinary JS string, so ten phone
+      // photos retained ~55 MB for the session — a rising P90 against a flat P50, which is exactly the
+      // leak signal Google's Feb-2027 memory metric looks for.
+      //
+      // Shrinking it loses nothing, and that is verified rather than assumed: the attachment is sent to
+      // the backend SEPARATELY a few lines below (`fileAttachments: await filesToBase64(files)`), so
+      // this value only ever reached a 64x64 bubble and a lightbox. The model sees exactly what it saw
+      // before. See lib/attachmentPreview.ts for why one shared helper replaced two hand-rolled copies.
+      const attachmentPreviews: import('../types').MessageAttachment[] =
+        await Promise.all(files.map(previewAttachment));
+      assertActiveTurn(turn);
+
+      const userMessage: Message = {
+        id: `user-${answerRequestId}`,
+        text: messageToSend || '',
+        sender: 'user',
+        timestamp: new Date(),
+        ...(attachmentPreviews.length > 0 ? { attachments: attachmentPreviews } : {}),
+      };
+
+      setMessagesForTab((prev) => [...prev, userMessage]);
+      addLog(isBasicGreeting ? 'Responding to greeting...' : 'Detecting intent...', 'info');
+      setInputForTab('');
+      setIsLoadingForTab(true);
+      setErrorContext(null);
+
+      const isRealTime = /today|current|latest|now|news|weather|time|date|day|aaj|samachar|update/i.test(messageToSend);
+
       let data: any;
 
       // Smart Intent Detection & Routing
@@ -356,7 +393,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
           // to the server; the block below is for the other agents only.
           if (currentAgent !== 'navbharatai' && !user) {
               const aiMessage: Message = {
-                id: (Date.now() + 1).toString(),
+                id: `reply-${answerRequestId}`,
                 text: "⚠️ Building apps is only available for logged-in users. Please login to continue building amazing things! 🙏",
                 sender: 'ai',
                 timestamp: new Date(),
@@ -388,10 +425,13 @@ export function useChatEngine(deps: ChatEngineDeps) {
       let streamingMsgId: string | null = null;
 
       const performStreamingBackendCall = async (): Promise<{ reply: string; model?: string }> => {
+        assertActiveTurn(turn!);
         addLog('Falling back to background AI processing...', 'info');
         // The account token (or, signed out, this device's guest id) — see the axios path above.
         // …and its platform, so the iPhone app's assistant never teaches a way to pay (Q-123).
+        assertActiveTurn(turn!);
         const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(await authHeader()), ...platformHeader() };
+        assertActiveTurn(turn!);
         if (keys.gemini) headers['x-gemini-key'] = keys.gemini;
         if (keys.groq) headers['x-groq-key'] = keys.groq;
         if (keys.deepseek) headers['x-deepseek-key'] = keys.deepseek;
@@ -420,10 +460,12 @@ export function useChatEngine(deps: ChatEngineDeps) {
           if (taught) saveVial(taught.drug.id, taught.concentration);
         } catch { /* a storage failure must never cost the user their message */ }
 
-        // A fresh controller per attempt, exposed via abortRef so the Stop button can cancel this fetch.
+        // The active turn owns this attempt controller; old attempts cannot replace a successor.
         const userAbort = new AbortController();
-        abortRef.current = userAbort;
+        turn!.controller = userAbort;
         let response: Response;
+        const fileAttachments = files.length > 0 ? await filesToBase64(files) : undefined;
+        assertActiveTurn(turn!);
         notifyFreeAnswerChanged();
         try { response = await fetch(endpoint, {
           method: 'POST',
@@ -431,13 +473,14 @@ export function useChatEngine(deps: ChatEngineDeps) {
           body: JSON.stringify({
             message: messageToSend,
             preferredModel: isNbi ? 'gemini' : selectedModel,
+            replyLanguage: resolveChatReplyLanguage(messageToSend, historyForAPI) ?? chatReplyLanguageFromPicker(preferredLanguage),
             history: historyForAPI.slice(-40).map(m => ({ sender: m.sender, text: String(m.text || '').slice(0, 2000) })),
             memorySummary: memorySummary || undefined,
             agent: currentAgent,
             mode: currentMode,
             intent: detectedIntent,
             // Convert File objects → base64 so they serialize over JSON
-            fileAttachments: files.length > 0 ? await filesToBase64(files) : undefined,
+            fileAttachments,
             // 3 — canvas memory: send current app so AI can edit it
             currentApp: hasGeneratedCode && generatedCode && generatedCode.length > 200
               ? generatedCode.slice(0, 15000)
@@ -452,7 +495,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
             vials: loadVials(),
             stream: true,
           }),
-          // The user can Stop this (abortRef) OR it self-cancels after 90s — whichever fires first.
+          // The user can Stop this turn OR it self-cancels after 90s — whichever fires first.
           signal: AbortSignal.any([userAbort.signal, AbortSignal.timeout(90000)]),
         }); } catch (error) {
           if (userAbort.signal.aborted) throw error;
@@ -460,22 +503,21 @@ export function useChatEngine(deps: ChatEngineDeps) {
           throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The connection ended before the reply was confirmed. Please retry when the service is available.', partial: false });
         }
 
+        assertActiveTurn(turn!);
         if (!response.ok) {
           // A signed-out visitor who has used today's free messages (checked BEFORE the 401 branch below,
           // which signs the user out). The reply goes into the chat as an answer, not as an outage.
-          const guestLimit = await guestLimitReached(response);
+          const guestLimit = await guestLimitReached(response, () => ownsTurn(turn!) && !turn!.stopped);
+          assertActiveTurn(turn!);
           if (guestLimit) {
-            setMessagesForTab((prev) => [...prev, { id: `guest-limit-${Date.now()}`, text: guestLimit, sender: 'ai', timestamp: new Date(), modelUsed: 'navBharatAI' }]);
+            setMessagesForTab((prev) => [...prev, { id: `guest-limit-${answerRequestId}`, text: guestLimit, sender: 'ai', timestamp: new Date(), modelUsed: 'navBharatAI' }]);
             throw Object.assign(new Error(guestLimit), { guestLimit: true });
           }
           const errData = await response.json().catch(() => ({}));
+          assertActiveTurn(turn!);
           const terminal = gatewayChatFailure(errData);
           if (terminal) throw new ChatStreamTerminalError(terminal);
           if (response.status >= 500) throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The AI service could not confirm the reply. Please retry when the service is available.', partial: false });
-          if (errData?.maintenance === true && typeof errData.reply === 'string') {
-            setMessagesForTab(prev => [...prev, { id: `maintenance-${Date.now()}`, text: errData.reply, sender: 'ai', timestamp: new Date() }]);
-            return;
-          }
           if (response.status === 401) {
             setUser(null);
             setShowAuth(true);
@@ -493,7 +535,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
         const isPlain = contentType.includes('text/plain');
         if ((isSSE || isPlain) && response.body) {
           // Streaming path — SSE (text/event-stream) or legacy plain text
-          streamingMsgId = (Date.now() + 1).toString();
+          streamingMsgId = `reply-${answerRequestId}`;
+          turn!.streamingMessageId = streamingMsgId;
           setMessagesForTab(prev => [...prev, {
             id: streamingMsgId!,
             text: '▋',
@@ -503,7 +546,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
 
           let lastUpdate = 0;
           const streamed = await consumeChatResponseStream(response.body, isSSE, snapshot => {
-            if (stoppedRef.current) return;
+            if (!ownsTurn(turn!) || turn!.stopped) return;
             const now = Date.now();
             if (now - lastUpdate > 40) {
               setMessagesForTab(prev => prev.map(m => m.id === streamingMsgId ? { ...m, text: snapshot + '▋' } : m));
@@ -511,7 +554,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
             }
           });
           // Keep genuine partial text/notice, remove the cursor, and never log an error frame as AI success.
-          if (stoppedRef.current) throw new DOMException('Stopped', 'AbortError');
+          assertActiveTurn(turn!);
           const finalText = streamed.failure?.code === 'STREAM_INTERRUPTED' && streamed.text
             ? `${streamed.text}\n\n${streamed.failure.message}` : streamed.text || streamed.failure?.message || '';
           setMessagesForTab(prev => prev.map(m => m.id === streamingMsgId ? { ...m, text: finalText } : m));
@@ -520,7 +563,11 @@ export function useChatEngine(deps: ChatEngineDeps) {
         }
 
         // Fallback: JSON response
-        return await response.json();
+        const data = await response.json();
+        assertActiveTurn(turn!);
+        const terminal = gatewayChatFailure(data);
+        if (terminal) throw new ChatStreamTerminalError(terminal);
+        return data;
       };
 
       // Retry helper: up to 3 attempts with backoff, only before streaming starts
@@ -529,7 +576,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
           try {
             return await performStreamingBackendCall();
           } catch (err: any) {
-            const isHardError = err?.guestLimit === true || stoppedRef.current || err?.name === 'AbortError' || err instanceof ChatStreamTerminalError || err.message?.includes('Session expired')
+            const isHardError = err?.guestLimit === true || !ownsTurn(turn!) || turn!.stopped || err?.name === 'AbortError' || err instanceof ChatStreamTerminalError || err.message?.includes('Session expired')
               || err.message?.includes('Too many requests')
               || streamingMsgId !== null; // streaming already started — don't retry mid-stream
             if (isHardError || attempt >= 3) throw err;
@@ -557,8 +604,9 @@ export function useChatEngine(deps: ChatEngineDeps) {
             potentialTarget = urlMatch ? urlMatch[0] : '';
           }
 
-          data = await runFrontendPipeline(messageToSend, isRealTime || detectedIntent === 'security', historyForAPI, detectedIntent, potentialTarget, currentAgent, currentMode, answerRequestId);
+          data = await runFrontendPipeline(turn, messageToSend, isRealTime || detectedIntent === 'security', historyForAPI, detectedIntent, potentialTarget, currentAgent, currentMode, answerRequestId);
         } catch (frontendErr: any) {
+          assertActiveTurn(turn);
           if (frontendErr instanceof ChatStreamTerminalError || frontendErr?.guestLimit === true) throw frontendErr;
           console.warn('Frontend Gemini failed, trying backend fallback...', frontendErr.message);
           data = await callWithRetry();
@@ -567,14 +615,14 @@ export function useChatEngine(deps: ChatEngineDeps) {
         data = await callWithRetry();
       }
       
-      if (stoppedRef.current) throw new DOMException('Stopped', 'AbortError');
+      assertActiveTurn(turn);
       // The bubble this reply lives in — the streamed one, or the one added just below. A successful code
       // sync marks THIS bubble as a build (Q-781), so its View preview / deploy row appear under it.
       let replyMsgId: string | null = streamingMsgId;
       // Only add aiMessage if streaming didn't already add it
       if (!streamingMsgId) {
         const aiMessage: Message = {
-          id: (Date.now() + 1).toString(),
+          id: `reply-${answerRequestId}`,
           text: data.reply || 'No response received.',
           sender: 'ai',
           timestamp: new Date(),
@@ -601,6 +649,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
          if (codeBlocks) {
            addLog('Extracting and compiling AI changes...', 'info');
            setFiles(prev => {
+             if (!ownsTurn(turn!) || turn!.stopped) return prev;
              const newFiles = { ...prev };
              let updated = false;
              
@@ -642,23 +691,18 @@ export function useChatEngine(deps: ChatEngineDeps) {
       }
 
     } catch (error: any) {
+      if (!ownsTurn(turn)) return;
       // The user pressed Stop — this is NOT an error. Keep whatever streamed so far (marked stopped) and
       // stay silent: showing "connection failed" for a deliberate cancel is exactly the confusing behaviour
       // the Stop button exists to fix.
-      if (stoppedRef.current || error?.name === 'AbortError') {
-        // Clean the cursor off the partially-streamed reply (the last AI bubble) and mark it stopped.
-        setMessagesForTab((prev) => {
-          if (!prev.length || prev[prev.length - 1].sender !== 'ai') return prev;
-          const last = prev[prev.length - 1];
-          const cleaned = `${String(last.text || '').replace(/▋$/, '').trimEnd()} ⏹ (stopped)`.trim();
-          return prev.map((m, i) => (i === prev.length - 1 ? { ...m, text: cleaned } : m));
-        });
-        return; // finally still clears the loading state
+      if (turn.stopped) {
+        markStopped(turn);
+        return; // finally still clears this turn's loading state
       }
       if (error instanceof ChatStreamTerminalError) {
         // The server's honest unavailable/interrupted notice already lives in the stream bubble.
         // Streaming has started, so callWithRetry cannot issue another provider request.
-        if (!error.displayed) setMessagesForTab(prev => [...prev, { id: `terminal-${Date.now()}`, text: error.message, sender: 'ai', timestamp: new Date() }]);
+        if (!error.displayed) setMessagesForTab(prev => [...prev, { id: `terminal-${answerRequestId}`, text: error.message, sender: 'ai', timestamp: new Date() }]);
         setErrorContext({ type: classifyError(error), message: error.message, lastInput: messageToSend });
         addLog(`AI Error: ${error.message}`, 'error');
         return; // finally clears loading; do not append a misleading second answer.
@@ -678,8 +722,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
       }
       
       const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: "We're having trouble reaching the AI right now. This can happen during high traffic or local network issues.",
+        id: `reply-${answerRequestId}`,
+        text: "NavBharatAI is temporarily unable to respond. Please try again shortly.",
         sender: 'ai',
         timestamp: new Date(),
       };
@@ -687,6 +731,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
     } finally {
       setIsLoadingForTab(false);
       notifyFreeAnswerChanged();
+      turn.finished = true;
+      turn.controller = null;
     }
   };
 
@@ -698,8 +744,11 @@ export function useChatEngine(deps: ChatEngineDeps) {
   // STOP — cancel the reply that is streaming right now (admin 2026-08-13). Marks it a deliberate stop so
   // the partial reply is kept (not replaced by an error), aborts the fetch, and clears the busy state.
   const stop = () => {
-    stoppedRef.current = true;
-    try { abortRef.current?.abort(); } catch { /* already settled — nothing to abort */ }
+    const turn = activeTurnRef.current;
+    if (!turn || turn.finished) return;
+    turn.stopped = true;
+    try { turn.controller?.abort(); } catch { /* already settled — nothing to abort */ }
+    markStopped(turn);
     setIsLoading(false);
   };
 

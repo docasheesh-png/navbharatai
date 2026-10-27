@@ -1,13 +1,15 @@
+import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
 import { createSurplusScopeAsk } from '../AI/SurplusRegistry/scopeAdmission';
 import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibility';
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
 import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
+import { wrapSurplusRunnerPreWriteFailOpen, tryConsumeSurplusPreWriteFailOpen, isPublicBuildEngineUnavailableText, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakScopeChatTerminal, weakScopeCatchResult } from '../AgentV3/weakScopeTerminal';
-import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction } from '../AgentV3/weakBuildPreflight';
+import { weakAdmissionForTurn, weakAdmissionBlocked, weakCandidateActive, createWeakTextRepairAllowance, resolveWeakComplexity, recordWeakAdmissionUsage, allowWeakChatAction, weakForceContinueDecision } from '../AgentV3/weakBuildPreflight';
 import { toSafeClientMessage } from '../lib/httpError';
 import { clarityGateEnabled, shouldJudgeClarity, judgeClarity, clarifyReply, categoryFromWords, bestGuessPrompt, type ClarityCategory, type QuickReply } from '../AgentV3/clarityGate';
 import { clarityJudgeAsk } from '../AgentV3/clarityJudgeAsk';
@@ -539,7 +541,7 @@ import { fillGateFromLedger, renderProvenInLedger } from '../AgentV3/evidenceLed
 import { appRenderedRecord, renderSeenThisBuild } from '../AgentV3/renderProof';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
-import { futilityMinutes, initialFutilityState, armedFutilityState, tickFutility, futilityDetail, futilityStopApplies } from '../AgentV3/futilityBreaker';
+import { futilityMinutes, initialFutilityState, armedFutilityState, resetFutilityQuiet, tickFutility, futilityDetail, futilityStopApplies } from '../AgentV3/futilityBreaker';
 import { waitingForUserLine } from '../AgentV3/userWait';
 import { STOP_DRAIN_WAIT_MS, BUILD_STILL_STOPPING_CODE, BUILD_STILL_STOPPING_MESSAGE, stoppedBuildGate, waitForBuildExit, markBuildExited, hasBuildBodyExitHold } from '../AgentV3/stoppingBuild';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -2656,7 +2658,7 @@ export function openAiCompatRunners(
         // becomes the hang signal (openAiStream.ts); the runner is handed the same number, so the pair
         // stays honest in both modes. Flag off ⇒ this is the old line to the byte.
         const sdkTimeoutMs = buildStreamingEnabled() ? Math.max(timeoutMs, streamHardCapMs()) : timeoutMs;
-        const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0 });
+        const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0, fetch: canaryFetch() });
         const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts, timeoutMs }), floorMaxPromptChars), name);
         out.push(k === 0
           ? { name, runner, modelId: model }
@@ -2921,7 +2923,7 @@ function openAiJudgeCandidate(
   if (!(apiKey || '').trim()) return null;
   try {
     // The judge chain owns fallback. SDK retries would hide a second deterministic billing HTTP 429.
-    const client = new OpenAI({ apiKey, baseURL, timeout, maxRetries: 0 });
+    const client = new OpenAI({ apiKey, baseURL, timeout, maxRetries: 0, fetch: canaryFetch() });
     const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
       assertLegacyInferenceAllowed('builder-review-judge');
       const r = await client.chat.completions.create({
@@ -3477,12 +3479,33 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
   bench?: BuildBenchRegistry;
   /** P4 (fix/build-reliability) — sticky start; see MultiProviderOptions.sticky. Omitted ⇒ unchanged. */
   sticky?: { remember: boolean };
+  /**
+   * After SURPLUS_ADMITTED, ANY Surplus public build-engine failure (LLM_CALL_FAILED scrub,
+   * transport, turn_timeout, …) with Files still 0 must fail-open to the Weak ladder (same spirit
+   * as admission fail-open). Shared `state` across every runner this build constructs so fail-open
+   * happens once. Omitted ⇒ Surplus-only (legacy) behaviour.
+   */
+  surplusPreWriteFailOpen?: SurplusPreWriteFailOpenHooks;
 }): TurnRunner {
   if (opts.surplusSession) {
-    return opts.surplusSession.runner({
+    const surplusRunner = opts.surplusSession.runner({
       onProviderUsed: () => opts.onProviderUsed?.('SURPLUS', []),
       onTurnComplete: (result) => opts.onTurnComplete?.('SURPLUS', result.usage, result.model, result.usage.cacheReadInputTokens),
     });
+    if (!opts.surplusPreWriteFailOpen) return surplusRunner;
+    // Drop Surplus from the recursive Weak factory so we never wrap Surplus again after fail-open.
+    return wrapSurplusRunnerPreWriteFailOpen(
+      surplusRunner,
+      // Explicit tier + onTurnComplete so heal/tier static guards see attribution through the spread.
+      () => buildTurnRunner({
+        ...opts,
+        surplusSession: undefined,
+        surplusPreWriteFailOpen: undefined,
+        tier: opts.tier,
+        onTurnComplete: opts.onTurnComplete,
+      }),
+      opts.surplusPreWriteFailOpen,
+    );
   }
   const level = toPowerLevel(opts.tier as PowerLevel | boolean | string | undefined | null);
   const parsed = tierLadder(level);
@@ -3942,7 +3965,7 @@ export async function checkBuilderPaidAdmission({ userId, email, onlyOpus, promp
       // totalMoneySpent) AND the balance math below (doc's remaining_balance via the same pure reader).
       // An anonymous caller (userId null) has no wallet to read → balance-unknown → fail-open proceed.
       const walletDoc = userId ? await firestoreWalletReader(getDb())(userId).catch(() => null) : null;
-      const balanceInr = userId ? await readWalletBalanceInr(async () => walletDoc, userId) : null;
+      const balanceInr = userId ? await readWalletBalanceInr(async () => walletDoc, userId, powerLevelReqEffective === 'weak' ? 'build' : 'usage') : null;
       if (userId) onFreeTier(isFreeTierUser(walletDoc));
       // Slice F (admin routing plan §1 row 6): POWER MODE (Only Opus) is for PAYING accounts only —
       // a user who has never purchased cannot spend the most expensive engine. Refused pre-stream,
@@ -11356,7 +11379,9 @@ async function noteBuildOutcome(
       createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
         audit('AGENTV3_DISCOUNT_SCOPE_CALL', { ok: row.ok, model: row.model, latencyMs: row.latencyMs, inputTokens: row.inputTokens, outputTokens: row.outputTokens }, 'info');
       }));
-    const weakScopeBlocked = weakAdmissionBlocked(weakAdmission);
+    const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(
+      req.body.weakForceContinue, powerLevelReqEffective, weakAdmission,
+    );
     if (weakScopeBlocked) {
       intent = 'chat';
       setAdmittedSurplusScope(surplusSession, false);
@@ -13276,6 +13301,7 @@ async function noteBuildOutcome(
                 billedInr: watchdogBilledUsd * usdInrRate(),
                 buildRef: coordination.billingRef(`${workspaceId}_${billingCtx.buildStartedAt}`),
                 feature: 'build',
+                adminCreditEligible: powerLevelReqEffective === 'weak',
                 description: 'NavBharatAI Pro build (time-capped)',
               });
               if (debitRes.ok) watchdogWalletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance };
@@ -13854,7 +13880,7 @@ async function noteBuildOutcome(
           && req.body?.confirmedFeatures == null && userAskedForAnAppToBeBuilt(prompt) && !userAskedForSmallScope(prompt)
           ? learnDomain(prompt)
           : null;
-      const promptComplexityDecision = await resolveWeakComplexity(weakAdmission, analysis?.complexityScore ?? 0, async () => scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
+      const promptComplexityDecision = await resolveWeakComplexity(weakAdmissionForBuild, analysis?.complexityScore ?? 0, async () => scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
         // The intent rides along so the router reads the request exactly as the analysis did (review of 303e8a6f).
         { prompt: planning.sizing, score: analysis?.complexityScore ?? 0, buildIntent: intent },
         (p) => AIRouterManager.getRouter('free')
@@ -14479,8 +14505,43 @@ async function noteBuildOutcome(
        * turn "slow for this build" into "blacklisted for everybody".
        */
       recordSurplusAdmissionDiag(buildDiag, surplusAdmissionDiag);
+      // Mid-build Surplus → Weak fail-open when Surplus dies BEFORE any user code is written.
+      // Covers ANY folded public failure after SURPLUS_ADMITTED — sub-second LLM_CALL_FAILED
+      // scrub (bench A) as well as ~60s turn_timeout / transport (bench B/C) — not timeout-only.
+      // Admission already fail-opens; this is the post-admit sibling. Shared state so every
+      // Surplus-wrapped runner (main / fast / plan / heal) drops once together.
+      const surplusPreWriteFailOpen: SurplusPreWriteFailOpenHooks = {
+        state: { dropped: false },
+        userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
+        onFailOpen: (reason) => {
+          const dropped = surplusSession;
+          surplusSession = undefined;
+          if (dropped) setAdmittedSurplusScope(dropped, false);
+          const safe = asSafeSurplusAdmissionReason(reason);
+          try {
+            audit('AGENTV3_SURPLUS_FALLBACK_TO_WEAK', { reason: safe, phase: 'mid_build_pre_write' }, 'warn');
+            console.warn(`[AGENT_STEP] Surplus mid-build unavailable (${safe}); continuing on Weak/CHEAP_FLOOR ladder.`);
+            buildDiag.record({
+              phase: 'provider', severity: 'warning', code: 'SURPLUS_FALLBACK', autoResolved: true,
+              message: `Surplus unavailable mid-build before any user file — continuing on Weak ladder (reason: ${safe}).`,
+              detail: String(safe),
+            });
+          } catch { /* audit/diagnostics must never block fail-open */ }
+        },
+      };
+
       for (const row of earlySurplusRecords) buildDiag.recordLlmCall(row);
       for (const turn of earlySurplusTurns) captureTurnUsage('SURPLUS', turn.usage, turn.model, turn.usage.cacheReadInputTokens, turn.usage.cacheCreationInputTokens);
+      // Night A/B autopsy (prod 04948 / #3964): scope classification uses unwrapped
+      // `session.runner()` — LLM_CALL_FAILED is recorded, admitWeakBuild swallows the
+      // throw, and Surplus stays admitted into a poisoned session. Drop Surplus HERE
+      // (before any build runner) so Weak owns the build; throw-only wrap never saw scope.
+      if (surplusSession && earlySurplusRecords.some((r) => r.ok === false)) {
+        tryConsumeSurplusPreWriteFailOpen(
+          surplusPreWriteFailOpen,
+          'The build engine is temporarily unavailable. Please try again shortly.',
+        );
+      }
       const fastLaneDeadRungs = new Map<string, string>();
       // 🔴 THE FLAG THAT WENT NOWHERE (autopsy e706e068, School ERP). `buildIsComplex` was computed,
       // logged, and spread into `baseRunnerOpts` — the AgentRunner's options, which never read it —
@@ -14492,6 +14553,7 @@ async function noteBuildOutcome(
       // (autopsy 6a5fb04b: the roadmap planner reasoned its whole 4,000-token allowance away).
       const makeFastTextRunner = (onUsed?: (used: string) => void, heal = false, manualUsage = false): TurnRunner => withAnswerNotDeliberation(withStopSignal(buildTurnRunner({
         surplusSession,
+        surplusPreWriteFailOpen,
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         heal,
@@ -14515,6 +14577,7 @@ async function noteBuildOutcome(
       // build ladder: they rewrite code, which is the work that ladder is ordered for.
       const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => withAnswerNotDeliberation(withStopSignal(buildTurnRunner({
         surplusSession,
+        surplusPreWriteFailOpen,
         tier: powerLevelReqEffective,
         noClaude: noClaudeBuild,
         plan: true,
@@ -14559,6 +14622,7 @@ async function noteBuildOutcome(
       };
       const client = buildTurnRunner({
         surplusSession,
+        surplusPreWriteFailOpen,
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         complex: buildIsComplex, // a complex app opens on KIMI, not the flash rung — see makeFastTextRunner
@@ -14624,6 +14688,7 @@ async function noteBuildOutcome(
        */
       const healRunnerOpts = () => ({
         surplusSession,
+        surplusPreWriteFailOpen,
         tier: powerLevelReqEffective,
         heal: true, // the tier's ladder minus its leading flash rung (admin 2026-08-13)
         noClaude: noClaudeBuild,
@@ -17251,6 +17316,11 @@ async function noteBuildOutcome(
         onNote: (note: { code: string; message: string; detail?: string }) => {
           // OUR style pass starts here (cancelledBuildBilling `stoppedDuringOurStylePass`).
           if (note.code === 'STYLE_RULES_RESUMED' && stylePassWindow.startedAt === null) stylePassWindow.startedAt = Date.now();
+          // Truncation recovery just ordered a rewrite — do not let the futility breaker abort it
+          // on the same quiet streak that filled while the cut-off turn was running (autopsy bd20f9b2).
+          if (note.code === 'TRUNCATION_RECOVERY') {
+            try { futilityState = resetFutilityQuiet(futilityState); } catch { /* breaker state is best-effort */ }
+          }
           try { buildDiag.record({ phase: 'build', severity: 'info', code: note.code, message: note.message, detail: note.detail, autoResolved: true }); } catch { /* a note must never fail a build */ }
         },
         // A small new app is built by ONE agent (soloBuild.ts, autopsy ca99778e) — the prompt says so beside the tools.
@@ -19380,7 +19450,7 @@ async function noteBuildOutcome(
             events.emit({ type: 'narration', agent: 'architect', text: surplusSession ? (repairing ? 'Repairing the issues found by the review…' : 'Continuing the build on its selected engine…') : repairing ? 'Bringing in NavBharatAI\'s stronger engine to fix what the review found…' : 'Bringing in NavBharatAI\'s stronger engine to finish the build…', ts: Date.now() });
             const escRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner({ surplusSession, tier: powerLevelReqEffective, fromProvider: tier === 'opus' ? 'CLAUDE_OPUS' : 'CLAUDE', noClaude: noClaudeBuild, deadRungs: fastLaneDeadRungs, bench: buildBench, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage, onProviderError: (name, err) => { try { buildDiag.recordProviderFailure(name, err); } catch { /* best-effort */ } } }),
+              client: buildTurnRunner({ surplusSession, surplusPreWriteFailOpen, tier: powerLevelReqEffective, fromProvider: tier === 'opus' ? 'CLAUDE_OPUS' : 'CLAUDE', noClaude: noClaudeBuild, deadRungs: fastLaneDeadRungs, bench: buildBench, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage, onProviderError: (name, err) => { try { buildDiag.recordProviderFailure(name, err); } catch { /* best-effort */ } } }),
               // Opus ONLY in power mode — a power-off escalation caps at Sonnet, never Opus
               // (admin rule 2026-06-28). Escalation only runs in normal mode anyway.
               model: resolveModel(tier === 'opus' && onlyOpus),
@@ -19519,7 +19589,28 @@ async function noteBuildOutcome(
         result = await runner.run(buildPrompt);
       }
       // result is always set here (OneShot, escalation, or the loop above).
-      if (!result) result = await runner.run(buildPrompt);
+      // Night A/B scrub path: AgentRunner catches PublicBuildEngineError and soft-returns
+      // `{ok:false, summary:"Error: The build engine is temporarily unavailable…"}` — that
+      // never re-enters wrapSurplusRunnerPreWriteFailOpen's catch. If Surplus was still live
+      // and Files=0, consume fail-open and converge ONCE more (wrap routes via state.dropped
+      // to Weak). Same single convergence statement — no second builder call site
+      // (keeps aPlatformWriterIsNeverTheModel + buildOutcomeWiring census green).
+      for (let scrubRetry = 0; scrubRetry < 2; scrubRetry++) {
+        if (!result) result = await runner.run(buildPrompt);
+        if (
+          scrubRetry > 0
+          || !result || result.ok !== false
+          || surplusPreWriteFailOpen.state.dropped
+          || !isPublicBuildEngineUnavailableText(result.summary)
+          || modelAuthoredPaths(writtenFiles).length !== 0
+          || !tryConsumeSurplusPreWriteFailOpen(surplusPreWriteFailOpen, result.summary ?? '')
+        ) break;
+        // Parentheses so heal-assignment census (theCalculatorsHelpersHadNoHome) does not
+        // treat this as a raw `result = <ident>;` replace — only empty-build `retry` may.
+        result = undefined as unknown as typeof result;
+      }
+      // Loop exits only after the convergence statement set `result`.
+      result = result!;
       // …and the architect's loop, and with it OUR style pass, is over.
       closeStylePassWindow(stylePassWindow, Date.now());
 
@@ -26985,6 +27076,7 @@ async function noteBuildOutcome(
             billedInr: effectiveBilledUsd * usdInrRate(),
             buildRef: coordination.billingRef(`${workspaceId}_${buildStartedAt}`),
             feature: 'build',
+            adminCreditEligible: powerLevelReqEffective === 'weak',
             description: 'NavBharatAI Pro build',
           });
           if (debitRes.ok) {

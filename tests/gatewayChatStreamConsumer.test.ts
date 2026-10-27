@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { consumeChatResponseStream, ChatStreamTerminalError } from '../src/lib/chatResponseStream';
+import { consumeChatResponseStream, ChatStreamTerminalError, gatewayChatFailure } from '../src/lib/chatResponseStream';
 const stream = (frames: string) => new Response(frames).body!;
 const frame = (data: unknown) => `data: ${JSON.stringify(data)}\n\n`;
 describe('actual Free-chat consumer handles selected server error and EOF', () => {
@@ -44,4 +44,34 @@ describe('actual Free-chat consumer handles selected server error and EOF', () =
     expect(code).toMatch(/streamingMsgId !== null/);
     expect(code).toMatch(/error instanceof ChatStreamTerminalError[\s\S]*?return;[\s\S]*?finally \{\s*setIsLoadingForTab\(false\)/);
   });
+  it.each(['FREE_ANSWER_DAILY_LIMIT', 'FREE_ANSWER_BUSY', 'FREE_ANSWER_DUPLICATE', 'FREE_ANSWER_ATTEMPT_LIMIT', 'FREE_ANSWER_UNAVAILABLE'])('does not relabel %s as shared overload', code => {
+    const reply = 'The original quota or in-flight request notice.';
+    expect(gatewayChatFailure({ code, reply })).toEqual({ code, message: reply, partial: false });
+  });
+  it('recognizes only explicit nonblank maintenance notices and bounds them', () => {
+    expect(gatewayChatFailure({ maintenance: true, reply: 'Paused for maintenance' })).toEqual({ code: 'CHAT_MAINTENANCE', message: 'Paused for maintenance', partial: false });
+    expect(gatewayChatFailure({ statusUnavailable: true, reply: "NavBharatAI is temporarily unable to respond. Please try again shortly.", maintenance: false })).toEqual({ code: 'CHAT_STATUS_UNAVAILABLE', message: "NavBharatAI is temporarily unable to respond. Please try again shortly.", partial: false });
+    expect(gatewayChatFailure({ maintenance: true, reply: '   ', error: 'Recovery in progress' })?.message).toBe('Recovery in progress');
+    expect(gatewayChatFailure({ maintenance: true, reply: 'a'.repeat(5000) })?.message).toHaveLength(2000);
+    for (const value of [{ maintenance: 'true', reply: 'fake' }, { reply: 'maintenance' }, { maintenance: true }, { maintenance: true, reply: '  ', error: 123 }]) expect(gatewayChatFailure(value)).toBeUndefined();
+  });
+
+  it.each([true, false])('returns a terminal partial result when the body read rejects (SSE=%s)', async sse => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({ start(value) { controller = value; } });
+    const update = vi.fn();
+    const pending = consumeChatResponseStream(body, sse, update);
+    controller.enqueue(new TextEncoder().encode(sse ? frame({ c: 'Partial answer' }) : 'Partial answer'));
+    await vi.waitFor(() => expect(update).toHaveBeenCalledWith('Partial answer'));
+    controller.error(new TypeError('Synthetic reader failure'));
+    expect(await pending).toEqual({ text: 'Partial answer', failure: {
+      code: 'STREAM_INTERRUPTED', message: 'The connection ended before the reply was complete. Please retry when the service is available.', partial: true,
+    } });
+    expect(body.locked).toBe(false);
+  });
+  it('does not hide a consumer callback defect as a network interruption', async () => {
+    const defect = new Error('Synthetic callback defect');
+    await expect(consumeChatResponseStream(stream(frame({ c: 'Answer' })), true, () => { throw defect; })).rejects.toBe(defect);
+  });
+
 });

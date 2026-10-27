@@ -1,11 +1,13 @@
 import { getServerDb, type Firestore } from './serverDb';
 
-import { MAINTENANCE_MESSAGE } from './aiMaintenanceMessage';
-export { MAINTENANCE_MESSAGE };
+import { MAINTENANCE_MESSAGE, STATUS_UNAVAILABLE_MESSAGE } from './aiMaintenanceMessage';
+export { MAINTENANCE_MESSAGE, STATUS_UNAVAILABLE_MESSAGE };
 export const MAINTENANCE_COLLECTION = 'platform_settings';
 export const MAINTENANCE_DOCUMENT = 'ai_maintenance';
 export const MAINTENANCE_FAILURE_WINDOW_MS = 120_000;
 export const MAINTENANCE_FAILURE_THRESHOLD = 3;
+/** Recent known-off window: prefer fail-open over latching a fake maintenance pause. */
+export const MAINTENANCE_FAIL_OPEN_MS = 45_000;
 export interface MaintenanceState {
   enabled: boolean;
   unavailable?: boolean;
@@ -71,7 +73,9 @@ export class AiMaintenanceStore {
     if (this.value && this.now() - this.readAt < 2_000) return this.value;
     if (this.pending) return this.pending;
     const generation = this.generation;
-    this.pending = (async () => {
+    // Assign the single-flight promise BEFORE invoking a factory/loader that can throw synchronously.
+    // Otherwise its finally clears pending first, then the outer assignment caches that failure forever.
+    this.pending = Promise.resolve().then(async () => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const data = await Promise.race([
@@ -82,9 +86,16 @@ export class AiMaintenanceStore {
         if (generation !== this.generation && this.value) return this.value;
         return this.accept(maintenanceState(data));
       } catch {
-        return { ...(this.value ?? defaults()), enabled: true, unavailable: true };
+        // Unreadable flag: never claim the admin paused AI. User copy is temporary high-demand (not technical).
+        // Fail-open only when a recent successful read said enabled===false (no deliberate pause).
+        const last = this.value;
+        const age = last ? this.now() - this.readAt : Number.POSITIVE_INFINITY;
+        if (last && last.enabled === false && !last.unavailable && age <= MAINTENANCE_FAIL_OPEN_MS) {
+          return { ...last, unavailable: true };
+        }
+        return { ...(last ?? defaults()), enabled: true, unavailable: true };
       } finally { if (timer) clearTimeout(timer); this.pending = null; }
-    })();
+    });
     return this.pending;
   }
   start(): void {
@@ -123,12 +134,26 @@ export class AiMaintenanceStore {
 }
 export class AiMaintenanceError extends Error {
   readonly status = 503;
-  constructor() { super(MAINTENANCE_MESSAGE); this.name = 'AiMaintenanceError'; }
+  readonly maintenance: boolean;
+  readonly statusUnavailable: boolean;
+  constructor(opts?: { unavailable?: boolean }) {
+    const unavailable = opts?.unavailable === true;
+    super(unavailable ? STATUS_UNAVAILABLE_MESSAGE : MAINTENANCE_MESSAGE);
+    this.name = 'AiMaintenanceError';
+    this.maintenance = !unavailable;
+    this.statusUnavailable = unavailable;
+  }
 }
 export const aiMaintenanceStore = new AiMaintenanceStore();
 export async function assertAiAvailable(): Promise<void> {
   // Unit tests never read a production setting. Store and HTTP tests use injected stores instead.
   if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
   aiMaintenanceStore.start();
-  if ((await aiMaintenanceStore.read()).enabled) throw new AiMaintenanceError();
+  const state = await aiMaintenanceStore.read();
+  // unavailable takes precedence for the user-facing string; enabled+unavailable still blocks spend.
+  if (state.unavailable) {
+    if (state.enabled) throw new AiMaintenanceError({ unavailable: true });
+    return; // fail-open: recent known-off, keep serving
+  }
+  if (state.enabled) throw new AiMaintenanceError();
 }

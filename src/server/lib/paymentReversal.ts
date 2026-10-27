@@ -28,6 +28,7 @@
 // PURE. No Firestore, no network, no clock. The I/O half is `paymentReversalStore.ts`.
 
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
+import { adminBuildRemaining } from './giftSpend';
 import { mirroredCreditPatch } from './walletMirror';
 import { appendLedgerEntry, LEDGER_OPENING_FIELD, LEDGER_DROPPED_FIELD } from './walletStatement';
 
@@ -327,6 +328,7 @@ export function computeClawedBackWallet(
     : '';
   const ledgerEntry = {
     type: 'refund',
+    ...(w.adminBuildTokensRemaining !== undefined ? { adminBuildTokensDelta: (patch?.adminBuildTokensRemaining ?? adminBuildRemaining(w)) - adminBuildRemaining(w) } : {}),
     amountCoinsOrTokens: -applied,
     moneySpent: 0,
     timestamp: now,

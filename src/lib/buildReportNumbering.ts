@@ -1,4 +1,4 @@
-/** A position in a retained cohort snapshot, never a permanent report identifier. */
+/** Chronological ranks within complete retained failed or latest-per-workspace snapshots. */
 export const REPORT_NUMBER_FAILURES = [
   'storage_unavailable', 'scan_timeout', 'scan_limit', 'invalid_timestamp', 'snapshot_miss', 'request_failed',
 ] as const;

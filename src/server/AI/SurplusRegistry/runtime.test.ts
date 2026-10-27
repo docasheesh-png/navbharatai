@@ -11,7 +11,7 @@ describe('optional metadata runtime', () => {
     expect(await refreshSurplusRegistry()).toEqual({ status: 'disabled' });
     expect(mocks.db).not.toHaveBeenCalled(); expect(mocks.sync).not.toHaveBeenCalled();
     expect(await previewSurplusBuild({ input: 1, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: 0 })).toMatchObject({ canDispatch: false, status: 'blocked' });
-    expect(await readSurplusObservations()).toMatchObject({ status: 'disabled', canDispatch: false, observedCandidates: [] });
+    expect(await readSurplusObservations()).toMatchObject({ status: 'disabled', canDispatch: false, liveBuilderAdmission: false, qualitySource: 'none', observedCandidates: [] });
     await expect(controlSurplusModel('model-a', 'disable', 0, 'version-a', 'Disable for safety')).rejects.toThrow('REGISTRY_DISABLED');
     expect(mocks.db).not.toHaveBeenCalled();
   });
@@ -52,7 +52,7 @@ describe('bounded observation candidate configuration', () => {
       ? { snapshot, lastAttemptAt: now, lastSuccessAt: now, nextAllowedAt: now + 300000, controls: { revision: 1, disabledModels: ['model-a'], updatedAt: now, reason: 'Disabled for review' } }
       : { account: { credentialSha256: 'PRIVATE_ACCOUNT_HASH' }, reviews: { quality: [], pricingContract: null, accountAndPrivacyReviewedUntil: 0 } } }) }) });
     const view = await readSurplusObservations();
-    expect(view).toMatchObject({ status: 'observed', version: 'version-a', controlRevision: 1, lastAttemptAt: now, lastSuccessAt: now, models: [{ modelId: 'model-a', disabled: true, qualityReviewStatus: 'unreviewed' }] });
+    expect(view).toMatchObject({ status: 'observed', version: 'version-a', controlRevision: 1, lastAttemptAt: now, lastSuccessAt: now, liveBuilderAdmission: false, qualitySource: 'none', models: [{ modelId: 'model-a', disabled: true, qualityReviewStatus: 'unreviewed' }] });
     expect(view.models[0].blockedReasons).toContain('manually_disabled');
     expect(JSON.stringify(view)).not.toContain('PRIVATE_ACCOUNT_HASH');
     expect(mocks.sync).not.toHaveBeenCalled();

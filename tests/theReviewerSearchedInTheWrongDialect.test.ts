@@ -145,7 +145,7 @@ describe('🧩 a tested template opens on the first rung', () => {
     expect(route).toContain("const seededScaffold = process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !isImportTurn ? goldenScaffoldForPrompt(prompt) : null;");
     expect(route).toContain('const scaffoldWillSeed = !!seededScaffold;');
     expect(route).toContain('async () => scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(');
-    expect(route).toContain('resolveWeakComplexity(weakAdmission,');
+    expect(route).toContain('resolveWeakComplexity(weakAdmissionForBuild,');
   });
 });
 

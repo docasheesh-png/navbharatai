@@ -27,13 +27,14 @@
 // live here, and `walletCreditIsTransactional` in the tests is what pins it at the call sites.
 
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
-import { giftAfterGrant, giftRemaining, type GiftWalletView } from './giftSpend';
+import { giftAfterGrant, giftRemaining, adminBuildRemaining, type GiftWalletView } from './giftSpend';
 
 /** The two views of one balance, as they sit on the wallet document. */
 export interface WalletViews extends GiftWalletView {
   tokenBalance?: unknown;
   remaining_balance?: unknown;
   total_balance?: unknown;
+  walletLedger?: unknown;
 }
 
 /**
@@ -45,7 +46,8 @@ export interface WalletViews extends GiftWalletView {
  * answer: 'gift' is anything NavBharatAI hands over (welcome bonus, weekly top-up, coupon, admin
  * grant); 'paid' is money that genuinely arrived from the user.
  */
-export type CreditSource = 'gift' | 'paid';
+// Explicit manual grants remain gifts, with provenance for the build-only pause exception.
+export type CreditSource = 'gift' | 'paid' | 'admin-build';
 
 /** The fields a credit writes. `total_balance` is the lifetime figure and only ever grows. */
 export interface MirroredPatch {
@@ -54,10 +56,19 @@ export interface MirroredPatch {
   total_balance?: number;
   /** How much of the new balance is gift money. Written on every credit, so it can never go stale. */
   giftTokensRemaining: number;
+  adminBuildTokensRemaining?: number;
+  adminBuildTokensTotalGranted?: number;
 }
 
 function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+}
+
+/** First tracking cannot change the accounting model underneath an outstanding legacy hold. */
+export function adminCreditActivationRefusal(w: WalletViews): string | null {
+  return w.adminBuildTokensRemaining === undefined && Array.isArray(w.walletLedger)
+    && w.walletLedger.some((row: any) => Array.isArray(row?.openHolds) && row.openHolds.length > 0)
+    ? 'Finish pending wallet reservations before adding admin build credits. No credit was added.' : null;
 }
 
 /** ₹ → tokens, at the one rate the whole platform uses. PURE. */
@@ -82,6 +93,8 @@ export function mirroredCreditPatch(
   source: CreditSource,
 ): MirroredPatch {
   const w = current || {};
+  const refusal = source === 'admin-build' ? adminCreditActivationRefusal(w) : null;
+  if (refusal) throw new Error(refusal);
   const delta = Number.isFinite(tokensDelta) ? tokensDelta : 0;
   const heldTokens = num(w.tokenBalance);
   // 🔴 A CREDIT MOVES THE BALANCE BY EXACTLY ITS AMOUNT, EVEN BELOW ZERO (Q-670, found 2026-10-05). The floor
@@ -101,7 +114,7 @@ export function mirroredCreditPatch(
   // A GIFT raises the gift figure; PAID money leaves it alone. Either way it is clamped to the new
   // balance, so a DEDUCTION (a negative delta, which only the admin path sends) takes the gift down
   // with it rather than leaving a wallet claiming more gift than it holds money.
-  const giftNow = source === 'gift' && appliedTokens > 0
+  const giftNow = source !== 'paid' && appliedTokens > 0
     ? giftAfterGrant(w, appliedTokens)
     : giftRemaining(w);
 
@@ -110,6 +123,15 @@ export function mirroredCreditPatch(
     remaining_balance: appliedInr >= 0 ? heldInr + appliedInr : Math.max(Math.min(0, heldInr), heldInr + appliedInr),
     giftTokensRemaining: Math.max(0, Math.min(giftNow, nextTokens)),
   };
+  if (w.adminBuildTokensRemaining !== undefined || source === 'admin-build') {
+    const oldAdmin = adminBuildRemaining(w);
+    // A revocation removes explicit admin credit first; all other negative writers clamp it so a
+    // later real-money top-up cannot revive credit that no longer exists.
+    const adminDelta = source === 'admin-build' ? (appliedTokens >= 0 ? appliedTokens : -Math.min(oldAdmin, -appliedTokens)) : 0;
+    if (adminDelta < 0) patch.giftTokensRemaining = Math.max(0, Math.min(nextTokens, giftRemaining(w) + adminDelta));
+    patch.adminBuildTokensRemaining = Math.max(0, Math.min(patch.giftTokensRemaining, oldAdmin + adminDelta));
+    patch.adminBuildTokensTotalGranted = num(w.adminBuildTokensTotalGranted) + Math.max(0, adminDelta);
+  }
   if (appliedTokens > 0) patch.total_balance = num(w.total_balance) + appliedInr;
   return patch;
 }

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   indianPeopleDirective, depictsPeople, namesOtherOrigin,
   INDIAN_PEOPLE_DIRECTION, INDIAN_PEOPLE_CONDITIONAL, INDIAN_PEOPLE_NEGATIVE,
+  NO_PEOPLE_DIRECTION, NO_PEOPLE_NEGATIVE,
 } from '../src/server/lib/imagePeople';
 import { craftImagePrompt, withInlineNegative } from '../src/server/lib/imagePromptCraft';
 import { feedFor, isPaidItem } from '../src/lib/imageFeed';
@@ -47,7 +48,8 @@ describe('every face is Indian — the words the old list left out', () => {
   ])('"%s" is told the person is Indian', (p) => {
     const d = indianPeopleDirective(p);
     expect(d, p).not.toBeNull();
-    expect(d!.direction.toLowerCase()).toContain('indian');
+    expect(d!.named, p).toBe(true);
+    expect(d!.direction).toBe(INDIAN_PEOPLE_DIRECTION);
     expect(d!.negative).toBe(INDIAN_PEOPLE_NEGATIVE);
   });
 
@@ -69,26 +71,32 @@ describe('every face is Indian — the words the old list left out', () => {
     expect(d!.direction).toBe(INDIAN_PEOPLE_DIRECTION);
   });
 
-  it('the CONDITIONAL wording is used where one is merely possible', () => {
+  it('a role word that used to miss the list is now NAMED — emphatic, not conditional', () => {
     const d = indianPeopleDirective('delivery worker wearing a mask');
-    expect(d!.named).toBe(false);
-    expect(d!.direction).toBe(INDIAN_PEOPLE_CONDITIONAL);
+    expect(d!.named).toBe(true);
+    expect(d!.direction).toBe(INDIAN_PEOPLE_DIRECTION);
   });
 
-  // 🔒 THE PROPERTY THAT MAKES BROAD APPLICATION SAFE, and the reason the word list no longer gates
-  // coverage: the conditional sentence constrains a person who is already there. It cannot add one.
-  it('the conditional sentence can never invent a person', () => {
+  // 🔴 THE CONDITIONAL IS RETIRED AS A DEFAULT (admin 2026-10-26). Kept as an export for history;
+  // the craft layer must never put it on a brief that did not ask for a person.
+  it('the retired conditional wording is not applied to briefs with no person', () => {
     expect(INDIAN_PEOPLE_CONDITIONAL).toMatch(/^If any person appears/);
-    expect(INDIAN_PEOPLE_CONDITIONAL).not.toMatch(/\bEvery person\b/);
+    const c = craftImagePrompt({ prompt: 'Clinic logo', style: 'photo', type: 'Photograph', size: 'square' });
+    expect(c.prompt).not.toContain(INDIAN_PEOPLE_CONDITIONAL);
+    expect(c.prompt).toContain(NO_PEOPLE_DIRECTION);
+    expect(c.negative).toContain('floating head');
+    expect(c.negative).not.toContain('east asian face');
   });
 
   it.each([
     'cat face', "a dog's face", 'face wash bottle product photo', 'a bowl of biryani',
     'sunset over the mountains', 'media player app icon', 'service worker diagram', 'best seller badge',
-  ])('"%s" still gets no EMPHATIC sentence — nobody is put into it', (p) => {
-    const d = indianPeopleDirective(p);
-    expect(d!.named, p).toBe(false);
-    expect(craftImagePrompt({ prompt: p }).prompt, p).not.toContain(INDIAN_PEOPLE_DIRECTION);
+  ])('"%s" gets no Indian face rule — and is told NOT to invent a person', (p) => {
+    expect(indianPeopleDirective(p), p).toBeNull();
+    const c = craftImagePrompt({ prompt: p });
+    expect(c.prompt, p).not.toContain(INDIAN_PEOPLE_DIRECTION);
+    expect(c.prompt, p).not.toContain(INDIAN_PEOPLE_CONDITIONAL);
+    expect(c.prompt, p).toContain(NO_PEOPLE_DIRECTION);
   });
 
   // THE HALF THAT HAS NEVER CHANGED, and must not: the user's own words win.
@@ -110,13 +118,14 @@ describe('every face is Indian — the words the old list left out', () => {
     }
   });
 
-  // A UI screenshot and a background used to get NOTHING, because "student" there names a domain.
-  // They now get the conditional sentence, which is strictly more and still cannot people a dashboard.
-  it('a dashboard gets the conditional sentence, never the emphatic one', () => {
+  // A UI screenshot used to get the conditional Indian sentence; that named "facial features" and
+  // invited faces into dashboards. Now it gets an explicit no-people brief instead.
+  it('a dashboard is told not to invent a person — never the Indian face rule', () => {
     const c = craftImagePrompt({ prompt: 'student management dashboard', type: 'UI screenshot' });
     expect(c.indianPeople).toBe(false);
     expect(c.prompt).not.toContain(INDIAN_PEOPLE_DIRECTION);
-    expect(c.prompt).toContain(INDIAN_PEOPLE_CONDITIONAL);
+    expect(c.prompt).not.toContain(INDIAN_PEOPLE_CONDITIONAL);
+    expect(c.prompt).toContain(NO_PEOPLE_DIRECTION);
   });
 
   it('the negative is short — this module pays for long inline negatives in sharpness', () => {
@@ -125,10 +134,12 @@ describe('every face is Indian — the words the old list left out', () => {
 
   // REVERSION GUARD. `tsc` and `vitest` cannot see a rule that is merely never applied, which is how
   // the negative came to be missing for a month: it was written, documented, and wired to nothing.
-  it('the craft layer really reads both halves of the directive', () => {
+  it('the craft layer really reads both halves of the directive — and the no-people rule', () => {
     const src = readFileSync(join(__dirname, '../src/server/lib/imagePromptCraft.ts'), 'utf8');
     expect(src).toContain('indianPeopleDirective(base');
-    expect(src).toContain('indian ? indian.negative : ');
+    expect(src).toContain('NO_PEOPLE_DIRECTION');
+    expect(src).toContain('NO_PEOPLE_NEGATIVE');
+    expect(src).toContain('forbidPeople');
   });
 
   it('depictsPeople itself is unchanged — the precision lock still holds', () => {

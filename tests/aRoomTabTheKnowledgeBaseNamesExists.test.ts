@@ -19,26 +19,27 @@
 //   3. every handler of the shared editor is referenced from the JSX, so deleting the tab again
 //      fails here with the reason rather than only moving a count in a baseline file.
 import { describe, it, expect } from 'vitest';
+import { COPY } from '../src/lib/copy';
+import { APP_KNOWLEDGE_BASE } from '../src/server/AppContext/AppKnowledgeBase';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(__dirname, '..');
 const component = readFileSync(join(root, 'src/components/ide/LiveCollaboration.tsx'), 'utf8');
-const knowledge = readFileSync(join(root, 'src/server/AppContext/AppKnowledgeBase.ts'), 'utf8');
 
 // The union is the declared set of tabs: type RoomTab = 'free' | 'pro' | … ;
 const unionLine = component.split('\n').find((l) => l.startsWith('type RoomTab')) ?? '';
 const declaredTabs = [...unionLine.matchAll(/'([a-z]+)'/g)].map((m) => m[1]);
 
 // The header button list is the set a user can actually tap, with the label shown on it.
-const renderedTabs = [...component.matchAll(/\{ key: '([a-z]+)', label: '([^']+)'/g)].map((m) => ({
+const renderedTabs = [...component.matchAll(/\{ key: '([a-z]+)', label: ('[^']+'|COPY\.branding\.aiChatName)/g)].map((m) => ({
   key: m[1],
-  label: m[2],
+  label: m[2] === 'COPY.branding.aiChatName' ? COPY.branding.aiChatName : m[2].slice(1, -1),
 }));
 
-// The one knowledge-base entry that describes this screen.
-const entryStart = knowledge.indexOf("id: 'live_collaboration'");
-const entry = knowledge.slice(entryStart, knowledge.indexOf('aiSurface', entryStart));
+// Read the actual exported display copy, including shared-name interpolation.
+const feature = APP_KNOWLEDGE_BASE.find((f) => f.id === 'live_collaboration');
+const entry = feature ? `${feature.description} ${feature.howToUse}` : '';
 
 describe('every room tab the app promises is a tab the app renders', () => {
   it('the union, the header buttons and the render branches agree', () => {
@@ -85,7 +86,7 @@ describe('the knowledge base describes the tabs that exist', () => {
   });
 
   it('no longer sends users to an "AI tab", which has never existed', () => {
-    // The real name of that tab is Free. "the AI tab" was in howToUse for as long as the entry was.
+    // The real name of that tab is AI chat. "the AI tab" was in howToUse for as long as the entry was.
     expect(entry).not.toContain('the AI tab');
   });
 

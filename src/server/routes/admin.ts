@@ -1,3 +1,5 @@
+import { adjustAdminBuildTokens, AdminTokenAdjustmentError } from '../lib/adminTokenAdjustment';
+import { validRequestId } from '../lib/walletOps';
 import { registerInferenceGatewayAdminRoutes } from './inferenceGatewayAdmin';
 import { registerFreeChatChainRoutes } from './freeChatChainAdmin';
 import { registerLiveModelRegistryRoutes } from './liveModelRegistry';
@@ -41,7 +43,7 @@ import { listDailyClaimOutcomes, summariseClaimOutcomes } from '../lib/referralC
 import { listDailyOtpOutcomes, summariseOtpOutcomes } from '../lib/otpOutcomes';
 import { runPushPreflight } from '../lib/pushPreflight';
 import { adminEmailList } from '../lib/adminEmails';
-import { mirroredCreditPatch } from '../lib/walletMirror';
+import { mirroredCreditPatch, adminCreditActivationRefusal } from '../lib/walletMirror';
 import { playRefundCheckView, PLAY_VOIDED_JOB } from '../lib/playVoidedPurchases';
 import { JOB_RUNS_COLLECTION } from '../lib/schedulerTick';
 import {
@@ -49,6 +51,7 @@ import {
   ADMIN_WELCOME_GIFT_TOKENS, ADMIN_WELCOME_GIFT_RUPEES, BULK_WELCOME_GIFT_MAX, NEW_USER_MAX_DAYS,
 } from '../lib/adminWelcomeGift';
 import { audit } from '../lib/audit';
+import { previewAdminGiftReclassification, confirmAdminGiftReclassification, AdminGiftReclassificationError } from '../lib/adminGiftReclassification';
 import { readAdminReason, readTokenDelta, broadcastScopeConfirmed } from '../../lib/adminActionReason';
 import { isRestorableStatus, restoredStatusFor, ownerModerationTargets, MAX_OWNER_MODERATION, type OwnerAction } from '../../lib/adminAppModeration';
 import { WORKSPACE_UID_RE } from '../lib/workspaceIdentity';
@@ -205,6 +208,8 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'guest_daily_usage', 'analytics_daily', 'analytics_events', 'build_events', 'abuseLedger',
   'user_reports', 'admin_apk_reports', 'admin_build_reports', 'admin_build_triage',
   'admin_failed_report_autopsies',
+  // Singleton counter for permanent failed-build report numbers (RETAINED_INDEFINITELY).
+  'admin_failed_report_numbers',
   'hosting_billing', 'hosting_period_usage',
   // Already on clocks, and absent from this inventory for the same reason the eleven above were.
   'takedown_records', 'safety_flags', 'admin_audit_log', 'build_jobs', 'build_failures',
@@ -2478,6 +2483,32 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
+  // Separate from adding tokens: preview is read-only; confirmation changes existing gift eligibility only.
+  app.post('/api/admin/users/:userId/weak-credit/preview', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const { userId } = routeParams(req.params);
+      const preview = await previewAdminGiftReclassification(getDb(), userId, req.body?.amount);
+      res.json({ ok: true, preview });
+    } catch (e: any) {
+      res.status(e instanceof AdminGiftReclassificationError ? e.status : 500).json({ ok: false,
+        error: e instanceof AdminGiftReclassificationError ? e.message : 'Could not read this wallet. No balance or credit was changed.' });
+    }
+  });
+  app.post('/api/admin/users/:userId/weak-credit/confirm', verifyAdminToken, async (req: Request, res: Response) => {
+    const { userId } = routeParams(req.params);
+    try {
+      const outcome = await confirmAdminGiftReclassification(getDb(), { userId, amount: req.body?.amount,
+        fingerprint: req.body?.fingerprint, requestId: req.body?.requestId, reason: req.body?.reason }, new Date().toISOString());
+      audit('ADMIN_GIFT_RECLASSIFY', { admin: adminUsername(), userId, ...outcome, reason: req.body?.reason, result: 'ok', ip: req.ip });
+      res.json({ ok: true, ...outcome });
+    } catch (e: any) {
+      audit('ADMIN_GIFT_RECLASSIFY', { admin: adminUsername(), userId, result: 'failed', ip: req.ip });
+      res.status(e instanceof AdminGiftReclassificationError ? e.status : 500).json({ ok: false,
+        outcomeUnknown: !(e instanceof AdminGiftReclassificationError),
+        error: e instanceof AdminGiftReclassificationError ? e.message : 'Confirmation status is unknown. Retry the same request ID to check it safely.' });
+    }
+  });
+
   // ── User token adjustment ─────────────────────────────────────────────────
   app.post('/api/admin/users/:userId/tokens', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
@@ -2492,42 +2523,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const delta = deltaRead.delta;
     const reason = reasonRead.reason;
     try {
-      const walletRef = doc(db, 'user_token_wallets', userId);
-      // 🔴 MONEY AUDIT 2026-09-12 — TWO BUGS FIXED HERE, AND THE SECOND WAS INVISIBLE.
-      //
-      // (1) This was a read-modify-write OUTSIDE a transaction, so a build settling at the same moment
-      //     could be erased by the adjustment writing a balance computed before that debit landed.
-      //     It is now a transaction that re-reads in-transaction, like every other credit path.
-      //
-      // (2) The ₹ mirror was ASSIGNED (`remaining_balance = newBalance / TOKENS_PER_RUPEE`), not moved
-      //     by the delta. The 2026-08-03 fix it replaced was right about the SYMPTOM — a gifted wallet
-      //     showing ₹0 could not build — but an assignment silently rewrites a balance whenever the two
-      //     views legitimately differ, and they DO: a Pass purchase credits `remaining_balance +=
-      //     netPaid` while the token figure was computed separately from the paid amount
-      //     first. So every Pass buyer's views differ by exactly the Pass price, permanently — and a
-      //     "+1 token" adjustment on such an account would have wiped that ₹ the user had really paid.
-      //     In the other direction (a wallet credited in ₹ only, as the coupon path used to do) the same
-      //     line MINTED balance. `mirroredCreditPatch` moves both views by the same money, never assigns.
-      const outcome = await runTransaction(db, async (tx: any) => {
-        const fresh = await tx.get(walletRef);
-        if (!fresh.exists()) return null;
-        const w = fresh.data();
-        const previousBalance = Number(w.tokenBalance || 0);
-        const patch = mirroredCreditPatch(w, delta, 'gift');
-        tx.update(walletRef, {
-          ...patch,
-          // 🔒 Through the shared appender — see walletStatement.ts.
-          ...ledgerPatch(w, {
-            type: 'admin_adjustment',
-            amountCoinsOrTokens: delta,
-            description: reason,
-            reason,
-            timestamp: new Date().toISOString(),
-          }),
-          updatedAt: new Date().toISOString(),
-        });
-        return { previousBalance, newBalance: patch.tokenBalance };
-      });
+      const requestId = req.body?.requestId;
+      if (!validRequestId(requestId)) return res.status(400).json({ error: 'Refresh the admin panel before adjusting tokens.' });
+      const outcome = await adjustAdminBuildTokens(db, { userId, delta, reason, requestId }, new Date().toISOString());
       if (outcome === null) {
         audit('ADMIN_TOKEN_ADJUST', { admin: adminUsername(), userId, delta, reason, result: 'user-not-found', ip: req.ip });
         return res.status(404).json({ error: 'User not found' });
@@ -2537,10 +2535,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         previousBalance: outcome.previousBalance, newBalance: outcome.newBalance,
         result: 'ok', ip: req.ip,
       });
-      res.json({ ok: true, previousBalance: outcome.previousBalance, newBalance: outcome.newBalance });
+      res.json({ ok: true, ...outcome });
     } catch (e: any) {
       console.error('[ADMIN] Internal error:', e?.message);
       audit('ADMIN_TOKEN_ADJUST', { admin: adminUsername(), userId, delta, reason, result: 'failed', error: e?.message, ip: req.ip });
+      if (e instanceof AdminTokenAdjustmentError) return res.status(e.status).json({ error: e.message });
       res.status(500).json({ error: 'Internal server error.' });
     }
   });
@@ -2559,7 +2558,10 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // Rules 2 and 3 re-read HERE, inside the transaction: a gift that landed since the check, or a
       // second press, finds the wallet no longer eligible and pays nothing.
       if (!welcomeGiftEligible(w)) return { ok: false as const, status: 409, error: walletRefusal(w) ?? 'not-eligible' };
-      const patch = mirroredCreditPatch(w, ADMIN_WELCOME_GIFT_TOKENS, 'gift');
+      if (w.mergedInto) return { ok: false as const, status: 409, error: 'This account is merged; select its canonical account. No credit was added.' };
+      const activationRefusal = adminCreditActivationRefusal(w);
+      if (activationRefusal) return { ok: false as const, status: 409, error: activationRefusal };
+      const patch = mirroredCreditPatch(w, ADMIN_WELCOME_GIFT_TOKENS, 'admin-build');
       tx.update(walletRef, {
         ...patch,
         // Gift money, counted against the ₹400 lifetime gift ceiling like every other gift.
@@ -2572,6 +2574,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           moneySpent: 0,
           timestamp: nowIso,
           description: `Welcome credit: ₹${ADMIN_WELCOME_GIFT_RUPEES} added by NavBharatAI`,
+          creditSource: 'admin-build',
+          adminBuildTokensDelta: ADMIN_WELCOME_GIFT_TOKENS,
         }),
         updatedAt: nowIso,
       });
@@ -2696,11 +2700,12 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const intoData = intoSnap.exists()
           ? intoSnap.data()
           : { userId, tokenBalance: 0, totalTokensUsed: 0, totalTokensPurchased: 0, total_output_tokens_used: 0, total_money_spent: 0, remaining_balance: 0, walletLedger: [] };
+        if (intoData.mergedInto) throw new Error('The target account is retired; select its canonical account instead.');
         const nowIso = new Date().toISOString();
         const { wallet: merged, audit: mergeAudit } = mergeWallets(intoData, fromData, nowIso);
         tx.set(intoRef, merged);
         // Retire the source: zero its balance and flag it merged so it can never be spent or re-merged.
-        tx.set(fromRef, { ...fromData, tokenBalance: 0, remaining_balance: 0, total_balance: 0, mergedInto: userId, mergedAt: nowIso, updatedAt: nowIso });
+        tx.set(fromRef, { ...fromData, ...(fromData.adminBuildTokensRemaining !== undefined ? { adminBuildTokensRemaining: 0, adminBuildTokensTotalGranted: 0, giftTokensRemaining: 0, cashRequiredTokenCarry: 0, ordinaryGiftTokenCarry: 0, adminEligibleTokenCarry: 0, tokenCarry: 0 } : {}), tokenBalance: 0, remaining_balance: 0, total_balance: 0, mergedInto: userId, mergedAt: nowIso, updatedAt: nowIso });
         return { newBalance: merged.tokenBalance, mergeAudit };
       });
       audit('ADMIN_WALLET_MERGE', { admin: adminUsername(), into: userId, from: fromUserId, newBalance: out.newBalance, ...out.mergeAudit, ip: req.ip });

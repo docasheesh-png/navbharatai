@@ -1,3 +1,4 @@
+import ts from 'typescript';
 /**
  * THE CHAT READS LIKE ONE PRODUCT (admin 2026-10-13, verbatim: *"navbharatai ke sabhi ai ka font, headline
  * etc bilkul claude jaisa karo! navbharatai ke sabhi ke chat wala ui aur ux ko claude jaisa karo!"*).
@@ -34,9 +35,10 @@ import {
 import { COMPOSER_BOX_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS } from '../src/components/chat/ComposerShell';
 
 const read = (rel: string) => readFileSync(join(process.cwd(), rel), 'utf8');
-/** Comments quote the OLD wording as evidence; only live code may answer these questions. */
-const code = (src: string) =>
-  src.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+/** Parse TSX comments: MIME strings such as image/* are live code, not comments. */
+const code = (src: string) => ts.createPrinter({ removeComments: true }).printFile(
+  ts.createSourceFile('surface.tsx', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX),
+);
 
 /** Every surface where a person talks to an AI and reads its reply. */
 const MESSAGE_SURFACES = [

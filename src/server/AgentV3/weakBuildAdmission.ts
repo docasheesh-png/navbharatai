@@ -60,11 +60,11 @@ export function weakAdmissionCode(scope: WeakScope | null): WeakScopeGuidanceCod
 }
 
 /**
- * Calm guidance when Weak should not start coding. Not a failure framing — the user should
- * switch Power (Weak / Normal / Strong) in Build options, or shrink the first version.
+ * Calm guidance when Weak should not start coding. Not a Fix-with-AI failure strip —
+ * the card offers Continue with Weak (honest risk) or Switch module for Build options.
  */
 export function weakAdmissionReply(scope: WeakScope | null): string {
   return scope === 'strong'
-    ? 'This request looks larger than Weak is meant for. Nothing was charged — coding has not started. Switch module below to open Build options and pick Normal or Strong, or describe a smaller first version. A full commercial-scale product usually needs a staged plan even on Strong.'
-    : 'I could not confirm this request fits Weak right now. Nothing was charged — coding has not started. Switch module below to open Build options and pick Normal or Strong, or retry with a clearer, smaller version of the app.';
+    ? 'This request looks larger than Weak is meant for. Nothing was charged — coding has not started. Continue with Weak below, or Switch module to open Build options, or describe a smaller first version. A full commercial-scale product usually needs a staged plan.'
+    : 'I could not confirm this request fits Weak right now. Nothing was charged — coding has not started. Continue with Weak below, or Switch module to open Build options, or retry with a clearer, smaller version of the app.';
 }

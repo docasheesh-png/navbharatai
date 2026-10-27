@@ -40,9 +40,11 @@ interface Props {
   ready: boolean;
   /** Fill the composer with a suggestion's ready-to-send instruction (the user then reviews & sends). */
   onPick: (promptText: string) => void;
+  /** Tiny corner control — fits the upper-right gap outside the + expander without enlarging the pad. */
+  compact?: boolean;
 }
 
-export function NextSuggestionsBulb({ workspaceId, ready, onPick }: Props) {
+export function NextSuggestionsBulb({ workspaceId, ready, onPick, compact }: Props) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [roadmap, setRoadmap] = useState<PublicRoadmap | null>(null);
   const [open, setOpen] = useState(false);
@@ -138,13 +140,17 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick }: Props) {
         type="button"
         onClick={toggle}
         title={hasRoadmap ? 'Your app roadmap & next-step ideas' : 'Ideas for what to build next'}
-        className={`relative h-7 w-7 flex items-center justify-center rounded-lg border transition-colors ${
-          open ? 'border-amber-500 text-warn bg-amber-500/10' : 'border-line text-warn hover:text-warn hover:border-amber-600 bg-card'
+        className={`relative flex items-center justify-center border transition-colors ${
+          compact
+            ? `h-5 w-5 rounded-md ${open ? 'border-amber-500/80 text-warn bg-amber-500/10' : 'border-transparent text-warn/90 hover:border-amber-600/50 bg-transparent'}`
+            : `h-7 w-7 rounded-lg ${open ? 'border-amber-500 text-warn bg-amber-500/10' : 'border-line text-warn hover:text-warn hover:border-amber-600 bg-card'}`
         }`}
       >
-        <Lightbulb className="w-4 h-4" />
+        <Lightbulb className={compact ? 'w-3 h-3' : 'w-4 h-4'} />
         {unseen && (
-          <span className="absolute -top-1.5 -right-1.5 min-w-[15px] h-[15px] px-1 flex items-center justify-center rounded-full bg-amber-500 text-[9px] font-black text-zinc-950">
+          <span className={`absolute flex items-center justify-center rounded-full bg-amber-500 font-black text-zinc-950 ${
+            compact ? '-top-1 -right-1 min-w-[12px] h-[12px] px-0.5 text-[8px]' : '-top-1.5 -right-1.5 min-w-[15px] h-[15px] px-1 text-[9px]'
+          }`}>
             {count}
           </span>
         )}

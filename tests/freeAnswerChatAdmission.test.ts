@@ -9,13 +9,14 @@ vi.mock('../src/server/lib/liveSearchContext', () => ({ liveSearchContext: m.liv
 vi.mock('../src/server/lib/visionChain', () => ({ runVisionChain: m.vision }));
 vi.mock('../src/server/lib/attachmentText', () => ({ buildDocumentContext: m.document }));
 vi.mock('../src/server/lib/serverDb', async original => ({ ...await original<typeof import('../src/server/lib/serverDb')>(), getServerDb: () => null, collection: () => ({}), addDoc: m.add }));
-vi.mock('../src/server/lib/freeAnswerQuotaStore', () => ({ FREE_ANSWER_LEASE_MS: 30_000, FREE_ANSWER_REQUEST_MS: 90_000, FreeAnswerQuotaStore: class {
+vi.mock('../src/server/lib/freeAnswerQuotaStore', async original => ({ ...await original<typeof import('../src/server/lib/freeAnswerQuotaStore')>(), FREE_ANSWER_LEASE_MS: 30_000, FREE_ANSWER_REQUEST_MS: 90_000, FreeAnswerQuotaStore: class {
   reserve = m.reserve; renew = m.renew; settle = m.settle; status = m.status;
 } }));
 vi.mock('../src/server/lib/imageEditRun', () => ({ checkEditable: () => ({ ok: false, outcome: { badInput: 'Test edit cannot be completed.' } }), runImageEdit: vi.fn() }));
 import { registerChatRoutes } from '../src/server/routes/chat';
 import { currentInferenceGatewayContext } from '../src/server/AI/InferenceGateway/runtime';
 import { firestoreGuestUsageStore } from '../src/server/lib/guestDailyQuota';
+import { consumeChatResponseStream, gatewayChatFailure } from '../src/lib/chatResponseStream';
 
 const requestId = '11111111-1111-4111-8111-111111111111';
 function response() {
@@ -38,7 +39,7 @@ beforeEach(() => {
   m.live.mockResolvedValue(''); m.document.mockResolvedValue('document text'); m.oldContext.mockResolvedValue(undefined); m.add.mockResolvedValue(undefined);
   m.detailed.mockResolvedValue({ ok: true, content: 'A useful answer.', provider: 'synthetic', model: 'synthetic', latencyMs: 1 });
   m.stream.mockImplementation(async (...args: any[]) => { args[4]('A useful answer.'); return { ok: true, provider: 'synthetic', model: 'synthetic', latencyMs: 1 }; });
-  m.reserve.mockImplementation(async (_subject, _id, now) => ({ allowed: true, reservation: { id: 'a'.repeat(64), owner: requestId, principalHash: 'b'.repeat(64), day: '2026-10-23', startedAt: now, deadlineAt: now + 90_000, leaseExpiresAt: now + 30_000 }, status: { limit: 20, used: 0, reserved: 1, remaining: 19, inProgress: true, day: '2026-10-23', resetsAt: now + 100_000 } }));
+  m.reserve.mockImplementation(async (_subject, _id, now = Date.now()) => ({ allowed: true, reservation: { id: 'a'.repeat(64), owner: requestId, principalHash: 'b'.repeat(64), day: '2026-10-23', startedAt: now, deadlineAt: now + 90_000, leaseExpiresAt: now + 30_000 }, status: { limit: 20, used: 0, reserved: 1, remaining: 19, inProgress: true, day: '2026-10-23', resetsAt: now + 100_000 } }));
   m.renew.mockResolvedValue(true); m.settle.mockResolvedValue(true);
   vi.spyOn(console, 'log').mockImplementation(() => {}); vi.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -49,15 +50,15 @@ describe('real chat ingress enforces shared answer admission without changing pr
     const res = response();
     m.detailed.mockImplementationOnce(async () => { expect(currentInferenceGatewayContext()).toBeUndefined(); return { ok: true, content: 'A useful answer.' }; });
     await route(path)(request({ uid: 'victim', userId: 'victim', tier: 'paid', freeAnswerQuota: false }), res);
-    expect(m.reserve).toHaveBeenCalledWith({ key: 'user:verified-user', limit: 20 }, requestId, expect.any(Number));
-    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'answered', expect.any(Number));
+    expect(m.reserve).toHaveBeenCalledWith({ key: 'user:verified-user', limit: 20 }, requestId);
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'answered');
     expect(m.legacy).toHaveBeenCalledOnce(); expect(m.detailed).toHaveBeenCalledOnce();
     expect(res.body).toEqual({ reply: 'A useful answer.' });
   });
   it('uses five guest answers and trusted address backstop despite forged account metadata and old unlimited knob', async () => {
     m.verify.mockResolvedValue(null); m.identity.mockResolvedValue(null);
     const res = response(); await route()(request({ uid: 'victim', userId: 'victim', tenantId: 'victim' }), res);
-    expect(m.reserve).toHaveBeenCalledWith({ key: 'guest-device:22222222-2222-4222-8222-222222222222', limit: 5, ipKey: 'ip:203.0.113.9' }, requestId, expect.any(Number));
+    expect(m.reserve).toHaveBeenCalledWith({ key: 'guest-device:22222222-2222-4222-8222-222222222222', limit: 5, ipKey: 'ip:203.0.113.9' }, requestId);
     expect(res.body.reply).toBe('A useful answer.');
   });
   it.each(['daily-limit', 'busy', 'duplicate', 'attempt-limit'])('stops %s before documents, prompt lookup and inference', async reason => {
@@ -79,19 +80,79 @@ describe('real chat ingress enforces shared answer admission without changing pr
     const res=response(); await route()(request(),res);
     expect(consume).toHaveBeenCalledOnce(); expect(res.statusCode).toBe(403); expect(res.body.code).toBe('guest_limit_reached');
     expect(m.reserve.mock.calls[0][0]).toMatchObject({limit:5});
-    expect(m.settle).toHaveBeenCalledWith(expect.any(Object),'provider-failed',expect.any(Number));
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object),'provider-failed');
     expect(m.legacy).not.toHaveBeenCalled(); expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled(); expect(m.add).not.toHaveBeenCalled();
   });
-  it('restores credit on a provider failure represented as HTTP200 reply text', async () => {
+  it.each(['/api/chat/navbharat', '/api/chat/navbharatai'])('%s preserves a failed outcome in JSON without changing quota settlement', async path => {
     m.detailed.mockResolvedValue({ ok: false, content: 'AI service temporarily busy.', reason: 'all-failed' });
-    await route()(request(), response());
-    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'provider-failed', expect.any(Number));
+    const res = response(); await route(path)(request(), res);
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toEqual({ ok: false, code: 'CHAT_ROUTE_UNAVAILABLE', reply: 'AI service temporarily busy.' });
+    expect(gatewayChatFailure(res.body)).toMatchObject({ code: 'CHAT_ROUTE_UNAVAILABLE', partial: false });
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'provider-failed');
   });
-  it('does not count synthetic streamed notices as a useful answer', async () => {
+  it.each(['/api/chat/navbharat', '/api/chat/navbharatai'])('%s sends a terminal failure, never DONE, for an unavailable stream', async path => {
     m.stream.mockImplementation(async (...args: any[]) => { args[4]('AI service temporarily busy.', 'notice'); return { ok: false, reason: 'all-failed' }; });
+    const res = response(); await route(path)(request({ stream: true }), res);
+    const wire = res.chunks.join('');
+    expect(wire).not.toContain('[DONE]');
+    const parsed = await consumeChatResponseStream(new Response(wire).body!, true, vi.fn());
+    expect(parsed).toEqual({ text: 'AI service temporarily busy.', failure: { code: 'CHAT_ROUTE_UNAVAILABLE', message: 'AI service temporarily busy.', partial: false } });
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'provider-failed');
+    expect(m.add).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ ok: false, failureReason: 'all-failed' }));
+  });
+  it('adds a nonblank failure notice when the stream returned no text', async () => {
+    m.stream.mockResolvedValue({ ok: false, reason: 'no-provider' });
     const res = response(); await route()(request({ stream: true }), res);
-    expect(res.chunks.join('')).toContain('temporarily busy');
-    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'provider-failed', expect.any(Number));
+    const parsed = await consumeChatResponseStream(new Response(res.chunks.join('')).body!, true, vi.fn());
+    expect(parsed.text).toContain('temporarily unavailable');
+    expect(parsed.failure).toMatchObject({ code: 'CHAT_ROUTE_UNAVAILABLE', partial: false });
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'provider-failed');
+  });
+  it.each(['', '   '])('keeps an empty JSON failure nonblank without claiming an AI answer', async content => {
+    m.detailed.mockResolvedValue({ ok: false, content, reason: 'no-provider' });
+    const res = response(); await route()(request(), res);
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toMatchObject({ ok: false, code: 'CHAT_ROUTE_UNAVAILABLE', reply: expect.stringContaining('temporarily unavailable') });
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'provider-failed');
+  });
+  it('keeps genuine partial output and its existing settlement while reporting interruption', async () => {
+    m.stream.mockImplementation(async (...args: any[]) => { args[4]('A genuine partial answer.'); return { ok: false, reason: 'aborted' }; });
+    const res = response(); await route()(request({ stream: true }), res);
+    const parsed = await consumeChatResponseStream(new Response(res.chunks.join('')).body!, true, vi.fn());
+    expect(parsed.text).toBe('A genuine partial answer.\n\nThis reply was interrupted. Please retry when the service is available.');
+    expect(parsed.failure).toMatchObject({ code: 'CHAT_ROUTE_UNAVAILABLE', partial: true });
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'answered');
+  });
+  it('leaves successful streaming completion and its existing settlement unchanged', async () => {
+    const res = response(); await route()(request({ stream: true }), res);
+    expect(res.chunks.join('')).toContain('[DONE]');
+    expect(await consumeChatResponseStream(new Response(res.chunks.join('')).body!, true, vi.fn())).toEqual({ text: 'A useful answer.' });
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'answered');
+  });
+  it.each([true, false, undefined])('records the actual streaming race outcome %s and reported zero usage', async raced => {
+    m.stream.mockImplementation(async (...args: any[]) => {
+      args[4]('A useful answer.');
+      return { ok: true, provider: 'synthetic', model: 'synthetic', latencyMs: 7,
+        ...(raced === undefined ? {} : { raced }), usage: { inputTokens: 0, outputTokens: 0 } };
+    });
+    await route()(request({ stream: true }), response());
+    expect(m.add).toHaveBeenCalledOnce();
+    const row = m.add.mock.calls[0][1];
+    expect(row).toMatchObject({ streamed: true, providerName: 'synthetic', modelName: 'synthetic',
+      latencyMs: 7, ok: true, usageMeasured: true, inputTokens: 0, outputTokens: 0 });
+    if (raced === undefined) expect(row).not.toHaveProperty('raced');
+    else expect(row.raced).toBe(raced);
+  });
+  it('keeps the existing stalled-but-answered outcome distinct from a failed route', async () => {
+    m.stream.mockImplementation(async (...args: any[]) => { args[4]('A genuine partial answer.'); return { ok: true, reason: 'stalled' }; });
+    const res = response(); await route()(request({ stream: true }), res);
+    const wire = res.chunks.join('');
+    expect(wire).toContain('[DONE]');
+    const parsed = await consumeChatResponseStream(new Response(wire).body!, true, vi.fn());
+    expect(parsed.text).toContain('went quiet before finishing');
+    expect(parsed.failure).toBeUndefined();
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'answered');
   });
   it('keeps a partially delivered answer charged and holds the slot until upstream settles after disconnect', async () => {
     const res = response(); let finish!: () => void;
@@ -105,14 +166,14 @@ describe('real chat ingress enforces shared answer admission without changing pr
     res.emit('close'); expect(m.settle).not.toHaveBeenCalled();
     finish(); await pending;
     expect(m.settle).toHaveBeenCalledTimes(1);
-    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'answered', expect.any(Number));
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'answered');
   });
   it('does not refund an uncertain no-output disconnect', async () => {
     const res = response(); let finish!: () => void;
     m.stream.mockImplementationOnce(async () => { await new Promise<void>(resolve => { finish = resolve; }); return { ok: false, reason: 'aborted' }; });
     const pending = route()(request({ stream: true }), res);
     await vi.waitFor(() => expect(m.stream).toHaveBeenCalledOnce()); res.emit('close'); finish(); await pending;
-    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'uncertain', expect.any(Number));
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'uncertain');
   });
   it('fences late output when the durable renewal loses ownership', async () => {
     vi.useFakeTimers();
@@ -129,7 +190,7 @@ describe('real chat ingress enforces shared answer admission without changing pr
     expect(m.renew).toHaveBeenCalledOnce();
     finish(); await pending;
     expect(res.chunks.join('')).not.toContain('Late output');
-    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'uncertain', expect.any(Number));
+    expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'uncertain');
   });
   it('keeps actual image editing outside the answer allowance', async () => {
     const res = response(); await route()(request({ message: 'Make the shirt red', fileAttachments: [{ type: 'image/png', name: 'photo.png', base64: 'AAAA' }] }), res);

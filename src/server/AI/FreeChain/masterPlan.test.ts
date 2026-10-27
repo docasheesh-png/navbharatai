@@ -23,7 +23,7 @@ describe('master plan config', () => {
   });
   it('order: glm45, glm47, groq, cloudflare, openrouter, then DeepInfra 8B → DeepSeek → backups; Nemotron gone', () => {
     const c = on();
-    expect(c.order).toEqual(['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
+    expect(c.order).toEqual(['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
     expect(c.rungs.map(r => r.id)).not.toContain('nemotron');
     expect(c.concurrency).toEqual({ glm45: 2, glm47: 1 });
   });
@@ -80,7 +80,7 @@ describe('rule-based router', () => {
   it('router off → normal', () => { expect(routeTurn(freeChainConfig({ FREE_CHAIN_ROUTER_ENABLED: 'off' }), { message: 'hi', history: [] }).route).toBe('normal'); });
   it('route orders', () => {
     const o = on().order;
-    expect(orderForRoute(o, 'quality')).toEqual(['dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
+    expect(orderForRoute(o, 'quality')).toEqual(['dsv4flash', 'cheapinf', 'gpt5nano', 'glmflashx', 'geminipaid']);
     expect(orderForRoute(o, 'fast')).not.toContain('dsv4flash');
     expect(orderForRoute(o, 'normal')).toBe(o);
   });

@@ -24,10 +24,9 @@
 //                    with what was delivered. Partial and honest beats duplicated.
 //   • HARD CAP     — an absolute backstop for a provider that dribbles a token forever.
 //
-// ⚠️ WHAT THIS CANNOT DO, said plainly rather than discovered later: `executeStream` takes no
-// AbortSignal, so nothing here CANCELS the upstream call. It stops us WAITING on it. The provider may
-// keep generating and we may still be billed for it — exactly the limitation the build-side cost
-// ceiling records for an abandoned provider call. Stopping the wait is what the user feels.
+// This utility bounds the observer only. Its caller must abort the attempt's SDK signal when a
+// watchdog fires AND retain physical occupancy until that provider promise actually settles.
+// Transport cancellation cannot guarantee that the provider stops server-side generation or billing.
 
 /** Nothing has arrived yet: how long to wait for the FIRST token before the rung counts as failed. */
 export const DEFAULT_FIRST_TOKEN_MS = 30_000;

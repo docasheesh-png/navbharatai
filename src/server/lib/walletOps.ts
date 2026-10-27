@@ -13,7 +13,7 @@ import { createHash } from 'crypto';
 
 export const WALLET_OPS = 'wallet_ops';
 
-export type WalletOpKind = 'build' | 'plan';
+export type WalletOpKind = 'build' | 'plan' | 'admin-adjustment' | 'admin-reclassification';
 
 /** Stable, path-safe doc id for one money move on one wallet. Pure. */
 export function walletOpId(ownerId: string, kind: WalletOpKind, ref: string): string {

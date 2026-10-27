@@ -4,6 +4,42 @@ import { enclosingBlock, anchorOf, codeOnly } from './helpers/sourceSlice';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { shouldRaceStreams } from '../src/server/AI/Router/streamRacePolicy';
+import ts from 'typescript';
+
+/** Find the actual streaming branch, not the first nested else after the provider call. */
+function streamingBranch(source: string): string {
+  const file = ts.createSourceFile('chat.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const calls: ts.CallExpression[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && node.expression.getText(file) === 'aiRouter.routeStream') calls.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  if (calls.length !== 1) throw new Error(`Expected one streaming router call, found ${calls.length}`);
+  for (let node: ts.Node | undefined = calls[0].parent; node; node = node.parent) {
+    if (ts.isIfStatement(node) && node.expression.getText(file).replace(/\s/g, '') === 'req.body.stream===true'
+      && node.thenStatement.pos <= calls[0].pos && node.thenStatement.end >= calls[0].end) return node.thenStatement.getText(file);
+  }
+  throw new Error('The router call is not inside the streaming request branch');
+}
+
+describe('streaming source boundary extraction', () => {
+  it('keeps later usage logging across nested else blocks without including the nonstreaming sibling', () => {
+    const branch = streamingBranch(`if (req.body.stream === true) {
+      aiRouter.routeStream();
+      if (failed) { sendError(); } else { sendDone(); }
+      writeStreamUsage();
+    } else { writeNonstreamingUsage(); }`);
+    expect(branch).toContain('writeStreamUsage()');
+    expect(branch).not.toContain('writeNonstreamingUsage()');
+  });
+  it('fails closed on missing, duplicate or misplaced calls instead of accepting source text in comments', () => {
+    expect(() => streamingBranch('// aiRouter.routeStream()')).toThrow('found 0');
+    expect(() => streamingBranch('aiRouter.routeStream();')).toThrow('not inside');
+    expect(() => streamingBranch('if (req.body.stream === true) {} else { aiRouter.routeStream(); }')).toThrow('not inside');
+    expect(() => streamingBranch('if (req.body.stream === true) { aiRouter.routeStream(); aiRouter.routeStream(); }')).toThrow('found 2');
+  });
+});
 
 /**
  * A RACE COSTS TWO MODELS AND BUYS ONE SECOND — so it belongs where someone is paying.
@@ -67,9 +103,7 @@ describe('wiring — the policy actually governs the router, and the outcome rea
   });
 
   it('🔒 the STREAMING chat turn now writes a usage row — it wrote none at all before', () => {
-    const at = chat.indexOf('aiRouter.routeStream(');
-    expect(at).toBeGreaterThan(-1);
-    const after = chat.slice(at, chat.indexOf('} else {', at));
+    const after = streamingBranch(chat);
     expect(after).toContain("addDoc(collection(getDb() as any, 'ai_usage_logs')");
     expect(after).toContain('streamed: true');
     expect(after).toContain('raced: outcome.raced');

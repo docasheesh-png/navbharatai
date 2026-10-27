@@ -85,6 +85,10 @@ const isTest = (p: string) => p.includes('.test.') || p.includes('.spec.');
  * becomes a place to hide the next dead engine.
  */
 const KNOWN_UNREACHABLE = new Set([
+  // Deliberately dormant benchmark prerequisite: no authority issuer or production driver.
+  // Activation requires separate privacy/transport/template/budget review; remove only with that wiring.
+  // canaryResumeProvenance.test.ts independently asserts that production entry points remain absent.
+  'src/server/AgentV3/reliability/canarySandboxController.ts',
   // Go-live PR 15's `src/server/lib/billOfSupply.ts` and PR 16's `byoLifecycle.ts` were both here, each
   // with the note "remove when wired". Both exemptions are now spent: THIS PR wires billOfSupply
   // (`receiptStore.ts` imports it), and #3732 — which wires byoLifecycle — has merged, so main reaches

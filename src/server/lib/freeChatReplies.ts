@@ -87,10 +87,10 @@ export function appRequestDirective(lang: ReplyLang): string {
 }
 
 /** Append the Pro line when the model left it out. Returns '' when nothing must be added. */
-export function missingProLine(replyText: string, message: string): string {
+export function missingProLine(replyText: string, message: string, replyLanguage?: ReplyLang): string {
   if (!isAppBuildRequest(message)) return '';
   if (/navbharat\s*ai\s*pro/i.test(String(replyText ?? ''))) return '';
-  const lang = detectReplyLanguage(message);
+  const lang = replyLanguage ?? detectReplyLanguage(message);
   return `\n\n${proLine(lang === 'other' ? 'en' : lang)}`;
 }
 

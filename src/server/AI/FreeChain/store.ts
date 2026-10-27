@@ -87,14 +87,21 @@ export class FreeChainStore {
     // period, erase committed counters, and allow overspend. Their expired array entries are pruned.
     return { ...ledger, kind };
   }
-  async reserveQuota(input: QuotaReservationInput, now = Date.now()): Promise<QuotaDecision> {
-    try { validateQuotaInput(input, now); }
-    catch { return { allowed: false, reason: 'invalid_quota', resetAt: Number.isSafeInteger(now) ? now + 60_000 : 0 }; }
-    if (!this.db) return { allowed: false, reason: 'store_unavailable', resetAt: now + 60_000 };
+  /** Explicit time is a deterministic fixture seam; production callers use the trusted live clock. */
+  async reserveQuota(input: QuotaReservationInput, fixedNow?: number): Promise<QuotaDecision> {
+    const startedAt = fixedNow === undefined ? Date.now() : fixedNow;
+    try { validateQuotaInput(input, startedAt); }
+    catch { return { allowed: false, reason: 'invalid_quota', resetAt: Number.isSafeInteger(startedAt) ? startedAt + 60_000 : 0 }; }
+    if (!this.db) return { allowed: false, reason: 'store_unavailable', resetAt: startedAt + 60_000 };
     try {
       const refs = this.quotaRefs(input);
       return await this.db.runTransaction(async tx => {
         const [quotaSnap, neuronSnap, cooldownSnap] = await Promise.all([tx.get(refs.quota), tx.get(refs.neurons), tx.get(refs.cooldown)]);
+        // Reads can wait or retry behind a newer valid commit. Validate against trusted time
+        // AFTER those reads, never the older request-start time or a ledger-controlled timestamp.
+        const now = fixedNow === undefined ? Date.now() : fixedNow;
+        validTime(now);
+        if (now < startedAt) throw new FreeChainDataError('Quota clock moved backwards');
         const until = readCooldown(readData(cooldownSnap));
         if (until > now) return { allowed: false, reason: 'cooldown' as const, resetAt: until };
         const ledger = readQuotaLedger(readData(quotaSnap), now, input.timeZone);
@@ -117,7 +124,7 @@ export class FreeChainStore {
         return { allowed: true, reason: 'allowed' as const, resetAt: ledgerResetAt(ledger, 'day', now) };
       });
     } catch (error) {
-      return { allowed: false, reason: error instanceof FreeChainDataError ? 'store_corrupt' : 'store_unavailable', resetAt: now + 60_000 };
+      return { allowed: false, reason: error instanceof FreeChainDataError ? 'store_corrupt' : 'store_unavailable', resetAt: startedAt + 60_000 };
     }
   }
   /** Cooldowns only extend. A late, shorter Retry-After cannot unbench an account early. */
@@ -134,11 +141,31 @@ export class FreeChainStore {
       return true;
     } catch { return false; }
   }
-  async quotaSnapshot(input: QuotaScope, now = Date.now()): Promise<QuotaSnapshot> {
+  /**
+   * Owner CHEAPERINFERENCE=admin exclusive probe: clear a stale Firestore cooldown so a
+   * long AUTH/402 open (1h/1d) cannot permanently hide the real upstream error.
+   */
+  async clearCooldown(provider: string): Promise<boolean> {
+    if (!this.db || !provider || provider.length > 128) return false;
+    try {
+      const ref = this.ref(`cooldown_${hash(provider)}`);
+      await this.db.runTransaction(async tx => {
+        tx.set(ref, { kind: 'cooldown', until: 0 });
+      });
+      return true;
+    } catch { return false; }
+  }
+  /** Same post-read clock as admission; a concurrent reservation is not corrupt status data. */
+  async quotaSnapshot(input: QuotaScope, fixedNow?: number): Promise<QuotaSnapshot> {
+    const startedAt = fixedNow === undefined ? Date.now() : fixedNow;
+    validTime(startedAt);
     if (!this.db) throw new Error('Free chat safety store unavailable');
     const refs = this.quotaRefs(input);
     return this.db.runTransaction(async tx => {
       const [quotaSnap, neuronSnap, cooldownSnap] = await Promise.all([tx.get(refs.quota), tx.get(refs.neurons), tx.get(refs.cooldown)]);
+      const now = fixedNow === undefined ? Date.now() : fixedNow;
+      validTime(now);
+      if (now < startedAt) throw new FreeChainDataError('Quota clock moved backwards');
       const ledger = readQuotaLedger(readData(quotaSnap), now, input.timeZone);
       const neurons = readQuotaLedger(readData(neuronSnap), now, input.timeZone);
       return { available: true, usage: { ...quotaUsage(ledger), neuronsPerDay: quotaUsage(neurons).neuronsPerDay },

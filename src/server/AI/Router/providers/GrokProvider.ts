@@ -23,8 +23,9 @@ export class GrokProvider implements AIProvider {
     return this._client;
   }
 
-  async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[]): Promise<AIProviderResponse> {
+  async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[], signal?: AbortSignal): Promise<AIProviderResponse> {
     assertLegacyInferenceAllowed('direct-text-provider');
+    signal?.throwIfAborted();
     const startTime = Date.now();
     const hasImages = Array.isArray(images) && images.length > 0;
     // Use a CURRENT vision-capable model when images are supplied (grok-2-vision-1212 is
@@ -52,7 +53,7 @@ export class GrokProvider implements AIProvider {
     // valid analysis doesn't spuriously fail. Text calls keep the fast default.
     const response = await this.client.chat.completions.create(
       { model, messages, max_tokens: 8000 },
-      hasImages ? { timeout: 120_000 } : undefined,
+      hasImages || signal ? { ...(hasImages ? { timeout: 120_000 } : {}), ...(signal ? { signal } : {}) } : undefined,
     );
 
     return {

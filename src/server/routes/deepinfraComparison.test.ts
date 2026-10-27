@@ -8,11 +8,12 @@ vi.mock('../lib/audit', () => ({ audit: fake.audit }));
 vi.mock('../lib/adminAuth', () => ({ adminUsername: () => 'server-derived-admin' }));
 import { registerDeepinfraComparisonRoutes } from './deepinfraComparison';
 import { ComparisonUnavailable } from '../lib/deepinfraComparison';
+import { jsonBodyParser } from '../lib/requestBodyLimits';
 let server: Server;
 const root = '/api/admin/free-chat-chain/deepinfra-comparison';
 const action = { runId: '1d2efc71-6d00-4514-83c0-e31461ea9f35', reason: 'Review the two model candidates', tariffDigest: 'a'.repeat(64), acceptPublishedRates: true };
 async function setup() {
-  const app = express(); app.use(express.json());
+  const app = express(); app.use(jsonBodyParser());
   registerDeepinfraComparisonRoutes(app, (req, res, next) => { if (req.headers['x-admin-token'] === 'synthetic-admin') next(); else res.status(401).end(); });
   server = app.listen(0, '127.0.0.1'); await new Promise<void>(resolve => server.once('listening', resolve));
   const address = server.address() as { port: number };
@@ -44,6 +45,11 @@ describe('admin comparison HTTP boundary', () => {
     const response = await request(action); expect(response.status).toBe(200);
     expect(fake.run).toHaveBeenCalledWith(action.runId, 'server-derived-admin', expect.any(AbortSignal), action.tariffDigest);
     expect(fake.audit).toHaveBeenCalledWith('ADMIN_DEEPINFRA_COMPARISON_STARTED', expect.objectContaining({ admin: 'server-derived-admin', runId: action.runId }));
+  });
+  it('rejects oversized approvals at the production body parser before any paid action', async () => {
+    const request = await setup();
+    expect((await request({ ...action, reason: 'x'.repeat(5000) })).status).toBe(413);
+    expect(fake.run).not.toHaveBeenCalled();
   });
   it('returns a conflict for an active run, and never reflects a raw provider error', async () => {
     const request = await setup(); fake.run.mockRejectedValueOnce(new ComparisonUnavailable('comparison-already-running', 409));

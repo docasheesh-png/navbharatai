@@ -492,3 +492,4 @@ ten-minute lease; refreshing status never resumes a run. The last report is save
 in the bounded `free_chat_chain/deepinfra_comparison` document with no generated
 text, credentials or customer prompts. GET and POST are admin-only at
 `/api/v1/admin/free-chat-chain/deepinfra-comparison`.
+Its approval body is capped at 4 KB by the shared parser, including versioned URLs.

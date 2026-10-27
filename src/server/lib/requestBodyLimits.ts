@@ -144,6 +144,7 @@ export interface SmallBodyRoute extends BodyRoute {
   readonly form?: { readonly parameterLimit: number };
 }
 export const SMALL_BODY_ROUTES: readonly SmallBodyRoute[] = [
+  { path: '/api/admin/free-chat-chain/deepinfra-comparison', limit: '4kb', why: 'fixed comparison approval: one UUID, one tariff digest, one boolean and a 500-character reason; never prompts, files or credentials' },
   { path: '/api/failedbr/mcp', limit: '64kb', why: 'bounded JSON-RPC arguments and optional evidence-linked autopsy metadata; never full reports or files' },
   { path: '/api/failedbr/reports/:workspaceId/:historyId/autopsy', limit: '64kb', why: 'bounded separate review metadata, counts and evidence links; never the saved report' },
   { path: '/api/failedbr/oauth/register', limit: '16kb', why: 'bounded OAuth client name and at most five redirect URLs' },

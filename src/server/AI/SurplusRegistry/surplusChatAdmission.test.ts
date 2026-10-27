@@ -28,7 +28,6 @@ describe('runWeakSurplusAdmissionForChat (Weak-only, chat-handler budget)', () =
     for (const powerLevel of ['off', 'mini'] as const) {
       mocks.resolve.mockClear();
       const gate = await runWeakSurplusAdmissionForChat({
-        verifiedAdmin: true,
         powerLevel, intent: 'build', hasImportIntent: false, prompt: 'hi', buildId: 'b',
         tierEngineAvailable: () => true, audit,
       });
@@ -37,7 +36,6 @@ describe('runWeakSurplusAdmissionForChat (Weak-only, chat-handler budget)', () =
     }
     mocks.resolve.mockClear();
     const plain = await runWeakSurplusAdmissionForChat({
-      verifiedAdmin: true,
       powerLevel: 'weak', intent: 'chat', hasImportIntent: false, prompt: 'hi', buildId: 'b',
       tierEngineAvailable: () => true, audit,
     });
@@ -53,7 +51,6 @@ describe('runWeakSurplusAdmissionForChat (Weak-only, chat-handler budget)', () =
     });
     const audit = vi.fn();
     const gate = await runWeakSurplusAdmissionForChat({
-      verifiedAdmin: true,
       powerLevel: 'weak', intent: 'build', hasImportIntent: false, prompt: 'Build X', buildId: 'b1',
       tierEngineAvailable: () => true, audit,
     });
@@ -71,7 +68,6 @@ describe('runWeakSurplusAdmissionForChat (Weak-only, chat-handler budget)', () =
     mocks.safe.mockReturnValue('stale_or_missing_snapshot');
     const audit = vi.fn();
     const gate = await runWeakSurplusAdmissionForChat({
-      verifiedAdmin: true,
       powerLevel: 'weak', intent: 'build', hasImportIntent: false, prompt: 'Build X', buildId: 'b2',
       tierEngineAvailable: () => true, audit,
     });
@@ -82,7 +78,6 @@ describe('runWeakSurplusAdmissionForChat (Weak-only, chat-handler budget)', () =
     mocks.skip.mockReturnValue(true);
     const audit = vi.fn();
     const gate = await runWeakSurplusAdmissionForChat({
-      verifiedAdmin: true,
       powerLevel: 'weak', intent: 'build', hasImportIntent: false, prompt: 'Build X', buildId: 'b-circuit',
       tierEngineAvailable: () => true, audit,
     });
@@ -101,7 +96,6 @@ describe('runWeakSurplusAdmissionForChat (Weak-only, chat-handler budget)', () =
   it('hard-fails when admit circuit is open AND Weak ladder is unavailable', async () => {
     mocks.skip.mockReturnValue(true);
     const gate = await runWeakSurplusAdmissionForChat({
-      verifiedAdmin: true,
       powerLevel: 'weak', intent: 'build', hasImportIntent: false, prompt: 'Build X', buildId: 'b-circuit-hard',
       tierEngineAvailable: () => false, audit: vi.fn(),
     });

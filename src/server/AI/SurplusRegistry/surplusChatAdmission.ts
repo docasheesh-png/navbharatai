@@ -6,8 +6,6 @@
  */
 import { resolveProBuildSurplusAdmission, safeSurplusAdmissionReason, type SafeSurplusAdmissionReason } from './admitOrFallback';
 import type { SurplusBuildSession } from './buildSession';
-import type { GrantEmail } from '../../AgentV3/featureFlag';
-import { isAdminEmail } from '../../lib/adminEmails';
 import { shouldSkipSurplusAdmit, SURPLUS_ADMIT_CIRCUIT_OPEN_REASON } from './surplusAdmitCircuit';
 
 export type SurplusAdmissionDiag = {
@@ -22,22 +20,11 @@ export type WeakSurplusAdmissionGate =
   | { ok: true; session: SurplusBuildSession | undefined; diag: SurplusAdmissionDiag | undefined }
   | { ok: false; session?: undefined; diag: SurplusAdmissionDiag | undefined; afterSurplusFallback: boolean };
 
-/** Existing verified identity/admin policy, kept outside the chat handler branch budget. */
-export function isVerifiedSurplusAdmin(
-  verified: { uid: string } | null | undefined,
-  email: GrantEmail | null | undefined,
-): boolean {
-  return Boolean(verified?.uid) && isAdminEmail(email);
-}
-
 /**
- * Prefer Surplus on verified-admin Weak build/import turns only. Others retain their direct ladder.
- * Normal/Strong and plain chat skip without Surplus I/O.
+ * Prefer Surplus on Weak build/import turns only. Normal/Strong and plain chat skip without I/O.
  * Fail-open to the Weak ladder; hard-fail only when the tier engine is also unavailable after Surplus fallback.
  */
 export async function runWeakSurplusAdmissionForChat(options: {
-  /** Server-derived from the verified identity and existing admin policy, never client claims. */
-  verifiedAdmin: boolean;
   powerLevel: string;
   intent: string;
   hasImportIntent: boolean;
@@ -49,13 +36,6 @@ export async function runWeakSurplusAdmissionForChat(options: {
   // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders.
   if (!(options.powerLevel === 'weak' && (options.intent !== 'chat' || options.hasImportIntent))) {
     return { ok: true, session: undefined, diag: undefined };
-  }
-
-  // Admin-only pilot. Unknown authority must not reach circuit, registry, session or provider I/O.
-  if (options.verifiedAdmin !== true) {
-    return options.tierEngineAvailable()
-      ? { ok: true, session: undefined, diag: undefined }
-      : { ok: false, diag: undefined, afterSurplusFallback: false };
   }
 
   // Overload cool-down: recent mid-build Surplus deaths after SURPLUS_ADMITTED → skip admit, Weak ladder.

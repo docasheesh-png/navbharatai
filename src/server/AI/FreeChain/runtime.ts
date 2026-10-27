@@ -3,7 +3,7 @@ import { freeChainAdmissionFailure } from './admissionFailure';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../../lib/chatReplyLanguage';
 import { chatReplyLanguageInstruction } from '../../lib/freeChatReplyLanguage';
 import { publishDeploymentPaidLimit } from './deploymentBudget';
-import { cheaperInferenceAdminStatus, cheaperInferenceMode, cheapinfFirstTokenMs } from '../../lib/cheaperInferencePolicy';
+import { cheaperInferenceAdminStatus, cheaperInferenceMode, cheaperInferenceSharedAccessPermitted, cheapinfFirstTokenMs } from '../../lib/cheaperInferencePolicy';
 import { adminBusyDetail, withAdminBusyDetail } from './adminBusyDetail';
 import { persistFreeChainSample } from './eventSample';
 export { shouldPersistFreeChainEvent } from './eventSample';
@@ -104,7 +104,8 @@ function rungReason(rung: RungConfig, cfg: FreeChainConfig, input?: FreeChainInp
     const mode = cheaperInferenceMode();
     if (mode === 'off') return 'disabled';
     if (mode === 'admin' && !input?.context.isAdmin) return 'disabled';
-    // mode=all: eligible for any FreeChain caller (key already checked in config).
+    // mode=all shares the key. Dispatch only after Keak's written permission is recorded.
+    if (mode === 'all' && !cheaperInferenceSharedAccessPermitted()) return 'terms-shared-access';
   }
   if (rung.id === 'openrouter' && !cfg.openRouterModels.length) return 'quality-allowlist-required';
   if (input && rung.id === 'gemini' && (!input.context.cacheEligible || !safeCacheKey({ message: input.message, history: input.history, eligible: true, language: 'public', systemPrompt: '', modelFamily: '' }))) return 'privacy-public-corpus-only';
@@ -279,6 +280,9 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
             } else {
               const provider = new OpenAiCompatProvider({ provider: names[id] as ConstructorParameters<typeof OpenAiCompatProvider>[0]['provider'], key: rung.key, envName: rung.keyEnv, model: rung.model, baseURL: rung.baseURL, priority: cfg.order.indexOf(id), maxOutputTokens: rung.maxOutputTokens, timeoutMs: 90000, streamUsage: rung.streamUsage,
                 ...(id === 'gemini' || id === 'geminipaid' ? { extraBody: { reasoning_effort: 'none' } } : id === 'gpt5nano' ? { extraBody: { reasoning_effort: 'minimal' } }
+                  // Beam's chat card allows effort low|medium|high|xhigh|max. `low` is the fastest.
+                  // none/minimal are not on that card. 2048 tokens leaves room after thinking.
+                  : id === 'cheapinf' ? { extraBody: { reasoning_effort: 'low' } }
                   // With the reply cap on, GLM thinking would spend the whole budget on hidden tokens.
                   : cfg.features.outputCap && (id === 'glm45' || id === 'glm47' || id === 'glmflashx') ? { extraBody: { thinking: { type: 'disabled' } } } : {}) });
               const result = await provider.executeTurn({ ...prepared, signal: controller.signal, onChunk: chunk }); response = result; completeUsage = result.completeUsage;

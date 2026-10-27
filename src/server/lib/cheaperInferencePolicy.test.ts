@@ -10,6 +10,7 @@ import {
   cheaperInferenceExclusiveAdmin,
   cheaperInferenceMode,
   cheaperInferencePaidRungEnabled,
+  cheaperInferenceSharedAccessPermitted,
   cheapinfFirstTokenMs,
   isCheaperInferenceAdmin,
 } from './cheaperInferencePolicy';
@@ -42,9 +43,11 @@ describe('cheaperInferencePolicy (simple mode)', () => {
     expect(cheaperInferencePaidRungEnabled(env)).toBe(false);
   });
 
-  it('all mode enables the paid rung for everyone when a key is set', () => {
+  it('all mode does not serve other users without Keak written permission', () => {
     const env = { CHEAPERINFERENCE: 'all', CHEAPERINFERENCE_API_KEY: 'ci_live_test' };
-    expect(cheaperInferencePaidRungEnabled(env)).toBe(true);
+    expect(cheaperInferenceSharedAccessPermitted(env)).toBe(false);
+    expect(cheaperInferencePaidRungEnabled(env)).toBe(false);
+    expect(cheaperInferencePaidRungEnabled({ ...env, CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION: 'on' })).toBe(true);
     expect(cheaperInferenceExclusiveAdmin(adminMail, env)).toBe(false);
     expect(cheaperInferenceApiKeyConfigured({ CHEAPERINFERENCE_API_KEY: 'a,b' })).toBe(false);
   });

@@ -27,25 +27,36 @@ describe('CheaperInference FreeChain paid rung (simple mode)', () => {
     expect(rung.reason).toBe('disabled');
   });
 
-  it('becomes configured under mode=admin or mode=all when a key is set', () => {
-    for (const mode of ['admin', 'all'] as const) {
-      const rung = freeChainConfig({
-        CHEAPERINFERENCE: mode,
-        CHEAPERINFERENCE_API_KEY: 'ci_live_test_key',
-        CHEAPERINFERENCE_MODEL: 'beam',
-      }).rungs.find(r => r.id === 'cheapinf')!;
-      expect(rung.configured).toBe(true);
-      expect(rung.reason).toBeUndefined();
-      expect(rung.priceIn).toBe(0.006);
-      expect(rung.priceOut).toBe(0.022);
-      expect(rung.keyEnv).toBe('CHEAPERINFERENCE_API_KEY');
-    }
+  it('becomes configured for admin, and for all only with Keak written permission', () => {
+    const admin = freeChainConfig({
+      CHEAPERINFERENCE: 'admin',
+      CHEAPERINFERENCE_API_KEY: 'ci_live_test_key',
+      CHEAPERINFERENCE_MODEL: 'beam',
+    }).rungs.find(r => r.id === 'cheapinf')!;
+    expect(admin.configured).toBe(true);
+    expect(admin.reason).toBeUndefined();
+    expect(admin.maxOutputTokens).toBe(2048);
+    expect(admin.priceIn).toBe(0.006);
+    expect(admin.priceOut).toBe(0.022);
+    const shared = freeChainConfig({
+      CHEAPERINFERENCE: 'all',
+      CHEAPERINFERENCE_API_KEY: 'ci_live_test_key',
+    }).rungs.find(r => r.id === 'cheapinf')!;
+    expect(shared.reason).toBe('terms-shared-access');
+    const permitted = freeChainConfig({
+      CHEAPERINFERENCE: 'all',
+      CHEAPERINFERENCE_API_KEY: 'ci_live_test_key',
+      CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION: 'on',
+    }).rungs.find(r => r.id === 'cheapinf')!;
+    expect(permitted.reason).toBeUndefined();
+    expect(admin.keyEnv).toBe('CHEAPERINFERENCE_API_KEY');
   });
 
   it('accepts CheaperInference spelling for the mode env', () => {
     const rung = freeChainConfig({
       CheaperInference: 'all',
       CHEAPERINFERENCE_API_KEY: 'ci_live_test_key',
+      CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION: 'on',
     }).rungs.find(r => r.id === 'cheapinf')!;
     expect(rung.reason).toBeUndefined();
   });
@@ -64,6 +75,7 @@ describe('CheaperInference FreeChain paid rung (simple mode)', () => {
     const rung = freeChainConfig({
       CHEAPERINFERENCE: 'all',
       CHEAPERINFERENCE_API_KEY: 'ci_live_test_key',
+      CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION: 'on',
       CHEAPERINFERENCE_MODEL: 'not-a-real-model',
     }).rungs.find(r => r.id === 'cheapinf')!;
     expect(rung.reason).toBe('model-unverified');

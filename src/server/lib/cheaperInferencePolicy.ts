@@ -5,8 +5,13 @@
  *   off   — never use (default)
  *   admin — ONLY verified admin Free Chat replies; free-chain ladder OFF for those
  *           replies so every admin answer comes from CheaperInference
- *   all   — CheaperInference is the first eligible paid Free Chat rung for everyone
- *           (free providers still tried first)
+ *   all   — would put this key on every Free Chat user. Keak terms §6 forbid shared
+ *           access unless Keak has permitted it in writing, so `all` does not dispatch
+ *           until CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION=on.
+ *
+ * Beam chat (model card, Reflection): reasoning effort is only low|medium|high|xhigh|max.
+ * Admin sends `low` (the fastest allowed) and 2048 output tokens so thinking cannot
+ * consume the whole reply. none/minimal are not on the Beam card and can 400.
  *
  * Official API (https://api.cheaperinference.com/docs):
  *   base URL  https://api.cheaperinference.com/v1
@@ -15,6 +20,7 @@
  * Doctor AI and App Builder are untouched. No hardcoded keys. Default stays off.
  */
 import { isAdminEmail } from './adminEmails';
+import { parseEnvFlag } from './envFlag';
 import type { GrantEmail } from '../AgentV3/featureFlag';
 
 export const CHEAPERINFERENCE_BASE_URL = 'https://api.cheaperinference.com/v1';
@@ -64,9 +70,14 @@ export function cheaperInferenceExclusiveAdmin(
   return cheaperInferenceMode(env) === 'admin' && isCheaperInferenceAdmin(email) && cheaperInferenceApiKeyConfigured(env);
 }
 
-/** cheapinf rung may dispatch for this caller under mode=all (key still required at the rung). */
+/** Keak terms §6: one key may not serve other users unless Keak allowed that product in writing. */
+export function cheaperInferenceSharedAccessPermitted(env: NodeJS.ProcessEnv = process.env): boolean {
+  return parseEnvFlag(env.CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION) === true;
+}
+
+/** cheapinf rung may dispatch for everyone only in mode=all, with a key, and written permission. */
 export function cheaperInferencePaidRungEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return cheaperInferenceMode(env) === 'all' && cheaperInferenceApiKeyConfigured(env);
+  return cheaperInferenceMode(env) === 'all' && cheaperInferenceApiKeyConfigured(env) && cheaperInferenceSharedAccessPermitted(env);
 }
 
 /** Safe operator status — never returns the key. */

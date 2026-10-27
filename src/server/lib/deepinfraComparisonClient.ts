@@ -83,10 +83,14 @@ export async function executeComparisonCase(client: OpenAI, model: ComparisonMod
           if (chunk.model !== model) modelMatched = false;
           if (chunk.usage) measure(chunk.usage);
           const choice = chunk.choices[0], next = choice?.delta.content;
-          if (next) { firstTokenMs ??= Date.now() - start; text += next; }
+          if (next) {
+            if (!chunk.usage) { inputTokens = null; outputTokens = null; }
+            firstTokenMs ??= Date.now() - start; text += next;
+          }
           if (choice?.finish_reason === 'stop') terminal = true;
         }
         finished = true; passed = terminal && checkComparisonText(task, text);
+        if (!terminal) { inputTokens = null; outputTokens = null; }
       } finally { if (!finished) stream.controller.abort(); }
     } else {
       const response = await client.chat.completions.create(body, { signal });
@@ -99,6 +103,7 @@ export async function executeComparisonCase(client: OpenAI, model: ComparisonMod
         try { const args = JSON.parse(call?.function.arguments ?? 'null'); passed = choice?.finish_reason === 'tool_calls' && call?.function.name === 'get_weather' && args?.city === 'Jaipur' && Object.keys(args).length === 1; } catch { passed = false; }
       } else passed = choice?.finish_reason === 'stop' && checkComparisonText(task, choice.message.content ?? '');
     }
+    if (!modelMatched) { inputTokens = null; outputTokens = null; }
     return { passed: passed && modelMatched, reason: !modelMatched ? 'model-mismatch' : passed ? 'passed' : 'check-failed', latencyMs: Date.now() - start, firstTokenMs, inputTokens, outputTokens };
   } catch (error) {
     const status = (error as { status?: unknown })?.status;

@@ -86,9 +86,9 @@ describe('DeepInfra comparison orchestration', () => {
     expect(report.summaries.every(s => s.totalCostUsd === null && s.costPerPassedCaseUsd === null)).toBe(true);
     expect(fake.settle).not.toHaveBeenCalled(); expect(fake.monthSettle.mock.calls[0][3]).toBeNull();
   });
-  it('429 and authentication errors stop further attempts without retrying', async () => {
-    fake.execute.mockResolvedValue({ passed: false, reason: 'rate-limit', latencyMs: 5, firstTokenMs: null, inputTokens: null, outputTokens: null });
-    expect((await runComparison(id, 'owner', new AbortController().signal, await tariff())).stopReason).toBe('rate-limit');
+  it.each(['rate-limit', 'authentication', 'model-mismatch', 'model-unavailable'])('%s stops further attempts without retrying', async reason => {
+    fake.execute.mockResolvedValue({ passed: false, reason, latencyMs: 5, firstTokenMs: null, inputTokens: null, outputTokens: null });
+    expect((await runComparison(id, 'owner', new AbortController().signal, await tariff())).stopReason).toBe(reason);
     expect(fake.execute).toHaveBeenCalledOnce(); expect(fake.settle).not.toHaveBeenCalled();
   });
   it('an unconfirmed settlement stops the run instead of continuing after an accounting failure', async () => {

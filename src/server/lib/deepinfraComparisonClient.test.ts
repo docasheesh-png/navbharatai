@@ -39,8 +39,16 @@ describe('fixed DeepInfra comparison requests', () => {
     expect(result).toMatchObject({ passed: true, inputTokens: 7, outputTokens: 4 }); expect(result.firstTokenMs).not.toBeNull();
   });
   it('does not accept a clean stream EOF without a terminal completion', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(`data: ${JSON.stringify({ model, choices: [{ delta: { content: 'NAVBHARAT_OK' } }] })}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })));
-    expect((await executeComparisonCase(createComparisonClient('synthetic'), model, 'stream', signal())).passed).toBe(false);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(`data: ${JSON.stringify({ model, choices: [{ delta: { content: 'NAVBHARAT_OK' } }], usage: { prompt_tokens: 3, completion_tokens: 3 } })}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })));
+    expect(await executeComparisonCase(createComparisonClient('synthetic'), model, 'stream', signal())).toMatchObject({ passed: false, inputTokens: null, outputTokens: null });
+  });
+  it('does not settle an intermediate usage sample after more unmeasured text arrives', async () => {
+    const chunks = [
+      { model, choices: [{ delta: { content: 'NAVBHARAT_' } }], usage: { prompt_tokens: 3, completion_tokens: 1 } },
+      { model, choices: [{ delta: { content: 'OK' }, finish_reason: 'stop' }] },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(chunks.map(c => `data: ${JSON.stringify(c)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } })));
+    expect(await executeComparisonCase(createComparisonClient('synthetic'), model, 'stream', signal())).toMatchObject({ passed: true, inputTokens: null, outputTokens: null });
   });
   it('checks tool name and arguments rather than treating any HTTP 200 as a pass', async () => {
     const answer = (city: string) => response('', { choices: [{ finish_reason: 'tool_calls', message: { role: 'assistant', content: null,
@@ -63,7 +71,7 @@ describe('fixed DeepInfra comparison requests', () => {
   });
   it('rejects an answer attributed to a different model, even when the answer is correct', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response('391', { model: 'another-model' })));
-    expect(await executeComparisonCase(createComparisonClient('synthetic'), model, 'math', signal())).toMatchObject({ passed: false, reason: 'model-mismatch' });
+    expect(await executeComparisonCase(createComparisonClient('synthetic'), model, 'math', signal())).toMatchObject({ passed: false, reason: 'model-mismatch', inputTokens: null, outputTokens: null });
   });
   it('an aborted run sends no inference request', async () => {
     const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher); const abort = new AbortController(); abort.abort();

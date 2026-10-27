@@ -128,7 +128,7 @@ export async function runComparison(runId: string, actor: string, signal: AbortS
           reservedUsd: amount / 1e9, settlementConfirmed });
         if (usagePresent && !usageBounded) { report.stopReason = 'provider-usage-out-of-bounds'; break outer; }
         if (actual !== null && !settlementConfirmed) { report.stopReason = 'accounting-unconfirmed'; break outer; }
-        if (['authentication', 'rate-limit', 'cancelled'].includes(observation.reason)) { report.stopReason = observation.reason; break outer; }
+        if (['authentication', 'rate-limit', 'cancelled', 'model-mismatch', 'model-unavailable'].includes(observation.reason)) { report.stopReason = observation.reason; break outer; }
       } catch { report.stopReason = bounded.aborted ? 'cancelled-or-deadline' : 'comparison-unavailable'; break outer; }
       finally {
         if (reservation?.mayDispatch && !entered) await budget.settlePaid(reservation, 0);

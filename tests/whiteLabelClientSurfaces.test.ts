@@ -279,8 +279,8 @@ describe('🔒 no NEW user-facing surface may name a vendor', () => {
     expect(importedBy('deepinfraComparison')).toEqual(['src/components/admin/DeepinfraComparisonPanel.tsx']);
     expect(read('src/server/routes/admin.ts')).toContain('registerDeepinfraComparisonRoutes(app, verifyAdminToken)');
     const routes = read('src/server/routes/deepinfraComparison.ts');
-    expect(routes).toContain("app.get('/api/admin/free-chat-chain/deepinfra-comparison', auth, reads,");
-    expect(routes).toContain("app.post('/api/admin/free-chat-chain/deepinfra-comparison', auth, runs,");
+    expect(routes).toContain("app.get('/api/admin/free-chat-chain/deepinfra-comparison', verifyAdminToken, reads,");
+    expect(routes).toContain("app.post('/api/admin/free-chat-chain/deepinfra-comparison', verifyAdminToken, runs,");
     expect(read('src/components/admin/DeepinfraComparisonPanel.tsx')).toContain('adminHeaders(adminToken)');
   });
   it('the paid manager exception remains confined to the authenticated admin surface', () => {

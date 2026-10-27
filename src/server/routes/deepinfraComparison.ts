@@ -6,15 +6,15 @@ import { adminUsername } from '../lib/adminAuth';
 import { audit } from '../lib/audit';
 import { sanitizeText } from '../../lib/observability/sanitize';
 
-export function registerDeepinfraComparisonRoutes(app: Express, auth: RequestHandler): void {
+export function registerDeepinfraComparisonRoutes(app: Express, verifyAdminToken: RequestHandler): void {
   const reads = rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false });
   const runs = rateLimit({ windowMs: 60_000, limit: 2, standardHeaders: 'draft-7', legacyHeaders: false });
-  app.get('/api/admin/free-chat-chain/deepinfra-comparison', auth, reads, async (_req, res) => {
+  app.get('/api/admin/free-chat-chain/deepinfra-comparison', verifyAdminToken, reads, async (_req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
     try { res.json(await comparisonStatus()); }
     catch { res.status(503).json({ error: 'Comparison status is unavailable. No inference was started.' }); }
   });
-  app.post('/api/admin/free-chat-chain/deepinfra-comparison', auth, runs, async (req, res) => {
+  app.post('/api/admin/free-chat-chain/deepinfra-comparison', verifyAdminToken, runs, async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
     const action = readComparisonAction(req.body);
     if (!action) { res.status(400).json({ error: 'Provide a fresh comparison run ID and a 10–500 character reason. Custom prompts, models, keys and endpoints are not accepted.' }); return; }

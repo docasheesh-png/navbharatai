@@ -31,7 +31,7 @@ describe('private failed-report page', () => {
     const html = renderToStaticMarkup(<FailedBuildReportsPage token="private-token" onLogout={() => {}} embedded />);
     expect(html).toContain('Failed BR');
     expect(html).toContain('newest build first');
-    expect(html).toContain('href="/failedbr"');
+    expect(html).toContain('href="https://navbharatai.com/failedbr"');
     expect(html).not.toContain('Create read-only credential');
     expect(html).not.toContain('private-token');
     const dashboard = readFileSync('src/components/AdminDashboard.tsx', 'utf8');

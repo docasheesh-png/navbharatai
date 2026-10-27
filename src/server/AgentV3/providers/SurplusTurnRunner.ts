@@ -158,6 +158,7 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
       let active = true;
       let maintenanceError: AiMaintenanceError | undefined;
       let deadlineError: Error | undefined;
+      let policyRefused = false;
       const offStop = onStop(params.signal, () => controller.abort());
       let rejectMaintenance: (error: Error) => void = () => {};
       const maintenance = new Promise<never>((_, reject) => { rejectMaintenance = reject; });
@@ -279,6 +280,8 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
             });
           } catch (error) {
             const failure: SurplusTurnFailure = Object.freeze({ stage: 'response_validation', reason: failureReason(error), attempt, hasResponse: true });
+            // Accounting can outlive the turn timer; a known refusal must never become availability.
+            if (failure.reason === 'content_filter') policyRefused = true;
             const next = await fallback(await accountFailure(error, failure), failure, error);
             if (next) { permit = next; continue; }
             throw error;
@@ -313,6 +316,8 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
           throw publicError(new AiMaintenanceError(from?.statusUnavailable ? { unavailable: true } : undefined));
         }
         if (deadlineError && error === deadlineError) throw publicError(new Error(BUDGET_REACHED_MESSAGE));
+        // A policy refusal stays terminal across the outer pre-write Weak fallback too.
+        if (policyRefused || failureReason(error) === 'content_filter') throw unavailable('policy_refusal');
         // Never forward an upstream name, stack, cause, body, metadata, or even its error text.
         // Preserve an already-tagged PublicBuildEngineError (timeout / attempts_exhausted); else fold.
         if (error instanceof PublicBuildEngineError) throw publicError(error);

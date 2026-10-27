@@ -9,6 +9,7 @@
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
+import { readSessionCutoff } from './sessionRevocation';
 
 export type DevicePlatform = 'android' | 'ios' | 'web';
 
@@ -17,6 +18,8 @@ export interface DeviceToken {
   platform: DevicePlatform;
   createdAt: number;
   lastSeenAt: number;
+  /** Verified original sign-in epoch; 0 means unknown legacy custom origin, never client supplied. */
+  sessionAuthTime?: number;
   /**
    * The app build this device last reported (Android versionCode).
    *
@@ -30,9 +33,35 @@ export interface DeviceToken {
 /** Max tokens kept per user (old/stale devices age out on registration, oldest-first). */
 export const MAX_TOKENS_PER_USER = 10;
 
-class DeviceTokenStore {
+/** Legacy rows remain usable until the owner first revokes sessions, then fail closed. */
+export function activePushTokens(tokens: DeviceToken[], cutoff: number): DeviceToken[] {
+  if (!Number.isSafeInteger(cutoff) || cutoff < 0) return [];
+  return tokens.filter((token) => cutoff === 0 || (Number.isSafeInteger(token.sessionAuthTime) && token.sessionAuthTime! >= cutoff));
+}
+
+/** Broadcast previews must count the same eligible sessions as the eventual sender. Reads are
+ * deduplicated per account ONLY within this scan and bounded to eight concurrent authority reads. */
+export async function activePushRows(
+  rows: Array<DeviceToken & { uid: string }>,
+  readCutoff: (uid: string) => Promise<number>,
+): Promise<Array<DeviceToken & { uid: string }>> {
+  const users = [...new Set(rows.map(row => row.uid))];
+  const cutoffs = new Map<string, number>();
+  let index = 0;
+  await Promise.all(Array.from({ length: Math.min(8, users.length) }, async () => {
+    while (index < users.length) {
+      const uid = users[index++];
+      try { cutoffs.set(uid, await readCutoff(uid)); } catch { /* fail closed for this account */ }
+    }
+  }));
+  return rows.filter(row => activePushTokens([row], cutoffs.get(row.uid) ?? -1).length > 0);
+}
+
+export class DeviceTokenStore {
+  constructor(private readonly injected?: { db: () => admin.firestore.Firestore | null; cutoff: (uid: string) => Promise<number> }) {}
   private db: admin.firestore.Firestore | null = null;
   private getDb(): admin.firestore.Firestore | null {
+    if (this.injected) return this.injected.db();
     if (process.env.VITEST || process.env.NODE_ENV === 'test') return null;
     try {
       if (!this.db) {
@@ -53,21 +82,24 @@ class DeviceTokenStore {
   /** Register (or refresh) a device token for a user. Idempotent — re-registering the same token just
    *  bumps lastSeenAt. Prunes the oldest token(s) past MAX_TOKENS_PER_USER so a user re-installing many
    *  times can't grow this collection unboundedly. Returns true on success, false on any failure. */
-  async saveToken(uid: string, token: string, platform: DevicePlatform, appVersionCode?: number | null): Promise<boolean> {
+  async saveToken(uid: string, token: string, platform: DevicePlatform, appVersionCode?: number | null, sessionAuthTime?: number): Promise<boolean> {
     const col = this.col(uid);
-    if (!col || !token) return false;
+    if (!col || !token || !Number.isSafeInteger(sessionAuthTime) || sessionAuthTime! < 0) return false;
     try {
       const now = Date.now();
-      await col.doc(token).set(
-        {
+      const ref = col.doc(token);
+      await this.getDb()!.runTransaction(async (tx) => {
+        const previous = (await tx.get(ref)).data()?.sessionAuthTime;
+        tx.set(ref, {
           token, platform, lastSeenAt: now,
+          // A late registration from an old request must not erase a fresh sign-in on this device.
+          sessionAuthTime: Math.max(Number.isSafeInteger(previous) ? previous : 0, sessionAuthTime!),
           createdAt: admin.firestore.FieldValue.serverTimestamp() as unknown as number,
           // Only written when the client actually reported one — never overwrite a known version with
           // a null just because an older client re-registered.
           ...(typeof appVersionCode === 'number' && appVersionCode > 0 ? { appVersionCode } : {}),
-        },
-        { merge: true },
-      );
+        }, { merge: true });
+      });
       // Best-effort prune — never blocks the registration itself.
       const snap = await col.orderBy('lastSeenAt', 'desc').get();
       if (snap.size > MAX_TOKENS_PER_USER) {
@@ -117,7 +149,7 @@ class DeviceTokenStore {
         if (!uid) return;
         rows.push({ ...(d.data() as DeviceToken), uid });
       });
-      return { rows, truncated: snap.size > limit };
+      return { rows: await activePushRows(rows, this.injected?.cutoff ?? readSessionCutoff), truncated: snap.size > limit };
     } catch {
       return { rows: [], truncated: false };
     }
@@ -130,7 +162,7 @@ class DeviceTokenStore {
       const snap = await col.get();
       const out: DeviceToken[] = [];
       snap.forEach((d) => out.push(d.data() as DeviceToken));
-      return out;
+      return activePushTokens(out, await (this.injected?.cutoff ?? readSessionCutoff)(uid));
     } catch {
       return [];
     }

@@ -10,6 +10,7 @@ import { authedHeaders } from '../../lib/authHeaders';
 import { LEGAL_META } from '../../content/legal/meta';
 import { LegalDocPage } from './LegalDocPage';
 import { DangerZone } from '../settings/DangerZone';
+import { LogoutControls } from '../settings/LogoutControls';
 import { AdultContentToggle } from '../settings/AdultContentToggle';
 import { FeatureConfirmToggle } from '../settings/FeatureConfirmToggle';
 import { AppLockSettings, AppLockRow } from '../settings/AppLockSettings';
@@ -710,6 +711,7 @@ export function SettingsPanel({
                     it will not fire until the user types the word. Google Play also requires in-app
                     account deletion for any app that lets people sign up; the public /delete-account
                     page satisfies the URL half of that rule, and this satisfies the in-app half. */}
+                <LogoutControls key={user?.uid} user={user} />
                 <DangerZone signedIn={!!user} onLog={addLog} />
 
                 <div className="pt-4 border-t border-line flex flex-col items-center">

@@ -3,10 +3,11 @@ import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 
 const deps = vi.hoisted(() => ({
   verify: vi.fn(async (token: string) => {
-    if (token === 'alice-token') return { uid: 'alice' };
-    if (token === 'bob-token') return { uid: 'bob' };
+    if (token === 'alice-token') return { uid: 'alice', auth_time: 10 };
+    if (token === 'bob-token') return { uid: 'bob', auth_time: 10 };
     throw new Error('invalid or expired token');
   }),
+  cutoff: vi.fn(async () => 0),
   countFiles: vi.fn(),
   list: vi.fn(), get: vi.fn(), save: vi.fn(), loadSession: vi.fn(),
   versions: new Map<string, Array<Record<string, unknown>>>(),
@@ -18,6 +19,11 @@ const deps = vi.hoisted(() => ({
 vi.mock('../src/server/lib/firebaseAdminModule', () => ({ loadFirebaseAdmin: async () => ({
   apps: [{}], auth: () => ({ verifyIdToken: deps.verify }),
 }) }));
+// Synthetic account authority: keep the real verifier/ownership checks, never read live Firestore.
+vi.mock('../src/server/lib/sessionRevocation', async (original) => ({
+  ...await original<typeof import('../src/server/lib/sessionRevocation')>(),
+  readSessionCutoff: deps.cutoff,
+}));
 vi.mock('../src/server/AgentV3/WorkspaceFileStore', async (original) => ({
   ...await original<typeof import('../src/server/AgentV3/WorkspaceFileStore')>(),
   countWorkspaceFiles: deps.countFiles,
@@ -38,6 +44,7 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.stubEnv('VITEST', '');
   vi.clearAllMocks();
+  deps.cutoff.mockReset().mockResolvedValue(0);
   deps.versions.clear();
   deps.sessions.clear();
   for (const [key, owner] of [[aliceWs, 'alice'], [bobWs, 'bob'], [anonWs, 'anonymous'], [sid, 'legacy-other-user']]) {
@@ -95,7 +102,7 @@ describe('history is isolated by owner even when session ids collide', () => {
         }
         const storage = kind === 'list' ? deps.list : kind === 'version' ? deps.get : deps.loadSession;
         expect(storage.mock.calls[0]?.[0]).toBe(`agentv3-${owner}-${sid}`);
-        expect(deps.verify).toHaveBeenCalledWith(`${owner}-token`);
+        expect(deps.verify).toHaveBeenCalledWith(`${owner}-token`, true);
       });
     }
     it(`${owner} saves a checkpoint under their full workspace id`, async () => {
@@ -110,6 +117,17 @@ describe('history is isolated by owner even when session ids collide', () => {
   }
 
   for (const [route] of [...reads, [checkpoint]]) {
+    it.each(['revoked', 'unavailable'])(`${route} refuses a signed owner when session authority is %s`, async (authority) => {
+      if (authority === 'revoked') deps.cutoff.mockResolvedValue(11);
+      else deps.cutoff.mockRejectedValue(new Error('Synthetic cutoff unavailable'));
+      expect((await request(route, 'alice-token')).statusCode).toBe(401);
+      expect(deps.cutoff).toHaveBeenCalledWith('alice');
+      expect(deps.countFiles).not.toHaveBeenCalled();
+      expect(deps.list).not.toHaveBeenCalled();
+      expect(deps.get).not.toHaveBeenCalled();
+      expect(deps.loadSession).not.toHaveBeenCalled();
+      expect(deps.save).not.toHaveBeenCalled();
+    });
     it(`${route} refuses the full workspace id of another account before touching storage`, async () => {
       expect((await request(route, 'alice-token', bobWs)).statusCode).toBe(403);
       expect(deps.list).not.toHaveBeenCalled();

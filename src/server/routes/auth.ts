@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from 'express';
+import { registerAccountSessionRoutes } from './accountSessions';
 import { verifyFirebaseToken, getAdminAuthForPhone, getAdminAuthForExchange } from '../lib/authMiddleware';
 import { addressRateKey } from '../lib/clientAddress';
 import { BoundedCache } from '../lib/boundedCache';
@@ -61,6 +62,7 @@ export function otpReportAllowed(ip: string, now: number): boolean {
 }
 
 export function registerAuthRoutes(app: Express): void {
+  registerAccountSessionRoutes(app);
   // HOW A MOBILE OTP ENDED, reported by the phone or browser (2026-09-26). The native phone-auth plugin
   // reports a failure only as a message on the handset, so without this the reason an OTP fails was
   // readable by nobody. Counts plus a scrubbed reason, admin-only on the way out (otpOutcomes.ts).

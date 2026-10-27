@@ -119,7 +119,8 @@ describe('admin-only explicit reclassification of existing gifts', () => {
     const routes=source.slice(source.indexOf('  // Separate from adding tokens:'), source.indexOf('  // ── User token adjustment'));
     const code=ts.transpileModule(auth+'\n'+routes,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
     const registered=new Map<string,Array<(...args:any[])=>any>>();
-    const app={post:(path:string,...handlers:Array<(...args:any[])=>any>)=>registered.set(path,handlers)};
+    const register=(path:string,...handlers:Array<(...args:any[])=>any>)=>registered.set(path,handlers);
+    const app={post:register,get:register}; // The adjacent read-only receipt route registers a GET too.
     const pass='synthetic-admin-test-only';const username='synthetic-admin';let accesses=0;
     const install=new Function('app','adminPassword','adminUsername','verifyAdminTokenValue','adminTokenTtlMs','audit','routeParams','getDb','previewAdminGiftReclassification','confirmAdminGiftReclassification','AdminGiftReclassificationError',code);
     const {AdminGiftReclassificationError}=await import('../src/server/lib/adminGiftReclassification');

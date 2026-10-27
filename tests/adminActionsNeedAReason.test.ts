@@ -26,6 +26,7 @@ const root = resolve(__dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
 const ADMIN = read('src/server/routes/admin.ts');
 const DASH = read('src/components/AdminDashboard.tsx');
+const TOKEN_REQUEST = read('src/lib/adminTokenAdjustmentRequest.ts');
 const APP = read('src/App.tsx');
 
 /** The handler body of one route, up to the next route registration. */
@@ -139,11 +140,16 @@ describe('the screen asks before it acts', () => {
     const run = DASH.slice(DASH.indexOf('const runPendingAction = async'));
     const runEnd = run.indexOf('\n  };\n');
     const runBody = run.slice(0, runEnd);
-    for (const path of ['/ban`', '/tokens`', "'/api/admin/announcement'"]) {
+    for (const path of ['/ban`', "'/api/admin/announcement'"]) {
       expect(runBody, path).toContain(path);
       // nowhere else in the dashboard
       expect(DASH.split(path).length - 1, path).toBe(1);
     }
+    // Token POSTs now have one durable, response-checked entry point, still called ONLY after confirm.
+    expect(runBody).toContain('await submitAdminTokenAdjustment(intent, { headers, session: tokenSession, signal: tokenSessionAbort.current?.signal })');
+    expect(DASH.match(/submitAdminTokenAdjustment\(/g)).toHaveLength(1);
+    expect(DASH).not.toContain('/tokens`');
+    expect(TOKEN_REQUEST).toContain('/api/v1/admin/users/${encodeURIComponent(intent.userId)}/tokens');
     expect(DASH).not.toContain("reason: 'Admin action'");
   });
 

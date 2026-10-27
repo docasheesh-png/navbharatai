@@ -25,8 +25,8 @@ function typescriptCheck(text: string): boolean {
   if (compiled.diagnostics?.some(d => d.category === ts.DiagnosticCategory.Error) || file.statements.length !== 1) return false;
   const fn = file.statements[0];
   if (!ts.isFunctionDeclaration(fn) || fn.name?.text !== 'add' || fn.parameters.length !== 2 || !fn.body || fn.body.statements.length !== 1 ||
-    !fn.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword) || fn.type?.kind !== ts.SyntaxKind.NumberKeyword ||
-    !fn.parameters.every((p, i) => p.name.getText(file) === ['a', 'b'][i] && p.type?.kind === ts.SyntaxKind.NumberKeyword)) return false;
+    fn.asteriskToken || fn.typeParameters?.length || fn.modifiers?.length !== 1 || fn.modifiers[0].kind !== ts.SyntaxKind.ExportKeyword || fn.type?.kind !== ts.SyntaxKind.NumberKeyword ||
+    !fn.parameters.every((p, i) => !p.questionToken && !p.initializer && !p.dotDotDotToken && p.name.getText(file) === ['a', 'b'][i] && p.type?.kind === ts.SyntaxKind.NumberKeyword)) return false;
   const statement = fn.body.statements[0];
   return ts.isReturnStatement(statement) && !!statement.expression && ts.isBinaryExpression(statement.expression) &&
     statement.expression.operatorToken.kind === ts.SyntaxKind.PlusToken && statement.expression.left.getText(file) === 'a' && statement.expression.right.getText(file) === 'b';

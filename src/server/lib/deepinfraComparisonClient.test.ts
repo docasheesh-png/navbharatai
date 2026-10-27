@@ -15,6 +15,7 @@ describe('fixed DeepInfra comparison requests', () => {
     expect(checkComparisonText('json', '{"name":"NavbharatAI","languages":["hi","en"],"extra":true}')).toBe(false);
     expect(checkComparisonText('typescript', 'export function add(a:number,b:number):number{return a+b;}')).toBe(true);
     for (const code of ['export function add(a:number,b:number):number{return a-b;}', 'export function add(a:number,b:number):number{return a+b;} fetch("https://evil.test");', '```typescript\nexport function add(a:number,b:number):number{return a+b;}\n```']) expect(checkComparisonText('typescript', code)).toBe(false);
+    for (const code of ['export async function add(a:number,b:number):number{return a+b;}', 'export function* add(a:number,b:number):number{return a+b;}', 'export function add(a?:number,b:number):number{return a+b;}', 'export function add(a:number=0,b:number):number{return a+b;}']) expect(checkComparisonText('typescript', code)).toBe(false);
   });
   it('pins endpoint and model, disables SDK retries, and strips ambient custom headers', async () => {
     vi.stubEnv('OPENAI_CUSTOM_HEADERS', 'Authorization: Bearer unrelated-secret\nX-Secret: private');

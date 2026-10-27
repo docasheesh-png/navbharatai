@@ -99609,3 +99609,62 @@ Pro submission now owns a synchronous, session-scoped preflight before attachmen
 Live response display timestamps are projected into a causal conversation clock after the submitted prompt, retained across replay; durable history derives ordering from the store's transcript sequence instead of equal or regressing timestamps. The Code Studio Pro sibling uses the same prompt boundary and retains earlier replies. Regression coverage executes the actual submit closures and mounted production hook with delayed/failed/stale requests, duplicate clicks, confirmation cancellation and result tails; history reversion reproduces reversed messages.
 
 All AI chat composers now share a roomy two-row writing card and wrapping control row, with centered responsive width, multiline inputs and preserved per-surface actions. This supersedes the previous footer-dependent one-line composer layout; branding, non-chat forms and human collaboration chat remain unchanged. Verification status is reported with the change; no live inference or paid build is used for validation.
+
+## 2026-10-27 — Six "the browser cannot import that export" reports were ONE gate judging the import graph from one turn's slice
+
+**The six rows.** Q-1378 (`IndianBikeGame`), Q-1380 (`createGame` from `gameLogic.ts`), Q-1384 and Q-1392
+(`combo` from `src/game/core/meta.ts`), Q-1427 (`DEFAULT_TOUCH_BUTTONS`, right after a repair) and Q-1446
+(`BlockWorldGame`). One user-visible failure in all six: the browser could not import a named export from a
+generated module while the build's own gates were green — Q-1392's row even records "despite typecheck and the
+project test suite passing".
+
+**Why the obvious theories were wrong, and how the real one was found.** The detection machinery is NOT missing.
+`ImportExportAnalysis` already flags a type-only export read as a value (`cap.runtime !== 'erased'`), so the
+classic "tsc is happy, the bundler is not" case is covered. `writeTimeImportCheck` fires while the agent still
+holds the file, and a project-wide incremental `tsc` runs on **every** TypeScript write. Each of those was
+checked and cleared before the cause was named.
+
+**ROOT CAUSE, measured.** The MISSING-EXPORT GATE in `routes/agentv3.ts` built its analysis map from
+`Object.fromEntries(writtenFiles)` — THIS turn's writes alone. `analyzeImportExports` skips an import whose
+target is not in the map (`if (!target) continue`) and never examines a target nobody in the map imports. So a
+mismatch whose two halves were authored in DIFFERENT turns was invisible to the one gate whose entire job is
+that class. Measured against the real analyzer, not assumed:
+
+| analysis map | mismatches |
+|---|---|
+| the importer only (`src/game/App.tsx`) | **0** |
+| the target only (`src/game/core/meta.ts`) | **0** |
+| both | **1**, named correctly |
+
+That is the six reports' signature exactly — and it explains Q-1427's "after a repair", because a repair pass
+rewrites one of the two files and leaves the other untouched.
+
+**THE CLASS.** A consistency check must not judge a cross-file contract from the writer's own slice. The route
+itself already says so a few hundred lines below the gate — *"an edit turn's writes are a slice — the player the
+first build wrote is in a file this turn never touched"* — and composes
+`{ ...loadWorkspaceFiles(), ...Object.fromEntries(writtenFiles) }` wherever it needs a whole-project fact. The
+scoping had simply been pushed one stage too early: "regenerate only OUR files" is a **repair** rule, and it had
+been applied to **detection**.
+
+**THE FIX.** The gate loads the workspace once and overlays the fresher captured writes. Detection scope widens;
+**repair scope is unchanged** — only files this build wrote are ever regenerated, so the change adds no new write
+surface. A target this build did not write is now **reported** instead of dropped in silence, as a warning that
+does not flip the turn's verdict (the defect predates the turn).
+
+**Siblings hunted across the whole repo.** The other `analyzeImportExports` callers are correctly scoped and were
+left alone: `ToolDispatcher` passes the workspace snapshot's sources, `WorkspaceHealth` and
+`ImportExportReconcile` take whole file sets, and `writeTimeImportCheck` reads each import target on demand. This
+gate was the only narrow one — reported as measured rather than inflated into a sweep.
+
+**Locked by** `tests/aMissingExportIsNotJudgedFromOneTurnsSlice.test.ts`: three behavioural cases against the real
+analyzer (importer-only, target-only, both) plus a source guard that fails the moment this gate — or a new sibling
+in the same route — is handed `analyzeImportExports(Object.fromEntries(writtenFiles))` again. **Proven by
+reversion:** with the slice restored, two of the six fail.
+
+**Honest limits, stated rather than papered over.**
+- The six builds' sandboxes are gone, so **no individual instance can be re-run**. What is proven is that this
+  hole is present in the code and produces exactly this signature. The rows record that distinction.
+- **OPEN root cause Q-2270:** the gate can now SEE a cross-turn mismatch but still cannot repair one, because
+  `writtenFiles` is its only proof that a file is ours to rewrite. Widening the repair set is a write-surface
+  decision (it could reach a file the user hand-wrote in an earlier session), so it was left for the admin with
+  three options and a recommendation rather than widened silently.

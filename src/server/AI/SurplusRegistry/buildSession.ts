@@ -1,4 +1,4 @@
-import { PublicBuildEngineError } from '../../lib/buildEngineError';
+import { PublicBuildEngineError, publicBuildEngineError } from '../../lib/buildEngineError';
 import { randomUUID } from 'node:crypto';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { SURPLUS_MIN90_BASE_URL } from '../../lib/surplusClient';
@@ -99,6 +99,7 @@ export async function createSurplusBuildSession(options: {
   if (initial.status !== 'estimated_candidate' || !initial.selection) return fail(initial.reason);
   let model = initial.selection.model;
   let poisoned = false;
+  let terminalPolicyFailure: PublicBuildEngineError | undefined;
   // Serialize inference across ALL runners of this build. Parallel tool execution is unchanged.
   // A queued call may be cancelled before spending; only durably resolved safe failures can get a new attempt.
   let queue: Promise<void> = Promise.resolve();
@@ -120,6 +121,7 @@ export async function createSurplusBuildSession(options: {
       const failedModels = new WeakMap<object, Set<string>>();
       const authorizedFallbacks = new WeakSet<object>();
       async function authorize(params: RunTurnParams, previous?: SurplusTurnPermit) {
+          if (terminalPolicyFailure) throw terminalPolicyFailure;
           if (poisoned) return fail('previous_call_accounting_unavailable');
           const workload = estimate(params), state = await adapter.readState(), at = now();
           // A winning model stays sticky. Only a durably resolved safe failed turn may change it.
@@ -137,6 +139,7 @@ export async function createSurplusBuildSession(options: {
             priceGeneration: plan.snapshotVersion!, estimatedMicroUsd: plan.selection.estimatedMicroUsd, policyVersion: SURPLUS_BUILD_POLICY, maxTokens: params.maxTokens ?? 8192,
             requestRouting: Object.freeze({ ...requestRouting }),
             assertCurrent() {
+              if (terminalPolicyFailure) throw terminalPolicyFailure;
               if (poisoned) return fail('previous_call_accounting_unavailable');
               const checked = planSurplusDispatchCandidate(frozenState.snapshot, frozenState.reviews, workload, now(), frozenState.floorContract);
               if (checked.status !== 'estimated_candidate' || !checked.selection) return fail(checked.reason);
@@ -186,6 +189,8 @@ export async function createSurplusBuildSession(options: {
           return receipt;
         },
         async onFailure(raw, permit, _error, failure) {
+          // Refusal cannot be downgraded into generic poisoned-session availability on a later turn.
+          if (failure?.reason === 'content_filter') terminalPolicyFailure = publicBuildEngineError('policy_refusal');
           const result: TurnResult = { text: '', toolUses: [], rawContent: [], stopReason: null, model: permit.model,
             usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, measured: false } };
           try {

@@ -49,7 +49,9 @@ describe('public build failure boundary', () => {
     const preWrite = readFileSync('src/server/AI/SurplusRegistry/surplusPreWriteFailOpen.ts','utf8');
     expect(preWrite).toContain('wrapSurplusRunnerPreWriteFailOpen');
     expect(preWrite).toContain('tryConsumeSurplusPreWriteFailOpen');
-    expect(preWrite).toContain('isPublicBuildEngineUnavailableText');
+    expect(route).not.toContain('isPublicBuildEngineUnavailableText');
+    expect(route).not.toContain('scrubRetry');
+    expect(route).toContain('earlySurplusFailure = error');
     expect(route).toContain('surplusPreWriteFailOpen');
     expect(route).toContain('wrapSurplusRunnerPreWriteFailOpen');
     expect(route).toContain('tryConsumeSurplusPreWriteFailOpen');
@@ -71,6 +73,11 @@ describe('public build failure boundary', () => {
     const folded = publicBuildEngineError('terminal_fold');
     expect(folded.message).toBe(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
     expect(publicBuildEngineSafeReason(folded)).toBe('terminal_fold');
+    const refusal = publicBuildEngineError('policy_refusal');
+    expect(publicBuildEngineSafeReason(refusal)).toBe('policy_refusal');
+    expect(refusal.message).toBe(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
+    expect(Object.getOwnPropertyNames(refusal).sort()).toEqual(['message', 'name', 'stack']);
+    expect(JSON.stringify(refusal)).not.toMatch(/policy_refusal|surplus/i);
   });
 
 });

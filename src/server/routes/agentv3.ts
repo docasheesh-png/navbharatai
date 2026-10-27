@@ -4,8 +4,8 @@ import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibili
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
-import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
-import { wrapSurplusRunnerPreWriteFailOpen, tryConsumeSurplusPreWriteFailOpen, isPublicBuildEngineUnavailableText, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
+import { runWeakSurplusAdmissionForChat, isVerifiedSurplusAdmin, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
+import { wrapSurplusRunnerPreWriteFailOpen, tryConsumeSurplusPreWriteFailOpen, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakScopeChatTerminal, weakScopeCatchResult } from '../AgentV3/weakScopeTerminal';
@@ -11352,10 +11352,12 @@ async function noteBuildOutcome(
     }
     const earlySurplusTurns: Array<import('../AgentV3/ClaudeClient').TurnResult> = [];
     const earlySurplusRecords: Array<Omit<import('../AgentV3/BuildDiagnostics').LlmCallRecord, 'ts'>> = [];
+    let earlySurplusFailure: unknown;
     // Buffered until buildDiag exists later (module keeps Weak-only + report branches out of this handler — TS2563).
     let surplusAdmissionDiag: SurplusAdmissionDiag | undefined;
     // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders. Branches live in surplusChatAdmission.
     const surplusAdmitGate = await runWeakSurplusAdmissionForChat({
+      verifiedAdmin: isVerifiedSurplusAdmin(verified, email),
       powerLevel: powerLevelReqEffective,
       intent,
       hasImportIntent,
@@ -11378,7 +11380,7 @@ async function noteBuildOutcome(
     const weakAdmission = await weakAdmissionForTurn({ prompt, intent, importing: hasImportIntent, tier: powerLevelReqEffective },
       createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
         audit('AGENTV3_DISCOUNT_SCOPE_CALL', { ok: row.ok, model: row.model, latencyMs: row.latencyMs, inputTokens: row.inputTokens, outputTokens: row.outputTokens }, 'info');
-      }));
+      }, error => { earlySurplusFailure = error; }));
     const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(
       req.body.weakForceContinue, powerLevelReqEffective, weakAdmission,
     );
@@ -14532,15 +14534,10 @@ async function noteBuildOutcome(
 
       for (const row of earlySurplusRecords) buildDiag.recordLlmCall(row);
       for (const turn of earlySurplusTurns) captureTurnUsage('SURPLUS', turn.usage, turn.model, turn.usage.cacheReadInputTokens, turn.usage.cacheCreationInputTokens);
-      // Night A/B autopsy (prod 04948 / #3964): scope classification uses unwrapped
-      // `session.runner()` — LLM_CALL_FAILED is recorded, admitWeakBuild swallows the
-      // throw, and Surplus stays admitted into a poisoned session. Drop Surplus HERE
-      // (before any build runner) so Weak owns the build; throw-only wrap never saw scope.
-      if (surplusSession && earlySurplusRecords.some((r) => r.ok === false)) {
-        tryConsumeSurplusPreWriteFailOpen(
-          surplusPreWriteFailOpen,
-          'The build engine is temporarily unavailable. Please try again shortly.',
-        );
+      // The scope classifier precedes the build wrappers. Recover only its actual
+      // eligible exception, never infer availability from a sanitized failed row.
+      if (surplusSession && !abort.signal.aborted) {
+        tryConsumeSurplusPreWriteFailOpen(surplusPreWriteFailOpen, earlySurplusFailure);
       }
       const fastLaneDeadRungs = new Map<string, string>();
       // 🔴 THE FLAG THAT WENT NOWHERE (autopsy e706e068, School ERP). `buildIsComplex` was computed,
@@ -19589,28 +19586,7 @@ async function noteBuildOutcome(
         result = await runner.run(buildPrompt);
       }
       // result is always set here (OneShot, escalation, or the loop above).
-      // Night A/B scrub path: AgentRunner catches PublicBuildEngineError and soft-returns
-      // `{ok:false, summary:"Error: The build engine is temporarily unavailable…"}` — that
-      // never re-enters wrapSurplusRunnerPreWriteFailOpen's catch. If Surplus was still live
-      // and Files=0, consume fail-open and converge ONCE more (wrap routes via state.dropped
-      // to Weak). Same single convergence statement — no second builder call site
-      // (keeps aPlatformWriterIsNeverTheModel + buildOutcomeWiring census green).
-      for (let scrubRetry = 0; scrubRetry < 2; scrubRetry++) {
-        if (!result) result = await runner.run(buildPrompt);
-        if (
-          scrubRetry > 0
-          || !result || result.ok !== false
-          || surplusPreWriteFailOpen.state.dropped
-          || !isPublicBuildEngineUnavailableText(result.summary)
-          || modelAuthoredPaths(writtenFiles).length !== 0
-          || !tryConsumeSurplusPreWriteFailOpen(surplusPreWriteFailOpen, result.summary ?? '')
-        ) break;
-        // Parentheses so heal-assignment census (theCalculatorsHelpersHadNoHome) does not
-        // treat this as a raw `result = <ident>;` replace — only empty-build `retry` may.
-        result = undefined as unknown as typeof result;
-      }
-      // Loop exits only after the convergence statement set `result`.
-      result = result!;
+      if (!result) result = await runner.run(buildPrompt);
       // …and the architect's loop, and with it OUR style pass, is over.
       closeStylePassWindow(stylePassWindow, Date.now());
 

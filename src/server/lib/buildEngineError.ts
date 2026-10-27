@@ -12,6 +12,7 @@ export type PublicBuildEngineSafeReason =
   | 'turn_timeout'
   | 'attempts_exhausted'
   | 'terminal_fold'
+  | 'policy_refusal'
   | 'misconfigured';
 
 const safeReasons = new WeakMap<object, PublicBuildEngineSafeReason>();

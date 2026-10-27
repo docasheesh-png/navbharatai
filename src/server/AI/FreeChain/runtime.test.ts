@@ -319,7 +319,7 @@ describe('free chat chain central dispatch', () => {
     context: { ...input().context, isAdmin: true },
   });
   expect(m.execute).toHaveBeenCalledTimes(1);
-  expect(m.execute.mock.calls[0][1]).toMatchObject({ maxOutputTokens: 1024, model: 'beam' });
+  expect(m.execute.mock.calls[0][1]).toMatchObject({ maxOutputTokens: 2048, model: 'beam', extraBody: { reasoning_effort: 'low' } });
   expect(result?.ok).toBe(true);
   expect(result?.provider).toBe('CHEAPERINFERENCE');
   expect(result?.content).not.toMatch(/circuit:last=empty_response/);
@@ -374,9 +374,11 @@ describe('free chat chain central dispatch', () => {
  it('non-admin chain still skips open circuit without probing', async () => {
   vi.stubEnv('CHEAPERINFERENCE', 'all');
   vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  vi.stubEnv('CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION', 'on');
   const cfg = freeChainConfig({
     FREE_CHAIN_ENABLED: 'on', FREE_CHAIN_ROLLOUT_PERCENT: '100', FREE_CHAIN_ORDER: 'cheapinf',
-    CHEAPERINFERENCE: 'all', CHEAPERINFERENCE_API_KEY: 'ci_live_test_key', FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off',
+    CHEAPERINFERENCE: 'all', CHEAPERINFERENCE_API_KEY: 'ci_live_test_key',
+    CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION: 'on', FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off',
   });
   getBreaker('free-chat-chain:cheapinf').recordFailure(3_600_000, Date.now(), 'auth:http=401');
   const result = await buildFreeChainRouter(db, cfg).route(input());

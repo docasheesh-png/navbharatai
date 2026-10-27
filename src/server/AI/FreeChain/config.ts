@@ -1,5 +1,5 @@
 import { parseEnvFlag } from '../../lib/envFlag';
-import { cheaperInferenceMode, cheaperInferenceApiKeyConfigured } from '../../lib/cheaperInferencePolicy';
+import { cheaperInferenceMode, cheaperInferenceApiKeyConfigured, cheaperInferenceSharedAccessPermitted } from '../../lib/cheaperInferencePolicy';
 import { usdToNanoUsd, DEFAULT_PAID_CAP_NANO_USD, OWNER_PAID_DAILY_CEILING_NANO_USD, NANO_USD } from './spendCap';
 import { dailyWindow } from './quota';
 import { DEFAULT_ADMISSION_QUEUE_LIMITS } from './admissionQueue';
@@ -179,12 +179,13 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
     if (id === 'gemini' && (skipGemini || !privacyApproved)) reason = 'privacy';
     if (blocked && !writtenApproval) reason = 'terms-non-production';
     if (unverified && !writtenApproval) reason = 'terms-unverified';
-    // CheaperInference: one mode CHEAPERINFERENCE=off|admin|all. Config marks the rung usable when
-    // mode is admin|all and a key is set; runtime still restricts admin-mode to verified admins only
-    // (exclusive path) and mode=all to the shared paid ladder. mode=off ⇒ disabled.
+    // CheaperInference: admin = this owner's verified admin replies only.
+    // mode=all would share the key with every Free Chat user. Keak terms §6 forbid that
+    // unless CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION=on. mode=off ⇒ disabled.
     if (id === 'cheapinf') {
       const mode = cheaperInferenceMode(env);
       if (mode === 'off' || !cheaperInferenceApiKeyConfigured(env)) reason = 'disabled';
+      else if (mode === 'all' && !cheaperInferenceSharedAccessPermitted(env)) reason = 'terms-shared-access';
     }
     const paidPrice = PAID_PRICES[id];
     const priceIn = paidPrice ? num(`FREE_CHAIN_${prefix}_PRICE_IN_PER_MTOK`, paidPrice[0], paidPrice[0], 1000, false) : 0;
@@ -198,7 +199,7 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
     return { id, model: allowed ? model : '', key: validKey ? rawKey : '', keyEnv, baseURL, configured: validKey, reason,
       languages: (langs.length ? langs : ['hi', 'hinglish', 'en', 'other']) as ReplyLanguage[],
       maxInputTokens: num(`FREE_CHAIN_${prefix}_MAX_INPUT_TOKENS`, id === 'groq' ? 6000 : 16000, 256, 100000),
-      maxOutputTokens: num(`FREE_CHAIN_${prefix}_MAX_OUTPUT_TOKENS`, 1024, 64, 8192),
+      maxOutputTokens: num(`FREE_CHAIN_${prefix}_MAX_OUTPUT_TOKENS`, id === 'cheapinf' ? 2048 : 1024, 64, 8192),
       rpm: num(`FREE_CHAIN_${prefix}_RPM`, limits[0], 0, 100000), rpd: num(`FREE_CHAIN_${prefix}_RPD`, limits[1], 0, 10000000),
       tpm: num(`FREE_CHAIN_${prefix}_TPM`, limits[2], 0, 100000000), tpd: num(`FREE_CHAIN_${prefix}_TPD`, limits[3], 0, 1000000000),
       // IANA zone handles Pacific daylight saving; Groq defaults conservatively rolling, not guessed midnight.

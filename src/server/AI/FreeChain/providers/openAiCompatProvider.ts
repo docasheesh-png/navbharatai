@@ -227,7 +227,7 @@ function validatedExtraBody(extra: AdapterConfig['extraBody']): Record<string, u
       result[name] = value;
     } else if (name === 'seed' && typeof value === 'number' && Number.isSafeInteger(value)) {
       result.seed = value;
-    } else if (name === 'reasoning_effort' && (value === 'none' || value === 'minimal')) {
+    } else if (name === 'reasoning_effort' && (value === 'none' || value === 'minimal' || value === 'low')) {
       result.reasoning_effort = value;
     } else if (name === 'thinking' && record(value)?.type === 'disabled' && Object.keys(record(value)!).length === 1) {
       result.thinking = { type: 'disabled' };

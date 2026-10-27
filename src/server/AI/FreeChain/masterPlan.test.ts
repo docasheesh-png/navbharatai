@@ -92,6 +92,8 @@ describe('output cap and history trim', () => {
     expect(effectiveMaxOutput(c, 'llama8b', 1024, 'normal')).toBe(250);
     expect(effectiveMaxOutput(c, 'glm45', 1024, 'fast')).toBe(80);
     expect(effectiveMaxOutput(c, 'groq', 1024, 'normal')).toBe(1024);
+    expect(effectiveMaxOutput(c, 'cheapinf', 1024, 'normal')).toBe(1024);
+    expect(effectiveMaxOutput(c, 'cheapinf', 1024, 'fast')).toBe(1024);
     expect(effectiveMaxOutput(freeChainConfig({ FREE_CHAIN_OUTPUT_CAP_ENABLED: 'off' }), 'llama8b', 1024, 'normal')).toBe(1024);
   });
   it('keeps the last N turns', () => {

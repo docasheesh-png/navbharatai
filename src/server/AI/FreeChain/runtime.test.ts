@@ -306,6 +306,24 @@ describe('free chat chain central dispatch', () => {
   expect(result?.content).toContain('[admin diagnostic]');
   expect(result?.content).toMatch(/circuit:last=auth:http=401:remain=\d+s/);
  });
+ it('CHEAPERINFERENCE=admin probes a short empty_response circuit instead of skipping Beam', async () => {
+  vi.stubEnv('FREE_CHAIN_ENABLED', 'off');
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  vi.stubEnv('FREE_CHAIN_MONTHLY_CAP_ENABLED', 'off');
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  getBreaker('free-chat-chain:cheapinf').recordFailure(28_000, Date.now(), 'empty_response');
+  const result = await maybeFreeChain({
+    ...input(),
+    message: 'hello again',
+    context: { ...input().context, isAdmin: true },
+  });
+  expect(m.execute).toHaveBeenCalledTimes(1);
+  expect(m.execute.mock.calls[0][1]).toMatchObject({ maxOutputTokens: 1024, model: 'beam' });
+  expect(result?.ok).toBe(true);
+  expect(result?.provider).toBe('CHEAPERINFERENCE');
+  expect(result?.content).not.toMatch(/circuit:last=empty_response/);
+ });
  it('CHEAPERINFERENCE=admin waits 60s for first content and labels timeout:first-token', async () => {
   // Keep the real immutable error contract: an unfrozen mock hid a failed metadata assignment.
   expect(Object.isFrozen(new FreeChainProviderError('TIMEOUT'))).toBe(true);

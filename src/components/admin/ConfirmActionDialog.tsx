@@ -15,12 +15,17 @@ export interface ConfirmActionDialogProps {
   /** What will be changed or sent — the preview. */
   children?: React.ReactNode;
   busy?: boolean;
+  /** Persistent feedback inside the portalled dialog, never behind its modal overlay. */
+  feedback?: string | null;
+  /** An uncertain money request must keep the exact reason bound to its saved operation ID. */
+  lockedReason?: string;
+  confirmLabel?: string;
   onCancel: () => void;
   /** Called with the trimmed reason ('' when the reason is optional and left empty). */
   onConfirm: (reason: string) => void;
 }
 
-export function ConfirmActionDialog({ copy, children, busy, onCancel, onConfirm }: ConfirmActionDialogProps): React.ReactElement {
+export function ConfirmActionDialog({ copy, children, busy, feedback, lockedReason, confirmLabel, onCancel, onConfirm }: ConfirmActionDialogProps): React.ReactElement {
   const [reason, setReason] = useState('');
   const [touched, setTouched] = useState(false);
   const boxRef = useRef<HTMLTextAreaElement>(null);
@@ -31,8 +36,9 @@ export function ConfirmActionDialog({ copy, children, busy, onCancel, onConfirm 
     return () => window.removeEventListener('keydown', onKey);
   }, [busy, onCancel]);
 
-  const read = readAdminReason(reason);
-  const typed = reason.trim().length > 0;
+  const effectiveReason = lockedReason ?? reason;
+  const read = readAdminReason(effectiveReason);
+  const typed = effectiveReason.trim().length > 0;
   // An optional reason, once typed, must still be a real one — the server applies the same rule.
   const reasonOk = copy.reasonRequired ? read.ok : (!typed || read.ok);
   const canConfirm = reasonOk && !busy;
@@ -53,6 +59,7 @@ export function ConfirmActionDialog({ copy, children, busy, onCancel, onConfirm 
         </div>
         <p className="text-sm text-body">{copy.consequence}</p>
         {children}
+        {feedback && <p role="alert" className="rounded-xl border border-line bg-well px-3 py-2 text-sm text-warn break-words">{feedback}</p>}
         <div className="space-y-1">
           <label htmlFor="confirm-action-reason" className="text-[11px] font-bold text-muted">
             {copy.reasonRequired ? 'Reason (required)' : 'Reason (optional)'}
@@ -60,7 +67,8 @@ export function ConfirmActionDialog({ copy, children, busy, onCancel, onConfirm 
           <textarea
             id="confirm-action-reason"
             ref={boxRef}
-            value={reason}
+            value={effectiveReason}
+            readOnly={lockedReason !== undefined}
             maxLength={ADMIN_REASON_MAX}
             onChange={(e) => setReason(e.target.value)}
             onBlur={() => setTouched(true)}
@@ -76,10 +84,10 @@ export function ConfirmActionDialog({ copy, children, busy, onCancel, onConfirm 
           <button
             type="button"
             disabled={!canConfirm}
-            onClick={() => onConfirm('reason' in read ? read.reason : '')}
+            onClick={() => { if (canConfirm) onConfirm('reason' in read ? read.reason : ''); }}
             className={`px-4 py-2 rounded-xl text-sm font-black text-on-accent disabled:opacity-40 ${copy.danger ? 'bg-red-600 hover:bg-red-500' : 'bg-indigo-600 hover:bg-indigo-500'}`}
           >
-            {busy ? 'Working…' : copy.confirmLabel}
+            {busy ? 'Working…' : (confirmLabel || copy.confirmLabel)}
           </button>
         </div>
       </div>

@@ -29,6 +29,7 @@ const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
  * is on neither list.
  */
 const REVIEWED_SMALL: Record<string, string> = {
+  '/api/auth/sessions/revoke': 'strict one-key JSON allowlist: confirm must be true; every other field rejected, no UID/files/credentials/prompts; standard 1 MB parser cap unchanged',
   '/api/admin/surplus-registry/connection-test': 'strict empty JSON object only; every caller field is rejected, no prompts, models, credentials, reviews or budgets; standard 1 MB parser cap unchanged',
   '/api/admin/surplus-registry/credential-check': 'strict empty JSON object only; every caller field is rejected, saved server credential only and no account response body; standard 1 MB parser cap unchanged',
   '/api/admin/surplus-registry/models/action': 'strict five-key allowlist: 120-character model id, disable/enable enum, safe integer revision, 36-character snapshot UUID and 10–500 character audit reason; all other fields rejected, no files/credentials, standard 1 MB parser cap unchanged',
@@ -282,6 +283,19 @@ describe('🔒 every route that can receive a big body is on the large-body list
       missing.push(`${s.file}:${s.line} ${s.method.toUpperCase()} ${s.path} reads ${payload.join(', ') || 'the whole body'}`);
     }
     expect(missing, 'add each to LARGE_BODY_ROUTES in src/server/lib/requestBodyLimits.ts (with its evidence), or to REVIEWED_SMALL here with the reason its body stays under 1 MB').toEqual([]);
+  });
+
+  it('all-device logout accepts only a single true confirmation and keeps the small parser cap', () => {
+    const path = '/api/auth/sessions/revoke';
+    const route = SITES.find(site => site.path === path && site.method === 'post');
+    expect(route).toBeDefined();
+    expect(REVIEWED_SMALL[path]).toContain('strict one-key JSON allowlist');
+    expect(LARGE_PATHS.has(path)).toBe(false);
+    expect(isLargeBodyRoute(path)).toBe(false);
+    expect(DEFAULT_JSON_LIMIT).toBe('1mb');
+    expect(route!.text).toContain("!req.is('application/json')");
+    expect(route!.text).toContain('req.body.confirm !== true');
+    expect(route!.text).toContain('Object.keys(req.body).length !== 1');
   });
 
   it('the reviewed-small paid candidate control still has only bounded scalar fields', () => {

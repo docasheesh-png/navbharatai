@@ -1,4 +1,7 @@
 import { adjustAdminBuildTokens, AdminTokenAdjustmentError } from '../lib/adminTokenAdjustment';
+import { adminTokenAdjustmentReceipt } from '../lib/adminTokenAdjustmentReceipt';
+import { freeProgramStore } from '../lib/freeProgram';
+import { walletMergeResolveEnabled } from '../lib/walletResolve';
 import { validRequestId } from '../lib/walletOps';
 import { registerInferenceGatewayAdminRoutes } from './inferenceGatewayAdmin';
 import { registerFreeChatChainRoutes } from './freeChatChainAdmin';
@@ -178,6 +181,7 @@ import { collectionsNeedingRetention } from '../lib/DataRetentionManager';
  * warning counts only what a human still has to decide.
  */
 const GROWING_COLLECTIONS: readonly string[] = [
+  'session_revocations', // Retained account-session security cutoffs; never silently purged.
   'free_answer_quota', // Shared Free answer admissions; bounded eight-day retention.
   'app_builds', 'build_sessions', 'build_sessions_v2', 'build_history_v2', 'user_build_history', 'user_costs', 'server_logs',
   'agentv3_build_requests',
@@ -2509,6 +2513,26 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
+  // Read-only reconciliation after Admin re-login/expiry. A missing receipt never proves no write.
+  // The existing API version middleware exposes the same handler at /api/v1/admin/… too.
+  app.get('/api/admin/token-adjustments/:requestId/receipt', verifyAdminToken, async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const { requestId } = routeParams(req.params);
+    if (!validRequestId(requestId)) return res.status(400).json({ ok: false, status: 'unknown', error: 'A valid original operation ID is required. No adjustment was sent.' });
+    try {
+      const pause = await freeProgramStore.read();
+      const outcome = await adminTokenAdjustmentReceipt(getDb(), requestId, {
+        paused: pause.paused, pauseStateKnown: !pause.unavailable, mergeResolutionEnabled: walletMergeResolveEnabled(),
+      });
+      audit('ADMIN_TOKEN_ADJUSTMENT_RECEIPT_VIEW', { admin: adminUsername(), requestId, result: outcome.status, ip: req.ip });
+      if (outcome.status === 'unknown') return res.status(404).json({ ok: false, status: 'unknown', error: outcome.reason });
+      return res.json(outcome.response);
+    } catch {
+      audit('ADMIN_TOKEN_ADJUSTMENT_RECEIPT_VIEW', { admin: adminUsername(), requestId, result: 'unavailable', ip: req.ip });
+      return res.status(500).json({ ok: false, status: 'unknown', error: 'The original receipt could not be verified. Do not replace its request ID or add the credit again.' });
+    }
+  });
+
   // ── User token adjustment ─────────────────────────────────────────────────
   app.post('/api/admin/users/:userId/tokens', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
@@ -2524,7 +2548,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const reason = reasonRead.reason;
     try {
       const requestId = req.body?.requestId;
-      if (!validRequestId(requestId)) return res.status(400).json({ error: 'Refresh the admin panel before adjusting tokens.' });
+      if (!validRequestId(requestId)) return res.status(400).json({ ok: false, code: 'ADMIN_CLIENT_UPDATE_REQUIRED',
+        error: 'This app cannot safely identify the adjustment. No tokens were changed by this request. Update the app or open https://navbharatai.com/admin in a current browser; reconcile earlier attempts before creating a new grant.' });
       const outcome = await adjustAdminBuildTokens(db, { userId, delta, reason, requestId }, new Date().toISOString());
       if (outcome === null) {
         audit('ADMIN_TOKEN_ADJUST', { admin: adminUsername(), userId, delta, reason, result: 'user-not-found', ip: req.ip });

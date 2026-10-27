@@ -1199,6 +1199,16 @@ export default function App() {
 
 
   useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    let stop: (() => void) | undefined;
+    void import('./lib/startSessionMonitor').then(({ startSessionMonitor }) => {
+      if (!cancelled) stop = startSessionMonitor();
+    });
+    return () => { cancelled = true; stop?.(); };
+  }, [user]);
+
+  useEffect(() => {
     // Finalize a social sign-in that used the REDIRECT fallback (popup is primary).
     // signInWithRedirect navigates the whole page away and back, so the auth modal
     // that started it is gone on return — getRedirectResult MUST run here at the app

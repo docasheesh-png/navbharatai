@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { requireUserMatch, trackDevice } from '../lib/authMiddleware';
+import { requireUserMatch, trackDevice, verifyFirebaseSession } from '../lib/authMiddleware';
 import { deviceTokenStore, type DevicePlatform } from '../lib/DeviceTokenStore';
 import { routeParam, routeParams } from '../lib/expressCompat';
 
@@ -23,12 +23,22 @@ export function registerPushRoutes(app: Express): void {
         res.status(400).json({ error: 'token required' });
         return;
       }
+      const session = (await verifyFirebaseSession(req)).token;
+      if (!session || session.uid !== userId || !Number.isSafeInteger(session.auth_time)) {
+        return res.status(401).json({ error: 'Sign in again to register notifications.' });
+      }
+      // A legacy custom credential can be redeemed after a provider revocation but before the
+      // shared mirror advances. Its fresh auth_time does not prove its original sign-in epoch.
+      // Preserve cutoff-0 compatibility, but mark the unknown origin ineligible at any later cutoff.
+      const origin = session.firebase?.sign_in_provider === 'custom' && session.session_auth_time === undefined
+        ? 0 : session.session_auth_time ?? session.auth_time!;
+      const sessionAuthTime = Math.min(session.auth_time!, origin);
       const plat: DevicePlatform = VALID_PLATFORMS.includes(platform) ? platform : 'web';
       // The build this device is running — what makes "notify only the users who are behind"
       // possible at all. Parsed strictly: junk becomes undefined (unknown), never a number.
       const parsedVersion = Number.parseInt(String(appVersionCode ?? ''), 10);
       const version = Number.isFinite(parsedVersion) && parsedVersion > 0 ? parsedVersion : undefined;
-      const ok = await deviceTokenStore.saveToken(userId, token.trim(), plat, version);
+      const ok = await deviceTokenStore.saveToken(userId, token.trim(), plat, version, sessionAuthTime);
       if (!ok) {
         res.status(500).json({ error: 'Could not save the device token. Please try again.' });
         return;

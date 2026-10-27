@@ -4,10 +4,11 @@ import { SandboxRecoveryUnavailableError } from '../src/server/AgentV3/SandboxRe
 
 const deps = vi.hoisted(() => ({
   verify: vi.fn(async (token: string) => {
-    if (token === 'owner-token') return { uid: 'victimUid123', email: 'owner@example.test' };
-    if (token === 'other-token') return { uid: 'otherUid456', email: 'other@example.test' };
+    if (token === 'owner-token') return { uid: 'victimUid123', email: 'owner@example.test', auth_time: 10 };
+    if (token === 'other-token') return { uid: 'otherUid456', email: 'other@example.test', auth_time: 10 };
     throw new Error('expired or invalid token');
   }),
+  cutoff: vi.fn(async () => 0),
   loadDiagnostics: vi.fn(async () => null),
   writeDiagnostics: vi.fn(async () => {}),
   mutateQueue: vi.fn(async () => ({ items: [] })),
@@ -23,6 +24,11 @@ const deps = vi.hoisted(() => ({
 vi.mock('../src/server/lib/firebaseAdminModule', () => ({ loadFirebaseAdmin: async () => ({
   apps: [{}], auth: () => ({ verifyIdToken: deps.verify }),
 }) }));
+// Synthetic account authority: keep the real verifier/ownership checks, never read live Firestore.
+vi.mock('../src/server/lib/sessionRevocation', async (original) => ({
+  ...await original<typeof import('../src/server/lib/sessionRevocation')>(),
+  readSessionCutoff: deps.cutoff,
+}));
 vi.mock('../src/server/AgentV3/DiagnosticsStore', async (original) => ({
   ...await original<typeof import('../src/server/AgentV3/DiagnosticsStore')>(),
   loadDiagnostics: deps.loadDiagnostics,
@@ -56,6 +62,7 @@ beforeEach(() => {
   vi.stubEnv('DOCKER_ENABLED', 'false');
   vi.stubEnv('AGENTV3_PREVIEW_SNAPSHOT', 'off');
   vi.clearAllMocks();
+  deps.cutoff.mockReset().mockResolvedValue(0);
   deps.actuator.mockImplementation(() => ({}));
 });
 
@@ -108,6 +115,21 @@ async function request(route: string, token?: string, ws = workspaceId) {
 
 describe('workspace preview and queue authorization uses the verified token', () => {
   for (const route of [...previewRoutes, ...queueRoutes]) {
+    it.each(['revoked', 'unavailable'])(`${route} refuses a signed owner when session authority is %s`, async (authority) => {
+      if (authority === 'revoked') deps.cutoff.mockResolvedValue(11);
+      else deps.cutoff.mockRejectedValue(new Error('Synthetic cutoff unavailable'));
+      expect((await request(route, 'owner-token')).statusCode).toBe(403);
+      expect(deps.cutoff).toHaveBeenCalledWith('victimUid123');
+      expect(deps.loadDiagnostics).not.toHaveBeenCalled();
+      expect(deps.writeDiagnostics).not.toHaveBeenCalled();
+      expect(deps.mutateQueue).not.toHaveBeenCalled();
+      expect(deps.mutateQueueWithResult).not.toHaveBeenCalled();
+      expect(deps.claimQueuedCommand).not.toHaveBeenCalled();
+      expect(deps.recoverQueuedCommand).not.toHaveBeenCalled();
+      expect(deps.countFiles).not.toHaveBeenCalled();
+      expect(deps.loadQueue).not.toHaveBeenCalled();
+      expect(deps.actuator).not.toHaveBeenCalled();
+    });
     for (const [label, token] of [['missing', undefined], ['expired', 'expired-token'], ['malformed', 'bad-token'], ['another account', 'other-token']] as const) {
       it(`${route} refuses ${label} token even when the claimed uid matches`, async () => {
         const res = await request(route, token);
@@ -121,7 +143,7 @@ describe('workspace preview and queue authorization uses the verified token', ()
         expect(deps.countFiles).not.toHaveBeenCalled();
         expect(deps.loadQueue).not.toHaveBeenCalled();
         expect(deps.actuator).not.toHaveBeenCalled();
-        if (token) expect(deps.verify).toHaveBeenCalledWith(token);
+        if (token) expect(deps.verify).toHaveBeenCalledWith(token, true);
       });
     }
   }
@@ -129,7 +151,7 @@ describe('workspace preview and queue authorization uses the verified token', ()
     it(`${route} accepts the verified owner after an expired-token refusal`, async () => {
       expect((await request(route, 'expired-token')).statusCode).toBe(403);
       expect((await request(route, 'owner-token')).statusCode).toBe(200);
-      expect(deps.verify).toHaveBeenCalledWith('owner-token');
+      expect(deps.verify).toHaveBeenCalledWith('owner-token', true);
       if (route.endsWith('/enqueue')) expect(deps.mutateQueueWithResult).toHaveBeenCalledWith(workspaceId, expect.any(Function));
       else if (route.endsWith('/next')) expect(deps.claimQueuedCommand).toHaveBeenCalledWith(workspaceId, false);
       else if (route.endsWith('/cancel')) expect(deps.mutateQueue).toHaveBeenCalledWith(workspaceId, expect.any(Function));
@@ -141,7 +163,7 @@ describe('workspace preview and queue authorization uses the verified token', ()
     it(`${route} accepts the verified owner after an expired-token refusal`, async () => {
       expect((await request(route, 'expired-token')).statusCode).toBe(403);
       expect((await request(route, 'owner-token')).statusCode).toBe(200);
-      expect(deps.verify).toHaveBeenCalledWith('owner-token');
+      expect(deps.verify).toHaveBeenCalledWith('owner-token', true);
       if (route.endsWith('/preview-error')) expect(deps.loadDiagnostics).toHaveBeenCalledWith(workspaceId);
       if (route.endsWith('/preview-health')) expect(deps.countFiles).toHaveBeenCalledWith(workspaceId);
     });

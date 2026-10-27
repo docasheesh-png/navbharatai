@@ -32,6 +32,9 @@ import { summariseBuilds, summarisePayments, accountFlags } from '../lib/adminUs
 import { lifetimeMoneySpentInr, lifetimeTokensUsed, lifetimeTokensPurchased } from '../lib/walletLifetime';
 import { purchaseRow, sortPurchases, summarisePurchases } from '../lib/purchaseLedger';
 import { buildWalletStatement } from '../lib/walletStatement';
+import { adminWalletCreditReview } from '../lib/adminWalletCreditReview';
+import { freeProgramStore } from '../lib/freeProgram';
+import { walletMergeResolveEnabled } from '../lib/walletResolve';
 import { userBuildHistoryStore } from '../lib/UserBuildHistoryStore';
 import { deploymentStore, isLiveDeployment } from '../AgentV3/DeploymentStore';
 import { getServerDb } from '../lib/serverDb';
@@ -539,8 +542,13 @@ export function registerReportRoutes(app: Express): void {
     const joined = resolveJoinedAt(authMeta, w.createdAt);
     const lastActive = resolveLastActiveAt(authMeta, { walletUpdatedAt: w.updatedAt, activityAtMs: ai.lastAtMs });
     const tier = activeHostingTier(w);
+    const pause = await freeProgramStore.read();
+    const creditReview = await adminWalletCreditReview(identityDb(), uid, {
+      paused: pause.paused, pauseStateKnown: !pause.unavailable, mergeResolutionEnabled: walletMergeResolveEnabled(),
+    });
 
     res.json({
+      creditReview,
       identity: identityMap.get(uid) ?? null,
       // How the account was created and when it was last used. Firestore answers neither properly —
       // see adminUserActivity.ts for why Auth is the source and the wallet only a labelled fallback.

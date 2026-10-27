@@ -87,10 +87,10 @@ export function tokenAdjustCopy(who: string, delta: number, currentBalance: numb
   const verb = delta > 0 ? `Add ${delta.toLocaleString('en-IN')} tokens to` : `Remove ${Math.abs(delta).toLocaleString('en-IN')} tokens from`;
   const after = currentBalance === null
     ? 'The new balance is shown after the change.'
-    : `Balance: ${currentBalance.toLocaleString('en-IN')} → ${(currentBalance + delta).toLocaleString('en-IN')} tokens.`;
+    : `Stored token preview: ${currentBalance.toLocaleString('en-IN')} → ${(currentBalance + delta).toLocaleString('en-IN')} tokens. The server confirms the actual balance after applying the change.`;
   return {
     title: `${verb} ${who}?`,
-    consequence: `${after} This changes the user's real wallet and is recorded with your reason in the audit log.`,
+    consequence: `${after} ${delta > 0 ? 'This adds gifted credit for Weak app builds only, not purchased money or hosting funds.' : 'This removes wallet credit; the server reports the actual applied change.'} The action is recorded with your reason in the audit log.`,
     confirmLabel: delta > 0 ? 'Add tokens' : 'Remove tokens',
     reasonRequired: true,
     danger: delta < 0,

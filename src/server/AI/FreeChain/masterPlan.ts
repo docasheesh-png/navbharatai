@@ -74,8 +74,10 @@ export function orderForRoute(order: ProviderId[], route: TurnRoute): ProviderId
   if (route === 'fast') return order.filter(id => id !== QUALITY_RUNG && id !== 'deepseek');
   return order;
 }
-/** Reasoning models spend hidden tokens; a 250-token cap would empty them, so they keep their own cap. */
-const REASONING_RUNGS: ReadonlySet<ProviderId> = new Set<ProviderId>(['groq', 'gpt5nano', 'openrouter']);
+/** Reasoning models spend hidden tokens; a 250-token cap would empty them, so they keep their own cap.
+ * cheapinf (Beam) is one of those: the 250 reply cap spent the whole budget on reasoning and
+ * Free Chat recorded EMPTY_RESPONSE, then the only admin rung sat in circuit for 30s. */
+const REASONING_RUNGS: ReadonlySet<ProviderId> = new Set<ProviderId>(['groq', 'gpt5nano', 'openrouter', 'cheapinf']);
 export function effectiveMaxOutput(cfg: FreeChainConfig, id: ProviderId, rungMax: number, route: TurnRoute): number {
   if (!cfg.features.outputCap || REASONING_RUNGS.has(id)) return rungMax;
   return Math.min(rungMax, route === 'fast' ? cfg.features.fastMaxTokens : cfg.features.replyMaxTokens);

@@ -188,13 +188,16 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       const attemptStarted = Date.now();
       const breakerName = `free-chat-chain:${id}`; const capacityName = `free-chat-chain:${accountId(id)}`; const breaker = getBreaker(breakerName);
       // Stale OPEN windows (AUTH=1h / QUOTA=1d) hide the real upstream status behind "circuit".
-      // CHEAPERINFERENCE=admin exclusive path: if remaining > 30s, force one probe so diagnostic
-      // shows auth/402/5xx; short remaining waits report lastOpenReason instead of hammering.
+      // Exclusive cheapinf probes those long windows. It also probes a SHORT window when the last
+      // reason is retryable (empty_response / timeout / network / server / rate_limit): Beam used
+      // to burn the 250-token reply cap on reasoning, open empty_response, and then every later
+      // send skipped the only rung because remain was under 30s. Auth and quota still wait.
       if (breaker.isBlocking()) {
         const snap = breaker.snapshot();
         const remainMs = Math.max(0, snap.openedUntil - Date.now());
         const last = snap.lastOpenReason || 'unknown';
-        if (exclusiveAdmin && id === 'cheapinf' && remainMs > 30_000) {
+        const retryableExclusiveOpen = /^(empty_response|timeout|network|server|rate_limit)(:|$)/.test(last);
+        if (exclusiveAdmin && id === 'cheapinf' && (remainMs > 30_000 || retryableExclusiveOpen)) {
           breaker.allowProbe();
           attempt.reason = `circuit-probe:last=${last}`;
         } else {

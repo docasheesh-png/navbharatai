@@ -5,6 +5,7 @@ import { walletMergeResolveEnabled } from '../lib/walletResolve';
 import { validRequestId } from '../lib/walletOps';
 import { registerInferenceGatewayAdminRoutes } from './inferenceGatewayAdmin';
 import { registerFreeChatChainRoutes } from './freeChatChainAdmin';
+import { registerDeepinfraComparisonRoutes } from './deepinfraComparison';
 import { registerLiveModelRegistryRoutes } from './liveModelRegistry';
 import { registerSurplusRegistryAdminRoutes } from './surplusRegistryAdmin';
 import { sendAdminOwnerApps } from './adminOwnerApps';
@@ -445,6 +446,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   registerLiveModelRegistryRoutes(app, verifyAdminToken);
   registerSurplusRegistryAdminRoutes(app, verifyAdminToken);
   registerFreeChatChainRoutes(app, verifyAdminToken);
+  registerDeepinfraComparisonRoutes(app, verifyAdminToken);
   registerInferenceGatewayAdminRoutes(app, verifyAdminToken);
   registerAiMaintenanceRoutes(app, verifyAdminToken);
   registerFreeProgramRoutes(app, verifyAdminToken);

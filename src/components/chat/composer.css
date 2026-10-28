@@ -137,6 +137,15 @@
 }
 
 /* —— Pro surface: Type first (with Send on its right), tools below, no divider —— */
+.nb-composer-box .nb-mode-menu.absolute.bottom-full {
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  /* Sit above the Pro input. The shared 72px pin lands on the box and drags Plan down over it. */
+  bottom: calc(var(--nb-composer-menu-bottom, 72px) + 120px) !important;
+  max-height: min(46dvh, var(--nb-composer-menu-max-height, 46dvh)) !important;
+}
+
 .nb-composer-box[data-composer-surface="pro"] {
   margin-top: 4px;
   margin-bottom: 4px;

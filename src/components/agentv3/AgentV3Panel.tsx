@@ -5714,7 +5714,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   <>
                     {/* outside-click catcher */}
                     <div className="fixed inset-0 z-10" onClick={() => setModeMenuOpen(false)} />
-                    <div className="absolute bottom-full left-0 mb-2 z-20 w-60 bg-card border border-line rounded-lg shadow-xl p-1.5 space-y-0.5">
+                    <div className="nb-mode-menu absolute bottom-full left-0 mb-2 z-20 w-60 bg-card border border-line rounded-lg shadow-xl">
+                      <div className="flex items-center justify-end px-1.5 pt-1">
+                        <button
+                          type="button"
+                          aria-label="Close"
+                          title="Close"
+                          onClick={() => { setAdviseIdeasOpen(false); setModeMenuOpen(false); }}
+                          className="h-7 w-7 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-raised"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="p-1.5 space-y-0.5">
                       {([['build', 'Build', '🔨'], ['planner', 'Plan', '🧠']] as const).map(([m, label, icon]) => (
                         <button
                           key={m}
@@ -5754,20 +5766,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                           <span className="ml-auto min-w-[15px] h-[15px] px-1 rounded-full bg-amber-500 text-[9px] font-black text-zinc-950 flex items-center justify-center">{adviseCount}</span>
                         )}
                       </button>
-                      <NextSuggestionsBulb
-                        inline
-                        open={adviseIdeasOpen}
-                        onCount={setAdviseCount}
-                        workspaceId={expectedWorkspaceId()}
-                        ready={!!state.done && !running}
-                        onPick={(text) => { setPrompt(text); setAdviseIdeasOpen(false); setModeMenuOpen(false); setTimeout(() => composerRef.current?.focus(), 0); }}
-                      />
-                      {/* …and the plan itself, expandable right here. Kept INSIDE the menu rather than
-                          opening another panel: the user asked to see it "jab chahe", and a second
-                          surface to dismiss is the opposite of that. Bounded height with its own
-                          scroll so a 20-step plan cannot grow the menu off the screen. */}
+                      </div>
+                      {adviseIdeasOpen && (
+                        <div className="min-h-0 max-h-[34vh] overflow-y-auto overscroll-contain border-t border-line">
+                          <NextSuggestionsBulb
+                            inline
+                            open
+                            onCount={setAdviseCount}
+                            workspaceId={expectedWorkspaceId()}
+                            ready={!!state.done && !running}
+                            onPick={(text) => { setPrompt(text); setAdviseIdeasOpen(false); setModeMenuOpen(false); setTimeout(() => composerRef.current?.focus(), 0); }}
+                          />
+                        </div>
+                      )}
+                      {/* Last block: with the menu pinned above the input, Plan stays there.
+                          Advise scrolls above it and cannot push this strip down onto the box. */}
                       {state.todos.length > 0 && (
-                        <div className="mt-1 border-t border-line pt-1">
+                        <div className="shrink-0 border-t border-line px-1.5 py-1">
                           <button
                             type="button"
                             onClick={() => setMenuPlanOpen((v) => !v)}

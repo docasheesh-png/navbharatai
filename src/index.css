@@ -738,6 +738,48 @@ html.nb-native-shell .nb-selectable {
   50% { opacity: 0; }
 }
 
+/* Needs-you header badge. The old ❓ sat in muted text and was missed on the dark Pro header.
+   This mark stays bright even if motion is reduced; the pulse and stars are the extra pull. */
+@keyframes nb-needs-you-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 49, 49, 0.55), 0 0 10px 2px rgba(255, 214, 10, 0.55);
+  }
+  50% {
+    transform: scale(1.14);
+    box-shadow: 0 0 0 8px rgba(255, 49, 49, 0), 0 0 22px 5px rgba(255, 230, 90, 0.95);
+  }
+}
+@keyframes nb-needs-you-twinkle {
+  0%, 100% { opacity: 0.15; transform: scale(0.4); }
+  40% { opacity: 1; transform: scale(1.2); }
+  70% { opacity: 0.25; transform: scale(0.55); }
+}
+.nb-needs-you {
+  color: #fff;
+  background: linear-gradient(180deg, #ff5a5a 0%, #d10000 100%);
+  border-color: #ffe14a;
+  animation: nb-needs-you-pulse 1.05s ease-in-out infinite;
+  z-index: 2;
+}
+.nb-needs-you-glyph {
+  font-size: 15px;
+  line-height: 1;
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+}
+.nb-needs-you-spark {
+  position: absolute;
+  color: #ffe566;
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+  text-shadow: 0 0 6px #fff6b0;
+  animation: nb-needs-you-twinkle 1.35s ease-in-out infinite;
+}
+.nb-needs-you-spark-a { top: -8px; right: -3px; }
+.nb-needs-you-spark-b { bottom: -7px; left: -4px; animation-delay: 0.45s; }
+.nb-needs-you-spark-c { top: -7px; left: 10px; animation-delay: 0.85s; }
+
 /* Dedicated, unbreakable status spinner. A live "working…" ring conveys that the build is
    alive; if it freezes it reads as a hung app. `!important` + class specificity make it win
    over the global reduced-motion reset below (which !important-zeroes every animation), and it

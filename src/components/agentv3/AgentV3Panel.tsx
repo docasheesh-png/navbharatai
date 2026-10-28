@@ -4543,10 +4543,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           <HeaderBadges
             badges={[{
               id: 'needs-you',
-              glyph: '❓',
+              glyph: '❗️',
               label: 'What you need to do',
               count: userActions.openCount,
               tone: userActions.actions.some((a) => a.status === 'open' && a.blocking) ? 'urgent' : 'info',
+              attention: true,
               onOpen: () => userActions.setTrayOpen(true),
             }]}
           />

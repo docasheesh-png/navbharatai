@@ -10,7 +10,7 @@ vi.mock('react', async original => ({
   useCallback: (fn: unknown) => fn,
   useEffect: (fn: () => (() => void) | void) => { hooks.effects.push(fn); },
 }));
-import { isSurplusManagerView, SurplusModelCard, SurplusRegistryPanel, SurplusConnectionTestPanel, isSurplusConnectionTestStatus } from './SurplusRegistryPanel';
+import { SurplusPilotPanel, isSurplusManagerView, SurplusModelCard, SurplusRegistryPanel, SurplusConnectionTestPanel, isSurplusConnectionTestStatus } from './SurplusRegistryPanel';
 const version = '11111111-1111-4111-8111-111111111111';
 function offer(): Observation {
   return { model: 'glm-5.3', offerId: 'offer-1', providerId: 'provider-1', available: true, healthy: true, trusted: true, providerTrustConfirmed: true,
@@ -327,5 +327,30 @@ describe('independent one-shot connection testing', () => {
     const fetch = vi.fn().mockResolvedValueOnce(response(connectionFixture())).mockResolvedValueOnce(answer);
     await mountConnection(fetch); button(connectionRoot(), 'Check saved credential').props.onClick(); await settle();
     const html = renderToStaticMarkup(connectionRoot()); expect(html).toContain('Acceptance is not confirmed'); expect(html).toContain('permission-limited or temporarily unavailable'); expect(html).toContain('does not establish an invalid key'); expect(html).not.toContain('private-finance'); expect(html).not.toContain('Saved credential accepted');
+  });
+});
+
+describe('durable reservation read-only panel', () => {
+  const pilotRoot = () => { hooks.cursor = 0; hooks.refCursor = 0; return SurplusPilotPanel({ adminToken: 'private-admin-token' }); };
+  const view = { status: 'recorded', canDispatch: false, pending: true, blocked: true, quarantined: true,
+    reason: 'supplier_cost_unknown', recordedExpenseMicroUsd: '123', calls: 2, reservedEstimateMicroUsd: '45', maxCalls: 1000000, maxEstimatedMicroUsd: '999999999999999999' };
+  async function mountPilot(body: unknown, ok = true) {
+    const fetch = vi.fn(async () => response(body, ok)); vi.stubGlobal('fetch', fetch); pilotRoot();
+    for (const effect of hooks.effects.splice(0)) { const dispose = effect(); if (dispose) cleanup.push(dispose); }
+    await settle(); return { fetch, html: renderToStaticMarkup(pilotRoot()) };
+  }
+  it('reads held accounting and configured limits without offering dispatch or recovery', async () => {
+    const { fetch, html } = await mountPilot(view);
+    expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/v1/admin/surplus-registry/pilot-status', expect.objectContaining({ headers: expect.any(Object), signal: expect.any(AbortSignal) }));
+    expect(html).toContain('Pending: Yes'); expect(html).toContain('Recorded expense: 123');
+    expect(html).toContain('No recorded hold is not permission'); expect(html).toContain('excludes unknown liability');
+    expect(html).not.toContain('private-admin-token');
+    expect(elements(pilotRoot()).filter(e => e.type === 'button')).toHaveLength(1);
+  });
+  it.each([null, { ...view, accountId: 'PRIVATE' }, { ...view, canDispatch: true }, { ...view, reason: 'PRIVATE' }])('rejects malformed/private status %j', async body => {
+    const { html } = await mountPilot(body); expect(html).toContain('Status: unknown'); expect(html).not.toContain('PRIVATE'); expect(html).not.toContain('Recorded expense:');
+  });
+  it('does not accept even a valid body from a failed HTTP response', async () => {
+    const { html } = await mountPilot(view, false); expect(html).toContain('Status: unknown'); expect(html).not.toContain('Recorded expense:');
   });
 });

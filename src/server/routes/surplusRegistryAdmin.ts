@@ -1,3 +1,4 @@
+import { readSurplusPilotStatus } from '../AI/SurplusRegistry/pilotStatus';
 import type { Express, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import { audit } from '../lib/audit';
@@ -28,6 +29,10 @@ export function registerSurplusRegistryAdminRoutes(app: Express, verifyAdminToke
       audit('ADMIN_SURPLUS_CREDENTIAL_CHECK_FAILED', { admin: adminUsername(), result: 'unavailable' });
       res.status(503).json({ error: 'Saved credential check is unavailable.' });
     }
+  });
+  app.get('/api/admin/surplus-registry/pilot-status', verifyAdminToken, reads, async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await readSurplusPilotStatus());
   });
   app.get('/api/admin/surplus-registry/connection-test', verifyAdminToken, reads, async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');

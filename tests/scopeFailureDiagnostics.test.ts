@@ -1,3 +1,4 @@
+import { RESERVATION_REJECTIONS } from '../src/server/AI/SurplusRegistry/reservationDiagnostic';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { admitWeakBuild, WEAK_SCOPE_TIMEOUT_MS } from '../src/server/AgentV3/weakBuildAdmission';
 import { tagScopeFailure, readScopeFailure } from '../src/server/AgentV3/scopeFailureDiagnostic';
@@ -66,6 +67,11 @@ describe('scope diagnostics without inference or accounting changes', () => {
       .toEqual({ requestId, workspaceId: 'workspace', observedAt: 10, stage: 'deadline', reason: 'scope_timeout', codingStarted: false });
     expect(projectScopeFailure({ ...row, meta: { stage: '__proto__', reason: 'PRIVATE' } })).toBeNull();
     expect(projectScopeFailure({ ...row, meta: { stage: 'receipt', reason: 'PRIVATE' } })).toBeNull();
+  });
+  it.each(RESERVATION_REJECTIONS)('projects only the safe reservation enum %s', reason => {
+    const row = { ...record(), meta: { stage: 'reservation', reason, error: 'PRIVATE_ERROR', callId: 'PRIVATE_CALL' } };
+    expect(projectScopeFailure(row)).toEqual({ requestId, workspaceId: 'workspace', observedAt: 10, stage: 'reservation', reason, codingStarted: false });
+    expect(JSON.stringify(projectScopeFailure(row))).not.toContain('PRIVATE_');
   });
   it('pages empty filtered batches without losing the cursor and never substitutes an empty storage error', async () => {
     const query = { where: db.where, orderBy: db.orderBy, startAfter: db.startAfter, limit: db.limit, get: db.query };

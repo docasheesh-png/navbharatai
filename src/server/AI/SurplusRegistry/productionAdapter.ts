@@ -1,3 +1,4 @@
+import { readReservationRejection } from './reservationDiagnostic';
 import { surplusUnattemptedEvidence } from './failureEvidence';
 import { tagScopeFailure } from '../../AgentV3/scopeFailureDiagnostic';
 import { createHash } from 'node:crypto';
@@ -117,7 +118,7 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
         credentialSha256: record.config.account.credentialSha256, model: permit.model, providerId: permit.providerId,
         endpoint: permit.endpoint, policyVersion: permit.policyVersion, priceGeneration: permit.priceGeneration,
         estimatedMicroUsd: selection.estimatedMicroUsd, controlRevision: record.state.snapshot?.controlRevision ?? 0, reviewRevision: record.config.revision, pilot: record.config.pilot, now });
-      } catch (error) { throw tagScopeFailure(error, { stage: 'reservation', reason: 'reservation_failed' }); }
+      } catch (error) { throw tagScopeFailure(error, { stage: 'reservation', reason: readReservationRejection(error) ?? 'reservation_failed' }); }
       // Reservation I/O may outlive review validity or observe a credential rotation. Fail closed.
       assertLive(env);
       reviewedEvidence(record.config, record.review, Date.now());

@@ -66,6 +66,13 @@ export function credentialSha256(key: string): string {
   return createHash('sha256').update(key).digest('hex');
 }
 
+/** Shared server-only identity; reading it does not grant dispatch or verify supplier limits. */
+export function livePilotIdentity(env: NodeJS.ProcessEnv = process.env) {
+  const key = surplusLiveKey(env);
+  return key ? { accountId: 'surplus-live-key', credentialSha256: credentialSha256(key),
+    pilotId: LIVE_PILOT_ID, maxCalls: LIVE_MAX_CALLS, maxEstimatedMicroUsd: LIVE_MAX_ESTIMATED_MICRO } : null;
+}
+
 /** In-process live reviews from key + metadata snapshot. Never a Firestore seed. */
 export function synthesizeLiveReviews(
   env: NodeJS.ProcessEnv,
@@ -78,8 +85,9 @@ export function synthesizeLiveReviews(
 
   const expiresAt = now + EVIDENCE_TTL_MS;
   const reviewedAt = Math.max(0, now - 1_000);
-  const sha = credentialSha256(key);
-  const accountId = 'surplus-live-key';
+  const identity = livePilotIdentity(env)!;
+  const sha = identity.credentialSha256;
+  const accountId = identity.accountId;
   const offers = snapshot?.offers ?? [];
   const pairs = new Map<string, { model: string; providerId: string }>();
   for (const offer of offers) {
@@ -160,10 +168,10 @@ export function synthesizeLiveReviews(
   }));
 
   const pilot: SurplusPilotAuthority = {
-    id: LIVE_PILOT_ID,
+    id: identity.pilotId,
     expiresAt,
-    maxCalls: LIVE_MAX_CALLS,
-    maxEstimatedMicroUsd: LIVE_MAX_ESTIMATED_MICRO,
+    maxCalls: identity.maxCalls,
+    maxEstimatedMicroUsd: identity.maxEstimatedMicroUsd,
     providerSpendLimitReviewedUntil: expiresAt,
     noAutoTopup: true,
   };

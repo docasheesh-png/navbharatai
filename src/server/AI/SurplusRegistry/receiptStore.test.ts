@@ -1,3 +1,4 @@
+import { readReservationRejection } from './reservationDiagnostic';
 import { describe, expect, it } from 'vitest';
 import { reserveSurplusAttempt, persistSurplusReceipt, resolveSurplusUnattempted, type SurplusReceiptAudit, type SurplusUnattemptedAudit } from './receiptStore';
 const now = 1800000000000;
@@ -323,5 +324,33 @@ describe('transactional Surplus model manager fence', () => {
   });
   it.each([-1, NaN, 1.5])('rejects invalid captured revision %s', async controlRevision => {
     const { db, input } = setup(); await expect(reserveSurplusAttempt(db, { ...input, controlRevision })).rejects.toThrow('control revision');
+  });
+});
+
+describe('private deterministic reservation diagnostics', () => {
+  it.each([
+    [{ pendingCallId: 'held' }, 'pending_attempt'],
+    [{ blocked: true }, 'pilot_blocked'],
+    [{ quarantineReason: 'private reason' }, 'pilot_quarantined'],
+    [{ calls: 2 }, 'call_limit_reached'],
+    [{ actualMicroUsd: '100' }, 'estimated_budget_exhausted'],
+    [{ calls: -1 }, 'invalid_pilot_state'],
+  ])('identifies predicate %j without mutating a hold', async (patch, reason) => {
+    const { db, input, pilotState, docs } = setup();
+    await reserveSurplusAttempt(db, input);
+    Object.assign(pilotState(), { pendingCallId: null, reservedEstimatedMicroUsd: '0' }, patch);
+    const before = structuredClone(docs);
+    const error = await reserveSurplusAttempt(db, { ...input, callId: 'new' }).catch(e => e);
+    expect(readReservationRejection(error)).toBe(reason); expect(docs).toEqual(before);
+  });
+  it('does not infer a predicate or a failed commit from infrastructure error text/properties', async () => {
+    const { db, input, docs } = setup();
+    const original = db.runTransaction.bind(db);
+    const error = Object.assign(new Error('Surplus pilot pending'), { reason: 'pending_attempt' });
+    db.runTransaction = (async (fn: never) => { await original(fn); throw error; }) as never;
+    await expect(reserveSurplusAttempt(db, input)).rejects.toBe(error);
+    expect(docs.size).toBe(2); // Simulated acknowledgement lost AFTER commit.
+    expect(readReservationRejection(error)).toBeUndefined();
+    expect(readReservationRejection({ reason: 'pending_attempt' })).toBeUndefined();
   });
 });

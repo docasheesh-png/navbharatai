@@ -1,10 +1,11 @@
+import { RESERVATION_REJECTIONS } from '../AI/SurplusRegistry/reservationDiagnostic';
 /** Private error identity, never upstream properties/text. Observations do not authorize retries. */
 export const SCOPE_FAILURE_REASONS = {
   input: ['invalid_request'],
   classification: ['classifier_failed', 'invalid_scope'],
   deadline: ['scope_timeout'],
   authorization: ['authorization_failed'],
-  reservation: ['reservation_failed'],
+  reservation: ['reservation_failed', ...RESERVATION_REJECTIONS],
   dispatch: ['dispatch_failed'],
   response_validation: ['invalid_completion'],
   receipt: ['receipt_failed'],

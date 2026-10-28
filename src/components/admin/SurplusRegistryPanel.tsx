@@ -1,3 +1,4 @@
+import { isSurplusPilotStatus, type SurplusPilotStatus } from '../../shared/surplusPilotStatus';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import type { Observation, Rates, SurplusManagerModel, SurplusManagerView, SurplusConnectionTestStatus } from '../../server/AI/SurplusRegistry/types';
@@ -273,6 +274,7 @@ export function SurplusRegistryPanel({ adminToken }: { adminToken: string }): Re
       {view.models.length === 0 && <p className="text-sm text-muted">No verified candidate details are available in this manager view.</p>}
       {view.models.map(model => <div key={model.modelId} className="space-y-2"><SurplusModelCard model={model} now={now} fresh={readable && !stale && view.status === 'observed'} qualitySource={view.qualitySource} liveBuilderAdmission={view.liveBuilderAdmission} controlsAvailable={controlsAvailable} onControl={() => openControl(model)} />{pending?.modelId === model.modelId && controlForm}</div>)}
     </>}
+    <SurplusPilotPanel adminToken={adminToken} />
     <SurplusConnectionTestPanel adminToken={adminToken} />
   </section>;
 }
@@ -453,5 +455,42 @@ export function SurplusConnectionTestPanel({ adminToken }: { adminToken: string 
       <button type="button" className={button} disabled={loading || testing} onClick={() => void load()}>{loading ? 'Reading connection status…' : 'Refresh connection status'}</button>
     </div>
     <p className="text-sm text-muted">Saved status is read every 30 seconds while open. Reads never send a provider request. Pending, uncertain, blocked and completed tests cannot be repeated here.</p>
+  </section>;
+}
+
+/** Snapshot only; failed refreshes discard stale claims. No paid action is offered. */
+export function SurplusPilotPanel({ adminToken }: { adminToken: string }): React.ReactElement {
+  const [view, setView] = useState<SurplusPilotStatus | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    setView(null); setLoading(true);
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    void (async () => {
+      try {
+        const response = await fetch(`${ROOT}/pilot-status`, { headers: adminHeaders(adminToken), signal: controller.signal });
+        if (!response.ok) throw new Error('Status unavailable');
+        const body: unknown = await response.json();
+        if (active && isSurplusPilotStatus(body)) setView(body);
+      } catch { /* Unknown is never permission to retry or clear a hold. */ }
+      finally { clearTimeout(timer); if (active) setLoading(false); }
+    })();
+    return () => { active = false; controller.abort(); clearTimeout(timer); };
+  }, [adminToken, revision]);
+  const flag = (value: boolean | null) => value === null ? 'Unknown' : value ? 'Yes' : 'No';
+  return <section aria-label="Durable builder reservation" className="rounded-lg border border-line p-4 space-y-2 text-body">
+    <h3 className="font-bold text-ink">Durable builder reservation</h3>
+    <p>Status: {loading ? 'Reading' : view?.status ?? 'unknown'} — snapshot from the last read.</p>
+    {view?.status === 'recorded' && <>
+      <p>Pending: {flag(view.pending)} · Blocked: {flag(view.blocked)} · Quarantined: {flag(view.quarantined)}</p>
+      <p>Quarantine reason: {view.reason ?? 'None recorded'}</p>
+      <p>Recorded expense: {view.recordedExpenseMicroUsd} micro-USD · Reserved estimate: {view.reservedEstimateMicroUsd} micro-USD · Reserved calls: {view.calls}</p>
+    </>}
+    {view?.maxCalls !== null && view?.maxCalls !== undefined && <p>Configured limits: {view.maxCalls} calls · {view.maxEstimatedMicroUsd} micro-USD estimated budget (exact integers).</p>}
+    <p>No recorded hold is not permission to dispatch. Pending may follow a pre-dispatch abort and must not be cleared blindly. Recorded expense excludes unknown liability.</p>
+    <p>Configured limits and synthetic review metadata do not verify a supplier hard stop, wallet balance, automatic funding protection, or the authorized aggregate budget.</p>
+    <button type="button" disabled={loading} onClick={() => setRevision(v => v + 1)} className="min-h-11 rounded-lg border border-line px-3 py-2 text-ink disabled:opacity-40">Refresh reservation status</button>
   </section>;
 }

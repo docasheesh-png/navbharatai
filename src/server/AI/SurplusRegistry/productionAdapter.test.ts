@@ -1,3 +1,4 @@
+import { RESERVATION_REJECTIONS, reservationRejection } from './reservationDiagnostic';
 import { PUBLIC_BUILD_ENGINE_UNAVAILABLE } from '../../lib/buildEngineError';
 import { createHash } from 'node:crypto';
 import { admitWeakBuild } from '../../AgentV3/weakBuildAdmission';
@@ -57,6 +58,15 @@ describe('production Surplus adapter — live key+flag admission', () => {
     expect(mocks.reserve).toHaveBeenCalledTimes(1);
     expect(mocks.transport).toHaveBeenCalledTimes(1);
     expect(mocks.persist).not.toHaveBeenCalled();
+  });
+  it.each(RESERVATION_REJECTIONS)('retains trusted reservation predicate %s without dispatch', async reason => {
+    const { make } = setup();
+    mocks.reserve.mockRejectedValue(reservationRejection(reason, 'PRIVATE_PREDICATE_DETAIL'));
+    const session = (await make())!;
+    const result = await admitWeakBuild('PRIVATE_PROMPT', createSurplusScopeAsk(session, [], [])!);
+    expect(result.failure).toEqual({ stage: 'reservation', reason });
+    expect(JSON.stringify(result)).not.toContain('PRIVATE_');
+    expect(mocks.transport).not.toHaveBeenCalled(); expect(mocks.persist).not.toHaveBeenCalled();
   });
   it.each(['reservation', 'dispatch', 'receipt'] as const)('retains %s failure through real session, public folding and scope classification', async stage => {
     const { make } = setup();

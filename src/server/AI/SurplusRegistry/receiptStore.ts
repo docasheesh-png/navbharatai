@@ -1,3 +1,4 @@
+import { reservationRejection } from './reservationDiagnostic';
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import type { SurplusReceiptDecision, SurplusNormalizedUsage } from './receiptPolicy';
@@ -28,7 +29,7 @@ function assertReservationIdentity(existing: StoredState, value: SurplusReceiptA
   if (!validText(existing.pilotKey)) throw new Error('Surplus receipt has no durable dispatch reservation');
   if (RESERVATION_IDENTITY.some(key => !validText(value[key]) || existing[key] !== value[key])) throw new Error('Surplus receipt reservation identity mismatch');
 }
-function assertPilotAccountingState(pilot: StoredState): void {
+export function assertPilotAccountingState(pilot: StoredState): void {
   if (typeof pilot.actualMicroUsd !== 'string' || !/^(0|[1-9]\d*)$/.test(pilot.actualMicroUsd)
       || typeof pilot.calls !== 'number' || !Number.isSafeInteger(pilot.calls) || pilot.calls < 1 || !validText(pilot.authorityId)
       || typeof pilot.expiresAt !== 'number' || !Number.isFinite(pilot.expiresAt) || pilot.expiresAt < 0
@@ -36,7 +37,7 @@ function assertPilotAccountingState(pilot: StoredState): void {
       || typeof pilot.reservedEstimatedMicroUsd !== 'string' || !/^(0|[1-9]\d*)$/.test(pilot.reservedEstimatedMicroUsd)
       || (pilot.blocked !== undefined && typeof pilot.blocked !== 'boolean')
       || (pilot.quarantineReason != null && !validText(pilot.quarantineReason))
-      || (pilot.quarantinedAt != null && (typeof pilot.quarantinedAt !== 'number' || !Number.isSafeInteger(pilot.quarantinedAt) || pilot.quarantinedAt < 0))) throw new Error('Surplus pilot accounting state invalid');
+      || (pilot.quarantinedAt != null && (typeof pilot.quarantinedAt !== 'number' || !Number.isSafeInteger(pilot.quarantinedAt) || pilot.quarantinedAt < 0))) throw reservationRejection('invalid_pilot_state', 'Surplus pilot accounting state invalid');
 }
 /** This is a circuit-breaker result, not fresh dispatch authority: reservation still checks all limits. */
 function continuation(pilot: StoredState, receipt: StoredState): SurplusPersistenceResult {
@@ -44,9 +45,9 @@ function continuation(pilot: StoredState, receipt: StoredState): SurplusPersiste
     && pilot.pendingCallId === null && pilot.reservedEstimatedMicroUsd === '0'
     && (receipt.state === 'reported' || receipt.state === 'not_attempted') };
 }
-const digest = (parts: string[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
+export const surplusReceiptDigest = (parts: string[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 function roundedMicro(value: string): bigint {
-  if (!/^\d{1,18}(?:\.\d{1,6})?$/.test(value)) throw new Error('Invalid Surplus estimated reservation');
+  if (!/^\d{1,18}(?:\.\d{1,6})?$/.test(value)) throw reservationRejection('invalid_estimate', 'Invalid Surplus estimated reservation');
   const [whole, fraction = ''] = value.split('.'); return BigInt(whole) + (/[^0]/.test(fraction) ? 1n : 0n);
 }
 /** Operational circuit breaker only: never changes the already-issued billing decision. */
@@ -71,31 +72,34 @@ export async function reserveSurplusAttempt(db: Pick<Firestore, 'doc' | 'runTran
 }): Promise<void> {
   const { pilot, now } = input;
   const controlRevision = input.controlRevision === undefined ? 0 : input.controlRevision;
-  if (!Number.isSafeInteger(controlRevision) || controlRevision < 0) throw new Error('Invalid Surplus model control revision');
-  if (!Number.isSafeInteger(input.reviewRevision) || input.reviewRevision < 1) throw new Error('Missing Surplus review revision');
+  if (!Number.isSafeInteger(controlRevision) || controlRevision < 0) throw reservationRejection('invalid_control_revision', 'Invalid Surplus model control revision');
+  if (!Number.isSafeInteger(input.reviewRevision) || input.reviewRevision < 1) throw reservationRejection('invalid_review_revision', 'Missing Surplus review revision');
   if (!pilot || !/^[A-Za-z0-9._:-]{1,120}$/.test(pilot.id) || !Number.isSafeInteger(pilot.maxCalls) || pilot.maxCalls < 1
       || !Number.isFinite(pilot.expiresAt) || pilot.expiresAt <= now || !Number.isFinite(pilot.providerSpendLimitReviewedUntil)
       || pilot.providerSpendLimitReviewedUntil <= now || pilot.noAutoTopup !== true || !/^\d{1,18}$/.test(pilot.maxEstimatedMicroUsd)
-      || BigInt(pilot.maxEstimatedMicroUsd) <= 0n || !/^[a-f0-9]{64}$/.test(input.credentialSha256)) throw new Error('Surplus pilot authority unavailable');
+      || BigInt(pilot.maxEstimatedMicroUsd) <= 0n || !/^[a-f0-9]{64}$/.test(input.credentialSha256)) throw reservationRejection('pilot_authority_unavailable', 'Surplus pilot authority unavailable');
   const estimate = roundedMicro(input.estimatedMicroUsd), limit = BigInt(pilot.maxEstimatedMicroUsd);
-  const pilotKey = digest([input.accountId, input.credentialSha256, pilot.id]);
+  const pilotKey = surplusReceiptDigest([input.accountId, input.credentialSha256, pilot.id]);
   const pilotRef = db.doc(`surplus_pilot_admissions/${pilotKey}`);
-  const receiptRef = db.doc(`surplus_build_receipts/${digest([input.accountId, input.callId])}`);
+  const receiptRef = db.doc(`surplus_build_receipts/${surplusReceiptDigest([input.accountId, input.callId])}`);
   await db.runTransaction(async tx => {
     const [pilotDoc, receiptDoc, metadataDoc] = await Promise.all([tx.get(pilotRef), tx.get(receiptRef), tx.get(db.doc(SURPLUS_DOCUMENT))]);
     const controls = readSurplusModelControls(metadataDoc.data()?.controls);
-    if (!controls || controls.revision !== controlRevision || controls.disabledModels.includes(input.model)) throw new Error('Surplus model controls revoked or changed');
+    if (!controls || controls.revision !== controlRevision || controls.disabledModels.includes(input.model)) throw reservationRejection('controls_changed', 'Surplus model controls revoked or changed');
     // Live admission (2026-10-25): pilot authority is carried on the in-process adapter permit.
     // No Firestore surplus-builder-reviews seed is required or re-checked here.
-    if (receiptDoc.exists) throw new Error('Surplus attempt already reserved; reconcile before retrying');
+    if (receiptDoc.exists) throw reservationRejection('duplicate_attempt', 'Surplus attempt already reserved; reconcile before retrying');
     const state = pilotDoc.data() ?? {};
     if (pilotDoc.exists) {
       assertPilotAccountingState(state);
-      if (state.authorityId !== pilot.id) throw new Error('Surplus pilot accounting state invalid');
+      if (state.authorityId !== pilot.id) throw reservationRejection('invalid_pilot_state', 'Surplus pilot accounting state invalid');
     }
-    if (state.pendingCallId || state.blocked || state.quarantineReason != null || state.quarantinedAt != null || (state.calls ?? 0) >= pilot.maxCalls) throw new Error('Surplus pilot pending, blocked or exhausted');
+    if (state.pendingCallId) throw reservationRejection('pending_attempt', 'Surplus pilot pending');
+    if (state.blocked) throw reservationRejection('pilot_blocked', 'Surplus pilot blocked');
+    if (state.quarantineReason != null || state.quarantinedAt != null) throw reservationRejection('pilot_quarantined', 'Surplus pilot blocked by quarantine');
+    if ((state.calls ?? 0) >= pilot.maxCalls) throw reservationRejection('call_limit_reached', 'Surplus pilot calls exhausted');
     const actual = BigInt(state.actualMicroUsd ?? '0');
-    if (actual + estimate > limit) throw new Error('Surplus pilot estimated budget exhausted');
+    if (actual + estimate > limit) throw reservationRejection('estimated_budget_exhausted', 'Surplus pilot estimated budget exhausted');
     tx.set(pilotRef, { ...state, calls: (state.calls ?? 0) + 1, actualMicroUsd: actual.toString(), pendingCallId: input.callId,
       reservedEstimatedMicroUsd: estimate.toString(), expiresAt: pilot.expiresAt, authorityId: pilot.id });
     tx.set(receiptRef, { state: 'pending', buildId: input.buildId, callId: input.callId, accountId: input.accountId,
@@ -106,7 +110,7 @@ export async function reserveSurplusAttempt(db: Pick<Firestore, 'doc' | 'runTran
 }
 /** Audit-only; serialized decisions never become wallet or inference authority. */
 export async function persistSurplusReceipt(db: Pick<Firestore, 'doc' | 'runTransaction'>, audit: SurplusReceiptAudit): Promise<SurplusPersistenceResult> {
-  const ref = db.doc(`surplus_build_receipts/${digest([audit.accountId, audit.callId])}`);
+  const ref = db.doc(`surplus_build_receipts/${surplusReceiptDigest([audit.accountId, audit.callId])}`);
   const value = JSON.parse(JSON.stringify(audit)) as SurplusReceiptAudit;
   return db.runTransaction(async tx => {
     const existing = (await tx.get(ref)).data();
@@ -172,7 +176,7 @@ export async function resolveSurplusUnattempted(
     priceGeneration: input.priceGeneration, reportedAt: input.reportedAt, reason: input.reason,
     traceRequestId: input.traceRequestId, evidenceSha256: input.evidenceSha256,
   };
-  const ref = db.doc(`surplus_build_receipts/${digest([value.accountId, value.callId])}`);
+  const ref = db.doc(`surplus_build_receipts/${surplusReceiptDigest([value.accountId, value.callId])}`);
   return db.runTransaction(async tx => {
     const existing = (await tx.get(ref)).data();
     if (!existing) throw new Error('Surplus unattempted request has no durable dispatch reservation');

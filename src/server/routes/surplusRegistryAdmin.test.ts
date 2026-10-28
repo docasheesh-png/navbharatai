@@ -1,12 +1,13 @@
 import type { Express, Request, Response, RequestHandler } from 'express';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-const mocks = vi.hoisted(() => ({ read: vi.fn(), control: vi.fn(), sync: vi.fn(), approve: vi.fn(), audit: vi.fn(), limiter: vi.fn(), connectionStatus: vi.fn(), connectionTest: vi.fn(), credentialCheck: vi.fn() }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), control: vi.fn(), sync: vi.fn(), approve: vi.fn(), audit: vi.fn(), limiter: vi.fn(), connectionStatus: vi.fn(), connectionTest: vi.fn(), credentialCheck: vi.fn(), pilot: vi.fn() }));
 vi.mock('../AI/SurplusRegistry/runtime', () => ({
   readSurplusObservations: mocks.read, controlSurplusModel: mocks.control, refreshSurplusRegistry: mocks.sync,
   approveObservedSurplusModels: mocks.approve, APPROVE_OBSERVED_CONFIRM: 'approve-observed-coding',
 }));
 vi.mock('../AI/SurplusRegistry/connectionTest', () => ({ getSurplusConnectionTestStatus: mocks.connectionStatus, runSurplusConnectionTest: mocks.connectionTest, runSurplusCredentialCheck: mocks.credentialCheck }));
+vi.mock('../AI/SurplusRegistry/pilotStatus', () => ({ readSurplusPilotStatus: mocks.pilot }));
 vi.mock('../lib/adminAuth', () => ({ adminUsername: () => 'verified-owner' }));
 vi.mock('../lib/audit', () => ({ audit: mocks.audit }));
 vi.mock('express-rate-limit', () => ({ default: (options: unknown) => { mocks.limiter(options); return (_req: unknown, _res: unknown, next: () => void) => next(); } }));
@@ -37,17 +38,26 @@ beforeEach(() => { vi.clearAllMocks(); mocks.control.mockResolvedValue(undefined
 describe('admin-only discounted paid registry', () => {
   it('mounts next to the existing verified-admin registry and keeps auth before rate limits and I/O', () => {
     const { auth, routes } = setup();
-    expect(routes.size).toBe(7);
+    expect(routes.size).toBe(8);
     for (const handlers of routes.values()) { expect(handlers[0]).toBe(auth); expect(handlers).toHaveLength(3); }
     expect(mocks.limiter).toHaveBeenCalledWith(expect.objectContaining({ limit: 30, windowMs: 60_000 }));
     expect(mocks.limiter).toHaveBeenCalledWith(expect.objectContaining({ limit: 6, windowMs: 60_000 }));
     const source = readFileSync('src/server/routes/admin.ts', 'utf8');
     expect(source).toContain('registerSurplusRegistryAdminRoutes(app, verifyAdminToken)');
   });
-  it.each([['GET', ''], ['POST', '/models/action'], ['POST', '/sync'], ['GET', '/connection-test'], ['POST', '/connection-test'], ['POST', '/credential-check']])('rejects unauthorized %s without reading or mutating state', async (method, path) => {
+  it.each([['GET', '/pilot-status'], ['GET', ''], ['POST', '/models/action'], ['POST', '/sync'], ['GET', '/connection-test'], ['POST', '/connection-test'], ['POST', '/credential-check']])('rejects unauthorized %s without reading or mutating state', async (method, path) => {
     const { call, response } = setup(); await call(method, path, body, 'forged-or-expired');
     expect(response.status).toHaveBeenCalledWith(401); expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.control).not.toHaveBeenCalled(); expect(mocks.sync).not.toHaveBeenCalled();
-    expect(mocks.connectionStatus).not.toHaveBeenCalled(); expect(mocks.connectionTest).not.toHaveBeenCalled(); expect(mocks.credentialCheck).not.toHaveBeenCalled();
+    expect(mocks.pilot).not.toHaveBeenCalled(); expect(mocks.connectionStatus).not.toHaveBeenCalled(); expect(mocks.connectionTest).not.toHaveBeenCalled(); expect(mocks.credentialCheck).not.toHaveBeenCalled();
+  });
+  it('reads only the server-derived pilot status with no-store', async () => {
+    const { call, response } = setup();
+    mocks.pilot.mockResolvedValue({ status: 'unknown', canDispatch: false });
+    await call('GET', '/pilot-status', { accountId: 'ignored', pilotId: 'ignored' });
+    expect(mocks.pilot).toHaveBeenCalledExactlyOnceWith();
+    expect(response.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+    expect(response.json).toHaveBeenCalledWith({ status: 'unknown', canDispatch: false });
+    expect(mocks.connectionTest).not.toHaveBeenCalled(); expect(mocks.sync).not.toHaveBeenCalled();
   });
   it('returns a no-store read without syncing or granting dispatch', async () => {
     const { call, response } = setup(); mocks.read.mockResolvedValue({ status: 'disabled', canDispatch: false });

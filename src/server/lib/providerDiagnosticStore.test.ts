@@ -5,7 +5,7 @@ const now = Date.parse('2026-10-28T13:00:00Z');
 const key = '11111111-1111-4111-8111-111111111111';
 const key2 = '22222222-2222-4222-8222-222222222222';
 const root = 'free_chat_chain/provider_diagnostics';
-function fixture() {
+function fixture(pairMode = false) {
   const rate = { model: 'test-model', contextTokens: 4096, inputPerMillionNanoUsd: 1_000_000, outputPerMillionNanoUsd: 2_000_000, rateEvidenceRef: 'review:tariff' };
   const docs = new Map<string, any>([
     [DIAGNOSTIC_REVIEW_PATH, { version: 1, expiresAt: now + 60_000, priorCommittedPaise: 100_000, priorEvidenceRef: 'review:prior-api-and-sandbox', totalBudgetPaise: 200_000, allInPaisePerUsdCeiling: 10_000, monthlyCapNanoUsd: 10e9, providers: { surplus: rate, cheaperinference: rate } }],
@@ -19,6 +19,7 @@ function fixture() {
     docs.get(DIAGNOSTIC_REVIEW_PATH).providers[provider] = rate;
     docs.set(`${root}/evidence/tariff:${provider}`, { ...evidence, ...rate, kind: 'supplier-tariff', provider, credentialsPinnedToDeploymentRevision: true, deploymentRevision: 'test-deployment', endpoint: provider === 'surplus' ? 'https://api.surplusintelligence.ai/v1' : 'https://api.cheaperinference.com/v1', ratesLockedForAdmittedRequest: true, ratesAreAllDimensionCeilings: true, coversAllServedModelVersions: true, accountSpecific: true, accountReviewId: 'test-account-review', currency: 'USD', billingBasis: 'tokens-only', additionalCharges: 'none', outputCapIncludesReasoning: true, sourceUrl: provider === 'surplus' ? 'https://api.surplusintelligence.ai/pricing' : 'https://api.cheaperinference.com/pricing' });
   }
+  const pair = pairMode ? { review: async () => ({ ...structuredClone(docs.get(DIAGNOSTIC_REVIEW_PATH)), diagnosticsInitialized: undefined, totalBudgetPaise: 10000, priorCommittedPaise: 0 }) } : undefined;
   let serial = Promise.resolve(); let uncertain = false;
   const snapshot = (path: string) => ({ exists: docs.has(path), data: () => structuredClone(docs.get(path)) });
   const db = {
@@ -36,8 +37,8 @@ function fixture() {
       serial = work.then(() => undefined, () => undefined); return work;
     },
   };
-  return { docs, store: new ProviderDiagnosticStore(db as unknown as Firestore, () => now, () => ({ daily: 10e9, monthly: 10e9 }), provider => ({ deploymentRevision: 'test-deployment', endpoint: provider === 'surplus' ? 'https://api.surplusintelligence.ai/v1' : 'https://api.cheaperinference.com/v1' })),
-    restart: () => new ProviderDiagnosticStore(db as unknown as Firestore, () => now + 86_400_000, () => ({ daily: 10e9, monthly: 10e9 }), provider => ({ deploymentRevision: 'test-deployment', endpoint: provider === 'surplus' ? 'https://api.surplusintelligence.ai/v1' : 'https://api.cheaperinference.com/v1' })),
+  return { docs, store: new ProviderDiagnosticStore(db as unknown as Firestore, () => now, () => ({ daily: 10e9, monthly: 10e9 }), provider => ({ deploymentRevision: 'test-deployment', endpoint: provider === 'surplus' ? 'https://api.surplusintelligence.ai/v1' : 'https://api.cheaperinference.com/v1' }), pair),
+    restart: () => new ProviderDiagnosticStore(db as unknown as Firestore, () => now + 86_400_000, () => ({ daily: 10e9, monthly: 10e9 }), provider => ({ deploymentRevision: 'test-deployment', endpoint: provider === 'surplus' ? 'https://api.surplusintelligence.ai/v1' : 'https://api.cheaperinference.com/v1' }), pair),
     uncertain: () => { uncertain = true; } };
 }
 describe('durable diagnostic accounting (mock transactions, no provider network)', () => {
@@ -167,4 +168,72 @@ describe('shared status and transactional evidence admission', () => {
     f.docs.get(`${root}/evidence/review:prior-api-and-sandbox`).includesUnresolvedLiabilities = false;
     await expect(f.store.reserve(key, 'surplus', 'test-model')).rejects.toMatchObject({ fields: expect.arrayContaining(['reconciliation.scope']) });
   });
+});
+
+
+describe('separately authorized two-call allowance', () => {
+  const pairRoot = 'free_chat_chain/provider_diagnostic_pair_20261028';
+  it('allows exactly one settled call per provider without editing historical authority', async () => {
+    const f = fixture(true), before = structuredClone(f.docs.get(DIAGNOSTIC_REVIEW_PATH));
+    const first = await f.store.reserve(key, 'surplus', 'test-model');
+    await f.store.finish(key, first.run.runId, 1000);
+    await expect(f.store.reserve(key2, 'surplus', 'test-model')).rejects.toMatchObject({ reason: 'budget_exhausted' });
+    const second = await f.store.reserve(key2, 'cheaperinference', 'test-model');
+    await f.store.finish(key2, second.run.runId, 1000);
+    expect(f.docs.get(DIAGNOSTIC_REVIEW_PATH)).toEqual(before);
+    expect(f.docs.has(`${root}/ledger/total`)).toBe(false);
+    expect(f.docs.get(`${pairRoot}/ledger/total`).priorCommittedPaise).toBe(0);
+    expect((await f.store.reserve(key, 'surplus', 'test-model')).mayDispatch).toBe(false);
+  });
+  it('concurrent duplicate clicks create only one paid reservation', async () => {
+    const f = fixture(true);
+    const admissions = await Promise.all([f.store.reserve(key, 'surplus', 'test-model'), f.store.reserve(key, 'surplus', 'test-model')]);
+    expect(admissions.map(a => a.mayDispatch)).toEqual([true, false]);
+    expect(f.docs.get('free_chat_chain/paid_day_2026-10-28').requests).toBe(1);
+  });
+  it('preserves legacy unknown-liability stop and records', async () => {
+    const f = fixture(true);
+    const legacy = { version: 1, activeRunId: key, priorCommittedPaise: 150000, diagnosticCommittedPaise: 100 };
+    f.docs.set(`${root}/ledger/total`, legacy);
+    await expect(f.store.reserve(key2, 'cheaperinference', 'test-model')).rejects.toMatchObject({ reason: 'run_in_progress' });
+    expect(f.docs.get(`${root}/ledger/total`)).toEqual(legacy);
+  });
+  it('unknown receipt keeps shared holds and cannot become a replacement call', async () => {
+    const f = fixture(true); const a = await f.store.reserve(key, 'surplus', 'test-model');
+    await f.store.finish(key, a.run.runId, null);
+    expect(f.docs.get('free_chat_chain/paid_day_2026-10-28').heldNanoUsd).toBe(a.run.reservedNanoUsd);
+    await expect(f.store.reserve(key2, 'cheaperinference', 'test-model')).rejects.toMatchObject({ reason: 'run_in_progress' });
+    expect((await f.store.read(key))?.actualCostNanoUsd).toBeNull();
+  });
+  it('does not reset allowance when its ledger disappears', async () => {
+    const f = fixture(true); const a = await f.store.reserve(key, 'surplus', 'test-model');
+    await f.store.finish(key, a.run.runId, 0); f.docs.delete(`${pairRoot}/ledger/total`);
+    await expect(f.store.reserve(key2, 'cheaperinference', 'test-model')).rejects.toMatchObject({ reason: 'accounting_failed' });
+  });
+  it('replays a committed reservation after lost acknowledgement', async () => {
+    const f = fixture(true); f.uncertain();
+    await expect(f.store.reserve(key, 'surplus', 'test-model')).rejects.toThrow('lost acknowledgement');
+    expect((await f.store.reserve(key, 'surplus', 'test-model')).mayDispatch).toBe(false);
+  });
+  it('status performs no writes and historical run lookup stays available', async () => {
+    const f = fixture(true), before = JSON.stringify([...f.docs]);
+    expect((await f.store.status('surplus', 'test-model')).dispatchReady).toBe(true);
+    expect(JSON.stringify([...f.docs])).toBe(before);
+    const legacy = fixture(); const admission = await legacy.store.reserve(key, 'surplus', 'test-model');
+    f.docs.set(`${root}/runs/${key}`, admission.run);
+    expect(await f.store.read(key)).toEqual(admission.run);
+  });
+  it('shared monthly holds are still charged against admission', async () => {
+    const f = fixture(true); f.docs.set('free_chat_chain/state/paid_month/2026-10', { heldNanoUsd: 10e9, spentNanoUsd: 0 });
+    await expect(f.store.reserve(key, 'surplus', 'test-model')).rejects.toMatchObject({ reason: 'budget_exhausted' });
+  });
+});
+
+it('pair transaction replays a legacy run even when the new pair namespace has no run', async () => {
+  const prior = fixture(); const a = await prior.store.reserve(key, 'surplus', 'test-model');
+  await prior.store.finish(key, a.run.runId, 0);
+  const f = fixture(true); f.docs.set(`${root}/runs/${key}`, await prior.store.read(key));
+  const before = JSON.stringify([...f.docs]);
+  expect((await f.store.reserve(key, 'surplus', 'test-model')).mayDispatch).toBe(false);
+  expect(JSON.stringify([...f.docs])).toBe(before);
 });

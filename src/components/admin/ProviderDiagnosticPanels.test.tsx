@@ -11,7 +11,7 @@ import { ProviderDiagnosticPanels, ProviderDiagnosticBot, ProviderDiagnosticResu
 import { ADMIN_TABS } from '../../lib/adminTabs';
 const id = '11111111-1111-4111-8111-111111111111';
 const reset = () => { hooks.values = []; hooks.refs = []; hooks.cursor = 0; hooks.refCursor = 0; };
-function render(component = 'bot', token = 'synthetic-admin') { hooks.cursor = 0; hooks.refCursor = 0; return component === 'bot' ? ProviderDiagnosticBot({ provider: 'surplus', adminToken: token, ready: true }) : ProviderDiagnosticPanels({ adminToken: token }); }
+function render(component = 'bot', token = 'synthetic-admin') { hooks.cursor = 0; hooks.refCursor = 0; return component !== 'panels' ? ProviderDiagnosticBot({ provider: 'surplus', adminToken: token, ready: true, oneShot: component === 'pair' }) : ProviderDiagnosticPanels({ adminToken: token }); }
 function nodes(node: any): any[] { return Array.isArray(node) ? node.flatMap(nodes) : React.isValidElement(node) ? [node, ...nodes((node.props as any).children)] : []; }
 const find = (tree: any, label: string) => nodes(tree).find(n => n.type === 'button' && (Array.isArray(n.props.children) ? n.props.children.join('') : n.props.children) === label);
 const flush = async () => { for (let i = 0; i < 25; i++) await Promise.resolve(); };
@@ -79,4 +79,24 @@ it.each([false, true])('recovery permits another test only when settled without 
   vi.mocked(fetch).mockResolvedValue(response({ run: { runId: id, provider: 'surplus', state: 'settled', actualCostNanoUsd: overrun ? 20 : 5, reservedNanoUsd: 10 } }) as any);
   find(render(), 'Recover original run').props.onClick(); await flush();
   expect(find(render(), 'Prepare another test').props.disabled).toBe(overrun);
+});
+
+it('pair uses a fixed prompt, separate recovery key and blocks another settled test', async () => {
+  sessionStorage.setItem('admin-diagnostic-pending:surplus', id);
+  let tree = render('pair');
+  expect(fetch).not.toHaveBeenCalled();
+  expect(nodes(tree).find(n => n.type === 'textarea').props).toMatchObject({ value: 'Reply with exactly: OK', readOnly: true });
+  expect(find(tree, 'Run surplus test').props.disabled).toBe(false);
+  vi.mocked(fetch).mockResolvedValue(response({ ...result, accounting: 'settled' }) as any);
+  find(tree, 'Run surplus test').props.onClick(); await flush(); tree = render('pair');
+  expect(find(tree, 'Clear blocked attempt').props.disabled).toBe(true);
+  expect(sessionStorage.getItem('admin-diagnostic-pending:surplus')).toBe(id);
+  expect(sessionStorage.getItem('admin-diagnostic-pair-20261028:surplus')).toBe(id);
+});
+it('pair manually retries only the same admission key after an unavailable outcome', async () => {
+  sessionStorage.setItem('admin-diagnostic-pair-20261028:surplus', id);
+  vi.mocked(fetch).mockResolvedValue(response({ ...result, replayed: true }) as any);
+  const tree = render('pair'); find(tree, 'Retry original admission with same key').props.onClick(); await flush();
+  expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string).idempotencyKey).toBe(id);
+  expect(fetch).toHaveBeenCalledTimes(1);
 });

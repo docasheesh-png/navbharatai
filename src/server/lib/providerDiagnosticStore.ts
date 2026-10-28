@@ -9,6 +9,11 @@ import { readData, readPaidPolicy, readSpendDay, writeSpendDay } from '../AI/Fre
 const ROOT = 'free_chat_chain/provider_diagnostics';
 export const DIAGNOSTIC_REVIEW_PATH = `${ROOT}/policy/review`;
 const TOTAL = `${ROOT}/ledger/total`;
+export interface DiagnosticPairAuthority {
+  /** Separate owner-authorized allowance; never changes the legacy benchmark ledger. */
+  review(provider: DiagnosticProvider, model: string): Promise<DiagnosticBudgetReview>;
+}
+const PAIR_ROOT = 'free_chat_chain/provider_diagnostic_pair_20261028';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const modelId = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$/;
 type Db = Pick<Firestore, 'doc' | 'runTransaction'>;
@@ -75,7 +80,10 @@ function checkedRun(raw: unknown): DiagnosticRunRecord {
  * Server composition only: every HTTP caller must first pass requireDiagnosticAdmin.
  */
 export class ProviderDiagnosticStore {
-  constructor(private readonly db: Db, private readonly now = Date.now, private readonly limits = diagnosticBillingLimits, private readonly binding = diagnosticEvidenceBinding) {}
+  constructor(private readonly db: Db, private readonly now = Date.now, private readonly limits = diagnosticBillingLimits, private readonly binding = diagnosticEvidenceBinding, private readonly pair?: DiagnosticPairAuthority) {}
+  private get root() { return this.pair ? PAIR_ROOT : ROOT; }
+  private get totalPath() { return this.pair ? `${PAIR_ROOT}/ledger/total` : TOTAL; }
+  private get reviewPath() { return this.pair ? `${PAIR_ROOT}/policy/review` : DIAGNOSTIC_REVIEW_PATH; }
   async status(provider: DiagnosticProvider, model: string) {
     try {
       await this.admit(randomUUID(), provider, model, true);
@@ -86,11 +94,16 @@ export class ProviderDiagnosticStore {
   }
   private runRef(key: string) {
     demand(UUID.test(key), 'invalid_request');
-    return this.db.doc(`${ROOT}/runs/${key.toLowerCase()}`);
+    return this.db.doc(`${this.root}/runs/${key.toLowerCase()}`);
   }
   async read(key: string): Promise<DiagnosticRunRecord | null> {
     const snap = await this.runRef(key).get();
-    return snap.exists ? checkedRun(snap.data()) : null;
+    if (snap.exists) return checkedRun(snap.data());
+    if (this.pair) {
+      const legacy = await this.db.doc(`${ROOT}/runs/${key.toLowerCase()}`).get();
+      if (legacy.exists) return checkedRun(legacy.data());
+    }
+    return null;
   }
   async reserve(key: string, provider: DiagnosticProvider, model: string): Promise<{ mayDispatch: boolean; run: DiagnosticRunRecord }> {
     return this.admit(key, provider, model, false);
@@ -98,6 +111,16 @@ export class ProviderDiagnosticStore {
   private async admit(key: string, provider: DiagnosticProvider, model: string, dryRun: boolean): Promise<{ mayDispatch: boolean; run: DiagnosticRunRecord }> {
     demand((provider === 'surplus' || provider === 'cheaperinference') && modelId.test(model), 'invalid_request');
     const runRef = this.runRef(key), runId = randomUUID();
+    if (this.pair) {
+      const existing = await runRef.get();
+      if (existing.exists) {
+        const run = checkedRun(existing.data());
+        demand(run.provider === provider && run.model === model, 'invalid_request');
+        return { mayDispatch: false, run };
+      }
+    }
+    // Network preflight occurs outside the retryable transaction. Admission rechecks expiry.
+    const prepared = this.pair ? await this.pair.review(provider, model) : null;
     return this.db.runTransaction(async tx => {
       const now = this.now();
       const window = civilDayWindow(now, PAID_BUDGET_TIME_ZONE), month = window.key.slice(0, 7);
@@ -107,7 +130,23 @@ export class ProviderDiagnosticStore {
         demand(run.provider === provider && run.model === model, 'invalid_request');
         return { mayDispatch: false, run };
       }
-      const review = await readDiagnosticEvidence((await tx.get(this.db.doc(DIAGNOSTIC_REVIEW_PATH))).data(), provider, model, now, async path => (await tx.get(this.db.doc(path))).data(), this.binding(provider));
+      const storedReview = (await tx.get(this.db.doc(this.reviewPath))).data();
+      const review = prepared ? { ...prepared, diagnosticsInitialized: storedReview?.diagnosticsInitialized }
+        : await readDiagnosticEvidence(storedReview, provider, model, now, async path => (await tx.get(this.db.doc(path))).data(), this.binding(provider));
+      if (prepared) {
+        const legacy = await tx.get(this.db.doc(`${ROOT}/runs/${key.toLowerCase()}`));
+        if (legacy.exists) {
+          const run = checkedRun(legacy.data());
+          demand(run.provider === provider && run.model === model, 'invalid_request');
+          return { mayDispatch: false, run };
+        }
+        demand(prepared.expiresAt > now && prepared.totalBudgetPaise === 10000 && prepared.priorCommittedPaise === 0, 'budget_evidence_unavailable');
+        const slot = await tx.get(this.db.doc(`${PAIR_ROOT}/slots/${provider}`));
+        demand(!slot.exists, 'budget_exhausted');
+        // Preserve the earlier diagnostic stop as well as its monetary holds.
+        const oldTotal = (await tx.get(this.db.doc(TOTAL))).data();
+        demand(!oldTotal || oldTotal.activeRunId === null, 'run_in_progress');
+      }
       const limits = this.limits();
       const policy = readPaidPolicy(readData(await tx.get(this.db.doc('free_chat_chain/paid_budget_policy'))));
       if (!policy) throw new DiagnosticEvidenceMissing(['billing.paidBudgetPolicy']);
@@ -116,7 +155,7 @@ export class ProviderDiagnosticStore {
       const monthSnap = await tx.get(monthRef);
       const monthly = monthSnap.exists ? monthSnap.data()! : { heldNanoUsd: 0, spentNanoUsd: 0 };
       demand(nonnegativeInteger(monthly.heldNanoUsd) && nonnegativeInteger(monthly.spentNanoUsd), 'accounting_failed');
-      const totalRef = this.db.doc(TOTAL), totalSnap = await tx.get(totalRef);
+      const totalRef = this.db.doc(this.totalPath), totalSnap = await tx.get(totalRef);
       demand(totalSnap.exists === (review.diagnosticsInitialized === true), 'accounting_failed');
       const total = totalSnap.exists ? checkedTotal(totalSnap.data()) : { version: 1 as const, priorCommittedPaise: review.priorCommittedPaise, diagnosticCommittedPaise: 0, activeRunId: null };
       demand(total.activeRunId === null, 'run_in_progress');
@@ -125,7 +164,7 @@ export class ProviderDiagnosticStore {
       const amount = maximumCostNanoUsd(rate.contextTokens, DIAGNOSTIC_LIMITS.outputTokens, rate.inputPerMillionNanoUsd, rate.outputPerMillionNanoUsd);
       const reservedPaise = paise(amount, review.allInPaisePerUsdCeiling);
       const priorCommittedPaise = Math.max(total.priorCommittedPaise, review.priorCommittedPaise);
-      demand(amount > 0 && reservedPaise <= 100
+      demand(amount > 0 && reservedPaise <= (this.pair ? 5000 : 100)
         && checkedAdd(checkedAdd(priorCommittedPaise, total.diagnosticCommittedPaise), reservedPaise) <= review.totalBudgetPaise
         && checkedAdd(checkedAdd(day.heldNanoUsd, day.spentNanoUsd), amount) <= Math.min(policy.capNanoUsd, limits.daily)
         && checkedAdd(checkedAdd(monthly.heldNanoUsd, monthly.spentNanoUsd), amount) <= Math.min(review.monthlyCapNanoUsd, limits.monthly), 'budget_exhausted');
@@ -135,7 +174,8 @@ export class ProviderDiagnosticStore {
       writeSpendDay(tx, this.db, { ...day, heldNanoUsd: checkedAdd(day.heldNanoUsd, amount), requests: checkedAdd(day.requests, 1), pending: checkedAdd(day.pending, 1) }, policy.capNanoUsd, now, () => []);
       tx.set(monthRef, { ...monthly, heldNanoUsd: checkedAdd(monthly.heldNanoUsd, amount), updatedAt: now });
       tx.set(totalRef, { ...total, priorCommittedPaise, diagnosticCommittedPaise: checkedAdd(total.diagnosticCommittedPaise, reservedPaise), activeRunId: runId });
-      if (!totalSnap.exists) tx.set(this.db.doc(DIAGNOSTIC_REVIEW_PATH), { ...review, diagnosticsInitialized: true });
+      if (!totalSnap.exists) tx.set(this.db.doc(this.reviewPath), { ...review, diagnosticsInitialized: true });
+      if (this.pair) tx.create(this.db.doc(`${PAIR_ROOT}/slots/${provider}`), { version: 1, runId, key: key.toLowerCase() });
       tx.create(runRef, run);
       return { mayDispatch: true, run };
     });
@@ -155,7 +195,7 @@ export class ProviderDiagnosticStore {
         const held = { ...run, state: 'unknown_liability' as const };
         tx.set(ref, held); return held;
       }
-      const totalRef = this.db.doc(TOTAL), total = checkedTotal((await tx.get(totalRef)).data());
+      const totalRef = this.db.doc(this.totalPath), total = checkedTotal((await tx.get(totalRef)).data());
       const window = civilDayWindow(run.startedAt, PAID_BUDGET_TIME_ZONE);
       const daySnap = await tx.get(this.db.doc(`free_chat_chain/paid_day_${run.day}`));
       const policy = readPaidPolicy(readData(await tx.get(this.db.doc('free_chat_chain/paid_budget_policy'))));

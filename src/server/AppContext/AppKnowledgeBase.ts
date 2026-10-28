@@ -3085,6 +3085,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['vercel deploy', 'netlify deploy', 'github pages', 'deploy', 'hosting', 'custom domain', 'publish app', 'live url', 'deploy karo', 'production'],
   },
   {
+    id: 'admin-provider-diagnostics',
+    name: 'Admin connection tests',
+    path: 'Admin Dashboard → AI Engines → Provider testing bots (verified admin only)',
+    description: 'Two independent manual connection tests show the real reply, supplier-reported cost when available, measured latency and sanitized diagnostics. The approved separate two-test allowance permits one fixed tiny request per connection. Preflight and shared budget checks may block dispatch. Reservations are conservative estimates, not provider-enforced monetary caps. Unknown charges retain their holds. This does not prove the app builder works, and historical benchmark holds are preserved.',
+    howToUse: 'Verified admins open Provider testing bots, verify status, and manually run each available test once. Loading the panel sends no test. After a connection loss, recover or retry admission with the original request key; never create a replacement key for an uncertain run. Other users cannot access these endpoints.',
+    relatedFeatures: ['admin-metrics'],
+    keywords: ['admin connection test', 'provider tests', 'diagnostic cost', 'test recovery'],
+  },
+  {
     id: 'admin-metrics',
     name: 'Live Metrics Dashboard',
     path: 'Settings → scroll to the bottom of the left menu → Live Metrics (admin only — the button appears only for an admin account, under Support & Help; it is NOT a tab inside App Settings)',

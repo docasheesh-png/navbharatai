@@ -29,9 +29,10 @@ export function ProviderDiagnosticResult({ result: r }: { result: RunView }) {
   </div>;
 }
 
-export function ProviderDiagnosticBot({ provider, adminToken, ready }: { provider: DiagnosticProvider; adminToken: string; ready: boolean }) {
-  const [prompt, setPrompt] = useState('');
-  const [key, setKey] = useState(() => { try { const saved = sessionStorage.getItem(storageKey(provider)); return saved && uuid.test(saved) ? saved : ''; } catch { return ''; } });
+export function ProviderDiagnosticBot({ provider, adminToken, ready, oneShot = false }: { provider: DiagnosticProvider; adminToken: string; ready: boolean; oneShot?: boolean }) {
+  const pendingStorageKey = oneShot ? `admin-diagnostic-pair-20261028:${provider}` : storageKey(provider);
+  const [prompt, setPrompt] = useState(oneShot ? 'Reply with exactly: OK' : '');
+  const [key, setKey] = useState(() => { try { const saved = sessionStorage.getItem(pendingStorageKey); return saved && uuid.test(saved) ? saved : ''; } catch { return ''; } });
   const [result, setResult] = useState<RunView | null>(null);
   const [recoveredSettled, setRecoveredSettled] = useState(false);
   const [message, setMessage] = useState('');
@@ -39,12 +40,12 @@ export function ProviderDiagnosticBot({ provider, adminToken, ready }: { provide
   const lock = useRef(false);
   const pending = useRef(key);
   const validPrompt = prompt.trim().length > 0 && new TextEncoder().encode(prompt).length <= DIAGNOSTIC_LIMITS.promptBytes;
-  async function action(recover: boolean) {
-    if (lock.current || !adminToken || (!recover && (!ready || pending.current || !validPrompt))) return;
-    const id = recover ? pending.current : newRequestIdentity();
+  async function action(recover: boolean, sameKey = false) {
+    if (lock.current || !adminToken || (!recover && (!ready || (pending.current && !sameKey) || !validPrompt))) return;
+    const id = recover || sameKey ? pending.current : newRequestIdentity();
     if (!id) { setMessage('A secure request identity is unavailable. No test was sent.'); return; }
     if (!recover) {
-      try { sessionStorage.setItem(storageKey(provider), id); } catch { setMessage('Recovery storage is unavailable. No test was sent.'); return; }
+      try { sessionStorage.setItem(pendingStorageKey, id); } catch { setMessage('Recovery storage is unavailable. No test was sent.'); return; }
       pending.current = id; setKey(id);
     }
     lock.current = true; setBusy(true); setMessage(''); setResult(null); setRecoveredSettled(false);
@@ -71,18 +72,20 @@ export function ProviderDiagnosticBot({ provider, adminToken, ready }: { provide
     finally { clearTimeout(timeout); lock.current = false; setBusy(false); }
   }
   function next() {
+    if (oneShot && result?.accounting !== 'not_dispatched') return;
     if (lock.current || !(recoveredSettled || result && !result.reconciliationRequired && ['settled', 'not_dispatched'].includes(result.accounting))) return;
-    try { sessionStorage.removeItem(storageKey(provider)); } catch { setMessage('Could not clear recovery key.'); return; }
+    try { sessionStorage.removeItem(pendingStorageKey); } catch { setMessage('Could not clear recovery key.'); return; }
     pending.current = ''; setKey(''); setResult(null); setRecoveredSettled(false); setMessage('');
   }
   if (!adminToken) return null;
   return <section className="rounded-xl border border-line p-4 space-y-3" aria-label={`${provider} diagnostic bot`}>
     <h3>{provider === 'surplus' ? 'Surplus-only testing bot' : 'CheaperInference-only testing bot'}</h3>
     <p>One explicit request. This diagnostic client performs no fallback or automatic retry. Provider-internal retries and routing are not controlled here. Maximum 2048 prompt bytes, 256 output tokens, 30-second client deadline. Supplier execution and billing may continue after a timeout.</p>
-    <label>Test prompt<textarea className="block w-full rounded border border-line bg-transparent p-2 text-ink" value={prompt} disabled={busy || !!key} onChange={e => setPrompt(e.target.value)} /></label>
+    <label>Test prompt<textarea className="block w-full rounded border border-line bg-transparent p-2 text-ink" value={prompt} readOnly={oneShot} disabled={busy || !!key} onChange={e => setPrompt(e.target.value)} /></label>
     <button className={button} disabled={!ready || busy || !!key || !validPrompt} onClick={() => void action(false)}>Run {provider} test</button>
+    {oneShot && <button className={button} disabled={busy || !key || !!result || !ready} onClick={() => void action(false, true)}>Retry original admission with same key</button>}
     <button className={button} disabled={busy || !key} onClick={() => void action(true)}>Recover original run</button>
-    <button className={button} disabled={busy || !(recoveredSettled || result && !result.reconciliationRequired && ['settled', 'not_dispatched'].includes(result.accounting))} onClick={next}>Prepare another test</button>
+    <button className={button} disabled={busy || (oneShot && result?.accounting !== 'not_dispatched') || !(recoveredSettled || result && !result.reconciliationRequired && ['settled', 'not_dispatched'].includes(result.accounting))} onClick={next}>{oneShot ? 'Clear blocked attempt' : 'Prepare another test'}</button>
     {key && <p>Recovery key: {key}</p>}{message && <p role="status">{message}</p>}
     {result && <ProviderDiagnosticResult result={result} />}
   </section>;
@@ -105,9 +108,9 @@ export function ProviderDiagnosticPanels({ adminToken }: { adminToken: string })
     <p>Manual tests only. Opening or refreshing this panel makes no request and spends nothing.</p>
     <button className={button} disabled={busy} onClick={() => void check()}>Verify admin and read test status</button>
     {error && <p role="alert">{error}</p>}
-    {status && <><p role="status">{status.dispatchReady ? 'Budget evidence verified by server. Each test still requires admission.' : 'Dispatch blocked by server evidence or spending checks. Review prior supplier API and sandbox liabilities, current account/model tariffs, conversion ceiling and the existing monthly cap. The ₹2,000 aggregate ceiling includes earlier attempts; unknown spend is not forgiven.'}</p>
-      {status.providers && <ul>{(['surplus', 'cheaperinference'] as const).map(p => <li key={p}>{p}: {status.providers![p]?.reason ?? 'Ready for admission'} · Missing fields: {status.providers![p]?.missingFields?.join(', ') || 'None reported'}</li>)}</ul>}
-      <ProviderDiagnosticBot provider="surplus" adminToken={adminToken} ready={status.providers?.surplus.dispatchReady ?? status.dispatchReady} />
-      <ProviderDiagnosticBot provider="cheaperinference" adminToken={adminToken} ready={status.providers?.cheaperinference.dispatchReady ?? status.dispatchReady} /></>}
+    {status && <><p>Separate allowance: ₹100 total, one call per provider. Reservations use full-context pricing and an exchange-rate buffer. They are estimates, not provider-enforced monetary caps. Unknown supplier charges retain their holds.</p><p role="status">{status.dispatchReady ? 'Preflight passed. One manual call per provider; each still requires budget admission.' : 'Dispatch blocked. See the specific provider or shared-budget issue below. This separate ₹100 allowance covers only one call per provider; historical benchmark holds remain unchanged.'}</p>
+      {status.providers && <ul>{(['surplus', 'cheaperinference'] as const).map(p => <li key={p}>{p}: {status.providers![p]?.reason ?? 'Ready for admission'} · Preflight: {status.providers![p]?.missingFields?.join(', ') || 'None reported'}</li>)}</ul>}
+      <ProviderDiagnosticBot provider="surplus" oneShot adminToken={adminToken} ready={status.providers?.surplus.dispatchReady ?? status.dispatchReady} />
+      <ProviderDiagnosticBot provider="cheaperinference" oneShot adminToken={adminToken} ready={status.providers?.cheaperinference.dispatchReady ?? status.dispatchReady} /></>}
   </section>;
 }

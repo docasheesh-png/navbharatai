@@ -207,7 +207,7 @@ describe('mobile tools and desktop layout contract', () => {
     expect(css).toContain('position: fixed !important');
     expect(css).toContain('order: 1 !important'); // Type
     expect(css).toContain('order: 2 !important'); // action bar
-    expect(css).toContain('max-height: min(72px, 14dvh) !important');
+    expect(css).toContain('max-height: min(120px, 22dvh) !important');
     expect(css.split('@media')[0]).toContain('.nb-composer-tools, .nb-composer-tools-content { display: contents; }');
   });
 });

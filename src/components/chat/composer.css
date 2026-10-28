@@ -175,8 +175,8 @@
 }
 
 .nb-composer-box[data-composer-surface="pro"] .nb-composer-text {
-  min-height: 40px !important;
-  max-height: min(72px, 14dvh) !important;
+  min-height: 84px !important;
+  max-height: min(120px, 22dvh) !important;
   padding: 10px 92px 10px 14px !important; /* room for Stop+Send while steering */
 }
 
@@ -184,13 +184,13 @@
   max-height: 50dvh !important;
 }
 
-/* Pro Send on Type right edge (same rule as Free). */
+/* Pro Send: right lower corner of the Type field. Expand: right top of the same box. */
 .nb-composer-box[data-composer-surface="pro"] .nb-pro-send-slot {
   position: absolute !important;
   right: 8px !important;
-  top: 50% !important;
-  bottom: auto !important;
-  transform: translateY(-50%);
+  top: auto !important;
+  bottom: 6px !important;
+  transform: none;
   margin-left: 0;
   flex-shrink: 0;
   display: flex;
@@ -219,10 +219,12 @@
 
 .nb-composer-box[data-composer-surface="pro"] .nb-pro-expand-desktop {
   display: flex !important;
-  position: static !important;
-  right: auto !important;
+  position: absolute !important;
+  top: 6px !important;
+  right: 8px !important;
   bottom: auto !important;
-  margin-left: auto;
+  margin-left: 0;
+  z-index: 3;
 }
 
 .nb-composer-box[data-composer-surface="pro"] .nb-pro-suggestions-corner {

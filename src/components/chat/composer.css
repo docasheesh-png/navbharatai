@@ -163,40 +163,40 @@
   width: 100%;
   min-height: 44px;
   max-width: none;
-  padding: 4px 8px 8px !important;
+  padding: 4px 52px 8px 8px !important;
   border-top: none !important;
   overflow: visible !important;
 }
 
 .nb-composer-box[data-composer-surface="pro"] [data-tour="chat"] {
   order: 1 !important;
-  position: relative;
+  position: static;
   width: 100%;
 }
 
 .nb-composer-box[data-composer-surface="pro"] .nb-composer-text {
-  min-height: 84px !important;
+  min-height: 44px !important;
   max-height: min(120px, 22dvh) !important;
-  padding: 10px 92px 10px 14px !important; /* room for Stop+Send while steering */
+  padding: 10px 56px 10px 14px !important;
 }
 
 .nb-composer-box[data-composer-surface="pro"][data-expanded="true"] .nb-composer-text {
   max-height: 50dvh !important;
 }
 
-/* Pro Send: right lower corner of the Type field. Expand: right top of the same box. */
+/* Send sits in the rounded card's right lower corner. Expand stays at the right top. */
 .nb-composer-box[data-composer-surface="pro"] .nb-pro-send-slot {
   position: absolute !important;
   right: 8px !important;
   top: auto !important;
-  bottom: 6px !important;
+  bottom: 8px !important;
   transform: none;
   margin-left: 0;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 4px;
-  z-index: 2;
+  z-index: 4;
 }
 
 .nb-composer-box[data-composer-surface="pro"] .nb-pro-send-btn {

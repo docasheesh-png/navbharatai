@@ -56,3 +56,36 @@ it('preserves recovery requirement after uncertain reservation acknowledgement',
   const { deps, call } = setup(); vi.mocked(deps.store.reserve).mockRejectedValue(new Error('lost acknowledgement'));
   const r = await runDiagnostic(input, deps); expect(r.accounting).toBe('unknown_liability'); expect(call).not.toHaveBeenCalled();
 });
+
+it('uses the server fixed tiny prompt for the authorized pair, ignoring submitted content', async () => {
+  const { deps, call } = setup(); deps.fixedPrompt = 'Reply with exactly: OK';
+  await runDiagnostic(input, deps);
+  expect(call).toHaveBeenCalledExactlyOnceWith('Reply with exactly: OK', expect.any(AbortSignal));
+});
+
+it('pair Surplus dispatch uses min90 once without changing the ordinary adapter endpoint', async () => {
+  const { diagnosticAdapter } = await import('./providerDiagnosticRunner');
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'OK' } }], usage: { buyer_cost_micro: 1 } }), { headers: { 'Content-Type': 'application/json' } }));
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    const env = { SURPLUS_API_KEY: 'mock-only', SURPLUS_BASE_URL: 'https://api.surplusintelligence.ai/v1' };
+    await diagnosticAdapter('surplus', env, true).call('Reply with exactly: OK', new AbortController().signal);
+    expect(String(fetcher.mock.calls[0][0])).toBe('https://api.surplusintelligence.ai/min90/v1/chat/completions');
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ max_tokens: 256, stream: false });
+    await diagnosticAdapter('surplus', env).call('ordinary', new AbortController().signal);
+    expect(String(fetcher.mock.calls[1][0])).toBe('https://api.surplusintelligence.ai/v1/chat/completions');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  } finally { vi.unstubAllGlobals(); }
+});
+
+it('pair CheaperInference dispatch sends documented reasoning and matching price constraint once', async () => {
+  const { diagnosticAdapter } = await import('./providerDiagnosticRunner');
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 }, billing: { status: 'settled', currency: 'USD', billed_cost_usd: '0.000001' } }), { headers: { 'Content-Type': 'application/json' } }));
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    await diagnosticAdapter('cheaperinference', { CHEAPERINFERENCE_API_KEY: 'mock-only', CHEAPERINFERENCE_MODEL: 'beam' }, true).call('Reply with exactly: OK', new AbortController().signal);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(String(fetcher.mock.calls[0][0])).toBe('https://api.cheaperinference.com/v1/chat/completions');
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ model: 'beam', reasoning: { effort: 'low' }, min_discount_percent: 0, max_tokens: 256, stream: false });
+  } finally { vi.unstubAllGlobals(); }
+});

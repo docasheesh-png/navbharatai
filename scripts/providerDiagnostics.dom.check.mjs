@@ -37,5 +37,25 @@ const runButton = [...container.querySelectorAll('button')].find(b => b.textCont
 assert.equal(runButton.disabled, false, 'real input enables a bounded manual test');
 answer = { runId: id, provider: 'surplus', model: 'test', startedAt: '2026-10-28T00:00:00Z', elapsedMs: 10, firstByteMs: null, firstTokenMs: null, outputTokensPerSecond: null, retryCount: 0, text: '<script>escaped</script>', usage: { inputTokens: 1, outputTokens: 1, cachedTokens: null }, supplierCost: { status: 'unavailable' }, walletCharge: { status: 'not_charged' }, accounting: 'unknown_liability', timeline: [{ elapsedMs: 10, stage: 'accounting', reason: 'receipt_unavailable' }], provesBuilderHealth: false };
 const postsBefore = calls.length; await click('Run surplus test', true); assert.equal(calls.length, postsBefore + 1); assert.equal(calls.at(-1).options.method, 'POST'); assert.equal(container.querySelector('script'), null); assert(container.textContent.includes('Actual cost unavailable')); await unmount();
+// Separate pair: fixed prompt, isolated durable key, same-key recovery, no repeat after settlement.
+sessionStorage.setItem('admin-diagnostic-pending:surplus', id);
+sessionStorage.removeItem('admin-diagnostic-pair-20261028:surplus');
+answer = { runId: id, provider: 'surplus', model: 'test', startedAt: new Date().toISOString(), elapsedMs: 1,
+  firstByteMs: null, firstTokenMs: null, outputTokensPerSecond: null, retryCount: 0, text: 'OK',
+  usage: { inputTokens: 1, outputTokens: 1, cachedTokens: null }, supplierCost: { status: 'reported', amount: '0.000001', currency: 'USD' },
+  walletCharge: { status: 'not_charged' }, accounting: 'settled', timeline: [], provesBuilderHealth: false };
+await mount(Bot, { adminToken: 'synthetic-admin', provider: 'surplus', ready: true, oneShot: true });
+assert.equal(container.querySelector('textarea').value, 'Reply with exactly: OK');
+assert(container.querySelector('textarea').readOnly);
+const pairBefore = calls.length; await click('Run surplus test', true); assert.equal(calls.length, pairBefore + 1);
+const pairKey = JSON.parse(calls.at(-1).options.body).idempotencyKey;
+assert.equal(sessionStorage.getItem('admin-diagnostic-pair-20261028:surplus'), pairKey);
+assert.equal(sessionStorage.getItem('admin-diagnostic-pending:surplus'), id);
+assert([...container.querySelectorAll('button')].find(b => b.textContent === 'Clear blocked attempt').disabled);
+await unmount();
+await mount(Bot, { adminToken: 'synthetic-admin', provider: 'surplus', ready: true, oneShot: true });
+await click('Retry original admission with same key');
+assert.equal(JSON.parse(calls.at(-1).options.body).idempotencyKey, pairKey);
+await unmount();
 console.log('PASS real React/Happy DOM: empty-admin exclusion, manual verified visibility, auth-failure hiding, no mount calls, duplicate recovery, remount same-key GET, unknown hold and settled recovery, real prompt input and duplicate POST suppression.');
 await window.happyDOM.close();

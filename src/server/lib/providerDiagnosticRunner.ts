@@ -1,9 +1,10 @@
+import { DIAGNOSTIC_PAIR_DISCOUNT } from './providerDiagnosticPair';
 import { DiagnosticEvidenceMissing } from './providerDiagnosticEvidence';
 import { randomUUID } from 'node:crypto';
 import { DIAGNOSTIC_LIMITS, type DiagnosticResult, type DiagnosticReason, type DiagnosticProvider } from '../../shared/providerDiagnostics';
 import type { DiagnosticInput } from './providerDiagnosticBoundary';
 import { ProviderDiagnosticStore, DiagnosticAdmissionError, type DiagnosticRunRecord } from './providerDiagnosticStore';
-import { createSurplusChat, SurplusError, SURPLUS_DEFAULT_MODEL } from './surplusClient';
+import { createSurplusChat, SurplusError, SURPLUS_DEFAULT_MODEL, SURPLUS_MIN90_BASE_URL } from './surplusClient';
 import { surplusBuyerCostToUsd } from '../AI/SurplusRegistry/receiptPolicy';
 import { OpenAiCompatProvider, FreeChainProviderError } from '../AI/FreeChain/providers/openAiCompatProvider';
 import { CHEAPERINFERENCE_BASE_URL, cheaperInferenceAdminStatus } from './cheaperInferencePolicy';
@@ -13,10 +14,10 @@ export interface DiagnosticAdapter { model: string; call(prompt: string, signal:
 class DiagnosticSurplusFailure extends SurplusError {
   constructor(error: SurplusError, readonly httpStatus?: number) { super(error.code, error.usage); }
 }
-export function diagnosticAdapter(provider: DiagnosticProvider, env = process.env): DiagnosticAdapter {
+export function diagnosticAdapter(provider: DiagnosticProvider, env = process.env, pair = false): DiagnosticAdapter {
   if (provider === 'surplus') {
     let httpStatus: number | undefined;
-    const chat = createSurplusChat(env, async (input, init) => { const response = await fetch(input, init); httpStatus = response.status; return response; });
+    const chat = createSurplusChat(pair ? { ...env, SURPLUS_BASE_URL: SURPLUS_MIN90_BASE_URL } : env, async (input, init) => { const response = await fetch(input, init); httpStatus = response.status; return response; });
     return { model: env.SURPLUS_MODEL?.trim() || SURPLUS_DEFAULT_MODEL, async call(prompt, signal) {
       const r = await chat(prompt, { signal, maxTokens: DIAGNOSTIC_LIMITS.outputTokens }).catch(error => { if (error instanceof SurplusError) throw new DiagnosticSurplusFailure(error, httpStatus); throw error; });
       return { text: r.text, usage: { inputTokens: r.usage?.prompt_tokens ?? null, outputTokens: r.usage?.completion_tokens ?? null, cachedTokens: null }, amount: surplusBuyerCostToUsd(r.usage?.buyer_cost_micro) };
@@ -27,7 +28,7 @@ export function diagnosticAdapter(provider: DiagnosticProvider, env = process.en
   const adapter = new OpenAiCompatProvider({ provider: 'CHEAPERINFERENCE', model: status.defaultModel,
     key: env.CHEAPERINFERENCE_API_KEY!.trim(), baseURL: CHEAPERINFERENCE_BASE_URL, priority: 0,
     maxOutputTokens: DIAGNOSTIC_LIMITS.outputTokens, timeoutMs: DIAGNOSTIC_LIMITS.deadlineMs,
-    streamUsage: false, extraBody: { reasoning_effort: 'low' } });
+    streamUsage: false, extraBody: pair ? { reasoning: { effort: 'low' }, min_discount_percent: DIAGNOSTIC_PAIR_DISCOUNT } : { reasoning_effort: 'low' } });
   return { model: status.defaultModel, async call(prompt, signal) {
     const r = await adapter.executeTurn({ prompt, signal });
     return { text: r.content, usage: { inputTokens: r.usage?.inputTokens ?? null, outputTokens: r.usage?.outputTokens ?? null, cachedTokens: r.cachedInputTokens ?? null }, amount: r.supplierChargeUsd ?? null };
@@ -47,6 +48,7 @@ function failure(error: unknown): DiagnosticReason {
 }
 export interface DiagnosticDependencies {
   status?: () => Promise<unknown>;
+  fixedPrompt?: string;
   store: Pick<ProviderDiagnosticStore, 'reserve' | 'finish' | 'read'>;
   adapter: (provider: DiagnosticProvider) => DiagnosticAdapter;
   /** Must verify real reconciliation/tariff evidence and current monthly limit before admission. */
@@ -93,7 +95,7 @@ export async function runDiagnostic(input: DiagnosticInput, deps: DiagnosticDepe
   let amount: string | null = null;
   try {
     const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new FreeChainProviderError('TIMEOUT')); }, DIAGNOSTIC_LIMITS.deadlineMs); });
-    const reply = await Promise.race([adapter.call(input.prompt, controller.signal), deadline]);
+    const reply = await Promise.race([adapter.call(deps.fixedPrompt ?? input.prompt, controller.signal), deadline]);
     result.text = reply.text; result.usage = reply.usage; amount = reply.amount;
     event('response', reply.text.trim() ? 'completed' : 'malformed_response');
   } catch (error) {

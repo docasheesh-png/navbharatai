@@ -225,7 +225,7 @@ function sanitizeError(error: unknown, signal: AbortSignal | undefined, credenti
 }
 
 /** Only text-generation tuning is accepted. Extra body fields cannot change spend or credentials. */
-function validatedExtraBody(extra: AdapterConfig['extraBody']): Record<string, unknown> {
+function validatedExtraBody(extra: AdapterConfig['extraBody'], provider: AdapterConfig['provider']): Record<string, unknown> {
   if (extra === undefined) return {};
   const input = record(extra);
   if (!input) throw new FreeChainProviderError('CONFIGURATION');
@@ -235,6 +235,10 @@ function validatedExtraBody(extra: AdapterConfig['extraBody']): Record<string, u
       && typeof value === 'number' && Number.isFinite(value)
       && (name === 'temperature' ? value >= 0 && value <= 2 : name === 'top_p' ? value >= 0 && value <= 1 : value >= -2 && value <= 2)) {
       result[name] = value;
+    } else if (name === 'min_discount_percent' && provider === 'CHEAPERINFERENCE' && typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 99.99) {
+      result.min_discount_percent = value;
+    } else if (name === 'reasoning' && provider === 'CHEAPERINFERENCE' && record(value)?.effort === 'low' && Object.keys(record(value)!).length === 1) {
+      result.reasoning = { effort: 'low' };
     } else if (name === 'seed' && typeof value === 'number' && Number.isSafeInteger(value)) {
       result.seed = value;
     } else if (name === 'reasoning_effort' && (value === 'none' || value === 'minimal' || value === 'low')) {
@@ -273,7 +277,7 @@ export class OpenAiCompatProvider implements AIProvider {
       || (config.envName !== undefined && !/^[A-Z][A-Z0-9_]{0,79}$/.test(config.envName))) {
       throw new FreeChainProviderError('CONFIGURATION');
     }
-    const extraBody = validatedExtraBody(config.extraBody);
+    const extraBody = validatedExtraBody(config.extraBody, config.provider);
     this.name = config.provider;
     this.priority = config.priority;
     this.pinnedModel = config.model;

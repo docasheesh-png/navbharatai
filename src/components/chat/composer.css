@@ -141,9 +141,13 @@
   display: flex !important;
   flex-direction: column !important;
   overflow: hidden !important;
-  /* Sit above the Pro input. The shared 72px pin lands on the box and drags Plan down over it. */
-  bottom: calc(var(--nb-composer-menu-bottom, 72px) + 120px) !important;
-  max-height: min(46dvh, var(--nb-composer-menu-max-height, 46dvh)) !important;
+  /* Measured from the composer. The shared 72px pin lands on the input. */
+  bottom: var(--nb-mode-bottom, calc(var(--nb-composer-menu-bottom, 72px) + 8px)) !important;
+  max-height: var(--nb-mode-max, min(42dvh, 380px)) !important;
+}
+
+.nb-composer-box .nb-mode-menu.absolute.bottom-full[data-advise-open="true"] {
+  height: var(--nb-mode-height, auto) !important;
 }
 
 .nb-composer-box[data-composer-surface="pro"] {

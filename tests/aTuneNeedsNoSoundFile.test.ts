@@ -638,6 +638,32 @@ describe('the player, run against a fake AudioContext', () => {
     const timeline = p.playTune(TUNE);
     expect(timeline.notes.length).toBeGreaterThan(0);
     expect(p.playing).toBe(true);
+    expect(fake.oscillators.length).toBeGreaterThan(0);
+  });
+
+  it('playTune waits while the browser is holding audio, then books the notes for real', async () => {
+    const fake = makeFakeAudio();
+    fake.ctx.state = 'suspended';
+    let allow = false;
+    fake.ctx.resume = function (this: typeof fake.ctx) {
+      this.resumed += 1;
+      if (allow) this.state = 'running';
+      return Promise.resolve();
+    };
+    const { MelodyPlayer } = loadPlayer(fake);
+    const p = new MelodyPlayer();
+    const timeline = p.playTune(TUNE);
+    await Promise.resolve();
+    expect(timeline.notes).toHaveLength(4);
+    expect(fake.oscillators).toHaveLength(0);
+    expect(p.playing).toBe(false);
+
+    allow = true;
+    fake.win.fire('pointerdown');
+    await Promise.resolve();
+    expect(p.playing).toBe(true);
+    expect(fake.oscillators.length).toBeGreaterThan(0);
+    expect(fake.oscillators.length).toBeLessThan(4);
   });
 
   it('every note is stopped, and every node released', () => {

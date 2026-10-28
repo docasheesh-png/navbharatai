@@ -633,6 +633,9 @@ export class MelodyPlayer {
   private opts: PlayOptions = {};
   private unlocked = false;
   private volume: number;
+  /** A tune that must not be booked until the audio clock is actually running. */
+  private pending: { tune: Tune; options: PlayOptions } | null = null;
+  private armed = false;
 
   /** Default 0.25: several voices SUM, and summing four at full gain clips the master into mud. */
   constructor(volume = 0.25) { this.volume = volume; }
@@ -672,16 +675,59 @@ export class MelodyPlayer {
     }
   }
 
-  /** Read the tune once, then book its notes a little ahead of the audio clock until it ends. */
+  /** Read the tune once, then book its notes a little ahead of the audio clock until it ends.
+   *  If the browser is still holding audio, the tune is kept and started on the next tap — booking
+   *  notes against a frozen clock plays nothing. */
   play(tune: Tune, options: PlayOptions = {}): Timeline | null {
     this.stop();
     this.init();
     if (!this.ctx || !this.master) return null;
-    void this.ctx.resume();
 
     const timeline = buildTimeline(tune);
     if (timeline.notes.length === 0) return timeline;
 
+    this.pending = { tune, options };
+    if (this.ctx.state === 'running') this.releaseHeld();
+    else {
+      void this.ctx.resume().then(() => this.releaseHeld());
+      this.armForTune();
+    }
+    return timeline;
+  }
+
+  /** Plays the tune. Same clock as play(); games already call this name. */
+  playTune(tune: Tune, options: PlayOptions = {}): Timeline | null {
+    return this.play(tune, options);
+  }
+
+  /** One gesture listener. Removed after it fires, so a tap cannot resume audio forever. */
+  private armForTune(): void {
+    if (this.armed || typeof window === 'undefined') return;
+    this.armed = true;
+    const resume = () => {
+      this.init();
+      void this.ctx?.resume()?.then(() => this.releaseHeld());
+      this.armed = false;
+      window.removeEventListener('pointerdown', resume);
+      window.removeEventListener('keydown', resume);
+      window.removeEventListener('touchstart', resume);
+    };
+    window.addEventListener('pointerdown', resume);
+    window.addEventListener('keydown', resume);
+    window.addEventListener('touchstart', resume);
+  }
+
+  /** Start the held tune only once the clock is running. A second call finds nothing left to start. */
+  private releaseHeld(): void {
+    const job = this.pending;
+    if (!job || !this.ctx || !this.master || this.ctx.state !== 'running') return;
+    this.pending = null;
+    this.startNow(job.tune, job.options);
+  }
+
+  private startNow(tune: Tune, options: PlayOptions): void {
+    const timeline = buildTimeline(tune);
+    if (!this.ctx || !this.master || timeline.notes.length === 0) return;
     this.timeline = timeline;
     this.opts = options;
     this.cursor = 0;
@@ -691,15 +737,10 @@ export class MelodyPlayer {
 
     this.pump();
     this.timer = setInterval(() => this.pump(), TICK_MS);
-    return timeline;
-  }
-
-  /** Same as play(). Game builds call this name; it is not a second player. */
-  playTune(tune: Tune, options: PlayOptions = {}): Timeline | null {
-    return this.play(tune, options);
   }
 
   stop(): void {
+    this.pending = null;
     if (this.timer !== null) { clearInterval(this.timer); this.timer = null; }
     this.timeline = null;
     const ctx = this.ctx;

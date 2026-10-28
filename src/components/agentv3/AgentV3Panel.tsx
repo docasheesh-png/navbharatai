@@ -211,6 +211,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // Mode dropup open/closed (admin 2026-07-07: the Build/Plan/Advise switcher moved back to the
   // composer as a dropdown selector — position only, identical function).
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const [adviseIdeasOpen, setAdviseIdeasOpen] = useState(false);
+  const [adviseCount, setAdviseCount] = useState(0);
   // Plan/Advise (read-only lanes) run on their OWN request, fully DECOUPLED from the build stream, so
   // they can be sent ANYTIME — even WHILE a build is running (the whole point of the model) — and can
   // never clobber the live build's state. `roleBusy` is their own in-flight flag (independent of the
@@ -5713,12 +5715,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     {/* outside-click catcher */}
                     <div className="fixed inset-0 z-10" onClick={() => setModeMenuOpen(false)} />
                     <div className="absolute bottom-full left-0 mb-2 z-20 w-60 bg-card border border-line rounded-lg shadow-xl p-1.5 space-y-0.5">
-                      {([['build', 'Build', '🔨'], ['planner', 'Plan', '🧠'], ['advisor', 'Advise', '🔍']] as const).map(([m, label, icon]) => (
+                      {([['build', 'Build', '🔨'], ['planner', 'Plan', '🧠']] as const).map(([m, label, icon]) => (
                         <button
                           key={m}
                           type="button"
-                          onClick={() => { setChatMode(m); setModeMenuOpen(false); }}
-                          title={m === 'build' ? 'Build — code, build & chat' : m === 'planner' ? 'Plan — read-only planning; approve steps into the build queue' : 'Advise — read-only analysis (audit / scan / compare)'}
+                          onClick={() => { setChatMode(m); setAdviseIdeasOpen(false); setModeMenuOpen(false); }}
+                          title={m === 'build' ? 'Build — code, build & chat' : 'Plan — read-only planning; approve steps into the build queue'}
                           className={`w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left ${chatMode === m ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:text-ink hover:bg-raised'}`}
                         >
                           <span>{icon}</span>{label}
@@ -5738,9 +5740,28 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                               {planComplete ? '\u2713' : `${planDone}/${state.todos.length}`}
                             </span>
                           )}
-                          {m === 'advisor' && roleThreads.advisor.length > 0 && <span className="text-[9px] opacity-70">{Math.ceil(roleThreads.advisor.length / 2)}</span>}
                         </button>
                       ))}
+                      <button
+                        type="button"
+                        onClick={() => setAdviseIdeasOpen((v) => !v)}
+                        title="Advise — ideas for what to build next"
+                        className={`w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left ${adviseIdeasOpen ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:text-ink hover:bg-raised'}`}
+                      >
+                        <span>💡</span>
+                        <span>Advise</span>
+                        {adviseCount > 0 && (
+                          <span className="ml-auto min-w-[15px] h-[15px] px-1 rounded-full bg-amber-500 text-[9px] font-black text-zinc-950 flex items-center justify-center">{adviseCount}</span>
+                        )}
+                      </button>
+                      <NextSuggestionsBulb
+                        inline
+                        open={adviseIdeasOpen}
+                        onCount={setAdviseCount}
+                        workspaceId={expectedWorkspaceId()}
+                        ready={!!state.done && !running}
+                        onPick={(text) => { setPrompt(text); setAdviseIdeasOpen(false); setModeMenuOpen(false); setTimeout(() => composerRef.current?.focus(), 0); }}
+                      />
                       {/* …and the plan itself, expandable right here. Kept INSIDE the menu rather than
                           opening another panel: the user asked to see it "jab chahe", and a second
                           surface to dismiss is the opposite of that. Bounded height with its own
@@ -5766,6 +5787,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       )}
                     </div>
                   </>
+                )}
+                {!modeMenuOpen && (
+                  <NextSuggestionsBulb
+                    inline
+                    open={false}
+                    onCount={setAdviseCount}
+                    workspaceId={expectedWorkspaceId()}
+                    ready={!!state.done && !running}
+                    onPick={() => {}}
+                  />
                 )}
                 <button
                   type="button"
@@ -5927,16 +5958,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   (the glowing template button and the Attach-menu option). accept=image/* (no capture) so
                   it opens the photo gallery/library. */}
               <input ref={screenshotInputRef} type="file" accept="image/*" className="hidden" onChange={handleScreenshotPicked} />
-              {/* NEXT-BUILD SUGGESTIONS 💡 — end of the tools row (OLD layout). Only renders when
-                  there is something to suggest; no extra corner chrome. */}
-              <div className="ml-auto shrink-0" aria-label="Suggestions">
-                <NextSuggestionsBulb
-                  workspaceId={expectedWorkspaceId()}
-                  ready={!!state.done && !running}
-                  onPick={(text) => { setPrompt(text); setTimeout(() => composerRef.current?.focus(), 0); }}
-                />
-              </div>
-              {/* Expand stays in the tools row; Send lives on Type's right edge. */}
+              {/* Expand stays in the tools row; Send lives on the card's lower-right corner. */}
                 {!canSteerMidBuild(running, powerLevel, chatMode) && (
                   <button
                     type="button"

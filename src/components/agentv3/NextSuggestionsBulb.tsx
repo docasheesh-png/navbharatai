@@ -42,13 +42,20 @@ interface Props {
   onPick: (promptText: string) => void;
   /** Tiny corner control — fits the upper-right gap outside the + expander without enlarging the pad. */
   compact?: boolean;
+  /** Draw the list in normal flow (no bulb button). Parent decides when it is open. */
+  inline?: boolean;
+  /** With `inline`, whether the list is showing. */
+  open?: boolean;
+  /** Actionable idea count, including 0 after a fetch. Used by the Advise row badge. */
+  onCount?: (count: number) => void;
 }
 
-export function NextSuggestionsBulb({ workspaceId, ready, onPick, compact }: Props) {
+export function NextSuggestionsBulb({ workspaceId, ready, onPick, compact, inline, open: inlineOpen, onCount }: Props) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [roadmap, setRoadmap] = useState<PublicRoadmap | null>(null);
   const [open, setOpen] = useState(false);
   const [seenKey, setSeenKey] = useState<string>('');
+  const [settled, setSettled] = useState(false);
   // ♻️ refresh rotates a window through the (larger) suggestion pool, so each press shows genuinely
   // different, still-app-relevant ideas rather than re-fetching the same top few (admin 2026-08-14).
   const [offset, setOffset] = useState(0);
@@ -83,6 +90,7 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick, compact }: Pro
         setOffset(0); // a fresh build starts the rotation from the most relevant ideas
         setRoadmap(d?.roadmap && Array.isArray(d.roadmap.steps) ? (d.roadmap as PublicRoadmap) : null);
       } catch { /* a suggestion surface must never disrupt the app */ }
+      finally { if (live) setSettled(true); }
     };
     run();
     return () => { live = false; };
@@ -90,20 +98,24 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick, compact }: Pro
 
   // Close the popover on an outside click / Escape.
   useEffect(() => {
-    if (!open) return;
+    if (inline || !open) return;
     const onDown = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
-  }, [open]);
+  }, [open, inline]);
 
+  const shown = inline ? !!inlineOpen : open;
   const hasRoadmap = !!roadmap && roadmap.steps.length > 0;
-  if (suggestions.length === 0 && !hasRoadmap) return null;
-
-  // The badge counts actionable things: the one next roadmap step (if any) plus the generic ideas.
   const roadmapActionable = hasRoadmap && roadmap!.nextStep != null ? 1 : 0;
   const count = roadmapActionable + suggestions.length;
+  useEffect(() => { if (inline && settled) onCount?.(count); }, [inline, settled, count, onCount]);
+  if (!inline && suggestions.length === 0 && !hasRoadmap) return null;
+  if (inline && !shown) return null;
+  if (inline && suggestions.length === 0 && !hasRoadmap) {
+    return <p className="px-3 py-2 text-[11px] text-faint">No ideas yet.</p>;
+  }
   // "Seen" set signature — includes the roadmap's current milestone so reaching a new step re-lights it.
   const setKey = `${hasRoadmap ? `r${roadmap!.currentStep}` : ''}|${suggestions.map((s) => s.id).join('|')}`;
   const unseen = seenKey !== setKey && count > 0;
@@ -135,7 +147,8 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick, compact }: Pro
   };
 
   return (
-    <div ref={boxRef} className="relative">
+    <div ref={boxRef} className={inline ? '' : 'relative'}>
+      {!inline && (
       <button
         type="button"
         onClick={toggle}
@@ -155,9 +168,12 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick, compact }: Pro
           </span>
         )}
       </button>
+      )}
 
-      {open && (
-        <div className="absolute bottom-full right-0 mb-2 w-72 max-h-[62vh] supports-[height:100dvh]:max-h-[62dvh] overflow-y-auto rounded-xl border border-line bg-surface shadow-2xl z-50">
+      {shown && (
+        <div className={inline
+          ? 'max-h-56 overflow-y-auto border-t border-line'
+          : 'absolute bottom-full right-0 mb-2 w-72 max-h-[62vh] supports-[height:100dvh]:max-h-[62dvh] overflow-y-auto rounded-xl border border-line bg-surface shadow-2xl z-50'}>
           {/* ── ROADMAP (guided step-by-step big-app journey) ── */}
           {hasRoadmap && (
             <div className="border-b border-line">
@@ -223,7 +239,7 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick, compact }: Pro
                       <RefreshCw className="w-3.5 h-3.5" />
                     </button>
                   )}
-                  <button onClick={() => setOpen(false)} title="Close" className="p-0.5 rounded hover:bg-raised text-muted">
+                  <button onClick={() => { if (!inline) setOpen(false); }} title="Close" className={`p-0.5 rounded hover:bg-raised text-muted ${inline ? 'hidden' : ''}`}>
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>

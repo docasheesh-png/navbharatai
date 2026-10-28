@@ -5,7 +5,8 @@
 // somebody's edit, and is never overwritten. Only ever grows: a version that shipped once may still sit in a project.
 export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   "src/audio/melody.ts": [
-    "68070c18da1547d373fadc060508399c393c946110b2b1d5b23506d531c1d3a0"
+    "68070c18da1547d373fadc060508399c393c946110b2b1d5b23506d531c1d3a0",
+    "eaf6d15fa0e2c4b6b682316cd0df080333896261c14762b92966301bb56ca803"
   ],
   "src/audio/notation.ts": [
     "ee3650b678e514906539e7bac2d43c7b71610f317badde57891150a07f8e960f"

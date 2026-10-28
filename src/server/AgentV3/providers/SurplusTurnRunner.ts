@@ -1,4 +1,5 @@
 import { guardSurplusNarrative, withServiceIdentity } from './surplusNarrativeIdentity';
+import { readScopeFailure, tagScopeFailure, type ScopeFailureDiagnostic } from '../scopeFailureDiagnostic';
 import { PublicBuildEngineError, publicBuildEngineError, type PublicBuildEngineSafeReason } from '../../lib/buildEngineError';
 import { assertAiAvailable, aiMaintenanceStore, AiMaintenanceError } from '../../lib/aiMaintenance';
 import type { RunTurnParams, TurnResult, TurnRunner, TurnUsage } from '../ClaudeClient';
@@ -150,6 +151,7 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
   if (!Number.isFinite(configuredMs) || configuredMs <= 0) throw unavailable('misconfigured');
   return {
     async runTurn(params) {
+      let diagnostic: ScopeFailureDiagnostic = { stage: 'authorization', reason: 'authorization_failed' };
       if (params.signal?.aborted) throw publicError(new BuildStoppedError());
       const bound = turnDeadline(configuredMs, params.deadlineAt);
       if (bound.expired) throw publicError(new Error(BUDGET_EXHAUSTED_MESSAGE));
@@ -249,11 +251,14 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
                 resolution?.retry !== true || resolution.receiptDurablyRecorded !== true || !authority.authorizeFallback) return;
             await assertAiAvailable();
             assertActive();
-            const next = await authority.authorizeFallback(freshParams(), permit, failure);
+            const next = await authority.authorizeFallback(freshParams(), permit, failure).catch(error => {
+              throw tagScopeFailure(error, { stage: 'authorization', reason: 'authorization_failed' });
+            });
             assertActive();
             return next;
           };
           try {
+            diagnostic = { stage: 'dispatch', reason: 'dispatch_failed' };
             raw = await authority.dispatch(request, controller.signal, permit);
           } catch (error) {
             const failure: SurplusTurnFailure = Object.freeze({ stage: 'dispatch', reason: 'dispatch_failed', attempt, hasResponse: false });
@@ -263,6 +268,7 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
           }
           let result: TurnResult;
           try {
+            diagnostic = { stage: 'response_validation', reason: 'invalid_completion' };
             assertActive();
             const completion = permit.validateResponse(raw);
             checkCompletion(completion, permit, tools);
@@ -290,6 +296,7 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
           result.selectedMaxOutputTokens = permit.maxTokens;
           // A receipt rejection/unknown result is terminal. Do not repeat accounting or inference.
           if (authority.onResponse) {
+            diagnostic = { stage: 'receipt', reason: 'receipt_failed' };
             const receipt = await authority.onResponse(raw, permit, result);
             if (receipt !== undefined) result.usage.surplusReceipt = receipt;
           }
@@ -320,9 +327,9 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
         if (policyRefused || failureReason(error) === 'content_filter') throw unavailable('policy_refusal');
         // Never forward an upstream name, stack, cause, body, metadata, or even its error text.
         // Preserve an already-tagged PublicBuildEngineError (timeout / attempts_exhausted); else fold.
-        if (error instanceof PublicBuildEngineError) throw publicError(error);
+        if (error instanceof PublicBuildEngineError) throw tagScopeFailure(publicError(error), readScopeFailure(error) ?? diagnostic);
         try { console.warn('[SURPLUS_TURN] folded provider/transport failure to public build-engine boundary'); } catch { /* best-effort */ }
-        throw unavailable('terminal_fold');
+        throw tagScopeFailure(unavailable('terminal_fold'), readScopeFailure(error) ?? diagnostic);
       } finally {
         active = false;
         controller.abort();

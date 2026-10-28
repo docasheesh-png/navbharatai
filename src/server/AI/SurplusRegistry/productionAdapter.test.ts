@@ -1,5 +1,7 @@
 import { PUBLIC_BUILD_ENGINE_UNAVAILABLE } from '../../lib/buildEngineError';
 import { createHash } from 'node:crypto';
+import { admitWeakBuild } from '../../AgentV3/weakBuildAdmission';
+import { createSurplusScopeAsk } from './scopeAdmission';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ getServerDb: vi.fn(), refresh: vi.fn(), read: vi.fn(), transport: vi.fn(), factory: vi.fn(), persist: vi.fn(), reserve: vi.fn(), unattempted: vi.fn() }));
 vi.mock('../../lib/serverDb', () => ({ getServerDb: mocks.getServerDb }));
@@ -11,6 +13,7 @@ vi.mock('../../lib/aiMaintenance', () => ({ assertAiAvailable: vi.fn(async () =>
 import { createSurplusBuildSession, type SurplusReviewedState } from './buildSession';
 import { createProductionSurplusAdapter } from './productionAdapter';
 import { isSurplusReceiptDecision } from './receiptPolicy';
+import * as liveAdmission from './liveAdmission';
 const now = 1800000000000;
 function snapshot(): NonNullable<SurplusReviewedState['snapshot']> {
   return { version: 'generation', startedAt: now, observedAt: now, expiresAt: now + 300000, models: ['model-a'], offers: [{ model: 'model-a', offerId: 'offer-a', providerId: 'provider-a', available: true, healthy: true, trusted: true, providerTrustConfirmed: true, trustObservedAt: now,
@@ -35,8 +38,77 @@ function setup(extraEnv: Record<string, string> = {}) {
   return { snap, wire, adapter, make, run, env };
 }
 beforeEach(() => { vi.resetAllMocks(); vi.useFakeTimers(); vi.setSystemTime(now); });
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 describe('production Surplus adapter — live key+flag admission', () => {
+  it('the scope deadline cancels the longer session/transport attempt without retry or invented receipt', async () => {
+    const { make } = setup();
+    let dispatchedSignal: AbortSignal | undefined;
+    mocks.transport.mockImplementation((_request, signal: AbortSignal) => {
+      dispatchedSignal = signal;
+      return new Promise<never>((_, reject) => signal.addEventListener('abort', () => reject(new Error('PRIVATE_ABORT'))));
+    });
+    const session = (await make())!;
+    const result = admitWeakBuild('PRIVATE_PROMPT', createSurplusScopeAsk(session, [], [])!);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(dispatchedSignal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await result).failure).toEqual({ stage: 'deadline', reason: 'scope_timeout' });
+    expect(dispatchedSignal?.aborted).toBe(true);
+    expect(mocks.reserve).toHaveBeenCalledTimes(1);
+    expect(mocks.transport).toHaveBeenCalledTimes(1);
+    expect(mocks.persist).not.toHaveBeenCalled();
+  });
+  it.each(['reservation', 'dispatch', 'receipt'] as const)('retains %s failure through real session, public folding and scope classification', async stage => {
+    const { make } = setup();
+    if (stage === 'reservation') mocks.reserve.mockRejectedValue(new Error('PRIVATE_PILOT_ERROR'));
+    if (stage === 'dispatch') mocks.transport.mockRejectedValue(new Error('PRIVATE_HTTP_ERROR'));
+    if (stage === 'receipt') mocks.persist.mockRejectedValue(new Error('PRIVATE_RECEIPT_ERROR'));
+    const session = (await make())!;
+    const ask = createSurplusScopeAsk(session, [], [])!;
+    const result = await admitWeakBuild('PRIVATE_PROMPT', ask);
+    expect(result.failure).toEqual({ stage, reason: stage === 'reservation' ? 'reservation_failed' : `${stage}_failed` });
+    expect(result.scope).toBeNull();
+    expect(JSON.stringify(result)).not.toContain('PRIVATE_');
+    expect(mocks.reserve).toHaveBeenCalledTimes(1);
+    expect(mocks.transport).toHaveBeenCalledTimes(stage === 'reservation' ? 0 : 1);
+  });
+  it.each([false, true])('reserves and dispatches the cheapest seller when a model has multiple sellers (reversed=%s)', async reversed => {
+    const { snap, wire, env, run } = setup();
+    snap.offers[0].rates = { input: '3', output: '3' };
+    snap.offers.push({ ...snap.offers[0], providerId: 'provider-b', offerId: 'offer-b', rates: { input: '1', output: '1' } });
+    addOffer(snap, 'model-b', '5');
+    if (reversed) snap.offers.reverse();
+    const before = structuredClone(snap);
+    const evidence = liveAdmission.synthesizeLiveReviews(env, snap, now);
+    expect(evidence.capabilities.map(c => [c.model, c.providerId]).sort()).toEqual([
+      ['model-a', 'provider-a'], ['model-a', 'provider-b'], ['model-b', 'provider-a'],
+    ]);
+    expect(evidence.reviews.quality).toHaveLength(3);
+    wire.headers['x-si-provider-family'] = 'provider-b';
+    const result = await run();
+    expect(result.text).toBe('done');
+    expect(result.usage.surplusReceipt?.status).toBe('chargeable');
+    expect(mocks.reserve).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.objectContaining({ model: 'model-a', providerId: 'provider-b' }));
+    expect(mocks.transport).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ model: 'model-a', provider: 'provider-b', si_route: { objective: 'price' } }), expect.any(AbortSignal));
+    expect(mocks.reserve.mock.invocationCallOrder[0]).toBeLessThan(mocks.transport.mock.invocationCallOrder[0]);
+    expect(evidence.usageMappings.map(m => m.model).sort()).toEqual(['model-a', 'model-b']);
+    expect(evidence.tariffs.map(t => t.surplusModelId).sort()).toEqual(['model-a', 'model-b']);
+    expect(snap).toEqual(before);
+  });
+  it.each(['mapping', 'tariff'] as const)('rejects genuinely conflicting model %s evidence before reservation or HTTP', async kind => {
+    const synthesize = liveAdmission.synthesizeLiveReviews;
+    vi.spyOn(liveAdmission, 'synthesizeLiveReviews').mockImplementation((...args) => {
+      const evidence = synthesize(...args);
+      if (kind === 'mapping') evidence.usageMappings.push({ ...evidence.usageMappings[0], reviewId: 'conflicting-usage', cacheRead: 'prompt_cache_hit_tokens' });
+      else evidence.tariffs.push({ ...evidence.tariffs[0], snapshotId: 'conflicting-tariff', usdPerMillionTokens: { ...evidence.tariffs[0].usdPerMillionTokens, input: '200' } });
+      return evidence;
+    });
+    const { run } = setup();
+    await expect(run()).rejects.toThrow();
+    expect(mocks.reserve).not.toHaveBeenCalled();
+    expect(mocks.factory).not.toHaveBeenCalled();
+    expect(mocks.transport).not.toHaveBeenCalled();
+  });
   it('synthesizes live admission from key + snapshot and dispatches without Firestore review seed', async () => {
     const { run } = setup(); const result = await run();
     expect(mocks.refresh).toHaveBeenCalled();

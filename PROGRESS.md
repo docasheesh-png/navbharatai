@@ -99615,3 +99615,92 @@ All AI chat composers now share a roomy two-row writing card and wrapping contro
 Added an admin-only comparison of the existing pinned V4 Flash release and the catalog-verified V4.1 Flash 1017 release. Six shared synthetic checks cover Hindi, arithmetic, schema output, tool envelopes, consumed SSE and parsed TypeScript. Reports separate unknown usage from zero cost and use reported tokens plus reviewed catalog rates for estimates; they do not assert invoice reconciliation or full app-build quality. The production model defaults, task routing and rollout remain unchanged.
 
 Inference requires explicit reviewed-rate consent, a fixed run identity, a $2 maximum reservation, existing shared daily/monthly budget admission and a persistent global run lease. Duplicate attempts cannot dispatch again; cancellations and uncertain provider usage retain conservative booking. The admin can refresh the last saved report without starting another run. No generated code or tool is executed. The owner's local-CI and explicit-merge rules are recorded in AGENTS.md. Detailed validation and any infrastructure/live-credential blockers are recorded with the PR; no merge or production activation is implied.
+## 2026-10-27 — Six "the browser cannot import that export" reports were ONE gate judging the import graph from one turn's slice
+
+**The six rows.** Q-1378 (`IndianBikeGame`), Q-1380 (`createGame` from `gameLogic.ts`), Q-1384 and Q-1392
+(`combo` from `src/game/core/meta.ts`), Q-1427 (`DEFAULT_TOUCH_BUTTONS`, right after a repair) and Q-1446
+(`BlockWorldGame`). One user-visible failure in all six: the browser could not import a named export from a
+generated module while the build's own gates were green — Q-1392's row even records "despite typecheck and the
+project test suite passing".
+
+**Why the obvious theories were wrong, and how the real one was found.** The detection machinery is NOT missing.
+`ImportExportAnalysis` already flags a type-only export read as a value (`cap.runtime !== 'erased'`), so the
+classic "tsc is happy, the bundler is not" case is covered. `writeTimeImportCheck` fires while the agent still
+holds the file, and a project-wide incremental `tsc` runs on **every** TypeScript write. Each of those was
+checked and cleared before the cause was named.
+
+**ROOT CAUSE, measured.** The MISSING-EXPORT GATE in `routes/agentv3.ts` built its analysis map from
+`Object.fromEntries(writtenFiles)` — THIS turn's writes alone. `analyzeImportExports` skips an import whose
+target is not in the map (`if (!target) continue`) and never examines a target nobody in the map imports. So a
+mismatch whose two halves were authored in DIFFERENT turns was invisible to the one gate whose entire job is
+that class. Measured against the real analyzer, not assumed:
+
+| analysis map | mismatches |
+|---|---|
+| the importer only (`src/game/App.tsx`) | **0** |
+| the target only (`src/game/core/meta.ts`) | **0** |
+| both | **1**, named correctly |
+
+That is the six reports' signature exactly — and it explains Q-1427's "after a repair", because a repair pass
+rewrites one of the two files and leaves the other untouched.
+
+**THE CLASS.** A consistency check must not judge a cross-file contract from the writer's own slice. The route
+itself already says so a few hundred lines below the gate — *"an edit turn's writes are a slice — the player the
+first build wrote is in a file this turn never touched"* — and composes
+`{ ...loadWorkspaceFiles(), ...Object.fromEntries(writtenFiles) }` wherever it needs a whole-project fact. The
+scoping had simply been pushed one stage too early: "regenerate only OUR files" is a **repair** rule, and it had
+been applied to **detection**.
+
+**THE FIX.** The gate loads the workspace once and overlays the fresher captured writes. Detection scope widens;
+**repair scope is unchanged** — only files this build wrote are ever regenerated, so the change adds no new write
+surface. A target this build did not write is now **reported** instead of dropped in silence, as a warning that
+does not flip the turn's verdict (the defect predates the turn).
+
+**Siblings hunted across the whole repo.** The other `analyzeImportExports` callers are correctly scoped and were
+left alone: `ToolDispatcher` passes the workspace snapshot's sources, `WorkspaceHealth` and
+`ImportExportReconcile` take whole file sets, and `writeTimeImportCheck` reads each import target on demand. This
+gate was the only narrow one — reported as measured rather than inflated into a sweep.
+
+**Locked by** `tests/aMissingExportIsNotJudgedFromOneTurnsSlice.test.ts`: three behavioural cases against the real
+analyzer (importer-only, target-only, both) plus a source guard that fails the moment this gate — or a new sibling
+in the same route — is handed `analyzeImportExports(Object.fromEntries(writtenFiles))` again. **Proven by
+reversion:** with the slice restored, two of the six fail.
+
+**Honest limits, stated rather than papered over.**
+- The six builds' sandboxes are gone, so **no individual instance can be re-run**. What is proven is that this
+  hole is present in the code and produces exactly this signature. The rows record that distinction.
+- **OPEN root cause Q-2270:** the gate can now SEE a cross-turn mismatch but still cannot repair one, because
+  `writtenFiles` is its only proof that a file is ours to rewrite. Widening the repair set is a write-surface
+  decision (it could reach a file the user hand-wrote in an earlier session), so it was left for the admin with
+  three options and a recommendation rather than widened silently.
+
+## 2026-10-28 — Surplus model contracts do not multiply with sellers
+
+The live admission synthesizer generated model-scoped usage mappings and tariffs once per
+(model, provider) pair. The production adapter correctly requires exactly one applicable
+contract per model, so multiple sellers made binding fail before reservation or transport.
+The synthesizer now enumerates distinct models for those two contracts only. Capabilities,
+quality evidence, seller offers/rates, tariff values/provenance and strict ambiguity rejection
+remain unchanged. The observer's pair-based quality evidence is intentionally seller-scoped.
+
+Regression proof on unchanged production source: the real buildSession-to-productionAdapter
+path failed both multi-seller orderings (2 failed, 19 passed). With the fix, all 21 Surplus
+registry test files / 573 tests passed. The regression checks cheapest-seller selection,
+reservation before mocked transport, chargeable receipt, unchanged snapshot, and rejection
+of genuinely conflicting mapping/tariff evidence before reservation or transport. No live
+provider call was used. Complete final-source local gates are recorded separately; real
+Firestore drills remain blocked by the environment proxy's CONNECT 403. This entry does not
+claim deployment, live provider attribution, completion of the older cumulative patch, or
+resolution of a specific production incident.
+
+## 2026-10-28 — Scope preflight diagnostic repair (separate from merged binding fix)
+
+Current base is merged main 69f59defd (the distinct-model contract fix remains intact). The post-deployment scope-unavailable canary did not reach coding diagnostics. Its exact historical provider/reservation cause remains unverified. Admin blank details are reproduced: AGENTV3_DISCOUNT_SCOPE_CALL supplied only ok/model/latency/token fields, while persistedAuditEntry derives message from a different fixed key list and Monitor renders only message.
+
+This branch adds safe request correlation and a readable scope-call summary, plus fixed-enum scope-unavailable diagnostics distinguishing invalid request/output, classifier error, the unchanged five-second scope deadline, and observed authorization/reservation/dispatch/response-validation/receipt failures. Native errors remain folded at the public boundary; internal metadata uses WeakMap identity, never upstream text/properties. The 60-second transport and 120-second session ceilings are unchanged. No financial guard, tariff, receipt decision, retry authority, reservation or quarantine state is changed.
+
+The existing private FailedBR MCP read gate exposes list_scope_failures as an allowlisted projection of only this event, paginated by document ID with at most 51 reads per request. Storage errors remain errors; audit retention is best effort and empty pages are not proof of success. No coding-build report is fabricated and existing history/scoring is untouched. Documentation and the app knowledge entry describe the new read tool. Tests cover privacy, access, pagination, abort/error/output distinctions and real buildSession/productionAdapter paths with mocked provider I/O. Focused verification: 164 tests passed; full final-source local workflow evidence will be kept outside the repository. The locked emulator remains unavailable due the previously observed proxy denial; no prohibited retry or paid provider call was made. This entry does not claim release or end-to-end inference success.
+
+### Scope diagnostic verification follow-up
+
+Independent review requested the neutral reservation_failed enum because an uncertain datastore exception cannot prove a reservation was rejected or never committed; corrected without changing guards. The completed preliminary full suite had 47,496 passes, two chat-handler branch-budget failures and 85 suite-declared skips; build/bundle/boot/production-dependency gates passed. Diagnostic formatting and conditional logging were then extracted into explicitly projected, synchronous helpers, preserving the unchanged 537 branch budget. All 172 focused tests, including that guard, passed. Independent review approved the extraction. Final exact-source workflow results remain in external CI evidence; no historical inference success is claimed.

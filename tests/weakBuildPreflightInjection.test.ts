@@ -44,7 +44,7 @@ describe('Weak preflight classifier injection', () => {
     await vi.advanceTimersByTimeAsync(WEAK_SCOPE_TIMEOUT_MS - 1);
     expect(signal?.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    expect(await pending).toEqual({ scope: null, source: 'unavailable' });
+    expect(await pending).toEqual({ scope: null, source: 'unavailable', failure: { stage: 'deadline', reason: 'scope_timeout' } });
     expect(signal?.aborted).toBe(true);
     expect(ask).toHaveBeenCalledTimes(1);
     expect(weakBuildAdmissionAsk).not.toHaveBeenCalled();
@@ -52,7 +52,7 @@ describe('Weak preflight classifier injection', () => {
 
   it('fails closed on an injected classifier error without retrying or using legacy', async () => {
     const ask = vi.fn().mockRejectedValue(new Error('session unavailable'));
-    expect(await weakAdmissionForTurn(input, ask)).toEqual({ scope: null, source: 'unavailable' });
+    expect(await weakAdmissionForTurn(input, ask)).toEqual({ scope: null, source: 'unavailable', failure: { stage: 'classification', reason: 'classifier_failed' } });
     expect(ask).toHaveBeenCalledTimes(1);
     expect(weakBuildAdmissionAsk).not.toHaveBeenCalled();
   });

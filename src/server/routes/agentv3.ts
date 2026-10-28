@@ -713,6 +713,7 @@ import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, fleetEmptyBasisNote, etaTaskKey, etaBuildKind, type EtaBuildKind } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { scopeCallAudit, recordScopeFailure } from '../lib/scopeFailureReports';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess, summaryAfterRescue } from '../AgentV3/renderRescue';
 import { entryIsStillTheStarter, starterRenderNote, importNeverTheStarter } from '../AgentV3/stillTheStarterApp';
@@ -11353,6 +11354,7 @@ async function noteBuildOutcome(
     const earlySurplusTurns: Array<import('../AgentV3/ClaudeClient').TurnResult> = [];
     const earlySurplusRecords: Array<Omit<import('../AgentV3/BuildDiagnostics').LlmCallRecord, 'ts'>> = [];
     let earlySurplusFailure: unknown;
+    const scopeRequestId = randomUUID();
     // Buffered until buildDiag exists later (module keeps Weak-only + report branches out of this handler — TS2563).
     let surplusAdmissionDiag: SurplusAdmissionDiag | undefined;
     // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders. Branches live in surplusChatAdmission.
@@ -11361,7 +11363,7 @@ async function noteBuildOutcome(
       intent,
       hasImportIntent,
       prompt,
-      buildId: randomUUID(),
+      buildId: scopeRequestId,
       tierEngineAvailable: () => tierEngineAvailable(powerLevelReqEffective),
       audit,
     });
@@ -11378,8 +11380,9 @@ async function noteBuildOutcome(
     // Scope is checked before sandbox/setup. Imports need their files inspected and keep the import pipeline.
     const weakAdmission = await weakAdmissionForTurn({ prompt, intent, importing: hasImportIntent, tier: powerLevelReqEffective },
       createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
-        audit('AGENTV3_DISCOUNT_SCOPE_CALL', { ok: row.ok, model: row.model, latencyMs: row.latencyMs, inputTokens: row.inputTokens, outputTokens: row.outputTokens }, 'info');
+        audit('AGENTV3_DISCOUNT_SCOPE_CALL', scopeCallAudit(scopeRequestId, intentWorkspaceId, row), 'info');
       }, error => { earlySurplusFailure = error; }));
+    recordScopeFailure(scopeRequestId, intentWorkspaceId, weakAdmission, audit);
     const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(
       req.body.weakForceContinue, powerLevelReqEffective, weakAdmission,
     );
@@ -20374,13 +20377,34 @@ async function noteBuildOutcome(
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
       ) {
         try {
-          const analyzeTargets = async (): Promise<ExportRegenTarget[]> => {
-            const map = Object.fromEntries(writtenFiles);
+          // 🔴 DETECTION SCOPE IS NOT REPAIR SCOPE (Q-1378, Q-1380, Q-1384, Q-1392, Q-1427, Q-1446 — six
+          // reports, 2026-10-27). This map used to be `Object.fromEntries(writtenFiles)`: THIS turn's slice.
+          // `analyzeImportExports` skips an import whose target is not in the map (`if (!target) continue`),
+          // and a target nobody in the map imports, so a mismatch whose two halves were written in DIFFERENT
+          // turns was invisible. Measured against the real analyzer: importer-only → 0 mismatches,
+          // target-only → 0, both → 1. That is exactly the six reports' signature — the browser failed on a
+          // named export while this gate was green, including right after a repair rewrote one of the two
+          // files. The workspace is read ONCE and overlaid with the fresher captured writes, the same
+          // composition `adFactsNow` and the end-of-build save already use: an edit turn's writes are a slice.
+          const exportGateBase = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+          const analyzeTargets = async (): Promise<{ ours: ExportRegenTarget[]; foreign: ExportRegenTarget[] }> => {
+            const map = { ...exportGateBase, ...Object.fromEntries(writtenFiles) };
             const rep = await analyzeImportExports(map);
-            // Regenerate only OUR written targets (never a scaffold/read-only file).
-            return exportRegenTargets(rep, new Set(Object.keys(map))).filter((t) => writtenFiles.has(t.target));
+            const all = exportRegenTargets(rep, new Set(Object.keys(map)));
+            // Regenerate only OUR written targets (never a scaffold/read-only file) — REPAIR scope is
+            // deliberately unchanged, so widening detection adds no new write surface. A target this build
+            // did not write is still REPORTED instead of dropped in silence: it is the real reason the app's
+            // import fails. It never flips THIS turn's verdict, because the defect predates this turn.
+            return {
+              ours: all.filter((t) => writtenFiles.has(t.target)),
+              foreign: all.filter((t) => !writtenFiles.has(t.target)),
+            };
           };
-          let targets = await analyzeTargets();
+          const firstPass = await analyzeTargets();
+          if (firstPass.foreign.length > 0) {
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'MISSING_EXPORT_DETECTED', message: `${firstPass.foreign.length} file(s) this build did not write are missing exports that other files import — the app's import fails at runtime. A follow-up turn can rewrite them:\n${exportRegenInstruction(firstPass.foreign)}`, autoResolved: false });
+          }
+          let targets = firstPass.ours;
           if (targets.length > 0) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'MISSING_EXPORT_DETECTED', message: `${targets.length} file(s) are missing exports that other files import (the build fails):\n${exportRegenInstruction(targets)}`, autoResolved: false });
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 ${targets.length} file(s) are missing an export another file needs — regenerating them…`, ts: Date.now() });
@@ -20407,7 +20431,7 @@ async function noteBuildOutcome(
             } catch (e) {
               console.log(`[AGENTV3] missing-export gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
             }
-            targets = await analyzeTargets();
+            targets = (await analyzeTargets()).ours;
             if (targets.length === 0) {
               buildDiag.record({ phase: 'build', severity: 'info', code: 'MISSING_EXPORT_HEALED', message: 'All previously-missing exports were restored — every local import now resolves to a real binding.', autoResolved: true });
               events.emit({ type: 'narration', agent: 'architect', text: '✅ Restored the missing exports — the imports resolve now.', ts: Date.now() });

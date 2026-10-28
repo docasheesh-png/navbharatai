@@ -137,6 +137,19 @@
 }
 
 /* —— Pro surface: Type first (with Send on its right), tools below, no divider —— */
+.nb-composer-box .nb-mode-menu.absolute.bottom-full {
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  /* Measured from the composer. The shared 72px pin lands on the input. */
+  bottom: var(--nb-mode-bottom, calc(var(--nb-composer-menu-bottom, 72px) + 8px)) !important;
+  max-height: var(--nb-mode-max, min(42dvh, 380px)) !important;
+}
+
+.nb-composer-box .nb-mode-menu.absolute.bottom-full[data-advise-open="true"] {
+  height: var(--nb-mode-height, auto) !important;
+}
+
 .nb-composer-box[data-composer-surface="pro"] {
   margin-top: 4px;
   margin-bottom: 4px;

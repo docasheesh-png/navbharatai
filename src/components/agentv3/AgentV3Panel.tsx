@@ -1,5 +1,5 @@
 import { COMPOSER_BOX_CLASS, COMPOSER_TEXTAREA_CLASS, MobileComposerTools, resizeMobileComposer } from '../chat/ComposerShell';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ServiceRecommendationCard } from './ServiceRecommendationCard';
 import { offerWatchLive } from './earlyPreviewCue';
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
@@ -213,6 +213,34 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [adviseIdeasOpen, setAdviseIdeasOpen] = useState(false);
   const [adviseCount, setAdviseCount] = useState(0);
+  const modeMenuRef = useRef<HTMLDivElement | null>(null);
+  // The shared menu pin is 72px, which is the tab bar, so a tall menu lands on the input and
+  // drags Plan down onto it. Measure the composer and stop the menu at its top edge.
+  useLayoutEffect(() => {
+    if (!modeMenuOpen) return;
+    const place = () => {
+      const menu = modeMenuRef.current;
+      const box = menu?.closest('.nb-composer-box') as HTMLElement | null;
+      if (!menu || !box) return;
+      const top = box.getBoundingClientRect().top;
+      const vv = window.visualViewport;
+      const fromLayoutTop = (vv?.offsetTop ?? 0) + top;
+      const maxPx = Math.max(200, Math.round(top - 12));
+      menu.style.setProperty('--nb-mode-bottom', `${Math.max(0, Math.round(window.innerHeight - fromLayoutTop + 8))}px`);
+      menu.style.setProperty('--nb-mode-max', `${maxPx}px`);
+      // Only take the full gap when the list is actually taller than the room above the input.
+      // Plan stays the footer either way, so it cannot fall onto the box.
+      menu.style.setProperty('--nb-mode-height', menu.scrollHeight > maxPx ? `${maxPx}px` : 'auto');
+    };
+    place();
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', place);
+    window.addEventListener('resize', place);
+    return () => {
+      vv?.removeEventListener('resize', place);
+      window.removeEventListener('resize', place);
+    };
+  }, [modeMenuOpen, adviseIdeasOpen]);
   // Plan/Advise (read-only lanes) run on their OWN request, fully DECOUPLED from the build stream, so
   // they can be sent ANYTIME — even WHILE a build is running (the whole point of the model) — and can
   // never clobber the live build's state. `roleBusy` is their own in-flight flag (independent of the
@@ -5714,7 +5742,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   <>
                     {/* outside-click catcher */}
                     <div className="fixed inset-0 z-10" onClick={() => setModeMenuOpen(false)} />
-                    <div className="absolute bottom-full left-0 mb-2 z-20 w-60 bg-card border border-line rounded-lg shadow-xl p-1.5 space-y-0.5">
+                    <div
+                      ref={modeMenuRef}
+                      data-advise-open={adviseIdeasOpen ? 'true' : 'false'}
+                      className="nb-mode-menu absolute bottom-full left-0 mb-2 z-20 w-60 bg-card border border-line rounded-lg shadow-xl"
+                    >
+                      <div className="flex items-center justify-end px-1.5 pt-1">
+                        <button
+                          type="button"
+                          aria-label="Close"
+                          title="Close"
+                          onClick={() => { setAdviseIdeasOpen(false); setModeMenuOpen(false); }}
+                          className="h-9 w-9 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-raised"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="p-1.5 space-y-0.5">
                       {([['build', 'Build', '🔨'], ['planner', 'Plan', '🧠']] as const).map(([m, label, icon]) => (
                         <button
                           key={m}
@@ -5754,20 +5798,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                           <span className="ml-auto min-w-[15px] h-[15px] px-1 rounded-full bg-amber-500 text-[9px] font-black text-zinc-950 flex items-center justify-center">{adviseCount}</span>
                         )}
                       </button>
-                      <NextSuggestionsBulb
-                        inline
-                        open={adviseIdeasOpen}
-                        onCount={setAdviseCount}
-                        workspaceId={expectedWorkspaceId()}
-                        ready={!!state.done && !running}
-                        onPick={(text) => { setPrompt(text); setAdviseIdeasOpen(false); setModeMenuOpen(false); setTimeout(() => composerRef.current?.focus(), 0); }}
-                      />
-                      {/* …and the plan itself, expandable right here. Kept INSIDE the menu rather than
-                          opening another panel: the user asked to see it "jab chahe", and a second
-                          surface to dismiss is the opposite of that. Bounded height with its own
-                          scroll so a 20-step plan cannot grow the menu off the screen. */}
+                      </div>
+                      {adviseIdeasOpen && (
+                        <div className="nb-mode-ideas min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-line">
+                          <NextSuggestionsBulb
+                            inline
+                            open
+                            onCount={setAdviseCount}
+                            workspaceId={expectedWorkspaceId()}
+                            ready={!!state.done && !running}
+                            onPick={(text) => { setPrompt(text); setAdviseIdeasOpen(false); setModeMenuOpen(false); setTimeout(() => composerRef.current?.focus(), 0); }}
+                          />
+                        </div>
+                      )}
+                      {/* Last block: with the menu pinned above the input, Plan stays there.
+                          Advise scrolls above it and cannot push this strip down onto the box. */}
                       {state.todos.length > 0 && (
-                        <div className="mt-1 border-t border-line pt-1">
+                        <div className="nb-mode-plan shrink-0 border-t border-line bg-card px-1.5 py-1">
                           <button
                             type="button"
                             onClick={() => setMenuPlanOpen((v) => !v)}

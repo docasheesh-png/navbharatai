@@ -99732,3 +99732,14 @@ Parent explicitly selected this fresh continuation and authorized a conditional 
 ### 2026-10-28 — Preserve #3987 melody behavior and register its generated version
 
 Parent authorized the narrow release-blocking baseline consistency repair. #3987 intentionally adds MelodyPlayer.playTune as an alias of play; the source behavior is preserved. The existing kit-history census reproduced a missing current version for src/audio/melody.ts. Running the documented `node scripts/gameKitHistory.mjs` added exactly one canonical SHA-256, `2e62430e44b136d1a93e85b074fe29f3b59caef82a47d2e01dd656a074a5fa55`, retaining every prior path/hash. A second generation added zero versions. The existing history and melody suites then passed all 86 tests. No assertion was changed to accept an unexplained hash, and no generator source or audio behavior was redesigned.
+
+### 2026-10-28 — Preserve the complete empty-test census under aggregate coverage
+
+The unchanged repository census passed in isolation but failed at approximately 20.4 seconds during aggregate coverage, matching Vitest's default 20-second per-test deadline. Its workload was every discovered test file inside one test. The census now gives each discovered file its own case, retaining the same discovery roots/extensions/exclusions, AST detector and empty-offender assertion; no timeout was increased and no file was exempted. All 3,141 resulting cases passed. Injected empty-test/empty-loop offenders in TS, TSX, JS and MJS each failed their census case and were removed afterward. This removes whole-corpus deadline pressure; the exact full aggregate gate is still required on the frozen final source and is recorded separately.
+
+### Census scheduling refinement before release
+
+The per-file census cases preserved detection but caused excessive aggregate-run bookkeeping (a worker remained busy beyond eight minutes). That attempt was stopped and superseded by contiguous batches of at most 128 discovered files per test. Discovery, AST detection, offender mapping and assertions are unchanged; every file belongs to exactly one batch, no timeout was raised and no file was exempted. Injected empty test/loop offenders across src/tests and TS/TSX/JS/MJS were all rejected. The exact full aggregate gate is rerun on this final bounded-batch source; the interrupted runs are not claimed as passing.
+
+
+Census evidence clarification: worker elapsed time alone does not identify its active test, so the earlier attribution of the slow aggregate run specifically to per-file bookkeeping was an inference, not a measured profile. The final batch design bounds parser work per test and avoids thousands of cases without relying on that attribution. The observed whole-corpus failure was at the configured deadline, the unchanged isolated census passed, and the final aggregate result remains the deciding evidence.

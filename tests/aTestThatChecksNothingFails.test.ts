@@ -163,8 +163,14 @@ describe('a test that checks nothing fails', () => {
     },
   );
 
-  it('CENSUS: no test file has an empty test or an empty loop', () => {
-    const offenders = testFiles().flatMap((f) => emptyTestBodies(readFileSync(f, 'utf8'), f).map((h) => `${f}: ${h}`));
+  // Preserve the entire census and its detector/assertion, while bounding work per test.
+  // One whole-repository case crossed the 20-second default under coverage; thousands of
+  // per-file cases multiply runner bookkeeping. Contiguous batches keep both bounded.
+  const files = testFiles();
+  const batches = Array.from({ length: Math.ceil(files.length / 128) }, (_, index) =>
+    [index + 1, files.slice(index * 128, (index + 1) * 128)] as const);
+  it.each(batches)('CENSUS: batch %i has no empty test or empty loop', (_batch, paths) => {
+    const offenders = paths.flatMap((file) => emptyTestBodies(readFileSync(file, 'utf8'), file).map((finding) => `${file}: ${finding}`));
     expect(offenders).toEqual([]);
   });
 });

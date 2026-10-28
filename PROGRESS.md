@@ -99687,3 +99687,15 @@ provider call was used. Complete final-source local gates are recorded separatel
 Firestore drills remain blocked by the environment proxy's CONNECT 403. This entry does not
 claim deployment, live provider attribution, completion of the older cumulative patch, or
 resolution of a specific production incident.
+
+## 2026-10-28 — Scope preflight diagnostic repair (separate from merged binding fix)
+
+Current base is merged main 69f59defd (the distinct-model contract fix remains intact). The post-deployment scope-unavailable canary did not reach coding diagnostics. Its exact historical provider/reservation cause remains unverified. Admin blank details are reproduced: AGENTV3_DISCOUNT_SCOPE_CALL supplied only ok/model/latency/token fields, while persistedAuditEntry derives message from a different fixed key list and Monitor renders only message.
+
+This branch adds safe request correlation and a readable scope-call summary, plus fixed-enum scope-unavailable diagnostics distinguishing invalid request/output, classifier error, the unchanged five-second scope deadline, and observed authorization/reservation/dispatch/response-validation/receipt failures. Native errors remain folded at the public boundary; internal metadata uses WeakMap identity, never upstream text/properties. The 60-second transport and 120-second session ceilings are unchanged. No financial guard, tariff, receipt decision, retry authority, reservation or quarantine state is changed.
+
+The existing private FailedBR MCP read gate exposes list_scope_failures as an allowlisted projection of only this event, paginated by document ID with at most 51 reads per request. Storage errors remain errors; audit retention is best effort and empty pages are not proof of success. No coding-build report is fabricated and existing history/scoring is untouched. Documentation and the app knowledge entry describe the new read tool. Tests cover privacy, access, pagination, abort/error/output distinctions and real buildSession/productionAdapter paths with mocked provider I/O. Focused verification: 164 tests passed; full final-source local workflow evidence will be kept outside the repository. The locked emulator remains unavailable due the previously observed proxy denial; no prohibited retry or paid provider call was made. This entry does not claim release or end-to-end inference success.
+
+### Scope diagnostic verification follow-up
+
+Independent review requested the neutral reservation_failed enum because an uncertain datastore exception cannot prove a reservation was rejected or never committed; corrected without changing guards. The completed preliminary full suite had 47,496 passes, two chat-handler branch-budget failures and 85 suite-declared skips; build/bundle/boot/production-dependency gates passed. Diagnostic formatting and conditional logging were then extracted into explicitly projected, synchronous helpers, preserving the unchanged 537 branch budget. All 172 focused tests, including that guard, passed. Independent review approved the extraction. Final exact-source workflow results remain in external CI evidence; no historical inference success is claimed.

@@ -4,6 +4,17 @@ Open `https://navbharatai.com/failedbr` and use the existing admin login (includ
 
 ## Read from an AI client
 
+Pre-coding scope failures are separate from coding-build reports. The authenticated MCP
+`list_scope_failures` tool accepts a `workspaceId`, optional epoch-millisecond `since`,
+`limit` (1–50) and `cursor`. Follow `nextCursor` until null, including empty filtered
+pages; ordering is by document ID, not date. It returns only request correlation,
+timestamp and fixed stage/reason enums from retained scope-failure audits. It cannot
+read arbitrary logs, credentials, prompts or provider responses. Missing historical
+records do not prove success, and no supplier expense is inferred from these diagnostics.
+Admin Server logs show the same `AGENTV3_SCOPE_UNAVAILABLE` request ID and reason.
+The five-second scope deadline is unchanged; a deadline failure is distinct from
+invalid classifier output or an observed authorization/reservation/dispatch/response/receipt failure.
+
 ### OAuth: ChatGPT, Claude, and other compatible remote MCP clients
 
 1. In the AI client's custom MCP settings, use `https://navbharatai.com/api/v1/failedbr/mcp` and select **OAuth**. In ChatGPT: Plugins → + → Add custom MCP server → Create MCP App. Leave advanced OAuth fields at discovered defaults. Use the MCP endpoint, not the `/failedbr` HTML dashboard.

@@ -1,4 +1,5 @@
 import { surplusUnattemptedEvidence } from './failureEvidence';
+import { tagScopeFailure } from '../../AgentV3/scopeFailureDiagnostic';
 import { createHash } from 'node:crypto';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { getServerDb } from '../../lib/serverDb';
@@ -110,12 +111,13 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
       const selection = recheck();
       record.startedAt = now; // An uncertain call cannot be replayed, including a transport failure.
       const db = getServerDb();
-      if (!db || typeof permit.estimatedMicroUsd !== 'string' || !/^[0-9]{1,18}(?:\.[0-9]{1,6})?$/.test(permit.estimatedMicroUsd)) throw new Error('Surplus durable reservation unavailable');
+      if (!db || typeof permit.estimatedMicroUsd !== 'string' || !/^[0-9]{1,18}(?:\.[0-9]{1,6})?$/.test(permit.estimatedMicroUsd)) throw tagScopeFailure(new Error('Surplus durable reservation unavailable'), { stage: 'reservation', reason: 'reservation_failed' });
       const dispatchEnv = { ...env };
-      await reserveSurplusAttempt(db, { buildId: permit.buildId, callId: permit.callId, accountId: record.config.account.accountId,
+      try { await reserveSurplusAttempt(db, { buildId: permit.buildId, callId: permit.callId, accountId: record.config.account.accountId,
         credentialSha256: record.config.account.credentialSha256, model: permit.model, providerId: permit.providerId,
         endpoint: permit.endpoint, policyVersion: permit.policyVersion, priceGeneration: permit.priceGeneration,
         estimatedMicroUsd: selection.estimatedMicroUsd, controlRevision: record.state.snapshot?.controlRevision ?? 0, reviewRevision: record.config.revision, pilot: record.config.pilot, now });
+      } catch (error) { throw tagScopeFailure(error, { stage: 'reservation', reason: 'reservation_failed' }); }
       // Reservation I/O may outlive review validity or observe a credential rotation. Fail closed.
       assertLive(env);
       reviewedEvidence(record.config, record.review, Date.now());

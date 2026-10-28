@@ -27,4 +27,14 @@ describe('private failed-report page', () => {
     expect(isFailedBuildPage({ reports: [], nextCursor: null, scanned: 2 })).toBe(true);
     expect(isFailedBuildPage({ reports: [{ workspaceId: 4 }], nextCursor: null, scanned: 2 })).toBe(false);
   });
+  it('shares the complete newest-first list with the admin panel without duplicating access controls', () => {
+    const html = renderToStaticMarkup(<FailedBuildReportsPage token="private-token" onLogout={() => {}} embedded />);
+    expect(html).toContain('Failed BR');
+    expect(html).toContain('newest build first');
+    expect(html).toContain('href="https://navbharatai.com/failedbr"');
+    expect(html).not.toContain('Create read-only credential');
+    expect(html).not.toContain('private-token');
+    const dashboard = readFileSync('src/components/AdminDashboard.tsx', 'utf8');
+    expect(dashboard).toContain('<FailedBuildReportsPage token={adminToken} onLogout={onLogout} embedded />');
+  });
 });

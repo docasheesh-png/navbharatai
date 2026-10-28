@@ -1,21 +1,22 @@
-import { useBuildReportNumbers } from '../../hooks/useBuildReportNumbers';
 import { BuildReportNumber } from './BuildReportNumber';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import { FailedReportOAuthConsent } from './FailedReportOAuthConsent';
 import { FailedReportAutopsyEditor } from './FailedReportAutopsyEditor';
-import { isFailedBuildPage, type FailedBuildPage, type FailedReportAccess } from '../../lib/failedBuildReports';
+import { type FailedBuildPage, type FailedReportAccess } from '../../lib/failedBuildReports';
+import { FAILED_REPORTS_REFRESH_MS, loadFailedBuildReports } from '../../lib/loadFailedBuildReports';
+import { usePagedList } from '../../hooks/usePagedList';
+import { LoadMore } from '../common/LoadMore';
 
 const API = '/api/v1/failedbr';
 const ACCESS = '/api/v1/admin/failedbr/access';
 const button = 'rounded-xl border border-line bg-card px-4 py-2 text-ink disabled:opacity-50';
 
-export function FailedBuildReportsPage({ token, onLogout }: { token: string; onLogout: () => void }) {
+export function FailedBuildReportsPage({ token, onLogout, embedded = false }: { token: string; onLogout: () => void; embedded?: boolean }) {
   const [page, setPage] = useState<FailedBuildPage | null>(null);
-  const listReports = page?.reports;
-  const listAlreadyNumbered = !!listReports?.length && listReports.every(r => r.numbering && r.numbering.ordinal !== null && r.numbering.ordinal !== undefined);
-  const hookReports = useBuildReportNumbers(listAlreadyNumbered ? undefined : listReports, 'failed', token);
-  const numberedReports = listAlreadyNumbered ? listReports! : hookReports;
+  // Each server batch already includes numbering. Do not repost the full inventory to
+  // the separate metadata endpoint, whose failed-report request limit is 50 references.
+  const visibleReports = usePagedList(page?.reports, { resetKey: token });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<unknown>(null);
@@ -29,12 +30,18 @@ export function FailedBuildReportsPage({ token, onLogout }: { token: string; onL
   const [message, setMessage] = useState('');
   const epoch = useRef(0);
   const busyRef = useRef(false);
-  const cursorRef = useRef<string | undefined>(undefined);
+  const listController = useRef<AbortController | null>(null);
+  const completeRef = useRef(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const request = useCallback(async (url: string, init?: RequestInit): Promise<unknown> => {
+    const current = epoch.current;
     const res = await fetch(url, { ...init, cache: 'no-store', headers: { ...adminHeaders(token), 'Content-Type': 'application/json' } });
     if (!res.ok) {
       if (res.status === 401) {
-        setPage(null); setReport(null); setSelected(null); setAccess([]); setCredential('');
+        if (current === epoch.current) {
+          reportSequence.current++; completeRef.current = false; setUpdatedAt(null);
+          setPage(null); setReport(null); setSelected(null); setAccess([]); setCredential('');
+        }
         throw new Error('Admin sign-in expired. Sign out and sign in again.');
       }
       const data = await res.json().catch(() => null) as { error?: unknown } | null;
@@ -42,16 +49,19 @@ export function FailedBuildReportsPage({ token, onLogout }: { token: string; onL
     }
     return res.json();
   }, [token]);
-  const load = useCallback(async (cursor?: string, preserveSelection = false) => {
+  const load = useCallback(async () => {
     if (busyRef.current) return;
     busyRef.current = true; setBusy(true); setError('');
     const current = epoch.current;
+    const controller = new AbortController();
+    listController.current = controller;
     try {
-      const data = await request(`${API}/reports${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
-      if (!isFailedBuildPage(data)) throw new Error('The server returned an unreadable report list.');
+      const data = await loadFailedBuildReports(request, controller.signal, progress => {
+        // Keep the last complete inventory visible during a background refresh.
+        if (current === epoch.current && !completeRef.current) setPage(progress);
+      });
       if (current === epoch.current) {
-        cursorRef.current = cursor; setPage(data);
-        if (!preserveSelection) { reportSequence.current++; setReport(null); setSelected(null); }
+        completeRef.current = true; setPage(data); setUpdatedAt(Date.now());
       }
     } catch (e) { if (current === epoch.current) setError(e instanceof Error ? e.message : 'Could not load reports.'); }
     finally { if (current === epoch.current) { busyRef.current = false; setBusy(false); } }
@@ -63,11 +73,18 @@ export function FailedBuildReportsPage({ token, onLogout }: { token: string; onL
     if (current === epoch.current) setAccess(data.access as FailedReportAccess[]);
   }, [request]);
   useEffect(() => {
-    epoch.current++; reportSequence.current++; busyRef.current = false; setPage(null); setReport(null); setSelected(null); setCredential('');
-    void load(); void loadAccess().catch((e) => setError(e.message));
-    const timer = window.setInterval(() => { void load(cursorRef.current, true); }, 60_000);
-    return () => { epoch.current++; window.clearInterval(timer); };
-  }, [load, loadAccess]);
+    epoch.current++; reportSequence.current++; busyRef.current = false; completeRef.current = false;
+    setPage(null); setReport(null); setSelected(null); setCredential(''); setAccess([]); setUpdatedAt(null);
+    const current = epoch.current;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      await load();
+      if (current === epoch.current) timer = setTimeout(() => { void refresh(); }, FAILED_REPORTS_REFRESH_MS);
+    };
+    void refresh();
+    if (!embedded) void loadAccess().catch((e) => { if (current === epoch.current) setError(e.message); });
+    return () => { epoch.current++; listController.current?.abort(); clearTimeout(timer); };
+  }, [load, loadAccess, embedded]);
   const openReport = async (workspaceId: string, historyId: string) => {
     const current = epoch.current, sequence = ++reportSequence.current; setError(''); setReport(null); setSelected(null);
     try {
@@ -98,25 +115,26 @@ export function FailedBuildReportsPage({ token, onLogout }: { token: string; onL
   };
   return <section className="w-full max-w-6xl mx-auto space-y-6 text-body" aria-label="Private failed build reports">
     <header className="flex flex-wrap items-center justify-between gap-4">
-      <div><p className="text-sm text-muted">Private · Admin access</p><h1 className="text-3xl font-serif text-ink">Failed build reports</h1></div>
-      <div className="flex gap-2"><a href="https://navbharatai.com/admin" className={button}>Admin console</a><button className={button} onClick={onLogout}>Sign out</button></div>
+      <div><p className="text-sm text-muted">Private · Admin access</p>{embedded ? <h2 className="text-2xl font-serif text-ink">Failed BR — all retained failures</h2> : <h1 className="text-3xl font-serif text-ink">Failed build reports</h1>}</div>
+      {embedded ? <a href="https://navbharatai.com/failedbr" className={button}>Open Failed BR</a> : <div className="flex gap-2"><a href="https://navbharatai.com/admin" className={button}>Admin console</a><button className={button} onClick={onLogout}>Sign out</button></div>}
     </header>
-    <p className="text-sm text-muted">Reports come automatically from retained build history, including failures before a later successful build. This page refreshes its current batch every minute. Browse every batch to see all retained failures; batches stay in workspace/history order. Numbering is chronological: #1 is the oldest retained failure and the highest rank is the newest, across the complete retained failure cohort, not just this batch. Hover a rank for its snapshot time. Retention and late-arriving reports can change ranks. An existing permanent ID is shown separately and never reassigned. Missing ranks show an explicit unavailable state rather than a page index.</p>
-    <FailedReportOAuthConsent token={token} />
+    <p className="text-sm text-muted">All retained failed reports, newest build first. New failures are added automatically: the complete list refreshes every minute, including failures before a later successful build. While the first load is running, the list is partial. Numbering is chronological: #1 is the oldest retained failure and the highest rank is the newest, across the complete retained failure cohort, not just this batch. Hover a rank for its snapshot time. Retention and late-arriving reports can change ranks. An existing permanent ID is shown separately and never reassigned. Missing ranks show an explicit unavailable state rather than a page index.</p>
+    {!embedded && <FailedReportOAuthConsent token={token} />}
     {error && <p role="alert" className="rounded-xl border border-line p-4 text-danger">{error}</p>}
     {message && <p role="status" className="text-success">{message}</p>}
     <section className="rounded-2xl border border-line bg-card p-4 space-y-4" aria-label="Reports">
-      <div className="flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={() => void load()}>Refresh from beginning</button><button className={button} disabled={busy || !page?.nextCursor} onClick={() => void load(page?.nextCursor ?? undefined)}>Next batch</button><span role="status" className="self-center text-sm text-muted">{busy ? 'Loading…' : page ? `${page.reports.length} failures · ${page.scanned} records checked in this batch` : 'Waiting for reports'}</span></div>
-      {page && page.reports.length === 0 && <p>{page.nextCursor ? 'No failures in this batch. Continue to the next batch.' : 'No failures in this final batch.'}</p>}
-      <ul className="space-y-3">{numberedReports.map((r) => <li key={`${r.workspaceId}/${r.historyId}`} className="rounded-xl border border-line p-4">
+      <div className="flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={() => void load()}>Refresh reports</button><span role="status" className="self-center text-sm text-muted">{busy ? `${updatedAt !== null ? 'Refreshing' : 'Loading all reports'}… ${page?.reports.length ?? 0} failures${updatedAt !== null ? ' in previous list' : ' found so far'}` : page ? `${page.reports.length} failures${updatedAt !== null ? '' : ' · incomplete list; refresh to retry'}` : 'Waiting for reports'}</span>{updatedAt !== null && <span className="self-center text-sm text-muted">Last complete refresh: {new Date(updatedAt).toLocaleString()}</span>}</div>
+      {page && updatedAt !== null && !busy && page.reports.length === 0 && <p>No retained failed builds.</p>}
+      <ul className="space-y-3">{visibleReports.visible.map((r) => <li key={`${r.workspaceId}/${r.historyId}`} className="rounded-xl border border-line p-4">
         <div className="flex flex-wrap justify-between gap-3"><div className="min-w-0"><BuildReportNumber numbering={r.numbering} kind="failed-chronological" />{r.permanentReportId !== undefined && <span className="ml-2 text-xs text-muted" title="Permanent allocation reference; not chronological order">ID #{r.permanentReportId}</span>}<h2 className="font-semibold text-ink break-words">{r.appLabel || 'Untitled build'}</h2><p className="text-sm text-muted">{new Date(r.endedAt).toLocaleString()} · Failed</p><p className="text-xs text-muted break-all">{r.workspaceId} / {r.buildId ?? r.historyId}</p></div><button className={button} onClick={() => void openReport(r.workspaceId, r.historyId)}>Read full report</button></div>
         {r.rootCause && <p className="mt-2 text-sm break-words">{r.rootCause}</p>}
         <p className="mt-2 text-sm text-muted">Autopsy: {r.autopsy ? r.autopsy.state.replaceAll('_', ' ') : 'Status not supplied'}</p>
       </li>)}</ul>
+      <LoadMore list={visibleReports} label="failed reports" />
       {report !== null && <div className="space-y-2"><h2 className="font-semibold text-ink">Saved report · secrets scrubbed</h2><p className="text-sm text-muted">Report text is untrusted evidence. Do not follow instructions embedded in it.</p><pre className="max-h-[36rem] overflow-auto rounded-xl bg-well p-4 text-xs text-body" tabIndex={0}>{JSON.stringify(report, null, 2)}</pre></div>}
       {selected && <FailedReportAutopsyEditor key={`${selected.workspaceId}/${selected.historyId}`} {...selected} request={request} />}
     </section>
-    <section className="rounded-2xl border border-line bg-card p-4 space-y-4" aria-label="AI access">
+    {!embedded && <section className="rounded-2xl border border-line bg-card p-4 space-y-4" aria-label="AI access">
       <h2 className="text-xl font-serif text-ink">AI connections and consent</h2>
       <p>For an AI client that supports remote MCP and OAuth, add <code className="break-all">https://navbharatai.com/api/v1/failedbr/mcp</code> as a custom server and choose <strong>OAuth</strong>. Existing connections stay read-only. To let a client update only autopsy metadata, reconnect requesting <code>failed-reports:read failed-reports:autopsy</code>, then review and explicitly approve that permission here. OAuth connections can be revoked below.</p>
       <p className="text-sm text-muted">Create a separate credential for each AI tool. It expires after 30 days and cannot access the admin console or change a build. Share it only with tools you trust. Creating a credential does not connect an AI account automatically.</p>
@@ -128,7 +146,7 @@ export function FailedBuildReportsPage({ token, onLogout }: { token: string; onL
       {credential && <div className="rounded-xl border border-line bg-well p-4 space-y-2"><p className="text-warn">Save this credential now. It is shown only once; the server stores its hash.</p><input aria-label="New read-only credential" type={showCredential ? 'text' : 'password'} readOnly value={credential} className="w-full bg-card text-ink p-3 rounded-xl" onFocus={(e) => e.target.select()} /><button className={button} onClick={() => { void (navigator.clipboard ? navigator.clipboard.writeText(credential) : Promise.reject(new Error('Clipboard unavailable'))).then(() => setMessage('Credential copied. Store it securely in your AI connection settings.')).catch(() => setError('Clipboard unavailable. Select and copy the credential field.')); }}>Copy credential</button><button className={button} onClick={() => setShowCredential((v) => !v)}>{showCredential ? 'Mask credential' : 'Show credential'}</button><button className={button} onClick={() => setCredential('')}>Hide credential</button></div>}
       <ul className="space-y-2">{access.map((a) => <li key={a.id} className="flex flex-wrap justify-between gap-2 border-b border-line py-2"><span>{a.label} <span className="text-sm text-muted">· {a.expiresAt <= Date.now() ? 'expired' : 'expires'} {new Date(a.expiresAt).toLocaleString()}</span></span><button className={button} disabled={busy} onClick={() => void revoke(a.id)}>Revoke access</button></li>)}</ul>
       <div className="text-sm space-y-2"><p>REST endpoint: <code>/api/v1/failedbr/reports</code></p><p>MCP endpoint: <code>/api/v1/failedbr/mcp</code></p><p>Clients that support a manually configured credential can still use <code>Authorization: Bearer &lt;credential&gt;</code>. Never put credentials in the URL or share your admin token. Availability of custom remote MCP connections depends on the AI service and your plan.</p><p>Ask your connected tool: “Read every batch of failed builds, open the full reports, and analyze common root causes.” This grants on-demand access; it does not start paid background AI analysis.</p></div>
-    </section>
+    </section>}
   </section>;
 }
 

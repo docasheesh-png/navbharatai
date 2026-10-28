@@ -3,6 +3,7 @@ import { FreeChatChainPanel } from './admin/FreeChatChainPanel';
 import { LiveModelRegistryPanel } from './admin/LiveModelRegistryPanel';
 import { useBuildReportNumbers } from '../hooks/useBuildReportNumbers';
 import { BuildReportNumber } from './admin/BuildReportNumber';
+import { FailedBuildReportsPage } from './admin/FailedBuildReportsPage';
 import type { BuildReportNumbering } from '../lib/buildReportNumbering';
 import { MaintenanceCard } from './admin/MaintenanceCard';
 import { FreeProgramCard } from './admin/FreeProgramCard';
@@ -1163,7 +1164,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       const qs = params.toString() ? `?${params}` : '';
       const r = await fetch(`/api/admin/all-builds${qs}`, { headers });
       const d = await r.json();
-      setAllBuilds(Array.isArray(d?.builds) ? d.builds : []);
+      // Saving an old build again must not move it above a newer build.
+      setAllBuilds(Array.isArray(d?.builds) ? d.builds.sort((a: AllBuildRow, b: AllBuildRow) =>
+        (b.startedAt ?? 0) - (a.startedAt ?? 0) || a.workspaceId.localeCompare(b.workspaceId)) : []);
       setAllBuildsCounts(d?.counts ?? null);
       setAllBuildsUsers(Array.isArray(d?.users) ? d.users : []);
       setAllBuildsFetched(typeof d?.fetched === 'number' ? { fetched: d.fetched, limit: d.limit ?? 0 } : null);
@@ -5002,6 +5005,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 onDownloadBuildReport={(ws, buildId) => void downloadWorkspaceReport(ws, buildId)}
               />
 
+              <FailedBuildReportsPage token={adminToken} onLogout={onLogout} embedded />
+
               {/* ALL BUILDS moved here from the Build tab (admin 2026-10-15: "apps ke andar hi all build report" and "build se
                   All builds wala column hata dena"). Same card, same state, same filters and marks — only its address changed, so no
                   report and no "taken" mark was lost. Each app above also has a "v" button that opens ITS builds. */}
@@ -5054,7 +5059,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   )}
                 />
                 <p className="text-[10px] text-muted">
-                  Chronological ranks (#1 oldest → newest) across retained latest-per-workspace reports, before filters — separate from the retained-failure chronological ranks on /failedbr; existing permanent IDs are shown separately. Existing ranks may use a 10-minute snapshot; new builds refresh after a short cooldown. Temporary failures retry twice. Retention can change these ranks. Missing ranks show — n/a. Showing {allBuilds.length}
+                  Newest build first. Chronological ranks (#1 oldest → newest) across retained latest-per-workspace reports, before filters — separate from the retained-failure chronological ranks on /failedbr; existing permanent IDs are shown separately. Existing ranks may use a 10-minute snapshot; new builds refresh after a short cooldown. Temporary failures retry twice. Retention can change these ranks. Missing ranks show — n/a. Showing {allBuilds.length}
                   {allBuildsFetched && allBuildsFetched.fetched >= allBuildsFetched.limit
                     /* Honest about the fetch ceiling: at the limit there may be OLDER builds this
                        list has not looked at, so "0 failed" must not read as "none exist". */

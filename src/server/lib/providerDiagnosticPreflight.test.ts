@@ -3,35 +3,33 @@ import { readDiagnosticCatalog } from './providerDiagnosticPreflight';
 
 const model = 'test-model';
 const env = { CHEAPERINFERENCE_API_KEY: 'mock-secret-not-a-real-key' };
-const catalog = () => new Response(JSON.stringify({ data: [{ id: model, pricing: {
-  currency: 'USD', input_per_million: '0.15', output_per_million: '0.60',
-}, private_metadata: 'must-not-escape' }] }));
+const catalog = () => new Response(JSON.stringify({ id: model, model_type: 'text', endpoint: '/v1/chat/completions', supported_endpoints: ['/v1/chat/completions'], discount_percent: '0.00', input_per_million: '0.15', output_per_million: '0.60', private_metadata: 'must-not-escape' }));
 afterEach(() => vi.useRealTimers());
 describe('read-only diagnostic catalog evidence', () => {
   it('uses only the named provider, with no redirects or retries, and projects safe fields', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(catalog());
     const result = await readDiagnosticCatalog('cheaperinference', model, env, fetcher);
     expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(fetcher.mock.calls[0][0]).toBe('https://api.cheaperinference.com/v1/models');
+    expect(fetcher.mock.calls[0][0]).toBe('https://api.cheaperinference.com/public/models/test-model');
     expect(fetcher.mock.calls[0][1]).toMatchObject({ method: 'GET', redirect: 'error', headers: {
-      Accept: 'application/json', Authorization: `Bearer ${env.CHEAPERINFERENCE_API_KEY}`,
+      Accept: 'application/json',
     } });
     expect(result).toMatchObject({ status: 'observed', estimatedInputUsdPerMillion: '0.15', estimatedOutputUsdPerMillion: '0.60' });
     expect(JSON.stringify(result)).not.toMatch(/mock-secret|must-not-escape|receipt|dispatchReady/);
   });
   it('does not transmit any key to the public Surplus catalog or guess its price units', async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(catalog());
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ data: [{ id: model }] })));
     const result = await readDiagnosticCatalog('surplus', model, env, fetcher);
     expect(fetcher.mock.calls[0][0]).toBe('https://api.surplusintelligence.ai/v1/models');
     expect(fetcher.mock.calls[0][1]?.headers).toEqual({ Accept: 'application/json' });
     expect(result).toMatchObject({ status: 'observed', estimatedInputUsdPerMillion: null, estimatedOutputUsdPerMillion: null });
   });
-  it('distinguishes missing configuration without making a request', async () => {
-    const fetcher = vi.fn<typeof fetch>();
-    expect(await readDiagnosticCatalog('cheaperinference', model, {}, fetcher)).toMatchObject({ reason: 'config_missing' });
-    expect(fetcher).not.toHaveBeenCalled();
+  it('public metadata needs no configured key and never transmits one', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(catalog());
+    expect(await readDiagnosticCatalog('cheaperinference', model, {}, fetcher)).toMatchObject({ status: 'observed' });
+    expect(fetcher.mock.calls[0][1]?.headers).toEqual({ Accept: 'application/json' });
   });
-  it.each([[401, 'authentication_rejected'], [403, 'authentication_rejected'], [429, 'rate_limited'], [500, 'provider_error']])('reports HTTP %s evidence without raw body or retry', async (httpStatus, reason) => {
+  it.each([[401, 'metadata_access_denied'], [403, 'metadata_access_denied'], [429, 'rate_limited'], [500, 'provider_error']])('reports HTTP %s evidence without raw body or retry', async (httpStatus, reason) => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('private response', { status: Number(httpStatus) }));
     const result = await readDiagnosticCatalog('surplus', model, {}, fetcher);
     expect(result).toMatchObject({ status: 'unavailable', httpStatus, reason });
@@ -55,14 +53,14 @@ describe('read-only diagnostic catalog evidence', () => {
     expect(await pending).toMatchObject({ reason: 'timeout' });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
-  it.each(['not-json', JSON.stringify({ data: 'invalid' }), 'x'.repeat(2_000_001)])('rejects malformed or oversized catalogs safely', async body => {
+  it.each([['not-json', 'malformed_json'], [JSON.stringify({ data: 'invalid' }), 'catalog_shape_unexpected'], ['x'.repeat(2_000_001), 'catalog_too_large']])('rejects malformed or oversized catalogs safely', async (body, reason) => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(body));
-    expect(await readDiagnosticCatalog('surplus', model, {}, fetcher)).toMatchObject({ reason: 'malformed_catalog' });
+    expect(await readDiagnosticCatalog('surplus', model, {}, fetcher)).toMatchObject({ reason });
   });
-  it('never treats a missing model or a wrong-currency price as zero cost', async () => {
+  it('never treats a missing model or a unreported price as zero cost', async () => {
     const missing = vi.fn<typeof fetch>().mockResolvedValue(new Response('{"data":[]}'));
     expect(await readDiagnosticCatalog('surplus', model, {}, missing)).toMatchObject({ reason: 'model_not_listed' });
-    const wrongCurrency = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ data: [{ id: model, pricing: { currency: 'INR', input_per_million: 1 } }] })));
+    const wrongCurrency = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ id: model, model_type: 'text', endpoint: '/v1/chat/completions', supported_endpoints: ['/v1/chat/completions'], discount_percent: '0.00', input_per_million: 'unknown', output_per_million: 'unknown' })));
     expect(await readDiagnosticCatalog('cheaperinference', model, env, wrongCurrency)).toMatchObject({ estimatedInputUsdPerMillion: null, estimatedOutputUsdPerMillion: null });
   });
 });

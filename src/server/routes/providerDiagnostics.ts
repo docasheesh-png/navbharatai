@@ -10,17 +10,17 @@ function dependencies(): DiagnosticDependencies {
   const db = getServerDb();
   if (!db) throw new DiagnosticAdmissionError('accounting_failed');
   const store = new ProviderDiagnosticStore(db, Date.now, undefined, undefined, diagnosticPairAuthority());
-  const adapter = (provider: 'surplus' | 'cheaperinference') => diagnosticAdapter(provider, process.env, true);
+  const adapter = (provider: 'surplus' | 'cheaperinference', outputTokens?: number) => diagnosticAdapter(provider, process.env, true, outputTokens);
   const state = async (provider: 'surplus' | 'cheaperinference') => {
-    try { return await store.status(provider, adapter(provider).model); }
+    try { return await store.status(provider, adapter(provider).model, 1); }
     catch { return { dispatchReady: false, reason: 'config_missing', missingFields: [`providers.${provider}.adapterConfiguration`] }; }
   };
-  return { store, adapter, fixedPrompt: 'Reply with exactly: OK',
+  return { store, adapter,
     status: async () => { const surplus = await state('surplus'), cheaperinference = await state('cheaperinference'); return {
       dispatchReady: surplus.dispatchReady || cheaperinference.dispatchReady, providers: { surplus, cheaperinference }, liveVerification: false,
     }; },
-    verifyEvidence: async (provider, model) => {
-      const status = await store.status(provider, model);
+    verifyEvidence: async (provider, model, outputTokens) => {
+      const status = await store.status(provider, model, outputTokens);
       if (status.missingFields.length) throw new DiagnosticEvidenceMissing(status.missingFields);
       if (!status.dispatchReady) throw new DiagnosticAdmissionError(status.reason === 'budget_exhausted' ? 'budget_exhausted' : 'budget_evidence_unavailable');
     } };

@@ -62,7 +62,9 @@ export interface SurplusChatOptions {
 export function createSurplusChat(
   env: NodeJS.ProcessEnv = process.env,
   transport: typeof fetch = globalThis.fetch,
+  limits: { maxOutputTokens: number } = { maxOutputTokens: 8192 },
 ) {
+  if (!Number.isSafeInteger(limits.maxOutputTokens) || limits.maxOutputTokens < 1) throw new SurplusError('configuration');
   if (typeof window !== 'undefined') throw new SurplusError('configuration');
   const apiKey = env.SURPLUS_API_KEY?.trim();
   const baseURL = (env.SURPLUS_BASE_URL?.trim() || SURPLUS_BASE_URL).replace(/\/$/, '');
@@ -101,7 +103,7 @@ export function createSurplusChat(
     let requestBytes: number;
     try { requestBytes = Buffer.byteLength(JSON.stringify(requestMessages), 'utf8'); }
     catch { throw new SurplusError('invalid_request'); }
-    if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 8192 ||
+    if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > limits.maxOutputTokens ||
         !Array.isArray(requestMessages) || requestMessages.length < 1 || requestMessages.length > 128 ||
         (typeof input === 'string' && !input.trim()) ||
         requestBytes > 65_536) {

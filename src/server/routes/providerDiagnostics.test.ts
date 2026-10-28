@@ -33,5 +33,5 @@ it.each(['surplus', 'cheaperinference'])('runs authenticated %s with response an
   const { base, token, deps, call } = await setup();
   const r = await fetch(`${base}/${provider}/runs`, { method: 'POST', headers: { 'x-admin-token': token, 'content-type': 'application/json' }, body: JSON.stringify({ idempotencyKey: '11111111-1111-4111-8111-111111111111', prompt: 'private prompt' }) });
   expect(r.status).toBe(200); expect(await r.json()).toMatchObject({ text: 'actual mocked response', supplierCost: { status: 'unavailable' }, accounting: 'unknown_liability', retryCount: 0 });
-  expect(deps.adapter).toHaveBeenCalledExactlyOnceWith(provider); expect(call).toHaveBeenCalledOnce();
+  expect(deps.adapter).toHaveBeenCalledExactlyOnceWith(provider, undefined); expect(call).toHaveBeenCalledOnce();
 });

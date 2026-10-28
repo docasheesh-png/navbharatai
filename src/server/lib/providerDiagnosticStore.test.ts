@@ -171,14 +171,17 @@ describe('shared status and transactional evidence admission', () => {
 });
 
 
-describe('separately authorized two-call allowance', () => {
+describe('manual diagnostics under shared budgets', () => {
   const pairRoot = 'free_chat_chain/provider_diagnostic_pair_20261028';
-  it('allows exactly one settled call per provider without editing historical authority', async () => {
+  it('allows repeated settled calls without deleting historical authority or one-call slots', async () => {
     const f = fixture(true), before = structuredClone(f.docs.get(DIAGNOSTIC_REVIEW_PATH));
     const first = await f.store.reserve(key, 'surplus', 'test-model');
     await f.store.finish(key, first.run.runId, 1000);
-    await expect(f.store.reserve(key2, 'surplus', 'test-model')).rejects.toMatchObject({ reason: 'budget_exhausted' });
-    const second = await f.store.reserve(key2, 'cheaperinference', 'test-model');
+    const oldSlot = { version: 1, runId: first.run.runId, key };
+    f.docs.set(`${pairRoot}/slots/surplus`, oldSlot);
+    const second = await f.store.reserve(key2, 'surplus', 'test-model', 1024);
+    expect(second.run.reservedNanoUsd).toBeGreaterThan(first.run.reservedNanoUsd);
+    expect(f.docs.get(`${pairRoot}/slots/surplus`)).toEqual(oldSlot);
     await f.store.finish(key2, second.run.runId, 1000);
     expect(f.docs.get(DIAGNOSTIC_REVIEW_PATH)).toEqual(before);
     expect(f.docs.has(`${root}/ledger/total`)).toBe(false);
@@ -236,4 +239,13 @@ it('pair transaction replays a legacy run even when the new pair namespace has n
   const before = JSON.stringify([...f.docs]);
   expect((await f.store.reserve(key, 'surplus', 'test-model')).mayDispatch).toBe(false);
   expect(JSON.stringify([...f.docs])).toBe(before);
+});
+
+it('manual diagnostics can reserve beyond the removed ₹100 cap while shared budgets still apply', async () => {
+  const f = fixture(true);
+  for (const rate of Object.values(f.docs.get(DIAGNOSTIC_REVIEW_PATH).providers) as any[]) {
+    rate.inputPerMillionNanoUsd = 500_000_000_000;
+  }
+  const a = await f.store.reserve(key, 'surplus', 'test-model', 1024);
+  expect(a.run.reservedPaise).toBeGreaterThan(10000);
 });

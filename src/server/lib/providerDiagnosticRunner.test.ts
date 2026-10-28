@@ -13,7 +13,7 @@ afterEach(() => vi.useRealTimers());
 describe('single provider diagnostics', () => {
   it.each(['surplus', 'cheaperinference'] as const)('dispatches only %s once and settles exact supplier cost', async provider => {
     const { deps, call } = setup(); const r = await runDiagnostic({ ...input, provider }, deps);
-    expect(deps.adapter).toHaveBeenCalledExactlyOnceWith(provider); expect(call).toHaveBeenCalledOnce();
+    expect(deps.adapter).toHaveBeenCalledExactlyOnceWith(provider, undefined); expect(call).toHaveBeenCalledOnce();
     expect(r.text).toBe('hello'); expect(r.supplierCost).toEqual({ status: 'reported', amount: '0.000001', currency: 'USD' });
     expect(deps.store.finish).toHaveBeenCalledWith(input.idempotencyKey, record.runId, 1000);
     expect(r.firstTokenMs).toBeNull(); expect(r.outputTokensPerSecond).toBeNull(); expect(r.retryCount).toBe(0);
@@ -57,10 +57,10 @@ it('preserves recovery requirement after uncertain reservation acknowledgement',
   const r = await runDiagnostic(input, deps); expect(r.accounting).toBe('unknown_liability'); expect(call).not.toHaveBeenCalled();
 });
 
-it('uses the server fixed tiny prompt for the authorized pair, ignoring submitted content', async () => {
-  const { deps, call } = setup(); deps.fixedPrompt = 'Reply with exactly: OK';
+it('uses the explicitly submitted manual prompt', async () => {
+  const { deps, call } = setup();
   await runDiagnostic(input, deps);
-  expect(call).toHaveBeenCalledExactlyOnceWith('Reply with exactly: OK', expect.any(AbortSignal));
+  expect(call).toHaveBeenCalledExactlyOnceWith(input.prompt, expect.any(AbortSignal));
 });
 
 it('pair Surplus dispatch uses min90 once without changing the ordinary adapter endpoint', async () => {
@@ -69,9 +69,9 @@ it('pair Surplus dispatch uses min90 once without changing the ordinary adapter 
   vi.stubGlobal('fetch', fetcher);
   try {
     const env = { SURPLUS_API_KEY: 'mock-only', SURPLUS_BASE_URL: 'https://api.surplusintelligence.ai/v1' };
-    await diagnosticAdapter('surplus', env, true).call('Reply with exactly: OK', new AbortController().signal);
+    await diagnosticAdapter('surplus', env, true, 10000).call('Reply with exactly: OK', new AbortController().signal);
     expect(String(fetcher.mock.calls[0][0])).toBe('https://api.surplusintelligence.ai/min90/v1/chat/completions');
-    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ max_tokens: 256, stream: false });
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ max_tokens: 10000, stream: false });
     await diagnosticAdapter('surplus', env).call('ordinary', new AbortController().signal);
     expect(String(fetcher.mock.calls[1][0])).toBe('https://api.surplusintelligence.ai/v1/chat/completions');
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -88,4 +88,20 @@ it('pair CheaperInference dispatch sends documented reasoning and matching price
     expect(String(fetcher.mock.calls[0][0])).toBe('https://api.cheaperinference.com/v1/chat/completions');
     expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ model: 'beam', reasoning: { effort: 'low' }, min_discount_percent: 0, max_tokens: 256, stream: false });
   } finally { vi.unstubAllGlobals(); }
+});
+
+it('passes chosen output limit into both provider adapter and durable admission', async () => {
+  const { deps } = setup();
+  await runDiagnostic({ ...input, maxOutputTokens: 1024 }, deps);
+  expect(deps.adapter).toHaveBeenCalledWith('surplus', 1024);
+  expect(deps.verifyEvidence).toHaveBeenCalledWith('surplus', 'test', 1024);
+  expect(deps.store.reserve).toHaveBeenCalledWith(input.idempotencyKey, 'surplus', 'test', 1024);
+});
+
+it('rejects unsupported Cheaper adapter output before any reserve or provider call', async () => {
+  const { deps, call } = setup();
+  const r = await runDiagnostic({ ...input, provider: 'cheaperinference', maxOutputTokens: 131073 }, deps);
+  expect(r.timeline[0]).toMatchObject({ stage: 'validation', reason: 'invalid_request' });
+  expect(deps.store.reserve).not.toHaveBeenCalled(); expect(deps.store.finish).not.toHaveBeenCalled();
+  expect(deps.adapter).not.toHaveBeenCalled(); expect(call).not.toHaveBeenCalled();
 });

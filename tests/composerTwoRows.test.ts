@@ -104,20 +104,9 @@ describe('the plan is reachable from the mode selector', () => {
     expect(panel).toContain("{planComplete ? '\\u2713' : `${planDone}/${state.todos.length}`}");
   });
 
-  it('and the plan itself expands inside the menu', () => {
-    expect(panel).toContain('setMenuPlanOpen((v) => !v)');
-    expect(panel).toContain('<TodoList todos={state.todos} hideHeader />');
-  });
-
-  it('bounded, so a long plan cannot grow the menu off the screen', () => {
-    expect(panel).toContain('max-h-40 overflow-y-auto overscroll-contain');
-  });
-
-  it('its open state is SEPARATE from the strip above the transcript', () => {
-    // Sharing one flag would mean opening the plan in one place silently changed the other — the kind
-    // of coupling that makes a UI feel haunted.
-    expect(panel).toContain('const [menuPlanOpen, setMenuPlanOpen] = useState(false);');
-    expect(panel).toContain('const [planCollapsed, setPlanCollapsed]');
+  it('the plan list is not a second block inside the mode menu', () => {
+    expect(panel).not.toContain('setMenuPlanOpen');
+    expect(panel).not.toContain('nb-mode-plan');
   });
 });
 

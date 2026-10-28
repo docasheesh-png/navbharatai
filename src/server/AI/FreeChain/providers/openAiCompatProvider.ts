@@ -23,6 +23,8 @@ export type FreeChainErrorCode =
 export type FreeChainFinishReason = 'stop' | 'length' | 'content_filter' | 'tool_calls' | 'function_call';
 
 export interface FreeChainProviderResponse extends AIProviderResponse {
+  /** Exact settled charge from CheaperInference billing, never an estimated token quote. */
+  supplierChargeUsd?: string;
   /** Only true when BOTH token counts were actually reported, never inferred from the text. */
   completeUsage: boolean;
   cachedInputTokens?: number;
@@ -39,6 +41,7 @@ export interface FreeChainTurnInput {
 }
 
 type SafeErrorDetails = {
+  supplierChargeUsd?: string;
   status?: number;
   rateLimitHeaders?: Record<string, string>;
   retryAfterMs?: number;
@@ -47,6 +50,7 @@ type SafeErrorDetails = {
 
 /** Never retains the original SDK error, response, request, headers, cause or credential. */
 export class FreeChainProviderError extends Error {
+  readonly supplierChargeUsd?: string;
   readonly code: FreeChainErrorCode;
   readonly status?: number;
   readonly retryAfterMs?: number;
@@ -59,6 +63,7 @@ export class FreeChainProviderError extends Error {
     super(`Free chat provider request failed (${safeCode}).`);
     this.name = safeCode === 'ABORTED' ? 'AbortError' : 'FreeChainProviderError';
     this.code = safeCode;
+    this.supplierChargeUsd = exactSupplierCharge(details.supplierChargeUsd);
     this.status = typeof details.status === 'number' && Number.isInteger(details.status) && details.status >= 400 && details.status <= 599 ? details.status : undefined;
     this.retryAfterMs = typeof details.retryAfterMs === 'number' && Number.isFinite(details.retryAfterMs) && details.retryAfterMs >= 0 ? Math.min(MAX_RETRY_AFTER_MS, Math.ceil(details.retryAfterMs)) : undefined;
     this.rateLimitHeaders = Object.freeze(safeRateLimitHeaders(details.rateLimitHeaders));
@@ -109,6 +114,11 @@ const DURATION = /^(?:\d+(?:\.\d+)?(?:ms|s|m|h|d))+$/;
 const MAX_RETRY_AFTER_MS = 31 * 24 * 60 * 60 * 1000;
 
 type UnknownRecord = Record<string, unknown>;
+/** Official docs /docs#usage-and-response-privacy: billing.billed_cost_usd is the
+ * customer's settled charge to CheaperInference, not its private serving-provider cost. */
+function exactSupplierCharge(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length <= 40 && /^(?:0|[1-9]\d*)(?:\.\d{1,9})?$/.test(value) ? value : undefined;
+}
 function record(value: unknown): UnknownRecord | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : undefined;
 }
@@ -317,6 +327,7 @@ export class OpenAiCompatProvider implements AIProvider {
 
   async executeTurn({ prompt, systemPrompt, signal, onChunk }: FreeChainTurnInput): Promise<FreeChainProviderResponse> {
     const started = Date.now();
+    let supplierChargeUsd: string | undefined;
     try {
       if (signal?.aborted) throw new FreeChainProviderError('ABORTED');
       if (typeof prompt !== 'string' || !prompt.trim() || (systemPrompt !== undefined && typeof systemPrompt !== 'string')
@@ -400,6 +411,10 @@ export class OpenAiCompatProvider implements AIProvider {
         assertLegacyInferenceAllowed('direct-text-provider');
         const { data: completion, response } = await this.#getClient().chat.completions.create({ ...body, stream: false }, options).withResponse();
         headers = safeRateLimitHeaders(response.headers);
+        if (this.name === 'CHEAPERINFERENCE') {
+          const billing = record(record(completion)?.billing);
+          if (billing?.status === 'settled' && billing.currency === 'USD') supplierChargeUsd = exactSupplierCharge(billing.billed_cost_usd);
+        }
         const extension = record(record(completion)?.x_groq);
         if (extension?.error) throw extensionError(extension.error);
         rememberUsage(completion.usage);
@@ -413,10 +428,13 @@ export class OpenAiCompatProvider implements AIProvider {
       if (!content.trim()) throw new FreeChainProviderError('EMPTY_RESPONSE');
       return {
         content, latencyMs: Date.now() - started, provider: this.name, model: this.pinnedModel,
+        ...(supplierChargeUsd === undefined ? {} : { supplierChargeUsd }),
         usage, completeUsage, cachedInputTokens, rateLimitHeaders: headers, finishReason: reason,
       };
     } catch (error) {
-      throw sanitizeError(error, signal, this.#config.envName, this.name);
+      const safe = sanitizeError(error, signal, this.#config.envName, this.name);
+      if (supplierChargeUsd !== undefined) throw new FreeChainProviderError(safe.code, { status: safe.status, rateLimitHeaders: safe.rateLimitHeaders, retryAfterMs: safe.retryAfterMs, credentialEnv: safe.credentialEnv, supplierChargeUsd });
+      throw safe;
     }
   }
 }

@@ -99712,3 +99712,101 @@ Integrated main `a97699747` into the existing comparison head `7647a7c76`, prese
 The seven baseline branding failures were reproduced with Node 22.23.4/npm 11.18.0. Root cause: the child runner's `createRequire` found the environment's globally supplied `sharp` through NODE_PATH, so fixtures explicitly modeling an absent image library ran with one installed. The shared subprocess helper now disables Node's global search paths while retaining fixture-local dependencies. Existing assertions are unchanged. A regression injects an ambient image module and proves it is never loaded; removing the isolation makes that regression fail. The sibling census found the affected branding subprocess cases share this helper. The original 30 executable cases plus the new regression pass; real-image cases and full CI-equivalent results are recorded in the final validation evidence, not inferred from this focused run.
 
 Q-2271 remains blocked: the locked Firestore emulator v1.22.0 download from storage.googleapis.com returned HTTP 403 in this environment, and no emulator exists in the normal verified cache locations. No alternate download, fake emulator, hosted Actions, credential access or paid comparison was used. The four current emulator commands cannot be claimed passed on this reconciled tree. Requires access to the official pinned download or an already verified normal cache, then all four drills on the final tree. Other local gates continue independently. No merge or deployment is authorized by this entry.
+
+### 2026-10-28 — Admin provider diagnostic bots: boundary-only local checkpoint
+
+Isolated branch `codex/admin-provider-diagnostics-20261028`, based on fetched main
+`2e83df1bc`. Added shared truthful response/receipt/timing types and strict request
+validation plus reuse of the existing verified-admin middleware. No route mounted,
+provider dispatched, production guard changed, old one-shot record reset or UI shipped.
+Focused validation: `vitest run src/server/lib/providerDiagnosticBoundary.test.ts`:
+22/22 passed on Node 22.23.4 with npm 11.18.0 execution environment. Full CI, mounted
+UI tests and emulator drills are NOT run at this checkpoint. No paid calls or hosted CI.
+Open-PR listing via `gh pr list` returned GraphQL Forbidden; not retried. Known parallel
+pilot-status/admin-panel work remains untouched. Repository `.agents/skills` absent.
+Next: inspect shared durable budget authority and implement reservations/provider adapters
+before mounting the two admin panels. Preserve all existing unknown-liability holds.
+
+### 2026-10-28 — Diagnostic bots: durable accounting local phase
+
+Added `providerDiagnosticStore.ts` and mocked transaction tests. One atomic transaction
+reserves existing shared daily/monthly ledgers and a separate aggregate benchmark
+allowance. Per-test reservation <= ₹1; aggregate <= ₹2,000 inclusive of reviewed prior
+supplier API/sandbox liabilities. Duplicates never gain dispatch permission, unknown
+cost retains holds/global slot, exact receipts settle idempotently, and overruns retain
+the stop. Missing reviewed prior-cost/rate/conversion evidence blocks dispatch; no
+production evidence was fabricated or written. `docs/PROVIDER_DIAGNOSTICS.md` records
+the exact required evidence and remaining composition work. Provider dispatch, routes,
+UI, independent review, full CI and real emulator drills remain unimplemented/unrun.
+No live provider calls, hosted Actions, publication or denied PR-list retry occurred.
+Validation for this phase's final source: 42/42 focused boundary/accounting tests
+passed; server strict typecheck passed; `git diff --check` passed. Executed with
+Node 22.23.4/npm 11.18.0. These are local checks, not full CI or live verification.
+
+### 2026-10-28 — Admin provider diagnostics dispatch/routes checkpoint
+
+On isolated codex/admin-provider-diagnostics-20261028, added providerDiagnosticRunner.ts
+and routes/providerDiagnostics.ts with tests; registered separate admin route prefix.
+Existing provider adapters only, no chain/classifier/fallback/retry. Inline supplier cost
+uses evidenced Surplus micro-USD; missing receipts retain unknown liability. No prompts,
+responses, raw errors or secrets are persisted by diagnostics. Mounted routes enforce
+real admin auth before reads, posts and unknown paths. Mocked complete path: 59/59 pass
+on pinned Node 22.23.4/npm 11.18.0. No paid calls, publication, hosted CI or UI work.
+Production evidence verification composition remains explicitly blocked, as documented;
+no fabricated approval/review data. Parent pilot routes/panels and historical tests untouched.
+Server strict typecheck also passed after route integration; git diff --check passed.
+
+### 2026-10-28 — Two admin diagnostic panels
+
+Added ProviderDiagnosticPanels.tsx and 10 component interaction/render tests; added
+AdminDashboard integration and adminTabs navigation entry. Both bots hidden until an
+explicit authenticated status read; no calls on mount. Plain-text response, supplier
+cost/unknown, wallet distinction, latency, safe stage/reason and expandable timeline.
+Session storage retains UUID only; duplicate lock and same-key GET recovery prevent
+replacement calls after uncertain outcomes. 69 focused tests and frontend strict
+ typecheck pass on pinned runtime. UI tests use repository hook harness, not real DOM;
+real mounted browser navigation remains unrun. No full CI or paid calls. Documented
+smallest evidence-authority integration and why synthetic liveAdmission tariff records
+cannot serve as independently verified prices. Production dispatch remains blocked.
+
+### 2026-10-28 — Shared evidence authority and independent review
+
+Removed production verifier stub. providerDiagnosticEvidence.ts now reads genuine
+server-owned reconciliation/tariff records, reports precise missing fields, binds the
+current deployment/account/endpoint, covers all billed dimensions/model versions and
+rates locked for admitted requests. Aggregate prior floor includes evidenced bounds
+for all outstanding authorized external benchmark spend. No records were fabricated.
+Status dry-runs the same transaction as admission; billing caps come from existing
+paid policy and freeChainConfig. Every transaction retry uses current time and runner
+checks the issued dispatch expiry before network. Existing holds never reset.
+Independent native subagent reviewed auth/accounting/UI and added17 passing evidence
+regressions. Fixed lost-ack uncertainty, settled recovery, overrun/replay cost projection,
+and Surplus failure usage/HTTP status. Official CheaperInference docs verified exact
+settled billing field; shared adapter projects it safely without routing changes.
+Application retry count is explicitly distinguished from unknown provider-internal
+retries. Local focused broad run256 passed; subsequent evidence/navigation run110 passed.
+Real React/Happy DOM21.0.4 mount drill passes, including duplicate POSTs and recovery;
+script is scripts/providerDiagnostics.dom.check.mjs (DOM dependency installed only /tmp).
+Full local CI first coverage run interrupted after two integration failures (navigation
+block format/admin-only provider whitelist); both fixed and final-source coverage restarted.
+Main-job audit/license/SBOM/typechecks/native/OAuth/build/bundle/boot/server-deps passed.
+Informational npm signatures download failed; no retry/bypass. Previously proxy-denied
+emulator download not retried, so real DB/rules/emulator drills remain unrun. No hosted
+Actions, live provider calls, production reads, publication or merge.
+
+Final-source local validation completed: full coverage exit0,3129 test files passed,
+47643 tests passed/85 skipped(47728 total),817.01s. Statements75.38%,branches71.31%,
+functions77.95%,lines77.29%. Final frontend/server typechecks and unused-import gate
+also passed after review fixes; build/bundle/boot/server-dependency checks passed.
+Real React/Happy DOM script passed with manual prompt input, duplicate POST suppression,
+no mount calls, verified visibility/auth denial, remount same-key recovery and hold logic.
+Informational signature verification remains failed(Failed to download). Real emulator
+and database/rules drills remain unrun due earlier official-download proxy denial; no
+retry/bypass. Actual deployed browser and live paid verification were not performed.
+
+Publication preparation: fetched remote main remains2e83df1bcebf455ab22bb771702b70e9861ded7f,
+so no integration changes were necessary. Replaced copied incident identifiers/timing in
+mock fixtures with synthetic values before publication. Product runtime code unchanged;
+affected focused suite and real DOM drill rerun. Draft-only publication explicitly
+authorized; commit uses [skip ci] to avoid hosted Actions. No approval review, merge,
+deployment, paid inference, or denied PR-list retry is authorized/performed here.

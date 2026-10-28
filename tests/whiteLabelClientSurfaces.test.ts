@@ -100,6 +100,7 @@ const ALLOWED: Record<string, string> = {
   // Admin-only surfaces. CLAUDE.md §3: "provider/model identity … MUST stay available to the admin:
   // the admin dashboard, build diagnostics, server logs, the deliveredVia / per-provider telemetry."
   'src/components/AdminDashboard.tsx': 'admin-only dashboard — vendor identity is permitted and needed',
+  'src/components/admin/ProviderDiagnosticPanels.tsx': 'explicitly requested admin-only provider diagnostic bots; controls require server-verified admin status and every endpoint requires admin authentication; never mounted in ordinary chat',
   'src/components/admin/SurplusRegistryPanel.tsx': 'mounted only inside the admin Live Model Registry; status and controls require server-verified admin authentication, and exact paid-candidate identities/source prices are needed for operator review, never public engine labels',
   'src/lib/agentV3CostSummary.ts': 'feeds AdminDashboard only — per-tier cost rows for the admin',
   'src/components/admin/InferenceGatewaySlotRecoveryPanel.tsx': 'mounted only within authenticated admin setup; recovery must identify the exact reviewed provider model and account',

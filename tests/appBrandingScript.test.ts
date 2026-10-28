@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -33,7 +33,10 @@ const has = (rel: string) => fs.existsSync(path.join(dir, rel));
 const walk = (d: string): string[] => fs.existsSync(d) ? fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)])) : [];
 
 function run(...args: string[]) {
-  const res = spawnSync(process.execPath, ['scripts/nbai-branding.mjs', ...args], { cwd: dir, encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '' } });
+  // Only fixture-local dependencies may influence the runner. NODE_PATH/global packages on a
+  // developer machine otherwise turn the explicit "sharp absent" cases into a different scenario.
+  // Local .nbai-tools/node_modules remains resolvable for the real-image-library cases below.
+  const res = spawnSync(process.execPath, ['--no-global-search-paths', 'scripts/nbai-branding.mjs', ...args], { cwd: dir, encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '' } });
   return { code: res.status, out: `${res.stdout}${res.stderr}` };
 }
 const status = () => JSON.parse(r('assets/.nbai-branding.json').toString());
@@ -100,7 +103,7 @@ if(platform==='android'){const res='android/app/src/main/res';
 const prepareAndEnsure = (platform: 'android' | 'ios') => { run('snapshot', platform); const p = run('prepare'); const e = run('ensure', platform); return { p, e, v: run('verify', platform) }; };
 
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nbai-brand-')); });
-afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => { vi.unstubAllEnvs(); fs.rmSync(dir, { recursive: true, force: true }); });
 
 describe('branding script — it is valid JavaScript', () => {
   it('parses (a broken string in this file once made every ship fail on the runner)', () => {
@@ -112,6 +115,17 @@ describe('branding script — it is valid JavaScript', () => {
 });
 
 describe('branding script — the logo choice', () => {
+  it('an ambient NODE_PATH image library cannot change a fixture that has no local image library', () => {
+    project({ declared: 'none' });
+    w('ambient-node-modules/sharp/index.js', "require('node:fs').writeFileSync('ambient-sharp-loaded', 'unexpected'); throw new Error('ambient sharp loaded');");
+    vi.stubEnv('NODE_PATH', path.join(dir, 'ambient-node-modules'));
+    const result = run('prepare');
+    expect(result.code).toBe(0);
+    expect(status().source).toBe('fallback');
+    expect(status().reason).toContain('sharp is not installed');
+    expect(has('ambient-sharp-loaded')).toBe(false);
+  });
+
   it('a logo the user uploaded is the source, and the launcher icons are built from it', () => {
     defaultAndroid(); project({ declared: 'user', icon: solidPng(1024, 1024, 'users-own-logo') }); fakeGenerator('ok');
     const { e, v } = prepareAndEnsure('android');

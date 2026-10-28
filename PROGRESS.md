@@ -99610,6 +99610,11 @@ Live response display timestamps are projected into a causal conversation clock 
 
 All AI chat composers now share a roomy two-row writing card and wrapping control row, with centered responsive width, multiline inputs and preserved per-surface actions. This supersedes the previous footer-dependent one-line composer layout; branding, non-chat forms and human collaboration chat remain unchanged. Verification status is reported with the change; no live inference or paid build is used for validation.
 
+## 2026-10-27 — Manual DeepInfra candidate comparison
+
+Added an admin-only comparison of the existing pinned V4 Flash release and the catalog-verified V4.1 Flash 1017 release. Six shared synthetic checks cover Hindi, arithmetic, schema output, tool envelopes, consumed SSE and parsed TypeScript. Reports separate unknown usage from zero cost and use reported tokens plus reviewed catalog rates for estimates; they do not assert invoice reconciliation or full app-build quality. The production model defaults, task routing and rollout remain unchanged.
+
+Inference requires explicit reviewed-rate consent, a fixed run identity, a $2 maximum reservation, existing shared daily/monthly budget admission and a persistent global run lease. Duplicate attempts cannot dispatch again; cancellations and uncertain provider usage retain conservative booking. The admin can refresh the last saved report without starting another run. No generated code or tool is executed. The owner's local-CI and explicit-merge rules are recorded in AGENTS.md. Detailed validation and any infrastructure/live-credential blockers are recorded with the PR; no merge or production activation is implied.
 ## 2026-10-27 — Six "the browser cannot import that export" reports were ONE gate judging the import graph from one turn's slice
 
 **The six rows.** Q-1378 (`IndianBikeGame`), Q-1380 (`createGame` from `gameLogic.ts`), Q-1384 and Q-1392
@@ -99699,3 +99704,11 @@ The existing private FailedBR MCP read gate exposes list_scope_failures as an al
 ### Scope diagnostic verification follow-up
 
 Independent review requested the neutral reservation_failed enum because an uncertain datastore exception cannot prove a reservation was rejected or never committed; corrected without changing guards. The completed preliminary full suite had 47,496 passes, two chat-handler branch-budget failures and 85 suite-declared skips; build/bundle/boot/production-dependency gates passed. Diagnostic formatting and conditional logging were then extracted into explicitly projected, synchronous helpers, preserving the unchanged 537 branch budget. All 172 focused tests, including that guard, passed. Independent review approved the extraction. Final exact-source workflow results remain in external CI evidence; no historical inference success is claimed.
+
+## 2026-10-28 — PR #3982 reconciliation and branding test isolation
+
+Integrated main `a97699747` into the existing comparison head `7647a7c76`, preserving #3980–#3984 without editing their branches or release configuration. No production model routing, consent, body bounds, budget accounting, global lease/tombstones, model-match or unknown-spend protection was changed.
+
+The seven baseline branding failures were reproduced with Node 22.23.4/npm 11.18.0. Root cause: the child runner's `createRequire` found the environment's globally supplied `sharp` through NODE_PATH, so fixtures explicitly modeling an absent image library ran with one installed. The shared subprocess helper now disables Node's global search paths while retaining fixture-local dependencies. Existing assertions are unchanged. A regression injects an ambient image module and proves it is never loaded; removing the isolation makes that regression fail. The sibling census found the affected branding subprocess cases share this helper. The original 30 executable cases plus the new regression pass; real-image cases and full CI-equivalent results are recorded in the final validation evidence, not inferred from this focused run.
+
+Q-2271 remains blocked: the locked Firestore emulator v1.22.0 download from storage.googleapis.com returned HTTP 403 in this environment, and no emulator exists in the normal verified cache locations. No alternate download, fake emulator, hosted Actions, credential access or paid comparison was used. The four current emulator commands cannot be claimed passed on this reconciled tree. Requires access to the official pinned download or an already verified normal cache, then all four drills on the final tree. Other local gates continue independently. No merge or deployment is authorized by this entry.

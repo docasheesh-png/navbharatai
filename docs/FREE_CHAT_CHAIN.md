@@ -456,3 +456,40 @@ budget (`FREE_TIER_PAID_DAILY_CAP_USD`, default $10, shared authority `free_chat
 lists are fixed by an allowlist (`visionModels.ts`, `freeTierPaidCap.ts`). `tests/freeTierPaidLeaks.test.ts`
 fails CI if any Free path names `gemini-*-pro`, Grok or Claude. When the cap is reached the turn falls
 back silently to the busy line in the user's language (Hindi / Hinglish / English).
+
+## DeepInfra candidate comparison (admin)
+
+The Free Chat admin page includes a manual comparison between pinned
+`deepseek-ai/DeepSeek-V4-Flash-0731` and `deepseek-ai/DeepSeek-V4.1-Flash-1017`.
+Opening the panel or refreshing status reads the public catalog, shared budget
+and last saved result; it never starts inference. The existing production model
+defaults and task routing are unchanged. A comparison never promotes a model.
+
+To run: configure the existing `FREE_CHAIN_DEEPINFRA_API_KEY` on the server
+(`DEEPINFRA_TOKEN` or `DEEPINFRA_API_KEY` is also accepted by this diagnostic), ensure its shared Free
+Chat paid budget has enough remaining capacity, review the displayed rates,
+confirm they apply to the account, enter an audit reason and press **Run paid
+comparison once**. Catalog or tariff changes require a fresh review. All requests
+use the official HTTPS origin and pinned models; a client cannot supply prompts,
+credentials, prices or endpoints.
+
+The twelve sequential requests alternate model order over six synthetic tasks:
+Hindi, arithmetic, strict JSON, a forced tool-call envelope, consumed SSE and a
+parsed TypeScript function. No tool is executed and generated code is never run.
+This is a small capability sample, **not an end-to-end app-build benchmark**.
+Reported costs are estimates from reported token usage and reviewed public
+tariffs, not verified invoices. Missing or partial usage is unknown, never zero.
+Compare repeat results and complete real app-build benchmarks before changing
+production routing.
+
+The maximum run reservation is $2 at the reviewed tariffs. Reservations use each
+model's full catalog context and fixed 512-token output limit, rather than an
+unproven character/token estimate. Each physical request must obtain the existing
+shared daily reservation and, when enabled, monthly hold. Unknown costs retain
+conservative booking; retries and duplicate IDs never authorize a second call.
+Only one comparison can run globally at once. A stopped server retains a
+ten-minute lease; refreshing status never resumes a run. The last report is saved
+in the bounded `free_chat_chain/deepinfra_comparison` document with no generated
+text, credentials or customer prompts. GET and POST are admin-only at
+`/api/v1/admin/free-chat-chain/deepinfra-comparison`.
+Its approval body is capped at 4 KB by the shared parser, including versioned URLs.

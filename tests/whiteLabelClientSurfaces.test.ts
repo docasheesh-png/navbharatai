@@ -106,6 +106,8 @@ const ALLOWED: Record<string, string> = {
   'src/components/admin/InferenceGatewaySetupPanel.tsx': 'mounted only inside the admin dashboard; authorized administrators must review exact provider/model/account identities, not public chat labels',
   'src/lib/inferenceGatewaySetup.ts': 'shared schema/validation consumed by the admin-only reviewed capability setup form and server; provider names are not ordinary chat labels',
   'src/lib/freeChatChainView.ts': 'shared schema/validation for the admin-only Free Chat Chain panel and server controls; no ordinary chat labels',
+  'src/components/admin/DeepinfraComparisonPanel.tsx': 'mounted only in the server-authenticated admin dashboard; operators must review exact candidate identities and paid rates before a comparison',
+  'src/lib/deepinfraComparison.ts': 'fixed model identities and schema consumed only by that admin comparison panel and server, never public engine labels',
   // The USER'S OWN third-party integrations. Naming them IS the feature.
   'src/components/ide/APIMarketplace.tsx': "catalogue of APIs the USER can add to THEIR app",
   'src/components/ide/AIChat.tsx': "the IDE's bring-your-own-key provider picker",
@@ -267,6 +269,20 @@ describe('🔒 long-form user-facing TEXT may not name a vendor', () => {
 });
 
 describe('🔒 no NEW user-facing surface may name a vendor', () => {
+  it('the comparison identities remain confined to the authenticated admin panel and server', () => {
+    expect(ALLOWED['src/components/admin/DeepinfraComparisonPanel.tsx']).toContain('server-authenticated admin');
+    const clientFiles = walk(resolve(root, 'src')).map(file => relative(root, file).replace(/\\/g, '/')).filter(file => !file.startsWith('src/server/'));
+    const importPattern = (name: string) => new RegExp(String.raw`(?:\bfrom\s+|\bimport\s*\(\s*)['"][^'"]*/${name}(?:\.tsx?)?['"]`);
+    const importedBy = (name: string) => clientFiles.filter(file => importPattern(name).test(read(file)));
+    expect(importPattern('deepinfraComparison').test("import { MODEL } from '../lib/deepinfraComparison.ts'")).toBe(true);
+    expect(importedBy('DeepinfraComparisonPanel')).toEqual(['src/components/AdminDashboard.tsx']);
+    expect(importedBy('deepinfraComparison')).toEqual(['src/components/admin/DeepinfraComparisonPanel.tsx']);
+    expect(read('src/server/routes/admin.ts')).toContain('registerDeepinfraComparisonRoutes(app, verifyAdminToken)');
+    const routes = read('src/server/routes/deepinfraComparison.ts');
+    expect(routes).toContain("app.get('/api/admin/free-chat-chain/deepinfra-comparison', verifyAdminToken, reads,");
+    expect(routes).toContain("app.post('/api/admin/free-chat-chain/deepinfra-comparison', verifyAdminToken, runs,");
+    expect(read('src/components/admin/DeepinfraComparisonPanel.tsx')).toContain('adminHeaders(adminToken)');
+  });
   it('the paid manager exception remains confined to the authenticated admin surface', () => {
     const panel = 'src/components/admin/SurplusRegistryPanel.tsx';
     expect(ALLOWED[panel]).toContain('server-verified admin authentication');

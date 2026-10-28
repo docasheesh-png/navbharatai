@@ -8,6 +8,14 @@ import { readData, readPaidPolicy, readSpendDay, writeSpendDay } from '../AI/Fre
 
 const ROOT = 'free_chat_chain/provider_diagnostics';
 export const DIAGNOSTIC_REVIEW_PATH = `${ROOT}/policy/review`;
+export const diagnosticControlPath = (provider: DiagnosticProvider) => `${ROOT}/control/${provider}`;
+export interface DiagnosticControl { enabled: boolean; revision: number }
+function controlFrom(raw: unknown): DiagnosticControl {
+  if (raw === undefined) return { enabled: false, revision: 0 };
+  const c = raw as DiagnosticControl;
+  demand(c && typeof c.enabled === 'boolean' && nonnegativeInteger(c.revision), 'accounting_failed');
+  return { enabled: c.enabled, revision: c.revision };
+}
 const TOTAL = `${ROOT}/ledger/total`;
 export interface DiagnosticPairAuthority {
   /** Automatic pricing for manual tests under shared platform budgets; preserves legacy ledgers. */
@@ -35,6 +43,7 @@ export interface DiagnosticBudgetReview {
   }>;
 }
 export interface DiagnosticRunRecord {
+  controlRevision?: number; dispatchClaimedAt?: number;
   dispatchBefore?: number;
   version: 1; runId: string; provider: DiagnosticProvider; model: string; startedAt: number;
   day: string; month: string; reservedNanoUsd: number; reservedPaise: number; conversionCeiling: number;
@@ -43,7 +52,7 @@ export interface DiagnosticRunRecord {
 }
 interface Total { version: 1; priorCommittedPaise: number; diagnosticCommittedPaise: number; activeRunId: string | null }
 export class DiagnosticAdmissionError extends Error {
-  constructor(readonly reason: 'invalid_request' | 'budget_evidence_unavailable' | 'budget_exhausted' | 'run_in_progress' | 'accounting_failed') {
+  constructor(readonly reason: 'diagnostics_disabled' | 'control_conflict' | 'invalid_request' | 'budget_evidence_unavailable' | 'budget_exhausted' | 'run_in_progress' | 'accounting_failed') {
     super(reason);
   }
 }
@@ -71,7 +80,7 @@ function checkedRun(raw: unknown): DiagnosticRunRecord {
     && ['reserved', 'unknown_liability', 'settled'].includes(r.state)
     && (r.actualCostNanoUsd === null || nonnegativeInteger(r.actualCostNanoUsd)), 'accounting_failed');
   // Explicit projection: extra stored fields never become response/log fields.
-  return { ...(nonnegativeInteger(r.dispatchBefore) ? { dispatchBefore: r.dispatchBefore } : {}), version: 1, runId: r.runId, provider: r.provider, model: r.model, startedAt: r.startedAt,
+  return { ...(nonnegativeInteger(r.controlRevision) ? { controlRevision: r.controlRevision } : {}), ...(nonnegativeInteger(r.dispatchClaimedAt) ? { dispatchClaimedAt: r.dispatchClaimedAt } : {}), ...(nonnegativeInteger(r.dispatchBefore) ? { dispatchBefore: r.dispatchBefore } : {}), version: 1, runId: r.runId, provider: r.provider, model: r.model, startedAt: r.startedAt,
     day: r.day, month: r.month, reservedNanoUsd: r.reservedNanoUsd, reservedPaise: r.reservedPaise,
     conversionCeiling: r.conversionCeiling, state: r.state, actualCostNanoUsd: r.actualCostNanoUsd };
 }
@@ -84,6 +93,38 @@ export class ProviderDiagnosticStore {
   private get root() { return this.pair ? PAIR_ROOT : ROOT; }
   private get totalPath() { return this.pair ? `${PAIR_ROOT}/ledger/total` : TOTAL; }
   private get reviewPath() { return this.pair ? `${PAIR_ROOT}/policy/review` : DIAGNOSTIC_REVIEW_PATH; }
+  async control(provider: DiagnosticProvider): Promise<DiagnosticControl> {
+    demand(provider === 'surplus' || provider === 'cheaperinference', 'invalid_request');
+    return controlFrom((await this.db.doc(diagnosticControlPath(provider)).get()).data());
+  }
+  async setControl(provider: DiagnosticProvider, enabled: boolean, expectedRevision: number, actor: string): Promise<DiagnosticControl> {
+    demand((provider === 'surplus' || provider === 'cheaperinference') && typeof enabled === 'boolean' && nonnegativeInteger(expectedRevision), 'invalid_request');
+    const ref = this.db.doc(diagnosticControlPath(provider)), auditRef = this.db.doc(`${ROOT}/control_audit/${randomUUID()}`);
+    return this.db.runTransaction(async tx => {
+      const before = controlFrom((await tx.get(ref)).data());
+      demand(before.revision === expectedRevision, 'control_conflict');
+      const after = { enabled, revision: checkedAdd(before.revision, 1) };
+      const at = this.now();
+      tx.set(ref, { ...after, updatedAt: at });
+      // Only the server's verified admin identity and fixed control fields enter this audit.
+      tx.create(auditRef, { provider, actor, before, after, at, action: 'diagnostic-control' });
+      return after;
+    });
+  }
+  /** Linearization point for dispatch versus disable. A later disable cannot revoke
+   * a claim already committed here or cancel supplier execution/billing. */
+  async claimDispatch(key: string, runId: string): Promise<boolean> {
+    return this.db.runTransaction(async tx => {
+      const ref = this.runRef(key), run = checkedRun((await tx.get(ref)).data());
+      demand(run.runId === runId, 'accounting_failed');
+      const control = controlFrom((await tx.get(this.db.doc(diagnosticControlPath(run.provider)))).data());
+      if (run.state !== 'reserved' || run.dispatchClaimedAt !== undefined || !control.enabled || control.revision !== run.controlRevision) return false;
+      const now = this.now();
+      demand(run.dispatchBefore !== undefined && now < run.dispatchBefore, 'budget_evidence_unavailable');
+      tx.set(ref, { ...run, dispatchClaimedAt: now });
+      return true;
+    });
+  }
   async status(provider: DiagnosticProvider, model: string, outputTokens: number = DIAGNOSTIC_LIMITS.defaultOutputTokens) {
     try {
       await this.admit(randomUUID(), provider, model, true, outputTokens);
@@ -120,6 +161,8 @@ export class ProviderDiagnosticStore {
         return { mayDispatch: false, run };
       }
     }
+    const control = await this.control(provider);
+    demand(control.enabled, 'diagnostics_disabled');
     // Network preflight occurs outside the retryable transaction. Admission rechecks expiry.
     const prepared = this.pair ? await this.pair.review(provider, model, outputTokens) : null;
     return this.db.runTransaction(async tx => {
@@ -131,6 +174,8 @@ export class ProviderDiagnosticStore {
         demand(run.provider === provider && run.model === model, 'invalid_request');
         return { mayDispatch: false, run };
       }
+      const currentControl = controlFrom((await tx.get(this.db.doc(diagnosticControlPath(provider)))).data());
+      demand(currentControl.enabled && currentControl.revision === control.revision, 'diagnostics_disabled');
       const storedReview = (await tx.get(this.db.doc(this.reviewPath))).data();
       const review = prepared ? { ...prepared, diagnosticsInitialized: storedReview?.diagnosticsInitialized }
         : await readDiagnosticEvidence(storedReview, provider, model, now, async path => (await tx.get(this.db.doc(path))).data(), this.binding(provider));
@@ -168,7 +213,7 @@ export class ProviderDiagnosticStore {
         && checkedAdd(checkedAdd(priorCommittedPaise, total.diagnosticCommittedPaise), reservedPaise) <= review.totalBudgetPaise)
         && checkedAdd(checkedAdd(day.heldNanoUsd, day.spentNanoUsd), amount) <= Math.min(policy.capNanoUsd, limits.daily)
         && checkedAdd(checkedAdd(monthly.heldNanoUsd, monthly.spentNanoUsd), amount) <= Math.min(review.monthlyCapNanoUsd, limits.monthly), 'budget_exhausted');
-      const run: DiagnosticRunRecord = { dispatchBefore: review.expiresAt, version: 1, runId, provider, model, startedAt: now, day: window.key, month,
+      const run: DiagnosticRunRecord = { controlRevision: currentControl.revision, dispatchBefore: review.expiresAt, version: 1, runId, provider, model, startedAt: now, day: window.key, month,
         reservedNanoUsd: amount, reservedPaise, conversionCeiling: review.allInPaisePerUsdCeiling, state: 'reserved', actualCostNanoUsd: null };
       if (dryRun) return { mayDispatch: false, run };
       writeSpendDay(tx, this.db, { ...day, heldNanoUsd: checkedAdd(day.heldNanoUsd, amount), requests: checkedAdd(day.requests, 1), pending: checkedAdd(day.pending, 1) }, policy.capNanoUsd, now, () => []);

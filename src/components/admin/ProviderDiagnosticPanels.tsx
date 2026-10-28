@@ -105,7 +105,7 @@ export function ProviderDiagnosticBot({ provider, adminToken, ready }: { provide
 }
 
 export function ProviderDiagnosticPanels({ adminToken }: { adminToken: string }) {
-  const [status, setStatus] = useState<{ dispatchReady: boolean; providers?: Record<DiagnosticProvider, { dispatchReady: boolean; reason: string | null; missingFields: string[] }> } | null>(null);
+  const [status, setStatus] = useState<{ dispatchReady: boolean; providers?: Record<DiagnosticProvider, { dispatchReady: boolean; reason: string | null; missingFields: string[]; enabled?: boolean; revision?: number }> } | null>(null);
   const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const lock = useRef(false);
   async function check() {
     if (lock.current || !adminToken) return; lock.current = true; setBusy(true); setError(''); setStatus(null);
@@ -116,14 +116,32 @@ export function ProviderDiagnosticPanels({ adminToken }: { adminToken: string })
     } catch { setError('Admin verification or diagnostic status is unavailable. Testing controls are hidden.'); }
     finally { lock.current = false; setBusy(false); }
   }
+  async function toggle(provider: DiagnosticProvider) {
+    const control = status?.providers?.[provider];
+    if (lock.current || !adminToken || typeof control?.enabled !== 'boolean' || !Number.isSafeInteger(control.revision)) return;
+    lock.current = true; setBusy(true); setError('');
+    try {
+      const response = await fetch(`${API}/${provider}/control`, { method: 'POST', cache: 'no-store',
+        headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !control.enabled, expectedRevision: control.revision }) });
+      const next = await response.json();
+      if (!response.ok || next.provider !== provider || typeof next.enabled !== 'boolean' || !Number.isSafeInteger(next.revision)) throw new Error('unconfirmed');
+      setStatus(previous => previous?.providers ? { ...previous, dispatchReady: false, providers: { ...previous.providers,
+        [provider]: { ...previous.providers[provider], enabled: next.enabled, revision: next.revision,
+          dispatchReady: false, reason: next.enabled ? 'Refresh status before testing' : 'diagnostics_disabled', missingFields: [] },
+      } } : null);
+    } catch { setStatus(null); setError('Control change is unconfirmed. Read status again before assuming ON or OFF.'); }
+    finally { lock.current = false; setBusy(false); }
+  }
   if (!adminToken) return null;
   return <section className="space-y-4 text-ink"><h2>Provider testing bots</h2>
+    <p>Each diagnostic switch defaults OFF. Only a verified admin can enable it. OFF blocks new dispatch claims; already admitted or dispatched requests may continue and incur supplier charges. Disabling preserves history and spending holds.</p>
     <p>Manual tests only. Opening or refreshing this panel makes no request and spends nothing.</p>
     <button className={button} disabled={busy} onClick={() => void check()}>Verify admin and read test status</button>
     {error && <p role="alert">{error}</p>}
     {status && <><p>Manual tests use existing shared platform budgets. Reservations use full-context pricing and an exchange-rate buffer. They are estimates, not provider-enforced monetary caps. Unknown supplier charges retain their holds.</p><p role="status">{status.dispatchReady ? 'Preflight passed. Each manual call still requires shared-budget admission.' : 'Dispatch blocked. See the specific provider or shared-budget issue below. Historical records and unresolved spending holds remain unchanged.'}</p>
-      {status.providers && <ul>{(['surplus', 'cheaperinference'] as const).map(p => <li key={p}>{p}: {status.providers![p]?.reason ?? 'Ready for admission'} · Preflight: {status.providers![p]?.missingFields?.join(', ') || 'None reported'}</li>)}</ul>}
-      <ProviderDiagnosticBot provider="surplus" adminToken={adminToken} ready={status.providers?.surplus.dispatchReady ?? status.dispatchReady} />
-      <ProviderDiagnosticBot provider="cheaperinference" adminToken={adminToken} ready={status.providers?.cheaperinference.dispatchReady ?? status.dispatchReady} /></>}
+      {status.providers && <div>{(['surplus', 'cheaperinference'] as const).map(p => <div key={p}><p>{p}: {status.providers![p]?.enabled === true ? 'ON' : status.providers![p]?.enabled === false ? 'OFF' : 'Control unavailable'}</p><button className={button} disabled={busy || typeof status.providers![p]?.enabled !== 'boolean' || !Number.isSafeInteger(status.providers![p]?.revision)} onClick={() => void toggle(p)}>{status.providers![p]?.enabled ? 'Disable' : 'Enable'} {p} diagnostics</button><p>{p}: {status.providers![p]?.reason ?? 'Ready for admission'} · Preflight: {status.providers![p]?.missingFields?.join(', ') || 'None reported'}</p></div>)}</div>}
+      <ProviderDiagnosticBot provider="surplus" adminToken={adminToken} ready={!busy && status.providers?.surplus.enabled === true && status.providers.surplus.dispatchReady} />
+      <ProviderDiagnosticBot provider="cheaperinference" adminToken={adminToken} ready={!busy && status.providers?.cheaperinference.enabled === true && status.providers.cheaperinference.dispatchReady} /></>}
   </section>;
 }

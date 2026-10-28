@@ -6,7 +6,7 @@ const input = { provider: 'surplus' as const, idempotencyKey: '11111111-1111-411
 const record = { runId: input.idempotencyKey, provider: 'surplus', model: 'test', startedAt: 1000, state: 'reserved' } as DiagnosticRunRecord;
 function setup() {
   const call = vi.fn().mockResolvedValue({ text: 'hello', usage: { inputTokens: 3, outputTokens: 2, cachedTokens: null }, amount: '0.000001' });
-  const deps: DiagnosticDependencies = { store: { read: vi.fn().mockResolvedValue(null), reserve: vi.fn().mockResolvedValue({ mayDispatch: true, run: record }), finish: vi.fn().mockResolvedValue(undefined) }, adapter: vi.fn(() => ({ model: 'test', call })), verifyEvidence: vi.fn().mockResolvedValue(undefined) };
+  const deps: DiagnosticDependencies = { store: { claimDispatch: vi.fn().mockResolvedValue(true), read: vi.fn().mockResolvedValue(null), reserve: vi.fn().mockResolvedValue({ mayDispatch: true, run: record }), finish: vi.fn().mockResolvedValue(undefined) }, adapter: vi.fn(() => ({ model: 'test', call })), verifyEvidence: vi.fn().mockResolvedValue(undefined) };
   return { deps, call };
 }
 afterEach(() => vi.useRealTimers());
@@ -104,4 +104,36 @@ it('rejects unsupported Cheaper adapter output before any reserve or provider ca
   expect(r.timeline[0]).toMatchObject({ stage: 'validation', reason: 'invalid_request' });
   expect(deps.store.reserve).not.toHaveBeenCalled(); expect(deps.store.finish).not.toHaveBeenCalled();
   expect(deps.adapter).not.toHaveBeenCalled(); expect(call).not.toHaveBeenCalled();
+});
+
+it('a disable after reservation blocks dispatch and preserves the hold without a fake receipt', async () => {
+  const { deps, call } = setup(); vi.mocked(deps.store.claimDispatch).mockResolvedValue(false);
+  const r = await runDiagnostic(input, deps);
+  expect(r.timeline.at(-1)).toMatchObject({ stage: 'dispatch', reason: 'diagnostics_disabled' });
+  expect(call).not.toHaveBeenCalled(); expect(deps.store.finish).not.toHaveBeenCalled();
+  expect(r.accounting).toBe('reserved'); expect(r.supplierCost.status).toBe('unavailable');
+});
+it('an unavailable final control read never dispatches or releases the hold', async () => {
+  const { deps, call } = setup(); vi.mocked(deps.store.claimDispatch).mockRejectedValue(new Error('unavailable'));
+  const r = await runDiagnostic(input, deps);
+  expect(call).not.toHaveBeenCalled(); expect(deps.store.finish).not.toHaveBeenCalled();
+  expect(r.timeline.at(-1)?.reason).toBe('accounting_failed');
+});
+
+it('reports expired final claim as budget evidence failure without dispatch or hold release', async () => {
+  const { deps, call } = setup();
+  vi.mocked(deps.store.claimDispatch).mockRejectedValue(new DiagnosticAdmissionError('budget_evidence_unavailable'));
+  const r = await runDiagnostic(input, deps);
+  expect(r.timeline.at(-1)).toMatchObject({ stage: 'dispatch', reason: 'budget_evidence_unavailable' });
+  expect(call).not.toHaveBeenCalled(); expect(deps.store.finish).not.toHaveBeenCalled();
+});
+
+it('a delayed final claim acknowledgement cannot dispatch after pricing expiry', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(1000);
+  const { deps, call } = setup();
+  vi.mocked(deps.store.reserve).mockResolvedValue({ mayDispatch: true, run: { ...record, dispatchBefore: 2000 } });
+  vi.mocked(deps.store.claimDispatch).mockImplementation(async () => { vi.setSystemTime(2001); return true; });
+  const r = await runDiagnostic(input, deps);
+  expect(r.timeline.at(-1)).toMatchObject({ stage: 'dispatch', reason: 'budget_evidence_unavailable' });
+  expect(call).not.toHaveBeenCalled(); expect(deps.store.finish).not.toHaveBeenCalled();
 });

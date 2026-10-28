@@ -48,7 +48,8 @@ function failure(error: unknown): DiagnosticReason {
 }
 export interface DiagnosticDependencies {
   status?: () => Promise<unknown>;
-  store: Pick<ProviderDiagnosticStore, 'reserve' | 'finish' | 'read'>;
+  setControl?: ProviderDiagnosticStore['setControl'];
+  store: Pick<ProviderDiagnosticStore, 'reserve' | 'finish' | 'read' | 'claimDispatch'>;
   adapter: (provider: DiagnosticProvider, outputTokens?: number) => DiagnosticAdapter;
   /** Must verify real reconciliation/tariff evidence and current monthly limit before admission. */
   verifyEvidence: (provider: DiagnosticProvider, model: string, outputTokens?: number) => Promise<void>;
@@ -67,6 +68,7 @@ export async function runDiagnostic(input: DiagnosticInput, deps: DiagnosticDepe
   if (input.provider === 'cheaperinference' && (input.maxOutputTokens ?? DIAGNOSTIC_LIMITS.defaultOutputTokens) > 131072) {
     event('validation', 'invalid_request'); result.missingEvidence = ['Maximum output exceeds the supported adapter limit of 131072 tokens.']; return result;
   }
+  let dispatchBefore: number | undefined;
   let adapter: DiagnosticAdapter;
   try { adapter = deps.adapter(input.provider, input.maxOutputTokens); result.model = adapter.model; }
   catch { event('configuration', 'config_missing'); return result; }
@@ -79,6 +81,7 @@ export async function runDiagnostic(input: DiagnosticInput, deps: DiagnosticDepe
     }
     await deps.verifyEvidence(input.provider, adapter.model, input.maxOutputTokens);
     const admission = await deps.store.reserve(input.idempotencyKey, input.provider, adapter.model, input.maxOutputTokens);
+    dispatchBefore = admission.run.dispatchBefore;
     result.runId = admission.run.runId; result.startedAt = new Date(admission.run.startedAt).toISOString(); result.accounting = admission.run.state;
     if (!admission.mayDispatch) return historical(admission.run);
     if (admission.run.dispatchBefore !== undefined && Date.now() >= admission.run.dispatchBefore) {
@@ -90,7 +93,19 @@ export async function runDiagnostic(input: DiagnosticInput, deps: DiagnosticDepe
   } catch (error) {
     if (!(error instanceof DiagnosticAdmissionError) && !(error instanceof DiagnosticEvidenceMissing)) result.accounting = 'unknown_liability';
     if (error instanceof DiagnosticEvidenceMissing) result.missingEvidence = error.fields;
-    event('reservation', error instanceof DiagnosticEvidenceMissing || error instanceof DiagnosticAdmissionError && error.reason === 'budget_evidence_unavailable' ? 'budget_evidence_unavailable' : 'reservation_failed');
+    event('reservation', error instanceof DiagnosticAdmissionError && error.reason === 'diagnostics_disabled' ? 'diagnostics_disabled' : error instanceof DiagnosticEvidenceMissing || error instanceof DiagnosticAdmissionError && error.reason === 'budget_evidence_unavailable' ? 'budget_evidence_unavailable' : 'reservation_failed');
+    result.elapsedMs = Date.now() - start; return result;
+  }
+  try {
+    if (!await deps.store.claimDispatch(input.idempotencyKey, result.runId)) {
+      // Do not release an existing hold or invent a zero-cost supplier receipt.
+      event('dispatch', 'diagnostics_disabled');
+      result.elapsedMs = Date.now() - start;
+      return result;
+    }
+    if (dispatchBefore !== undefined && Date.now() >= dispatchBefore) throw new DiagnosticAdmissionError('budget_evidence_unavailable');
+  } catch (error) {
+    result.accounting = 'unknown_liability'; event('dispatch', error instanceof DiagnosticAdmissionError && error.reason === 'budget_evidence_unavailable' ? 'budget_evidence_unavailable' : 'accounting_failed');
     result.elapsedMs = Date.now() - start; return result;
   }
   const controller = new AbortController();

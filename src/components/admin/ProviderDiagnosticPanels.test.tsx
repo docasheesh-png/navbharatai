@@ -115,3 +115,27 @@ it('remount retries the exact original prompt and output setting with the same k
   find(render(), 'Retry original admission with same key').props.onClick(); await flush();
   expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string)).toEqual(submitted);
 });
+
+it('manual revision-checked toggles do not dispatch or enable the other provider', async () => {
+  const off = { enabled: false, revision: 0, dispatchReady: false, reason: 'diagnostics_disabled', missingFields: [] };
+  vi.mocked(fetch).mockResolvedValue(response({ dispatchReady: false, providers: { surplus: off, cheaperinference: off } }) as any);
+  find(render('panels'), 'Verify admin and read test status').props.onClick(); await flush();
+  vi.mocked(fetch).mockResolvedValue(response({ provider: 'surplus', enabled: true, revision: 1 }) as any);
+  const click = find(render('panels'), 'Enable surplus diagnostics').props.onClick; click(); click(); await flush();
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(fetch).mock.calls[1][0]).toContain('/surplus/control');
+  expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string)).toEqual({ enabled: true, expectedRevision: 0 });
+  const tree = render('panels');
+  expect(find(tree, 'Disable surplus diagnostics').props.disabled).toBe(false);
+  expect(find(tree, 'Enable cheaperinference diagnostics').props.disabled).toBe(false);
+  expect(nodes(tree).filter(n => n.type === ProviderDiagnosticBot).every(n => n.props.ready === false)).toBe(true);
+});
+it('allows disable even when an enabled provider fails preflight and does not claim success on error', async () => {
+  const state = { enabled: true, revision: 3, dispatchReady: false, reason: 'config_missing', missingFields: [] };
+  vi.mocked(fetch).mockResolvedValue(response({ dispatchReady: false, providers: { surplus: state, cheaperinference: { ...state, enabled: false } } }) as any);
+  find(render('panels'), 'Verify admin and read test status').props.onClick(); await flush();
+  expect(find(render('panels'), 'Disable surplus diagnostics').props.disabled).toBe(false);
+  vi.mocked(fetch).mockRejectedValue(new Error('unconfirmed'));
+  find(render('panels'), 'Disable surplus diagnostics').props.onClick(); await flush();
+  expect(nodes(render('panels')).filter(n => n.type === ProviderDiagnosticBot)).toHaveLength(0);
+});

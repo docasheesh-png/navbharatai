@@ -55,3 +55,10 @@ describe('diagnostic request boundary', () => {
     expect(JSON.stringify(res.json.mock.calls)).not.toContain(body.prompt);
   });
 });
+
+it('accepts a manual output limit above 256 but rejects unsafe numeric values', () => {
+  expect(parseDiagnosticInput('surplus', { ...body, maxOutputTokens: 1024 })?.maxOutputTokens).toBe(1024);
+  for (const maxOutputTokens of [0, -1, 1.5, '1024', Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    expect(parseDiagnosticInput('surplus', { ...body, maxOutputTokens })).toBeNull();
+  }
+});

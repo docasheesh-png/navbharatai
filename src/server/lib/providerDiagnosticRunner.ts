@@ -14,12 +14,12 @@ export interface DiagnosticAdapter { model: string; call(prompt: string, signal:
 class DiagnosticSurplusFailure extends SurplusError {
   constructor(error: SurplusError, readonly httpStatus?: number) { super(error.code, error.usage); }
 }
-export function diagnosticAdapter(provider: DiagnosticProvider, env = process.env, pair = false): DiagnosticAdapter {
+export function diagnosticAdapter(provider: DiagnosticProvider, env = process.env, pair = false, outputTokens: number = DIAGNOSTIC_LIMITS.defaultOutputTokens): DiagnosticAdapter {
   if (provider === 'surplus') {
     let httpStatus: number | undefined;
-    const chat = createSurplusChat(pair ? { ...env, SURPLUS_BASE_URL: SURPLUS_MIN90_BASE_URL } : env, async (input, init) => { const response = await fetch(input, init); httpStatus = response.status; return response; });
+    const chat = createSurplusChat(pair ? { ...env, SURPLUS_BASE_URL: SURPLUS_MIN90_BASE_URL } : env, async (input, init) => { const response = await fetch(input, init); httpStatus = response.status; return response; }, { maxOutputTokens: outputTokens });
     return { model: env.SURPLUS_MODEL?.trim() || SURPLUS_DEFAULT_MODEL, async call(prompt, signal) {
-      const r = await chat(prompt, { signal, maxTokens: DIAGNOSTIC_LIMITS.outputTokens }).catch(error => { if (error instanceof SurplusError) throw new DiagnosticSurplusFailure(error, httpStatus); throw error; });
+      const r = await chat(prompt, { signal, maxTokens: outputTokens }).catch(error => { if (error instanceof SurplusError) throw new DiagnosticSurplusFailure(error, httpStatus); throw error; });
       return { text: r.text, usage: { inputTokens: r.usage?.prompt_tokens ?? null, outputTokens: r.usage?.completion_tokens ?? null, cachedTokens: null }, amount: surplusBuyerCostToUsd(r.usage?.buyer_cost_micro) };
     } };
   }
@@ -27,7 +27,7 @@ export function diagnosticAdapter(provider: DiagnosticProvider, env = process.en
   if (!status.apiKeyConfigured) throw new FreeChainProviderError('CONFIGURATION');
   const adapter = new OpenAiCompatProvider({ provider: 'CHEAPERINFERENCE', model: status.defaultModel,
     key: env.CHEAPERINFERENCE_API_KEY!.trim(), baseURL: CHEAPERINFERENCE_BASE_URL, priority: 0,
-    maxOutputTokens: DIAGNOSTIC_LIMITS.outputTokens, timeoutMs: DIAGNOSTIC_LIMITS.deadlineMs,
+    maxOutputTokens: outputTokens, timeoutMs: DIAGNOSTIC_LIMITS.deadlineMs,
     streamUsage: false, extraBody: pair ? { reasoning: { effort: 'low' }, min_discount_percent: DIAGNOSTIC_PAIR_DISCOUNT } : { reasoning_effort: 'low' } });
   return { model: status.defaultModel, async call(prompt, signal) {
     const r = await adapter.executeTurn({ prompt, signal });
@@ -48,11 +48,11 @@ function failure(error: unknown): DiagnosticReason {
 }
 export interface DiagnosticDependencies {
   status?: () => Promise<unknown>;
-  fixedPrompt?: string;
-  store: Pick<ProviderDiagnosticStore, 'reserve' | 'finish' | 'read'>;
-  adapter: (provider: DiagnosticProvider) => DiagnosticAdapter;
+  setControl?: ProviderDiagnosticStore['setControl'];
+  store: Pick<ProviderDiagnosticStore, 'reserve' | 'finish' | 'read' | 'claimDispatch'>;
+  adapter: (provider: DiagnosticProvider, outputTokens?: number) => DiagnosticAdapter;
   /** Must verify real reconciliation/tariff evidence and current monthly limit before admission. */
-  verifyEvidence: (provider: DiagnosticProvider, model: string) => Promise<void>;
+  verifyEvidence: (provider: DiagnosticProvider, model: string, outputTokens?: number) => Promise<void>;
 }
 export async function runDiagnostic(input: DiagnosticInput, deps: DiagnosticDependencies): Promise<DiagnosticResult & { replayed: boolean }> {
   const start = Date.now();
@@ -64,8 +64,13 @@ export async function runDiagnostic(input: DiagnosticInput, deps: DiagnosticDepe
   const historical = (run: DiagnosticRunRecord) => ({ ...result, runId: run.runId, startedAt: new Date(run.startedAt).toISOString(), accounting: run.state, replayed: true,
     reconciliationRequired: run.actualCostNanoUsd !== null && run.actualCostNanoUsd > run.reservedNanoUsd,
     supplierCost: run.actualCostNanoUsd == null ? { status: 'unavailable' as const } : { status: 'reported' as const, amount: `${Math.floor(run.actualCostNanoUsd / 1e9)}.${String(run.actualCostNanoUsd % 1e9).padStart(9, '0')}`, currency: 'USD' } });
+  // Existing Cheaper adapter ceiling; reject user settings before constructing it or reserving money.
+  if (input.provider === 'cheaperinference' && (input.maxOutputTokens ?? DIAGNOSTIC_LIMITS.defaultOutputTokens) > 131072) {
+    event('validation', 'invalid_request'); result.missingEvidence = ['Maximum output exceeds the supported adapter limit of 131072 tokens.']; return result;
+  }
+  let dispatchBefore: number | undefined;
   let adapter: DiagnosticAdapter;
-  try { adapter = deps.adapter(input.provider); result.model = adapter.model; }
+  try { adapter = deps.adapter(input.provider, input.maxOutputTokens); result.model = adapter.model; }
   catch { event('configuration', 'config_missing'); return result; }
   try {
     // Replays remain readable even when evidence has since expired; never redispatch.
@@ -74,8 +79,9 @@ export async function runDiagnostic(input: DiagnosticInput, deps: DiagnosticDepe
       if (previous.provider !== input.provider || previous.model !== adapter.model) throw new DiagnosticAdmissionError('invalid_request');
       return historical(previous);
     }
-    await deps.verifyEvidence(input.provider, adapter.model);
-    const admission = await deps.store.reserve(input.idempotencyKey, input.provider, adapter.model);
+    await deps.verifyEvidence(input.provider, adapter.model, input.maxOutputTokens);
+    const admission = await deps.store.reserve(input.idempotencyKey, input.provider, adapter.model, input.maxOutputTokens);
+    dispatchBefore = admission.run.dispatchBefore;
     result.runId = admission.run.runId; result.startedAt = new Date(admission.run.startedAt).toISOString(); result.accounting = admission.run.state;
     if (!admission.mayDispatch) return historical(admission.run);
     if (admission.run.dispatchBefore !== undefined && Date.now() >= admission.run.dispatchBefore) {
@@ -87,7 +93,19 @@ export async function runDiagnostic(input: DiagnosticInput, deps: DiagnosticDepe
   } catch (error) {
     if (!(error instanceof DiagnosticAdmissionError) && !(error instanceof DiagnosticEvidenceMissing)) result.accounting = 'unknown_liability';
     if (error instanceof DiagnosticEvidenceMissing) result.missingEvidence = error.fields;
-    event('reservation', error instanceof DiagnosticEvidenceMissing || error instanceof DiagnosticAdmissionError && error.reason === 'budget_evidence_unavailable' ? 'budget_evidence_unavailable' : 'reservation_failed');
+    event('reservation', error instanceof DiagnosticAdmissionError && error.reason === 'diagnostics_disabled' ? 'diagnostics_disabled' : error instanceof DiagnosticEvidenceMissing || error instanceof DiagnosticAdmissionError && error.reason === 'budget_evidence_unavailable' ? 'budget_evidence_unavailable' : 'reservation_failed');
+    result.elapsedMs = Date.now() - start; return result;
+  }
+  try {
+    if (!await deps.store.claimDispatch(input.idempotencyKey, result.runId)) {
+      // Do not release an existing hold or invent a zero-cost supplier receipt.
+      event('dispatch', 'diagnostics_disabled');
+      result.elapsedMs = Date.now() - start;
+      return result;
+    }
+    if (dispatchBefore !== undefined && Date.now() >= dispatchBefore) throw new DiagnosticAdmissionError('budget_evidence_unavailable');
+  } catch (error) {
+    result.accounting = 'unknown_liability'; event('dispatch', error instanceof DiagnosticAdmissionError && error.reason === 'budget_evidence_unavailable' ? 'budget_evidence_unavailable' : 'accounting_failed');
     result.elapsedMs = Date.now() - start; return result;
   }
   const controller = new AbortController();
@@ -95,7 +113,7 @@ export async function runDiagnostic(input: DiagnosticInput, deps: DiagnosticDepe
   let amount: string | null = null;
   try {
     const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new FreeChainProviderError('TIMEOUT')); }, DIAGNOSTIC_LIMITS.deadlineMs); });
-    const reply = await Promise.race([adapter.call(deps.fixedPrompt ?? input.prompt, controller.signal), deadline]);
+    const reply = await Promise.race([adapter.call(input.prompt, controller.signal), deadline]);
     result.text = reply.text; result.usage = reply.usage; amount = reply.amount;
     event('response', reply.text.trim() ? 'completed' : 'malformed_response');
   } catch (error) {

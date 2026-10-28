@@ -11,17 +11,17 @@ function fixture() {
     fx: () => ({ rate: 90, updatedAt: now - 1000, heldCandidate: null, lastRefusal: '', refusalsInARow: 0 }),
     catalog: vi.fn().mockImplementation(async (_provider, model) => ({ status: 'observed', model, observedAt: now,
       source: 'catalog', estimatedInputUsdPerMillion: '0.00001', estimatedOutputUsdPerMillion: '0.00001',
-      contextTokens: 1048576, maxCompletionTokens: 4096, textOutput: true })),
+      contextTokens: 1048576, maxCompletionTokens: 4096, textOutput: true, chatCompletions: true })),
     fetcher: vi.fn<typeof fetch>().mockImplementation(async url => new Response(JSON.stringify(String(url).includes('/supply')
       ? { model: 'beam', min_discount_percent: 0, max_input_per_million: '0.22217', max_output_per_million: '0.876156', candidate_count: 1 }
       : raw))),
   };
   return { inputs, raw, authority: () => diagnosticPairAuthority({ CHEAPERINFERENCE_API_KEY: 'mock-only-secret' }, inputs) };
 }
-describe('automatic preflight for separate two-call allowance (all reads mocked)', () => {
+describe('automatic preflight for shared-budget manual diagnostics (all reads mocked)', () => {
   it('uses undiscounted max reference dimensions, not cheapest catalog or 90% discount', async () => {
     const f = fixture(), r = await f.authority().review('surplus', 'flash');
-    expect(r).toMatchObject({ totalBudgetPaise: 10000, priorCommittedPaise: 0, allInPaisePerUsdCeiling: 18000 });
+    expect(r).toMatchObject({ totalBudgetPaise: 0, priorCommittedPaise: 0, allInPaisePerUsdCeiling: 18000 });
     expect(r.providers.surplus).toMatchObject({ contextTokens: 1048576, inputPerMillionNanoUsd: 300000000, outputPerMillionNanoUsd: 900000000 });
     expect(f.inputs.fetcher).toHaveBeenCalledWith('https://api.surplusintelligence.ai/v1/prices', expect.objectContaining({ method: 'GET', redirect: 'error', headers: { Accept: 'application/json' } }));
     expect(JSON.stringify(r)).not.toContain('mock-only-secret');
@@ -32,9 +32,9 @@ describe('automatic preflight for separate two-call allowance (all reads mocked)
     expect(f.inputs.fetcher).toHaveBeenCalledWith('https://api.cheaperinference.com/v1/models/supply?model=beam&min_discount_percent=0', expect.anything());
     expect(r.expiresAt).toBe(now + 30000);
   });
-  it('does not fetch another model or upgrade when the configured model differs', async () => {
+  it('does not accept a quote for a different configured model', async () => {
     const f = fixture(); await expect(f.authority().review('cheaperinference', 'other')).rejects.toMatchObject({ reason: 'budget_evidence_unavailable' });
-    expect(f.inputs.fetcher).not.toHaveBeenCalled();
+    expect(f.inputs.fetcher).toHaveBeenCalledOnce();
   });
   it('makes no repeated preflight reads within one admission composition', async () => {
     const f = fixture(), a = f.authority(); await a.review('surplus', 'flash'); await a.review('surplus', 'flash');
@@ -61,4 +61,15 @@ describe('automatic preflight for separate two-call allowance (all reads mocked)
     const f = fixture(); vi.mocked(f.inputs.fetcher).mockResolvedValue(new Response('{"model":"other","secret":"private"}'));
     await expect(f.authority().review('cheaperinference', 'beam')).rejects.toMatchObject({ fields: [expect.stringContaining('no valid current')] });
   });
+});
+
+it('allows requested output above 256 but rejects provider-native maximum violations', async () => {
+  const f = fixture();
+  await expect(f.authority().review('surplus', 'flash', 4096)).resolves.toMatchObject({ totalBudgetPaise: 0 });
+  await expect(f.authority().review('surplus', 'flash', 4097)).rejects.toMatchObject({ fields: [expect.stringContaining('modelLimits')] });
+});
+it('does not require optional text/output metadata when context and prices support reservation', async () => {
+  const f = fixture();
+  vi.mocked(f.inputs.catalog).mockResolvedValue({ status: 'observed', model: 'flash', source: 'catalog', observedAt: now, contextTokens: 1048576, estimatedInputUsdPerMillion: null, estimatedOutputUsdPerMillion: null });
+  await expect(f.authority().review('surplus', 'flash', 1024)).resolves.toBeDefined();
 });

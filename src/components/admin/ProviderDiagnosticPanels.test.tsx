@@ -11,7 +11,7 @@ import { ProviderDiagnosticPanels, ProviderDiagnosticBot, ProviderDiagnosticResu
 import { ADMIN_TABS } from '../../lib/adminTabs';
 const id = '11111111-1111-4111-8111-111111111111';
 const reset = () => { hooks.values = []; hooks.refs = []; hooks.cursor = 0; hooks.refCursor = 0; };
-function render(component = 'bot', token = 'synthetic-admin') { hooks.cursor = 0; hooks.refCursor = 0; return component !== 'panels' ? ProviderDiagnosticBot({ provider: 'surplus', adminToken: token, ready: true, oneShot: component === 'pair' }) : ProviderDiagnosticPanels({ adminToken: token }); }
+function render(component = 'bot', token = 'synthetic-admin') { hooks.cursor = 0; hooks.refCursor = 0; return component !== 'panels' ? ProviderDiagnosticBot({ provider: 'surplus', adminToken: token, ready: true }) : ProviderDiagnosticPanels({ adminToken: token }); }
 function nodes(node: any): any[] { return Array.isArray(node) ? node.flatMap(nodes) : React.isValidElement(node) ? [node, ...nodes((node.props as any).children)] : []; }
 const find = (tree: any, label: string) => nodes(tree).find(n => n.type === 'button' && (Array.isArray(n.props.children) ? n.props.children.join('') : n.props.children) === label);
 const flush = async () => { for (let i = 0; i < 25; i++) await Promise.resolve(); };
@@ -44,7 +44,7 @@ it('synchronous duplicate clicks issue one request and unknown liability blocks 
   vi.mocked(fetch).mockResolvedValue(response(result) as any);
   nodes(render()).find(n => n.type === 'textarea').props.onChange({ target: { value: 'private prompt' } });
   const click = find(render(), 'Run surplus test').props.onClick; click(); click(); await flush();
-  expect(fetch).toHaveBeenCalledOnce(); expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toEqual({ idempotencyKey: id, prompt: 'private prompt' });
+  expect(fetch).toHaveBeenCalledOnce(); expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toEqual({ idempotencyKey: id, prompt: 'private prompt', maxOutputTokens: 256 });
   expect(find(render(), 'Run surplus test').props.disabled).toBe(true); expect(find(render(), 'Prepare another test').props.disabled).toBe(true);
 });
 it('remount recovers the same key with a GET and never retransmits the prompt', async () => {
@@ -57,7 +57,7 @@ it('remount recovers the same key with a GET and never retransmits the prompt', 
   expect(renderToStaticMarkup(render()!)).toContain('Actual cost unavailable'); expect(fetch).toHaveBeenCalledTimes(2);
 });
 it('failed recovery preserves key and prevents a new call', async () => {
-  sessionStorage.setItem('admin-diagnostic-pending:surplus', id); vi.mocked(fetch).mockResolvedValue(response({}, false) as any);
+  sessionStorage.setItem('admin-diagnostic-pair-20261028:surplus', id); vi.mocked(fetch).mockResolvedValue(response({}, false) as any);
   find(render(), 'Recover original run').props.onClick(); await flush(); expect(find(render(), 'Run surplus test').props.disabled).toBe(true);
 });
 it('renders cost, safe error evidence and escaped text without invented speed', () => {
@@ -75,23 +75,26 @@ it('registers admin navigation and keeps the existing admin-only dashboard gate'
   const panel = readFileSync('src/components/panels/AdminLoginPanel.tsx', 'utf8'); expect(panel).toContain('!isAdmin'); expect(panel).toContain('<AdminDashboard');
 });
 it.each([false, true])('recovery permits another test only when settled without overrun (%s)', async overrun => {
-  sessionStorage.setItem('admin-diagnostic-pending:surplus', id);
+  sessionStorage.setItem('admin-diagnostic-pair-20261028:surplus', id);
   vi.mocked(fetch).mockResolvedValue(response({ run: { runId: id, provider: 'surplus', state: 'settled', actualCostNanoUsd: overrun ? 20 : 5, reservedNanoUsd: 10 } }) as any);
   find(render(), 'Recover original run').props.onClick(); await flush();
   expect(find(render(), 'Prepare another test').props.disabled).toBe(overrun);
 });
 
-it('pair uses a fixed prompt, separate recovery key and blocks another settled test', async () => {
-  sessionStorage.setItem('admin-diagnostic-pending:surplus', id);
+it('manual tests allow editable prompts/output and another test after settlement', async () => {
   let tree = render('pair');
   expect(fetch).not.toHaveBeenCalled();
-  expect(nodes(tree).find(n => n.type === 'textarea').props).toMatchObject({ value: 'Reply with exactly: OK', readOnly: true });
-  expect(find(tree, 'Run surplus test').props.disabled).toBe(false);
+  const textarea = nodes(tree).find(n => n.type === 'textarea');
+  expect(textarea.props.readOnly).not.toBe(true);
+  textarea.props.onChange({ target: { value: 'Custom request' } });
+  nodes(tree).find(n => n.type === 'input' && n.props.type === 'number').props.onChange({ target: { value: '1024' } });
+  tree = render('pair');
   vi.mocked(fetch).mockResolvedValue(response({ ...result, accounting: 'settled' }) as any);
   find(tree, 'Run surplus test').props.onClick(); await flush(); tree = render('pair');
-  expect(find(tree, 'Clear blocked attempt').props.disabled).toBe(true);
-  expect(sessionStorage.getItem('admin-diagnostic-pending:surplus')).toBe(id);
-  expect(sessionStorage.getItem('admin-diagnostic-pair-20261028:surplus')).toBe(id);
+  expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toMatchObject({ prompt: 'Custom request', maxOutputTokens: 1024 });
+  expect(find(tree, 'Prepare another test').props.disabled).toBe(false);
+  find(tree, 'Prepare another test').props.onClick();
+  expect(sessionStorage.getItem('admin-diagnostic-pair-20261028:surplus')).toBeFalsy();
 });
 it('pair manually retries only the same admission key after an unavailable outcome', async () => {
   sessionStorage.setItem('admin-diagnostic-pair-20261028:surplus', id);
@@ -99,4 +102,40 @@ it('pair manually retries only the same admission key after an unavailable outco
   const tree = render('pair'); find(tree, 'Retry original admission with same key').props.onClick(); await flush();
   expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string).idempotencyKey).toBe(id);
   expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it('remount retries the exact original prompt and output setting with the same key', async () => {
+  nodes(render()).find(n => n.type === 'textarea').props.onChange({ target: { value: 'Original custom prompt' } });
+  nodes(render()).find(n => n.type === 'input' && n.props.type === 'number').props.onChange({ target: { value: '1024' } });
+  vi.mocked(fetch).mockRejectedValue(new Error('lost acknowledgement'));
+  find(render(), 'Run surplus test').props.onClick(); await flush();
+  const submitted = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+  reset();
+  vi.mocked(fetch).mockResolvedValue(response({ ...result, replayed: true }) as any);
+  find(render(), 'Retry original admission with same key').props.onClick(); await flush();
+  expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string)).toEqual(submitted);
+});
+
+it('manual revision-checked toggles do not dispatch or enable the other provider', async () => {
+  const off = { enabled: false, revision: 0, dispatchReady: false, reason: 'diagnostics_disabled', missingFields: [] };
+  vi.mocked(fetch).mockResolvedValue(response({ dispatchReady: false, providers: { surplus: off, cheaperinference: off } }) as any);
+  find(render('panels'), 'Verify admin and read test status').props.onClick(); await flush();
+  vi.mocked(fetch).mockResolvedValue(response({ provider: 'surplus', enabled: true, revision: 1 }) as any);
+  const click = find(render('panels'), 'Enable surplus diagnostics').props.onClick; click(); click(); await flush();
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(fetch).mock.calls[1][0]).toContain('/surplus/control');
+  expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string)).toEqual({ enabled: true, expectedRevision: 0 });
+  const tree = render('panels');
+  expect(find(tree, 'Disable surplus diagnostics').props.disabled).toBe(false);
+  expect(find(tree, 'Enable cheaperinference diagnostics').props.disabled).toBe(false);
+  expect(nodes(tree).filter(n => n.type === ProviderDiagnosticBot).every(n => n.props.ready === false)).toBe(true);
+});
+it('allows disable even when an enabled provider fails preflight and does not claim success on error', async () => {
+  const state = { enabled: true, revision: 3, dispatchReady: false, reason: 'config_missing', missingFields: [] };
+  vi.mocked(fetch).mockResolvedValue(response({ dispatchReady: false, providers: { surplus: state, cheaperinference: { ...state, enabled: false } } }) as any);
+  find(render('panels'), 'Verify admin and read test status').props.onClick(); await flush();
+  expect(find(render('panels'), 'Disable surplus diagnostics').props.disabled).toBe(false);
+  vi.mocked(fetch).mockRejectedValue(new Error('unconfirmed'));
+  find(render('panels'), 'Disable surplus diagnostics').props.onClick(); await flush();
+  expect(nodes(render('panels')).filter(n => n.type === ProviderDiagnosticBot)).toHaveLength(0);
 });

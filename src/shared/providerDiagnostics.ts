@@ -1,7 +1,7 @@
 /** Admin-only wire contract. Provider output and prompts must never enter persisted logs. */
 export type DiagnosticProvider = 'surplus' | 'cheaperinference';
-export const DIAGNOSTIC_LIMITS = Object.freeze({ promptBytes: 2048, outputTokens: 256, deadlineMs: 30_000, concurrentRuns: 1 });
-export type DiagnosticReason = 'config_missing' | 'authentication_rejected' | 'network_error'
+export const DIAGNOSTIC_LIMITS = Object.freeze({ promptBytes: 2048, defaultOutputTokens: 256, deadlineMs: 30_000, concurrentRuns: 1 });
+export type DiagnosticReason = 'diagnostics_disabled' | 'invalid_request' | 'config_missing' | 'authentication_rejected' | 'network_error'
   | 'timeout' | 'rate_limited' | 'provider_error' | 'malformed_response'
   | 'receipt_unavailable' | 'accounting_failed' | 'reservation_failed'
   | 'budget_evidence_unavailable' | 'completed';

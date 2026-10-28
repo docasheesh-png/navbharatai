@@ -1,0 +1,16 @@
+{
+  "$comment": "Projection of PublicModel from https://www.cheaperinference.com/api/openapi.json, read 2026-10-28. Complete required list and exact types of consumed fields; unrelated optional fields omitted. This is documentation, not a captured live API response.",
+  "type": "object",
+  "required": ["id", "model_type", "endpoint", "supported_endpoints", "input_per_million", "output_per_million", "discount_percent"],
+  "properties": {
+    "id": {"type": "string"},
+    "model_type": {"type": "string", "enum": ["text", "image", "video", "decision", "embedding", "speech", "transcription"]},
+    "context_length": {"type": ["integer", "null"]},
+    "max_output_tokens": {"type": ["integer", "null"]},
+    "endpoint": {"type": "string"},
+    "supported_endpoints": {"type": "array", "items": {"type": "string"}},
+    "input_per_million": {"type": "string"},
+    "output_per_million": {"type": "string"},
+    "discount_percent": {"type": "string"}
+  }
+}

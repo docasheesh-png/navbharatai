@@ -1,13 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Firestore } from 'firebase-admin/firestore';
-import { ProviderDiagnosticStore, DIAGNOSTIC_REVIEW_PATH } from './providerDiagnosticStore';
+import { ProviderDiagnosticStore, DIAGNOSTIC_REVIEW_PATH, diagnosticControlPath } from './providerDiagnosticStore';
 const now = Date.parse('2026-10-28T13:00:00Z');
 const key = '11111111-1111-4111-8111-111111111111';
 const key2 = '22222222-2222-4222-8222-222222222222';
 const root = 'free_chat_chain/provider_diagnostics';
 function fixture(pairMode = false) {
+  let currentNow = now;
   const rate = { model: 'test-model', contextTokens: 4096, inputPerMillionNanoUsd: 1_000_000, outputPerMillionNanoUsd: 2_000_000, rateEvidenceRef: 'review:tariff' };
   const docs = new Map<string, any>([
+    [diagnosticControlPath('surplus'), { enabled: true, revision: 1 }],
+    [diagnosticControlPath('cheaperinference'), { enabled: true, revision: 1 }],
     [DIAGNOSTIC_REVIEW_PATH, { version: 1, expiresAt: now + 60_000, priorCommittedPaise: 100_000, priorEvidenceRef: 'review:prior-api-and-sandbox', totalBudgetPaise: 200_000, allInPaisePerUsdCeiling: 10_000, monthlyCapNanoUsd: 10e9, providers: { surplus: rate, cheaperinference: rate } }],
     ['free_chat_chain/paid_budget_policy', { kind: 'paid_budget_policy', version: 1, revision: 1, capNanoUsd: 10e9, updatedAt: now, source: 'admin' }],
     ['live_ai_registry/old_connection_test', { status: 'completed', latencyMs: 1234 }],
@@ -19,7 +22,8 @@ function fixture(pairMode = false) {
     docs.get(DIAGNOSTIC_REVIEW_PATH).providers[provider] = rate;
     docs.set(`${root}/evidence/tariff:${provider}`, { ...evidence, ...rate, kind: 'supplier-tariff', provider, credentialsPinnedToDeploymentRevision: true, deploymentRevision: 'test-deployment', endpoint: provider === 'surplus' ? 'https://api.surplusintelligence.ai/v1' : 'https://api.cheaperinference.com/v1', ratesLockedForAdmittedRequest: true, ratesAreAllDimensionCeilings: true, coversAllServedModelVersions: true, accountSpecific: true, accountReviewId: 'test-account-review', currency: 'USD', billingBasis: 'tokens-only', additionalCharges: 'none', outputCapIncludesReasoning: true, sourceUrl: provider === 'surplus' ? 'https://api.surplusintelligence.ai/pricing' : 'https://api.cheaperinference.com/pricing' });
   }
-  const pair = pairMode ? { review: async () => ({ ...structuredClone(docs.get(DIAGNOSTIC_REVIEW_PATH)), diagnosticsInitialized: undefined, totalBudgetPaise: 10000, priorCommittedPaise: 0 }) } : undefined;
+  let onReview: (() => Promise<void>) | undefined;
+  const pair = pairMode ? { review: async () => { await onReview?.(); return ({ ...structuredClone(docs.get(DIAGNOSTIC_REVIEW_PATH)), diagnosticsInitialized: undefined, totalBudgetPaise: 10000, priorCommittedPaise: 0 }); } } : undefined;
   let serial = Promise.resolve(); let uncertain = false;
   const snapshot = (path: string) => ({ exists: docs.has(path), data: () => structuredClone(docs.get(path)) });
   const db = {
@@ -37,7 +41,7 @@ function fixture(pairMode = false) {
       serial = work.then(() => undefined, () => undefined); return work;
     },
   };
-  return { docs, store: new ProviderDiagnosticStore(db as unknown as Firestore, () => now, () => ({ daily: 10e9, monthly: 10e9 }), provider => ({ deploymentRevision: 'test-deployment', endpoint: provider === 'surplus' ? 'https://api.surplusintelligence.ai/v1' : 'https://api.cheaperinference.com/v1' }), pair),
+  return { advanceTime: (ms: number) => { currentNow += ms; }, beforeReview: (fn: () => Promise<void>) => { onReview = fn; }, docs, store: new ProviderDiagnosticStore(db as unknown as Firestore, () => currentNow, () => ({ daily: 10e9, monthly: 10e9 }), provider => ({ deploymentRevision: 'test-deployment', endpoint: provider === 'surplus' ? 'https://api.surplusintelligence.ai/v1' : 'https://api.cheaperinference.com/v1' }), pair),
     restart: () => new ProviderDiagnosticStore(db as unknown as Firestore, () => now + 86_400_000, () => ({ daily: 10e9, monthly: 10e9 }), provider => ({ deploymentRevision: 'test-deployment', endpoint: provider === 'surplus' ? 'https://api.surplusintelligence.ai/v1' : 'https://api.cheaperinference.com/v1' }), pair),
     uncertain: () => { uncertain = true; } };
 }
@@ -171,14 +175,17 @@ describe('shared status and transactional evidence admission', () => {
 });
 
 
-describe('separately authorized two-call allowance', () => {
+describe('manual diagnostics under shared budgets', () => {
   const pairRoot = 'free_chat_chain/provider_diagnostic_pair_20261028';
-  it('allows exactly one settled call per provider without editing historical authority', async () => {
+  it('allows repeated settled calls without deleting historical authority or one-call slots', async () => {
     const f = fixture(true), before = structuredClone(f.docs.get(DIAGNOSTIC_REVIEW_PATH));
     const first = await f.store.reserve(key, 'surplus', 'test-model');
     await f.store.finish(key, first.run.runId, 1000);
-    await expect(f.store.reserve(key2, 'surplus', 'test-model')).rejects.toMatchObject({ reason: 'budget_exhausted' });
-    const second = await f.store.reserve(key2, 'cheaperinference', 'test-model');
+    const oldSlot = { version: 1, runId: first.run.runId, key };
+    f.docs.set(`${pairRoot}/slots/surplus`, oldSlot);
+    const second = await f.store.reserve(key2, 'surplus', 'test-model', 1024);
+    expect(second.run.reservedNanoUsd).toBeGreaterThan(first.run.reservedNanoUsd);
+    expect(f.docs.get(`${pairRoot}/slots/surplus`)).toEqual(oldSlot);
     await f.store.finish(key2, second.run.runId, 1000);
     expect(f.docs.get(DIAGNOSTIC_REVIEW_PATH)).toEqual(before);
     expect(f.docs.has(`${root}/ledger/total`)).toBe(false);
@@ -236,4 +243,80 @@ it('pair transaction replays a legacy run even when the new pair namespace has n
   const before = JSON.stringify([...f.docs]);
   expect((await f.store.reserve(key, 'surplus', 'test-model')).mayDispatch).toBe(false);
   expect(JSON.stringify([...f.docs])).toBe(before);
+});
+
+it('manual diagnostics can reserve beyond the removed ₹100 cap while shared budgets still apply', async () => {
+  const f = fixture(true);
+  for (const rate of Object.values(f.docs.get(DIAGNOSTIC_REVIEW_PATH).providers) as any[]) {
+    rate.inputPerMillionNanoUsd = 500_000_000_000;
+  }
+  const a = await f.store.reserve(key, 'surplus', 'test-model', 1024);
+  expect(a.run.reservedPaise).toBeGreaterThan(10000);
+});
+
+describe('diagnostic-only durable controls', () => {
+  it('defaults missing controls OFF without writes and blocks direct reservation', async () => {
+    const f = fixture(true); f.docs.delete(diagnosticControlPath('surplus'));
+    const before = JSON.stringify([...f.docs]);
+    expect(await f.store.control('surplus')).toEqual({ enabled: false, revision: 0 });
+    expect(await f.store.status('surplus', 'test-model')).toMatchObject({ dispatchReady: false, reason: 'diagnostics_disabled' });
+    await expect(f.store.reserve(key, 'surplus', 'test-model')).rejects.toMatchObject({ reason: 'diagnostics_disabled' });
+    expect(JSON.stringify([...f.docs])).toBe(before);
+  });
+  it('changes only the selected provider and atomically audits without releasing holds', async () => {
+    const f = fixture(true); const a = await f.store.reserve(key, 'surplus', 'test-model');
+    const held = structuredClone(f.docs.get('free_chat_chain/paid_day_2026-10-28'));
+    await f.store.setControl('surplus', false, 1, 'verified-test-admin');
+    expect(await f.store.control('surplus')).toEqual({ enabled: false, revision: 2 });
+    expect(await f.store.control('cheaperinference')).toEqual({ enabled: true, revision: 1 });
+    expect(f.docs.get('free_chat_chain/paid_day_2026-10-28')).toEqual(held);
+    expect((await f.store.read(key))?.runId).toBe(a.run.runId);
+    expect([...f.docs.entries()].filter(([p]) => p.includes('/control_audit/'))).toHaveLength(1);
+    await expect(f.store.setControl('surplus', true, 1, 'stale-admin')).rejects.toMatchObject({ reason: 'control_conflict' });
+    expect((await f.store.control('surplus')).enabled).toBe(false);
+  });
+  it('disable wins before dispatch claim, including disable-then-enable ABA race', async () => {
+    const f = fixture(true); const a = await f.store.reserve(key, 'surplus', 'test-model');
+    await f.store.setControl('surplus', false, 1, 'admin');
+    expect(await f.store.claimDispatch(key, a.run.runId)).toBe(false);
+    await f.store.setControl('surplus', true, 2, 'admin');
+    expect(await f.store.claimDispatch(key, a.run.runId)).toBe(false);
+    expect((await f.store.read(key))?.state).toBe('reserved');
+  });
+  it('an already committed dispatch claim is not retried or erased by disable', async () => {
+    const f = fixture(true); const a = await f.store.reserve(key, 'surplus', 'test-model');
+    expect(await f.store.claimDispatch(key, a.run.runId)).toBe(true);
+    expect(await f.store.claimDispatch(key, a.run.runId)).toBe(false);
+    await f.store.setControl('surplus', false, 1, 'admin');
+    expect((await f.store.read(key))?.dispatchClaimedAt).toBe(now);
+    expect((await f.store.read(key))?.actualCostNanoUsd).toBeNull();
+  });
+});
+
+it('disable during network preflight is rechecked transactionally before any reservation', async () => {
+  const f = fixture(true);
+  f.beforeReview(async () => { await f.store.setControl('surplus', false, 1, 'admin'); });
+  await expect(f.store.reserve(key, 'surplus', 'test-model')).rejects.toMatchObject({ reason: 'diagnostics_disabled' });
+  expect(f.docs.has('free_chat_chain/paid_day_2026-10-28')).toBe(false);
+  expect(await f.store.read(key)).toBeNull();
+});
+
+it('a delayed dispatch claim cannot outlive the admitted pricing deadline', async () => {
+  const f = fixture(true); const a = await f.store.reserve(key, 'surplus', 'test-model');
+  f.advanceTime(60001);
+  await expect(f.store.claimDispatch(key, a.run.runId)).rejects.toMatchObject({ reason: 'budget_evidence_unavailable' });
+  expect((await f.store.read(key))?.dispatchClaimedAt).toBeUndefined();
+  expect((await f.store.read(key))?.state).toBe('reserved');
+});
+it('malformed controls fail closed and concurrent stale toggles cannot overwrite disable', async () => {
+  const f = fixture(true);
+  f.docs.set(diagnosticControlPath('surplus'), { enabled: 'true', revision: 1 });
+  await expect(f.store.reserve(key, 'surplus', 'test-model')).rejects.toMatchObject({ reason: 'accounting_failed' });
+  f.docs.set(diagnosticControlPath('surplus'), { enabled: true, revision: 1 });
+  const outcomes = await Promise.allSettled([
+    f.store.setControl('surplus', false, 1, 'admin-a'),
+    f.store.setControl('surplus', true, 1, 'stale-admin-b'),
+  ]);
+  expect(outcomes.map(r => r.status)).toEqual(['fulfilled', 'rejected']);
+  expect(await f.store.control('surplus')).toEqual({ enabled: false, revision: 2 });
 });

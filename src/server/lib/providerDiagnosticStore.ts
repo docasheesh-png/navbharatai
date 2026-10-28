@@ -8,10 +8,18 @@ import { readData, readPaidPolicy, readSpendDay, writeSpendDay } from '../AI/Fre
 
 const ROOT = 'free_chat_chain/provider_diagnostics';
 export const DIAGNOSTIC_REVIEW_PATH = `${ROOT}/policy/review`;
+export const diagnosticControlPath = (provider: DiagnosticProvider) => `${ROOT}/control/${provider}`;
+export interface DiagnosticControl { enabled: boolean; revision: number }
+function controlFrom(raw: unknown): DiagnosticControl {
+  if (raw === undefined) return { enabled: false, revision: 0 };
+  const c = raw as DiagnosticControl;
+  demand(c && typeof c.enabled === 'boolean' && nonnegativeInteger(c.revision), 'accounting_failed');
+  return { enabled: c.enabled, revision: c.revision };
+}
 const TOTAL = `${ROOT}/ledger/total`;
 export interface DiagnosticPairAuthority {
-  /** Separate owner-authorized allowance; never changes the legacy benchmark ledger. */
-  review(provider: DiagnosticProvider, model: string): Promise<DiagnosticBudgetReview>;
+  /** Automatic pricing for manual tests under shared platform budgets; preserves legacy ledgers. */
+  review(provider: DiagnosticProvider, model: string, outputTokens?: number): Promise<DiagnosticBudgetReview>;
 }
 const PAIR_ROOT = 'free_chat_chain/provider_diagnostic_pair_20261028';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -35,6 +43,7 @@ export interface DiagnosticBudgetReview {
   }>;
 }
 export interface DiagnosticRunRecord {
+  controlRevision?: number; dispatchClaimedAt?: number;
   dispatchBefore?: number;
   version: 1; runId: string; provider: DiagnosticProvider; model: string; startedAt: number;
   day: string; month: string; reservedNanoUsd: number; reservedPaise: number; conversionCeiling: number;
@@ -43,7 +52,7 @@ export interface DiagnosticRunRecord {
 }
 interface Total { version: 1; priorCommittedPaise: number; diagnosticCommittedPaise: number; activeRunId: string | null }
 export class DiagnosticAdmissionError extends Error {
-  constructor(readonly reason: 'invalid_request' | 'budget_evidence_unavailable' | 'budget_exhausted' | 'run_in_progress' | 'accounting_failed') {
+  constructor(readonly reason: 'diagnostics_disabled' | 'control_conflict' | 'invalid_request' | 'budget_evidence_unavailable' | 'budget_exhausted' | 'run_in_progress' | 'accounting_failed') {
     super(reason);
   }
 }
@@ -71,7 +80,7 @@ function checkedRun(raw: unknown): DiagnosticRunRecord {
     && ['reserved', 'unknown_liability', 'settled'].includes(r.state)
     && (r.actualCostNanoUsd === null || nonnegativeInteger(r.actualCostNanoUsd)), 'accounting_failed');
   // Explicit projection: extra stored fields never become response/log fields.
-  return { ...(nonnegativeInteger(r.dispatchBefore) ? { dispatchBefore: r.dispatchBefore } : {}), version: 1, runId: r.runId, provider: r.provider, model: r.model, startedAt: r.startedAt,
+  return { ...(nonnegativeInteger(r.controlRevision) ? { controlRevision: r.controlRevision } : {}), ...(nonnegativeInteger(r.dispatchClaimedAt) ? { dispatchClaimedAt: r.dispatchClaimedAt } : {}), ...(nonnegativeInteger(r.dispatchBefore) ? { dispatchBefore: r.dispatchBefore } : {}), version: 1, runId: r.runId, provider: r.provider, model: r.model, startedAt: r.startedAt,
     day: r.day, month: r.month, reservedNanoUsd: r.reservedNanoUsd, reservedPaise: r.reservedPaise,
     conversionCeiling: r.conversionCeiling, state: r.state, actualCostNanoUsd: r.actualCostNanoUsd };
 }
@@ -84,9 +93,41 @@ export class ProviderDiagnosticStore {
   private get root() { return this.pair ? PAIR_ROOT : ROOT; }
   private get totalPath() { return this.pair ? `${PAIR_ROOT}/ledger/total` : TOTAL; }
   private get reviewPath() { return this.pair ? `${PAIR_ROOT}/policy/review` : DIAGNOSTIC_REVIEW_PATH; }
-  async status(provider: DiagnosticProvider, model: string) {
+  async control(provider: DiagnosticProvider): Promise<DiagnosticControl> {
+    demand(provider === 'surplus' || provider === 'cheaperinference', 'invalid_request');
+    return controlFrom((await this.db.doc(diagnosticControlPath(provider)).get()).data());
+  }
+  async setControl(provider: DiagnosticProvider, enabled: boolean, expectedRevision: number, actor: string): Promise<DiagnosticControl> {
+    demand((provider === 'surplus' || provider === 'cheaperinference') && typeof enabled === 'boolean' && nonnegativeInteger(expectedRevision), 'invalid_request');
+    const ref = this.db.doc(diagnosticControlPath(provider)), auditRef = this.db.doc(`${ROOT}/control_audit/${randomUUID()}`);
+    return this.db.runTransaction(async tx => {
+      const before = controlFrom((await tx.get(ref)).data());
+      demand(before.revision === expectedRevision, 'control_conflict');
+      const after = { enabled, revision: checkedAdd(before.revision, 1) };
+      const at = this.now();
+      tx.set(ref, { ...after, updatedAt: at });
+      // Only the server's verified admin identity and fixed control fields enter this audit.
+      tx.create(auditRef, { provider, actor, before, after, at, action: 'diagnostic-control' });
+      return after;
+    });
+  }
+  /** Linearization point for dispatch versus disable. A later disable cannot revoke
+   * a claim already committed here or cancel supplier execution/billing. */
+  async claimDispatch(key: string, runId: string): Promise<boolean> {
+    return this.db.runTransaction(async tx => {
+      const ref = this.runRef(key), run = checkedRun((await tx.get(ref)).data());
+      demand(run.runId === runId, 'accounting_failed');
+      const control = controlFrom((await tx.get(this.db.doc(diagnosticControlPath(run.provider)))).data());
+      if (run.state !== 'reserved' || run.dispatchClaimedAt !== undefined || !control.enabled || control.revision !== run.controlRevision) return false;
+      const now = this.now();
+      demand(run.dispatchBefore !== undefined && now < run.dispatchBefore, 'budget_evidence_unavailable');
+      tx.set(ref, { ...run, dispatchClaimedAt: now });
+      return true;
+    });
+  }
+  async status(provider: DiagnosticProvider, model: string, outputTokens: number = DIAGNOSTIC_LIMITS.defaultOutputTokens) {
     try {
-      await this.admit(randomUUID(), provider, model, true);
+      await this.admit(randomUUID(), provider, model, true, outputTokens);
       return { dispatchReady: true, reason: null, missingFields: [] as string[] };
     } catch (error) {
       return { dispatchReady: false, reason: error instanceof DiagnosticAdmissionError ? error.reason : error instanceof DiagnosticEvidenceMissing ? 'budget_evidence_unavailable' : 'accounting_unavailable', missingFields: error instanceof DiagnosticEvidenceMissing ? error.fields : [] };
@@ -105,10 +146,11 @@ export class ProviderDiagnosticStore {
     }
     return null;
   }
-  async reserve(key: string, provider: DiagnosticProvider, model: string): Promise<{ mayDispatch: boolean; run: DiagnosticRunRecord }> {
-    return this.admit(key, provider, model, false);
+  async reserve(key: string, provider: DiagnosticProvider, model: string, outputTokens: number = DIAGNOSTIC_LIMITS.defaultOutputTokens): Promise<{ mayDispatch: boolean; run: DiagnosticRunRecord }> {
+    return this.admit(key, provider, model, false, outputTokens);
   }
-  private async admit(key: string, provider: DiagnosticProvider, model: string, dryRun: boolean): Promise<{ mayDispatch: boolean; run: DiagnosticRunRecord }> {
+  private async admit(key: string, provider: DiagnosticProvider, model: string, dryRun: boolean, outputTokens: number): Promise<{ mayDispatch: boolean; run: DiagnosticRunRecord }> {
+    demand(Number.isSafeInteger(outputTokens) && outputTokens > 0, 'invalid_request');
     demand((provider === 'surplus' || provider === 'cheaperinference') && modelId.test(model), 'invalid_request');
     const runRef = this.runRef(key), runId = randomUUID();
     if (this.pair) {
@@ -119,8 +161,10 @@ export class ProviderDiagnosticStore {
         return { mayDispatch: false, run };
       }
     }
+    const control = await this.control(provider);
+    demand(control.enabled, 'diagnostics_disabled');
     // Network preflight occurs outside the retryable transaction. Admission rechecks expiry.
-    const prepared = this.pair ? await this.pair.review(provider, model) : null;
+    const prepared = this.pair ? await this.pair.review(provider, model, outputTokens) : null;
     return this.db.runTransaction(async tx => {
       const now = this.now();
       const window = civilDayWindow(now, PAID_BUDGET_TIME_ZONE), month = window.key.slice(0, 7);
@@ -130,6 +174,8 @@ export class ProviderDiagnosticStore {
         demand(run.provider === provider && run.model === model, 'invalid_request');
         return { mayDispatch: false, run };
       }
+      const currentControl = controlFrom((await tx.get(this.db.doc(diagnosticControlPath(provider)))).data());
+      demand(currentControl.enabled && currentControl.revision === control.revision, 'diagnostics_disabled');
       const storedReview = (await tx.get(this.db.doc(this.reviewPath))).data();
       const review = prepared ? { ...prepared, diagnosticsInitialized: storedReview?.diagnosticsInitialized }
         : await readDiagnosticEvidence(storedReview, provider, model, now, async path => (await tx.get(this.db.doc(path))).data(), this.binding(provider));
@@ -140,9 +186,8 @@ export class ProviderDiagnosticStore {
           demand(run.provider === provider && run.model === model, 'invalid_request');
           return { mayDispatch: false, run };
         }
-        demand(prepared.expiresAt > now && prepared.totalBudgetPaise === 10000 && prepared.priorCommittedPaise === 0, 'budget_evidence_unavailable');
-        const slot = await tx.get(this.db.doc(`${PAIR_ROOT}/slots/${provider}`));
-        demand(!slot.exists, 'budget_exhausted');
+        demand(prepared.expiresAt > now, 'budget_evidence_unavailable');
+        // Historical one-call slots are retained, but no longer govern new admissions.
         // Preserve the earlier diagnostic stop as well as its monetary holds.
         const oldTotal = (await tx.get(this.db.doc(TOTAL))).data();
         demand(!oldTotal || oldTotal.activeRunId === null, 'run_in_progress');
@@ -161,21 +206,20 @@ export class ProviderDiagnosticStore {
       demand(total.activeRunId === null, 'run_in_progress');
       const rate = review.providers[provider];
       // Full reviewed context, not an assumed chars/token ratio. Includes hidden output within the cap.
-      const amount = maximumCostNanoUsd(rate.contextTokens, DIAGNOSTIC_LIMITS.outputTokens, rate.inputPerMillionNanoUsd, rate.outputPerMillionNanoUsd);
+      const amount = maximumCostNanoUsd(rate.contextTokens, outputTokens, rate.inputPerMillionNanoUsd, rate.outputPerMillionNanoUsd);
       const reservedPaise = paise(amount, review.allInPaisePerUsdCeiling);
       const priorCommittedPaise = Math.max(total.priorCommittedPaise, review.priorCommittedPaise);
-      demand(amount > 0 && reservedPaise <= (this.pair ? 5000 : 100)
-        && checkedAdd(checkedAdd(priorCommittedPaise, total.diagnosticCommittedPaise), reservedPaise) <= review.totalBudgetPaise
+      demand(amount > 0 && (this.pair || reservedPaise <= 100
+        && checkedAdd(checkedAdd(priorCommittedPaise, total.diagnosticCommittedPaise), reservedPaise) <= review.totalBudgetPaise)
         && checkedAdd(checkedAdd(day.heldNanoUsd, day.spentNanoUsd), amount) <= Math.min(policy.capNanoUsd, limits.daily)
         && checkedAdd(checkedAdd(monthly.heldNanoUsd, monthly.spentNanoUsd), amount) <= Math.min(review.monthlyCapNanoUsd, limits.monthly), 'budget_exhausted');
-      const run: DiagnosticRunRecord = { dispatchBefore: review.expiresAt, version: 1, runId, provider, model, startedAt: now, day: window.key, month,
+      const run: DiagnosticRunRecord = { controlRevision: currentControl.revision, dispatchBefore: review.expiresAt, version: 1, runId, provider, model, startedAt: now, day: window.key, month,
         reservedNanoUsd: amount, reservedPaise, conversionCeiling: review.allInPaisePerUsdCeiling, state: 'reserved', actualCostNanoUsd: null };
       if (dryRun) return { mayDispatch: false, run };
       writeSpendDay(tx, this.db, { ...day, heldNanoUsd: checkedAdd(day.heldNanoUsd, amount), requests: checkedAdd(day.requests, 1), pending: checkedAdd(day.pending, 1) }, policy.capNanoUsd, now, () => []);
       tx.set(monthRef, { ...monthly, heldNanoUsd: checkedAdd(monthly.heldNanoUsd, amount), updatedAt: now });
       tx.set(totalRef, { ...total, priorCommittedPaise, diagnosticCommittedPaise: checkedAdd(total.diagnosticCommittedPaise, reservedPaise), activeRunId: runId });
       if (!totalSnap.exists) tx.set(this.db.doc(this.reviewPath), { ...review, diagnosticsInitialized: true });
-      if (this.pair) tx.create(this.db.doc(`${PAIR_ROOT}/slots/${provider}`), { version: 1, runId, key: key.toLowerCase() });
       tx.create(runRef, run);
       return { mayDispatch: true, run };
     });

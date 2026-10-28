@@ -2,19 +2,20 @@ import type { RequestHandler } from 'express';
 import { requireAdmin } from './adminAuth';
 import { DIAGNOSTIC_LIMITS, type DiagnosticProvider } from '../../shared/providerDiagnostics';
 
-export interface DiagnosticInput { provider: DiagnosticProvider; idempotencyKey: string; prompt: string }
+export interface DiagnosticInput { provider: DiagnosticProvider; idempotencyKey: string; prompt: string; maxOutputTokens?: number }
 
-/** No client-selected model, endpoint, credential, budget, output cap or retry policy. */
+/** No client-selected model, endpoint, credential, budget or retry policy. */
 export function parseDiagnosticInput(provider: unknown, body: unknown): DiagnosticInput | null {
   if (provider !== 'surplus' && provider !== 'cheaperinference') return null;
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
   const data = body as Record<string, unknown>;
-  if (Object.keys(data).some(key => key !== 'idempotencyKey' && key !== 'prompt')) return null;
+  if (Object.keys(data).some(key => key !== 'idempotencyKey' && key !== 'prompt' && key !== 'maxOutputTokens')) return null;
   if (typeof data.idempotencyKey !== 'string'
     || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(data.idempotencyKey)) return null;
   if (typeof data.prompt !== 'string' || !data.prompt.trim()
     || Buffer.byteLength(data.prompt, 'utf8') > DIAGNOSTIC_LIMITS.promptBytes) return null;
-  return { provider, idempotencyKey: data.idempotencyKey.toLowerCase(), prompt: data.prompt };
+  if (data.maxOutputTokens !== undefined && (!Number.isSafeInteger(data.maxOutputTokens) || Number(data.maxOutputTokens) <= 0)) return null;
+  return { ...(data.maxOutputTokens === undefined ? {} : { maxOutputTokens: Number(data.maxOutputTokens) }), provider, idempotencyKey: data.idempotencyKey.toLowerCase(), prompt: data.prompt };
 }
 
 /** Apply to the entire future diagnostic router, including status/log reads and unknown paths. */

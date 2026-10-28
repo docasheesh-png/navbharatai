@@ -24,12 +24,30 @@ await mount(Panels, { adminToken: '' }); assert.equal(container.innerHTML, ''); 
 await mount(Panels, { adminToken: 'synthetic-admin' }); assert.equal(calls.length, 0); assert.equal(container.querySelectorAll('textarea').length, 0);
 await click('Verify admin and read test status'); assert.equal(calls.length, 1); assert.equal(container.querySelectorAll('textarea').length, 2); assert(container.textContent.includes('Dispatch blocked')); assert([...container.querySelectorAll('button')].filter(b => b.textContent.startsWith('Run ')).every(b => b.disabled)); await unmount();
 ok = false; await mount(Panels, { adminToken: 'invalid-admin' }); await click('Verify admin and read test status'); assert.equal(container.querySelectorAll('textarea').length, 0); await unmount(); ok = true;
+// Real mounted controls default OFF; toggles are explicit, independent, and never inference.
+const off = { enabled: false, revision: 0, dispatchReady: false, reason: 'diagnostics_disabled', missingFields: [] };
+answer = { dispatchReady: false, providers: { surplus: off, cheaperinference: off } };
+await mount(Panels, { adminToken: 'synthetic-admin' }); const controlsBefore = calls.length;
+assert.equal(calls.length, controlsBefore); await click('Verify admin and read test status');
+assert([...container.querySelectorAll('button')].filter(b => b.textContent.startsWith('Run ')).every(b => b.disabled));
+answer = { provider: 'surplus', enabled: true, revision: 1 };
+await click('Enable surplus diagnostics', true);
+assert.equal(calls.length, controlsBefore + 2);
+assert(calls.at(-1).url.endsWith('/surplus/control'));
+assert.deepEqual(JSON.parse(calls.at(-1).options.body), { enabled: true, expectedRevision: 0 });
+assert([...container.querySelectorAll('button')].some(b => b.textContent === 'Enable cheaperinference diagnostics'));
+assert([...container.querySelectorAll('button')].filter(b => b.textContent.startsWith('Run ')).every(b => b.disabled));
+answer = { provider: 'surplus', enabled: false, revision: 2 };
+await click('Disable surplus diagnostics');
+assert.deepEqual(JSON.parse(calls.at(-1).options.body), { enabled: false, expectedRevision: 1 });
+assert(container.textContent.includes('already admitted or dispatched requests may continue'));
+await unmount();
 const id = '11111111-1111-4111-8111-111111111111';
-sessionStorage.setItem('admin-diagnostic-pending:surplus', id); answer = { run: { runId: id, provider: 'surplus', state: 'unknown_liability', actualCostNanoUsd: null, reservedNanoUsd: 1000 } };
+sessionStorage.setItem('admin-diagnostic-pair-20261028:surplus', id); answer = { run: { runId: id, provider: 'surplus', state: 'unknown_liability', actualCostNanoUsd: null, reservedNanoUsd: 1000 } };
 await mount(Bot, { adminToken: 'synthetic-admin', provider: 'surplus', ready: true }); const before = calls.length;
 await click('Recover original run', true); assert.equal(calls.length, before + 1); assert.equal(calls.at(-1).options.method, 'GET'); assert.equal(calls.at(-1).options.body, undefined); assert(container.textContent.includes('Actual cost unavailable')); assert([...container.querySelectorAll('button')].find(b => b.textContent === 'Prepare another test').disabled); await unmount();
 answer = { run: { runId: id, provider: 'surplus', state: 'settled', actualCostNanoUsd: 5, reservedNanoUsd: 1000 } };
-await mount(Bot, { adminToken: 'synthetic-admin', provider: 'surplus', ready: true }); await click('Recover original run'); await click('Prepare another test'); assert.equal(sessionStorage.getItem('admin-diagnostic-pending:surplus'), null); await unmount();
+await mount(Bot, { adminToken: 'synthetic-admin', provider: 'surplus', ready: true }); await click('Recover original run'); await click('Prepare another test'); assert.equal(sessionStorage.getItem('admin-diagnostic-pair-20261028:surplus'), null); await unmount();
 await mount(Bot, { adminToken: 'synthetic-admin', provider: 'surplus', ready: true });
 const textarea = container.querySelector('textarea');
 await React.act(async () => { Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(textarea, 'Reply hello'); textarea.dispatchEvent(new window.Event('input', { bubbles: true })); textarea.dispatchEvent(new window.Event('change', { bubbles: true })); });
@@ -37,25 +55,24 @@ const runButton = [...container.querySelectorAll('button')].find(b => b.textCont
 assert.equal(runButton.disabled, false, 'real input enables a bounded manual test');
 answer = { runId: id, provider: 'surplus', model: 'test', startedAt: '2026-10-28T00:00:00Z', elapsedMs: 10, firstByteMs: null, firstTokenMs: null, outputTokensPerSecond: null, retryCount: 0, text: '<script>escaped</script>', usage: { inputTokens: 1, outputTokens: 1, cachedTokens: null }, supplierCost: { status: 'unavailable' }, walletCharge: { status: 'not_charged' }, accounting: 'unknown_liability', timeline: [{ elapsedMs: 10, stage: 'accounting', reason: 'receipt_unavailable' }], provesBuilderHealth: false };
 const postsBefore = calls.length; await click('Run surplus test', true); assert.equal(calls.length, postsBefore + 1); assert.equal(calls.at(-1).options.method, 'POST'); assert.equal(container.querySelector('script'), null); assert(container.textContent.includes('Actual cost unavailable')); await unmount();
-// Separate pair: fixed prompt, isolated durable key, same-key recovery, no repeat after settlement.
-sessionStorage.setItem('admin-diagnostic-pending:surplus', id);
+// Manual diagnostics: editable prompt, durable key, same-key recovery, repeated settled calls.
+sessionStorage.setItem('admin-diagnostic-pair-20261028:surplus', id);
 sessionStorage.removeItem('admin-diagnostic-pair-20261028:surplus');
 answer = { runId: id, provider: 'surplus', model: 'test', startedAt: new Date().toISOString(), elapsedMs: 1,
   firstByteMs: null, firstTokenMs: null, outputTokensPerSecond: null, retryCount: 0, text: 'OK',
   usage: { inputTokens: 1, outputTokens: 1, cachedTokens: null }, supplierCost: { status: 'reported', amount: '0.000001', currency: 'USD' },
   walletCharge: { status: 'not_charged' }, accounting: 'settled', timeline: [], provesBuilderHealth: false };
-await mount(Bot, { adminToken: 'synthetic-admin', provider: 'surplus', ready: true, oneShot: true });
+await mount(Bot, { adminToken: 'synthetic-admin', provider: 'surplus', ready: true });
 assert.equal(container.querySelector('textarea').value, 'Reply with exactly: OK');
-assert(container.querySelector('textarea').readOnly);
+assert.equal(container.querySelector('textarea').readOnly, false);
 const pairBefore = calls.length; await click('Run surplus test', true); assert.equal(calls.length, pairBefore + 1);
 const pairKey = JSON.parse(calls.at(-1).options.body).idempotencyKey;
-assert.equal(sessionStorage.getItem('admin-diagnostic-pair-20261028:surplus'), pairKey);
-assert.equal(sessionStorage.getItem('admin-diagnostic-pending:surplus'), id);
-assert([...container.querySelectorAll('button')].find(b => b.textContent === 'Clear blocked attempt').disabled);
+assert.equal(JSON.parse(sessionStorage.getItem('admin-diagnostic-pair-20261028:surplus')).id, pairKey);
+assert.equal([...container.querySelectorAll('button')].find(b => b.textContent === 'Prepare another test').disabled, false);
 await unmount();
-await mount(Bot, { adminToken: 'synthetic-admin', provider: 'surplus', ready: true, oneShot: true });
+await mount(Bot, { adminToken: 'synthetic-admin', provider: 'surplus', ready: true });
 await click('Retry original admission with same key');
 assert.equal(JSON.parse(calls.at(-1).options.body).idempotencyKey, pairKey);
 await unmount();
-console.log('PASS real React/Happy DOM: empty-admin exclusion, manual verified visibility, auth-failure hiding, no mount calls, duplicate recovery, remount same-key GET, unknown hold and settled recovery, real prompt input and duplicate POST suppression.');
+console.log('PASS real React/Happy DOM: independent default-OFF controls, revision-checked toggles without inference, disable, empty-admin exclusion, manual verified visibility, auth-failure hiding, no mount calls, duplicate recovery, remount same-key GET, unknown hold and settled recovery, real prompt input and duplicate POST suppression.');
 await window.happyDOM.close();

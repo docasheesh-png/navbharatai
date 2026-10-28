@@ -2,10 +2,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import express from 'express';
 import { request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
-const mocked = vi.hoisted(() => ({ page: vi.fn(), detail: vi.fn(), create: vi.fn(), list: vi.fn(), revoke: vi.fn(), tokenOk: vi.fn() }));
+const mocked = vi.hoisted(() => ({ scope: vi.fn(), page: vi.fn(), detail: vi.fn(), create: vi.fn(), list: vi.fn(), revoke: vi.fn(), tokenOk: vi.fn() }));
 const oauth = vi.hoisted(() => ({ register: vi.fn(), authorize: vi.fn(), pending: vi.fn(), decide: vi.fn(), token: vi.fn(), tokenOk: vi.fn(), tokenPrincipal: vi.fn(), revoke: vi.fn() }));
 const autopsy = vi.hoisted(() => ({ read: vi.fn(), update: vi.fn() }));
 vi.mock('../src/server/lib/failedReportOAuth', async original => ({ ...await original<any>(), reportOAuthService: () => oauth }));
+vi.mock('../src/server/lib/scopeFailureReports', () => ({ readScopeFailures: mocked.scope }));
 vi.mock('../src/server/lib/failedReportAccess', () => ({ createReportAccess: mocked.create, listReportAccess: mocked.list, revokeReportAccess: mocked.revoke, reportTokenOk: mocked.tokenOk }));
 vi.mock('../src/server/lib/failedBuildReports', async (original) => ({ ...await original<any>(), readFailedBuildPage: mocked.page, readFailedBuildWithDigest: mocked.detail }));
 vi.mock('../src/server/lib/failedReportAutopsy', async original => ({ ...await original<any>(),
@@ -36,7 +37,7 @@ beforeAll(async () => {
   port = (server.address() as { port: number }).port;
 });
 afterAll(async () => { await new Promise<void>((r) => server.close(() => r())); });
-beforeEach(() => { mocked.page.mockReset().mockResolvedValue({ reports: [], nextCursor: null, scanned: 1 }); mocked.detail.mockReset().mockResolvedValue({ report: { ok: false }, reportDigest: failedReportDigest({ ok: false }) }); mocked.tokenOk.mockReset().mockImplementation(async (s) => s === 'Bearer read-only'); mocked.create.mockReset().mockResolvedValue({ id: 'a'.repeat(64), token: 'only-once' }); mocked.list.mockResolvedValue([]); mocked.revoke.mockResolvedValue(undefined);
+beforeEach(() => { mocked.scope.mockReset().mockResolvedValue({ failures: [], nextCursor: null }); mocked.page.mockReset().mockResolvedValue({ reports: [], nextCursor: null, scanned: 1 }); mocked.detail.mockReset().mockResolvedValue({ report: { ok: false }, reportDigest: failedReportDigest({ ok: false }) }); mocked.tokenOk.mockReset().mockImplementation(async (s) => s === 'Bearer read-only'); mocked.create.mockReset().mockResolvedValue({ id: 'a'.repeat(64), token: 'only-once' }); mocked.list.mockResolvedValue([]); mocked.revoke.mockResolvedValue(undefined);
   oauth.tokenOk.mockReset().mockResolvedValue(false); oauth.tokenPrincipal.mockReset().mockResolvedValue(null);
   autopsy.read.mockReset().mockResolvedValue({ reportDigest: 'a'.repeat(64), revision: 0, state: 'not_started', record: null });
   autopsy.update.mockReset().mockResolvedValue({ reportDigest: 'a'.repeat(64), revision: 1, state: 'in_progress', record: {} });
@@ -47,6 +48,20 @@ describe('private report HTTP boundary', () => {
   it('rejects the public, forged tokens, query credentials and normal user auth before reading', async () => {
     for (const [path, headers] of [['/api/v1/failedbr/reports', {}], ['/api/v1/failedbr/reports?token=read-only', {}], ['/api/v1/failedbr/reports', { Authorization: 'Bearer user-firebase-token' }], ['/api/v1/failedbr/reports', { 'x-admin-token': 'forged' }]] as const) expect((await request(path, { headers })).status).toBe(401);
     expect(mocked.page).not.toHaveBeenCalled();
+  });
+  it('gates scope diagnostics with the same private read grant and propagates storage failure', async () => {
+    const body = rpc('tools/call', { name: 'list_scope_failures', arguments: { workspaceId: 'app' } });
+    expect((await request('/api/v1/failedbr/mcp', { method: 'POST', body })).status).toBe(401);
+    expect(mocked.scope).not.toHaveBeenCalled();
+    const response = await request('/api/v1/failedbr/mcp', { method: 'POST', body, headers: bearer });
+    expect(response.status).toBe(200);
+    expect(response.headers['cache-control']).toContain('no-store');
+    expect(JSON.parse(response.body.result.content[0].text)).toEqual({ failures: [], nextCursor: null });
+    expect(mocked.scope).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'app' });
+    mocked.scope.mockRejectedValue(new Error('PRIVATE_STORAGE_ERROR'));
+    const failed = await request('/api/v1/failedbr/mcp', { method: 'POST', body, headers: bearer });
+    expect(failed.body.error.code).toBe(-32603);
+    expect(JSON.stringify(failed.body)).not.toContain('PRIVATE_');
   });
   it('admits admin and delegated reads but forbids delegate credential management', async () => {
     const a = await request('/api/v1/failedbr/reports', { headers: { 'x-admin-token': adminToken } });
@@ -74,7 +89,7 @@ describe('private report HTTP boundary', () => {
   it('serves authenticated MCP initialization, read tools, notifications and honest errors', async () => {
     const call = (body: unknown, headers = bearer) => request('/api/v1/failedbr/mcp', { method: 'POST', headers, body });
     expect((await call(rpc('initialize'))).body.result.capabilities).toEqual({ tools: {} });
-    expect((await call(rpc('tools/list'))).body.result.tools).toHaveLength(3);
+    expect((await call(rpc('tools/list'))).body.result.tools).toHaveLength(4);
     expect((await call(rpc('tools/call', { name: 'list_failed_builds', arguments: { cursor: 'next' } }))).body.result.content[0].text).toContain('nextCursor');
     expect(mocked.page).toHaveBeenCalledWith('next', undefined);
     expect((await call(rpc('tools/call', { name: 'get_failed_build', arguments: { workspaceId: 'app', historyId: '100' } }))).body.result.content[0].text).toContain('false');
@@ -119,7 +134,7 @@ describe('separate autopsy write boundary', () => {
     oauth.tokenPrincipal.mockResolvedValue({ grantId: 'b'.repeat(64), owner: 'owner', clientId: 'client', scope: 'failed-reports:read failed-reports:autopsy' });
     const headers = { Authorization: 'Bearer explicit-write' };
     const tools = (await request('/api/v1/failedbr/mcp', { method: 'POST', headers, body: rpc('tools/list') })).body.result.tools;
-    expect(tools.map((t: any) => t.name)).toEqual(['list_failed_builds', 'get_failed_build', 'get_failed_build_autopsy', 'set_failed_build_autopsy']);
+    expect(tools.map((t: any) => t.name)).toEqual(['list_scope_failures', 'list_failed_builds', 'get_failed_build', 'get_failed_build_autopsy', 'set_failed_build_autopsy']);
     expect(tools.at(-1).annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
     expect((await request(path, { method: 'POST', headers, body: { status: 'in_progress' } })).status).toBe(200);
     expect(autopsy.update).toHaveBeenCalledWith('app', '100', { status: 'in_progress' }, `oauth:${'b'.repeat(64)}`);

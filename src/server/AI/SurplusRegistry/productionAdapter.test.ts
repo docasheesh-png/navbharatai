@@ -1,5 +1,7 @@
 import { PUBLIC_BUILD_ENGINE_UNAVAILABLE } from '../../lib/buildEngineError';
 import { createHash } from 'node:crypto';
+import { admitWeakBuild } from '../../AgentV3/weakBuildAdmission';
+import { createSurplusScopeAsk } from './scopeAdmission';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ getServerDb: vi.fn(), refresh: vi.fn(), read: vi.fn(), transport: vi.fn(), factory: vi.fn(), persist: vi.fn(), reserve: vi.fn(), unattempted: vi.fn() }));
 vi.mock('../../lib/serverDb', () => ({ getServerDb: mocks.getServerDb }));
@@ -38,6 +40,38 @@ function setup(extraEnv: Record<string, string> = {}) {
 beforeEach(() => { vi.resetAllMocks(); vi.useFakeTimers(); vi.setSystemTime(now); });
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 describe('production Surplus adapter — live key+flag admission', () => {
+  it('the scope deadline cancels the longer session/transport attempt without retry or invented receipt', async () => {
+    const { make } = setup();
+    let dispatchedSignal: AbortSignal | undefined;
+    mocks.transport.mockImplementation((_request, signal: AbortSignal) => {
+      dispatchedSignal = signal;
+      return new Promise<never>((_, reject) => signal.addEventListener('abort', () => reject(new Error('PRIVATE_ABORT'))));
+    });
+    const session = (await make())!;
+    const result = admitWeakBuild('PRIVATE_PROMPT', createSurplusScopeAsk(session, [], [])!);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(dispatchedSignal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await result).failure).toEqual({ stage: 'deadline', reason: 'scope_timeout' });
+    expect(dispatchedSignal?.aborted).toBe(true);
+    expect(mocks.reserve).toHaveBeenCalledTimes(1);
+    expect(mocks.transport).toHaveBeenCalledTimes(1);
+    expect(mocks.persist).not.toHaveBeenCalled();
+  });
+  it.each(['reservation', 'dispatch', 'receipt'] as const)('retains %s failure through real session, public folding and scope classification', async stage => {
+    const { make } = setup();
+    if (stage === 'reservation') mocks.reserve.mockRejectedValue(new Error('PRIVATE_PILOT_ERROR'));
+    if (stage === 'dispatch') mocks.transport.mockRejectedValue(new Error('PRIVATE_HTTP_ERROR'));
+    if (stage === 'receipt') mocks.persist.mockRejectedValue(new Error('PRIVATE_RECEIPT_ERROR'));
+    const session = (await make())!;
+    const ask = createSurplusScopeAsk(session, [], [])!;
+    const result = await admitWeakBuild('PRIVATE_PROMPT', ask);
+    expect(result.failure).toEqual({ stage, reason: stage === 'reservation' ? 'reservation_failed' : `${stage}_failed` });
+    expect(result.scope).toBeNull();
+    expect(JSON.stringify(result)).not.toContain('PRIVATE_');
+    expect(mocks.reserve).toHaveBeenCalledTimes(1);
+    expect(mocks.transport).toHaveBeenCalledTimes(stage === 'reservation' ? 0 : 1);
+  });
   it.each([false, true])('reserves and dispatches the cheapest seller when a model has multiple sellers (reversed=%s)', async reversed => {
     const { snap, wire, env, run } = setup();
     snap.offers[0].rates = { input: '3', output: '3' };

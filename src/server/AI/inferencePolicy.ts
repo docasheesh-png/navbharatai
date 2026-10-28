@@ -38,9 +38,17 @@ export class StrictFreeCapabilityError extends Error {
 }
 /** Every legacy network path must opt out before dispatch, not after provider billing. */
 export function assertLegacyInferenceAllowed(capability: string): void {
+  assertInferenceAllowed(capability, false);
+}
+/** Only the fixed GLM admission client uses this door; it grants no ambient legacy permission.
+ * Canary, gateway and strict-free fences still apply. Never accept a caller-supplied capability. */
+export function assertWeakScopeClassificationAllowed(): void {
+  assertInferenceAllowed('builder-scope-classifier', true);
+}
+function assertInferenceAllowed(capability: string, scopeClassification: boolean): void {
   assertCanaryLegacyAllowed(capability);
   assertNoUnclaimedGatewayDispatch(capability);
-  if (surplusBuild.getStore()?.enabled === true && !SURPLUS_MEDIA_EXCEPTIONS.has(capability)) throw new SurplusLegacyFallbackError();
+  if (surplusBuild.getStore()?.enabled === true && !scopeClassification && !SURPLUS_MEDIA_EXCEPTIONS.has(capability)) throw new SurplusLegacyFallbackError();
   if (capability === 'image-edit' && scopes.getStore()?.scope === 'free-modules' && admittedImageEdit.getStore() === true) return;
   if (strictFreeRequired()) throw new StrictFreeCapabilityError(capability);
 }

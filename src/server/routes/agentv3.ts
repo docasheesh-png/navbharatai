@@ -1,11 +1,11 @@
 import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
-import { createSurplusScopeAsk } from '../AI/SurplusRegistry/scopeAdmission';
+import { createGlmScopeAsk } from '../AI/SurplusRegistry/scopeAdmission';
 import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibility';
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
 import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
-import { wrapSurplusRunnerPreWriteFailOpen, tryConsumeSurplusPreWriteFailOpen, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
+import { wrapSurplusRunnerPreWriteFailOpen, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakScopeChatTerminal, weakScopeCatchResult } from '../AgentV3/weakScopeTerminal';
@@ -11351,9 +11351,7 @@ async function noteBuildOutcome(
         return;
       }
     }
-    const earlySurplusTurns: Array<import('../AgentV3/ClaudeClient').TurnResult> = [];
-    const earlySurplusRecords: Array<Omit<import('../AgentV3/BuildDiagnostics').LlmCallRecord, 'ts'>> = [];
-    let earlySurplusFailure: unknown;
+    const earlyScopeRecords: Array<Omit<import('../AgentV3/BuildDiagnostics').LlmCallRecord, 'ts'>> = [];
     const scopeRequestId = randomUUID();
     // Buffered until buildDiag exists later (module keeps Weak-only + report branches out of this handler — TS2563).
     let surplusAdmissionDiag: SurplusAdmissionDiag | undefined;
@@ -11379,9 +11377,9 @@ async function noteBuildOutcome(
     if (surplusBuilderEnabled() && !(await checkPaidBuildAdmission())) return;
     // Scope is checked before sandbox/setup. Imports need their files inspected and keep the import pipeline.
     const weakAdmission = await weakAdmissionForTurn({ prompt, intent, importing: hasImportIntent, tier: powerLevelReqEffective },
-      createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
-        audit('AGENTV3_DISCOUNT_SCOPE_CALL', scopeCallAudit(scopeRequestId, intentWorkspaceId, row), 'info');
-      }, error => { earlySurplusFailure = error; }));
+      createGlmScopeAsk(earlyScopeRecords, row => {
+        audit('AGENTV3_SCOPE_CALL', scopeCallAudit(scopeRequestId, intentWorkspaceId, row), 'info');
+      }));
     recordScopeFailure(scopeRequestId, intentWorkspaceId, weakAdmission, audit);
     const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(
       req.body.weakForceContinue, powerLevelReqEffective, weakAdmission,
@@ -14534,13 +14532,7 @@ async function noteBuildOutcome(
         },
       };
 
-      for (const row of earlySurplusRecords) buildDiag.recordLlmCall(row);
-      for (const turn of earlySurplusTurns) captureTurnUsage('SURPLUS', turn.usage, turn.model, turn.usage.cacheReadInputTokens, turn.usage.cacheCreationInputTokens);
-      // The scope classifier precedes the build wrappers. Recover only its actual
-      // eligible exception, never infer availability from a sanitized failed row.
-      if (surplusSession && !abort.signal.aborted) {
-        tryConsumeSurplusPreWriteFailOpen(surplusPreWriteFailOpen, earlySurplusFailure);
-      }
+      for (const row of earlyScopeRecords) buildDiag.recordLlmCall(row);
       const fastLaneDeadRungs = new Map<string, string>();
       // 🔴 THE FLAG THAT WENT NOWHERE (autopsy e706e068, School ERP). `buildIsComplex` was computed,
       // logged, and spread into `baseRunnerOpts` — the AgentRunner's options, which never read it —

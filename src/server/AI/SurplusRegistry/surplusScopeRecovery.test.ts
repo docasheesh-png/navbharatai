@@ -4,14 +4,11 @@ import type { LlmCallRecord } from '../../AgentV3/BuildDiagnostics';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../../AgentV3/ClaudeClient';
 import { BuildStoppedError } from '../../AgentV3/stopSignal';
 import { BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../../AgentV3/turnDeadline';
-import { admitWeakBuild } from '../../AgentV3/weakBuildAdmission';
-import { weakForceContinueDecision } from '../../AgentV3/weakBuildPreflight';
 import { makeSurplusTurnRunner, type SurplusTurnPermit } from '../../AgentV3/providers/SurplusTurnRunner';
 import type { OpenAiCompletionLike } from '../../AgentV3/providers/OpenAiToolAdapter';
 import { AiMaintenanceError } from '../../lib/aiMaintenance';
 import { PublicBuildEngineError, PUBLIC_BUILD_ENGINE_UNAVAILABLE, publicBuildEngineError, publicBuildEngineSafeReason } from '../../lib/buildEngineError';
 import { createSurplusBuildSession, type SurplusBuildSession, type SurplusReviewedAdapter, type SurplusReviewedState } from './buildSession';
-import { createSurplusScopeAsk } from './scopeAdmission';
 import { tryConsumeSurplusPreWriteFailOpen, wrapSurplusRunnerPreWriteFailOpen, type SurplusPreWriteFailOpenHooks } from './surplusPreWriteFailOpen';
 
 const circuit = vi.hoisted(() => ({ death: vi.fn(), success: vi.fn() }));
@@ -38,81 +35,16 @@ function harness(runTurn: TurnRunner['runTurn'], userFilesWritten: () => number 
 
 beforeEach(() => vi.clearAllMocks());
 
-describe('scope failure recovery before builder creation', () => {
-  it('carries the real scope failure into one pre-write recovery and returns a useful Weak turn', async () => {
-    const failure = new PublicBuildEngineError();
-    const surplusRun = vi.fn(async () => { throw failure; });
-    const h = harness(surplusRun);
-    const ask = createSurplusScopeAsk(h.session, h.turns, h.records, h.observe, h.onFailure)!;
-    await expect(ask('SYNTHETIC_PRIVATE_SYSTEM', 'SYNTHETIC_PRIVATE_REQUEST')).rejects.toBe(failure);
-    expect(h.onFailure).toHaveBeenCalledExactlyOnceWith(failure);
-    expect(h.records).toMatchObject([{ ok: false, responseChars: 0, error: 'Build scope classification failed' }]);
-    expect(tryConsumeSurplusPreWriteFailOpen(h.hooks, h.onFailure.mock.calls[0][0])).toBe('mid_build_engine_unavailable');
-    const weakRun = vi.fn(async () => answer());
-    const wrapped = wrapSurplusRunnerPreWriteFailOpen({ runTurn: surplusRun }, () => ({ runTurn: weakRun }), h.hooks);
-    await expect(wrapped.runTurn(params())).resolves.toMatchObject({ text: 'Useful synthetic build response' });
-    await expect(wrapped.runTurn(params())).resolves.toMatchObject({ text: 'Useful synthetic build response' });
-    expect(surplusRun).toHaveBeenCalledOnce();
-    expect(weakRun).toHaveBeenCalledTimes(2);
-    expect(h.onFailOpen).toHaveBeenCalledOnce();
-    expect(circuit.death).toHaveBeenCalledOnce();
-    expect(JSON.stringify([h.records, h.turns, h.observe.mock.calls])).not.toContain('SYNTHETIC_PRIVATE');
-  });
-
-  it('retains an internal error for classification without publishing its contents', async () => {
-    const failure = new Error('SYNTHETIC_PRIVATE_PROVIDER_DETAIL');
-    const h = harness(async () => { throw failure; });
-    await expect(createSurplusScopeAsk(h.session, h.turns, h.records, h.observe, h.onFailure)!('system', 'request')).rejects.toBe(failure);
-    expect(h.onFailure).toHaveBeenCalledExactlyOnceWith(failure);
-    expect(tryConsumeSurplusPreWriteFailOpen(h.hooks, failure)).toBeNull();
-    expect(JSON.stringify([h.records, h.turns, h.observe.mock.calls])).not.toContain('SYNTHETIC_PRIVATE');
-    expect(circuit.death).not.toHaveBeenCalled();
-  });
-
-  it('cannot replace the original failure when its observer throws', async () => {
-    const failure = new PublicBuildEngineError(), h = harness(async () => { throw failure; });
-    h.onFailure.mockImplementation(() => { throw new Error('synthetic observer failure'); });
-    await expect(createSurplusScopeAsk(h.session, h.turns, h.records, h.observe, h.onFailure)!('system', 'request')).rejects.toBe(failure);
-    expect(h.records).toHaveLength(1);
-  });
-
-  it('captures a synchronous session-runner construction failure', async () => {
-    const failure = new PublicBuildEngineError(), h = harness(async () => answer());
-    h.runner.mockImplementation(() => { throw failure; });
-    await expect(createSurplusScopeAsk(h.session, h.turns, h.records, h.observe, h.onFailure)!('system', 'request')).rejects.toBe(failure);
-    expect(h.onFailure).toHaveBeenCalledExactlyOnceWith(failure);
-    expect(h.records).toMatchObject([{ ok: false }]);
-  });
-
-  it('does not turn a successful answer containing public error wording into a failed call', async () => {
-    const h = harness(async () => answer(PUBLIC_BUILD_ENGINE_UNAVAILABLE));
-    await expect(createSurplusScopeAsk(h.session, h.turns, h.records, h.observe, h.onFailure)!('system', 'request')).resolves.toEqual({ text: PUBLIC_BUILD_ENGINE_UNAVAILABLE });
-    expect(h.onFailure).not.toHaveBeenCalled();
-    expect(h.records).toMatchObject([{ ok: true }]);
-    expect(tryConsumeSurplusPreWriteFailOpen(h.hooks, undefined)).toBeNull();
-    expect(circuit.death).not.toHaveBeenCalled();
-  });
-
-  it('does no Surplus work or recovery when no session was admitted', () => {
-    const h = harness(async () => answer());
-    expect(createSurplusScopeAsk(undefined, h.turns, h.records, h.observe, h.onFailure)).toBeUndefined();
-    expect(h.runner).not.toHaveBeenCalled();
-    expect(h.onFailure).not.toHaveBeenCalled();
-    expect(h.records).toEqual([]);
-    expect(circuit.death).not.toHaveBeenCalled();
-  });
-
+describe('coding failure recovery before user writes', () => {
   it.each([
     ['stop', () => new BuildStoppedError()],
     ['maintenance', () => new AiMaintenanceError()],
     ['exhausted budget', () => new Error(BUDGET_EXHAUSTED_MESSAGE)],
     ['reached budget', () => new Error(BUDGET_REACHED_MESSAGE)],
     ['policy refusal', () => publicBuildEngineError('policy_refusal')],
-  ] as const)('observes %s without consuming a recovery or recording an availability death', async (_label, makeFailure) => {
-    const failure = makeFailure(), h = harness(async () => { throw failure; });
-    await expect(createSurplusScopeAsk(h.session, h.turns, h.records, h.observe, h.onFailure)!('system', 'request')).rejects.toBe(failure);
-    expect(h.onFailure).toHaveBeenCalledExactlyOnceWith(failure);
-    expect(tryConsumeSurplusPreWriteFailOpen(h.hooks, failure)).toBeNull();
+  ] as const)('does not consume recovery for %s', (_label, makeFailure) => {
+    const h = harness(async () => answer());
+    expect(tryConsumeSurplusPreWriteFailOpen(h.hooks, makeFailure())).toBeNull();
     expect(h.hooks.state.dropped).toBe(false);
     expect(h.onFailOpen).not.toHaveBeenCalled();
     expect(circuit.death).not.toHaveBeenCalled();
@@ -215,7 +147,7 @@ describe('native refusal stays terminal across the public boundary and outer rec
     expect(Object.getOwnPropertyNames(caught)).not.toContain('reason');
   });
 
-  it('retains a refused scope across real-session poisoning and an attempted forced continuation', async () => {
+  it('retains a coding refusal across real-session poisoning and another coding attempt', async () => {
     const now = Date.now(), model = 'synthetic-model', provider = 'synthetic-provider';
     const state: SurplusReviewedState = {
       snapshot: { version: 'synthetic-generation', startedAt: now, observedAt: now, expiresAt: now + 300000, models: [model], offers: [{
@@ -247,10 +179,8 @@ describe('native refusal stays terminal across the public boundary and outer rec
     const session = await createSurplusBuildSession({ buildId: 'synthetic-build', tier: 'weak', enabled: true, adapter, now: () => now });
     expect(session).toBeDefined();
     const h = harness(async () => answer());
-    const admission = await admitWeakBuild('A synthetic small application', createSurplusScopeAsk(session, h.turns, h.records, h.observe, h.onFailure)!);
-    expect(admission).toMatchObject({ scope: null, source: 'unavailable' });
-    expect(weakForceContinueDecision(true, 'weak', admission).blocked).toBe(false);
-    const initialFailure: unknown = h.onFailure.mock.calls[0]?.[0];
+    let initialFailure: unknown;
+    try { await session!.runner().runTurn(params()); } catch (error) { initialFailure = error; }
     expect(publicBuildEngineSafeReason(initialFailure)).toBe('policy_refusal');
     expect(tryConsumeSurplusPreWriteFailOpen(h.hooks, initialFailure)).toBeNull();
     const weak = vi.fn(async () => answer());
@@ -266,9 +196,9 @@ describe('native refusal stays terminal across the public boundary and outer rec
 });
 
 describe('route recovery placement', () => {
-  it('consumes the captured early failure rather than replaying a failed builder result', () => {
+  it('keeps classification errors out of coding recovery', () => {
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    expect(route.includes('earlySurplusFailure')).toBe(true);
+    expect(route.includes('earlySurplusFailure')).toBe(false);
     expect(route.includes('scrubRetry')).toBe(false);
     expect(route.includes('isPublicBuildEngineUnavailableText(result.summary)')).toBe(false);
     expect(route.includes('earlySurplusRecords.some((r) => r.ok === false)')).toBe(false);

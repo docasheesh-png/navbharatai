@@ -20374,13 +20374,34 @@ async function noteBuildOutcome(
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
       ) {
         try {
-          const analyzeTargets = async (): Promise<ExportRegenTarget[]> => {
-            const map = Object.fromEntries(writtenFiles);
+          // 🔴 DETECTION SCOPE IS NOT REPAIR SCOPE (Q-1378, Q-1380, Q-1384, Q-1392, Q-1427, Q-1446 — six
+          // reports, 2026-10-27). This map used to be `Object.fromEntries(writtenFiles)`: THIS turn's slice.
+          // `analyzeImportExports` skips an import whose target is not in the map (`if (!target) continue`),
+          // and a target nobody in the map imports, so a mismatch whose two halves were written in DIFFERENT
+          // turns was invisible. Measured against the real analyzer: importer-only → 0 mismatches,
+          // target-only → 0, both → 1. That is exactly the six reports' signature — the browser failed on a
+          // named export while this gate was green, including right after a repair rewrote one of the two
+          // files. The workspace is read ONCE and overlaid with the fresher captured writes, the same
+          // composition `adFactsNow` and the end-of-build save already use: an edit turn's writes are a slice.
+          const exportGateBase = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+          const analyzeTargets = async (): Promise<{ ours: ExportRegenTarget[]; foreign: ExportRegenTarget[] }> => {
+            const map = { ...exportGateBase, ...Object.fromEntries(writtenFiles) };
             const rep = await analyzeImportExports(map);
-            // Regenerate only OUR written targets (never a scaffold/read-only file).
-            return exportRegenTargets(rep, new Set(Object.keys(map))).filter((t) => writtenFiles.has(t.target));
+            const all = exportRegenTargets(rep, new Set(Object.keys(map)));
+            // Regenerate only OUR written targets (never a scaffold/read-only file) — REPAIR scope is
+            // deliberately unchanged, so widening detection adds no new write surface. A target this build
+            // did not write is still REPORTED instead of dropped in silence: it is the real reason the app's
+            // import fails. It never flips THIS turn's verdict, because the defect predates this turn.
+            return {
+              ours: all.filter((t) => writtenFiles.has(t.target)),
+              foreign: all.filter((t) => !writtenFiles.has(t.target)),
+            };
           };
-          let targets = await analyzeTargets();
+          const firstPass = await analyzeTargets();
+          if (firstPass.foreign.length > 0) {
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'MISSING_EXPORT_DETECTED', message: `${firstPass.foreign.length} file(s) this build did not write are missing exports that other files import — the app's import fails at runtime. A follow-up turn can rewrite them:\n${exportRegenInstruction(firstPass.foreign)}`, autoResolved: false });
+          }
+          let targets = firstPass.ours;
           if (targets.length > 0) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'MISSING_EXPORT_DETECTED', message: `${targets.length} file(s) are missing exports that other files import (the build fails):\n${exportRegenInstruction(targets)}`, autoResolved: false });
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 ${targets.length} file(s) are missing an export another file needs — regenerating them…`, ts: Date.now() });
@@ -20407,7 +20428,7 @@ async function noteBuildOutcome(
             } catch (e) {
               console.log(`[AGENTV3] missing-export gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
             }
-            targets = await analyzeTargets();
+            targets = (await analyzeTargets()).ours;
             if (targets.length === 0) {
               buildDiag.record({ phase: 'build', severity: 'info', code: 'MISSING_EXPORT_HEALED', message: 'All previously-missing exports were restored — every local import now resolves to a real binding.', autoResolved: true });
               events.emit({ type: 'narration', agent: 'architect', text: '✅ Restored the missing exports — the imports resolve now.', ts: Date.now() });

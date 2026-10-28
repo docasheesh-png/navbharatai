@@ -16,13 +16,13 @@ export function isSurplusPilotStatus(value: unknown): value is SurplusPilotStatu
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;
   if (Object.keys(v).length !== keys.length || !Object.keys(v).every(k => keys.includes(k))
-    || !['unknown', 'no_record', 'recorded', 'invalid_state'].includes(String(v.status)) || v.canDispatch !== false
+    || typeof v.status !== 'string' || !['unknown', 'no_record', 'recorded', 'invalid_state'].includes(v.status) || v.canDispatch !== false
     || !(v.maxCalls === null || count(v.maxCalls) && (v.maxCalls as number) > 0)
     || !(v.maxEstimatedMicroUsd === null || money(v.maxEstimatedMicroUsd))) return false;
-  if ((v.maxCalls === null) !== (v.maxEstimatedMicroUsd === null)) return false;
+  if ((v.maxCalls === null) !== (v.maxEstimatedMicroUsd === null) || v.status !== 'unknown' && v.maxCalls === null) return false;
   if (v.status !== 'recorded') return ['pending', 'blocked', 'quarantined', 'reason', 'recordedExpenseMicroUsd', 'calls', 'reservedEstimateMicroUsd'].every(k => v[k] === null);
   return ['pending', 'blocked', 'quarantined'].every(k => typeof v[k] === 'boolean')
-    && (v.reason === null || PILOT_REASONS.includes(v.reason as typeof PILOT_REASONS[number]))
+    && (v.reason === null || v.quarantined === true && PILOT_REASONS.includes(v.reason as typeof PILOT_REASONS[number]))
     && money(v.recordedExpenseMicroUsd) && money(v.reservedEstimateMicroUsd) && count(v.calls) && (v.calls as number) >= 1
     && v.maxCalls !== null && v.maxEstimatedMicroUsd !== null;
 }

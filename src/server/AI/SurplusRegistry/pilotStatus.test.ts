@@ -33,6 +33,17 @@ describe('read-only actual production pilot projection', () => {
   it.each([{ calls: -1 }, { calls: NaN }, { pendingCallId: undefined }, { actualMicroUsd: '-1' }, { actualMicroUsd: '1'.repeat(32) }, { reservedEstimatedMicroUsd: '1e9' }, { authorityId: 'other-pilot' }, { blocked: 'false' }])('rejects malformed durable accounting %j', async patch => {
     expect(await setup({ ...valid, ...patch }).read()).toMatchObject({ status: 'invalid_state', pending: null, calls: null });
   });
+  it('requires exact enum strings and consistent known configuration/quarantine flags', async () => {
+    const view = await setup().read();
+    const unknown = { ...view, status: 'unknown', pending: null, blocked: null, quarantined: null,
+      reason: null, recordedExpenseMicroUsd: null, calls: null, reservedEstimateMicroUsd: null };
+    expect(isSurplusPilotStatus(unknown)).toBe(true);
+    for (const status of [['unknown'], { toString: () => 'unknown' }, null, 1]) {
+      expect(isSurplusPilotStatus({ ...unknown, status })).toBe(false);
+    }
+    expect(isSurplusPilotStatus({ ...unknown, status: 'no_record', maxCalls: null, maxEstimatedMicroUsd: null })).toBe(false);
+    expect(isSurplusPilotStatus({ ...view, quarantined: false })).toBe(false);
+  });
   it('projects only allowlisted reasons and fields', async () => {
     const view = await setup({ ...valid, quarantineReason: 'private unknown error', prompt: 'secret' }).read();
     expect(view.reason).toBe('other'); expect(JSON.stringify(view)).not.toMatch(/private|secret|prompt/);

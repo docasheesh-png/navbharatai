@@ -99668,3 +99668,22 @@ reversion:** with the slice restored, two of the six fail.
   `writtenFiles` is its only proof that a file is ours to rewrite. Widening the repair set is a write-surface
   decision (it could reach a file the user hand-wrote in an earlier session), so it was left for the admin with
   three options and a recommendation rather than widened silently.
+
+## 2026-10-28 — Surplus model contracts do not multiply with sellers
+
+The live admission synthesizer generated model-scoped usage mappings and tariffs once per
+(model, provider) pair. The production adapter correctly requires exactly one applicable
+contract per model, so multiple sellers made binding fail before reservation or transport.
+The synthesizer now enumerates distinct models for those two contracts only. Capabilities,
+quality evidence, seller offers/rates, tariff values/provenance and strict ambiguity rejection
+remain unchanged. The observer's pair-based quality evidence is intentionally seller-scoped.
+
+Regression proof on unchanged production source: the real buildSession-to-productionAdapter
+path failed both multi-seller orderings (2 failed, 19 passed). With the fix, all 21 Surplus
+registry test files / 573 tests passed. The regression checks cheapest-seller selection,
+reservation before mocked transport, chargeable receipt, unchanged snapshot, and rejection
+of genuinely conflicting mapping/tariff evidence before reservation or transport. No live
+provider call was used. Complete final-source local gates are recorded separately; real
+Firestore drills remain blocked by the environment proxy's CONNECT 403. This entry does not
+claim deployment, live provider attribution, completion of the older cumulative patch, or
+resolution of a specific production incident.

@@ -108,7 +108,10 @@ export function synthesizeLiveReviews(
     endpoint: SURPLUS_MIN90_BASE_URL,
   }));
 
-  const usageMappings: LiveUsageMapping[] = [...pairs.values()].map(({ model }) => ({
+  // Usage and tariff contracts bind a model, not a seller. Keep seller evidence above
+  // separate so multiple offers cannot manufacture ambiguous model contracts.
+  const models = [...new Set([...pairs.values()].map(({ model }) => model))];
+  const usageMappings: LiveUsageMapping[] = models.map(model => ({
     reviewId: `live-usage-${model}`.slice(0, 120),
     model,
     reviewedAt,
@@ -119,7 +122,7 @@ export function synthesizeLiveReviews(
     additionalCharges: 'none',
   }));
 
-  const tariffs: SurplusOfficialTariff[] = [...pairs.values()].map(({ model }) => {
+  const tariffs: SurplusOfficialTariff[] = models.map(model => {
     const usageId = `live-usage-${model}`.slice(0, 120);
     return {
       kind: 'reviewed-official-provider-tariff',

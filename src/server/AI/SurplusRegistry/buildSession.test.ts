@@ -1,4 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { createGlmScopeAsk } from './scopeAdmission';
+import { admitWeakBuild } from '../../AgentV3/weakBuildAdmission';
+import { weakForceContinueDecision } from '../../AgentV3/weakBuildPreflight';
+import { runWithSurplusBuild, assertLegacyInferenceAllowed } from '../inferencePolicy';
+const glm = vi.hoisted(() => ({ create: vi.fn() }));
+vi.mock('openai', () => ({ default: class { chat = { completions: { create: glm.create } }; } }));
+afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); });
+import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../lib/aiMaintenance', () => ({ assertAiAvailable: vi.fn(async () => {}), aiMaintenanceStore: { onChange: () => () => {} }, AiMaintenanceError: class extends Error {} }));
 import { evaluateSurplusReceipt } from './receiptPolicy';
 import type { SurplusTurnPermit } from '../../AgentV3/providers/SurplusTurnRunner';
@@ -29,6 +36,26 @@ function setup() {
   return { s, adapter, make };
 }
 describe('Surplus build-scoped authority', () => {
+  it.each(['simple', 'complex', 'strong', 'invalid', 'error'])('keeps the real coding session intact after GLM %s', async label => {
+    vi.stubEnv('GLM_API_KEY', 'synthetic-key');
+    if (label === 'error') glm.create.mockRejectedValue(new Error('synthetic GLM unavailable'));
+    else glm.create.mockResolvedValue({ choices: [{ message: { content: label } }] });
+    const { make, adapter } = setup(), session = await make();
+    await runWithSurplusBuild(true, async () => {
+      const admission = await admitWeakBuild('synthetic request', createGlmScopeAsk([]));
+      const blocked = !['simple', 'complex'].includes(label);
+      expect(weakForceContinueDecision(false, 'weak', admission).blocked).toBe(blocked);
+      expect(adapter.dispatch).not.toHaveBeenCalled();
+      expect(adapter.receipt).not.toHaveBeenCalled();
+      expect(() => assertLegacyInferenceAllowed('builder-scope-classifier')).toThrow();
+      // Blocked scopes require the existing explicit user continuation before coding.
+      expect(weakForceContinueDecision(blocked, 'weak', admission).blocked).toBe(false);
+      await expect(session!.runner().runTurn(params)).resolves.toMatchObject({ text: 'done', model: 'model-a' });
+      expect(adapter.dispatch).toHaveBeenCalledOnce();
+      expect(adapter.receipt).toHaveBeenCalledOnce();
+    });
+    expect(glm.create).toHaveBeenCalledOnce();
+  });
   it('default OFF does not read state or construct transport', async () => {
     const { adapter } = setup();
     expect(await createSurplusBuildSession({ buildId: 'build', tier: 'weak', enabled: false, adapter })).toBeUndefined();

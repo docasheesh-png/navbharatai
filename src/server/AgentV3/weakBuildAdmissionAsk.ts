@@ -1,5 +1,5 @@
 import { canaryFetch } from './reliability/canarySpendGuard';
-import { assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
+import { assertWeakScopeClassificationAllowed } from '../AI/inferencePolicy';
 import OpenAI from 'openai';
 import { parseKeyPool } from '../lib/keyPool';
 import { glmThinkingParam } from './providers/glmThinking';
@@ -7,7 +7,7 @@ import { WEAK_SCOPE_MODEL, WEAK_SCOPE_TIMEOUT_MS } from './weakBuildAdmission';
 
 let turn = 0;
 export async function weakBuildAdmissionAsk(system: string, user: string, signal: AbortSignal) {
-  assertLegacyInferenceAllowed('builder-scope-classifier');
+  assertWeakScopeClassificationAllowed();
   const keys = parseKeyPool(process.env.GLM_API_KEY);
   if (!keys.length) throw new Error('scope classifier unavailable');
   const client = new OpenAI({ apiKey: keys[turn++ % keys.length], baseURL: process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', timeout: WEAK_SCOPE_TIMEOUT_MS, maxRetries: 0, fetch: canaryFetch() });
@@ -20,6 +20,7 @@ export async function weakBuildAdmissionAsk(system: string, user: string, signal
   } as unknown as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming, { signal });
   return {
     text: String(res.choices?.[0]?.message?.content ?? ''),
+    ...(res.choices?.[0]?.finish_reason ? { finishReason: res.choices[0].finish_reason } : {}),
     ...(res.usage ? { usage: { inputTokens: res.usage.prompt_tokens, outputTokens: res.usage.completion_tokens } } : {}),
   };
 }

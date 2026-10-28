@@ -161,11 +161,11 @@ describe('a text-only call the build route makes is on the record too', () => {
     expect(scope).toContain('records.push(sanitized)');
     expect(scope).toContain('observe?.(Object.freeze({ ...sanitized }))');
     expect(scope).toContain("responsePreview: ''");
-    expect(scope).toContain('promptPreview: SURPLUS_SCOPE_PURPOSE');
-    expect(scope).toContain('usage: { ...turn.usage }');
-    expect(code).toContain('createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords,');
-    expect(code).toContain('for (const row of earlySurplusRecords) buildDiag.recordLlmCall(row)');
-    expect(code).toContain("audit('AGENTV3_DISCOUNT_SCOPE_CALL'");
+    expect(scope).toContain('promptPreview: SCOPE_PURPOSE');
+    expect(scope).toContain('usage = answer.usage');
+    expect(code).toContain('createGlmScopeAsk(earlyScopeRecords,');
+    expect(code).toContain('for (const row of earlyScopeRecords) buildDiag.recordLlmCall(row)');
+    expect(code).toContain("audit('AGENTV3_SCOPE_CALL'");
     // The shared recorder owns the success/failure pair, tested behaviorally by scopeAdmission.test.
     expect(codeOnly(recorder)).toContain('ok: true');
     expect(codeOnly(recorder)).toContain('ok: false');

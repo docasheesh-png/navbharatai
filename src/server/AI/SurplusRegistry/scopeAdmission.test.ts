@@ -1,67 +1,94 @@
-import { describe, expect, it, vi } from 'vitest';
-import { createSurplusScopeAsk, SURPLUS_SCOPE_PURPOSE } from './scopeAdmission';
-import type { SurplusBuildSession } from './buildSession';
-import type { TurnResult } from '../../AgentV3/ClaudeClient';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createGlmScopeAsk, SCOPE_PURPOSE } from './scopeAdmission';
 import type { LlmCallRecord } from '../../AgentV3/BuildDiagnostics';
-import { evaluateSurplusReceipt, isSurplusReceiptDecision } from './receiptPolicy';
+import { weakAdmissionForTurn, weakForceContinueDecision, recordWeakAdmissionUsage } from '../../AgentV3/weakBuildPreflight';
+import { runWithSurplusBuild, runWithInferenceScope, assertLegacyInferenceAllowed } from '../inferencePolicy';
+import { createProviderUsageLedger } from '../../AgentV3/ProviderUsageLedger';
+import { WEAK_SCOPE_MODEL, admitWeakBuild } from '../../AgentV3/weakBuildAdmission';
 
-const receipt = evaluateSurplusReceipt({ provider: 'surplus', product: 'app-builder', binding: {} as never,
-  disposition: 'unknown', receipt: null, tariff: null, now: 1 });
-function outcome(): TurnResult {
-  return { text: 'PRIVATE_RESPONSE', rawContent: ['PRIVATE_RAW_CONTENT'], toolUses: [], stopReason: 'end_turn', model: 'synthetic-model',
-    usage: { inputTokens: 123, outputTokens: 4, surplusReceipt: receipt } };
+const mock = vi.hoisted(() => ({ create: vi.fn() }));
+vi.mock('openai', () => ({ default: class { chat = { completions: { create: mock.create } }; } }));
+afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); vi.useRealTimers(); });
+function harness(text = 'simple', usage: unknown = { prompt_tokens: 123, completion_tokens: 4 }) {
+  vi.stubEnv('GLM_API_KEY', 'synthetic-key');
+  vi.stubEnv('AGENTV3_WEAK_SCOPE_POLICY', 'on');
+  vi.stubEnv('AGENTV3_GOLDEN_SCAFFOLD', 'off');
+  mock.create.mockResolvedValue({ choices: [{ message: { content: text } }], usage });
+  const records: Omit<LlmCallRecord, 'ts'>[] = [], observe = vi.fn();
+  const ask = createGlmScopeAsk(records, observe);
+  const classify = () => weakAdmissionForTurn({ prompt: 'PRIVATE_REQUEST', intent: 'new_build', importing: false, tier: 'weak' }, ask);
+  return { records, observe, ask, classify };
 }
-function harness(mode: 'success' | 'failure' | 'after-usage' | 'factory-failure' = 'success') {
-  const turns: TurnResult[] = [], records: Omit<LlmCallRecord, 'ts'>[] = [];
-  const observe = vi.fn();
-  const run = vi.fn();
-  const runner = vi.fn((callbacks?: Parameters<SurplusBuildSession['runner']>[0]) => {
-    if (mode === 'factory-failure') throw new Error('PRIVATE_FACTORY_ERROR');
-    return { runTurn: async (params: unknown) => {
-      run(params);
-      if (mode === 'failure') throw new Error('PRIVATE_PROVIDER_ERROR');
-      const turn = outcome(); callbacks?.onTurnComplete?.(turn, 'SURPLUS');
-      if (mode === 'after-usage') throw new Error('PRIVATE_POST_USAGE_ERROR');
-      return turn;
-    } };
+describe('independent GLM scope recording', () => {
+  it.each(['simple', 'complex', 'strong', 'PRIVATE_INVALID'])('records %s accurately and preserves coding policy', async text => {
+    const h = harness(text);
+    await runWithSurplusBuild(true, async () => {
+      const result = await h.classify();
+      expect(result).toMatchObject({ scope: text === 'PRIVATE_INVALID' ? null : text, usage: { inputTokens: 123, outputTokens: 4 } });
+      expect(weakForceContinueDecision(false, 'weak', result).blocked).toBe(['strong', 'PRIVATE_INVALID'].includes(text));
+      expect(weakForceContinueDecision(true, 'weak', result).blocked).toBe(false);
+      expect(() => assertLegacyInferenceAllowed('glm')).toThrow();
+      const ledger = createProviderUsageLedger();
+      recordWeakAdmissionUsage(result, usage => ledger.add('GLM', usage, WEAK_SCOPE_MODEL));
+      expect(ledger.byProvider()).toEqual({ GLM: { inputTokens: 123, outputTokens: 4 } });
+    });
+    expect(h.records).toMatchObject([{ provider: 'GLM', model: WEAK_SCOPE_MODEL, ok: true, inputTokens: 123, outputTokens: 4, promptPreview: SCOPE_PURPOSE, responsePreview: '' }]);
+    expect(JSON.stringify(h.records)).not.toContain('PRIVATE');
+    expect(h.observe).toHaveBeenCalledOnce();
   });
-  const session = { model: 'synthetic-model', runner } as unknown as SurplusBuildSession;
-  return { turns, records, observe, run, runner, session };
-}
-
-describe('recorded Surplus scope admission', () => {
-  it('OFF returns the original optional-default path without side effects', () => {
+  it('retains a truncated answer finish reason and measured usage without admitting invalid scope', async () => {
     const h = harness();
-    expect(createSurplusScopeAsk(undefined, h.turns, h.records, h.observe)).toBeUndefined();
-    expect(h.records).toEqual([]); expect(h.turns).toEqual([]); expect(h.observe).not.toHaveBeenCalled(); expect(h.runner).not.toHaveBeenCalled();
+    mock.create.mockResolvedValue({ choices: [{ message: { content: 'This request is' }, finish_reason: 'length' }], usage: { prompt_tokens: 123, completion_tokens: 8 } });
+    const result = await runWithSurplusBuild(true, h.classify);
+    expect(result).toMatchObject({ scope: null, failure: { reason: 'invalid_scope' }, usage: { inputTokens: 123, outputTokens: 8 } });
+    expect(h.records).toMatchObject([{ ok: true, finishReason: 'length', inputTokens: 123, outputTokens: 8 }]);
+    expect(weakForceContinueDecision(false, 'weak', result).blocked).toBe(true);
   });
-  it('records success, exact response length and measured usage, without retaining prompt or response', async () => {
-    const h = harness(), signal = new AbortController().signal;
-    const ask = createSurplusScopeAsk(h.session, h.turns, h.records, h.observe)!;
-    expect(await ask('PRIVATE_SYSTEM', 'PRIVATE_USER', signal)).toEqual({ text: 'PRIVATE_RESPONSE' });
-    expect(h.run).toHaveBeenCalledWith(expect.objectContaining({ signal, maxTokens: 8, tools: [], model: 'synthetic-model' }));
-    expect(h.records).toHaveLength(1);
-    expect(h.records[0]).toMatchObject({ ok: true, provider: 'SURPLUS', model: 'synthetic-model', promptPreview: SURPLUS_SCOPE_PURPOSE,
-      promptChars: 26, responsePreview: '', responseChars: 16, inputTokens: 123, outputTokens: 4 });
-    expect(h.turns).toHaveLength(1);
-    expect(h.turns[0]).toMatchObject({ text: '', rawContent: [], toolUses: [] });
-    expect(h.turns[0].usage.surplusReceipt).toBe(receipt);
-    expect(isSurplusReceiptDecision(h.turns[0].usage.surplusReceipt)).toBe(true);
-    expect(JSON.stringify([h.records, h.turns, h.observe.mock.calls])).not.toContain('PRIVATE_');
-    expect(h.observe).toHaveBeenCalledTimes(1);
+  it('fails closed without recovering or naming a Surplus failure', async () => {
+    const h = harness();
+    mock.create.mockRejectedValue(new Error('PRIVATE_PROVIDER_DETAIL'));
+    const result = await runWithSurplusBuild(true, h.classify);
+    expect(result).toMatchObject({ scope: null, source: 'unavailable', failure: { stage: 'classification', reason: 'classifier_failed' } });
+    expect(weakForceContinueDecision(false, 'weak', result).blocked).toBe(true);
+    expect(weakForceContinueDecision('true', 'weak', result).blocked).toBe(true);
+    expect(h.records).toMatchObject([{ ok: false, provider: 'unknown', error: 'Build scope classification failed' }]);
+    expect(h.records[0].inputTokens).toBeUndefined();
+    expect(JSON.stringify(h.observe.mock.calls)).not.toMatch(/PRIVATE|SURPLUS/);
   });
-  it.each(['failure', 'after-usage', 'factory-failure'] as const)('records and audits %s even with no later build report, then rethrows', async mode => {
-    const h = harness(mode);
-    await expect(createSurplusScopeAsk(h.session, h.turns, h.records, h.observe)!('PRIVATE_SYSTEM', 'PRIVATE_USER')).rejects.toThrow('PRIVATE_');
-    expect(h.records).toHaveLength(1); expect(h.observe).toHaveBeenCalledTimes(1);
-    expect(h.records[0]).toMatchObject({ ok: false, responsePreview: '', error: 'Build scope classification failed' });
-    expect(JSON.stringify([h.records, h.turns, h.observe.mock.calls])).not.toContain('PRIVATE_');
-    expect(h.turns).toHaveLength(mode === 'after-usage' ? 1 : 0);
-    if (mode === 'after-usage') expect(h.records[0]).toMatchObject({ inputTokens: 123, outputTokens: 4, responseChars: 16 });
+  it('does not invent measured usage or permit a throwing audit to change the verdict', async () => {
+    const h = harness('complex', null);
+    h.observe.mockImplementation(() => { throw new Error('audit unavailable'); });
+    expect(await h.classify()).toMatchObject({ scope: 'complex' });
+    expect(h.records[0].inputTokens).toBeUndefined();
+    expect(h.records[0].outputTokens).toBeUndefined();
   });
-  it('an audit failure cannot lose the receipt or prevent the classifier answer', async () => {
-    const h = harness(); h.observe.mockImplementation(() => { throw new Error('audit unavailable'); });
-    await expect(createSurplusScopeAsk(h.session, h.turns, h.records, h.observe)!('system', 'user')).resolves.toEqual({ text: 'PRIVATE_RESPONSE' });
-    expect(h.records).toHaveLength(1); expect(h.turns[0].usage.surplusReceipt).toBe(receipt);
+  it('keeps strict-free fences in force even when Surplus is admitted', async () => {
+    const h = harness();
+    vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'true');
+    const result = await runWithInferenceScope('free-modules', () => runWithSurplusBuild(true, h.classify));
+    expect(result?.scope).toBeNull();
+    expect(mock.create).not.toHaveBeenCalled();
+  });
+  it('retains the bounded deadline and unavailable outcome', async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    mock.create.mockImplementation((_params, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    }));
+    const result = runWithSurplusBuild(true, () => admitWeakBuild('request', h.ask));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(await result).toMatchObject({ scope: null, failure: { stage: 'deadline', reason: 'scope_timeout' } });
+    expect(h.records).toMatchObject([{ ok: false }]);
+    expect(mock.create).toHaveBeenCalledOnce();
+  });
+  it.each([
+    { intent: 'chat', importing: false, tier: 'weak' },
+    { intent: 'new_build', importing: true, tier: 'weak' },
+    { intent: 'new_build', importing: false, tier: 'mini' },
+  ])('keeps non-classified turns unchanged: %j', async input => {
+    const h = harness();
+    expect(await weakAdmissionForTurn({ prompt: 'request', ...input }, h.ask)).toBeNull();
+    expect(mock.create).not.toHaveBeenCalled();
+    expect(h.records).toEqual([]);
   });
 });

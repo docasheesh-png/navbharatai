@@ -51,10 +51,10 @@ describe('public build failure boundary', () => {
     expect(preWrite).toContain('tryConsumeSurplusPreWriteFailOpen');
     expect(route).not.toContain('isPublicBuildEngineUnavailableText');
     expect(route).not.toContain('scrubRetry');
-    expect(route).toContain('earlySurplusFailure = error');
+    expect(route).not.toContain('earlySurplusFailure = error');
     expect(route).toContain('surplusPreWriteFailOpen');
     expect(route).toContain('wrapSurplusRunnerPreWriteFailOpen');
-    expect(route).toContain('tryConsumeSurplusPreWriteFailOpen');
+    expect(route).not.toContain('tryConsumeSurplusPreWriteFailOpen');
     expect(route).toContain("phase: 'mid_build_pre_write'");
     expect(route).not.toContain("res.status(503).json({ code: 'ENGINE_UNAVAILABLE', error: PUBLIC_BUILD_ENGINE_UNAVAILABLE });");
     expect(route).toContain('content: `❌ Build failed: ${redactProviderError(errMsg)}`');

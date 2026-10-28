@@ -4187,15 +4187,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   }, [workspaceFiles, workspaceFilesFor, running]);
 
   // Plan (todo list) collapse toggle (Task 3) — keeps the chat area readable.
-  /**
-   * Is the plan expanded inside the Build/Plan/Advise menu?
-   *
-   * SEPARATE from `planCollapsed`, deliberately. That one belongs to the strip above the transcript;
-   * this one belongs to the menu. Sharing a single flag would mean opening the plan in one place
-   * silently changed the other, which is the kind of coupling that makes a UI feel haunted.
-   * Defaults CLOSED so the menu opens the size it always has.
-   */
-  const [menuPlanOpen, setMenuPlanOpen] = useState(false);
   const [planCollapsed, setPlanCollapsed] = useState(false);
 
   const agents = Object.values(state.agents).sort((a, b) => b.updatedTs - a.updatedTs);
@@ -5809,27 +5800,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                             ready={!!state.done && !running}
                             onPick={(text) => { setPrompt(text); setAdviseIdeasOpen(false); setModeMenuOpen(false); setTimeout(() => composerRef.current?.focus(), 0); }}
                           />
-                        </div>
-                      )}
-                      {/* Last block: with the menu pinned above the input, Plan stays there.
-                          Advise scrolls above it and cannot push this strip down onto the box. */}
-                      {state.todos.length > 0 && (
-                        <div className="nb-mode-plan shrink-0 border-t border-line bg-card px-1.5 py-1">
-                          <button
-                            type="button"
-                            onClick={() => setMenuPlanOpen((v) => !v)}
-                            className="w-full flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wider text-muted hover:text-body hover:bg-raised"
-                            title={menuPlanOpen ? 'Hide the plan' : 'Show this build\u2019s plan'}
-                          >
-                            {menuPlanOpen ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
-                            <span>Plan</span>
-                            <span className="text-faint normal-case font-normal">{planDone}/{state.todos.length}</span>
-                          </button>
-                          {menuPlanOpen && (
-                            <div className="mt-1 max-h-40 overflow-y-auto overscroll-contain px-1">
-                              <TodoList todos={state.todos} hideHeader />
-                            </div>
-                          )}
                         </div>
                       )}
                     </div>

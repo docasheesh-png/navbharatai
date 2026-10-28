@@ -694,6 +694,11 @@ export class MelodyPlayer {
     return timeline;
   }
 
+  /** Same as play(). Game builds call this name; it is not a second player. */
+  playTune(tune: Tune, options: PlayOptions = {}): Timeline | null {
+    return this.play(tune, options);
+  }
+
   stop(): void {
     if (this.timer !== null) { clearInterval(this.timer); this.timer = null; }
     this.timeline = null;
@@ -939,7 +944,7 @@ export function generateMelody(include?: string[]): MelodyResult {
       + '\n'
       + 'melody.unlock();                       // MUST happen; browsers suspend audio until a gesture\n'
       + 'melody.play(TUNES.round, { loop: true });\n'
-      + 'melody.play(TUNES.success);            // a short cue\n'
+      + 'melody.playTune(TUNES.success);         // same as play()\n'
       + 'melody.stop();\n'
       + '\n'
       + '// Your own tune — one line of notes:\n'

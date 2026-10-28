@@ -631,6 +631,15 @@ describe('the player, run against a fake AudioContext', () => {
       .toEqual([261.6, 293.7, 329.6, 349.2]);
   });
 
+  it('playTune is play — the name a game build already calls', () => {
+    const fake = makeFakeAudio();
+    const { MelodyPlayer } = loadPlayer(fake);
+    const p = new MelodyPlayer();
+    const timeline = p.playTune(TUNE);
+    expect(timeline.notes.length).toBeGreaterThan(0);
+    expect(p.playing).toBe(true);
+  });
+
   it('every note is stopped, and every node released', () => {
     const fake = makeFakeAudio();
     const { MelodyPlayer } = loadPlayer(fake);

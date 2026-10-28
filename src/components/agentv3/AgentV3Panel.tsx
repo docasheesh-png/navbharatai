@@ -5795,7 +5795,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                         <span>💡</span>
                         <span>Advise</span>
                         {adviseCount > 0 && (
-                          <span className="ml-auto min-w-[15px] h-[15px] px-1 rounded-full bg-amber-500 text-[9px] font-black text-zinc-950 flex items-center justify-center">{adviseCount}</span>
+                          <span className="ml-auto min-w-[15px] h-[15px] px-1 rounded-full bg-amber-500 text-[9px] font-black text-on-accent flex items-center justify-center">{adviseCount}</span>
                         )}
                       </button>
                       </div>

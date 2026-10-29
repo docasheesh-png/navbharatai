@@ -163,3 +163,8 @@ it('stale wave revision cannot use an adapter prepared before a settings edit',a
  const f=fixture(),corpus=questions(2);await f.store.create(authority,corpus,1);await f.store.update(authority.scopeId,0,{...authority,maxOutputTokens:1024},corpus,2,1,'admin');
  const call=vi.fn();await expect(executeWave(authority.scopeId,corpus,f.store,{model:authority.model,call},randomUUID(),undefined,undefined,0)).rejects.toMatchObject({code:'conflict'});expect(call).not.toHaveBeenCalled();
 });
+
+import { MAX_CONCURRENCY as LOAD_MAX_CONCURRENCY } from './providerLoadBatch';
+describe('load batch concurrency ceiling', () => {
+  it('allows the 140-concurrent burst target', () => { expect(LOAD_MAX_CONCURRENCY).toBeGreaterThanOrEqual(140); });
+});

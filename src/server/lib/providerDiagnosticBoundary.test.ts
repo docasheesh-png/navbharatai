@@ -20,9 +20,9 @@ describe('diagnostic request boundary', () => {
   it.each(['model', 'baseURL', 'apiKey', 'maxTokens', 'retries', 'budget', 'provider'])('rejects injected %s', field => {
     expect(parseDiagnosticInput('surplus', { ...body, [field]: 'override' })).toBeNull();
   });
-  it('bounds UTF-8 bytes and requires a replay key', () => {
+  it('accepts long UTF-8 prompts without a diagnostic cap and requires a replay key', () => {
     expect(parseDiagnosticInput('surplus', { ...body, prompt: 'é'.repeat(1024) })).not.toBeNull();
-    expect(parseDiagnosticInput('surplus', { ...body, prompt: 'é'.repeat(1025) })).toBeNull();
+    expect(parseDiagnosticInput('surplus', { ...body, prompt: 'é'.repeat(40000) })).not.toBeNull();
     for (const input of [null, [], {}, { ...body, prompt: ' ' }, { ...body, idempotencyKey: '../old-test' }]) {
       expect(parseDiagnosticInput('surplus', input)).toBeNull();
     }
@@ -56,9 +56,6 @@ describe('diagnostic request boundary', () => {
   });
 });
 
-it('accepts a manual output limit above 256 but rejects unsafe numeric values', () => {
+it('accepts an explicitly requested output bound for older clients without imposing a default', () => {
   expect(parseDiagnosticInput('surplus', { ...body, maxOutputTokens: 1024 })?.maxOutputTokens).toBe(1024);
-  for (const maxOutputTokens of [0, -1, 1.5, '1024', Infinity, Number.MAX_SAFE_INTEGER + 1]) {
-    expect(parseDiagnosticInput('surplus', { ...body, maxOutputTokens })).toBeNull();
-  }
 });

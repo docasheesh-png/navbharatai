@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import { newRequestIdentity } from '../../lib/requestIdentity';
-import { DIAGNOSTIC_LIMITS, type DiagnosticProvider, type DiagnosticResult } from '../../shared/providerDiagnostics';
+import { type DiagnosticProvider, type DiagnosticResult } from '../../shared/providerDiagnostics';
 
 const API = '/api/v1/admin/provider-diagnostics';
 const button = 'min-h-11 rounded-lg border border-line px-3 py-2 text-sm text-ink disabled:opacity-40';
@@ -9,14 +9,14 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 // Keep the deployed recovery namespace: old keys and liabilities must remain recoverable.
 const storageKey = (provider: DiagnosticProvider) => `admin-diagnostic-pair-20261028:${provider}`;
 // Session-only recovery payload is kept in the admin's browser, never server logs.
-function recoveredRequest(provider: DiagnosticProvider): { id: string; prompt: string; maxOutputTokens: number } | null {
+function recoveredRequest(provider: DiagnosticProvider): { id: string; prompt: string; maxOutputTokens?: number } | null {
   try {
     const saved = sessionStorage.getItem(storageKey(provider));
     if (!saved) return null;
     // The previously deployed one-shot UUID always represented these fixed settings.
     if (uuid.test(saved)) return { id: saved, prompt: 'Reply with exactly: OK', maxOutputTokens: 256 };
     const value = JSON.parse(saved);
-    return uuid.test(value.id) && typeof value.prompt === 'string' && Number.isSafeInteger(value.maxOutputTokens) && value.maxOutputTokens > 0 ? value : null;
+    return uuid.test(value.id) && typeof value.prompt === 'string' ? value : null;
   } catch { return null; }
 }
 const unknown = (n: number | null | undefined) => n == null ? 'Unknown / not measured' : String(n);
@@ -44,7 +44,6 @@ export function ProviderDiagnosticResult({ result: r }: { result: RunView }) {
 export function ProviderDiagnosticBot({ provider, adminToken, ready }: { provider: DiagnosticProvider; adminToken: string; ready: boolean }) {
   const pendingStorageKey = storageKey(provider);
   const [prompt, setPrompt] = useState(() => recoveredRequest(provider)?.prompt ?? 'Reply with exactly: OK');
-  const [maxOutputTokens, setMaxOutputTokens] = useState<number>(() => recoveredRequest(provider)?.maxOutputTokens ?? DIAGNOSTIC_LIMITS.defaultOutputTokens);
   const [key, setKey] = useState(() => recoveredRequest(provider)?.id ?? '');
   const [result, setResult] = useState<RunView | null>(null);
   const [recoveredSettled, setRecoveredSettled] = useState(false);
@@ -52,53 +51,54 @@ export function ProviderDiagnosticBot({ provider, adminToken, ready }: { provide
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
   const pending = useRef(key);
-  const validPrompt = Number.isSafeInteger(maxOutputTokens) && maxOutputTokens > 0 && prompt.trim().length > 0 && new TextEncoder().encode(prompt).length <= DIAGNOSTIC_LIMITS.promptBytes;
+  const validPrompt = prompt.trim().length > 0;
   async function action(recover: boolean, sameKey = false) {
     if (lock.current || !adminToken || (!recover && (!ready || (pending.current && !sameKey) || !validPrompt))) return;
     const id = recover || sameKey ? pending.current : newRequestIdentity();
     if (!id) { setMessage('A secure request identity is unavailable. No test was sent.'); return; }
+    const legacyOutput = sameKey ? recoveredRequest(provider)?.maxOutputTokens : undefined;
+    const output = Number.isSafeInteger(legacyOutput) && legacyOutput! > 0 ? { maxOutputTokens: legacyOutput } : {};
     if (!recover) {
-      try { sessionStorage.setItem(pendingStorageKey, JSON.stringify({ id, prompt, maxOutputTokens })); } catch { setMessage('Recovery storage is unavailable. No test was sent.'); return; }
+      try { sessionStorage.setItem(pendingStorageKey, JSON.stringify({ id, prompt, ...output })); } catch { setMessage('Recovery storage is unavailable. No test was sent.'); return; }
       pending.current = id; setKey(id);
     }
     lock.current = true; setBusy(true); setMessage(''); setResult(null); setRecoveredSettled(false);
-    const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 45_000);
+    const controller = new AbortController();
     try {
       const response = await fetch(recover ? `${API}/runs/${id}` : `${API}/${provider}/runs`, {
         method: recover ? 'GET' : 'POST', cache: 'no-store', signal: controller.signal,
         headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' },
-        ...(recover ? {} : { body: JSON.stringify({ idempotencyKey: id, prompt, maxOutputTokens }) }),
+        ...(recover ? {} : { body: JSON.stringify({ idempotencyKey: id, prompt, ...output }) }),
       });
       if (!response.ok) throw new Error('unavailable');
       const data = await response.json();
       if (recover) {
         const run = data?.run;
-        if (!run || run.provider !== provider || !uuid.test(run.runId) || !['reserved', 'unknown_liability', 'settled'].includes(run.state)) throw new Error('invalid');
+        if (!run || run.provider !== provider || !uuid.test(run.runId) || !['pending', 'reserved', 'unknown_liability', 'settled'].includes(run.state)) throw new Error('invalid');
         const overrun = Number.isSafeInteger(run.actualCostNanoUsd) && run.actualCostNanoUsd > run.reservedNanoUsd;
-        setRecoveredSettled(run.state === 'settled' && Number.isSafeInteger(run.actualCostNanoUsd) && Number.isSafeInteger(run.reservedNanoUsd) && !overrun);
+        setRecoveredSettled((run.state === 'settled' || run.state === 'unknown_liability' && Number.isSafeInteger(run.completedAt)) && !overrun);
         setMessage(`${overrun ? 'Receipt exceeded reservation; reconciliation required. ' : ''}Historical request ${run.runId}: ${run.state}. Supplier actual cost: ${Number.isSafeInteger(run.actualCostNanoUsd) && run.actualCostNanoUsd >= 0 ? `${run.actualCostNanoUsd} nano-USD (recorded receipt)` : 'Actual cost unavailable'}. Response text and timing are not persisted. No new call was made.`);
       } else {
         if (!data || data.provider !== provider || !uuid.test(data.runId) || !Array.isArray(data.timeline) || !data.usage || !data.supplierCost || !data.walletCharge) throw new Error('invalid');
         setResult(data as RunView);
       }
     } catch { setMessage('Outcome unavailable. Keep this request key and use Recover original run. Do not start a replacement test.'); }
-    finally { clearTimeout(timeout); lock.current = false; setBusy(false); }
+    finally { lock.current = false; setBusy(false); }
   }
   function next() {
-    if (lock.current || !(recoveredSettled || result && !result.reconciliationRequired && ['settled', 'not_dispatched'].includes(result.accounting))) return;
+    if (lock.current || !(recoveredSettled || result && !result.reconciliationRequired && (['settled', 'not_dispatched'].includes(result.accounting) || result.accounting === 'unknown_liability' && Number.isSafeInteger(result.completedAt)))) return;
     try { sessionStorage.removeItem(pendingStorageKey); } catch { setMessage('Could not clear recovery key.'); return; }
     pending.current = ''; setKey(''); setResult(null); setRecoveredSettled(false); setMessage('');
   }
   if (!adminToken) return null;
   return <section className="rounded-xl border border-line p-4 space-y-3" aria-label={`${provider} diagnostic bot`}>
     <h3>{provider === 'surplus' ? 'Surplus-only testing bot' : 'CheaperInference-only testing bot'}</h3>
-    <p>One explicit request. This diagnostic client performs no fallback or automatic retry. Provider-internal retries and routing are not controlled here. Maximum 2048 prompt bytes and a 30-second client deadline. Choose an output limit supported by the configured provider model. Supplier execution and billing may continue after a timeout.</p>
+    <p>One explicit request. This diagnostic client performs no fallback or automatic retry. Provider-internal retries and routing are not controlled here. Text is sent directly using the configured provider. No diagnostic pricing/catalog check, prompt-size cap, output-token cap or custom response deadline is added. Provider and hosting limits still apply. Supplier billing may continue after a connection loss.</p>
     <label>Test prompt<textarea className="block w-full rounded border border-line bg-transparent p-2 text-ink" value={prompt} disabled={busy || !!key} onChange={e => setPrompt(e.target.value)} /></label>
-    <label>Maximum output tokens<input type="number" min="1" step="1" value={maxOutputTokens} disabled={busy || !!key} onChange={e => setMaxOutputTokens(Number(e.target.value))} /></label>
     <button className={button} disabled={!ready || busy || !!key || !validPrompt} onClick={() => void action(false)}>Run {provider} test</button>
     {<button className={button} disabled={busy || !key || !!result || !ready} onClick={() => void action(false, true)}>Retry original admission with same key</button>}
     <button className={button} disabled={busy || !key} onClick={() => void action(true)}>Recover original run</button>
-    <button className={button} disabled={busy || !(recoveredSettled || result && !result.reconciliationRequired && ['settled', 'not_dispatched'].includes(result.accounting))} onClick={next}>Prepare another test</button>
+    <button className={button} disabled={busy || !(recoveredSettled || result && !result.reconciliationRequired && (['settled', 'not_dispatched'].includes(result.accounting) || result.accounting === 'unknown_liability' && Number.isSafeInteger(result.completedAt)))} onClick={next}>Prepare another test</button>
     {key && <p>Recovery key: {key}</p>}{message && <p role="status">{message}</p>}
     {result && <ProviderDiagnosticResult result={result} />}
   </section>;
@@ -128,7 +128,7 @@ export function ProviderDiagnosticPanels({ adminToken }: { adminToken: string })
       if (!response.ok || next.provider !== provider || typeof next.enabled !== 'boolean' || !Number.isSafeInteger(next.revision)) throw new Error('unconfirmed');
       setStatus(previous => previous?.providers ? { ...previous, dispatchReady: false, providers: { ...previous.providers,
         [provider]: { ...previous.providers[provider], enabled: next.enabled, revision: next.revision,
-          dispatchReady: false, reason: next.enabled ? 'Refresh status before testing' : 'diagnostics_disabled', missingFields: [] },
+          dispatchReady: false, reason: next.enabled ? 'Read status before testing' : 'diagnostics_disabled', missingFields: [] },
       } } : null);
     } catch { setStatus(null); setError('Control change is unconfirmed. Read status again before assuming ON or OFF.'); }
     finally { lock.current = false; setBusy(false); }
@@ -139,8 +139,8 @@ export function ProviderDiagnosticPanels({ adminToken }: { adminToken: string })
     <p>Manual tests only. Opening or refreshing this panel makes no request and spends nothing.</p>
     <button className={button} disabled={busy} onClick={() => void check()}>Verify admin and read test status</button>
     {error && <p role="alert">{error}</p>}
-    {status && <><p>Manual tests use existing shared platform budgets. Reservations use full-context pricing and an exchange-rate buffer. They are estimates, not provider-enforced monetary caps. Unknown supplier charges retain their holds.</p><p role="status">{status.dispatchReady ? 'Preflight passed. Each manual call still requires shared-budget admission.' : 'Dispatch blocked. See the specific provider or shared-budget issue below. Historical records and unresolved spending holds remain unchanged.'}</p>
-      {status.providers && <div>{(['surplus', 'cheaperinference'] as const).map(p => <div key={p}><p>{p}: {status.providers![p]?.enabled === true ? 'ON' : status.providers![p]?.enabled === false ? 'OFF' : 'Control unavailable'}</p><button className={button} disabled={busy || typeof status.providers![p]?.enabled !== 'boolean' || !Number.isSafeInteger(status.providers![p]?.revision)} onClick={() => void toggle(p)}>{status.providers![p]?.enabled ? 'Disable' : 'Enable'} {p} diagnostics</button><p>{p}: {status.providers![p]?.reason ?? 'Ready for admission'} · Preflight: {status.providers![p]?.missingFields?.join(', ') || 'None reported'}</p></div>)}</div>}
+    {status && <><p>Manual calls have no diagnostic pricing or budget prerequisite. Actual supplier cost is shown when reported; otherwise it remains unknown. Historical liabilities and records are preserved.</p><p role="status">{status.dispatchReady ? 'Ready to send a direct manual request.' : 'Dispatch blocked. See the specific provider issue below. Historical records and unresolved spending holds remain unchanged.'}</p>
+      {status.providers && <div>{(['surplus', 'cheaperinference'] as const).map(p => <div key={p}><p>{p}: {status.providers![p]?.enabled === true ? 'ON' : status.providers![p]?.enabled === false ? 'OFF' : 'Control unavailable'}</p><button className={button} disabled={busy || typeof status.providers![p]?.enabled !== 'boolean' || !Number.isSafeInteger(status.providers![p]?.revision)} onClick={() => void toggle(p)}>{status.providers![p]?.enabled ? 'Disable' : 'Enable'} {p} diagnostics</button><p>{p}: {status.providers![p]?.reason ?? 'Ready for admission'} · Details: {status.providers![p]?.missingFields?.join(', ') || 'None reported'}</p></div>)}</div>}
       <ProviderDiagnosticBot provider="surplus" adminToken={adminToken} ready={!busy && status.providers?.surplus.enabled === true && status.providers.surplus.dispatchReady} />
       <ProviderDiagnosticBot provider="cheaperinference" adminToken={adminToken} ready={!busy && status.providers?.cheaperinference.enabled === true && status.providers.cheaperinference.dispatchReady} /></>}
   </section>;

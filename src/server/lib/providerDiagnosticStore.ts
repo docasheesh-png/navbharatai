@@ -70,7 +70,7 @@ function checkedTotal(raw: unknown): Total {
     && (t.activeRunId === null || typeof t.activeRunId === 'string' && UUID.test(t.activeRunId)), 'accounting_failed');
   return t;
 }
-function checkedRun(raw: unknown): DiagnosticRunRecord {
+export function checkedRun(raw: unknown): DiagnosticRunRecord {
   const r = raw as DiagnosticRunRecord;
   demand(r && r.version === 1 && typeof r.runId === 'string' && UUID.test(r.runId)
     && (r.provider === 'surplus' || r.provider === 'cheaperinference') && typeof r.model === 'string' && modelId.test(r.model)

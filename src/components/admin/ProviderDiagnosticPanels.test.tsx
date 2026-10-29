@@ -44,7 +44,7 @@ it('synchronous duplicate clicks issue one request and unknown liability blocks 
   vi.mocked(fetch).mockResolvedValue(response(result) as any);
   nodes(render()).find(n => n.type === 'textarea').props.onChange({ target: { value: 'private prompt' } });
   const click = find(render(), 'Run surplus test').props.onClick; click(); click(); await flush();
-  expect(fetch).toHaveBeenCalledOnce(); expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toEqual({ idempotencyKey: id, prompt: 'private prompt', maxOutputTokens: 256 });
+  expect(fetch).toHaveBeenCalledOnce(); expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toEqual({ idempotencyKey: id, prompt: 'private prompt' });
   expect(find(render(), 'Run surplus test').props.disabled).toBe(true); expect(find(render(), 'Prepare another test').props.disabled).toBe(true);
 });
 it('remount recovers the same key with a GET and never retransmits the prompt', async () => {
@@ -81,17 +81,16 @@ it.each([false, true])('recovery permits another test only when settled without 
   expect(find(render(), 'Prepare another test').props.disabled).toBe(overrun);
 });
 
-it('manual tests allow editable prompts/output and another test after settlement', async () => {
+it('manual tests allow editable prompts with provider defaults and another test after settlement', async () => {
   let tree = render('pair');
   expect(fetch).not.toHaveBeenCalled();
   const textarea = nodes(tree).find(n => n.type === 'textarea');
   expect(textarea.props.readOnly).not.toBe(true);
   textarea.props.onChange({ target: { value: 'Custom request' } });
-  nodes(tree).find(n => n.type === 'input' && n.props.type === 'number').props.onChange({ target: { value: '1024' } });
   tree = render('pair');
   vi.mocked(fetch).mockResolvedValue(response({ ...result, accounting: 'settled' }) as any);
   find(tree, 'Run surplus test').props.onClick(); await flush(); tree = render('pair');
-  expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toMatchObject({ prompt: 'Custom request', maxOutputTokens: 1024 });
+  expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toMatchObject({ prompt: 'Custom request' });
   expect(find(tree, 'Prepare another test').props.disabled).toBe(false);
   find(tree, 'Prepare another test').props.onClick();
   expect(sessionStorage.getItem('admin-diagnostic-pair-20261028:surplus')).toBeFalsy();
@@ -104,9 +103,8 @@ it('pair manually retries only the same admission key after an unavailable outco
   expect(fetch).toHaveBeenCalledTimes(1);
 });
 
-it('remount retries the exact original prompt and output setting with the same key', async () => {
+it('remount retries the exact original prompt with the same key', async () => {
   nodes(render()).find(n => n.type === 'textarea').props.onChange({ target: { value: 'Original custom prompt' } });
-  nodes(render()).find(n => n.type === 'input' && n.props.type === 'number').props.onChange({ target: { value: '1024' } });
   vi.mocked(fetch).mockRejectedValue(new Error('lost acknowledgement'));
   find(render(), 'Run surplus test').props.onClick(); await flush();
   const submitted = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
@@ -138,4 +136,18 @@ it('allows disable even when an enabled provider fails preflight and does not cl
   vi.mocked(fetch).mockRejectedValue(new Error('unconfirmed'));
   find(render('panels'), 'Disable surplus diagnostics').props.onClick(); await flush();
   expect(nodes(render('panels')).filter(n => n.type === ProviderDiagnosticBot)).toHaveLength(0);
+});
+
+it('completed unknown supplier cost allows a new explicit manual test without inventing a receipt', async () => {
+  vi.mocked(fetch).mockResolvedValue(response({ ...result, completedAt: 1234 }) as any);
+  find(render(), 'Run surplus test').props.onClick(); await flush();
+  expect(find(render(), 'Prepare another test').props.disabled).toBe(false);
+  expect(renderToStaticMarkup(render()!)).toContain('Actual cost unavailable');
+});
+
+it('preserves the explicit output bound of a pre-upgrade pending submission on retry', async () => {
+  sessionStorage.setItem('admin-diagnostic-pair-20261028:surplus', JSON.stringify({ id, prompt: 'Original', maxOutputTokens: 10000 }));
+  vi.mocked(fetch).mockResolvedValue(response({ ...result, replayed: true }) as any);
+  find(render(), 'Retry original admission with same key').props.onClick(); await flush();
+  expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toEqual({ idempotencyKey: id, prompt: 'Original', maxOutputTokens: 10000 });
 });

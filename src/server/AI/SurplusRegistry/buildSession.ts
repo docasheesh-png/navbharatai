@@ -195,15 +195,24 @@ export async function createSurplusBuildSession(options: {
           catch (error) { release(permit); throw error; }
         },
         async onResponse(raw, permit, result) {
+          // DNA (z@ live 2026-10-30): a validated, identity-checked Surplus reply whose receipt could not be
+          // settled (blocked/duplicate/conflict, or the audit store threw) used to poison the whole session:
+          // that turn died with response_accounting_unavailable and every later turn with
+          // previous_call_accounting_unavailable — killing a build that Surplus was answering fine.
+          // Accounting is now non-fatal: the reply is kept, the cost is absorbed (user charge 0), and the
+          // reason is logged for reconciliation. Billing never blocks inference.
           let receipt: TurnUsage['surplusReceipt'];
           try { receipt = await adapter.receipt(raw, permit, result); }
-          catch (error) { poisoned = true; release(permit); throw error; }
-          if (!isSurplusReceiptDecision(receipt) || !['chargeable', 'absorbed'].includes(receipt.status)) {
-            poisoned = true;
-            result.usage.surplusReceipt = receipt;
-            callbacks.onTurnComplete?.(result, 'SURPLUS');
+          catch (error) {
+            console.warn(`[SURPLUS] receipt unavailable (non-fatal, absorbed): ${error instanceof Error ? error.message.slice(0, 120) : 'unknown'}`);
             release(permit);
-            return fail('response_accounting_unavailable');
+            return undefined;
+          }
+          if (!isSurplusReceiptDecision(receipt) || !['chargeable', 'absorbed'].includes(receipt.status)) {
+            const why = isSurplusReceiptDecision(receipt) ? `${receipt.status}:${receipt.reason}` : 'invalid_decision';
+            console.warn(`[SURPLUS] receipt not settled (non-fatal, absorbed): ${why}`);
+            release(permit);
+            return isSurplusReceiptDecision(receipt) ? receipt : undefined;
           }
           return receipt;
         },

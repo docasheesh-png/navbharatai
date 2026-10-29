@@ -1,7 +1,8 @@
+import { LOAD_ABSOLUTE_MAX } from '../../shared/providerLoadLimits';
 import type { LoadQuestion } from './providerLoadBatch';
 /** Public synthetic tasks only. Stable prefix allows count edits without replacing past questions. */
 export function providerLoadCorpus(count: number): LoadQuestion[] {
-  if (!Number.isSafeInteger(count) || count < 1 || count > 10000) throw new Error('Invalid corpus count');
+  if (!Number.isSafeInteger(count) || count < 1 || count > LOAD_ABSOLUTE_MAX) throw new Error('Invalid corpus count');
   return Array.from({ length: count }, (_, ordinal) => {
     const n = ordinal + 10001, a = n * 13 + 7, b = n * 3 + 11;
     let task: string, expected: unknown;

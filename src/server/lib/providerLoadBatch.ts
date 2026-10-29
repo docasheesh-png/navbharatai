@@ -12,14 +12,13 @@ export type { LoadBatchAuthority, LoadQuestion, LoadBatch, LoadItem } from '../.
 export class LoadBatchError extends Error {
   constructor(readonly code: 'invalid' | 'conflict' | 'unavailable' | 'expired' | 'disabled' | 'corrupt') { super(`Batch ${code}`); }
 }
-const MAX_ITEMS = 10000;
-/** Hard ceiling on in-flight batch attempts. Raised 32 -> 160 so an admin can run a
- * 140-concurrent / 1s burst test (owner target). Safety/budget: every attempt still
- * reserves maxAttemptNanoUsd against totalBudgetNanoUsd before dispatch, so the
- * worst-case held liability is concurrency x maxAttemptNanoUsd and the batch can
- * never exceed totalBudgetNanoUsd. Higher concurrency raises supplier 429 risk and
- * Firestore transaction contention; it does not loosen any spend guard. */
-export const MAX_CONCURRENCY = 160;
+import { LOAD_ABSOLUTE_MAX, LOAD_WAVE_MAX_CLAIM } from '../../shared/providerLoadLimits';
+/** Absolute ceilings (10 lakh). The configurable, env-lowerable limits are enforced at
+ * configure time (providerLoadRuntime); stored batches are validated against the absolute
+ * ceiling so lowering the env later never corrupts an existing batch. Budget still binds:
+ * each attempt reserves maxAttemptNanoUsd against totalBudgetNanoUsd before dispatch. */
+const MAX_ITEMS = LOAD_ABSOLUTE_MAX;
+export const MAX_CONCURRENCY = LOAD_ABSOLUTE_MAX;
 const ROOT = 'free_chat_chain/provider_load_batches/scopes';
 const CONTROL = 'free_chat_chain/provider_diagnostics/control/cheaperinference';
 const safeId = (v: unknown): v is string => typeof v === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(v);
@@ -57,7 +56,12 @@ function checkedItem(raw: unknown): LoadItem {
     reason: i.reason, provider: i.provider, model: i.model, retryCount: 0, fallbackCount: 0,
     usage: { inputTokens: i.usage.inputTokens, outputTokens: i.usage.outputTokens, cachedTokens: i.usage.cachedTokens } };
 }
+const hashMemo = new WeakMap<readonly LoadQuestion[], string>();
 export function loadCorpusHash(questions: readonly LoadQuestion[]): string {
+  const memo = Array.isArray(questions) ? hashMemo.get(questions) : undefined; if (memo) return memo;
+  const hash = computeCorpusHash(questions); if (Array.isArray(questions) && Object.isFrozen(questions)) hashMemo.set(questions, hash); return hash;
+}
+function computeCorpusHash(questions: readonly LoadQuestion[]): string {
   if (!Array.isArray(questions) || questions.length < 1 || questions.length > MAX_ITEMS
     || questions.some(q => !q || !safeId(q.id) || typeof q.prompt !== 'string' || !q.prompt.trim() || Buffer.byteLength(q.prompt) > 8192)
     || new Set(questions.map(q => q.id)).size !== questions.length || new Set(questions.map(q => q.prompt)).size !== questions.length) throw new LoadBatchError('invalid');
@@ -189,7 +193,7 @@ export class ProviderLoadBatchStore {
       const items: LoadItem[] = [];
       let held = b.heldNanoUsd;
       if (!b.stopped && b.authority.expiresAt > this.now()) {
-        while (items.length < b.concurrency - b.active && b.next + items.length < b.count
+        while (items.length < LOAD_WAVE_MAX_CLAIM && items.length < b.concurrency - b.active && b.next + items.length < b.count
           && BigInt(b.spentNanoUsd) + BigInt(held) + BigInt(b.authority.maxAttemptNanoUsd) <= BigInt(b.authority.totalBudgetNanoUsd)) {
           items.push({ ordinal: b.next + items.length, requestId: randomUUID(), batchRevision: b.revision, controlRevision: control.revision, state: 'reserved',
             reservedNanoUsd: b.authority.maxAttemptNanoUsd, actualNanoUsd: null, quality: 'not_evaluated', elapsedMs: null, responseReceived: false,

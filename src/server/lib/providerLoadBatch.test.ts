@@ -166,5 +166,5 @@ it('stale wave revision cannot use an adapter prepared before a settings edit',a
 
 import { MAX_CONCURRENCY as LOAD_MAX_CONCURRENCY } from './providerLoadBatch';
 describe('load batch concurrency ceiling', () => {
-  it('allows the 140-concurrent burst target', () => { expect(LOAD_MAX_CONCURRENCY).toBeGreaterThanOrEqual(140); });
+  it('allows flexible concurrency up to 10 lakh', () => { expect(LOAD_MAX_CONCURRENCY).toBe(1_000_000); });
 });

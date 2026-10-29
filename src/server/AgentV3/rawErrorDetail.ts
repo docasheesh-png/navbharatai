@@ -12,6 +12,8 @@ function describe(error: unknown): string {
       const bits = [`${e.name}: ${e.message}`];
       if (e.status !== undefined) bits.push(`status=${String(e.status)}`);
       if (e.code !== undefined) bits.push(`code=${String(e.code)}`);
+      const reason = (e as { reason?: unknown }).reason;
+      if (reason !== undefined) bits.push(`reason=${String(reason)}`);
       const inner = readRawErrorDetail(error);
       if (inner) bits.push(`inner=${inner}`);
       else if (e.cause instanceof Error) bits.push(`cause=${e.cause.name}: ${e.cause.message}`);

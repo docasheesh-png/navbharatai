@@ -19450,7 +19450,7 @@ async function noteBuildOutcome(
       // Q-963 — a verbatim chip whose tested template parsed is the app. No architect loop, no review.
       // The decision lives in templateVerify.ts so this handler grows no branch (Q-979).
       const verbatimTemplate = await settleVerbatimTemplate({
-        skip: verbatimTemplateSkipsModel({ preseeded: goldenPreseeded, tier: goldenPreseededTier, prompt }),
+        skip: verbatimTemplateSkipsModel({ preseeded: goldenPreseeded, tier: goldenPreseededTier, prompt, surplusAdmitted: surplusAdmissionDiag?.code === 'SURPLUS_ADMITTED' }),
         files: Object.fromEntries(preseededGolden),
         startPreview: () => startTemplatePreview(templateInstantPreviewEnabled(), () => dispatcher.dispatch({ id: 'template-verify-preview', name: 'update_preview', input: { port: 5173 } }, 'architect', { signal: abort.signal }).then(() => undefined)),
         narrate: (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }),

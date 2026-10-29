@@ -1,5 +1,6 @@
 import { guardSurplusNarrative, withServiceIdentity } from './surplusNarrativeIdentity';
 import { readScopeFailure, tagScopeFailure, type ScopeFailureDiagnostic } from '../scopeFailureDiagnostic';
+import { tagRawErrorDetail } from '../rawErrorDetail';
 import { PublicBuildEngineError, publicBuildEngineError, type PublicBuildEngineSafeReason } from '../../lib/buildEngineError';
 import { assertAiAvailable, aiMaintenanceStore, AiMaintenanceError } from '../../lib/aiMaintenance';
 import type { RunTurnParams, TurnResult, TurnRunner, TurnUsage } from '../ClaudeClient';
@@ -327,9 +328,9 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
         if (policyRefused || failureReason(error) === 'content_filter') throw unavailable('policy_refusal');
         // Never forward an upstream name, stack, cause, body, metadata, or even its error text.
         // Preserve an already-tagged PublicBuildEngineError (timeout / attempts_exhausted); else fold.
-        if (error instanceof PublicBuildEngineError) throw tagScopeFailure(publicError(error), readScopeFailure(error) ?? diagnostic);
+        if (error instanceof PublicBuildEngineError) throw tagRawErrorDetail(tagScopeFailure(publicError(error), readScopeFailure(error) ?? diagnostic), error, JSON.stringify(readScopeFailure(error) ?? diagnostic ?? null));
         try { console.warn('[SURPLUS_TURN] folded provider/transport failure to public build-engine boundary'); } catch { /* best-effort */ }
-        throw tagScopeFailure(unavailable('terminal_fold'), readScopeFailure(error) ?? diagnostic);
+        throw tagRawErrorDetail(tagScopeFailure(unavailable('terminal_fold'), readScopeFailure(error) ?? diagnostic), error, JSON.stringify(readScopeFailure(error) ?? diagnostic ?? null));
       } finally {
         active = false;
         controller.abort();

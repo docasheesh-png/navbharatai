@@ -94,7 +94,7 @@ function readVerifiedLiveReviews(env: NodeJS.ProcessEnv, snapshot: Snapshot | nu
   return structuredClone({ ...data, snapshot });
 }
 
-const LIVE_PILOT_ID = 'owner-live-key-flag-v1';
+const LIVE_PILOT_ID = 'owner-live-key-flag-v1'; // = receiptStore SURPLUS_LIVE_PILOT_ID (livePilotUnjam.test pins the pair)
 /** ~$1e12 micro-USD estimated pilot ceiling — effectively uncapped for product gates. */
 const LIVE_MAX_ESTIMATED_MICRO = '999999999999999999';
 const LIVE_MAX_CALLS = 1_000_000;

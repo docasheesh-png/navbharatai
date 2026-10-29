@@ -2,6 +2,7 @@ import type { TurnResult } from '../../AgentV3/ClaudeClient';
 import type { LlmCallRecord } from '../../AgentV3/BuildDiagnostics';
 import { recordedTextCall } from '../../AgentV3/recordedTextCall';
 import type { SurplusBuildSession } from './buildSession';
+import { readScopeFailure, type ScopeFailureDiagnostic } from '../../AgentV3/scopeFailureDiagnostic';
 
 type ScopeRecord = Omit<LlmCallRecord, 'ts'>;
 export const SURPLUS_SCOPE_PURPOSE = 'Build scope admission classification';
@@ -24,19 +25,26 @@ export function createSurplusScopeAsk(
   if (!session) return undefined; // OFF: no runner, observation, or additional provider call
   return async (system, user, signal) => {
     let measured: Pick<LlmCallRecord, 'inputTokens' | 'outputTokens' | 'responseChars'> | undefined;
+    // Enumerated internal stage only (never upstream text): "provider=unknown" alone hid that 05011–05013
+    // failed at the durable reservation, before any HTTP request — so token/param fixes could not help.
+    let failedAt: Readonly<ScopeFailureDiagnostic> | undefined;
     try {
       const result = await recordedTextCall({
         // Construct inside runTurn so even a synchronous runner-factory failure is recorded.
-        makeRunner: onUsed => ({ runTurn: params => session.runner({ onTurnComplete: turn => {
-          onUsed('SURPLUS');
-          measured = { inputTokens: turn.usage.inputTokens, outputTokens: turn.usage.outputTokens, responseChars: turn.text.length };
-          turns.push({ ...turn, usage: { ...turn.usage }, text: '', rawContent: [], toolUses: [] });
-        } }).runTurn(params) }),
+        makeRunner: onUsed => ({ runTurn: async params => {
+          try {
+            return await session.runner({ onTurnComplete: turn => {
+              onUsed('SURPLUS');
+              measured = { inputTokens: turn.usage.inputTokens, outputTokens: turn.usage.outputTokens, responseChars: turn.text.length };
+              turns.push({ ...turn, usage: { ...turn.usage }, text: '', rawContent: [], toolUses: [] });
+            } }).runTurn(params);
+          } catch (error) { failedAt = readScopeFailure(error); throw error; }
+        } }),
         identify: (reported, used, answered) => ({ provider: reported ? used ?? 'unknown' : 'unknown', model: answered ?? 'unknown' }),
         recordLlmCall: row => {
           const sanitized: ScopeRecord = { ...row, ...(!row.ok && measured ? measured : {}), promptPreview: SURPLUS_SCOPE_PURPOSE,
             promptChars: system.length + user.length, responsePreview: '',
-            ...(row.ok ? {} : { error: 'Build scope classification failed' }) };
+            ...(row.ok ? {} : { error: failedAt ? `Build scope classification failed (stage=${failedAt.stage} reason=${failedAt.reason})` : 'Build scope classification failed' }) };
           records.push(sanitized);
           // Audit failure cannot suppress the buffered outcome or break classification.
           try { observe?.(Object.freeze({ ...sanitized })); } catch { /* best-effort bounded audit */ }

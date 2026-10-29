@@ -11,6 +11,11 @@ export const SURPLUS_SCOPE_PURPOSE = 'Build scope admission classification';
  * classification failed" → mid_build_engine_unavailable → Weak/Kimi builds the app. The label is
  * still one short word; this is only the ceiling, billed on actual usage. */
 export const SURPLUS_SCOPE_MAX_TOKENS = 1024;
+/** DNA (05016): the Weak scope deadline (5s) was sized for glm-4.7-flashx. Admitted Surplus models are
+ * reasoning models (gpt-5.6-sol) whose single-word answer routinely needs >5s of hidden reasoning, so the
+ * race aborted a healthy call → scope_timeout → "could not confirm this fits Weak" (₹0, coding never
+ * started). The Surplus-driven scope ask gets a reasoning-sized deadline; GLM keeps 5s. */
+export const SURPLUS_SCOPE_TIMEOUT_MS = 30_000;
 
 /** One recorded classification door, including rejected/chat-only requests without a build report.
  * Buffers retain measured usage and immutable receipt authority, never prompt/response contents. */

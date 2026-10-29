@@ -1,10 +1,11 @@
 import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
-import { createSurplusScopeAsk } from '../AI/SurplusRegistry/scopeAdmission';
+import { createSurplusScopeAsk, SURPLUS_SCOPE_TIMEOUT_MS } from '../AI/SurplusRegistry/scopeAdmission';
 import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibility';
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
 import { surplusFallbackDisabledFor, surplusRawErrorReporter } from '../AI/SurplusRegistry/surplusNoFallback';
+import { rawErrorText } from '../AgentV3/rawErrorDetail';
 import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
 import { wrapSurplusRunnerPreWriteFailOpen, tryConsumeSurplusPreWriteFailOpen, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
@@ -11383,7 +11384,8 @@ async function noteBuildOutcome(
     const weakAdmission = await weakAdmissionForTurn({ prompt, intent, importing: hasImportIntent, tier: powerLevelReqEffective },
       createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
         audit('AGENTV3_DISCOUNT_SCOPE_CALL', scopeCallAudit(scopeRequestId, intentWorkspaceId, row), 'info');
-      }, error => { earlySurplusFailure = error; }));
+      }, error => { earlySurplusFailure = error; }),
+      surplusSession ? { timeoutMs: SURPLUS_SCOPE_TIMEOUT_MS } : {});
     recordScopeFailure(scopeRequestId, intentWorkspaceId, weakAdmission, audit);
     const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(
       req.body.weakForceContinue, powerLevelReqEffective, weakAdmission,
@@ -11501,6 +11503,12 @@ async function noteBuildOutcome(
         let clarifyChips: QuickReply[] | null = null;
         if (weakScopeBlocked) {
           reply = weakAdmissionReply(weakAdmission?.scope ?? null);
+          // Owner debug profiles only (surplusNoFallback): show WHY scope blocked instead of the soft copy alone.
+          if (surplusFallbackDisabledFor(email) && weakAdmission?.scope === null) {
+            const why = earlySurplusFailure !== undefined ? rawErrorText(earlySurplusFailure)
+              : `stage=${weakAdmission.failure?.stage ?? 'unknown'} reason=${weakAdmission.failure?.reason ?? 'unknown'}`;
+            reply += `\n\n🛠️ Surplus raw error (debug, this profile only): scope ${why}`;
+          }
         } else if (clarity && !echoesPlatformNotice) {
           // Written by the PLATFORM, not a model: one short question in the user's language + 3–4 chips. Billed 0.
           const r = clarifyReply(clarity.category, voiceOf(String(prompt ?? '')));

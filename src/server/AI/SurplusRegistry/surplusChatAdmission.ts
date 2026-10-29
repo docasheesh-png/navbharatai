@@ -4,6 +4,7 @@
  * Kept OUT of routes/agentv3.ts so Weak-only gating and SURPLUS_* diagnostics do not
  * spend the chat handler's TS2563 branch budget (Q-979). Owner 2026-10-25: Surplus = Weak only.
  */
+import { refreshSurplusRegistry } from './runtime';
 import { resolveProBuildSurplusAdmission, safeSurplusAdmissionReason, type SafeSurplusAdmissionReason } from './admitOrFallback';
 import type { SurplusBuildSession } from './buildSession';
 import { shouldSkipSurplusAdmit, SURPLUS_ADMIT_CIRCUIT_OPEN_REASON } from './surplusAdmitCircuit';
@@ -34,6 +35,8 @@ export async function runWeakSurplusAdmissionForChat(options: {
   audit: AuditFn;
   /** Owner per-profile opt-out (surplusNoFallback): Surplus or fail — never the Weak ladder. */
   noFallback?: boolean;
+  /** Test seam; defaults to the durable registry refresh. */
+  refreshRegistry?: () => Promise<unknown>;
 }): Promise<WeakSurplusAdmissionGate> {
   // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders.
   if (!(options.powerLevel === 'weak' && (options.intent !== 'chat' || options.hasImportIntent))) {
@@ -55,7 +58,7 @@ export async function runWeakSurplusAdmissionForChat(options: {
   }
 
   let diag: SurplusAdmissionDiag | undefined;
-  const surplusAdmit = await resolveProBuildSurplusAdmission({
+  const admitOnce = () => resolveProBuildSurplusAdmission({
     buildId: options.buildId,
     tier: options.powerLevel,
     initialWorkload: {
@@ -82,6 +85,13 @@ export async function runWeakSurplusAdmissionForChat(options: {
       } catch { /* best-effort audit */ }
     },
   });
+  let surplusAdmit = await admitOnce();
+  // No-fallback debug profiles: a stale/missing registry snapshot is recoverable — force one
+  // metadata refresh and re-admit instead of failing (and NEVER falling back to Weak).
+  if (options.noFallback && surplusAdmit.ok && !surplusAdmit.session && diag?.reason === 'stale_or_missing_snapshot') {
+    try { await (options.refreshRegistry ?? refreshSurplusRegistry)(); } catch { /* best-effort */ }
+    surplusAdmit = await admitOnce();
+  }
 
   if (!surplusAdmit.ok) {
     return { ok: false, diag, afterSurplusFallback: surplusAdmit.afterSurplusFallback };

@@ -57,7 +57,7 @@ describe('fifteen-model shared metadata manager', () => {
     });
     expect(await syncSurplusMetadata(store, modelIds, 300000, fetcher, () => now)).toEqual({ status: 'unavailable' });
     expect(active).toBe(0); expect(fetcher).toHaveBeenCalledTimes(4);
-    expect(rows.get(SURPLUS_DOCUMENT)).toMatchObject({ snapshot, lastAttemptAt: now, nextAllowedAt: now + 300000, lastError: 'metadata_unavailable' });
+    expect(rows.get(SURPLUS_DOCUMENT)).toMatchObject({ snapshot, lastAttemptAt: now, nextAllowedAt: now + 15000, lastError: 'metadata_unavailable' }); // failed sync retries fast (stale DNA)
     expect(rows.get(SURPLUS_DOCUMENT)?.lastSuccessAt).toBeUndefined();
   });
   it('accepts fifteen candidates in selector but still requires independent reviews', () => {
@@ -101,8 +101,9 @@ describe('fifteen-model shared metadata manager', () => {
     const leases = await Promise.all([first.claim(now, 300000), second.claim(now, 300000)]);
     expect(leases.filter(Boolean)).toHaveLength(1);
     await first.publish(leases.find(Boolean)!, snapshot);
-    expect(await new SurplusStore(db).claim(now + 299999, 300000)).toBeNull();
-    expect(rows.get(SURPLUS_DOCUMENT)).toMatchObject({ lastAttemptAt: now, lastSuccessAt: now, nextAllowedAt: now + 300000 });
+    expect(await new SurplusStore(db).claim(now + 239999, 300000)).toBeNull();
+    // Refresh one minute before the 300s snapshot expiry so admission never sees a stale window.
+    expect(rows.get(SURPLUS_DOCUMENT)).toMatchObject({ lastAttemptAt: now, lastSuccessAt: now, nextAllowedAt: now + 240000 });
     expect([...rows.keys()]).toEqual([SURPLUS_DOCUMENT]);
   });
 });

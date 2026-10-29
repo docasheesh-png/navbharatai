@@ -40,7 +40,9 @@ export async function readLoadQuote(outputTokens: number, env = process.env, tra
   // DNA fix (live 2026-10-29, prod 05000): supply 200 carries max_* null + list_* / primary_market_offers / candidates.
   // Order: list_* (== ceiling at min_discount 0) -> offers/candidates (highest) -> /v1/models catalog. Values may be
   // string numbers, "$"-prefixed, exponent or >9-decimal floats; normalizeUsd rounds UP to nano so the ceiling never shrinks.
-  let { rates, path } = resolveRatesWithPath(data);
+  const resolved = resolveRatesWithPath(data);
+  let rates = resolved.rates;
+  let path: string = resolved.path;
   if (!num(rates.input) || !num(rates.output)) {
     const catalog = await readCatalogRates(status.defaultModel, env.CHEAPERINFERENCE_API_KEY!.trim(), transport);
     if (catalog) { rates = { input: num(rates.input) ? rates.input : catalog.input, output: num(rates.output) ? rates.output : catalog.output }; path = path === 'none' ? 'catalog' : `${path}_catalog`; }

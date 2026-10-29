@@ -36,3 +36,12 @@ describe('surplusRawErrorReporter', () => {
     expect(out[0]).toContain('400 bad param max_tokens');
   });
 });
+
+describe('surplusFallbackDisabledFor uid match (2026-10-29 stale_or_missing_snapshot fallback leak)', () => {
+  it('matches the owner debug uid even when the token has no email claim', async () => {
+    const { surplusFallbackDisabledFor } = await import('./surplusNoFallback');
+    expect(surplusFallbackDisabledFor(null, 'GiYNmFcDMVYSWW48Nrurm7j41gv1')).toBe(true);
+    expect(surplusFallbackDisabledFor(null, 'someone-else')).toBe(false);
+    expect(surplusFallbackDisabledFor(' Z@gmail.com ')).toBe(true);
+  });
+});

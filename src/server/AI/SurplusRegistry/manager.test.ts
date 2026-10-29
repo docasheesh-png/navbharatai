@@ -75,6 +75,20 @@ describe('fifteen-model shared metadata manager', () => {
     expect(result).toMatchObject({ canDispatch: false, status: 'estimated_candidate', selection: { model: 'model-14' } });
     expect(result.configuredUniverse).toHaveLength(15);
   });
+  it('picks the better coding model among ≥90%-discount eligible offers, not the cheapest', () => {
+    const models = ['glm-5.3-flash', 'claude-sonnet-5', 'qwen3-coder'];
+    const offers = models.map((model, index) => ({ ...offer, model, offerId: `q-${index}`, rates: { input: String(index === 0 ? 1 : 50), output: '2' }, referenceRates: { input: '1000', output: '2000' } }));
+    const base = { pricingContract: { unit: 'micro-usd-per-million' as const, sourceUrl: 'https://www.surplusintelligence.ai/docs/pricing', reviewedAt: now - 1, expiresAt: now + 300000 }, accountAndPrivacyReviewedUntil: now + 300000 };
+    const q = (item: typeof offers[number], extra = {}) => ({ offerId: item.offerId, model: item.model, providerId: item.providerId, benchmarkId: 'b', cohort: 'c', artifactSha256: 'ab'.repeat(32), approved: true, reviewedAt: now - 1, expiresAt: now + 300000, ...extra });
+    const w = { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
+    const snap = { ...snapshot, models, offers };
+    expect(planSurplusBuild(snap, { ...base, quality: offers.map(i => q(i)) }, w, now).selection?.model).toBe('claude-sonnet-5');
+    // Reviewed score overrides static order.
+    expect(planSurplusBuild(snap, { ...base, quality: offers.map(i => q(i, i.model === 'qwen3-coder' ? { qualityScore: 95 } : {})) }, w, now).selection?.model).toBe('qwen3-coder');
+    // Better model below 90% discount is never chosen.
+    const shallow = offers.map(o => o.model === 'claude-sonnet-5' ? { ...o, rates: { input: '200', output: '2' } } : o);
+    expect(planSurplusBuild({ ...snap, offers: shallow }, { ...base, quality: offers.map(i => q(i)) }, w, now).selection?.model).toBe('qwen3-coder');
+  });
   it('rejects aggregate count and byte overflows without partial storage', async () => {
     const { db, rows } = fakeDb(), store = new SurplusStore(db, () => now);
     const lease = (await store.claim(now, 300000))!;

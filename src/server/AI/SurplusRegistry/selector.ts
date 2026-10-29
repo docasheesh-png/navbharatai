@@ -1,5 +1,5 @@
 import type { Dimension, Observation, Plan, Reviews, Snapshot, Workload } from './types';
-import { SURPLUS_MAX_MODELS, SURPLUS_MAX_OFFERS } from './config';
+import { SURPLUS_MAX_MODELS, SURPLUS_MAX_OFFERS, surplusCodingQuality } from './config';
 const DIMENSIONS: Dimension[] = ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning'];
 const SCALE = 1_000_000n;
 const blocked = (reason: string): Plan => ({ canDispatch: false, status: 'blocked', reason });
@@ -64,8 +64,10 @@ function plan(snapshot: Snapshot | null, reviews: Reviews, workload: Workload, n
     const cost = weighted(offer.rates, workload), reference = weighted(offer.referenceRates, workload);
     // Both reported discount AND the actual workload-weighted estimate must meet 90%.
     if (cost === null || reference === null || reference <= 0n || cost * 10n > reference) return [];
-    return [{ offer, approved, cost }];
-  }).sort((a, b) => a.cost < b.cost ? -1 : a.cost > b.cost ? 1 : a.offer.offerId.localeCompare(b.offer.offerId));
+    return [{ offer, approved, cost, quality: surplusCodingQuality(offer.model, approved.qualityScore) }];
+  // Objective (admin 2026-10-29): among ≥90%-discount eligible offers pick the BEST coding quality;
+  // price only breaks ties within the same model/quality, then offerId for determinism.
+  }).sort((a, b) => b.quality - a.quality || (a.cost < b.cost ? -1 : a.cost > b.cost ? 1 : 0) || a.offer.offerId.localeCompare(b.offer.offerId));
   if (!candidates.length) return blocked('no_eligible_90_percent_offer');
   const { offer, approved, cost } = candidates[0];
   return { canDispatch: false, status: 'estimated_candidate', reason: 'cost_preview_only_agent_capability_receipts_and_builder_adapter_unverified', snapshotVersion: snapshot.version, configuredUniverse: snapshot.models, observationBasis: requestFloor ? 'request-time-floor-required' : 'origin-timestamp',

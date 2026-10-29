@@ -13,7 +13,13 @@ export class LoadBatchError extends Error {
   constructor(readonly code: 'invalid' | 'conflict' | 'unavailable' | 'expired' | 'disabled' | 'corrupt') { super(`Batch ${code}`); }
 }
 const MAX_ITEMS = 10000;
-const MAX_CONCURRENCY = 32;
+/** Hard ceiling on in-flight batch attempts. Raised 32 -> 160 so an admin can run a
+ * 140-concurrent / 1s burst test (owner target). Safety/budget: every attempt still
+ * reserves maxAttemptNanoUsd against totalBudgetNanoUsd before dispatch, so the
+ * worst-case held liability is concurrency x maxAttemptNanoUsd and the batch can
+ * never exceed totalBudgetNanoUsd. Higher concurrency raises supplier 429 risk and
+ * Firestore transaction contention; it does not loosen any spend guard. */
+export const MAX_CONCURRENCY = 160;
 const ROOT = 'free_chat_chain/provider_load_batches/scopes';
 const CONTROL = 'free_chat_chain/provider_diagnostics/control/cheaperinference';
 const safeId = (v: unknown): v is string => typeof v === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(v);

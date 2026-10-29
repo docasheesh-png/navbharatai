@@ -41,6 +41,15 @@ export interface AppFeature {
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
+    id: 'admin_concurrent_engine_checks',
+    name: 'Admin concurrent engine checks',
+    path: 'Admin panel → AI Engines → Provider testing bots',
+    description: 'Verified administrators can configure an approved batch budget, prior spend and attempts, remaining count, concurrency and output settings. Batch requests use durable single-dispatch identities and retain unknown billing liabilities. Existing shared budget controls and independent engine switches remain effective. Manual diagnostic bots are separate. Loading the panel never sends inference.',
+    howToUse: 'Read the original batch, enter the approved scope and payment conversion ceiling, save, then explicitly run. Abort stops unsent work; already dispatched requests can still be billed. Read individual receipts and quality outcomes. Resuming preserves attempts, spend and held liabilities. This does not establish large-scale capacity or guarantee every answer is correct.',
+    relatedFeatures: [],
+    keywords: ['admin', 'concurrent checks', 'batch budget', 'engine diagnostics', 'abort unsent'],
+  },
+  {
     id: 'shared_free_daily_answers',
     name: 'Shared Free daily answer ceiling',
     path: 'Free chat or Professionals → Shared Free daily ceiling',

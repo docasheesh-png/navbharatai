@@ -131,6 +131,12 @@ function quote(cfg: FreeChainConfig, input: number, output: number, rung?: RungC
   if (rung && rung.id !== 'deepseek') return maximumCostNanoUsd(input, output, usdToNanoUsd(rung.priceIn), usdToNanoUsd(rung.priceOut));
   return maximumCostNanoUsd(input, output, usdToNanoUsd(cfg.deepseekPrices.input), usdToNanoUsd(cfg.deepseekPrices.output));
 }
+/** Missing supplier receipts must not be replaced with a token-price estimate. */
+function reportedChargeNanoUsd(response: unknown): number | null {
+  const amount = (response as { supplierChargeUsd?: unknown } | null)?.supplierChargeUsd;
+  if (typeof amount !== 'string') return null;
+  try { return usdToNanoUsd(amount); } catch { return null; }
+}
 /** This namespace is not installed in AIRouterManager: other consumers of 'free' stay untouched. */
 export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeChainConfig(), refreshConfig?: () => FreeChainConfig) {
   const store = new FreeChainStore(db);
@@ -315,8 +321,10 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
             throw new FreeChainProviderError(watch.verdict === 'first-token-timeout' || watch.verdict === 'idle-timeout' || watch.verdict === 'hard-cap' ? 'TIMEOUT' : 'NETWORK');
           }
         if (!response || !content.trim()) throw new FreeChainProviderError('EMPTY_RESPONSE');
-        if (reservation && completeUsage && response.usage) await store.settlePaid(reservation, quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung));
-        if (monthHold) { monthSettled = true; await settleMonthly(db, monthHold.month, monthHold.amount, completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) : null); }
+        const actual = id === 'cheapinf' ? reportedChargeNanoUsd(response)
+          : completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) : null;
+        if (reservation && actual !== null) await store.settlePaid(reservation, actual);
+        if (monthHold) { monthSettled = true; await settleMonthly(db, monthHold.month, monthHold.amount, actual); }
         breaker.recordSuccess(); recordProviderLatency(breakerName, Date.now() - attemptStarted, false);
         attempt.reason = 'served'; trace.rung = id; trace.costUsdEstimate = isPaidRung(id) ? (completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) / 1e9 : null) : 0;
         if (cacheKey && id !== 'openrouter') await new FreeChainCache(db).put(cacheKey, { content, provider: response.provider, model: response.model }, cfg.cacheTtlS).catch(() => {});
@@ -337,6 +345,12 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           const until = Math.max(Date.now() + requestedCooldown, breaker.recordFailure(requestedCooldown, Date.now(), openReason));
           breaker.honorRemoteOpenUntil(until, openReason);
           if (accountId(id) !== 'glm' || ['AUTH', 'RATE_LIMIT', 'QUOTA_EXHAUSTED'].includes(safe?.code ?? '')) await store.cooldown(accountId(id), until).catch(() => {}); recordProviderLatency(breakerName, 0, true);
+        }
+        // A failed response can still carry a settled supplier receipt. Unknown failures retain holds.
+        const failedCharge = id === 'cheapinf' ? reportedChargeNanoUsd(safe) : null;
+        if (reservation?.mayDispatch && attempt.entered && failedCharge !== null) {
+          await store.settlePaid(reservation, failedCharge);
+          if (monthHold && !monthSettled) { monthSettled = true; await settleMonthly(db, monthHold.month, monthHold.amount, failedCharge); }
         }
         // Never release an uncertain paid hold, and never mix replies after text commitment.
         if (partial || content) { trace.rung = id; if (!input.onChunk) content += '\n\nThe response was interrupted. Please try again.'; return done({ content, provider: names[id], model: response?.model ?? rung.model, latencyMs: 0, ok: true, reason: 'stalled' }); }

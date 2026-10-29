@@ -547,3 +547,51 @@ describe('first-use authority is not inferred from failed reads', () => {
   expect(m.setBudget).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 0, capNanoUsd: 0 }));
  });
 });
+
+describe('CheaperInference supplier-charge settlement', () => {
+ function setup() {
+  vi.stubEnv('CHEAPERINFERENCE', 'admin'); vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');
+  m.paid.mockResolvedValue({ id: 'receipt-hold', day: 'original-day', uidHash: 'u', maxCostNanoUsd: 1000000, createdAt: 0, mayDispatch: true });
+  m.settle.mockResolvedValue(true);
+  const cfg = freeChainConfig({ FREE_CHAIN_ENABLED: 'on', FREE_CHAIN_ROLLOUT_PERCENT: '100', FREE_CHAIN_ORDER: 'cheapinf', CHEAPERINFERENCE: 'admin', CHEAPERINFERENCE_API_KEY: 'ci_live_test_key', FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off' });
+  return () => buildFreeChainRouter(db, cfg).route({ ...input(), context: { ...input().context, isAdmin: true } });
+ }
+ it.each(['0', '0.001234567', '1.000000001'])('uses actual receipt %s rather than token estimate', async amount => {
+  const run = setup();
+  m.execute.mockImplementation(async (arg, cfg) => ({ ...await successful()(arg,cfg), supplierChargeUsd: amount }));
+  expect((await run()).ok).toBe(true);
+  const [whole,fraction=''] = amount.split('.');
+  expect(m.settle).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ day: 'original-day' }), Number(BigInt(whole)*1000000000n+BigInt(fraction.padEnd(9,'0'))));
+ });
+ it.each([undefined, 'unknown', '9007199254740992', '-1'])('keeps unknown/unrepresentable receipt %s held despite complete tokens', async amount => {
+  const run=setup(); m.execute.mockImplementation(async (arg,cfg) => ({ ...await successful()(arg,cfg), supplierChargeUsd: amount }));
+  expect((await run()).ok).toBe(true); expect(m.settle).not.toHaveBeenCalled();
+ });
+ it.each(['TIMEOUT','NETWORK','EMPTY_RESPONSE'] as const)('retains unknown hold on %s', async code => {
+  const run=setup(); m.execute.mockRejectedValue(new FreeChainProviderError(code));
+  expect((await run()).ok).toBe(false); expect(m.settle).not.toHaveBeenCalled(); expect(m.execute).toHaveBeenCalledOnce();
+ });
+ it('accounts an evidenced charged failure without retry', async () => {
+  const run=setup(); m.execute.mockRejectedValue(new FreeChainProviderError('EMPTY_RESPONSE', { supplierChargeUsd: '0.000004' }));
+  expect((await run()).ok).toBe(false); expect(m.settle).toHaveBeenCalledExactlyOnceWith(expect.anything(),4000); expect(m.execute).toHaveBeenCalledOnce();
+ });
+ it('does not dispatch or settle a duplicate admission', async () => {
+  const run=setup(); m.paid.mockResolvedValue({ id:'receipt-hold',mayDispatch:false });
+  expect((await run()).ok).toBe(false);expect(m.execute).not.toHaveBeenCalled();expect(m.settle).not.toHaveBeenCalled();
+ });
+});
+
+it.each(['0.000005', undefined])('uses the same supplier evidence for monthly settlement: %s', async amount => {
+ vi.stubEnv('CHEAPERINFERENCE','admin');vi.stubEnv('CHEAPERINFERENCE_API_KEY','ci_live_test_key');
+ m.paid.mockResolvedValue({id:'monthly-receipt',day:'original-day',uidHash:'u',maxCostNanoUsd:1000000,createdAt:0,mayDispatch:true});m.settle.mockResolvedValue(true);
+ m.execute.mockImplementation(async(arg,cfg)=>({...await successful()(arg,cfg),supplierChargeUsd:amount}));
+ let record:Record<string,number>={};const writes:Record<string,number>[]=[];
+ const ref={collection:(_name:string)=>ref,doc:(_name:string)=>ref};
+ const monthDb={collection:(_name:string)=>ref,runTransaction:async(fn:(tx:unknown)=>Promise<unknown>)=>fn({get:async()=>({data:()=>record}),set:(_ref:unknown,data:Record<string,number>)=>{record={...data};writes.push({...data});}})};
+ const cfg=freeChainConfig({FREE_CHAIN_ENABLED:'on',FREE_CHAIN_ROLLOUT_PERCENT:'100',FREE_CHAIN_ORDER:'cheapinf',CHEAPERINFERENCE:'admin',CHEAPERINFERENCE_API_KEY:'ci_live_test_key',FREE_CHAIN_MONTHLY_CAP_ENABLED:'on'});
+ const result=await buildFreeChainRouter(monthDb as unknown as typeof db,cfg).route({...input(),context:{...input().context,isAdmin:true}});
+ expect(result.ok).toBe(true);expect(writes).toHaveLength(2);
+ expect(record.spentNanoUsd).toBe(amount===undefined?writes[0].heldNanoUsd:5000);
+ expect(record.heldNanoUsd).toBe(0);
+ if(amount===undefined)expect(m.settle).not.toHaveBeenCalled();else expect(m.settle).toHaveBeenCalledExactlyOnceWith(expect.anything(),5000);
+});

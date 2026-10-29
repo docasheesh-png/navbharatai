@@ -1,0 +1,25 @@
+import { afterEach, beforeEach, expect,it,vi } from 'vitest';
+import { loadPlatformAdmission } from './providerLoadPlatformBudget';
+import type { LoadBatch,LoadItem } from './providerLoadBatch';
+import { providerLoadDb } from '../../../tests/fixtures/providerLoadDb';
+const f=vi.hoisted(()=>({reserve:vi.fn(),settle:vi.fn()}));
+vi.mock('../AI/FreeChain/store',()=>({FreeChainStore:class{reservePaid=f.reserve;settlePaid=f.settle;}}));
+vi.mock('../AI/FreeChain/config',()=>({freeChainConfig:()=>({paidCapNanoUsd:10000,features:{monthlyCap:true,monthlyCapNanoUsd:20000}})}));
+const item={requestId:'durable-request',reservedNanoUsd:1000} as LoadItem;
+const batch={scopeId:'original-run',authority:{totalAttempts:1000}} as LoadBatch;
+const path='free_chat_chain/state/paid_month/2026-10';
+beforeEach(()=>{vi.clearAllMocks();vi.useFakeTimers();vi.setSystemTime('2026-10-29T00:00:00Z');f.reserve.mockResolvedValue({id:'original-reservation',mayDispatch:true});f.settle.mockResolvedValue(true);});
+afterEach(()=>vi.useRealTimers());
+it('uses existing daily/monthly limits and settles each receipt once',async()=>{
+ const {db,docs}=providerLoadDb(),settle=await loadPlatformAdmission(db)(item,batch);
+ expect(f.reserve).toHaveBeenCalledWith({requestId:'durable-request',uid:'admin-load:original-run',maxCostNanoUsd:1000,capNanoUsd:10000,perUserLimit:1000});
+ await settle(25);await settle(25);expect(docs.get(path)).toMatchObject({heldNanoUsd:0,spentNanoUsd:25});
+});
+it('monthly budget denial prevents daily reservation',async()=>{const {db,docs}=providerLoadDb();docs.set(path,{heldNanoUsd:20000,spentNanoUsd:0});await expect(loadPlatformAdmission(db)(item,batch)).rejects.toThrow();expect(f.reserve).not.toHaveBeenCalled();});
+it('uncertain daily reservation does not refund the shared month',async()=>{const {db,docs}=providerLoadDb();f.reserve.mockResolvedValue(null);await expect(loadPlatformAdmission(db)(item,batch)).rejects.toThrow();expect(docs.get(path)).toMatchObject({heldNanoUsd:1000,spentNanoUsd:0});});
+it('unknown supplier cost retains both global holds',async()=>{const {db,docs}=providerLoadDb(),settle=await loadPlatformAdmission(db)(item,batch);await settle(null);expect(f.settle).not.toHaveBeenCalled();expect(docs.get(path)).toMatchObject({heldNanoUsd:1000,spentNanoUsd:0});});
+it('definitively undispatched work releases only its new hold at zero',async()=>{const {db,docs}=providerLoadDb();docs.set(path,{heldNanoUsd:500,spentNanoUsd:40});const settle=await loadPlatformAdmission(db)(item,batch);await settle(0);expect(docs.get(path)).toMatchObject({heldNanoUsd:500,spentNanoUsd:40});});
+it('settlement stays bound to the original month across IST rollover',async()=>{const {db,docs}=providerLoadDb();vi.setSystemTime('2026-10-31T18:29:00Z');const settle=await loadPlatformAdmission(db)(item,batch);vi.setSystemTime('2026-10-31T18:31:00Z');await settle(25);expect(docs.get(path)).toMatchObject({heldNanoUsd:0,spentNanoUsd:25});expect(docs.has('free_chat_chain/state/paid_month/2026-11')).toBe(false);});
+it('lost daily settlement acknowledgement leaves the month held',async()=>{const {db,docs}=providerLoadDb(),settle=await loadPlatformAdmission(db)(item,batch);f.settle.mockResolvedValue(false);await expect(settle(25)).rejects.toThrow();expect(docs.get(path)).toMatchObject({heldNanoUsd:1000,spentNanoUsd:0});});
+it('corrupt month history is not silently treated as zero',async()=>{const {db,docs}=providerLoadDb();docs.set(path,{heldNanoUsd:'unknown',spentNanoUsd:20});await expect(loadPlatformAdmission(db)(item,batch)).rejects.toMatchObject({code:'corrupt'});expect(f.reserve).not.toHaveBeenCalled();expect(docs.get(path).heldNanoUsd).toBe('unknown');});
+it('duplicate month admission cannot reserve or dispatch again',async()=>{const {db,docs}=providerLoadDb();await loadPlatformAdmission(db)(item,batch);await expect(loadPlatformAdmission(db)(item,batch)).rejects.toMatchObject({code:'conflict'});expect(f.reserve).toHaveBeenCalledOnce();expect(docs.get(path).heldNanoUsd).toBe(1000);});

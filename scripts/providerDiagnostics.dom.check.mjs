@@ -13,7 +13,7 @@ const require = createRequire(resolve(repo, 'package.json'));
 const React = require('react'); const { createRoot } = require('react-dom/client');
 const bundle = resolve(repo, 'node_modules/.cache/providerDiagnosticPanels.dom.mjs');
 require('esbuild').buildSync({ entryPoints: [resolve(repo, 'src/components/admin/ProviderDiagnosticPanels.tsx')], bundle: true, platform: 'node', format: 'esm', external: ['react', 'react/jsx-runtime'], outfile: bundle });
-const { ProviderDiagnosticPanels: Panels, ProviderDiagnosticBot: Bot } = await import(pathToFileURL(bundle).href);
+const { ProviderDiagnosticPanels: Panels, ProviderDiagnosticBot: Bot, ProviderDiagnosticResult: Result } = await import(pathToFileURL(bundle).href);
 let calls = []; let answer = { dispatchReady: false }; let ok = true;
 globalThis.fetch = async (url, options) => { calls.push({ url, options }); return { ok, json: async () => answer }; };
 let container, root;
@@ -74,5 +74,18 @@ await mount(Bot, { adminToken: 'synthetic-admin', provider: 'surplus', ready: tr
 await click('Retry original admission with same key');
 assert.equal(JSON.parse(calls.at(-1).options.body).idempotencyKey, pairKey);
 await unmount();
+// Measured slow timing is visible only on fresh admin results; unknown causes stay unknown.
+const timing = { slow: true, thresholdMs: 10000, admissionMs: 100, dispatchStartedMs: 100,
+  responseCompletedMs: 25100, providerRoundTripMs: 25000, accountingMs: 155, totalMs: 25255,
+  queueMs: null, headersMs: null, parsingMs: null, retryAfterMs: null, httpStatus: null,
+  fallbackCount: 0, largestMeasuredStage: 'provider_round_trip' };
+await mount(Result, { result: { ...answer, timing } });
+assert(container.querySelector('[aria-label="Slow call diagnostics"]'));
+assert(container.textContent.includes('25000')); assert(container.textContent.includes('congestion is unknown'));
+assert(container.textContent.includes('No retry or cooldown wait was performed')); await unmount();
+await mount(Result, { result: { ...answer, timing, replayed: true } });
+assert.equal(container.querySelector('[aria-label="Slow call diagnostics"]'), null); await unmount();
+await mount(Result, { result: { ...answer, timing: { ...timing, slow: false } } });
+assert.equal(container.querySelector('[aria-label="Slow call diagnostics"]'), null); await unmount();
 console.log('PASS real React/Happy DOM: independent default-OFF controls, revision-checked toggles without inference, disable, empty-admin exclusion, manual verified visibility, auth-failure hiding, no mount calls, duplicate recovery, remount same-key GET, unknown hold and settled recovery, real prompt input and duplicate POST suppression.');
 await window.happyDOM.close();

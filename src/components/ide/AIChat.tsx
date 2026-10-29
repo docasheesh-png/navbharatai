@@ -1,3 +1,4 @@
+import { ReplyPendingStatus } from '../chat/ReplyPendingStatus';
 import { autoGrow, resizeMobileComposer } from '../../lib/autoGrowTextarea';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { COPY } from '../../lib/copy';
@@ -250,6 +251,8 @@ interface AIChatProps {
   onInputChange: (val: string) => void;
   onSend: (files: File[]) => void;
   isLoading: boolean;
+  /** Opt-in normal-chat pending copy; other surfaces retain their existing indicator. */
+  showReplyPendingStatus?: boolean;
   activeIntent?: string;
   mode?: AgentMode;
   onModeChange?: (mode: AgentMode) => void;
@@ -315,6 +318,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   onInputChange,
   onSend,
   isLoading,
+  showReplyPendingStatus,
   activeIntent = 'social',
   mode = 'planning',
   onModeChange,
@@ -942,7 +946,7 @@ export const AIChat: React.FC<AIChatProps> = ({
         </AnimatePresence>
 
         {/* B8: Typing indicator — three-dot bounce animation */}
-        {isLoading && (
+        {isLoading && (showReplyPendingStatus ? <ReplyPendingStatus key={messages.filter(message => message.sender === 'user').at(-1)?.id} pending={isLoading} /> : (
           <div
             role="status"
             aria-busy="true"
@@ -955,7 +959,7 @@ export const AIChat: React.FC<AIChatProps> = ({
               <span className={TYPING_DOT_CLASS} style={{ animationDelay: '300ms' }} />
             </div>
           </div>
-        )}
+        ))}
 
         {/* ── Guider Confirmation Card (Hybrid: propose → confirm before building) ── */}
         {guiderPlan && (

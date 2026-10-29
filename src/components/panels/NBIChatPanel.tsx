@@ -146,6 +146,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
           // the button did nothing at all; this panel owns setMessages, so it can simply honour it.
           onMessagesChange={(next) => setMessages(next)}
           isLoading={isLoading}
+          showReplyPendingStatus
           activeIntent={activeIntent}
           isPinned={currentSession?.isPinned || false}
           onTogglePin={() => togglePin(currentSessionId)}

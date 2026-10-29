@@ -79,7 +79,11 @@ export function ProviderDiagnosticBot({ provider, adminToken, ready }: { provide
         headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' },
         ...(recover ? {} : { body: JSON.stringify({ idempotencyKey: id, prompt, ...output }) }),
       });
-      if (!response.ok) throw new Error('unavailable');
+      if (!response.ok) {
+        let reason = ''; try { const b = await response.json(); if (typeof b?.reason === 'string' && /^[a-z_]{1,40}$/.test(b.reason)) reason = b.reason; } catch { /* body optional */ }
+        if (recover && response.status === 404) { setMessage('No run was recorded for this key — the request never reached admission. Retry original admission with same key is safe.'); return; }
+        throw new DiagnosticHttpError(response.status, reason);
+      }
       const data = await response.json();
       if (recover) {
         const run = data?.run;
@@ -91,7 +95,10 @@ export function ProviderDiagnosticBot({ provider, adminToken, ready }: { provide
         if (!data || data.provider !== provider || !uuid.test(data.runId) || !Array.isArray(data.timeline) || !data.usage || !data.supplierCost || !data.walletCharge) throw new Error('invalid');
         setResult(data as RunView);
       }
-    } catch { setMessage('Outcome unavailable. Keep this request key and use Recover original run. Do not start a replacement test.'); }
+    } catch (error) {
+      const detail = error instanceof DiagnosticHttpError ? ` (HTTP ${error.status}${error.reason ? `, ${error.reason}` : ''})` : error instanceof Error && error.message === 'invalid' ? ' (response shape invalid)' : ' (connection lost)';
+      setMessage(`Outcome unavailable${detail}. Keep this request key and use Recover original run. Do not start a replacement test.`);
+    }
     finally { lock.current = false; setBusy(false); }
   }
   function next() {
@@ -112,6 +119,8 @@ export function ProviderDiagnosticBot({ provider, adminToken, ready }: { provide
     {result && <ProviderDiagnosticResult result={result} />}
   </section>;
 }
+
+class DiagnosticHttpError extends Error { constructor(readonly status: number, readonly reason: string) { super('http'); } }
 
 export function ProviderDiagnosticPanels({ adminToken }: { adminToken: string }) {
   const [status, setStatus] = useState<{ dispatchReady: boolean; providers?: Record<DiagnosticProvider, { dispatchReady: boolean; reason: string | null; missingFields: string[]; enabled?: boolean; revision?: number }> } | null>(null);

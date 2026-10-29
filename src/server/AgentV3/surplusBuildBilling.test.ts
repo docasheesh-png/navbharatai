@@ -90,13 +90,16 @@ describe('actual Builder route Surplus settlement branch', () => {
     const ledger = createProviderUsageLedger(); add(ledger, fixture('one'), { phase: 'review' }); add(ledger, fixture('two'), { phase: 'build' });
     expect(bill(ledger, 0, new Set(['review']))).toMatchObject({ effectiveBilledUsd: 0.01, realCostUsd: 0.002, absorbedUnbilledUsd: 0.001 });
   });
-  it.each(['usage', 'cap', 'receipt'] as const)('missing %s halts settlement rather than guessing a zero or tariff', missing => {
+  it.each(['usage', 'cap', 'receipt'] as const)('missing %s is absorbed at ₹0 (no guess, no tariff) and never crashes a finished build', missing => {
     const ledger = createProviderUsageLedger(); const input = fixture();
     if (missing === 'usage') input.receipt!.usage = null;
     if (missing === 'cap') input.tariff = null;
     if (missing === 'receipt') input.receipt = null;
     expect(add(ledger, input).status).toBe('blocked');
-    expect(() => bill(ledger)).toThrow(SurplusAccountingUnavailableError);
+    // z@ live 2026-10-30: this throw used to turn a green, rendered Surplus app into BUILD_EXCEPTION.
+    const decided = bill(ledger);
+    expect(decided.effectiveBilledUsd).toBe(0);
+    expect(decided.absorbedUnbilledUsd).toBe(0);
   });
   it('existing failed-build downstream guard still zeroes a decided Surplus charge', () => {
     const ledger = createProviderUsageLedger(); add(ledger);

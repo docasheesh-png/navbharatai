@@ -1878,7 +1878,21 @@ export function decideBuildBilledUsd(
 } {
   const surplusEntries = providerLedger.entries().filter(e => e.provider.toUpperCase() === 'SURPLUS');
   if (surplusEntries.length) {
-    const surplus = surplusBuildCharges(surplusEntries, barrenPhases);
+    // DNA (z@ live 2026-10-30, counter app — SURPLUS_ADMITTED, GREEN_GUARD_SAVE, READY 92/100, then
+    // BUILD_EXCEPTION "build engine temporarily unavailable" + OUTCOME_UNEXPLAINED). Since #4025 a validated
+    // Surplus reply whose receipt could not be settled is kept and its cost ABSORBED instead of poisoning the
+    // session — but this final bill still re-validated every Surplus ledger entry and threw
+    // SurplusAccountingUnavailableError (a PublicBuildEngineError) on the unsettled one. That throw landed in
+    // the build's outer catch AFTER the app was saved and rendered, scrubbing a finished app into
+    // "unavailable". Billing never decides a build's outcome: unverifiable Surplus spend is absorbed (₹0 to
+    // the user, never an estimate), loudly logged for reconciliation, and the result stays what it was.
+    let surplus: { chargeUsd: string; actualUsd: string; absorbedUsd: string };
+    try { surplus = surplusBuildCharges(surplusEntries, barrenPhases); }
+    catch (error) {
+      if (!(error instanceof SurplusAccountingUnavailableError)) throw error;
+      console.error(`[AGENTV3 BILLING] Surplus receipts unsettled for user ${userId} — ${surplusEntries.length} Surplus call(s) absorbed at ₹0; reconcile from the Surplus audit store.`);
+      surplus = { chargeUsd: '0', actualUsd: '0', absorbedUsd: '0' };
+    }
     const legacyEntries = providerLedger.entries().filter(e => e.provider.toUpperCase() !== 'SURPLUS');
     const surplusTokens = surplusEntries.reduce((sum, e) => ({ inputTokens: sum.inputTokens + e.usage.inputTokens, outputTokens: sum.outputTokens + e.usage.outputTokens }), { inputTokens: 0, outputTokens: 0 });
     const legacyTotal = { inputTokens: Math.max(0, providerLedger.total().inputTokens - surplusTokens.inputTokens), outputTokens: Math.max(0, providerLedger.total().outputTokens - surplusTokens.outputTokens) };
@@ -13017,7 +13031,7 @@ async function noteBuildOutcome(
     }) => ({
       category: classifyFailure(i.rootCause || i.summary || '', outcomeCodeOf(i.issues)).category,
       framework,
-      realUsd: realProviderCostUsd(i.entries, i.remainder) + Math.max(0, i.sandboxUsd || 0),
+      realUsd: (() => { try { return realProviderCostUsd(i.entries, i.remainder); } catch { return 0; } })() + Math.max(0, i.sandboxUsd || 0), // unsettled Surplus receipt must not crash the failure ledger
       inputTokens: i.inputTokens || 0,
       outputTokens: i.outputTokens || 0,
       ms: Math.max(0, Date.now() - i.startedAt),

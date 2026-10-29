@@ -1,3 +1,4 @@
+import { ProviderThroughputPanel } from './ProviderThroughputPanel';
 import { ProviderLoadBatchPanel } from './ProviderLoadBatchPanel';
 import { useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
@@ -154,6 +155,7 @@ export function ProviderDiagnosticPanels({ adminToken }: { adminToken: string })
   if (!adminToken) return null;
   return <section className="space-y-4 text-ink"><h2>Provider testing bots</h2>
     <p>Each diagnostic switch defaults OFF. Only a verified admin can enable it. OFF blocks new dispatch claims; already admitted or dispatched requests may continue and incur supplier charges. Disabling preserves history and spending holds.</p>
+    <ProviderThroughputPanel adminToken={adminToken} />
     <ProviderLoadBatchPanel adminToken={adminToken} />
     <p>Manual tests only. Opening or refreshing this panel makes no request and spends nothing.</p>
     <button className={button} disabled={busy} onClick={() => void check()}>Verify admin and read test status</button>

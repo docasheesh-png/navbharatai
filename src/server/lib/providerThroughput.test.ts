@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { runThroughput, parseThroughputInput, gradeAnswer, shouldRetryThroughput, THROUGHPUT_MIN_OUTPUT_TOKENS } from './providerThroughput';
-import { providerLoadCorpus } from './providerLoadCorpus';
+import { throughputCorpus as providerLoadCorpus } from './providerThroughput';
 
 describe('providerThroughput', () => {
   it('sends unique prompts, retries failures, computes rpm', async () => {
@@ -96,4 +96,17 @@ describe('providerThroughput DNA (prod 05006)', () => {
     expect(r.ok).toBe(120); expect(r.pass).toBe(120); expect(r.minConcurrency).toBeLessThan(100);
     expect(r.mismatchSamples).toEqual([]);
   }, 30_000);
+});
+describe('providerThroughput exam corpus v2 (prod 05007)', () => {
+  it('is single-step, unique per ordinal, and self-consistent with the grader', () => {
+    const c = providerLoadCorpus(1000);
+    expect(new Set(c.map(q => q.id)).size).toBe(1000);
+    for (const q of c) {
+      expect(gradeAnswer(JSON.stringify(q.expected), q.expected)).toBe(true);
+      expect(gradeAnswer(String(Array.isArray(q.expected) ? JSON.stringify(q.expected) : q.expected), q.expected)).toBe(true);
+    }
+    expect(gradeAnswer('The answer is 42.', 42)).toBe(true);
+    expect(gradeAnswer('APPLE', 'APPLE')).toBe(true);
+    expect(gradeAnswer('apple', 'APPLE')).toBe(false);
+  });
 });

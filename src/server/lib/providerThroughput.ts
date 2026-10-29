@@ -1,6 +1,28 @@
 import { randomUUID } from 'node:crypto';
 import type { DiagnosticAdapter } from './providerDiagnosticRunner';
-import { providerLoadCorpus } from './providerLoadCorpus';
+
+/** Throughput exam corpus (v2). DNA (prod 05006/05007): with thinking disabled the v1 load corpus asked for
+ * 13-digit squares mod n and 25-char string reversals — tasks a no-reasoning model gets wrong by capability,
+ * not by format (Surplus correct 31/100, 140/1000; CI 983/1000). The throughput panel measures *working replies*,
+ * so every task here is single-step and deterministic, still unique per ordinal (numbers derive from it) and per
+ * run (salt in the prompt), and graded exactly. The batch load corpus (providerLoadCorpus) is unchanged. */
+export interface ThroughputQuestion { id: string; prompt: string; expected: unknown }
+const WORDS = ['apple', 'river', 'tiger', 'lemon', 'cloud', 'stone', 'maple', 'ocean', 'pearl', 'frost', 'eagle', 'ember'];
+export function throughputCorpus(count: number): ThroughputQuestion[] {
+  return Array.from({ length: count }, (_, i) => {
+    const x = 10 + (i * 7) % 80, y = 10 + (i * 13) % 80, d = 2 + i % 8, w = WORDS[i % WORDS.length];
+    let task: string, expected: unknown;
+    switch (i % 6) {
+      case 0: task = `What is ${x} + ${y}? Reply with only the number.`; expected = x + y; break;
+      case 1: task = `What is ${x} * ${d}? Reply with only the number.`; expected = x * d; break;
+      case 2: { const z = x === y ? x + 1 : y; task = `Which number is larger, ${x} or ${z}? Reply with only that number.`; expected = Math.max(x, z); break; }
+      case 3: { const a = [x + 100, y, d]; task = `Sort ascending: [${a.join(', ')}]. Reply with only the JSON array.`; expected = a.slice().sort((p, q) => p - q); break; }
+      case 4: task = `Write the word "${w}" in uppercase letters. Reply with only the word.`; expected = w.toUpperCase(); break;
+      default: task = `What is ${x + y} - ${y}? Reply with only the number.`; expected = x;
+    }
+    return { id: `throughput-v2-${i}`, prompt: task, expected };
+  });
+}
 
 /** Owner t124u (2026-10-29): Surplus and CheaperInference must each sustain 1000 working
  * responses/minute. This harness fires N unique prompts (fresh run salt + ordinal, so no
@@ -43,7 +65,7 @@ function reason(e: unknown): string {
  * (ok 100 / correct 31). Uniqueness is untouched: every prompt still carries the run salt + ordinal. */
 export function gradeAnswer(text: string, expected: unknown): boolean {
   const t = text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/```(?:json)?/gi, '').replace(/\*\*|__/g, '').trim();
-  const strip = (c: string) => c.trim().replace(/^(?:final\s+)?(?:answer|result|output)\s*[:=]\s*/i, '').trim().replace(/[.;]$/, '').trim();
+  const strip = (c: string) => c.trim().replace(/^(?:the\s+)?(?:final\s+)?(?:answer|result|output|word|number)(?:\s+is)?\s*[:=]?\s+|^(?:final\s+)?(?:answer|result|output)\s*[:=]\s*/i, '').trim().replace(/[.;]$/, '').trim();
   const lines = t.split('\n').map(strip).filter(Boolean);
   const cands = [strip(t), ...lines.slice().reverse()];
   if (t.length <= 200) {
@@ -105,7 +127,7 @@ const preview = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v)).
 export async function runThroughput(provider: string, adapter: DiagnosticAdapter, input: ThroughputInput, now = () => performance.now(),
   onProgress?: (p: ThroughputProgress) => void): Promise<ThroughputResult> {
   const runId = randomUUID(), salt = runId.slice(0, 8);
-  const corpus = providerLoadCorpus(input.requests);
+  const corpus = throughputCorpus(input.requests);
   const lat: number[] = [], errors: Record<string, number> = {}, mismatchSamples: ThroughputResult['mismatchSamples'] = [];
   let next = 0, done = 0, ok = 0, pass = 0, retried = 0, cost = 0;
   const workers = Math.min(input.concurrency, input.requests);

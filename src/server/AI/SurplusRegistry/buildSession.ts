@@ -137,8 +137,16 @@ export async function createSurplusBuildSession(options: {
           const workload = estimate(params), state = await adapter.readState(), at = now();
           // A winning model stays sticky. Only a durably resolved safe failed turn may change it.
           const excluded = previous ? new Set([...(failedModels.get(previous) ?? []), previous.model]) : new Set<string>();
-          const snapshot = eligibleSnapshot(state, workload, at, previous ? undefined : model, excluded);
-          const plan = planSurplusDispatchCandidate(snapshot, state.reviews, workload, at, state.floorContract);
+          let snapshot = eligibleSnapshot(state, workload, at, previous ? undefined : model, excluded);
+          let plan = planSurplusDispatchCandidate(snapshot, state.reviews, workload, at, state.floorContract);
+          // DNA (z@ live 2026-10-29): the sticky model is the small flash scope model; a full build turn
+          // (system+tools) can exceed its reviewed context/output, which filtered the ONLY allowed offer
+          // and threw DISCOUNT_BUILD_UNAVAILABLE. Stickiness is a preference: move to another eligible
+          // Surplus model (Surplus AI2/AI3) instead of refusing the build.
+          if (!previous && (plan.status !== 'estimated_candidate' || !plan.selection)) {
+            snapshot = eligibleSnapshot(state, workload, at, undefined, excluded);
+            plan = planSurplusDispatchCandidate(snapshot, state.reviews, workload, at, state.floorContract);
+          }
           if (plan.status !== 'estimated_candidate' || !plan.selection) return fail(plan.reason);
           const selectedModel = plan.selection.model;
           const review = capability(state, plan.selection, at, workload);

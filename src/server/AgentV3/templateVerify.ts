@@ -50,10 +50,13 @@ export function verbatimTemplateSkipsModel(input: {
   preseeded: boolean;
   tier: string | null;
   prompt: string;
+  /** Surplus admitted this build: the admitted engine must write the code, never a template stand-in. */
+  surplusAdmitted?: boolean;
   env?: NodeJS.ProcessEnv;
 }): boolean {
   const env = input.env ?? process.env;
   if (off(env.AGENTV3_TEMPLATE_NO_MODEL)) return false;
+  if (input.surplusAdmitted) return false;
   if (!input.preseeded || input.tier !== 'simple') return false;
   // A chip the user added words to is a customisation, not a delivery. An exact chip (or its bare
   // name) is. A prompt that merely fails to contain a chip is not one.

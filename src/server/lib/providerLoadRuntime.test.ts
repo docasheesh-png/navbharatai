@@ -50,3 +50,14 @@ it('explicit revision-checked resume preserves claims, spend and unknown holds',
  await expect(runtime.resume(stopped.revision-1,'admin')).rejects.toMatchObject({code:'conflict'});
  await runtime.resume(stopped.revision,'admin');expect((await runtime.status()).batch).toMatchObject({next:1,active:1,heldNanoUsd:1000,stopped:false});
 });
+it('identifies actual settings-read and configuration-write failures without raw database errors',async()=>{
+ const f=providerLoadDb();const runtime=new ProviderLoadRuntime(f.db,quote);
+ const doc=vi.spyOn(f.db,'doc').mockImplementation(()=>{throw Error('private database credential');});
+ await expect(runtime.configure(config,'admin')).rejects.toMatchObject({stage:'settings_read',reason:'operation_unavailable'});doc.mockRestore();
+ const tx=vi.spyOn(f.db,'runTransaction').mockRejectedValue(Error('private lost acknowledgement'));
+ await expect(runtime.configure(config,'admin')).rejects.toMatchObject({stage:'configuration_write',reason:'operation_unavailable'});tx.mockRestore();
+});
+it('reports revision conflict before native quote or mutation',async()=>{
+ const f=providerLoadDb(),reader=vi.fn(quote),runtime=new ProviderLoadRuntime(f.db,reader);
+ await expect(runtime.configure({...config,expectedRevision:1},'admin')).rejects.toMatchObject({stage:'revision',reason:'revision_conflict'});expect(reader).not.toHaveBeenCalled();
+});

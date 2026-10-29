@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { safeLoadDiagnostic } from '../lib/providerLoadDiagnostics';
 import { Router, type Express } from 'express';
 import { requireDiagnosticAdmin } from '../lib/providerDiagnosticBoundary';
 import { LoadBatchError } from '../lib/providerLoadBatch';
@@ -20,7 +22,7 @@ export function registerProviderLoadBatchRoutes(app: Express, resolve: () => Pic
   });
   router.post('/configure', async (req, res) => {
     try { res.json({ batch: await resolve().configure(req.body, adminUsername()) }); }
-    catch (error) { res.status(error instanceof LoadBatchError && error.code === 'invalid' ? 400 : error instanceof LoadBatchError && error.code === 'conflict' ? 409 : 503).json({ error: 'Configuration not saved. Check the revision, budget including held liabilities, and current native supplier cost bound. No inference dispatched.' }); }
+    catch (error) { res.status(error instanceof LoadBatchError && error.code === 'invalid' ? 400 : error instanceof LoadBatchError && error.code === 'conflict' ? 409 : 503).json({ error: 'Configuration outcome unconfirmed. Read original state before resubmitting. No inference dispatched.', diagnostic: safeLoadDiagnostic(error, randomUUID()) }); }
   });
   router.post('/resume', async (req, res) => {
     if (!req.body || Object.keys(req.body).length !== 1 || !Number.isSafeInteger(req.body.expectedRevision)) { res.status(400).json({ error: 'Provide current expectedRevision only.' }); return; }

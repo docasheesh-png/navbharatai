@@ -23,3 +23,10 @@ it('status/items are read-only, configure uses server admin identity, and advanc
  const waveId='11111111-1111-4111-8111-111111111111';await fetch(f.base+'/advance',{method:'POST',headers:f.headers,body:JSON.stringify({waveId})});expect(f.service.advance).toHaveBeenCalledWith(waveId);
  f.service.advance.mockRejectedValue(new Error('Bearer secret'));const r=await fetch(f.base+'/advance',{method:'POST',headers:f.headers,body:JSON.stringify({waveId})});expect(await r.text()).not.toContain('secret');
 });
+
+it('configure returns correlation and sanitized failure evidence without invoking advance',async()=>{
+ const {LoadDiagnosticError}=await import('../lib/providerLoadDiagnostics');const f=await setup();
+ f.service.configure.mockRejectedValue(new LoadDiagnosticError('unavailable','quote_http','http_rejected',400,'list_price_unknown'));
+ const r=await fetch(f.base+'/configure',{method:'POST',headers:f.headers,body:'{}'});const data=await r.json();
+ expect(r.status).toBe(503);expect(data.diagnostic).toMatchObject({stage:'quote_http',reason:'http_rejected',upstreamStatus:400,supplierCode:'list_price_unknown'});expect(data.diagnostic.correlationId).toMatch(/^[0-9a-f-]{36}$/);expect(f.service.advance).not.toHaveBeenCalled();
+});

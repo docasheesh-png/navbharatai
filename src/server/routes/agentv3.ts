@@ -11355,6 +11355,25 @@ async function noteBuildOutcome(
         return;
       }
     }
+    // DNA (z@ transcript 404, 2026-10-29): a PRE-STREAM refusal (Surplus admission / engine unavailable)
+    // returned 503 JSON without ever writing a ConversationStore record, yet the client had already
+    // added the v3_<sid> history entry → reopening it hit GET /conversations/:id → 404 "Conversation not
+    // found". Persist the prompt + refusal turn under the SAME stable id first, so the transcript loads.
+    const persistPreStreamRefusal = async (wsId: string): Promise<void> => {
+      try {
+        await raceTimeout(upsertConversationTurn(getConversationStore(), {
+          conversationId: conversationIdForWorkspace(wsId),
+          userId: userId ?? 'anon',
+          workspaceId: wsId,
+          title: deriveTitle(prompt),
+          turn: [
+            { role: 'user', content: typedPrompt || prompt, ts: Date.now() - 1 },
+            { role: 'assistant', content: 'The build could not start — the engine was temporarily unavailable. Please try again.', ts: Date.now() },
+          ],
+          patch: { status: 'error', updatedAt: Date.now() },
+        }), 5_000, 'persistPreStreamRefusal');
+      } catch { /* best-effort — never blocks the refusal */ }
+    };
     const earlySurplusTurns: Array<import('../AgentV3/ClaudeClient').TurnResult> = [];
     const earlySurplusRecords: Array<Omit<import('../AgentV3/BuildDiagnostics').LlmCallRecord, 'ts'>> = [];
     let earlySurplusFailure: unknown;
@@ -11376,6 +11395,7 @@ async function noteBuildOutcome(
     if (!surplusAdmitGate.ok) {
       releaseBuildLock(buildKey, buildLockToken);
       audit('AGENTV3_TIER_ENGINE_UNAVAILABLE', { userId, tier: powerLevelReqEffective, afterSurplusFallback: surplusAdmitGate.afterSurplusFallback }, 'warn');
+      await persistPreStreamRefusal(intentWorkspaceId);
       respondBuilderEngineUnavailable(res, powerLevelReqEffective, surplusFallbackDisabledFor(email, userId)
         ? `admission ${surplusAdmitGate.diag?.code ?? 'NO_DIAG'} reason=${surplusAdmitGate.diag?.reason ?? 'unknown'}${surplusAdmitGate.diag?.model ? ` model=${surplusAdmitGate.diag.model}` : ''}`
         : undefined);
@@ -11402,6 +11422,7 @@ async function noteBuildOutcome(
     // The multiplexed non-build chat keeps its original engine-availability rule.
     if (isPlainChatTurn && surplusBuilderEnabled() && !tierEngineAvailable(powerLevelReqEffective)) {
       releaseBuildLock(buildKey, buildLockToken);
+      await persistPreStreamRefusal(intentWorkspaceId);
       respondBuilderEngineUnavailable(res, powerLevelReqEffective);
       return;
     }

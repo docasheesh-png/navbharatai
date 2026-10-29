@@ -95,3 +95,36 @@ it2('falls back to /v1/models catalog pricing when supply 200 has all-null rates
   const q = await rq(64, env, t);
   ex2(q.maximumNanoUsd).toBeGreaterThan(0);
 });
+
+// Live key list (prod 05000, 2026-10-29): max_* null, list_* present, primary_market_offers, candidates.
+describe('live supply shape: max_* null DNA fix',()=>{
+ const live={object:'model.supply',model:'beam',min_discount_percent:0,max_input_per_million:null,max_output_per_million:null,list_input_per_million:'3.00',list_output_per_million:'15.00',candidate_count:0,primary_market_offers:[],candidates:[]};
+ const env={CHEAPERINFERENCE_API_KEY:'synthetic-test-only'};
+ const one=(b:unknown)=>vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(b)));
+ it('prefers list_* string numbers when max_* null, without catalog call',async()=>{
+  const f=one(live); const q=await readLoadQuote(2048,env,f); expect(q.maximumNanoUsd).toBe(3176448000); expect(f).toHaveBeenCalledOnce();
+ });
+ it.each([[3,15],['$3.00','$15.00'],[' 3 ','15'],[0.30000000000000004,15]])('accepts list_* as %j/%j',async(i,o)=>{
+  const q=await readLoadQuote(2048,env,one({...live,list_input_per_million:i,list_output_per_million:o})); expect(q.maximumNanoUsd).toBeGreaterThanOrEqual(317644800);
+ });
+ it('falls to candidates prices when list_* null',async()=>{
+  const f=one({...live,list_input_per_million:null,list_output_per_million:null,candidates:[{input_per_million:'2.5',output_per_million:'10'},{input_per_million:'3',output_per_million:'15'}]});
+  expect((await readLoadQuote(2048,env,f)).maximumNanoUsd).toBe(3176448000); expect(f).toHaveBeenCalledOnce();
+ });
+ it('falls to primary_market_offers pricing.*',async()=>{
+  const f=one({...live,list_input_per_million:null,list_output_per_million:null,primary_market_offers:[{pricing:{input_per_million:3,output_per_million:15}}]});
+  expect((await readLoadQuote(2048,env,f)).maximumNanoUsd).toBe(3176448000);
+ });
+ it('falls to /v1/models catalog when supply has no rates',async()=>{
+  const f=vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({...live,list_input_per_million:null,list_output_per_million:null})))
+   .mockResolvedValueOnce(new Response(JSON.stringify({data:[{id:'beam',pricing:{input_per_million:'3',output_per_million:'15'}}]})));
+  expect((await readLoadQuote(2048,env,f)).maximumNanoUsd).toBe(3176448000); expect(f).toHaveBeenCalledTimes(2);
+ });
+ it('reports rate path in admin diagnostic when every path fails (no invented rate)',async()=>{
+  const { safeLoadDiagnostic } = await import('./providerLoadDiagnostics');
+  const f=vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({...live,list_input_per_million:null,list_output_per_million:null})))
+   .mockResolvedValueOnce(new Response(JSON.stringify({data:[]})));
+  const err=await readLoadQuote(2048,env,f).catch(e=>e);
+  const d=safeLoadDiagnostic(err,'c1'); expect(d.reason).toBe('invalid_rates'); expect(d.keys).toContain('rate_path.none_catalog_miss'); expect(d.keys).toContain('list_input_per_million');
+ });
+});

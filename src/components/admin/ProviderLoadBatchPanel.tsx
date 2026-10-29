@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import { newRequestIdentity } from '../../lib/requestIdentity';
 import type { LoadBatch } from '../../shared/providerLoadBatch';
+import { loadLanes, LOAD_ABSOLUTE_MAX } from '../../shared/providerLoadLimits';
 class BatchRequestError extends Error {}
 const API = '/api/v1/admin/provider-load-batch';
 const button = 'min-h-11 rounded-lg border border-line px-3 py-2 text-sm text-ink disabled:opacity-40';
@@ -66,9 +67,12 @@ export function ProviderLoadBatchPanel({ adminToken }: { adminToken: string }) {
     try {
       let previous = batch.next;
       while (loop.current && alive.current) {
-        const waveId = newRequestIdentity(); if (!waveId) throw new Error('identity');
-        // A lost acknowledgement stops this loop; no new wave is sent until an explicit operator action.
-        const data = await request('advance', { waveId });
+                // A lost acknowledgement stops this loop; no new wave is sent until an explicit operator action.
+        // Concurrency above one wave (Firestore 500-write tx) is reached with parallel lanes.
+        const ids = Array.from({ length: loadLanes(batch.concurrency) }, () => newRequestIdentity());
+        if (ids.some(id => !id)) throw new Error('identity');
+        const results = await Promise.all(ids.map(id => request('advance', { waveId: id })));
+        const data = results.reduce((a, r) => ((r.batch as LoadBatch).revision >= (a.batch as LoadBatch).revision ? r : a));
         if (!alive.current) break;
         const current = data.batch as LoadBatch; acceptBatch(current);
         if (current.stopped || current.next >= current.count || current.next === previous || current.active >= current.concurrency) {
@@ -80,7 +84,7 @@ export function ProviderLoadBatchPanel({ adminToken }: { adminToken: string }) {
     finally { loop.current = false; if (alive.current) setRunning(false); }
   }
   async function readItem() {
-    if (!adminToken || !/^(0|[1-9]\d{0,3})$/.test(ordinal)) return;
+    if (!adminToken || !/^(0|[1-9]\d{0,6})$/.test(ordinal)) return;
     try { const data = await request(`items/${ordinal}`); if (alive.current) setItem(data.item); }
     catch { if (alive.current) setMessage('Item receipt unavailable. No replacement call was made.'); }
   }
@@ -98,7 +102,7 @@ export function ProviderLoadBatchPanel({ adminToken }: { adminToken: string }) {
   if (!adminToken) return null;
   const fields: Array<[keyof Form, string]> = [['budgetInr','Total approved budget (INR, including prior spend)'], ['allInInrPerUsd','All-in INR per USD ceiling (include fees and taxes)'],
     ['priorSupplierUsd','Previously spent supplier USD'], ['priorAttempts','Previously consumed attempts'], ['attempts','Additional attempts in this run'],
-    ['concurrency','Concurrent requests'], ['outputTokens','Requested output token limit for this batch']];
+    ['concurrency',`Concurrent requests (1 to ${LOAD_ABSOLUTE_MAX.toLocaleString('en-IN')}; budget must cover concurrency x max attempt cost)`], ['outputTokens','Requested output token limit for this batch']];
   return <section aria-label="Concurrent CheaperInference batch" className="space-y-3 rounded-xl border border-line p-4 text-ink">
     <h3>Concurrent CheaperInference batch</h3>
     <p>Separate from manual bots. Use only the approved remaining count and total budget; earlier attempts and costs are included, never reset. Native provider limits apply. Budget reservations are not supplier receipts or a provider account spending cap.</p>

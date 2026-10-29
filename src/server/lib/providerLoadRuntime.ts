@@ -8,6 +8,10 @@ import { providerLoadCorpus } from './providerLoadCorpus';
 import { readLoadQuote } from './providerLoadQuote';
 import { usdToNanoUsd } from '../AI/FreeChain/spendCap';
 import { providerLoadAdapter } from './providerLoadAdapter';
+import { loadMaxAttempts, loadMaxConcurrency } from '../../shared/providerLoadLimits';
+/** Memoize the synthetic corpus: at 10-lakh scale rebuilding it per parallel wave would dominate CPU/RAM. */
+let corpusMemo: { count: number; questions: ReturnType<typeof providerLoadCorpus> } | null = null;
+function corpus(count: number) { if (corpusMemo?.count !== count) corpusMemo = { count, questions: Object.freeze(providerLoadCorpus(count)) as ReturnType<typeof providerLoadCorpus> }; return corpusMemo.questions; }
 const SETTINGS = 'free_chat_chain/provider_load_batch_settings';
 function paise(value: unknown): number {
   if (typeof value !== 'string' || !/^\d+(?:\.\d{1,2})?$/.test(value)) throw new LoadBatchError('invalid');
@@ -29,7 +33,8 @@ export class ProviderLoadRuntime {
     const p = raw as Record<string, unknown>;
     if (!p || Array.isArray(p) || Object.keys(p).sort().join(',') !== 'allInInrPerUsd,attempts,budgetInr,concurrency,expectedRevision,outputTokens,priorAttempts,priorSupplierUsd'
       || ![p.attempts,p.concurrency,p.expectedRevision,p.outputTokens,p.priorAttempts].every(v => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0)
-      || Number(p.attempts) < 1 || Number(p.attempts) + Number(p.priorAttempts) > 10000 || Number(p.outputTokens) < 1 || Number(p.outputTokens) > 131072) throw new LoadBatchError('invalid');
+      || Number(p.attempts) < 1 || Number(p.attempts) + Number(p.priorAttempts) > loadMaxAttempts()
+      || Number(p.concurrency) < 1 || Number(p.concurrency) > loadMaxConcurrency() || Number(p.outputTokens) < 1 || Number(p.outputTokens) > 131072) throw new LoadBatchError('invalid');
     const budgetPaise = paise(p.budgetInr), allInPaisePerUsd = paise(p.allInInrPerUsd);
     const total = BigInt(budgetPaise) * 1_000_000_000n / BigInt(allInPaisePerUsd);
     if (total > BigInt(Number.MAX_SAFE_INTEGER)) throw new LoadBatchError('invalid');
@@ -37,17 +42,20 @@ export class ProviderLoadRuntime {
     const settings = await loadStage('settings_read', () => this.settings());
     if ((settings?.revision ?? 0) !== p.expectedRevision) throw new LoadDiagnosticError('conflict', 'revision', 'revision_conflict');
     const quote = await this.quote(Number(p.outputTokens));
+    // Budget guard: the chosen concurrency must be fundable — concurrency x worst-case attempt
+    // cost cannot exceed the remaining approved budget, otherwise the "concurrent" test is a lie.
+    if (BigInt(Number(p.concurrency)) * BigInt(quote.maximumNanoUsd) + BigInt(prior) > total) throw new LoadBatchError('invalid');
     const authority: LoadBatchAuthority = { scopeId: settings?.scopeId ?? randomUUID(), model: quote.model, totalAttempts: Number(p.attempts) + Number(p.priorAttempts),
       priorAttempts: Number(p.priorAttempts), priorCostNanoUsd: prior, totalBudgetNanoUsd: Number(total), maxAttemptNanoUsd: quote.maximumNanoUsd,
-      maxConcurrency: 32, maxOutputTokens: Number(p.outputTokens), expiresAt: Date.now() + 86400000 };
-    return loadStage('configuration_write', () => this.store.configure(authority, providerLoadCorpus(Number(p.attempts)), Number(p.concurrency), Number(p.expectedRevision), actor, { budgetPaise, allInPaisePerUsd }));
+      maxConcurrency: Number(p.concurrency), maxOutputTokens: Number(p.outputTokens), expiresAt: Date.now() + 86400000 };
+    return loadStage('configuration_write', () => this.store.configure(authority, corpus(Number(p.attempts)), Number(p.concurrency), Number(p.expectedRevision), actor, { budgetPaise, allInPaisePerUsd }));
   }
   async advance(waveId: string) {
     const { batch } = await this.status(); if (!batch) throw new LoadBatchError('unavailable');
     // Read-only native quote refresh: no paid request occurs if the earlier reservation is insufficient.
     const quote = await this.quote(batch.authority.maxOutputTokens);
     if (quote.model !== batch.model || quote.maximumNanoUsd > batch.authority.maxAttemptNanoUsd) throw new LoadBatchError('unavailable');
-    return advanceLoadBatch(batch.scopeId, providerLoadCorpus(batch.count), this.store,
+    return advanceLoadBatch(batch.scopeId, corpus(batch.count), this.store,
       providerLoadAdapter(batch.authority), waveId, undefined, loadPlatformAdmission(this.db), batch.revision);
   }
   async resume(expectedRevision: number, actor: string) { const settings = await this.settings(); if (!settings) throw new LoadBatchError('unavailable'); await this.store.setStopped(settings.scopeId, false, actor, expectedRevision); return this.status(); }

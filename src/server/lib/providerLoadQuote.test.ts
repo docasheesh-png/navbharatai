@@ -1,4 +1,4 @@
-import { expect,it,vi } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
 import { readLoadQuote } from './providerLoadQuote';
 // Schema fields match the official /docs#price-ceiling model.supply example, not an observed live account body.
 const body={object:'model.supply',model:'beam',min_discount_percent:0,list_input_per_million:'3.00',list_output_per_million:'15.00',max_input_per_million:'3.00',max_output_per_million:'15.00',candidate_count:0,primary_market_offers:null};
@@ -8,7 +8,7 @@ it('uses documented capped rate fields; absent optional inventory is not malform
  expect(q.maximumNanoUsd).toBe(3176448000); expect(fetcher).toHaveBeenCalledOnce();
  expect(fetcher.mock.calls[0][1]?.method).toBe('GET'); expect(JSON.stringify(q)).not.toContain('synthetic-test-only');
 });
-it.each([{max_input_per_million:undefined},{max_output_per_million:'NaN'},{model:'other'},{min_discount_percent:40}])('fails honestly when required cost evidence is absent %j',async patch=>{
+it.each([{max_input_per_million:undefined,list_input_per_million:undefined},{max_output_per_million:'NaN'},{model:'other'},{min_discount_percent:40}])('fails honestly when required cost evidence is absent %j',async patch=>{
  const fetcher=vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({...body,...patch})));
  await expect(readLoadQuote(2048,{CHEAPERINFERENCE_API_KEY:'synthetic-test-only'},fetcher)).rejects.toMatchObject({code:'unavailable'});
 });
@@ -61,4 +61,26 @@ it.each([
 it('all-null 200 body still fails honestly with field evidence',async()=>{
  const f=vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({object:null,model:null})));
  await expect(readLoadQuote(256,{CHEAPERINFERENCE_API_KEY:'synthetic'},f)).rejects.toMatchObject({code:'unavailable'});
+});
+
+describe('alternate supplier rate fields', () => {
+ const base={object:'model.supply',model:'beam',min_discount_percent:null,max_input_per_million:null,max_output_per_million:null};
+ it.each([
+  {...base,list_input_per_million:'3.00',list_output_per_million:'15.00'},
+  {...base,pricing:{input:'3.00',output:'15.00'}},
+  {...base,price_ceiling:{max_input_per_million:3,max_output_per_million:15}},
+  {...base,rates:{prompt:'3',completion:'15'}},
+  {...base,primary_market_offers:[{input_per_million:'1'},{input_per_million:'3',output_per_million:'15'}]},
+  {data:{...base,list_input_per_million:'3',list_output_per_million:'15'}},
+ ])('accepts %j', async b => {
+  const f=vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(b)));
+  await expect(readLoadQuote(2048,{CHEAPERINFERENCE_API_KEY:'synthetic'},f)).resolves.toMatchObject({maximumNanoUsd:3176448000});
+ });
+ it('reports key names (never values) when rates truly absent', async () => {
+  const f=vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({...base,candidate_count:0,secret_price:{x:1}})));
+  const e=await readLoadQuote(256,{CHEAPERINFERENCE_API_KEY:'synthetic'},f).catch(x=>x);
+  expect(e).toMatchObject({stage:'quote_rates',reason:'invalid_rates'});
+  expect(e.keys).toEqual(expect.arrayContaining(['object','model','max_input_per_million','candidate_count','secret_price.x']));
+  expect(JSON.stringify(e.keys)).not.toContain('beam');
+ });
 });

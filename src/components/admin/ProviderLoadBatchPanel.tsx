@@ -35,6 +35,7 @@ export function ProviderLoadBatchPanel({ adminToken }: { adminToken: string }) {
             if (Number.isInteger(d.upstreamStatus) && d.upstreamStatus >= 100 && d.upstreamStatus <= 599) detail += ` · Supplier HTTP ${d.upstreamStatus}`;
             if (['list_price_unknown','min_discount_unavailable','invalid_min_discount','invalid_api_key','insufficient_balance','rate_limit_exceeded','model_not_found'].includes(d.supplierCode)) detail += ` · Supplier code ${d.supplierCode}`;
             for (const key of ['object','model','min_discount_percent','max_input_per_million','max_output_per_million']) if (['missing','null','array','object','string','number','boolean'].includes(d.fields?.[key])) detail += ` · ${key}: ${d.fields[key]}`;
+            if (Array.isArray(d.keys)) { const ks = d.keys.filter((k: unknown) => typeof k === 'string' && /^[A-Za-z0-9_.]{1,64}$/.test(k)).slice(0, 40); if (ks.length) detail += ` · Supplier keys: ${ks.join(', ')}`; }
           }
         } catch { /* No raw body is displayed. */ }
       }

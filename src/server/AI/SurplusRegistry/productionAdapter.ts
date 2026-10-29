@@ -35,6 +35,18 @@ function envelope(raw: unknown): { wire: WireResponse; body: Record<string, unkn
     objective: supplied.route_objective ?? h['x-si-route-objective'],
   } };
 }
+/** DNA (05012): quality-first admits OpenAI reasoning models (gpt-5.6-sol). They reject `max_tokens`, so
+ * Surplus renames it to `max_completion_tokens` and names that in X-SI-Adapted-Params. Any adapted
+ * param was treated as a route mismatch → scope ask threw (provider=unknown, 0 tokens) →
+ * mid_build_engine_unavailable → Kimi. A pure output-cap rename keeps the contract (same bound, same
+ * billing); every other adaptation (tools, tool_choice, provider pin, routing…) still fails closed. */
+const CONTRACT_PRESERVING_ADAPTATIONS = new Set(['max_tokens', 'max_completion_tokens', 'max_output_tokens']);
+function headerAdaptedParams(value: unknown): string[] {
+  return typeof value === 'string' && value.trim() ? value.split(',').map(s => s.trim()).filter(Boolean) : [];
+}
+export function adaptedParamsPreserveContract(params: unknown[]): boolean {
+  return params.every(p => typeof p === 'string' && CONTRACT_PRESERVING_ADAPTATIONS.has(p.trim().toLowerCase().split(/[:=>\s-]/)[0]));
+}
 /** Configuration permits evaluation, but never substitutes for verified evidence. */
 function assertLive(env: NodeJS.ProcessEnv): string {
   if (parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) !== true) throw new Error('Surplus builder is disabled');
@@ -135,7 +147,8 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
       if (!wire || wire.status < 200 || wire.status >= 300 || body.error || !Array.isArray(body.choices)
           || telemetry.conflicts || typeof telemetry.truncated !== 'boolean' || typeof body.model !== 'string' || typeof telemetry.provider !== 'string' || telemetry.served_by !== 'marketplace'
           || (telemetry.objective !== undefined && telemetry.objective !== 'price')
-          || !Array.isArray(telemetry.adapted_params) || telemetry.adapted_params.length || wire.headers?.['x-si-adapted-params']?.trim()) throw new Error('Surplus response route or capabilities did not match');
+          || !Array.isArray(telemetry.adapted_params) || !adaptedParamsPreserveContract(telemetry.adapted_params)
+          || !adaptedParamsPreserveContract(headerAdaptedParams(wire.headers?.['x-si-adapted-params']))) throw new Error('Surplus response route or capabilities did not match');
       const completion = structuredClone(body) as unknown as OpenAiCompletionLike;
       if (telemetry.truncated === true && completion.choices?.[0]) completion.choices[0].finish_reason = 'length';
       return { model: body.model, providerId: telemetry.provider, completion };

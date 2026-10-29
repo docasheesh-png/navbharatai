@@ -1,5 +1,5 @@
 import type { Request, Response, RequestHandler } from 'express';
-import { renewWorkspaceBuild, LEASE_HEARTBEAT_MS, type BuildLeaseStore } from './workspaceBuildLease';
+import { renewWorkspaceBuild, LEASE_HEARTBEAT_MS, LEASE_STALE_MS, type BuildLeaseStore } from './workspaceBuildLease';
 import type { RunningBuild } from './runningBuildRegistry';
 import { abortBuild } from './buildAbortCause';
 import { hasBuildBodyExitHold } from './stoppingBuild';
@@ -305,6 +305,10 @@ export function startBuildLeaseHeartbeat(opts: {
   build: () => RunningBuild | null; current: () => RunningBuild | undefined; active: () => boolean;
   release: () => Promise<void>; lost: () => void;
 }): ReturnType<typeof setInterval> {
+  // DNA (05012 OUTCOME_AUTHORITY_UNAVAILABLE): one slow/failed Firestore renewal aborted a healthy build,
+  // though the lease survives LEASE_STALE_MS (four beats) and no other worker may claim it before then.
+  // Abort only once the last CONFIRMED renewal is old enough that the lease could lapse before the next beat.
+  let lastConfirmedAt = opts.admittedAt;
   const timer = setInterval(() => {
     void (async () => {
       const build = opts.build();
@@ -319,7 +323,9 @@ export function startBuildLeaseHeartbeat(opts: {
       }
       const heartbeatAt = Date.now();
       const renewal = await renewWorkspaceBuild(opts.store, { workspaceId: opts.workspaceId, token: opts.token, nowMs: heartbeatAt });
-      if (renewal === 'unknown' && build && !build.exited) {
+      if (renewal !== 'unknown') lastConfirmedAt = heartbeatAt;
+      const authorityAtRisk = Date.now() - lastConfirmedAt >= LEASE_STALE_MS - LEASE_HEARTBEAT_MS;
+      if (renewal === 'unknown' && build && !build.exited && authorityAtRisk) {
         // An unavailable store is not permission to keep building until another worker takes over.
         // Abort cooperatively, but retain the local/body hold and keep trying to renew: an abort
         // signal does not prove an already-dispatched sandbox command has actually stopped.

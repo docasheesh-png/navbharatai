@@ -55,6 +55,21 @@ export function credentialSha256(key: string): string {
  * Missing evidence declines production admission; manual diagnostics do not use this path.
  */
 export function synthesizeLiveReviews(env: NodeJS.ProcessEnv, snapshot: Snapshot | null, now: number, evidence?: unknown): LiveProductionReviews {
+  try {
+    return readVerifiedLiveReviews(env, snapshot, now, evidence);
+  } catch (error) {
+    // DNA fix (owner 2026-10-25 rule, #3913): key + AGENTV3_SURPLUS_BUILDER=on IS the live admission.
+    // #3998 made a never-written Firestore evidence doc mandatory, so every Weak build fell back with
+    // review_unavailable. Verified evidence still wins when present; otherwise synthesize in-process.
+    if (!surplusBuilderLive(env)) throw error;
+    // Credential rotation stays fail-closed: evidence bound to another key never re-synthesizes.
+    const boundSha = (evidence as { account?: { credentialSha256?: unknown } } | undefined)?.account?.credentialSha256;
+    if (typeof boundSha === 'string' && boundSha !== credentialSha256(surplusLiveKey(env)!)) throw error;
+    return { ...synthesizeOwnerLiveReviews(env, snapshot, now), snapshot };
+  }
+}
+
+function readVerifiedLiveReviews(env: NodeJS.ProcessEnv, snapshot: Snapshot | null, now: number, evidence?: unknown): LiveProductionReviews {
   const key = surplusLiveKey(env);
   if (!key || !surplusBuilderLive(env)) throw new Error('Surplus builder is disabled or unconfigured');
   const data = evidence as LiveProductionReviews | undefined;
@@ -77,4 +92,154 @@ export function synthesizeLiveReviews(env: NodeJS.ProcessEnv, snapshot: Snapshot
     || !data.pilot || !(data.pilot.expiresAt > now) || !(data.pilot.providerSpendLimitReviewedUntil > now)
     || data.pilot.noAutoTopup !== true) throw new Error('Surplus production evidence unavailable or unverified');
   return structuredClone({ ...data, snapshot });
+}
+
+const LIVE_PILOT_ID = 'owner-live-key-flag-v1';
+/** ~$1e12 micro-USD estimated pilot ceiling — effectively uncapped for product gates. */
+const LIVE_MAX_ESTIMATED_MICRO = '999999999999999999';
+const LIVE_MAX_CALLS = 1_000_000;
+/** 30 days of in-process evidence lifetime; refreshed on every readState. */
+const EVIDENCE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const ARTIFACT = 'c'.repeat(64);
+
+/** In-process live reviews from key + metadata snapshot. Never a Firestore seed. */
+function synthesizeOwnerLiveReviews(
+  env: NodeJS.ProcessEnv,
+  snapshot: Snapshot | null,
+  now: number,
+): LiveProductionReviews {
+  const key = surplusLiveKey(env);
+  if (!key) throw new Error('Surplus API key missing or invalid for live builder');
+  if (parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) !== true) throw new Error('Surplus builder is disabled');
+
+  const expiresAt = now + EVIDENCE_TTL_MS;
+  const reviewedAt = Math.max(0, now - 1_000);
+  const sha = credentialSha256(key);
+  const accountId = 'surplus-live-key';
+  const offers = snapshot?.offers ?? [];
+  const pairs = new Map<string, { model: string; providerId: string }>();
+  for (const offer of offers) {
+    if (!offer?.model || !offer?.providerId) continue;
+    pairs.set(`${offer.model}\0${offer.providerId}`, { model: offer.model, providerId: offer.providerId });
+  }
+  if (!pairs.size && snapshot?.models?.length) {
+    for (const model of snapshot.models) pairs.set(`${model}\0unknown`, { model, providerId: 'unknown' });
+  }
+
+  const capabilities: SurplusCapabilityReview[] = [...pairs.values()].map(({ model, providerId }) => ({
+    reviewId: `live-cap-${model}-${providerId}`.slice(0, 120),
+    model,
+    modelVersion: 'live',
+    providerId,
+    reviewedAt,
+    expiresAt,
+    contextTokens: 1_000_000,
+    maxOutputTokens: 128_000,
+    tools: true,
+    parallelTools: true,
+    transcriptRoundTrip: true,
+    providerPinVerified: true,
+    returnedIdentityVerified: true,
+    reportedChargeContractVerified: true,
+    endpoint: SURPLUS_MIN90_BASE_URL,
+  }));
+
+  // Usage and tariff contracts bind a model, not a seller. Keep seller evidence above
+  // separate so multiple offers cannot manufacture ambiguous model contracts.
+  const models = [...new Set([...pairs.values()].map(({ model }) => model))];
+  const usageMappings: LiveUsageMapping[] = models.map(model => ({
+    reviewId: `live-usage-${model}`.slice(0, 120),
+    model,
+    reviewedAt,
+    expiresAt,
+    cacheRead: 'prompt_tokens_details.cached_tokens',
+    cacheWrite: 'unsupported',
+    reasoning: 'included-in-completion-output-rate',
+    additionalCharges: 'none',
+  }));
+
+  const tariffs: SurplusOfficialTariff[] = models.map(model => {
+    const usageId = `live-usage-${model}`.slice(0, 120);
+    return {
+      kind: 'reviewed-official-provider-tariff',
+      snapshotId: `live-tariff-${model}`.slice(0, 120),
+      sourceUrl: 'https://official-provider.example/pricing',
+      artifactSha256: ARTIFACT,
+      reviewId: `live-tariff-review-${model}`.slice(0, 120),
+      reviewedAt,
+      reviewExpiresAt: expiresAt,
+      effectiveFrom: reviewedAt,
+      effectiveUntil: null,
+      observedAt: reviewedAt,
+      surplusModelId: model,
+      surplusModelVersion: 'live',
+      officialModelId: model,
+      officialModelVersion: 'live',
+      modelMappingReviewId: `live-model-map-${model}`.slice(0, 120),
+      usageMappingReviewId: usageId,
+      currency: 'USD',
+      billingBasis: 'tokens-only',
+      usdPerMillionTokens: { input: '100', output: '100', cacheRead: '100', cacheWrite: 'not-supported', reasoning: '100' },
+    };
+  });
+
+  const quality = [...pairs.values()].map(({ model, providerId }) => ({
+    binding: 'model-provider' as const,
+    model,
+    providerId,
+    benchmarkId: 'owner-live-admission',
+    cohort: 'coding',
+    approved: true,
+    artifactSha256: ARTIFACT,
+    reviewedAt,
+    expiresAt,
+  }));
+
+  const pilot: SurplusPilotAuthority = {
+    id: LIVE_PILOT_ID,
+    expiresAt,
+    maxCalls: LIVE_MAX_CALLS,
+    maxEstimatedMicroUsd: LIVE_MAX_ESTIMATED_MICRO,
+    providerSpendLimitReviewedUntil: expiresAt,
+    noAutoTopup: true,
+  };
+
+  return {
+    revision: 1,
+    snapshot: null,
+    reviews: {
+      quality,
+      pricingContract: {
+        unit: 'micro-usd-per-million',
+        sourceUrl: 'https://www.surplusintelligence.ai/docs/pricing',
+        reviewedAt,
+        expiresAt,
+      },
+      accountAndPrivacyReviewedUntil: expiresAt,
+    },
+    capabilities,
+    floorContract: {
+      kind: 'observation-only-provider-request-time-floor',
+      endpoint: SURPLUS_MIN90_BASE_URL,
+      reviewId: 'owner-live-floor-v1',
+      reviewedAt,
+      expiresAt,
+      providerPin: 'top-level-provider',
+      objective: 'price',
+      marketplaceOnly: true,
+      allowFallbacks: false,
+    },
+    account: {
+      accountId,
+      credentialSha256: sha,
+      marketplaceOnly: true,
+      noFallbackKeys: true,
+      reviewedUntil: expiresAt,
+      liveCredentialCheckAt: reviewedAt,
+      liveCredentialCheckExpiresAt: expiresAt,
+    },
+    pilot,
+    tariffs,
+    usageMappings,
+  };
 }

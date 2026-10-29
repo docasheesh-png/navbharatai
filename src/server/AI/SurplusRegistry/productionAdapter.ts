@@ -40,12 +40,22 @@ function envelope(raw: unknown): { wire: WireResponse; body: Record<string, unkn
  * param was treated as a route mismatch → scope ask threw (provider=unknown, 0 tokens) →
  * mid_build_engine_unavailable → Kimi. A pure output-cap rename keeps the contract (same bound, same
  * billing); every other adaptation (tools, tool_choice, provider pin, routing…) still fails closed. */
-const CONTRACT_PRESERVING_ADAPTATIONS = new Set(['max_tokens', 'max_completion_tokens', 'max_output_tokens']);
+/* DNA (05016+, z scope): Surplus also discloses reasoning-wire repairs for gpt-5.6 reasoning models —
+ * `reasoning_effort` forced to "none" when tools are present, `include_reasoning`/`reasoning` stripped,
+ * sampling knobs removed, prompt-cache key / stream_options injected (docs: reference/reasoning,
+ * parameter-compatibility). None of these change model, provider, tools, messages or billing basis, yet
+ * each one failed the allowlist → "route or capabilities did not match" (response_validation /
+ * invalid_completion) on every scope ask. Allow them; contract params (model, provider, si_route,
+ * messages, tools, tool_choice) still fail closed. */
+const CONTRACT_PRESERVING_ADAPTATIONS = new Set(['max_tokens', 'max_completion_tokens', 'max_output_tokens',
+  'reasoning_effort', 'reasoning', 'include_reasoning', 'thinking', 'verbosity',
+  'temperature', 'top_p', 'presence_penalty', 'frequency_penalty', 'parallel_tool_calls', 'logprobs', 'top_logprobs', 'logit_bias', 'stop',
+  'prompt_cache_key', 'cache_control', 'stream_options']);
 function headerAdaptedParams(value: unknown): string[] {
   return typeof value === 'string' && value.trim() ? value.split(',').map(s => s.trim()).filter(Boolean) : [];
 }
 export function adaptedParamsPreserveContract(params: unknown[]): boolean {
-  return params.every(p => typeof p === 'string' && CONTRACT_PRESERVING_ADAPTATIONS.has(p.trim().toLowerCase().split(/[:=>\s-]/)[0]));
+  return params.every(p => typeof p === 'string' && CONTRACT_PRESERVING_ADAPTATIONS.has(p.trim().toLowerCase().split(/[:=>\s.-]/)[0]));
 }
 /** Which identity check failed ('' = accepted). Same contract as before, just named. */
 export function surplusIdentityMismatch(wire: WireResponse, body: Record<string, unknown>, telemetry: Record<string, unknown>): string {

@@ -62,7 +62,7 @@ export interface SurplusChatOptions {
 export function createSurplusChat(
   env: NodeJS.ProcessEnv = process.env,
   transport: typeof fetch = globalThis.fetch,
-  limits: { maxOutputTokens: number } = { maxOutputTokens: 8192 },
+  limits: { maxOutputTokens: number; providerDefaults?: boolean } = { maxOutputTokens: 8192 },
 ) {
   if (!Number.isSafeInteger(limits.maxOutputTokens) || limits.maxOutputTokens < 1) throw new SurplusError('configuration');
   if (typeof window !== 'undefined') throw new SurplusError('configuration');
@@ -79,7 +79,7 @@ export function createSurplusChat(
     baseURL,
     organization: null,
     project: null,
-    timeout: SURPLUS_TIMEOUT_MS,
+    ...(limits.providerDefaults ? {} : { timeout: SURPLUS_TIMEOUT_MS }),
     maxRetries: 0, // Avoid hidden extra inference charges, including after an uncertain timeout.
     logLevel: 'off', // Override OPENAI_LOG; never emit requests or raw error bodies.
     fetch: (input, init) => {
@@ -103,17 +103,17 @@ export function createSurplusChat(
     let requestBytes: number;
     try { requestBytes = Buffer.byteLength(JSON.stringify(requestMessages), 'utf8'); }
     catch { throw new SurplusError('invalid_request'); }
-    if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > limits.maxOutputTokens ||
+    if (!Number.isInteger(maxTokens) || maxTokens < 1 || (!limits.providerDefaults && maxTokens > limits.maxOutputTokens) ||
         !Array.isArray(requestMessages) || requestMessages.length < 1 || requestMessages.length > 128 ||
         (typeof input === 'string' && !input.trim()) ||
-        requestBytes > 65_536) {
+        (!limits.providerDefaults && requestBytes > 65_536)) {
       throw new SurplusError('invalid_request');
     }
     try {
       const response = await client.chat.completions.create({
         model: options.model?.trim() || defaultModel,
         messages: requestMessages,
-        max_tokens: maxTokens,
+        ...(limits.providerDefaults && options.maxTokens === undefined ? {} : { max_tokens: maxTokens }),
         stream: false,
       }, { signal: options.signal });
       // Surplus can report long-running failures inside HTTP 200 bodies. HTTP success is

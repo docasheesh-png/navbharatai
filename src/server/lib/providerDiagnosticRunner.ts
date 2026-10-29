@@ -1,10 +1,10 @@
-import { DIAGNOSTIC_PAIR_DISCOUNT } from './providerDiagnosticPair';
 import { DiagnosticEvidenceMissing } from './providerDiagnosticEvidence';
 import { randomUUID } from 'node:crypto';
-import { DIAGNOSTIC_LIMITS, type DiagnosticResult, type DiagnosticReason, type DiagnosticProvider } from '../../shared/providerDiagnostics';
+import { type DiagnosticResult, type DiagnosticReason, type DiagnosticProvider } from '../../shared/providerDiagnostics';
 import type { DiagnosticInput } from './providerDiagnosticBoundary';
-import { ProviderDiagnosticStore, DiagnosticAdmissionError, type DiagnosticRunRecord } from './providerDiagnosticStore';
-import { createSurplusChat, SurplusError, SURPLUS_DEFAULT_MODEL, SURPLUS_MIN90_BASE_URL } from './surplusClient';
+import { ProviderDiagnosticStore, DiagnosticAdmissionError } from './providerDiagnosticStore';
+import { createSurplusChat, SurplusError, SURPLUS_DEFAULT_MODEL } from './surplusClient';
+import type { DiagnosticStoredRun } from './providerDiagnosticDirectStore';
 import { surplusBuyerCostToUsd } from '../AI/SurplusRegistry/receiptPolicy';
 import { OpenAiCompatProvider, FreeChainProviderError } from '../AI/FreeChain/providers/openAiCompatProvider';
 import { CHEAPERINFERENCE_BASE_URL, cheaperInferenceAdminStatus } from './cheaperInferencePolicy';
@@ -14,12 +14,12 @@ export interface DiagnosticAdapter { model: string; call(prompt: string, signal:
 class DiagnosticSurplusFailure extends SurplusError {
   constructor(error: SurplusError, readonly httpStatus?: number) { super(error.code, error.usage); }
 }
-export function diagnosticAdapter(provider: DiagnosticProvider, env = process.env, pair = false, outputTokens: number = DIAGNOSTIC_LIMITS.defaultOutputTokens): DiagnosticAdapter {
+export function diagnosticAdapter(provider: DiagnosticProvider, env = process.env, _pair = false, outputTokens?: number): DiagnosticAdapter {
   if (provider === 'surplus') {
     let httpStatus: number | undefined;
-    const chat = createSurplusChat(pair ? { ...env, SURPLUS_BASE_URL: SURPLUS_MIN90_BASE_URL } : env, async (input, init) => { const response = await fetch(input, init); httpStatus = response.status; return response; }, { maxOutputTokens: outputTokens });
+    const chat = createSurplusChat(env, async (input, init) => { const response = await fetch(input, init); httpStatus = response.status; return response; }, { maxOutputTokens: 8192, providerDefaults: true });
     return { model: env.SURPLUS_MODEL?.trim() || SURPLUS_DEFAULT_MODEL, async call(prompt, signal) {
-      const r = await chat(prompt, { signal, maxTokens: outputTokens }).catch(error => { if (error instanceof SurplusError) throw new DiagnosticSurplusFailure(error, httpStatus); throw error; });
+      const r = await chat(prompt, { signal, ...(outputTokens === undefined ? {} : { maxTokens: outputTokens }) }).catch(error => { if (error instanceof SurplusError) throw new DiagnosticSurplusFailure(error, httpStatus); throw error; });
       return { text: r.text, usage: { inputTokens: r.usage?.prompt_tokens ?? null, outputTokens: r.usage?.completion_tokens ?? null, cachedTokens: null }, amount: surplusBuyerCostToUsd(r.usage?.buyer_cost_micro) };
     } };
   }
@@ -27,8 +27,8 @@ export function diagnosticAdapter(provider: DiagnosticProvider, env = process.en
   if (!status.apiKeyConfigured) throw new FreeChainProviderError('CONFIGURATION');
   const adapter = new OpenAiCompatProvider({ provider: 'CHEAPERINFERENCE', model: status.defaultModel,
     key: env.CHEAPERINFERENCE_API_KEY!.trim(), baseURL: CHEAPERINFERENCE_BASE_URL, priority: 0,
-    maxOutputTokens: outputTokens, timeoutMs: DIAGNOSTIC_LIMITS.deadlineMs,
-    streamUsage: false, extraBody: pair ? { reasoning: { effort: 'low' }, min_discount_percent: DIAGNOSTIC_PAIR_DISCOUNT } : { reasoning_effort: 'low' } });
+    maxOutputTokens: 2048, timeoutMs: 600000, providerDefaults: true, requestedOutputTokens: outputTokens,
+    streamUsage: false, extraBody: { reasoning: { effort: 'low' } } });
   return { model: status.defaultModel, async call(prompt, signal) {
     const r = await adapter.executeTurn({ prompt, signal });
     return { text: r.content, usage: { inputTokens: r.usage?.inputTokens ?? null, outputTokens: r.usage?.outputTokens ?? null, cachedTokens: r.cachedInputTokens ?? null }, amount: r.supplierChargeUsd ?? null };
@@ -49,10 +49,15 @@ function failure(error: unknown): DiagnosticReason {
 export interface DiagnosticDependencies {
   status?: () => Promise<unknown>;
   setControl?: ProviderDiagnosticStore['setControl'];
-  store: Pick<ProviderDiagnosticStore, 'reserve' | 'finish' | 'read' | 'claimDispatch'>;
+  store: {
+    read(key: string): Promise<DiagnosticStoredRun | null>;
+    reserve(key: string, provider: DiagnosticProvider, model: string, outputTokens?: number): Promise<{ mayDispatch: boolean; run: DiagnosticStoredRun }>;
+    claimDispatch(key: string, runId: string): Promise<boolean>;
+    finish(key: string, runId: string, amount: number | null): Promise<DiagnosticStoredRun>;
+  };
   adapter: (provider: DiagnosticProvider, outputTokens?: number) => DiagnosticAdapter;
-  /** Must verify real reconciliation/tariff evidence and current monthly limit before admission. */
-  verifyEvidence: (provider: DiagnosticProvider, model: string, outputTokens?: number) => Promise<void>;
+  /** Checks only existing local platform controls; never requires provider catalog/pricing evidence. */
+  verifyAdmission: (provider: DiagnosticProvider, model: string, outputTokens?: number) => Promise<void>;
 }
 export async function runDiagnostic(input: DiagnosticInput, deps: DiagnosticDependencies): Promise<DiagnosticResult & { replayed: boolean }> {
   const start = Date.now();
@@ -61,13 +66,9 @@ export async function runDiagnostic(input: DiagnosticInput, deps: DiagnosticDepe
     retryCount: 0, text: null, usage: { inputTokens: null, outputTokens: null, cachedTokens: null }, supplierCost: { status: 'unavailable' },
     walletCharge: { status: 'not_charged' }, accounting: 'not_dispatched', timeline: [], provesBuilderHealth: false, replayed: false };
   const event = (stage: DiagnosticResult['timeline'][number]['stage'], reason: DiagnosticReason, httpStatus?: number) => result.timeline.push({ stage, reason, elapsedMs: Date.now() - start, ...(httpStatus === undefined ? {} : { httpStatus }) });
-  const historical = (run: DiagnosticRunRecord) => ({ ...result, runId: run.runId, startedAt: new Date(run.startedAt).toISOString(), accounting: run.state, replayed: true,
-    reconciliationRequired: run.actualCostNanoUsd !== null && run.actualCostNanoUsd > run.reservedNanoUsd,
+  const historical = (run: DiagnosticStoredRun) => ({ ...result, runId: run.runId, startedAt: new Date(run.startedAt).toISOString(), accounting: run.state, replayed: true, completedAt: run.completedAt,
+    reconciliationRequired: run.actualCostNanoUsd !== null && typeof run.reservedNanoUsd === 'number' && run.actualCostNanoUsd > run.reservedNanoUsd,
     supplierCost: run.actualCostNanoUsd == null ? { status: 'unavailable' as const } : { status: 'reported' as const, amount: `${Math.floor(run.actualCostNanoUsd / 1e9)}.${String(run.actualCostNanoUsd % 1e9).padStart(9, '0')}`, currency: 'USD' } });
-  // Existing Cheaper adapter ceiling; reject user settings before constructing it or reserving money.
-  if (input.provider === 'cheaperinference' && (input.maxOutputTokens ?? DIAGNOSTIC_LIMITS.defaultOutputTokens) > 131072) {
-    event('validation', 'invalid_request'); result.missingEvidence = ['Maximum output exceeds the supported adapter limit of 131072 tokens.']; return result;
-  }
   let dispatchBefore: number | undefined;
   let adapter: DiagnosticAdapter;
   try { adapter = deps.adapter(input.provider, input.maxOutputTokens); result.model = adapter.model; }
@@ -79,7 +80,7 @@ export async function runDiagnostic(input: DiagnosticInput, deps: DiagnosticDepe
       if (previous.provider !== input.provider || previous.model !== adapter.model) throw new DiagnosticAdmissionError('invalid_request');
       return historical(previous);
     }
-    await deps.verifyEvidence(input.provider, adapter.model, input.maxOutputTokens);
+    await deps.verifyAdmission(input.provider, adapter.model, input.maxOutputTokens);
     const admission = await deps.store.reserve(input.idempotencyKey, input.provider, adapter.model, input.maxOutputTokens);
     dispatchBefore = admission.run.dispatchBefore;
     result.runId = admission.run.runId; result.startedAt = new Date(admission.run.startedAt).toISOString(); result.accounting = admission.run.state;
@@ -109,25 +110,23 @@ export async function runDiagnostic(input: DiagnosticInput, deps: DiagnosticDepe
     result.elapsedMs = Date.now() - start; return result;
   }
   const controller = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
   let amount: string | null = null;
   try {
-    const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new FreeChainProviderError('TIMEOUT')); }, DIAGNOSTIC_LIMITS.deadlineMs); });
-    const reply = await Promise.race([adapter.call(input.prompt, controller.signal), deadline]);
+    const reply = await adapter.call(input.prompt, controller.signal);
     result.text = reply.text; result.usage = reply.usage; amount = reply.amount;
     event('response', reply.text.trim() ? 'completed' : 'malformed_response');
   } catch (error) {
     if (error instanceof SurplusError) { amount = surplusBuyerCostToUsd(error.usage?.buyer_cost_micro); result.usage = { inputTokens: error.usage?.prompt_tokens ?? null, outputTokens: error.usage?.completion_tokens ?? null, cachedTokens: null }; }
     if (error instanceof FreeChainProviderError) amount = error.supplierChargeUsd ?? null;
     event('response', failure(error), error instanceof DiagnosticSurplusFailure ? error.httpStatus : error instanceof FreeChainProviderError ? error.status : undefined);
-  } finally { clearTimeout(timer); }
+  }
   let nano: number | null = null;
   if (amount !== null && /^\d+(?:\.\d{1,9})?$/.test(amount)) {
     const [whole, fraction = ''] = amount.split('.'); const exact = BigInt(whole) * 1_000_000_000n + BigInt(fraction.padEnd(9, '0'));
     if (exact <= BigInt(Number.MAX_SAFE_INTEGER)) nano = Number(exact);
     result.supplierCost = { status: 'reported', amount, currency: 'USD' };
   }
-  try { const settled = await deps.store.finish(input.idempotencyKey, result.runId, nano); result.reconciliationRequired = !!settled && settled.actualCostNanoUsd !== null && settled.actualCostNanoUsd > settled.reservedNanoUsd; result.accounting = nano === null ? 'unknown_liability' : 'settled'; event('accounting', nano === null ? 'receipt_unavailable' : 'completed'); }
+  try { const settled = await deps.store.finish(input.idempotencyKey, result.runId, nano); result.completedAt = settled?.completedAt; result.reconciliationRequired = !!settled && settled.actualCostNanoUsd !== null && typeof settled.reservedNanoUsd === 'number' && settled.actualCostNanoUsd > settled.reservedNanoUsd; result.accounting = nano === null ? 'unknown_liability' : 'settled'; event('accounting', nano === null ? 'receipt_unavailable' : 'completed'); }
   catch { result.accounting = 'unknown_liability'; event('accounting', 'accounting_failed'); }
   result.elapsedMs = Date.now() - start;
   return result;

@@ -12,6 +12,8 @@ export interface DiagnosticEvent {
   httpStatus?: number;
 }
 export interface DiagnosticResult {
+  /** Present only after the durable run completion acknowledgement. */
+  completedAt?: number;
   missingEvidence?: string[];
   reconciliationRequired?: boolean;
   runId: string;
@@ -28,7 +30,7 @@ export interface DiagnosticResult {
   usage: { inputTokens: number | null; outputTokens: number | null; cachedTokens: number | null };
   supplierCost: { status: 'reported'; amount: string; currency: string } | { status: 'unavailable' };
   walletCharge: { status: 'not_charged' } | { status: 'unknown' };
-  accounting: 'not_dispatched' | 'reserved' | 'settled' | 'unknown_liability';
+  accounting: 'pending' | 'not_dispatched' | 'reserved' | 'settled' | 'unknown_liability';
   timeline: DiagnosticEvent[];
   /** Provider health alone never establishes production builder health. */
   provesBuilderHealth: false;

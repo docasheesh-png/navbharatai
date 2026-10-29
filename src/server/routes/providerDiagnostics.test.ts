@@ -10,7 +10,7 @@ async function setup() {
   vi.stubEnv('ADMIN_PASSWORD', 'synthetic-password'); vi.stubEnv('ADMIN_USERNAME', 'test-admin');
   const token = mintAdminToken('synthetic-password', 'test-admin', Date.now());
   const call = vi.fn().mockResolvedValue({ text: 'actual mocked response', usage: { inputTokens: 1, outputTokens: 2, cachedTokens: null }, amount: null });
-  const deps: DiagnosticDependencies = { adapter: vi.fn(() => ({ model: 'test', call })), verifyEvidence: vi.fn().mockResolvedValue(undefined), store: { claimDispatch: vi.fn().mockResolvedValue(true), read: vi.fn().mockResolvedValue(null), reserve: vi.fn().mockResolvedValue({ mayDispatch: true, run: { runId: '11111111-1111-4111-8111-111111111111', startedAt: Date.now(), state: 'reserved' } }), finish: vi.fn().mockResolvedValue(undefined) } };
+  const deps: DiagnosticDependencies = { adapter: vi.fn(() => ({ model: 'test', call })), verifyAdmission: vi.fn().mockResolvedValue(undefined), store: { claimDispatch: vi.fn().mockResolvedValue(true), read: vi.fn().mockResolvedValue(null), reserve: vi.fn().mockResolvedValue({ mayDispatch: true, run: { runId: '11111111-1111-4111-8111-111111111111', startedAt: Date.now(), state: 'reserved' } }), finish: vi.fn().mockResolvedValue(undefined) } };
   const resolve = vi.fn(() => deps); const app = express(); app.use(express.json()); registerProviderDiagnosticRoutes(app, resolve);
   server = app.listen(0, '127.0.0.1'); await new Promise<void>(done => server!.once('listening', done));
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('listener');
@@ -47,7 +47,7 @@ it('only verified admins can change one control using a revision-checked body', 
 it('OFF blocks authenticated direct POST and leaves history readable', async () => {
   const { DiagnosticAdmissionError } = await import('../lib/providerDiagnosticStore');
   const { base, token, deps, call } = await setup();
-  vi.mocked(deps.verifyEvidence).mockRejectedValue(new DiagnosticAdmissionError('diagnostics_disabled'));
+  vi.mocked(deps.verifyAdmission).mockRejectedValue(new DiagnosticAdmissionError('diagnostics_disabled'));
   const r = await fetch(base + '/surplus/runs', { method: 'POST', headers: { 'x-admin-token': token, 'content-type': 'application/json' }, body: JSON.stringify({ idempotencyKey: '11111111-1111-4111-8111-111111111111', prompt: 'mock' }) });
   expect((await r.json()).timeline.at(-1).reason).toBe('diagnostics_disabled');
   expect(deps.store.reserve).not.toHaveBeenCalled(); expect(call).not.toHaveBeenCalled();

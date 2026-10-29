@@ -1,9 +1,9 @@
-import { diagnosticPairAuthority } from '../lib/providerDiagnosticPair';
 import { DiagnosticEvidenceMissing } from '../lib/providerDiagnosticEvidence';
 import { Router, type Express } from 'express';
 import { requireDiagnosticAdmin, validateDiagnosticRun, type DiagnosticInput } from '../lib/providerDiagnosticBoundary';
 import { runDiagnostic, diagnosticAdapter, type DiagnosticDependencies } from '../lib/providerDiagnosticRunner';
 import { ProviderDiagnosticStore, DiagnosticAdmissionError } from '../lib/providerDiagnosticStore';
+import { ProviderDiagnosticDirectStore } from '../lib/providerDiagnosticDirectStore';
 import { adminUsername } from '../lib/adminAuth';
 import { getServerDb } from '../lib/serverDb';
 
@@ -19,14 +19,14 @@ export async function readDiagnosticProviderState(provider: 'surplus' | 'cheaper
 function dependencies(): DiagnosticDependencies {
   const db = getServerDb();
   if (!db) throw new DiagnosticAdmissionError('accounting_failed');
-  const store = new ProviderDiagnosticStore(db, Date.now, undefined, undefined, diagnosticPairAuthority());
+  const store = new ProviderDiagnosticDirectStore(db);
   const adapter = (provider: 'surplus' | 'cheaperinference', outputTokens?: number) => diagnosticAdapter(provider, process.env, true, outputTokens);
   const state = (provider: 'surplus' | 'cheaperinference') => readDiagnosticProviderState(provider, store, adapter);
   return { store, adapter, setControl: store.setControl.bind(store),
     status: async () => { const surplus = await state('surplus'), cheaperinference = await state('cheaperinference'); return {
       dispatchReady: surplus.dispatchReady || cheaperinference.dispatchReady, providers: { surplus, cheaperinference }, liveVerification: false,
     }; },
-    verifyEvidence: async (provider, model, outputTokens) => {
+    verifyAdmission: async (provider, model, outputTokens) => {
       const status = await store.status(provider, model, outputTokens);
       if (status.missingFields.length) throw new DiagnosticEvidenceMissing(status.missingFields);
       if (!status.dispatchReady) throw new DiagnosticAdmissionError(status.reason === 'diagnostics_disabled' ? 'diagnostics_disabled' : status.reason === 'budget_exhausted' ? 'budget_exhausted' : 'budget_evidence_unavailable');

@@ -6,7 +6,7 @@ const input = { provider: 'surplus' as const, idempotencyKey: '11111111-1111-411
 const record = { runId: input.idempotencyKey, provider: 'surplus', model: 'test', startedAt: 1000, state: 'reserved' } as DiagnosticRunRecord;
 function setup() {
   const call = vi.fn().mockResolvedValue({ text: 'hello', usage: { inputTokens: 3, outputTokens: 2, cachedTokens: null }, amount: '0.000001' });
-  const deps: DiagnosticDependencies = { store: { claimDispatch: vi.fn().mockResolvedValue(true), read: vi.fn().mockResolvedValue(null), reserve: vi.fn().mockResolvedValue({ mayDispatch: true, run: record }), finish: vi.fn().mockResolvedValue(undefined) }, adapter: vi.fn(() => ({ model: 'test', call })), verifyEvidence: vi.fn().mockResolvedValue(undefined) };
+  const deps: DiagnosticDependencies = { store: { claimDispatch: vi.fn().mockResolvedValue(true), read: vi.fn().mockResolvedValue(null), reserve: vi.fn().mockResolvedValue({ mayDispatch: true, run: record }), finish: vi.fn().mockResolvedValue(undefined) }, adapter: vi.fn(() => ({ model: 'test', call })), verifyAdmission: vi.fn().mockResolvedValue(undefined) };
   return { deps, call };
 }
 afterEach(() => vi.useRealTimers());
@@ -21,14 +21,14 @@ describe('single provider diagnostics', () => {
   it('does not dispatch a replay even with expired evidence', async () => {
     const { deps, call } = setup(); vi.mocked(deps.store.read).mockResolvedValue(record);
     const r = await runDiagnostic(input, deps); expect(r.replayed).toBe(true); expect(r.runId).toBe(record.runId); expect(r.text).toBeNull();
-    expect(call).not.toHaveBeenCalled(); expect(deps.verifyEvidence).not.toHaveBeenCalled();
+    expect(call).not.toHaveBeenCalled(); expect(deps.verifyAdmission).not.toHaveBeenCalled();
   });
   it('honors atomic admission replay', async () => {
     const { deps, call } = setup(); vi.mocked(deps.store.reserve).mockResolvedValue({ mayDispatch: false, run: record });
     expect((await runDiagnostic(input, deps)).replayed).toBe(true); expect(call).not.toHaveBeenCalled();
   });
   it('blocks missing evidence before reservation or network', async () => {
-    const { deps, call } = setup(); vi.mocked(deps.verifyEvidence).mockRejectedValue(new DiagnosticAdmissionError('budget_evidence_unavailable'));
+    const { deps, call } = setup(); vi.mocked(deps.verifyAdmission).mockRejectedValue(new DiagnosticAdmissionError('budget_evidence_unavailable'));
     expect((await runDiagnostic(input, deps)).timeline[0].reason).toBe('budget_evidence_unavailable');
     expect(deps.store.reserve).not.toHaveBeenCalled(); expect(call).not.toHaveBeenCalled();
   });
@@ -38,10 +38,15 @@ describe('single provider diagnostics', () => {
     expect(r.supplierCost.status).toBe('unavailable'); expect(r.accounting).toBe('unknown_liability'); expect(call).toHaveBeenCalledOnce();
     expect(JSON.stringify(r)).not.toContain(input.prompt); expect(deps.store.finish).toHaveBeenCalledWith(input.idempotencyKey, record.runId, null);
   });
-  it('bounds an unresponsive adapter and retains unknown liability', async () => {
-    vi.useFakeTimers(); const { deps, call } = setup(); call.mockImplementation(() => new Promise(() => {}));
-    const pending = runDiagnostic(input, deps); await vi.advanceTimersByTimeAsync(30001); const r = await pending;
-    expect(r.timeline[0].reason).toBe('timeout'); expect(call).toHaveBeenCalledOnce(); expect(r.accounting).toBe('unknown_liability');
+  it('does not impose a diagnostic deadline or retry a slow request', async () => {
+    vi.useFakeTimers(); const { deps, call } = setup();
+    let resolve!: (value: unknown) => void;
+    call.mockImplementation(() => new Promise(r => { resolve = r; }));
+    let finished = false;
+    const pending = runDiagnostic(input, deps).then(r => { finished = true; return r; });
+    await vi.advanceTimersByTimeAsync(60001); expect(finished).toBe(false);
+    resolve({ text: 'late reply', usage: { inputTokens: null, outputTokens: null, cachedTokens: null }, amount: null });
+    const r = await pending; expect(r.text).toBe('late reply'); expect(call).toHaveBeenCalledOnce();
   });
   it('never exposes raw errors or fabricates zero cost', async () => {
     const { deps, call } = setup(); call.mockRejectedValue(new Error('Bearer secret private prompt'));
@@ -63,30 +68,32 @@ it('uses the explicitly submitted manual prompt', async () => {
   expect(call).toHaveBeenCalledExactlyOnceWith(input.prompt, expect.any(AbortSignal));
 });
 
-it('pair Surplus dispatch uses min90 once without changing the ordinary adapter endpoint', async () => {
+it('Surplus diagnostics use configured endpoint without catalog, discount, or output cap', async () => {
   const { diagnosticAdapter } = await import('./providerDiagnosticRunner');
   const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'OK' } }], usage: { buyer_cost_micro: 1 } }), { headers: { 'Content-Type': 'application/json' } }));
   vi.stubGlobal('fetch', fetcher);
   try {
     const env = { SURPLUS_API_KEY: 'mock-only', SURPLUS_BASE_URL: 'https://api.surplusintelligence.ai/v1' };
-    await diagnosticAdapter('surplus', env, true, 10000).call('Reply with exactly: OK', new AbortController().signal);
-    expect(String(fetcher.mock.calls[0][0])).toBe('https://api.surplusintelligence.ai/min90/v1/chat/completions');
-    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ max_tokens: 10000, stream: false });
+    await diagnosticAdapter('surplus', env).call('Reply with exactly: OK', new AbortController().signal);
+    expect(String(fetcher.mock.calls[0][0])).toBe('https://api.surplusintelligence.ai/v1/chat/completions');
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).not.toHaveProperty('max_tokens');
     await diagnosticAdapter('surplus', env).call('ordinary', new AbortController().signal);
     expect(String(fetcher.mock.calls[1][0])).toBe('https://api.surplusintelligence.ai/v1/chat/completions');
     expect(fetcher).toHaveBeenCalledTimes(2);
   } finally { vi.unstubAllGlobals(); }
 });
 
-it('pair CheaperInference dispatch sends documented reasoning and matching price constraint once', async () => {
+it('CheaperInference sends one direct request without pricing or output constraints', async () => {
   const { diagnosticAdapter } = await import('./providerDiagnosticRunner');
   const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 }, billing: { status: 'settled', currency: 'USD', billed_cost_usd: '0.000001' } }), { headers: { 'Content-Type': 'application/json' } }));
   vi.stubGlobal('fetch', fetcher);
   try {
     await diagnosticAdapter('cheaperinference', { CHEAPERINFERENCE_API_KEY: 'mock-only', CHEAPERINFERENCE_MODEL: 'beam' }, true).call('Reply with exactly: OK', new AbortController().signal);
     expect(fetcher).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse(String(fetcher.mock.calls[0][1]?.body));
+    expect(sent).not.toHaveProperty('max_tokens'); expect(sent).not.toHaveProperty('min_discount_percent');
     expect(String(fetcher.mock.calls[0][0])).toBe('https://api.cheaperinference.com/v1/chat/completions');
-    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ model: 'beam', reasoning: { effort: 'low' }, min_discount_percent: 0, max_tokens: 256, stream: false });
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ model: 'beam', reasoning: { effort: 'low' }, stream: false });
   } finally { vi.unstubAllGlobals(); }
 });
 
@@ -94,16 +101,8 @@ it('passes chosen output limit into both provider adapter and durable admission'
   const { deps } = setup();
   await runDiagnostic({ ...input, maxOutputTokens: 1024 }, deps);
   expect(deps.adapter).toHaveBeenCalledWith('surplus', 1024);
-  expect(deps.verifyEvidence).toHaveBeenCalledWith('surplus', 'test', 1024);
+  expect(deps.verifyAdmission).toHaveBeenCalledWith('surplus', 'test', 1024);
   expect(deps.store.reserve).toHaveBeenCalledWith(input.idempotencyKey, 'surplus', 'test', 1024);
-});
-
-it('rejects unsupported Cheaper adapter output before any reserve or provider call', async () => {
-  const { deps, call } = setup();
-  const r = await runDiagnostic({ ...input, provider: 'cheaperinference', maxOutputTokens: 131073 }, deps);
-  expect(r.timeline[0]).toMatchObject({ stage: 'validation', reason: 'invalid_request' });
-  expect(deps.store.reserve).not.toHaveBeenCalled(); expect(deps.store.finish).not.toHaveBeenCalled();
-  expect(deps.adapter).not.toHaveBeenCalled(); expect(call).not.toHaveBeenCalled();
 });
 
 it('a disable after reservation blocks dispatch and preserves the hold without a fake receipt', async () => {
@@ -136,4 +135,15 @@ it('a delayed final claim acknowledgement cannot dispatch after pricing expiry',
   const r = await runDiagnostic(input, deps);
   expect(r.timeline.at(-1)).toMatchObject({ stage: 'dispatch', reason: 'budget_evidence_unavailable' });
   expect(call).not.toHaveBeenCalled(); expect(deps.store.finish).not.toHaveBeenCalled();
+});
+
+it.each(['surplus', 'cheaperinference'] as const)('honors an explicit legacy output setting for %s without imposing a default', async provider => {
+  const { diagnosticAdapter } = await import('./providerDiagnosticRunner');
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] }), { headers: { 'Content-Type': 'application/json' } }));
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    await diagnosticAdapter(provider, { SURPLUS_API_KEY: 'mock-only', CHEAPERINFERENCE_API_KEY: 'mock-only' }, false, 10000).call('x'.repeat(70000), new AbortController().signal);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).max_tokens).toBe(10000);
+  } finally { vi.unstubAllGlobals(); }
 });

@@ -11,6 +11,9 @@ export type AdapterConfig = {
   maxOutputTokens: number;
   timeoutMs: number;
   streamUsage: boolean;
+  /** Admin manual diagnostics may defer output and timeout defaults to provider/SDK. */
+  providerDefaults?: boolean;
+  requestedOutputTokens?: number;
   /** The variable's name, never its value. Used only for safe operator diagnostics. */
   envName?: string;
   extraBody?: Readonly<Record<string, unknown>>;
@@ -286,7 +289,8 @@ export class OpenAiCompatProvider implements AIProvider {
     this.#config = Object.freeze({
       provider: config.provider, model: config.model, baseURL: config.baseURL.replace(/\/$/, ''),
       priority: config.priority, maxOutputTokens: config.maxOutputTokens, timeoutMs: config.timeoutMs,
-      streamUsage: config.streamUsage, envName: config.envName ?? DEFAULT_ENV[config.provider],
+      requestedOutputTokens: Number.isSafeInteger(config.requestedOutputTokens) && config.requestedOutputTokens! > 0 ? config.requestedOutputTokens : undefined,
+      streamUsage: config.streamUsage, providerDefaults: config.providerDefaults === true, envName: config.envName ?? DEFAULT_ENV[config.provider],
       extraBody: Object.freeze(extraBody),
     });
     Object.freeze(this);
@@ -300,7 +304,7 @@ export class OpenAiCompatProvider implements AIProvider {
 
   #getClient(): OpenAI {
     return this.#client ??= new OpenAI({
-      apiKey: this.#key, baseURL: this.#config.baseURL, timeout: this.#config.timeoutMs,
+      apiKey: this.#key, baseURL: this.#config.baseURL, ...(this.#config.providerDefaults ? {} : { timeout: this.#config.timeoutMs }),
       organization: null, project: null, adminAPIKey: null, webhookSecret: null,
       maxRetries: 0, logLevel: 'off', fetchOptions: { redirect: 'error' },
       // The SDK inherits OPENAI_CUSTOM_HEADERS even for non-OpenAI base URLs. Never forward
@@ -343,9 +347,9 @@ export class OpenAiCompatProvider implements AIProvider {
         ...this.#config.extraBody,
         ...(['DEEPSEEK', 'GLM'].includes(this.name) ? { thinking: { type: 'disabled' } } : {}),
         model: this.#config.model, messages,
-        ...(this.name === 'GROQ' || this.name === 'OPENAI' ? { max_completion_tokens: this.#config.maxOutputTokens } : { max_tokens: this.#config.maxOutputTokens }),
+        ...(this.#config.providerDefaults ? (this.#config.requestedOutputTokens === undefined ? {} : { max_tokens: this.#config.requestedOutputTokens }) : this.name === 'GROQ' || this.name === 'OPENAI' ? { max_completion_tokens: this.#config.maxOutputTokens } : { max_tokens: this.#config.maxOutputTokens }),
       };
-      const options = { signal, maxRetries: 0, timeout: this.#config.timeoutMs };
+      const options = { signal, maxRetries: 0, ...(this.#config.providerDefaults ? {} : { timeout: this.#config.timeoutMs }) };
       let content = '';
       let usage: ProviderUsage | undefined;
       let cachedInputTokens: number | undefined;

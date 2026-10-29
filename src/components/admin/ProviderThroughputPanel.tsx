@@ -9,7 +9,7 @@ export function ProviderThroughputPanel({ adminToken }: { adminToken: string }) 
     setBusy(provider);
     try {
       const r = await fetch(`/api/admin/provider-diagnostics/${provider}/throughput`, { method: 'POST', cache: 'no-store',
-        headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' }, body: JSON.stringify({ requests, concurrency, retries: 1, maxOutputTokens: 64 }) });
+        headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' }, body: JSON.stringify({ requests, concurrency, retries: 2 }) });
       if (!r.ok || !r.body) { const j = await r.json().catch(() => ({})); setResult(s => ({ ...s, [provider]: `HTTP ${r.status} ${j.error ?? ''} ${j.reason ?? ''}` })); return; }
       // NDJSON stream: started → progress heartbeats → exactly one result | error line.
       const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '', final = false;

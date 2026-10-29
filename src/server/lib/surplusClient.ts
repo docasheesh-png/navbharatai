@@ -56,6 +56,8 @@ export interface SurplusChatOptions {
   model?: string;
   maxTokens?: number;
   signal?: AbortSignal;
+  /** Ask the model to answer directly (no reasoning phase). A 400 rejection of the flag retries once without it. */
+  disableThinking?: boolean;
 }
 
 /** Server-only, lazy factory. Importing this module does not read secrets or make requests. */
@@ -110,12 +112,20 @@ export function createSurplusChat(
       throw new SurplusError('invalid_request');
     }
     try {
-      const response = await client.chat.completions.create({
+      const request = (noThinking: boolean) => client.chat.completions.create({
         model: options.model?.trim() || defaultModel,
         messages: requestMessages,
         ...(limits.providerDefaults && options.maxTokens === undefined ? {} : { max_tokens: maxTokens }),
+        ...(noThinking ? { thinking: { type: 'disabled' } } : {}),
         stream: false,
-      }, { signal: options.signal });
+      } as Parameters<typeof client.chat.completions.create>[0] & { stream: false }, { signal: options.signal });
+      let response;
+      try { response = await request(options.disableThinking === true); }
+      catch (error) {
+        // A 400 is a rejected request (never billed): the supplier does not know the flag.
+        if (options.disableThinking !== true || !(error instanceof OpenAI.APIError) || error.status !== 400) throw error;
+        response = await request(false);
+      }
       // Surplus can report long-running failures inside HTTP 200 bodies. HTTP success is
       // NOT inference success. Never retry these, or infer that a failed turn was unbilled.
       const usage = safeUsage(response?.usage);

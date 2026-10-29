@@ -93,7 +93,7 @@ it('CheaperInference sends one direct request without pricing or output constrai
     const sent = JSON.parse(String(fetcher.mock.calls[0][1]?.body));
     expect(sent).not.toHaveProperty('max_tokens'); expect(sent).not.toHaveProperty('min_discount_percent');
     expect(String(fetcher.mock.calls[0][0])).toBe('https://api.cheaperinference.com/v1/chat/completions');
-    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ model: 'beam', reasoning: { effort: 'low' }, stream: false });
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({ model: 'beam', reasoning: { effort: 'none' }, stream: false });
   } finally { vi.unstubAllGlobals(); }
 });
 

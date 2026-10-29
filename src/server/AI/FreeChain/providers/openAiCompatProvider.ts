@@ -240,8 +240,8 @@ function validatedExtraBody(extra: AdapterConfig['extraBody'], provider: Adapter
       result[name] = value;
     } else if (name === 'min_discount_percent' && provider === 'CHEAPERINFERENCE' && typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 99.99) {
       result.min_discount_percent = value;
-    } else if (name === 'reasoning' && provider === 'CHEAPERINFERENCE' && record(value)?.effort === 'low' && Object.keys(record(value)!).length === 1) {
-      result.reasoning = { effort: 'low' };
+    } else if (name === 'reasoning' && provider === 'CHEAPERINFERENCE' && (record(value)?.effort === 'low' || record(value)?.effort === 'none') && Object.keys(record(value)!).length === 1) {
+      result.reasoning = { effort: record(value)!.effort };
     } else if (name === 'seed' && typeof value === 'number' && Number.isSafeInteger(value)) {
       result.seed = value;
     } else if (name === 'reasoning_effort' && (value === 'none' || value === 'minimal' || value === 'low')) {

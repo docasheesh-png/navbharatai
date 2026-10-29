@@ -56,6 +56,8 @@ export interface QualityReview {
   benchmarkId: string;
   artifactSha256: string;
   cohort: string;
+  /** Optional reviewed coding-quality score 0–100 (higher = better). Ranks eligible ≥90%-discount offers. */
+  qualityScore?: number;
   approved: boolean;
   reviewedAt: number;
   expiresAt: number;

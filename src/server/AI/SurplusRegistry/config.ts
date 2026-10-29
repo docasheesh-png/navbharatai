@@ -23,3 +23,21 @@ export const SURPLUS_OBSERVATION_CANDIDATES: readonly string[] = Object.freeze([
   'qwen3.8-flash', 'qwen3.8-2.4t-a95b', 'qwen3-coder', 'qwen3-coder-next', 'qwen3-coder-30b-a3b-instruct',
   'minimax-m2.5', 'minimax-m2.1', 'gpt-5.6-luna', 'gpt-5.6-sol', 'claude-sonnet-5',
 ]);
+
+/**
+ * Coding-quality preference (best first) used ONLY to order offers that already passed every
+ * gate (reviewed+approved, healthy, trusted, fresh, ≥90% discount reported AND workload-weighted).
+ * Grants nothing by itself. A reviewed `qualityScore` on the QualityReview overrides this order.
+ * Admin decision 2026-10-29: when >1 coding-eligible model qualifies, pick the better one, not the cheapest.
+ */
+export const SURPLUS_CODING_QUALITY_ORDER: readonly string[] = Object.freeze([
+  'claude-sonnet-5', 'gpt-5.6-sol', 'qwen3-coder', 'glm-5.3', 'qwen3.8-2.4t-a95b',
+  'deepseek-v4.1-flash-1017', 'deepseek-v4.1-flash', 'minimax-m2.5', 'gpt-5.6-luna', 'qwen3-coder-next',
+  'glm-5.2', 'minimax-m2.1', 'glm-5.3-flash', 'qwen3.8-flash', 'qwen3-coder-30b-a3b-instruct',
+]);
+/** Higher = better. Reviewed score (0–100) wins; else static order; unknown models rank last. */
+export function surplusCodingQuality(model: string, reviewedScore?: unknown): number {
+  if (typeof reviewedScore === 'number' && Number.isFinite(reviewedScore) && reviewedScore >= 0 && reviewedScore <= 100) return 1000 + reviewedScore;
+  const i = SURPLUS_CODING_QUALITY_ORDER.indexOf(model);
+  return i < 0 ? -1 : SURPLUS_CODING_QUALITY_ORDER.length - i;
+}

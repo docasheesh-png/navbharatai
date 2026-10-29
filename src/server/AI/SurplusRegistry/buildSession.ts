@@ -53,7 +53,7 @@ export interface SurplusReviewedAdapter {
   routing(review: SurplusCapabilityReview): Readonly<Record<string, unknown>>;
   bind?(permit: SurplusTurnPermit, state: SurplusReviewedState, review: SurplusCapabilityReview): void;
   dispatch(request: Record<string, unknown>, signal: AbortSignal, permit: SurplusTurnPermit): Promise<unknown>;
-  identify(raw: unknown): { model: string; providerId: string; completion: OpenAiCompletionLike };
+  identify(raw: unknown, expectedModel?: string): { model: string; providerId: string; completion: OpenAiCompletionLike };
   receipt(raw: unknown, permit: SurplusTurnPermit, result: TurnResult): Promise<TurnUsage['surplusReceipt']>;
   failure?(raw: unknown, permit: SurplusTurnPermit, result: TurnResult, failure: SurplusTurnFailure): Promise<{ receipt?: TurnUsage['surplusReceipt']; canRetry: boolean }>;
 }
@@ -146,7 +146,7 @@ export async function createSurplusBuildSession(options: {
               capability(frozenState, { model: selectedModel, providerId: review.providerId, offerId: plan.selection!.offerId }, now(), workload);
             },
             validateResponse(raw: unknown) {
-              const identity = adapter.identify(raw);
+              const identity = adapter.identify(raw, selectedModel);
               if (identity.model !== selectedModel || identity.providerId !== review.providerId) return fail('returned_route_identity_mismatch');
               return identity.completion;
             },

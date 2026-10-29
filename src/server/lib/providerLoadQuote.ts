@@ -37,18 +37,21 @@ export async function readLoadQuote(outputTokens: number, env = process.env, tra
   if (!data || !objectOk || !modelOk || discount !== 0) throw new LoadDiagnosticError('unavailable', 'quote_schema', 'schema_mismatch', response.status, undefined, fields);
   let input: number, output: number;
   const keys = supplyKeys(data);
-  let rates = resolveRates(data);
-  // DNA fix (live 2026-10-29): supplier 200 with every max_*/list_* null (no list price for beam at min_discount 0).
-  // The catalog /v1/models carries the current per-million rates for the same key; use those as the ceiling.
+  // DNA fix (live 2026-10-29, prod 05000): supply 200 carries max_* null + list_* / primary_market_offers / candidates.
+  // Order: list_* (== ceiling at min_discount 0) -> offers/candidates (highest) -> /v1/models catalog. Values may be
+  // string numbers, "$"-prefixed, exponent or >9-decimal floats; normalizeUsd rounds UP to nano so the ceiling never shrinks.
+  let { rates, path } = resolveRatesWithPath(data);
   if (!num(rates.input) || !num(rates.output)) {
     const catalog = await readCatalogRates(status.defaultModel, env.CHEAPERINFERENCE_API_KEY!.trim(), transport);
-    if (catalog) rates = { input: num(rates.input) ? rates.input : catalog.input, output: num(rates.output) ? rates.output : catalog.output };
+    if (catalog) { rates = { input: num(rates.input) ? rates.input : catalog.input, output: num(rates.output) ? rates.output : catalog.output }; path = path === 'none' ? 'catalog' : `${path}_catalog`; }
+    else path = `${path}_catalog_miss`;
   }
-  try { input = usdToNanoUsd(rates.input as string | number); output = usdToNanoUsd(rates.output as string | number); } catch { throw new LoadDiagnosticError('unavailable', 'quote_rates', 'invalid_rates', response.status, undefined, fields, keys); }
+  const diagKeys = [`rate_path.${path}`, ...keys];
+  try { input = usdToNanoUsd(normalizeUsd(rates.input)); output = usdToNanoUsd(normalizeUsd(rates.output)); } catch { throw new LoadDiagnosticError('unavailable', 'quote_rates', 'invalid_rates', response.status, undefined, fields, diagKeys); }
   let maximumNanoUsd: number;
   try { maximumNanoUsd = maximumCostNanoUsd(1048576, outputTokens, input, output); }
-  catch { throw new LoadDiagnosticError('unavailable', 'quote_rates', 'invalid_rates', response.status, undefined, fields, keys); }
-  if (!maximumNanoUsd) throw new LoadDiagnosticError('unavailable', 'quote_rates', 'zero_bound', response.status, undefined, fields, keys);
+  catch { throw new LoadDiagnosticError('unavailable', 'quote_rates', 'invalid_rates', response.status, undefined, fields, diagKeys); }
+  if (!maximumNanoUsd) throw new LoadDiagnosticError('unavailable', 'quote_rates', 'zero_bound', response.status, undefined, fields, diagKeys);
   return { model: status.defaultModel, maximumNanoUsd, checkedAt: Date.now(), source: 'https://api.cheaperinference.com/docs#price-ceiling' };
 }
 
@@ -67,7 +70,18 @@ function unwrapSupply(raw: unknown, depth = 0): Record<string, unknown> | null {
   return obj;
 }
 
-const num = (v: unknown) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v)) && Number(v) > 0;
+const clean = (v: unknown) => typeof v === 'string' ? v.trim().replace(/^\$/, '').replace(/,/g, '') : v;
+const num = (v: unknown) => { const c = clean(v); return c !== null && c !== undefined && c !== '' && typeof c !== 'boolean' && Number.isFinite(Number(c)) && Number(c) > 0; };
+/** Decimal USD string with <=9 fractional digits, rounded UP (ceiling-safe). Throws on non-positive / non-numeric. */
+export function normalizeUsd(v: unknown): string {
+  if (!num(v)) throw new Error('Invalid USD amount');
+  const c = clean(v); const text = typeof c === 'string' && /^\d+(\.\d+)?$/.test(c) ? c : Number(c).toFixed(20).replace(/0+$/, '').replace(/\.$/, '');
+  const [whole, frac = ''] = text.split('.');
+  if (frac.length <= 9) return frac ? `${whole}.${frac}` : whole;
+  let nano = BigInt(whole) * 1_000_000_000n + BigInt(frac.slice(0, 9));
+  if (/[1-9]/.test(frac.slice(9))) nano += 1n;
+  return `${nano / 1_000_000_000n}.${(nano % 1_000_000_000n).toString().padStart(9, '0')}`;
+}
 const rec = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null);
 const pick = (o: Record<string, unknown> | null, names: string[]) => { if (o) for (const n of names) if (num(o[n])) return o[n]; return undefined; };
 const IN = ['max_input_per_million', 'max_input_usd_per_million', 'input_per_million', 'list_input_per_million', 'input_price_per_million', 'input', 'prompt'];
@@ -81,13 +95,24 @@ export function resolveRates(data: Record<string, unknown>): { input: unknown; o
   if (data.max_input_per_million != null && !num(data.max_input_per_million)) input = data.max_input_per_million;
   if (data.max_output_per_million != null && !num(data.max_output_per_million)) output = data.max_output_per_million;
   for (const s of scopes) { input ??= pick(s, IN); output ??= pick(s, OUT); }
-  const offers = Array.isArray(data.primary_market_offers) ? data.primary_market_offers : Array.isArray(data.offers) ? data.offers : [];
+  const offers = ['primary_market_offers', 'offers', 'candidates'].flatMap(k => Array.isArray(data[k]) ? data[k] as unknown[] : []);
   if (input === undefined || output === undefined) {
     let mi = 0, mo = 0;
     for (const o of offers) { const r = rec(o); const i = Number(pick(r, IN) ?? pick(rec(r?.pricing), IN) ?? 0), x = Number(pick(r, OUT) ?? pick(rec(r?.pricing), OUT) ?? 0); if (i > mi) mi = i; if (x > mo) mo = x; }
     if (input === undefined && mi > 0) input = mi; if (output === undefined && mo > 0) output = mo;
   }
   return { input, output };
+}
+export type RatePath = 'max' | 'list' | 'nested' | 'offers' | 'none';
+/** Same as resolveRates but reports which evidence produced the ceiling (for admin diagnostics). */
+export function resolveRatesWithPath(data: Record<string, unknown>): { rates: { input: unknown; output: unknown }; path: RatePath } {
+  const rates = resolveRates(data);
+  if (!num(rates.input) || !num(rates.output)) return { rates, path: 'none' };
+  const has = (names: string[]) => names.some(n => num(data[n]) && clean(data[n]) === clean(rates.input) || num(data[n]) && clean(data[n]) === clean(rates.output));
+  const path: RatePath = has(['max_input_per_million', 'max_output_per_million']) ? 'max'
+    : has(['list_input_per_million', 'list_output_per_million']) ? 'list'
+    : IN.concat(OUT).some(n => num(data[n])) ? 'list' : ['primary_market_offers', 'offers', 'candidates'].some(k => Array.isArray(data[k]) && (data[k] as unknown[]).length) ? 'offers' : 'nested';
+  return { rates, path };
 }
 /** Key names only (never values), one level of nesting, for honest diagnostics. */
 function supplyKeys(data: Record<string, unknown>): string[] {

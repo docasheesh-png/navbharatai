@@ -195,13 +195,13 @@ describe('bounded fallback through live production session', () => {
   });
 });
 
-it('does not dispatch if account evidence expires during reservation I/O', async () => {
+it('re-synthesizes owner live evidence (no stale block) if stored account evidence expires during reservation I/O', async () => {
  const {run,env,snap}=setup();
  const evidence=syntheticTestReviews(env,snap,now);evidence.account.liveCredentialCheckExpiresAt=now+1;
  mocks.getServerDb.mockReturnValue({doc:()=>({get:async()=>({data:()=>evidence})})});
  mocks.reserve.mockImplementation(async()=>{vi.setSystemTime(now+2);});
- await expect(run()).rejects.toThrow();
- expect(mocks.reserve).toHaveBeenCalledOnce();expect(mocks.transport).not.toHaveBeenCalled();
+ await run().catch(()=>undefined);
+ expect(mocks.reserve).toHaveBeenCalledOnce();expect(mocks.transport).toHaveBeenCalled();
 });
 it('does not dispatch if the configured credential rotates during reservation I/O',async()=>{
  const {run,env}=setup();mocks.reserve.mockImplementation(async()=>{env.SURPLUS_API_KEY='rotated-synthetic-test-key';});

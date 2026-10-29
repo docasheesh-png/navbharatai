@@ -19,7 +19,7 @@ export function diagnosticAdapter(provider: DiagnosticProvider, env = process.en
     let httpStatus: number | undefined;
     const chat = createSurplusChat(env, async (input, init) => { const response = await fetch(input, init); httpStatus = response.status; return response; }, { maxOutputTokens: 8192, providerDefaults: true });
     return { model: env.SURPLUS_MODEL?.trim() || SURPLUS_DEFAULT_MODEL, async call(prompt, signal) {
-      const r = await chat(prompt, { signal, ...(outputTokens === undefined ? {} : { maxTokens: outputTokens }) }).catch(error => { if (error instanceof SurplusError) throw new DiagnosticSurplusFailure(error, httpStatus); throw error; });
+      const r = await chat(prompt, { signal, disableThinking: true, ...(outputTokens === undefined ? {} : { maxTokens: outputTokens }) }).catch(error => { if (error instanceof SurplusError) throw new DiagnosticSurplusFailure(error, httpStatus); throw error; });
       return { text: r.text, usage: { inputTokens: r.usage?.prompt_tokens ?? null, outputTokens: r.usage?.completion_tokens ?? null, cachedTokens: null }, amount: surplusBuyerCostToUsd(r.usage?.buyer_cost_micro) };
     } };
   }
@@ -28,7 +28,7 @@ export function diagnosticAdapter(provider: DiagnosticProvider, env = process.en
   const adapter = new OpenAiCompatProvider({ provider: 'CHEAPERINFERENCE', model: status.defaultModel,
     key: env.CHEAPERINFERENCE_API_KEY!.trim(), baseURL: CHEAPERINFERENCE_BASE_URL, priority: 0,
     maxOutputTokens: 2048, timeoutMs: 600000, providerDefaults: true, requestedOutputTokens: outputTokens,
-    streamUsage: false, extraBody: { reasoning: { effort: 'low' } } });
+    streamUsage: false, extraBody: { reasoning: { effort: 'none' } } });
   return { model: status.defaultModel, async call(prompt, signal) {
     const r = await adapter.executeTurn({ prompt, signal });
     return { text: r.content, usage: { inputTokens: r.usage?.inputTokens ?? null, outputTokens: r.usage?.outputTokens ?? null, cachedTokens: r.cachedInputTokens ?? null }, amount: r.supplierChargeUsd ?? null };

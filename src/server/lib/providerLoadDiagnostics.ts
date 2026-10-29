@@ -2,7 +2,7 @@ import { LoadBatchError } from './providerLoadBatch';
 export type LoadStage = 'configuration' | 'settings_read' | 'revision' | 'quote_configuration' | 'quote_transport' | 'quote_http' | 'quote_schema' | 'quote_rates' | 'configuration_write';
 export class LoadDiagnosticError extends LoadBatchError {
   constructor(code: LoadBatchError['code'], readonly stage: LoadStage, readonly reason: string,
-    readonly upstreamStatus?: number, readonly supplierCode?: string, readonly fields?: Record<string, string>) { super(code); }
+    readonly upstreamStatus?: number, readonly supplierCode?: string, readonly fields?: Record<string, string>, readonly keys?: string[]) { super(code); }
 }
 export async function loadStage<T>(stage: LoadStage, run: () => Promise<T>): Promise<T> {
   try { return await run(); } catch (error) {
@@ -23,5 +23,6 @@ export function safeLoadDiagnostic(error: unknown, correlationId: string) {
     reason: e && reasons.includes(e.reason) ? e.reason : error instanceof LoadBatchError && error.code === 'conflict' ? 'revision_conflict' : error instanceof LoadBatchError && error.code === 'invalid' ? 'validation_failed' : 'operation_unavailable',
     ...(e?.upstreamStatus && Number.isInteger(e.upstreamStatus) && e.upstreamStatus >= 100 && e.upstreamStatus <= 599 ? { upstreamStatus: e.upstreamStatus } : {}),
     ...(e?.supplierCode && supplierCodes.includes(e.supplierCode) ? { supplierCode: e.supplierCode } : {}),
-    ...(Object.keys(fields).length ? { fields } : {}) };
+    ...(Object.keys(fields).length ? { fields } : {}),
+    ...(e?.keys?.length ? { keys: e.keys.filter(k => typeof k === 'string' && /^[A-Za-z0-9_.]{1,64}$/.test(k)).slice(0, 40) } : {}) };
 }

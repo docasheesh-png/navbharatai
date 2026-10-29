@@ -36,11 +36,13 @@ export async function readLoadQuote(outputTokens: number, env = process.env, tra
   const modelOk = data?.model === undefined || data?.model === null || sameBeamModel(String(data.model), status.defaultModel);
   if (!data || !objectOk || !modelOk || discount !== 0) throw new LoadDiagnosticError('unavailable', 'quote_schema', 'schema_mismatch', response.status, undefined, fields);
   let input: number, output: number;
-  try { input = usdToNanoUsd(data.max_input_per_million as string | number); output = usdToNanoUsd(data.max_output_per_million as string | number); } catch { throw new LoadDiagnosticError('unavailable', 'quote_rates', 'invalid_rates', response.status, undefined, fields); }
+  const keys = supplyKeys(data);
+  const rates = resolveRates(data);
+  try { input = usdToNanoUsd(rates.input as string | number); output = usdToNanoUsd(rates.output as string | number); } catch { throw new LoadDiagnosticError('unavailable', 'quote_rates', 'invalid_rates', response.status, undefined, fields, keys); }
   let maximumNanoUsd: number;
   try { maximumNanoUsd = maximumCostNanoUsd(1048576, outputTokens, input, output); }
-  catch { throw new LoadDiagnosticError('unavailable', 'quote_rates', 'invalid_rates', response.status, undefined, fields); }
-  if (!maximumNanoUsd) throw new LoadDiagnosticError('unavailable', 'quote_rates', 'zero_bound', response.status, undefined, fields);
+  catch { throw new LoadDiagnosticError('unavailable', 'quote_rates', 'invalid_rates', response.status, undefined, fields, keys); }
+  if (!maximumNanoUsd) throw new LoadDiagnosticError('unavailable', 'quote_rates', 'zero_bound', response.status, undefined, fields, keys);
   return { model: status.defaultModel, maximumNanoUsd, checkedAt: Date.now(), source: 'https://api.cheaperinference.com/docs#price-ceiling' };
 }
 
@@ -57,4 +59,33 @@ function unwrapSupply(raw: unknown, depth = 0): Record<string, unknown> | null {
   if (obj.max_input_per_million != null || obj.max_output_per_million != null || obj.object === 'model.supply') return obj;
   for (const key of ['data', 'supply', 'result', 'model_supply']) { const hit = unwrapSupply(obj[key], depth + 1); if (hit) return hit; }
   return obj;
+}
+
+const num = (v: unknown) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v)) && Number(v) > 0;
+const rec = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null);
+const pick = (o: Record<string, unknown> | null, names: string[]) => { if (o) for (const n of names) if (num(o[n])) return o[n]; return undefined; };
+const IN = ['max_input_per_million', 'max_input_usd_per_million', 'input_per_million', 'list_input_per_million', 'input_price_per_million', 'input', 'prompt'];
+const OUT = ['max_output_per_million', 'max_output_usd_per_million', 'output_per_million', 'list_output_per_million', 'output_price_per_million', 'output', 'completion'];
+/** Price ceiling per million tokens. Prefers max_*; at min_discount_percent=0 the list price is the same ceiling, so list_* and
+ * nested pricing/rates/price_ceiling/max objects are accepted; finally the highest primary-market offer rate (still an upper bound). */
+export function resolveRates(data: Record<string, unknown>): { input: unknown; output: unknown } {
+  const scopes = [data, ...['price_ceiling', 'ceiling', 'max', 'rates', 'pricing', 'price', 'list', 'list_price'].map(k => rec(data[k]))];
+  let input: unknown, output: unknown;
+  // A present-but-malformed ceiling is corrupt evidence: never paper over it with a fallback.
+  if (data.max_input_per_million != null && !num(data.max_input_per_million)) input = data.max_input_per_million;
+  if (data.max_output_per_million != null && !num(data.max_output_per_million)) output = data.max_output_per_million;
+  for (const s of scopes) { input ??= pick(s, IN); output ??= pick(s, OUT); }
+  const offers = Array.isArray(data.primary_market_offers) ? data.primary_market_offers : Array.isArray(data.offers) ? data.offers : [];
+  if (input === undefined || output === undefined) {
+    let mi = 0, mo = 0;
+    for (const o of offers) { const r = rec(o); const i = Number(pick(r, IN) ?? pick(rec(r?.pricing), IN) ?? 0), x = Number(pick(r, OUT) ?? pick(rec(r?.pricing), OUT) ?? 0); if (i > mi) mi = i; if (x > mo) mo = x; }
+    if (input === undefined && mi > 0) input = mi; if (output === undefined && mo > 0) output = mo;
+  }
+  return { input, output };
+}
+/** Key names only (never values), one level of nesting, for honest diagnostics. */
+function supplyKeys(data: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const [k, v] of Object.entries(data)) { out.push(k); const r = rec(v); if (r) for (const c of Object.keys(r)) out.push(`${k}.${c}`); }
+  return out.filter(k => /^[A-Za-z0-9_.]{1,64}$/.test(k)).slice(0, 40);
 }

@@ -71,9 +71,9 @@ describe('Surplus live pilot — the scope ask is no longer killed by a jammed g
     const db = fakeDb({ [livePilotPath]: JAMMED });
     mocks.getServerDb.mockReturnValue(db);
     const { session, result, records } = await scopeOnce();
-    expect(session.model).toBe('gpt-5.6-sol');
+    expect(session.model).toBe('deepseek-v4.1-flash');
     expect(result).toMatchObject({ scope: 'simple', source: 'model' });
-    expect(records).toEqual([expect.objectContaining({ ok: true, provider: 'SURPLUS', model: 'gpt-5.6-sol' })]);
+    expect(records).toEqual([expect.objectContaining({ ok: true, provider: 'SURPLUS', model: 'deepseek-v4.1-flash' })]);
     expect(mocks.transport).toHaveBeenCalledTimes(1);
     // The global doc is a counter now: unlocked, and the old quarantine is kept only as history.
     expect(db.docs.get(livePilotPath)).toMatchObject({ pendingCallId: null, blocked: false, quarantineReason: null, lastQuarantineReason: 'supplier_cost_unknown' });
@@ -90,7 +90,7 @@ describe('Surplus live pilot — the scope ask is no longer killed by a jammed g
     expect(receipts.map(r => r.state)).toEqual(['pending']); // the uncertain call's own liability is retained
     const second = await scopeOnce(); // before this fix: "Surplus pilot pending, blocked or exhausted"
     expect(second.result).toMatchObject({ scope: 'simple', source: 'model' });
-    expect(second.records[0]).toMatchObject({ ok: true, provider: 'SURPLUS', model: 'gpt-5.6-sol' });
+    expect(second.records[0]).toMatchObject({ ok: true, provider: 'SURPLUS', model: 'deepseek-v4.1-flash' });
   });
 
   it('concurrent live builds both reserve (no global single-flight), replay of one callId still refused', async () => {

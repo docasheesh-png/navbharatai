@@ -205,7 +205,7 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
       if (why) {
         // Enumerated check name only (never upstream text) so the next live fail names its DNA.
         console.warn(`[SURPLUS] response identity rejected: ${why}`);
-        throw new Error('Surplus response route or capabilities did not match');
+        throw new Error(`Surplus response route or capabilities did not match (${why})`);
       }
       const completion = normalizeSurplusCompletion(structuredClone(body) as unknown as OpenAiCompletionLike, expectedModel);
       if (telemetry.truncated === true && completion.choices?.[0]) completion.choices[0].finish_reason = 'length';
@@ -278,7 +278,12 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
             && !choice.message.content?.trim() && !choice.message.tool_calls?.length;
         } catch { /* no route-identity guess */ }
       }
-      return { receipt, canRetry: verifiedEmpty && record.canContinue === true && receipt?.status === 'absorbed' && receipt.actualCostUsd !== null && receipt.officialCeilingUsd !== null };
+      // DNA (z scope, gpt-5.6-sol): a returned-but-unusable completion (invalid_completion) was terminal →
+      // the whole build died on model A. Once its cost is durably recorded, let the session try the next
+      // Surplus coding model (B/C) — Surplus-internal ladder only, never Weak/Kimi/GLM.
+      const recorded = record.canContinue === true && (receipt?.status === 'absorbed' || receipt?.status === 'chargeable');
+      return { receipt, canRetry: (verifiedEmpty && record.canContinue === true && receipt?.status === 'absorbed' && receipt.actualCostUsd !== null && receipt.officialCeilingUsd !== null)
+        || (failure.reason === 'invalid_completion' && recorded) };
     },
   };
 }

@@ -78,6 +78,12 @@ function capability(state: SurplusReviewedState, selection: { model: string; pro
       || workload.input + workload.output > r.contextTokens || workload.output > r.maxOutputTokens) return fail('reviewed_capability_or_exact_route_contract_missing');
   return r;
 }
+/** OpenAI-style reasoning ids (gpt-5.x, o-series, *-sol/-terra, *thinking/*reason*). Flash/mini/instruct stay plain. */
+export function isSurplusReasoningModel(model: string): boolean {
+  const m = model.toLowerCase();
+  if (/flash|instruct|chat|non-?reason|turbo/.test(m)) return false;
+  return /(^|\/)(gpt-5|o[1-9])|-(sol|terra)\b|think|reason|\br1\b/.test(m);
+}
 /** Default OFF is a strict no-I/O path. ON with SURPLUS_API_KEY uses live key+flag admission (no Firestore review seed). */
 export async function createSurplusBuildSession(options: {
   buildId: string; tier: string; initialWorkload?: Workload; enabled?: boolean; adapter?: SurplusReviewedAdapter; now?: () => number;
@@ -95,7 +101,12 @@ export async function createSurplusBuildSession(options: {
       try { capability(state, offer, at, workload); return true; } catch { return false; }
     }) } : null;
   }
-  const initial = planSurplusDispatchCandidate(eligibleSnapshot(initialState, initialWorkload, now()), initialState.reviews, initialWorkload, now(), initialState.floorContract);
+  // Scope/first call: prefer a flash / non-reasoning Surplus model (reasoning models burned the budget
+  // thinking → empty/invalid scope answers). Reasoning models stay eligible as the Surplus-internal B/C.
+  const reasoningModels = new Set((initialState.snapshot?.offers ?? []).map(o => o.model).filter(isSurplusReasoningModel));
+  const plainFirst = planSurplusDispatchCandidate(eligibleSnapshot(initialState, initialWorkload, now(), undefined, reasoningModels), initialState.reviews, initialWorkload, now(), initialState.floorContract);
+  const initial = plainFirst.status === 'estimated_candidate' && plainFirst.selection ? plainFirst
+    : planSurplusDispatchCandidate(eligibleSnapshot(initialState, initialWorkload, now()), initialState.reviews, initialWorkload, now(), initialState.floorContract);
   if (initial.status !== 'estimated_candidate' || !initial.selection) return fail(initial.reason);
   let model = initial.selection.model;
   let poisoned = false;

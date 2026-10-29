@@ -63,3 +63,37 @@ describe('providerThroughput empty-response DNA (prod 05004)', () => {
     expect(calls).toBe(2); expect(r.retried).toBe(0); expect(r.fail).toBe(2);
   });
 });
+describe('providerThroughput DNA (prod 05006)', () => {
+  it('counts genuine short answers in human shape, still rejects wrong ones', () => {
+    expect(gradeAnswer('Answer: 42', 42)).toBe(true);
+    expect(gradeAnswer('{"result": 42}', 42)).toBe(true);
+    expect(gradeAnswer('**42**', 42)).toBe(true);
+    expect(gradeAnswer('"42"', 42)).toBe(true);
+    expect(gradeAnswer('The sorted list is [-5, 1, 3].', [-5, 1, 3])).toBe(true);
+    expect(gradeAnswer('{"answer":"A"}', 'A')).toBe(true);
+    expect(gradeAnswer('A.', 'A')).toBe(true);
+    expect(gradeAnswer('Answer: 41', 42)).toBe(false);
+    expect(gradeAnswer('[3, 1, -5]', [-5, 1, 3])).toBe(false);
+    expect(gradeAnswer('B', 'A')).toBe(false);
+  });
+  it('retries 404/5xx provider blips but never 401/403', () => {
+    expect(shouldRetryThroughput('provider:404')).toBe(true);
+    expect(shouldRetryThroughput('provider:503')).toBe(true);
+    expect(shouldRetryThroughput('provider:401')).toBe(false);
+    expect(shouldRetryThroughput('provider:403')).toBe(false);
+  });
+  it('backs off concurrency on 429 and still completes every request', async () => {
+    let inFlight = 0, peak = 0; const corpus = providerLoadCorpus(120);
+    const r = await runThroughput('cheaperinference', { model: 'm', call: async (p) => {
+      inFlight++; peak = Math.max(peak, inFlight);
+      try {
+        await new Promise(res => setTimeout(res, 5));
+        if (inFlight > 20) throw Object.assign(new Error('x'), { code: 'RATE_LIMIT', retryAfterMs: 50 });
+        const i = Number(/-(\d+)\]/.exec(p)![1]);
+        return { text: JSON.stringify(corpus[i].expected), amount: 0, usage: { inputTokens: 1, outputTokens: 1, cachedTokens: null } };
+      } finally { inFlight--; }
+    } }, { requests: 120, concurrency: 100, retries: 1 });
+    expect(r.ok).toBe(120); expect(r.pass).toBe(120); expect(r.minConcurrency).toBeLessThan(100);
+    expect(r.mismatchSamples).toEqual([]);
+  }, 30_000);
+});

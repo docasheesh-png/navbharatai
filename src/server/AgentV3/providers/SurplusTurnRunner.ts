@@ -35,6 +35,8 @@ export interface SurplusTurnRequest extends Record<string, unknown> {
   tools?: OpenAiTool[];
   tool_choice?: 'auto';
   max_tokens: number;
+  /** Thinking off: reasoning models spent the whole budget thinking → empty scope answer. */
+  reasoning_effort?: 'none';
   stream: false;
 }
 /** Internal-only facts. No provider error text or response data crosses this contract. */
@@ -109,12 +111,12 @@ function checkCompletion(completion: OpenAiCompletionLike, permit: SurplusTurnPe
   if (completion?.model === permit.model && Array.isArray(completion?.choices) && completion.choices.length === 0) {
     throw validationError('empty_completion');
   }
-  if (completion?.model !== permit.model || completion?.choices?.length !== 1 ||
-      !choice?.message || choice.message.role !== 'assistant' ||
-      (choice.message.content !== null && typeof choice.message.content !== 'string') ||
-      !['stop', 'length', 'tool_calls', 'content_filter'].includes(choice.finish_reason ?? '')) {
-    throw new Error('Surplus returned an invalid completion');
-  }
+  const bad = completion?.model !== permit.model ? 'model'
+    : completion?.choices?.length !== 1 ? 'choices'
+    : !choice?.message ? 'message' : choice.message.role !== 'assistant' ? 'role'
+    : (choice.message.content !== null && typeof choice.message.content !== 'string') ? 'content'
+    : !['stop', 'length', 'tool_calls', 'content_filter'].includes(choice.finish_reason ?? '') ? 'finish_reason' : '';
+  if (bad) throw new Error(`Surplus returned an invalid completion (${bad})`);
   // A refusal is terminal even when a compatible endpoint reports stop or includes tools.
   if ('refusal' in choice.message && choice.message.refusal != null) throw validationError('content_filter');
   const calls = choice.message.tool_calls;
@@ -233,6 +235,7 @@ export function makeSurplusTurnRunner(authority: SurplusRunnerAuthority): TurnRu
             messages: structuredClone(messages),
             ...(tools.length ? { tools: structuredClone(tools), tool_choice: 'auto' as const } : {}),
             max_tokens: permit.maxTokens,
+            reasoning_effort: 'none' as const,
             stream: false,
           };
           await assertAiAvailable();

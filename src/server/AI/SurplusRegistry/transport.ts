@@ -13,7 +13,7 @@ export const SURPLUS_TRANSPORT_MAX_ATTEMPTS = 3;
 export const SURPLUS_TRANSPORT_RETRY_BASE_MS = 250;
 export const SURPLUS_TRANSPORT_RETRY_MAX_MS = 2_000;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
-const REQUEST_KEYS = new Set(['model', 'provider', 'si_route', 'messages', 'tools', 'tool_choice', 'max_tokens', 'stream']);
+const REQUEST_KEYS = new Set(['model', 'provider', 'si_route', 'messages', 'tools', 'tool_choice', 'max_tokens', 'stream', 'reasoning_effort']);
 const RESPONSE_HEADERS = ['x-si-provider-family', 'x-si-served-by', 'x-si-truncated', 'x-si-adapted-params', 'x-si-route-objective'] as const;
 /** Marketplace error codes that are worth one more HTTP attempt (never auth / billing). */
 const TRANSIENT_ERROR_CODES = new Set([
@@ -85,7 +85,8 @@ function encodeRequest(request: Record<string, unknown>): string {
       request.stream !== false || !Number.isSafeInteger(request.max_tokens) || (request.max_tokens as number) <= 0 ||
       !Array.isArray(request.messages) || request.messages.length === 0 ||
       (request.tools !== undefined && !Array.isArray(request.tools)) ||
-      (request.tool_choice !== undefined && request.tool_choice !== 'auto')) {
+      (request.tool_choice !== undefined && request.tool_choice !== 'auto') ||
+      (request.reasoning_effort !== undefined && !['none', 'minimal', 'low'].includes(request.reasoning_effort as string))) {
     throw new SurplusBuildTransportError('request');
   }
   try {

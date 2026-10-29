@@ -69,3 +69,14 @@ it('a failed control read is accounting-unavailable and does not probe providers
   expect(await readDiagnosticProviderState('surplus', store, adapter)).toEqual({ dispatchReady: false, reason: 'accounting_unavailable', missingFields: ['providers.surplus.control'] });
   expect(adapter).not.toHaveBeenCalled(); expect(store.status).not.toHaveBeenCalled();
 });
+it.each(['surplus', 'cheaperinference'])('throughput with unconfigured %s adapter is a precise 424, never an opaque 503', async provider => {
+  const { base, token } = await setup();
+  vi.stubEnv('SURPLUS_API_KEY', ''); vi.stubEnv('CHEAPERINFERENCE_API_KEY', '');
+  const r = await fetch(`${base}/${provider}/throughput`, { method: 'POST', headers: { 'x-admin-token': token, 'content-type': 'application/json' }, body: JSON.stringify({ requests: 2, concurrency: 2 }) });
+  expect(r.status).toBe(424); expect((await r.json()).reason).toMatch(/^adapter_unavailable:/);
+});
+it('throughput rejects invalid input with 400 and requires admin', async () => {
+  const { base, token } = await setup();
+  expect((await fetch(`${base}/surplus/throughput`, { method: 'POST', headers: { authorization: 'Bearer x' } })).status).toBe(401);
+  expect((await fetch(`${base}/surplus/throughput`, { method: 'POST', headers: { 'x-admin-token': token, 'content-type': 'application/json' }, body: JSON.stringify({ requests: 0 }) })).status).toBe(400);
+});

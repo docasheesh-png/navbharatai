@@ -27,11 +27,15 @@ function reason(e: unknown): string {
 function answer(text: string): unknown { const t = text.trim().replace(/^```(?:json)?\s*|\s*```$/g, ''); return JSON.parse(t); }
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-export async function runThroughput(provider: string, adapter: DiagnosticAdapter, input: ThroughputInput, now = () => performance.now()): Promise<ThroughputResult> {
+export interface ThroughputProgress { done: number; ok: number; pass: number; requests: number; elapsedMs: number }
+/** Safe, enumerable reason for a throughput failure: code/name/http status only, never a message or prompt. */
+export function throughputFailureReason(e: unknown): string { return reason(e); }
+export async function runThroughput(provider: string, adapter: DiagnosticAdapter, input: ThroughputInput, now = () => performance.now(),
+  onProgress?: (p: ThroughputProgress) => void): Promise<ThroughputResult> {
   const runId = randomUUID(), salt = runId.slice(0, 8);
   const corpus = providerLoadCorpus(input.requests);
   const lat: number[] = [], errors: Record<string, number> = {};
-  let next = 0, ok = 0, pass = 0, retried = 0, cost = 0;
+  let next = 0, done = 0, ok = 0, pass = 0, retried = 0, cost = 0;
   const started = now();
   async function one(i: number) {
     const q = corpus[i];
@@ -40,12 +44,14 @@ export async function runThroughput(provider: string, adapter: DiagnosticAdapter
       const t0 = now();
       try {
         const r = await adapter.call(prompt, AbortSignal.timeout(90_000));
-        lat.push(now() - t0); ok++; cost += r.amount ?? 0;
+        lat.push(now() - t0); ok++; cost += Number(r.amount ?? 0) || 0;
         let good = false; try { good = same(answer(r.text), q.expected); } catch { /* fail */ }
         if (good) pass++;
+        done++; onProgress?.({ done, ok, pass, requests: input.requests, elapsedMs: Math.round(now() - started) });
         return;
       } catch (e) {
         const k = reason(e); errors[k] = (errors[k] ?? 0) + 1;
+        if (attempt >= input.retries) { done++; onProgress?.({ done, ok, pass, requests: input.requests, elapsedMs: Math.round(now() - started) }); }
         if (attempt < input.retries) { retried++; await new Promise(r => setTimeout(r, 250 * (attempt + 1))); }
       }
     }

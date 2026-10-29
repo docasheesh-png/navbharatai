@@ -10,10 +10,21 @@ export function ProviderThroughputPanel({ adminToken }: { adminToken: string }) 
     try {
       const r = await fetch(`/api/admin/provider-diagnostics/${provider}/throughput`, { method: 'POST', cache: 'no-store',
         headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' }, body: JSON.stringify({ requests, concurrency, retries: 1, maxOutputTokens: 64 }) });
-      const j = await r.json().catch(() => ({}));
-      setResult(s => ({ ...s, [provider]: r.ok
-        ? `ok ${j.ok}/${j.requests} · correct ${j.pass} · ${j.rpm} resp/min · ${j.workingRpm} correct/min · ${Math.round(j.durationMs / 1000)}s · p50 ${j.p50Ms}ms p95 ${j.p95Ms}ms · retried ${j.retried} · errors ${JSON.stringify(j.errors)} · $${j.costUsd}`
-        : `HTTP ${r.status} ${j.error ?? ''} ${j.reason ?? ''}` }));
+      if (!r.ok || !r.body) { const j = await r.json().catch(() => ({})); setResult(s => ({ ...s, [provider]: `HTTP ${r.status} ${j.error ?? ''} ${j.reason ?? ''}` })); return; }
+      // NDJSON stream: started → progress heartbeats → exactly one result | error line.
+      const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '', final = false;
+      for (;;) {
+        const { value, done } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true }); let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl); buf = buf.slice(nl + 1); if (!line.trim()) continue;
+          const j = JSON.parse(line);
+          if (j.type === 'progress') setResult(s => ({ ...s, [provider]: `running ${j.done}/${j.requests} · ok ${j.ok} · correct ${j.pass} · ${Math.round(j.elapsedMs / 1000)}s` }));
+          else if (j.type === 'result') { final = true; setResult(s => ({ ...s, [provider]: `ok ${j.ok}/${j.requests} · correct ${j.pass} · ${j.rpm} resp/min · ${j.workingRpm} correct/min · ${Math.round(j.durationMs / 1000)}s · p50 ${j.p50Ms}ms p95 ${j.p95Ms}ms · retried ${j.retried} · errors ${JSON.stringify(j.errors)} · $${j.costUsd}` })); }
+          else if (j.type === 'error') { final = true; setResult(s => ({ ...s, [provider]: `aborted: ${j.reason}` })); }
+        }
+      }
+      if (!final) setResult(s => ({ ...s, [provider]: `${s[provider] ?? ''} — stream ended before result (instance recycled or proxy timeout)` }));
     } catch { setResult(s => ({ ...s, [provider]: 'Network error / timeout' })); }
     finally { setBusy(null); }
   }

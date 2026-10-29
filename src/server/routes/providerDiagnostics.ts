@@ -7,6 +7,7 @@ import { ProviderDiagnosticStore, DiagnosticAdmissionError } from '../lib/provid
 import { ProviderDiagnosticDirectStore } from '../lib/providerDiagnosticDirectStore';
 import { adminUsername } from '../lib/adminAuth';
 import { getServerDb } from '../lib/serverDb';
+import { parseThroughputInput, runThroughput } from '../lib/providerThroughput';
 
 export async function readDiagnosticProviderState(provider: 'surplus' | 'cheaperinference', store: Pick<ProviderDiagnosticStore, 'control' | 'status'>, adapter: DiagnosticDependencies['adapter']) {
   let control;
@@ -73,6 +74,14 @@ export function registerProviderDiagnosticRoutes(app: Express, resolve = depende
         : reason === 'diagnostics_disabled' || reason === 'budget_exhausted' ? 403 : 503;
       res.status(status).json({ error: 'Diagnostic outcome unavailable. Read the original run before any further test.', reason });
     }
+  });
+  // Owner t124u: concurrent unique-prompt throughput (target 1000 working responses/min per provider).
+  router.post('/:provider/throughput', async (req, res) => {
+    const provider = req.params.provider, input = parseThroughputInput(req.body);
+    if ((provider !== 'surplus' && provider !== 'cheaperinference') || !input) { res.status(400).json({ error: 'Provide requests (1-20000), concurrency (1-2000), optional retries (0-3), maxOutputTokens.' }); return; }
+    req.setTimeout?.(900_000); res.setTimeout?.(900_000);
+    try { res.json(await runThroughput(provider, diagnosticAdapter(provider, process.env, true, input.maxOutputTokens), input)); }
+    catch (error) { res.status(503).json({ error: 'Throughput run unavailable.', reason: (error as { code?: string })?.code ?? 'unavailable' }); }
   });
   router.use((_req, res) => { res.status(404).json({ error: 'Diagnostic endpoint not found.' }); });
   app.use('/api/admin/provider-diagnostics', router);

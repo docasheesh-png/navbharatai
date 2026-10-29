@@ -65,7 +65,14 @@ export function registerProviderDiagnosticRoutes(app: Express, resolve = depende
   });
   router.post('/:provider/runs', validateDiagnosticRun, async (_req, res) => {
     try { res.json(await runDiagnostic(res.locals.diagnosticInput as DiagnosticInput, resolve())); }
-    catch { res.status(503).json({ error: 'Diagnostic outcome unavailable. Read the original run before any further test.' }); }
+    catch (error) {
+      // Root cause of "Outcome unavailable": every admission refusal (run_in_progress, budget, disabled, …) was
+      // flattened into one opaque 503, so the admin could not tell "never sent" from "unknown". Expose the safe enum.
+      const reason = error instanceof DiagnosticAdmissionError ? error.reason : 'outcome_unknown';
+      const status = reason === 'run_in_progress' || reason === 'control_conflict' ? 409 : reason === 'invalid_request' ? 400
+        : reason === 'diagnostics_disabled' || reason === 'budget_exhausted' ? 403 : 503;
+      res.status(status).json({ error: 'Diagnostic outcome unavailable. Read the original run before any further test.', reason });
+    }
   });
   router.use((_req, res) => { res.status(404).json({ error: 'Diagnostic endpoint not found.' }); });
   app.use('/api/admin/provider-diagnostics', router);

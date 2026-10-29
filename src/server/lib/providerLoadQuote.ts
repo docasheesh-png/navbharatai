@@ -24,13 +24,17 @@ export async function readLoadQuote(outputTokens: number, env = process.env, tra
     try { const body = await response.json(); if (supplierCodes.includes(body?.error?.code)) supplierCode = body.error.code; } catch { /* Raw body is never exposed. */ }
     throw new LoadDiagnosticError('unavailable', 'quote_http', 'http_rejected', response.status, supplierCode);
   }
-  let data: Record<string, unknown>;
-  try { data = await response.json(); } catch (error) {
+  let raw: unknown;
+  try { raw = await response.json(); } catch (error) {
     if (error instanceof SyntaxError) throw new LoadDiagnosticError('unavailable', 'quote_schema', 'invalid_json', response.status);
     throw new LoadDiagnosticError('unavailable', 'quote_transport', error instanceof Error && error.name === 'TimeoutError' ? 'timeout' : 'network_error', response.status);
   }
+  const data = unwrapSupply(raw);
   const fields = Object.fromEntries(quoteFields.map(key => { const value = data?.[key]; return [key, value === undefined ? 'missing' : value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value]; }));
-  if (!data || data.object !== 'model.supply' || data.model !== status.defaultModel || data.min_discount_percent !== 0) throw new LoadDiagnosticError('unavailable', 'quote_schema', 'schema_mismatch', response.status, undefined, fields);
+  const discount = data?.min_discount_percent === undefined || data?.min_discount_percent === null ? 0 : Number(data.min_discount_percent);
+  const objectOk = data?.object === undefined || data?.object === null || data.object === 'model.supply';
+  const modelOk = data?.model === undefined || data?.model === null || sameBeamModel(String(data.model), status.defaultModel);
+  if (!data || !objectOk || !modelOk || discount !== 0) throw new LoadDiagnosticError('unavailable', 'quote_schema', 'schema_mismatch', response.status, undefined, fields);
   let input: number, output: number;
   try { input = usdToNanoUsd(data.max_input_per_million as string | number); output = usdToNanoUsd(data.max_output_per_million as string | number); } catch { throw new LoadDiagnosticError('unavailable', 'quote_rates', 'invalid_rates', response.status, undefined, fields); }
   let maximumNanoUsd: number;
@@ -38,4 +42,19 @@ export async function readLoadQuote(outputTokens: number, env = process.env, tra
   catch { throw new LoadDiagnosticError('unavailable', 'quote_rates', 'invalid_rates', response.status, undefined, fields); }
   if (!maximumNanoUsd) throw new LoadDiagnosticError('unavailable', 'quote_rates', 'zero_bound', response.status, undefined, fields);
   return { model: status.defaultModel, maximumNanoUsd, checkedAt: Date.now(), source: 'https://api.cheaperinference.com/docs#price-ceiling' };
+}
+
+const BEAM_ALIASES = new Set(['beam', 'beam-1.0-501b-a23b']);
+function sameBeamModel(got: string, want: string): boolean {
+  const g = got.trim().toLowerCase().replace(/^[a-z0-9_-]+\//, '');
+  return g === want || (BEAM_ALIASES.has(g) && BEAM_ALIASES.has(want));
+}
+/** Supplier 200 bodies may arrive enveloped ({data:{...}}, {supply:{...}}, [{...}]). Accept the first object carrying rate fields. */
+function unwrapSupply(raw: unknown, depth = 0): Record<string, unknown> | null {
+  if (!raw || typeof raw !== 'object' || depth > 2) return null;
+  if (Array.isArray(raw)) { for (const item of raw) { const hit = unwrapSupply(item, depth + 1); if (hit) return hit; } return null; }
+  const obj = raw as Record<string, unknown>;
+  if (obj.max_input_per_million != null || obj.max_output_per_million != null || obj.object === 'model.supply') return obj;
+  for (const key of ['data', 'supply', 'result', 'model_supply']) { const hit = unwrapSupply(obj[key], depth + 1); if (hit) return hit; }
+  return obj;
 }

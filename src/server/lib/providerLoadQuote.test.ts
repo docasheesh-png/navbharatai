@@ -51,3 +51,14 @@ it.each(['TimeoutError','TypeError','AbortError'])('classifies post-header %s as
  const response=new Response('{}');vi.spyOn(response,'json').mockRejectedValue(Object.assign(Error('private credential'),{name}));
  await expect(readLoadQuote(256,{CHEAPERINFERENCE_API_KEY:'synthetic'},vi.fn<typeof fetch>().mockResolvedValue(response))).rejects.toMatchObject({stage:'quote_transport',reason:name==='TimeoutError'?'timeout':'network_error',upstreamStatus:200});
 });
+
+it.each([
+ {data:body},{supply:body},[body],{...body,model:'beam-1.0-501b-a23b'},{...body,min_discount_percent:'0'},{...body,object:undefined},{...body,max_input_per_million:3,max_output_per_million:15},
+])('tolerates valid supplier 200 variants %j',async variant=>{
+ const f=vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(variant)));
+ await expect(readLoadQuote(2048,{CHEAPERINFERENCE_API_KEY:'synthetic'},f)).resolves.toMatchObject({maximumNanoUsd:3176448000});
+});
+it('all-null 200 body still fails honestly with field evidence',async()=>{
+ const f=vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({object:null,model:null})));
+ await expect(readLoadQuote(256,{CHEAPERINFERENCE_API_KEY:'synthetic'},f)).rejects.toMatchObject({code:'unavailable'});
+});

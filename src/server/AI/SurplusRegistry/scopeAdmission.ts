@@ -5,6 +5,11 @@ import type { SurplusBuildSession } from './buildSession';
 
 type ScopeRecord = Omit<LlmCallRecord, 'ts'>;
 export const SURPLUS_SCOPE_PURPOSE = 'Build scope admission classification';
+/** DNA (05011): quality-first admits reasoning models (e.g. gpt-5.6-sol). An 8-token cap is consumed by
+ * hidden reasoning, the completion comes back with empty content → empty_completion → "Build scope
+ * classification failed" → mid_build_engine_unavailable → Weak/Kimi builds the app. The label is
+ * still one short word; this is only the ceiling, billed on actual usage. */
+export const SURPLUS_SCOPE_MAX_TOKENS = 1024;
 
 /** One recorded classification door, including rejected/chat-only requests without a build report.
  * Buffers retain measured usage and immutable receipt authority, never prompt/response contents. */
@@ -36,7 +41,7 @@ export function createSurplusScopeAsk(
           // Audit failure cannot suppress the buffered outcome or break classification.
           try { observe?.(Object.freeze({ ...sanitized })); } catch { /* best-effort bounded audit */ }
         },
-      }, { model: session.model, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8, signal },
+      }, { model: session.model, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: SURPLUS_SCOPE_MAX_TOKENS, signal },
       { promptPreview: SURPLUS_SCOPE_PURPOSE });
       return { text: result.text };
     } catch (error) {

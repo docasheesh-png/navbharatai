@@ -29,6 +29,7 @@ import { routeParam } from './expressCompat';
 import { grantEmail, identityGrantEmail, type GrantEmail } from '../AgentV3/featureFlag';
 import { isAdminEmail } from './adminEmails';
 import { readSessionCutoff, sessionTokenIsCurrent } from './sessionRevocation';
+import { surplusFallbackDisabledFor } from '../AI/SurplusRegistry/surplusNoFallback';
 
 /**
  * firebase-admin init options. Passes an EXPLICIT projectId when the environment provides one, so the
@@ -634,7 +635,8 @@ export function buildRateLimiter() {
         // Prefer the verified email on the ID token; fall back to the Admin SDK account email when the
         // token omitted it (same pattern as free-list / grant checks — never a body/query email).
         const email = identityGrantEmail(identity) ?? await resolveGrantEmail(identity.uid);
-        if (buildRateLimitExempt(email)) {
+        // z@ Surplus debug profile (owner 2026-10-29): DNA testing must not stall on 10 builds/hr.
+        if (buildRateLimitExempt(email) || surplusFallbackDisabledFor(email, identity.uid)) {
           next();
           return;
         }

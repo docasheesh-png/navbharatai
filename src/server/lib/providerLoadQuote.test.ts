@@ -25,3 +25,29 @@ it('reservation follows the exact requested native output limit',async()=>{
  expect(large.maximumNanoUsd-small.maximumNanoUsd).toBe(30720000);
  await expect(readLoadQuote(0,env,transport)).rejects.toMatchObject({code:'invalid'});
 });
+
+it.each([
+ [{},'quote_configuration','key_missing'],
+ [{CHEAPERINFERENCE_API_KEY:'synthetic',CHEAPERINFERENCE_MODEL:'other'},'quote_configuration','model_unsupported'],
+])('reports safe configuration evidence without network',async(env,stage,reason)=>{
+ const f=vi.fn<typeof fetch>();await expect(readLoadQuote(256,env,f)).rejects.toMatchObject({stage,reason});expect(f).not.toHaveBeenCalled();
+});
+it.each(['TimeoutError','TypeError'])('classifies transport %s without exposing message',async name=>{
+ const f=vi.fn<typeof fetch>().mockRejectedValue(Object.assign(new Error('Bearer private'),{name}));
+ await expect(readLoadQuote(256,{CHEAPERINFERENCE_API_KEY:'synthetic'},f)).rejects.toMatchObject({stage:'quote_transport',reason:name==='TimeoutError'?'timeout':'network_error'});
+});
+it('retains allowlisted supplier status/code, never its message',async()=>{
+ const f=vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({error:{code:'list_price_unknown',message:'Bearer private'}}),{status:400}));
+ await expect(readLoadQuote(256,{CHEAPERINFERENCE_API_KEY:'synthetic'},f)).rejects.toMatchObject({stage:'quote_http',upstreamStatus:400,supplierCode:'list_price_unknown'});
+});
+it.each([
+ ['not json','quote_schema','invalid_json'],
+ [JSON.stringify({...body,model:'private model'}),'quote_schema','schema_mismatch'],
+ [JSON.stringify({...body,max_output_per_million:'private'}),'quote_rates','invalid_rates'],
+])('distinguishes schema/rate failures',async(raw,stage,reason)=>{
+ const f=vi.fn<typeof fetch>().mockResolvedValue(new Response(raw));await expect(readLoadQuote(256,{CHEAPERINFERENCE_API_KEY:'synthetic'},f)).rejects.toMatchObject({stage,reason});
+});
+it.each(['TimeoutError','TypeError','AbortError'])('classifies post-header %s as transport, not malformed JSON',async name=>{
+ const response=new Response('{}');vi.spyOn(response,'json').mockRejectedValue(Object.assign(Error('private credential'),{name}));
+ await expect(readLoadQuote(256,{CHEAPERINFERENCE_API_KEY:'synthetic'},vi.fn<typeof fetch>().mockResolvedValue(response))).rejects.toMatchObject({stage:'quote_transport',reason:name==='TimeoutError'?'timeout':'network_error',upstreamStatus:200});
+});

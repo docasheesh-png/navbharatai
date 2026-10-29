@@ -1,3 +1,4 @@
+import { loadStage, LoadDiagnosticError } from './providerLoadDiagnostics';
 import { loadPlatformAdmission } from './providerLoadPlatformBudget';
 import { randomUUID } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
@@ -33,13 +34,13 @@ export class ProviderLoadRuntime {
     const total = BigInt(budgetPaise) * 1_000_000_000n / BigInt(allInPaisePerUsd);
     if (total > BigInt(Number.MAX_SAFE_INTEGER)) throw new LoadBatchError('invalid');
     let prior: number; try { prior = usdToNanoUsd(String(p.priorSupplierUsd)); } catch { throw new LoadBatchError('invalid'); }
-    const settings = await this.settings();
-    if ((settings?.revision ?? 0) !== p.expectedRevision) throw new LoadBatchError('conflict');
+    const settings = await loadStage('settings_read', () => this.settings());
+    if ((settings?.revision ?? 0) !== p.expectedRevision) throw new LoadDiagnosticError('conflict', 'revision', 'revision_conflict');
     const quote = await this.quote(Number(p.outputTokens));
     const authority: LoadBatchAuthority = { scopeId: settings?.scopeId ?? randomUUID(), model: quote.model, totalAttempts: Number(p.attempts) + Number(p.priorAttempts),
       priorAttempts: Number(p.priorAttempts), priorCostNanoUsd: prior, totalBudgetNanoUsd: Number(total), maxAttemptNanoUsd: quote.maximumNanoUsd,
       maxConcurrency: 32, maxOutputTokens: Number(p.outputTokens), expiresAt: Date.now() + 86400000 };
-    return this.store.configure(authority, providerLoadCorpus(Number(p.attempts)), Number(p.concurrency), Number(p.expectedRevision), actor, { budgetPaise, allInPaisePerUsd });
+    return loadStage('configuration_write', () => this.store.configure(authority, providerLoadCorpus(Number(p.attempts)), Number(p.concurrency), Number(p.expectedRevision), actor, { budgetPaise, allInPaisePerUsd }));
   }
   async advance(waveId: string) {
     const { batch } = await this.status(); if (!batch) throw new LoadBatchError('unavailable');

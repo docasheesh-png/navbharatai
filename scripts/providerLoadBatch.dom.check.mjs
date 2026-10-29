@@ -20,7 +20,9 @@ await mount('synthetic-admin');assert.equal(calls.length,0);reply={batch,setting
 await click('Read original batch');assert.equal(calls.length,1);assert.equal(calls[0].options.method,'GET');
 assert(node.textContent.includes('Operator-entered prior spend'));reply={batch:{...batch,revision:2}};
 await click('Save approved batch configuration');assert.equal(calls.length,2);const body=JSON.parse(calls.at(-1).options.body);assert.equal(body.expectedRevision,1);assert.equal(body.attempts,2);assert.equal(body.budgetInr,'1000');
-resolveWave=null;await click('Run configured batch');assert.equal(calls.length,3);const wave=JSON.parse(calls.at(-1).options.body);assert.match(wave.waveId,/^[0-9a-f-]{36}$/i);
+ok=false;reply={error:'Bearer private',diagnostic:{correlationId:'11111111-1111-4111-8111-111111111111',stage:'quote_http',reason:'http_rejected',upstreamStatus:400,supplierCode:'list_price_unknown',fields:{model:'string',secret:'private'}}};
+await click('Save approved batch configuration');assert(node.textContent.includes('Supplier code list_price_unknown'));assert(!node.textContent.includes('Bearer private'));assert(!node.textContent.includes('secret:'));ok=true;
+resolveWave=null;await click('Run configured batch');assert.equal(calls.length,4);const wave=JSON.parse(calls.at(-1).options.body);assert.match(wave.waveId,/^[0-9a-f-]{36}$/i);
 reply={batch:{...batch,revision:3,stopped:true}};await click('Abort unsent work');assert(calls.at(-1).url.endsWith('/stop'));const before=calls.length;
 await React.act(async()=>resolveWave());assert.equal(calls.length,before,'abort prevents another wave');assert(node.textContent.includes('Revision: 3'),'late wave acknowledgement cannot overwrite stop revision');assert([...node.querySelectorAll('button')].find(b=>b.textContent==='Run configured batch').disabled);
 reply={item:{requestId:'safe-id',provider:'cheaperinference',quality:'fail',actualNanoUsd:null}};await click('Read item receipt');assert.equal(calls.at(-1).options.method,'GET');assert(node.textContent.includes('safe-id'));

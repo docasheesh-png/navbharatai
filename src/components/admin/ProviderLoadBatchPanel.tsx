@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import { newRequestIdentity } from '../../lib/requestIdentity';
 import type { LoadBatch } from '../../shared/providerLoadBatch';
+class BatchRequestError extends Error {}
 const API = '/api/v1/admin/provider-load-batch';
 const button = 'min-h-11 rounded-lg border border-line px-3 py-2 text-sm text-ink disabled:opacity-40';
 const money = (nano: number) => `${(nano / 1e9).toFixed(9)} USD`;
@@ -24,7 +25,20 @@ export function ProviderLoadBatchPanel({ adminToken }: { adminToken: string }) {
   async function request(path: string, body?: unknown) {
     const response = await fetch(`${API}/${path}`, { method: body === undefined ? 'GET' : 'POST', cache: 'no-store',
       headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-    if (!response.ok) throw new Error('unavailable'); return response.json();
+    if (!response.ok) {
+      let detail = `HTTP ${response.status}`;
+      if (path === 'configure') {
+        try { const { diagnostic: d } = await response.json();
+          if (d && /^[0-9a-f-]{36}$/i.test(d.correlationId) && /^[a-z_]{1,40}$/.test(d.stage) && /^[a-z_]{1,40}$/.test(d.reason)) {
+            detail += ` · Request ${d.correlationId} · Stage ${d.stage} · Reason ${d.reason}`;
+            if (Number.isInteger(d.upstreamStatus) && d.upstreamStatus >= 100 && d.upstreamStatus <= 599) detail += ` · Supplier HTTP ${d.upstreamStatus}`;
+            if (['list_price_unknown','min_discount_unavailable','invalid_min_discount','invalid_api_key','insufficient_balance','rate_limit_exceeded','model_not_found'].includes(d.supplierCode)) detail += ` · Supplier code ${d.supplierCode}`;
+            for (const key of ['object','model','min_discount_percent','max_input_per_million','max_output_per_million']) if (['missing','null','array','object','string','number','boolean'].includes(d.fields?.[key])) detail += ` · ${key}: ${d.fields[key]}`;
+          }
+        } catch { /* No raw body is displayed. */ }
+      }
+      throw new BatchRequestError(detail);
+    } return response.json();
   }
   async function read() {
     if (!adminToken || actionLock.current) return; actionLock.current = true; setBusy(true);
@@ -43,7 +57,7 @@ export function ProviderLoadBatchPanel({ adminToken }: { adminToken: string }) {
     try {
       const data = await request('configure', { ...form, expectedRevision: batch?.revision ?? 0 });
       if (alive.current) { acceptBatch(data.batch); setMessage('Configuration saved and audited. No inference dispatched.'); }
-    } catch { if (alive.current) setMessage('Not saved. Read current revision; check budget against held liabilities and the native supplier quote. Missing price evidence is not a free-call claim.'); }
+    } catch (error) { if (alive.current) setMessage(`Save outcome unconfirmed. No inference dispatched. ${error instanceof BatchRequestError ? error.message : 'Network or response unavailable; exact cause unknown.'}`); }
     finally { actionLock.current = false; if (alive.current) setBusy(false); }
   }
   async function start() {

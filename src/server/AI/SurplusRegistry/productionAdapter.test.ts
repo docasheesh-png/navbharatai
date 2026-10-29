@@ -59,7 +59,13 @@ describe('production Surplus adapter — live key+flag admission', () => {
     expect(mocks.transport).toHaveBeenCalledTimes(1);
     expect(mocks.persist).not.toHaveBeenCalled();
   });
-  it.each(['reservation', 'dispatch', 'receipt'] as const)('retains %s failure through real session, public folding and scope classification', async stage => {
+  it('a receipt-store failure no longer kills a validated Surplus scope reply (accounting non-fatal)', async () => {
+    const { make } = setup(); mocks.persist.mockRejectedValue(new Error('PRIVATE_RECEIPT_ERROR'));
+    const result = await admitWeakBuild('PRIVATE_PROMPT', createSurplusScopeAsk((await make())!, [], [])!);
+    expect(result.failure?.stage).not.toBe('receipt');
+    expect(JSON.stringify(result)).not.toContain('PRIVATE_');
+  });
+  it.each(['reservation', 'dispatch'] as const)('retains %s failure through real session, public folding and scope classification', async stage => {
     const { make } = setup();
     if (stage === 'reservation') mocks.reserve.mockRejectedValue(new Error('PRIVATE_PILOT_ERROR'));
     if (stage === 'dispatch') mocks.transport.mockRejectedValue(new Error('PRIVATE_HTTP_ERROR'));
@@ -125,7 +131,7 @@ describe('production Surplus adapter — live key+flag admission', () => {
   });
   it('does not substitute unknown cache usage with zero', async () => {
     const { run, wire } = setup(); delete wire.body.usage.prompt_tokens_details;
-    await expect(run()).rejects.toThrow();
+    expect((await run()).text).toBe('done'); // reply kept; receipt recorded blocked, cost absorbed
     expect(mocks.persist).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ decision: expect.objectContaining({ status: 'blocked', reason: 'missing_or_ambiguous_usage' }) }));
   });
   it('supports long-running body metadata without requiring fast response headers', async () => {

@@ -32,6 +32,8 @@ export async function runWeakSurplusAdmissionForChat(options: {
   buildId: string;
   tierEngineAvailable: () => boolean;
   audit: AuditFn;
+  /** Owner per-profile opt-out (surplusNoFallback): Surplus or fail — never the Weak ladder. */
+  noFallback?: boolean;
 }): Promise<WeakSurplusAdmissionGate> {
   // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders.
   if (!(options.powerLevel === 'weak' && (options.intent !== 'chat' || options.hasImportIntent))) {
@@ -39,7 +41,7 @@ export async function runWeakSurplusAdmissionForChat(options: {
   }
 
   // Overload cool-down: recent mid-build Surplus deaths after SURPLUS_ADMITTED → skip admit, Weak ladder.
-  if (shouldSkipSurplusAdmit()) {
+  if (!options.noFallback && shouldSkipSurplusAdmit()) {
     const safe = SURPLUS_ADMIT_CIRCUIT_OPEN_REASON;
     const diag: SurplusAdmissionDiag = { code: 'SURPLUS_FALLBACK', reason: safe };
     try {
@@ -83,6 +85,9 @@ export async function runWeakSurplusAdmissionForChat(options: {
 
   if (!surplusAdmit.ok) {
     return { ok: false, diag, afterSurplusFallback: surplusAdmit.afterSurplusFallback };
+  }
+  if (options.noFallback && !surplusAdmit.session) {
+    return { ok: false, diag, afterSurplusFallback: false };
   }
   return { ok: true, session: surplusAdmit.session, diag };
 }

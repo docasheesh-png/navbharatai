@@ -4,6 +4,7 @@ import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibili
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
+import { surplusFallbackDisabledFor, surplusRawErrorReporter } from '../AI/SurplusRegistry/surplusNoFallback';
 import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
 import { wrapSurplusRunnerPreWriteFailOpen, tryConsumeSurplusPreWriteFailOpen, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
@@ -11366,6 +11367,7 @@ async function noteBuildOutcome(
       buildId: scopeRequestId,
       tierEngineAvailable: () => tierEngineAvailable(powerLevelReqEffective),
       audit,
+      noFallback: surplusFallbackDisabledFor(email),
     });
     surplusAdmissionDiag = surplusAdmitGate.diag;
     if (!surplusAdmitGate.ok) {
@@ -14516,6 +14518,8 @@ async function noteBuildOutcome(
       // Surplus-wrapped runner (main / fast / plan / heal) drops once together.
       const surplusPreWriteFailOpen: SurplusPreWriteFailOpenHooks = {
         state: { dropped: false },
+        noFallback: surplusFallbackDisabledFor(email),
+        onSurplusError: surplusRawErrorReporter(email, (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() })),
         userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
         onFailOpen: (reason) => {
           const dropped = surplusSession;
@@ -14538,6 +14542,7 @@ async function noteBuildOutcome(
       for (const turn of earlySurplusTurns) captureTurnUsage('SURPLUS', turn.usage, turn.model, turn.usage.cacheReadInputTokens, turn.usage.cacheCreationInputTokens);
       // The scope classifier precedes the build wrappers. Recover only its actual
       // eligible exception, never infer availability from a sanitized failed row.
+      if (earlySurplusFailure !== undefined) surplusPreWriteFailOpen.onSurplusError?.(earlySurplusFailure);
       if (surplusSession && !abort.signal.aborted) {
         tryConsumeSurplusPreWriteFailOpen(surplusPreWriteFailOpen, earlySurplusFailure);
       }

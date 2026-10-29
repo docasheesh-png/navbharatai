@@ -54,6 +54,10 @@ export type SurplusPreWriteFailOpenHooks = {
   /** Count of model-authored (non-platform-seed) files written so far. */
   userFilesWritten: () => number;
   onFailOpen?: (reason: SurplusPreWriteFailOpenReason) => void;
+  /** Owner per-profile opt-out (surplusNoFallback): never drop Surplus to Weak; error propagates. */
+  noFallback?: boolean;
+  /** Observe every Surplus turn error (raw-error profiles). Never alters control flow. */
+  onSurplusError?: (error: unknown) => void;
 };
 
 /** True when `reason` is one of the mid-build fail-open tokens (for tests / allowlist checks). */
@@ -115,6 +119,7 @@ export function tryConsumeSurplusPreWriteFailOpen(
   hooks: SurplusPreWriteFailOpenHooks,
   error: unknown,
 ): SurplusPreWriteFailOpenReason | null {
+  if (hooks.noFallback) return null;
   let files: number;
   try { files = hooks.userFilesWritten(); } catch { return null; }
   if (!shouldFailOpenSurplusPreWrite({ userFilesWritten: files, error, alreadyDropped: hooks.state.dropped })) {
@@ -152,6 +157,7 @@ export function wrapSurplusRunnerPreWriteFailOpen(
         try { recordSurplusAdmitProbeSuccess(); } catch { /* never block the turn */ }
         return result;
       } catch (error) {
+        try { hooks.onSurplusError?.(error); } catch { /* observer must never alter the turn */ }
         if (params.signal?.aborted || !tryConsumeSurplusPreWriteFailOpen(hooks, error)) throw error;
         return getWeak().runTurn(params);
       }

@@ -151,3 +151,16 @@ it('preserves the explicit output bound of a pre-upgrade pending submission on r
   find(render(), 'Retry original admission with same key').props.onClick(); await flush();
   expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toEqual({ idempotencyKey: id, prompt: 'Original', maxOutputTokens: 10000 });
 });
+
+it('shows slow-call stage evidence with explicit unknown causes only for fresh runs', () => {
+  const timing = { slow: true, thresholdMs: 10000 as const, admissionMs: 100, dispatchStartedMs: 100,
+    responseCompletedMs: 25100, providerRoundTripMs: 25000, accountingMs: 155, totalMs: 25255,
+    queueMs: null, headersMs: null, parsingMs: null, retryAfterMs: null, httpStatus: null,
+    fallbackCount: 0 as const, largestMeasuredStage: 'provider_round_trip' as const };
+  const html = renderToStaticMarkup(<ProviderDiagnosticResult result={{ ...result, timing }} />);
+  expect(html).toContain('Slow call: over 10 seconds'); expect(html).toContain('25000');
+  expect(html).toContain('traffic or provider congestion is unknown');
+  expect(html).toContain('No retry or cooldown wait was performed');
+  expect(renderToStaticMarkup(<ProviderDiagnosticResult result={{ ...result, timing, replayed: true }} />)).not.toContain('Slow call:');
+  expect(renderToStaticMarkup(<ProviderDiagnosticResult result={{ ...result, timing: { ...timing, slow: false } }} />)).not.toContain('Slow call:');
+});

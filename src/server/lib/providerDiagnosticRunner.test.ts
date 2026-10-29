@@ -147,3 +147,73 @@ it.each(['surplus', 'cheaperinference'] as const)('honors an explicit legacy out
     expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).max_tokens).toBe(10000);
   } finally { vi.unstubAllGlobals(); }
 });
+
+
+describe('monotonic slow-call evidence', () => {
+  function timed() {
+    const fixture = setup(); let ms = 0;
+    fixture.deps.monotonicNow = () => ms;
+    return { ...fixture, advance: (value: number) => { ms += value; } };
+  }
+  it.each([9999, 10000, 10001])('marks slow only above 10000 ms (%s)', async duration => {
+    const { deps, call, advance } = timed();
+    call.mockImplementation(async () => { advance(duration); return { text: 'OK', usage: { inputTokens: 1, outputTokens: 1, cachedTokens: null }, amount: null }; });
+    const result = await runDiagnostic(input, deps);
+    expect(result.timing).toMatchObject({ slow: duration > 10000, providerRoundTripMs: duration, totalMs: duration,
+      admissionMs: 0, accountingMs: 0, dispatchStartedMs: 0, responseCompletedMs: duration,
+      queueMs: null, headersMs: null, parsingMs: null, httpStatus: null, fallbackCount: 0 });
+    expect(result.firstByteMs).toBeNull(); expect(result.firstTokenMs).toBeNull();
+  });
+  it('separates admission, provider round trip and accounting despite wall-clock jumps', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000);
+    const { deps, call, advance } = timed();
+    vi.mocked(deps.verifyAdmission).mockImplementation(async () => { advance(200); vi.setSystemTime(999999); });
+    call.mockImplementation(async () => { advance(25000); vi.setSystemTime(1); return { text: 'OK', usage: { inputTokens: 1, outputTokens: 1, cachedTokens: null }, amount: null }; });
+    vi.mocked(deps.store.finish).mockImplementation(async () => { advance(155); return undefined as never; });
+    const result = await runDiagnostic(input, deps);
+    expect(result.timing).toMatchObject({ admissionMs: 200, providerRoundTripMs: 25000, accountingMs: 155,
+      dispatchStartedMs: 200, responseCompletedMs: 25200, totalMs: 25355, largestMeasuredStage: 'provider_round_trip' });
+    expect(result.timeline.map(e => e.elapsedMs)).toEqual([25200, 25355]);
+    expect(result.elapsedMs).toBe(25355); expect(call).toHaveBeenCalledOnce();
+  });
+  it.each(['TIMEOUT', 'ABORTED', 'RATE_LIMIT', 'NETWORK'] as const)('retains measured failure timing and safe %s evidence', async code => {
+    const { deps, call, advance } = timed();
+    call.mockImplementation(async () => { advance(11000); throw new FreeChainProviderError(code, code === 'RATE_LIMIT' ? { status: 429, retryAfterMs: 2000 } : {}); });
+    const result = await runDiagnostic(input, deps);
+    expect(result.timing).toMatchObject({ providerRoundTripMs: 11000, slow: true, retryAfterMs: code === 'RATE_LIMIT' ? 2000 : null, httpStatus: code === 'RATE_LIMIT' ? 429 : null });
+    expect(result.timeline[0].reason).toBe(code === 'ABORTED' ? 'cancelled' : code === 'TIMEOUT' ? 'timeout' : code === 'RATE_LIMIT' ? 'rate_limited' : 'network_error');
+    expect(JSON.stringify(result.timing)).not.toMatch(/private|Bearer|prompt|secret/);
+    expect(call).toHaveBeenCalledOnce(); expect(deps.store.finish).toHaveBeenCalledWith(input.idempotencyKey, record.runId, null);
+  });
+  it('identifies slow accounting without blaming the provider', async () => {
+    const { deps, advance } = timed();
+    vi.mocked(deps.store.finish).mockImplementation(async () => { advance(12000); throw new Error('secret raw output'); });
+    const result = await runDiagnostic(input, deps);
+    expect(result.timing).toMatchObject({ accountingMs: 12000, providerRoundTripMs: 0, largestMeasuredStage: 'accounting' });
+    expect(JSON.stringify(result)).not.toContain('secret');
+  });
+  it('reports slow failed admission without inventing dispatch or queue evidence', async () => {
+    const { deps, call, advance } = timed();
+    vi.mocked(deps.verifyAdmission).mockImplementation(async () => { advance(12000); throw new Error('secret'); });
+    const result = await runDiagnostic(input, deps);
+    expect(result.timing).toMatchObject({ admissionMs: 12000, providerRoundTripMs: null, accountingMs: null, dispatchStartedMs: null, largestMeasuredStage: 'admission' });
+    expect(call).not.toHaveBeenCalled();
+  });
+  it('never presents recovery lookup timing as a fresh provider measurement', async () => {
+    const { deps, advance } = timed();
+    vi.mocked(deps.store.read).mockImplementation(async () => { advance(12000); return record; });
+    const result = await runDiagnostic(input, deps);
+    expect(result.replayed).toBe(true); expect(result.timing).toBeUndefined();
+  });
+});
+
+it('attributes expired-admission settlement latency to accounting without dispatch', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(2000);
+  const { deps, call } = setup(); let ms = 0; deps.monotonicNow = () => ms;
+  vi.mocked(deps.store.reserve).mockImplementation(async () => { ms += 100; return { mayDispatch: true, run: { ...record, dispatchBefore: 1999 } }; });
+  vi.mocked(deps.store.finish).mockImplementation(async () => { ms += 12000; throw new Error('private settlement error'); });
+  const result = await runDiagnostic(input, deps);
+  expect(result.timing).toMatchObject({ admissionMs: 100, accountingMs: 12000, totalMs: 12100,
+    dispatchStartedMs: null, providerRoundTripMs: null, largestMeasuredStage: 'accounting' });
+  expect(call).not.toHaveBeenCalled(); expect(JSON.stringify(result)).not.toContain('private settlement error');
+});

@@ -1,3 +1,4 @@
+import { registerProviderLoadBatchRoutes } from './providerLoadBatch';
 import { DiagnosticEvidenceMissing } from '../lib/providerDiagnosticEvidence';
 import { Router, type Express } from 'express';
 import { requireDiagnosticAdmin, validateDiagnosticRun, type DiagnosticInput } from '../lib/providerDiagnosticBoundary';
@@ -34,6 +35,7 @@ function dependencies(): DiagnosticDependencies {
 
 }
 export function registerProviderDiagnosticRoutes(app: Express, resolve = dependencies): void {
+  registerProviderLoadBatchRoutes(app);
   const router = Router();
   router.use(requireDiagnosticAdmin);
   router.get('/status', async (_req, res) => {

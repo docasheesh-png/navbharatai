@@ -1,3 +1,4 @@
+import { ProviderLoadBatchPanel } from './ProviderLoadBatchPanel';
 import { useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import { newRequestIdentity } from '../../lib/requestIdentity';
@@ -35,6 +36,14 @@ export function ProviderDiagnosticResult({ result: r }: { result: RunView }) {
     <p>First byte: {unknown(r.firstByteMs)} · First token: {unknown(r.firstTokenMs)} · Output tokens/second: {unknown(r.outputTokensPerSecond)}</p>
     <p>Input / output / cached tokens: {unknown(r.usage.inputTokens)} / {unknown(r.usage.outputTokens)} / {unknown(r.usage.cachedTokens)}</p>
     <p>Diagnostic-client retries: {r.retryCount}; provider-internal retries are unknown. Whole-request latency is not model generation speed.</p>
+    {!r.replayed && r.timing?.slow && <section aria-label="Slow call diagnostics" className="space-y-2">
+      <p>Slow call: over 10 seconds. Largest measured interval: {r.timing.largestMeasuredStage.replaceAll('_', ' ')}. This identifies where time was observed, not the upstream cause.</p>
+      <p>Admission / controls / reservation: {r.timing.admissionMs} ms · Provider round trip including response parsing: {unknown(r.timing.providerRoundTripMs)} ms · Accounting: {unknown(r.timing.accountingMs)} ms</p>
+      <p>Dispatch started at +{unknown(r.timing.dispatchStartedMs)} ms · Response or failure received at +{unknown(r.timing.responseCompletedMs)} ms · Runner total: {r.timing.totalMs} ms</p>
+      <p>Queue wait, HTTP headers, and parsing separately: not measured. These non-streaming calls do not measure first token. Provider processing and network delay cannot be separated here; traffic or provider congestion is unknown.</p>
+      <p>HTTP status: {unknown(r.timing.httpStatus)} · Reported retry-after: {unknown(r.timing.retryAfterMs)} ms · Diagnostic fallbacks: {r.timing.fallbackCount}. No retry or cooldown wait was performed.</p>
+      <p>Timing starts inside the server diagnostic runner; browser connection and authentication middleware time are excluded. Historical recovery does not recreate these measurements.</p>
+    </section>}
     <pre className="whitespace-pre-wrap break-words">{r.text ?? 'No response text available. Recovery does not persist or recreate response text.'}</pre>
     <details><summary>Sanitized diagnostic timeline</summary><ul>{r.timeline.map((e, i) => <li key={i}>{e.elapsedMs} ms · {e.stage} · {e.reason}{e.httpStatus === undefined ? '' : ` · HTTP ${e.httpStatus}`}</li>)}</ul></details>
     <p>Provider success alone does not prove the app builder works.</p>
@@ -136,6 +145,7 @@ export function ProviderDiagnosticPanels({ adminToken }: { adminToken: string })
   if (!adminToken) return null;
   return <section className="space-y-4 text-ink"><h2>Provider testing bots</h2>
     <p>Each diagnostic switch defaults OFF. Only a verified admin can enable it. OFF blocks new dispatch claims; already admitted or dispatched requests may continue and incur supplier charges. Disabling preserves history and spending holds.</p>
+    <ProviderLoadBatchPanel adminToken={adminToken} />
     <p>Manual tests only. Opening or refreshing this panel makes no request and spends nothing.</p>
     <button className={button} disabled={busy} onClick={() => void check()}>Verify admin and read test status</button>
     {error && <p role="alert">{error}</p>}

@@ -14,6 +14,7 @@ import { createSurplusBuildSession, type SurplusReviewedState } from './buildSes
 import { createProductionSurplusAdapter } from './productionAdapter';
 import { isSurplusReceiptDecision } from './receiptPolicy';
 import * as liveAdmission from './liveAdmission';
+import { syntheticTestReviews } from '../../../../tests/fixtures/surplusProductionEvidence';
 const now = 1800000000000;
 function snapshot(): NonNullable<SurplusReviewedState['snapshot']> {
   return { version: 'generation', startedAt: now, observedAt: now, expiresAt: now + 300000, models: ['model-a'], offers: [{ model: 'model-a', offerId: 'offer-a', providerId: 'provider-a', available: true, healthy: true, trusted: true, providerTrustConfirmed: true, trustObservedAt: now,
@@ -26,7 +27,7 @@ function setup(extraEnv: Record<string, string> = {}) {
     body: { id: 'response-1', model: 'model-a', choices: [{ message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 1000, completion_tokens: 100, prompt_tokens_details: { cached_tokens: 100 }, buyer_cost_micro: 100 } as Record<string, unknown>,
       surplus: undefined as Record<string, unknown> | undefined } };
-  mocks.getServerDb.mockReturnValue({ doc: vi.fn(() => ({ get: vi.fn(async () => ({ data: () => ({}) })) })) });
+  mocks.getServerDb.mockReturnValue({ doc: vi.fn(() => ({ get: vi.fn(async () => ({ data: () => syntheticTestReviews({ AGENTV3_SURPLUS_BUILDER: 'true', SURPLUS_API_KEY: 'synthetic-test-key' }, snap, now) })) })) });
   mocks.read.mockResolvedValue(snap);
   mocks.persist.mockResolvedValue({ canContinue: true }); mocks.unattempted.mockResolvedValue({ canContinue: true });
   mocks.refresh.mockResolvedValue(undefined); mocks.factory.mockReturnValue(mocks.transport);
@@ -79,7 +80,7 @@ describe('production Surplus adapter — live key+flag admission', () => {
     addOffer(snap, 'model-b', '5');
     if (reversed) snap.offers.reverse();
     const before = structuredClone(snap);
-    const evidence = liveAdmission.synthesizeLiveReviews(env, snap, now);
+    const evidence = liveAdmission.synthesizeLiveReviews(env, snap, now, syntheticTestReviews(env, snap, now));
     expect(evidence.capabilities.map(c => [c.model, c.providerId]).sort()).toEqual([
       ['model-a', 'provider-a'], ['model-a', 'provider-b'], ['model-b', 'provider-a'],
     ]);
@@ -119,7 +120,7 @@ describe('production Surplus adapter — live key+flag admission', () => {
     expect(mocks.reserve).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       accountId: 'surplus-live-key',
       credentialSha256: createHash('sha256').update('synthetic-test-key').digest('hex'),
-      pilot: expect.objectContaining({ id: 'owner-live-key-flag-v1', noAutoTopup: true }),
+      pilot: expect.objectContaining({ id: 'synthetic-test-pilot', noAutoTopup: true }),
     }));
   });
   it('does not substitute unknown cache usage with zero', async () => {
@@ -192,4 +193,17 @@ describe('bounded fallback through live production session', () => {
     expect(result.model).toBe('model-b'); expect(session.model).toBe('model-b'); expect(onText).toHaveBeenCalledExactlyOnceWith('done');
     expect(mocks.unattempted).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.objectContaining({ reason: code, traceRequestId: 'trace-one', model: 'model-a' }));
   });
+});
+
+it('does not dispatch if account evidence expires during reservation I/O', async () => {
+ const {run,env,snap}=setup();
+ const evidence=syntheticTestReviews(env,snap,now);evidence.account.liveCredentialCheckExpiresAt=now+1;
+ mocks.getServerDb.mockReturnValue({doc:()=>({get:async()=>({data:()=>evidence})})});
+ mocks.reserve.mockImplementation(async()=>{vi.setSystemTime(now+2);});
+ await expect(run()).rejects.toThrow();
+ expect(mocks.reserve).toHaveBeenCalledOnce();expect(mocks.transport).not.toHaveBeenCalled();
+});
+it('does not dispatch if the configured credential rotates during reservation I/O',async()=>{
+ const {run,env}=setup();mocks.reserve.mockImplementation(async()=>{env.SURPLUS_API_KEY='rotated-synthetic-test-key';});
+ await expect(run()).rejects.toThrow();expect(mocks.transport).not.toHaveBeenCalled();
 });

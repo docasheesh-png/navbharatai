@@ -5,10 +5,10 @@ import { syncSurplusMetadata } from './sync';
 import { planSurplusBuild, planSurplusDispatchCandidate, type SurplusRequestFloorContract } from './selector';
 import { SURPLUS_MAX_MODELS, SURPLUS_METADATA_FRESH_MS, SURPLUS_OBSERVATION_CANDIDATES, isSurplusModelId, validSurplusUniverse } from './config';
 import { NO_REVIEWS, type Reviews, type Snapshot, type SurplusManagerView, type SurplusQualitySource, type Workload } from './types';
-import { synthesizeLiveReviews, surplusBuilderLive } from './liveAdmission';
+import { synthesizeLiveReviews } from './liveAdmission';
 
 export const SURPLUS_SYNC_JOB = 'surplus-metadata-registry';
-/** Fixed Firestore document for durable admin coding approvals (manager/preview). Live production admission synthesizes reviews in-process and does not require this seed. */
+/** Fixed Firestore document for durable admin coding approvals (manager/preview). Catalog observations do not grant verified production authority. */
 export const SURPLUS_REVIEWS_DOC = 'live_ai_registry/surplus-builder-reviews';
 export const APPROVE_OBSERVED_CONFIRM = 'approve-observed-coding';
 
@@ -47,12 +47,12 @@ const LIMITATIONS = [
   'Fetched time and HTTP cache headers are observations, not an origin quote timestamp or an executable reservation.',
   'Raw rate units remain unverified unless a separate current pricing review exists. Unknown cache and reasoning prices are not zero.',
   'Estimates use 10,000 input and 2,000 output tokens only. Real builds rank the same reviewed cohort for their actual workload.',
-  'This manager never grants paid dispatch. Live Weak builds admit Surplus when SURPLUS_API_KEY + AGENTV3_SURPLUS_BUILDER are on (in-process synthesis), or after an admin Approve observed for coding write.',
+  'This manager never grants paid dispatch. Key/flag and healthy metadata alone do not establish production capability, tariff or quality evidence.',
 ];
 const LIVE_LIMITATIONS = [
-  'Live builder admission is ACTIVE (SURPLUS_API_KEY + AGENTV3_SURPLUS_BUILDER). Production synthesizes coding quality + request-time floor for currently observed offers — this screen no longer shows forever-unreviewed.',
+  'Production admission requires existing verified evidence; this preview does not certify dispatch readiness.',
   'Manager canDispatch stays false by design. Mid-build Surplus failures with Files=0 fail-open to the Weak/CHEAP_FLOOR ladder (see surplusPreWriteFailOpen).',
-  'Admin Approve observed for coding persists a durable Firestore review seed for manager/preview; live production still uses in-process synthesis and does not need that seed.',
+  'Admin approval cannot fabricate missing capability, tariff or benchmark evidence.',
 ];
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
@@ -62,12 +62,12 @@ function hasUsableQuality(quality: Reviews['quality'], now: number): boolean {
     && (review.binding === 'model-provider' || isSurplusModelId(review.offerId))
     && typeof review.benchmarkId === 'string' && !!review.benchmarkId.trim()
     && typeof review.cohort === 'string' && !!review.cohort.trim()
-    && /^[a-f0-9]{64}$/.test(review.artifactSha256)
+    && /^[a-f0-9]{64}$/.test(review.artifactSha256) && !/^(.)\1{63}$/.test(review.artifactSha256)
     && Number.isFinite(review.reviewedAt) && review.reviewedAt <= now
     && Number.isFinite(review.expiresAt) && review.expiresAt > now);
 }
 
-/** Resolve reviews for the admin manager view: live synthesis wins when builder is live; else durable Firestore. */
+/** Resolve existing reviews for display without synthesizing verification from configuration. */
 function resolveManagerReviews(opts: {
   env: NodeJS.ProcessEnv;
   snapshot: Snapshot | null;
@@ -75,23 +75,9 @@ function resolveManagerReviews(opts: {
   firestoreFloor: SurplusRequestFloorContract | undefined;
   now: number;
 }): { reviews: Reviews; floorContract: SurplusRequestFloorContract | undefined; liveBuilderAdmission: boolean; qualitySource: SurplusQualitySource } {
-  const live = surplusBuilderLive(opts.env);
-  if (live) {
-    try {
-      const synthesized = synthesizeLiveReviews(opts.env, opts.snapshot, opts.now);
-      return {
-        reviews: synthesized.reviews,
-        floorContract: synthesized.floorContract,
-        liveBuilderAdmission: true,
-        qualitySource: 'live_synthesis',
-      };
-    } catch {
-      // Key/flag race: fall through to Firestore rather than claiming live admission.
-    }
-  }
   const firestoreQuality = Array.isArray(opts.firestoreReviews?.quality) ? opts.firestoreReviews.quality : [];
   return {
-    reviews: opts.firestoreReviews ?? NO_REVIEWS,
+    reviews: { ...(opts.firestoreReviews ?? NO_REVIEWS), quality: firestoreQuality.filter(q => q && typeof q.artifactSha256 === 'string' && !/^(.)\1{63}$/.test(q.artifactSha256)) },
     floorContract: opts.firestoreFloor,
     liveBuilderAdmission: false,
     qualitySource: hasUsableQuality(firestoreQuality, opts.now) ? 'firestore' : 'none',
@@ -143,7 +129,7 @@ export async function readSurplusObservations(env: NodeJS.ProcessEnv = process.e
         const approved = quality.filter(review => review?.model === modelId && review.approved === true
           && isSurplusModelId(review.providerId) && (review.binding === 'model-provider' || isSurplusModelId(review.offerId))
           && typeof review.benchmarkId === 'string' && !!review.benchmarkId.trim() && typeof review.cohort === 'string' && !!review.cohort.trim()
-          && /^[a-f0-9]{64}$/.test(review.artifactSha256) && Number.isFinite(review.reviewedAt) && review.reviewedAt <= now && Number.isFinite(review.expiresAt));
+          && /^[a-f0-9]{64}$/.test(review.artifactSha256) && !/^(.)\1{63}$/.test(review.artifactSha256) && Number.isFinite(review.reviewedAt) && review.reviewedAt <= now && Number.isFinite(review.expiresAt));
         const qualityReviewStatus = approved.some(review => review.expiresAt > now) ? 'reviewed' as const : approved.length ? 'expired' as const : 'unreviewed' as const;
         const eligibleSnapshot = snapshot && snapshot.startedAt >= now - SURPLUS_METADATA_FRESH_MS && state.controls && !disabled ? { ...snapshot, models: snapshot.models.filter(model => config.models.includes(model)), offers } : null;
         const plan = planSurplusDispatchCandidate(eligibleSnapshot, reviews, ADMIN_WORKLOAD, now, resolved.floorContract);
@@ -159,12 +145,8 @@ export async function readSurplusObservations(env: NodeJS.ProcessEnv = process.e
   } catch { return { ...view, status: 'unavailable', lastError: 'metadata_unavailable' }; }
 }
 
-/**
- * Admin durable unlock: persist coding quality + request-time floor for currently observed
- * model/provider pairs into surplus-builder-reviews. Requires explicit confirm token + reason.
- * Does NOT flip AGENTV3_SURPLUS_BUILDER, raise budgets, or grant manager canDispatch.
- * Live production already synthesizes reviews when key+flag are on; this seed keeps the
- * manager/preview honest when live admission is off, and records owner approval.
+/** Compatibility action: verify existing production evidence without creating, renewing
+ * or overwriting approval records. The legacy route/confirm token remains accepted.
  */
 export async function approveObservedSurplusModels(opts: {
   reason: string;
@@ -184,70 +166,12 @@ export async function approveObservedSurplusModels(opts: {
   if (!snapshot || !state.controls) throw new Error('NO_OBSERVED_SNAPSHOT');
   const now = Date.now();
   if (snapshot.expiresAt <= now || snapshot.startedAt < now - SURPLUS_METADATA_FRESH_MS) throw new Error('STALE_SNAPSHOT');
-  let reviews: Reviews;
-  let floorContract: SurplusRequestFloorContract;
-  let expiresAt: number;
-  if (surplusBuilderLive(env)) {
-    const live = synthesizeLiveReviews(env, snapshot, now);
-    reviews = live.reviews;
-    floorContract = live.floorContract;
-    expiresAt = live.floorContract.expiresAt;
-  } else {
-    expiresAt = now + 30 * 24 * 60 * 60 * 1000;
-    const reviewedAt = Math.max(0, now - 1_000);
-    const artifact = 'd'.repeat(64);
-    const pairs = new Map<string, { model: string; providerId: string }>();
-    for (const offer of snapshot.offers) {
-      if (!offer?.model || !config.models.includes(offer.model) || !offer.providerId) continue;
-      if (!offer.available || !offer.healthy || !offer.trusted || !offer.providerTrustConfirmed) continue;
-      pairs.set(`${offer.model}\0${offer.providerId}`, { model: offer.model, providerId: offer.providerId });
-    }
-    if (!pairs.size) throw new Error('NO_ELIGIBLE_OBSERVED_OFFERS');
-    reviews = {
-      quality: [...pairs.values()].map(({ model, providerId }) => ({
-        binding: 'model-provider' as const,
-        model,
-        providerId,
-        benchmarkId: 'admin-approve-observed',
-        cohort: 'coding',
-        approved: true,
-        artifactSha256: artifact,
-        reviewedAt,
-        expiresAt,
-      })),
-      pricingContract: {
-        unit: 'micro-usd-per-million',
-        sourceUrl: 'https://www.surplusintelligence.ai/docs/pricing',
-        reviewedAt,
-        expiresAt,
-      },
-      accountAndPrivacyReviewedUntil: expiresAt,
-    };
-    floorContract = {
-      kind: 'observation-only-provider-request-time-floor',
-      endpoint: 'https://api.surplusintelligence.ai/min90/v1',
-      reviewId: 'admin-approve-observed-floor-v1',
-      reviewedAt,
-      expiresAt,
-      providerPin: 'top-level-provider',
-      objective: 'price',
-      marketplaceOnly: true,
-      allowFallbacks: false,
-    };
-  }
-  const approvedModels = [...new Set(reviews.quality.map(q => q.model))].sort();
-  const existing = object((await db.doc(SURPLUS_REVIEWS_DOC).get()).data());
-  const revision = typeof existing.revision === 'number' && Number.isSafeInteger(existing.revision) && existing.revision >= 0
-    ? existing.revision + 1 : 1;
-  await db.doc(SURPLUS_REVIEWS_DOC).set({
-    revision,
-    reviews,
-    floorContract,
-    approvedAt: now,
-    approvedReason: reason,
-    approvalSource: 'admin-approve-observed',
-  }, { merge: false });
-  return { approvedModels, offerPairs: reviews.quality.length, qualitySource: 'firestore', expiresAt };
+  // Catalog health and a button click cannot create tariff/capability/benchmark evidence.
+  // Existing independently recorded evidence is required by the unchanged customer billing policy.
+  const existing = (await db.doc(SURPLUS_REVIEWS_DOC).get()).data();
+  const evidence = synthesizeLiveReviews(env, snapshot, now, existing);
+  return { approvedModels: [...new Set(evidence.reviews.quality.map(q => q.model))].sort(),
+    offerPairs: evidence.reviews.quality.length, qualitySource: 'firestore', expiresAt: evidence.floorContract.expiresAt };
 }
 
 /** Admin manual exclusion only. This cannot create quality/terms/capability/account reviews. */

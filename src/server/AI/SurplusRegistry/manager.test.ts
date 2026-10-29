@@ -70,7 +70,7 @@ describe('fifteen-model shared metadata manager', () => {
     const offers = modelIds.map((model, index) => ({ ...offer, model, offerId: `offer-${index}`, rates: { input: String(15 - index), output: '2' }, referenceRates: { input: '1000', output: '2000' } }));
     const reviews: Reviews = { pricingContract: { unit: 'micro-usd-per-million', sourceUrl: 'https://www.surplusintelligence.ai/docs/pricing', reviewedAt: now - 1, expiresAt: now + 300000 },
       accountAndPrivacyReviewedUntil: now + 300000,
-      quality: offers.map(item => ({ offerId: item.offerId, model: item.model, providerId: item.providerId, benchmarkId: 'same-coding-run', cohort: 'same-coding-cohort', artifactSha256: 'a'.repeat(64), approved: true, reviewedAt: now - 1, expiresAt: now + 300000 })) };
+      quality: offers.map(item => ({ offerId: item.offerId, model: item.model, providerId: item.providerId, benchmarkId: 'same-coding-run', cohort: 'same-coding-cohort', artifactSha256: 'ab'.repeat(32), approved: true, reviewedAt: now - 1, expiresAt: now + 300000 })) };
     const result = planSurplusBuild({ ...snapshot, offers }, reviews, { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, now);
     expect(result).toMatchObject({ canDispatch: false, status: 'estimated_candidate', selection: { model: 'model-14' } });
     expect(result.configuredUniverse).toHaveLength(15);

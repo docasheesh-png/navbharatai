@@ -75,7 +75,7 @@ describe('paid manager validates server data before rendering claims', () => {
     const fetch = vi.fn(async () => response(fixture())); await mount(fetch);
     expect(fetch).toHaveBeenCalledWith('/api/v1/admin/surplus-registry', expect.objectContaining({ headers: { 'x-admin-token': 'private-admin-token' } }));
     const html = renderToStaticMarkup(root());
-    for (const text of ['Separate from OpenRouter STRICT_FREE', 'Configured candidate', 'Not independently approved', 'Reported available', 'Not confirmed eligible', '90% minimum discount retained', 'Unknown', 'Raw source rate units are unverified']) expect(html).toContain(text);
+    for (const text of ['Separate from OpenRouter STRICT_FREE', 'Configured candidate', 'Not independently verified', 'Reported available', 'Not confirmed eligible', '90% minimum discount retained', 'Unknown', 'Raw source rate units are unverified']) expect(html).toContain(text);
     expect(html).not.toContain('private-admin-token'); expect(html).not.toContain('type="password"');
   });
   it('expired metadata cannot keep availability or candidate eligibility green', async () => {
@@ -97,19 +97,19 @@ describe('paid manager validates server data before rendering claims', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     for (const [url, options] of fetch.mock.calls as unknown as [string, RequestInit][]) { expect(url).toBe('/api/v1/admin/surplus-registry'); expect(options.method).toBeUndefined(); }
   });
-  it('live synthesis view shows admission active instead of forever-unreviewed', async () => {
+  it('legacy synthesis is displayed as unverified rather than active authority', async () => {
     const view = fixture();
     view.liveBuilderAdmission = true;
     view.qualitySource = 'live_synthesis';
     view.models[0] = { ...view.models[0], qualityReviewStatus: 'reviewed', blockedReasons: ['dispatch_authority_not_evaluated'], estimatedCandidate: { model: 'glm-5.3', providerId: 'provider-1', offerId: 'offer-1', estimatedMicroUsd: '0.140000', qualityArtifact: 'a'.repeat(64) } };
     await mount(vi.fn(async () => response(view)));
     const html = renderToStaticMarkup(root());
-    expect(html).toContain('Live builder admission is ACTIVE');
-    expect(html).toContain('Live builder admission — coding quality synthesized');
-    expect(html).not.toContain('Not independently approved');
-    expect(html).toContain('Approve observed for coding');
+    expect(html).not.toContain('Live builder admission is ACTIVE');
+    expect(html).toContain('Legacy synthesized quality is not independent verification');
+    expect(html).not.toContain('Not independently verified');
+    expect(html).toContain('Verify existing production evidence');
   });
-  it('Approve observed for coding posts confirm token and reason', async () => {
+  it('Verify existing production evidence posts confirm token and reason', async () => {
     const approvedView = { ...fixture(), qualitySource: 'firestore' as const, models: [{ ...fixture().models[0], qualityReviewStatus: 'reviewed' as const, blockedReasons: ['dispatch_authority_not_evaluated'], estimatedCandidate: null }] };
     const fetch = vi.fn(async (url: string, options?: RequestInit) => {
       if (String(url).endsWith('/approve-observed') && options?.method === 'POST') {
@@ -121,18 +121,18 @@ describe('paid manager validates server data before rendering claims', () => {
       return response(approvedView);
     });
     await mount(fetch);
-    button(root(), 'Approve observed for coding').props.onClick();
+    button(root(), 'Verify existing production evidence').props.onClick();
     let tree = root();
     const textarea = elements(tree).find(e => e.type === 'textarea')!;
     textarea.props.onChange({ target: { value: 'Owner approved observed Surplus coding offers' } });
     tree = root();
-    const form = elements(tree).find(e => e.type === 'form' && e.props['aria-label'] === 'Approve observed models for coding')!;
+    const form = elements(tree).find(e => e.type === 'form' && e.props['aria-label'] === 'Verify existing production evidence')!;
     form.props.onSubmit({ preventDefault: () => {} });
     await settle();
     const approveCall = (fetch.mock.calls as unknown as [string, RequestInit][]).find(([url, options]) => String(url).endsWith('/approve-observed') && options?.method === 'POST');
     expect(approveCall).toBeTruthy();
     expect(JSON.parse(approveCall![1].body as string)).toEqual({ confirm: 'approve-observed-coding', reason: 'Owner approved observed Surplus coding offers' });
-    expect(renderToStaticMarkup(root())).toContain('Observed models approved for coding');
+    expect(renderToStaticMarkup(root())).toContain('Existing production evidence verified');
   });
   it('Sync metadata now posts the dedicated sync route and never claims inference', async () => {
     const fetch = vi.fn()
@@ -179,7 +179,7 @@ describe('paid controls cannot pretend to enable paid inference', () => {
     const [url, options] = fetch.mock.calls[1] as unknown as [string, RequestInit];
     expect(url).toBe('/api/v1/admin/surplus-registry/models/action');
     expect(JSON.parse(options.body as string)).toEqual({ modelId: 'glm-5.3', action: 'enable', snapshotVersion: version, expectedRevision: 4, reason: 'Recheck candidate after investigation' });
-    expect(renderToStaticMarkup(root())).toContain('Not independently approved');
+    expect(renderToStaticMarkup(root())).toContain('Not independently verified');
     expect(renderToStaticMarkup(root())).toContain('does not approve quality');
   });
   it('duplicate submit before rerender sends one control, and does not optimistically change state', async () => {

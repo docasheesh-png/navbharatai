@@ -15,7 +15,7 @@ import type { OpenAiCompletionLike } from '../../AgentV3/providers/OpenAiToolAda
 import type { SurplusTurnPermit } from '../../AgentV3/providers/SurplusTurnRunner';
 import { synthesizeLiveReviews, surplusLiveKey, type LiveProductionReviews, type LiveUsageMapping } from './liveAdmission';
 
-/** @deprecated Review Firestore seed is no longer required for live Surplus; kept for admin/legacy references. */
+/** Existing immutable production evidence; catalog discovery must not populate it. */
 export const SURPLUS_REVIEWS_DOCUMENT = 'live_ai_registry/surplus-builder-reviews';
 export type SurplusUsageMapping = LiveUsageMapping;
 export type SurplusProductionReviews = LiveProductionReviews;
@@ -35,7 +35,7 @@ function envelope(raw: unknown): { wire: WireResponse; body: Record<string, unkn
     objective: supplied.route_objective ?? h['x-si-route-objective'],
   } };
 }
-/** Live admission: Standard key present + AGENTV3_SURPLUS_BUILDER on. No Firestore review seed. */
+/** Configuration permits evaluation, but never substitutes for verified evidence. */
 function assertLive(env: NodeJS.ProcessEnv): string {
   if (parseEnvFlag(env.AGENTV3_SURPLUS_BUILDER) !== true) throw new Error('Surplus builder is disabled');
   const key = surplusLiveKey(env);
@@ -69,8 +69,9 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
       await refreshSurplusRegistry();
       const snapshot = await new SurplusStore(db).read(surplusRegistryConfig(env).models);
       const now = Date.now();
-      // Live path: synthesize admission from key + observed snapshot. No Firestore review seed.
-      const data = synthesizeLiveReviews(env, snapshot, now);
+      // Read existing evidence; never manufacture verification from observed metadata.
+      const evidence = (await db.doc(SURPLUS_REVIEWS_DOCUMENT).get()).data();
+      const data = synthesizeLiveReviews(env, snapshot, now, evidence);
       if (!data.capabilities.length) throw new Error('Surplus live admission has no observed models yet');
       const state: SurplusReviewedState = { ...data, snapshot };
       states.set(state, structuredClone({ ...data, snapshot }));
@@ -89,6 +90,7 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
       const record = permits.get(permit), now = Date.now();
       if (!record || record.startedAt !== null) throw new Error('Unissued or replayed Surplus dispatch');
       assertLive(env);
+      synthesizeLiveReviews(env, record.state.snapshot, now, record.config);
       if (record.review.expiresAt <= now || permit.endpoint !== record.review.endpoint || request.model !== permit.model
           || request.provider !== permit.providerId || object(request.si_route).objective !== 'price') throw new Error('Expired or mismatched Surplus dispatch');
       reviewedEvidence(record.config, record.review, now);
@@ -120,6 +122,7 @@ export function createProductionSurplusAdapter(env: NodeJS.ProcessEnv = process.
       } catch (error) { throw tagScopeFailure(error, { stage: 'reservation', reason: 'reservation_failed' }); }
       // Reservation I/O may outlive review validity or observe a credential rotation. Fail closed.
       assertLive(env);
+      synthesizeLiveReviews(env, record.state.snapshot, Date.now(), record.config);
       reviewedEvidence(record.config, record.review, Date.now());
       recheck();
       permit.assertCurrent?.();

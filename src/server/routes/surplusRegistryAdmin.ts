@@ -92,7 +92,7 @@ export function registerSurplusRegistryAdminRoutes(app: Express, verifyAdminToke
     }
     try {
       const result = await approveObservedSurplusModels({ reason: reason.trim(), confirm: APPROVE_OBSERVED_CONFIRM });
-      audit('ADMIN_SURPLUS_APPROVE_OBSERVED', {
+      audit('ADMIN_SURPLUS_VERIFY_EVIDENCE', {
         admin: adminUsername(),
         models: result.approvedModels.length,
         offerPairs: result.offerPairs,
@@ -109,8 +109,8 @@ export function registerSurplusRegistryAdminRoutes(app: Express, verifyAdminToke
         STALE_SNAPSHOT: [409, 'stale', 'Observations are stale. Sync metadata, then approve again.'],
         NO_ELIGIBLE_OBSERVED_OFFERS: [409, 'empty', 'No healthy trusted observed offers to approve.'],
       };
-      const mapped = map[code] ?? [503, 'unconfirmed', 'Approval could not be confirmed. Refresh status before retrying.'];
-      audit('ADMIN_SURPLUS_APPROVE_OBSERVED_FAILED', { admin: adminUsername(), result: mapped[1] });
+      const mapped = map[code] ?? [503, 'unverified', 'Production evidence is unavailable or unverified. Metadata sync and configured credentials do not establish capability, tariff or quality evidence.'];
+      audit('ADMIN_SURPLUS_VERIFY_EVIDENCE_FAILED', { admin: adminUsername(), result: mapped[1] });
       res.status(mapped[0]).json({ error: mapped[2] });
     }
   });

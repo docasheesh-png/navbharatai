@@ -336,6 +336,7 @@ export class OpenAiCompatProvider implements AIProvider {
   async executeTurn({ prompt, systemPrompt, signal, onChunk }: FreeChainTurnInput): Promise<FreeChainProviderResponse> {
     const started = Date.now();
     let supplierChargeUsd: string | undefined;
+    let conflictingCharge = false;
     try {
       if (signal?.aborted) throw new FreeChainProviderError('ABORTED');
       if (typeof prompt !== 'string' || !prompt.trim() || (systemPrompt !== undefined && typeof systemPrompt !== 'string')
@@ -378,6 +379,14 @@ export class OpenAiCompatProvider implements AIProvider {
         try {
           for await (const chunk of stream) {
             if (signal?.aborted) throw new FreeChainProviderError('ABORTED');
+            if (this.name === 'CHEAPERINFERENCE') {
+              const billing = record(record(chunk)?.billing);
+              if (billing?.status === 'settled' && billing.currency === 'USD') {
+                const charge = exactSupplierCharge(billing.billed_cost_usd);
+                if (supplierChargeUsd !== undefined && charge !== undefined && charge !== supplierChargeUsd) conflictingCharge = true;
+                supplierChargeUsd = conflictingCharge ? undefined : charge ?? supplierChargeUsd;
+              }
+            }
             const extension = record(record(chunk)?.x_groq);
             if (extension?.error) throw extensionError(extension.error);
             const measured = rememberUsage(chunk.usage);

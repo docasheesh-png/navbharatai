@@ -24,6 +24,10 @@ function boundedSnapshot(raw: unknown): raw is Snapshot {
     && Buffer.byteLength(JSON.stringify(raw)) <= SURPLUS_MAX_SNAPSHOT_BYTES;
 }
 /** Exactly one fixed document; no credentials, user/build data, history or subcollections. */
+/** Refresh this long before snapshot expiry. */
+export const SURPLUS_REFRESH_HEADROOM_MS = 60_000;
+/** A failed sync may retry quickly instead of waiting a full interval on a stale snapshot. */
+export const SURPLUS_FAILED_SYNC_RETRY_MS = 15_000;
 export class SurplusStore implements Store {
   constructor(private readonly db: Pick<Firestore, 'doc' | 'runTransaction'>, private readonly clock = Date.now) {}
   private ref() { return this.db.doc(SURPLUS_DOCUMENT); }
@@ -52,7 +56,10 @@ export class SurplusStore implements Store {
       const state = (await tx.get(this.ref())).data() ?? {};
       if (state.lease?.expiresAt > now || state.nextAllowedAt > now) return null;
       const lease = { token: randomUUID(), expiresAt: now + 120_000 };
-      tx.set(this.ref(), { lease, nextAllowedAt: now + intervalMs, lastAttemptAt: now }, { merge: true });
+      // DNA 2026-10-29 (stale_or_missing_snapshot): snapshot expires at startedAt+interval and the next
+      // refresh was allowed at the SAME instant, so every boundary left a stale window while the
+      // next sync ran (and a full interval after any failed sync). Refresh one minute early.
+      tx.set(this.ref(), { lease, nextAllowedAt: now + intervalMs - SURPLUS_REFRESH_HEADROOM_MS, lastAttemptAt: now }, { merge: true });
       return lease;
     });
   }
@@ -70,7 +77,7 @@ export class SurplusStore implements Store {
     await this.db.runTransaction(async tx => {
       if ((await tx.get(this.ref())).data()?.lease?.token !== lease.token) return;
       // Preserve the previous snapshot's original age. Failure never renews freshness.
-      tx.set(this.ref(), { lease: null, lastError: 'metadata_unavailable' }, { merge: true });
+      tx.set(this.ref(), { lease: null, lastError: 'metadata_unavailable', nextAllowedAt: this.clock() + SURPLUS_FAILED_SYNC_RETRY_MS }, { merge: true });
     });
   }
   async control(modelId: string, action: 'disable' | 'enable', expectedRevision: number, snapshotVersion: string, reason: string): Promise<void> {

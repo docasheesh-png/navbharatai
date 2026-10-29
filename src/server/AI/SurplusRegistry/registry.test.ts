@@ -132,7 +132,7 @@ describe('fixed-document fencing and provider isolation', () => {
     const store = new SurplusStore(db, () => now);
     const lease = (await store.claim(now, 300000))!; await store.fail(lease);
     expect(await store.read()).toEqual({ ...snapshot, controlRevision: 0 });
-    expect(rows.get(SURPLUS_DOCUMENT)?.nextAllowedAt).toBe(now + 300000);
+    expect(rows.get(SURPLUS_DOCUMENT)?.nextAllowedAt).toBe(now + 15000); // failed sync retries fast; snapshot age untouched
   });
 });
 

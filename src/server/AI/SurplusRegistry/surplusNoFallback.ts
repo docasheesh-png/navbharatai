@@ -6,7 +6,11 @@ import { rawErrorText } from '../../AgentV3/rawErrorDetail';
  */
 const SURPLUS_NO_FALLBACK_EMAILS: ReadonlySet<string> = new Set(['z@gmail.com']);
 
-export function surplusFallbackDisabledFor(email: string | null | undefined): boolean {
+/** Same owner debug profile by verified uid, so a token without an email claim can't silently fall back. */
+const SURPLUS_NO_FALLBACK_UIDS: ReadonlySet<string> = new Set(['GiYNmFcDMVYSWW48Nrurm7j41gv1']);
+
+export function surplusFallbackDisabledFor(email: string | null | undefined, uid?: string | null): boolean {
+  if (typeof uid === 'string' && SURPLUS_NO_FALLBACK_UIDS.has(uid)) return true;
   return typeof email === 'string' && SURPLUS_NO_FALLBACK_EMAILS.has(email.trim().toLowerCase());
 }
 
@@ -17,8 +21,9 @@ export function surplusFallbackDisabledFor(email: string | null | undefined): bo
 export function surplusRawErrorReporter(
   email: string | null | undefined,
   emit: (text: string) => void,
+  uid?: string | null,
 ): ((error: unknown) => void) | undefined {
-  if (!surplusFallbackDisabledFor(email)) return undefined;
+  if (!surplusFallbackDisabledFor(email, uid)) return undefined;
   return (error) => {
     try { emit(`🛠️ Surplus raw error (debug, this profile only): ${rawErrorText(error)}`); } catch { /* best-effort */ }
   };

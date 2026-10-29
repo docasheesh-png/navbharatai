@@ -3946,12 +3946,14 @@ function setAdmittedSurplusScope(session: SurplusBuildSession | undefined, enabl
   if (session) activateSurplusBuildForCurrentRequest(enabled);
 }
 
-function respondBuilderEngineUnavailable(res: Response, tier: PowerLevel): void {
+function respondBuilderEngineUnavailable(res: Response, tier: PowerLevel, debugDetail?: string): void {
       const tierName = tierDisplayName(toPowerLevel(tier));
-      res.status(503).json({
-        error: tierName === 'Weak'
+      const soft = tierName === 'Weak'
           ? 'The free engine is temporarily unavailable. Please try again shortly, or add credits to build on the full engine.'
-          : `The ${tierName} engine is temporarily unavailable. Please try again shortly, or pick another power level.`,
+          : `The ${tierName} engine is temporarily unavailable. Please try again shortly, or pick another power level.`;
+      res.status(503).json({
+        // debugDetail is set ONLY for surplusNoFallback owner debug profiles; everyone else gets the soft copy.
+        error: debugDetail ? `${soft}\n\n🛠️ Surplus raw error (debug, this profile only): ${debugDetail}` : soft,
         code: tierName === 'Weak' ? 'WEAK_ENGINE_UNAVAILABLE' : 'ENGINE_UNAVAILABLE',
       });
 }
@@ -11368,13 +11370,15 @@ async function noteBuildOutcome(
       buildId: scopeRequestId,
       tierEngineAvailable: () => tierEngineAvailable(powerLevelReqEffective),
       audit,
-      noFallback: surplusFallbackDisabledFor(email),
+      noFallback: surplusFallbackDisabledFor(email, userId),
     });
     surplusAdmissionDiag = surplusAdmitGate.diag;
     if (!surplusAdmitGate.ok) {
       releaseBuildLock(buildKey, buildLockToken);
       audit('AGENTV3_TIER_ENGINE_UNAVAILABLE', { userId, tier: powerLevelReqEffective, afterSurplusFallback: surplusAdmitGate.afterSurplusFallback }, 'warn');
-      respondBuilderEngineUnavailable(res, powerLevelReqEffective);
+      respondBuilderEngineUnavailable(res, powerLevelReqEffective, surplusFallbackDisabledFor(email, userId)
+        ? `admission ${surplusAdmitGate.diag?.code ?? 'NO_DIAG'} reason=${surplusAdmitGate.diag?.reason ?? 'unknown'}${surplusAdmitGate.diag?.model ? ` model=${surplusAdmitGate.diag.model}` : ''}`
+        : undefined);
       return;
     }
     surplusSession = surplusAdmitGate.session;
@@ -11504,7 +11508,7 @@ async function noteBuildOutcome(
         if (weakScopeBlocked) {
           reply = weakAdmissionReply(weakAdmission?.scope ?? null);
           // Owner debug profiles only (surplusNoFallback): show WHY scope blocked instead of the soft copy alone.
-          if (surplusFallbackDisabledFor(email) && weakAdmission?.scope === null) {
+          if (surplusFallbackDisabledFor(email, userId) && weakAdmission?.scope === null) {
             const why = earlySurplusFailure !== undefined ? rawErrorText(earlySurplusFailure)
               : `stage=${weakAdmission.failure?.stage ?? 'unknown'} reason=${weakAdmission.failure?.reason ?? 'unknown'}`;
             reply += `\n\n🛠️ Surplus raw error (debug, this profile only): scope ${why}`;
@@ -14526,8 +14530,8 @@ async function noteBuildOutcome(
       // Surplus-wrapped runner (main / fast / plan / heal) drops once together.
       const surplusPreWriteFailOpen: SurplusPreWriteFailOpenHooks = {
         state: { dropped: false },
-        noFallback: surplusFallbackDisabledFor(email),
-        onSurplusError: surplusRawErrorReporter(email, (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() })),
+        noFallback: surplusFallbackDisabledFor(email, userId),
+        onSurplusError: surplusRawErrorReporter(email, (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }), userId),
         userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
         onFailOpen: (reason) => {
           const dropped = surplusSession;

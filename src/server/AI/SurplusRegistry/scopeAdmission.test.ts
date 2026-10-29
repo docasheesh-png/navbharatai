@@ -39,7 +39,7 @@ describe('recorded Surplus scope admission', () => {
     const h = harness(), signal = new AbortController().signal;
     const ask = createSurplusScopeAsk(h.session, h.turns, h.records, h.observe)!;
     expect(await ask('PRIVATE_SYSTEM', 'PRIVATE_USER', signal)).toEqual({ text: 'PRIVATE_RESPONSE' });
-    expect(h.run).toHaveBeenCalledWith(expect.objectContaining({ signal, maxTokens: 8, tools: [], model: 'synthetic-model' }));
+    expect(h.run).toHaveBeenCalledWith(expect.objectContaining({ signal, maxTokens: 1024, tools: [], model: 'synthetic-model' }));
     expect(h.records).toHaveLength(1);
     expect(h.records[0]).toMatchObject({ ok: true, provider: 'SURPLUS', model: 'synthetic-model', promptPreview: SURPLUS_SCOPE_PURPOSE,
       promptChars: 26, responsePreview: '', responseChars: 16, inputTokens: 123, outputTokens: 4 });
@@ -63,5 +63,12 @@ describe('recorded Surplus scope admission', () => {
     const h = harness(); h.observe.mockImplementation(() => { throw new Error('audit unavailable'); });
     await expect(createSurplusScopeAsk(h.session, h.turns, h.records, h.observe)!('system', 'user')).resolves.toEqual({ text: 'PRIVATE_RESPONSE' });
     expect(h.records).toHaveLength(1); expect(h.turns[0].usage.surplusReceipt).toBe(receipt);
+  });
+});
+
+describe('reasoning-model scope budget (05011 DNA)', () => {
+  it('never sends a cap too small for a reasoning model to emit a label', async () => {
+    const { SURPLUS_SCOPE_MAX_TOKENS } = await import('./scopeAdmission');
+    expect(SURPLUS_SCOPE_MAX_TOKENS).toBeGreaterThanOrEqual(512);
   });
 });

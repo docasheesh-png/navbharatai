@@ -84,3 +84,14 @@ describe('alternate supplier rate fields', () => {
   expect(JSON.stringify(e.keys)).not.toContain('beam');
  });
 });
+
+import { readLoadQuote as rq } from './providerLoadQuote';
+import { it as it2, expect as ex2 } from 'vitest';
+it2('falls back to /v1/models catalog pricing when supply 200 has all-null rates', async () => {
+  const env = { CHEAPERINFERENCE_API_KEY: 'ci_live_x', CHEAPERINFERENCE_MODEL: 'beam' } as unknown as NodeJS.ProcessEnv;
+  const t = (async (url: string) => String(url).includes('/models/supply')
+    ? new Response(JSON.stringify({ object: 'model.supply', model: 'beam', min_discount_percent: 0, list_input_per_million: null, list_output_per_million: null, max_input_per_million: null, max_output_per_million: null, candidate_count: 2 }), { status: 200 })
+    : new Response(JSON.stringify({ object: 'list', data: [{ id: 'other' }, { id: 'beam', pricing: { input_per_million: '0.20', output_per_million: '0.80' } }] }), { status: 200 })) as unknown as typeof fetch;
+  const q = await rq(64, env, t);
+  ex2(q.maximumNanoUsd).toBeGreaterThan(0);
+});

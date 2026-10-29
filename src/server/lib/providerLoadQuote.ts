@@ -37,7 +37,13 @@ export async function readLoadQuote(outputTokens: number, env = process.env, tra
   if (!data || !objectOk || !modelOk || discount !== 0) throw new LoadDiagnosticError('unavailable', 'quote_schema', 'schema_mismatch', response.status, undefined, fields);
   let input: number, output: number;
   const keys = supplyKeys(data);
-  const rates = resolveRates(data);
+  let rates = resolveRates(data);
+  // DNA fix (live 2026-10-29): supplier 200 with every max_*/list_* null (no list price for beam at min_discount 0).
+  // The catalog /v1/models carries the current per-million rates for the same key; use those as the ceiling.
+  if (!num(rates.input) || !num(rates.output)) {
+    const catalog = await readCatalogRates(status.defaultModel, env.CHEAPERINFERENCE_API_KEY!.trim(), transport);
+    if (catalog) rates = { input: num(rates.input) ? rates.input : catalog.input, output: num(rates.output) ? rates.output : catalog.output };
+  }
   try { input = usdToNanoUsd(rates.input as string | number); output = usdToNanoUsd(rates.output as string | number); } catch { throw new LoadDiagnosticError('unavailable', 'quote_rates', 'invalid_rates', response.status, undefined, fields, keys); }
   let maximumNanoUsd: number;
   try { maximumNanoUsd = maximumCostNanoUsd(1048576, outputTokens, input, output); }
@@ -88,4 +94,23 @@ function supplyKeys(data: Record<string, unknown>): string[] {
   const out: string[] = [];
   for (const [k, v] of Object.entries(data)) { out.push(k); const r = rec(v); if (r) for (const c of Object.keys(r)) out.push(`${k}.${c}`); }
   return out.filter(k => /^[A-Za-z0-9_.]{1,64}$/.test(k)).slice(0, 40);
+}
+
+/** Catalog fallback: GET /v1/models returns each model with current pricing (input_per_million/output_per_million,
+ * possibly under pricing.*; tiered models expose pricing.above_threshold — take the higher tier as the ceiling). */
+export async function readCatalogRates(model: string, key: string, transport: typeof fetch = fetch): Promise<{ input: unknown; output: unknown } | null> {
+  try {
+    const r = await transport(`${CHEAPERINFERENCE_BASE_URL}/models`, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(10000),
+      headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' } });
+    if (!r.ok) return null;
+    const body = await r.json() as unknown;
+    const list = Array.isArray(body) ? body : Array.isArray(rec(body)?.data) ? rec(body)!.data as unknown[] : Array.isArray(rec(body)?.models) ? rec(body)!.models as unknown[] : [];
+    const hit = list.map(rec).find(m => m && sameBeamModel(String(m.id ?? m.model ?? ''), model));
+    if (!hit) return null;
+    const base = resolveRates(hit), above = rec(rec(hit.pricing)?.above_threshold);
+    const tier = above ? resolveRates(above) : { input: undefined, output: undefined };
+    const max = (a: unknown, b: unknown) => num(a) && num(b) ? (Number(a) >= Number(b) ? a : b) : num(a) ? a : b;
+    const out = { input: max(base.input, tier.input), output: max(base.output, tier.output) };
+    return num(out.input) && num(out.output) ? out : null;
+  } catch { return null; }
 }

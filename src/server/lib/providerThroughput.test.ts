@@ -18,3 +18,11 @@ describe('providerThroughput', () => {
     expect(parseThroughputInput({ requests: 0 })).toBeNull();
   });
 });
+describe('providerThroughput progress', () => {
+  it('reports progress once per finished request including terminal failures', async () => {
+    const seen: number[] = [];
+    await runThroughput('cheaperinference', { model: 'm', call: async () => { throw Object.assign(new Error('x'), { code: 'TIMEOUT' }); } },
+      { requests: 3, concurrency: 3, retries: 0, maxOutputTokens: 8 }, undefined, p => seen.push(p.done));
+    expect(seen.sort()).toEqual([1, 2, 3]);
+  });
+});

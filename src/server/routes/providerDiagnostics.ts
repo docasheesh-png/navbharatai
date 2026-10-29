@@ -7,7 +7,8 @@ import { ProviderDiagnosticStore, DiagnosticAdmissionError } from '../lib/provid
 import { ProviderDiagnosticDirectStore } from '../lib/providerDiagnosticDirectStore';
 import { adminUsername } from '../lib/adminAuth';
 import { getServerDb } from '../lib/serverDb';
-import { parseThroughputInput, runThroughput } from '../lib/providerThroughput';
+import { parseThroughputInput, runThroughput, throughputFailureReason, type ThroughputProgress } from '../lib/providerThroughput';
+const throughputRunning = new Set<string>();
 
 export async function readDiagnosticProviderState(provider: 'surplus' | 'cheaperinference', store: Pick<ProviderDiagnosticStore, 'control' | 'status'>, adapter: DiagnosticDependencies['adapter']) {
   let control;
@@ -76,12 +77,30 @@ export function registerProviderDiagnosticRoutes(app: Express, resolve = depende
     }
   });
   // Owner t124u: concurrent unique-prompt throughput (target 1000 working responses/min per provider).
+  // DNA fix (live HTTP 503 "Throughput run unavailable"): the old route (a) flattened every adapter-construction
+  // failure into one opaque 503, and (b) held a silent request open for minutes, so any proxy/idle timeout or
+  // instance recycle surfaced as the same 503/network error with no evidence. Now: configuration failures are a
+  // precise 424 with a safe reason; one run per provider per instance (409); and the run streams NDJSON progress
+  // heartbeats every 2s (keeps the request active so Cloud Run keeps CPU allocated and no idle timeout fires),
+  // ending with exactly one {type:"result"} or {type:"error", reason} line.
   router.post('/:provider/throughput', async (req, res) => {
     const provider = req.params.provider, input = parseThroughputInput(req.body);
-    if ((provider !== 'surplus' && provider !== 'cheaperinference') || !input) { res.status(400).json({ error: 'Provide requests (1-20000), concurrency (1-2000), optional retries (0-3), maxOutputTokens.' }); return; }
-    req.setTimeout?.(900_000); res.setTimeout?.(900_000);
-    try { res.json(await runThroughput(provider, diagnosticAdapter(provider, process.env, true, input.maxOutputTokens), input)); }
-    catch (error) { res.status(503).json({ error: 'Throughput run unavailable.', reason: (error as { code?: string })?.code ?? 'unavailable' }); }
+    if ((provider !== 'surplus' && provider !== 'cheaperinference') || !input) { res.status(400).json({ error: 'Provide requests (1-20000), concurrency (1-2000), optional retries (0-3), maxOutputTokens.', reason: 'invalid_request' }); return; }
+    if (throughputRunning.has(provider)) { res.status(409).json({ error: 'A throughput run for this provider is already in progress on this instance.', reason: 'run_in_progress' }); return; }
+    let adapter;
+    try { adapter = diagnosticAdapter(provider, process.env, true, input.maxOutputTokens); }
+    catch (error) { res.status(424).json({ error: 'Provider adapter not configured; nothing dispatched.', reason: `adapter_unavailable:${throughputFailureReason(error)}` }); return; }
+    throughputRunning.add(provider);
+    req.setTimeout?.(3_600_000); res.setTimeout?.(3_600_000);
+    res.status(200).setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('X-Accel-Buffering', 'no');
+    const write = (o: unknown) => { if (!res.writableEnded) res.write(JSON.stringify(o) + '\n'); };
+    let last: ThroughputProgress | null = null;
+    write({ type: 'started', provider, model: adapter.model, requests: input.requests, concurrency: input.concurrency });
+    const beat = setInterval(() => write({ type: 'progress', ...(last ?? { done: 0, ok: 0, pass: 0, requests: input.requests, elapsedMs: 0 }) }), 2_000);
+    try { write({ type: 'result', ...await runThroughput(provider, adapter, input, undefined, p => { last = p; }) }); }
+    catch (error) { write({ type: 'error', error: 'Throughput run aborted.', reason: throughputFailureReason(error) }); }
+    finally { clearInterval(beat); throughputRunning.delete(provider); res.end(); }
   });
   router.use((_req, res) => { res.status(404).json({ error: 'Diagnostic endpoint not found.' }); });
   app.use('/api/admin/provider-diagnostics', router);

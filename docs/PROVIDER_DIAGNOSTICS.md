@@ -138,3 +138,28 @@ true facts: `accountSpecific`, `credentialsPinnedToDeploymentRevision`,
 `ratesLockedForAdmittedRequest`, `ratesAreAllDimensionCeilings`,
 `coversAllServedModelVersions`, `outputCapIncludesReasoning`.
 These fields record verified facts; do not set attestations merely to unblock a test.
+
+## Throughput test (`POST /api/admin/provider-diagnostics/:provider/throughput`)
+
+Response is `application/x-ndjson`: `started` → `progress` heartbeat every 2s → exactly one `result` or `error` line.
+Pre-dispatch failures are plain JSON: `400 invalid_request`, `409 run_in_progress` (one run per provider per instance),
+`424 adapter_unavailable:<code>` (e.g. missing/invalid `SURPLUS_API_KEY`, `CHEAPERINFERENCE_API_KEY`, `SURPLUS_BASE_URL`).
+If the UI shows "stream ended before result", the instance was recycled or a proxy cut the stream — rerun with fewer requests.
+
+Root cause of the old opaque `503 "Throughput run unavailable"`: every adapter-construction error was flattened into
+one 503 without its reason, and the run held a silent HTTP request open for minutes (no bytes until the end), so
+idle/proxy timeouts and instance recycles were indistinguishable from config errors.
+
+## Settling a stuck CheaperInference load batch (e.g. `completed 53/100, active 73`)
+
+By design (`providerLoadBatch.ts`), only an observed complete response releases a concurrency slot; a timeout/network
+failure keeps `active` held forever (the supplier may still be working and charging), and `completed` counts failures
+too. So `active` can exceed `count - completed` and never drain. Nothing re-sends automatically. To settle:
+
+1. Admin → Provider testing bots → **Stop** (`POST /api/admin/provider-load-batch/stop`). No further claims happen.
+2. Read `GET /api/admin/provider-load-batch/status` and per-item `GET .../items/:ordinal`; items in state
+   `dispatched`/`unknown` are the retained liabilities. Reconcile their cost against the CheaperInference dashboard.
+3. To start a fresh batch, the scope must change: in Firestore delete the doc
+   `free_chat_chain/provider_load_batch_settings` (the old batch doc under its `scopeId` stays as the audit record).
+   The next **Save** mints a new `scopeId` with `active: 0`. Do not edit `active`/`heldNanoUsd` by hand on the old batch.
+4. For raw throughput measurement prefer the Throughput test above; it does not use the durable batch ledger.

@@ -40,14 +40,14 @@ describe('isolated exact Surplus app-builder receipt policy', () => {
       userChargeUsd: '0.001', officialCeilingUsd: '0.00111', absorbedCostUsd: '0',
       expenseEvidence: 'provider-reported-actual', reason: 'ten_times_verified_actual_cost' });
   });
-  it('caps ten times actual at the reviewed official tariff', () => {
+  it('charges a flat ten times actual even above the official tariff (no cap)', () => {
     const input = fixture(); input.receipt!.buyerCostMicro = '200';
-    expect(evaluateSurplusReceipt(input)).toMatchObject({ actualCostUsd: '0.0002', userChargeUsd: '0.00111',
-      reason: 'capped_at_verified_official_tariff' });
+    expect(evaluateSurplusReceipt(input)).toMatchObject({ actualCostUsd: '0.0002', userChargeUsd: '0.002',
+      reason: 'ten_times_verified_actual_cost' });
   });
-  it('preserves expense and explicitly absorbs the difference when official price is below cost', () => {
+  it('preserves expense and charges ten times cost even when official price is below cost', () => {
     const input = fixture(); input.receipt!.buyerCostMicro = '2000';
-    expect(evaluateSurplusReceipt(input)).toMatchObject({ actualCostUsd: '0.002', userChargeUsd: '0.00111', absorbedCostUsd: '0.00089', newSupplierExpenseUsd: '0.002' });
+    expect(evaluateSurplusReceipt(input)).toMatchObject({ actualCostUsd: '0.002', userChargeUsd: '0.02', absorbedCostUsd: '0', newSupplierExpenseUsd: '0.002' });
   });
   it('never guesses a price or creates a model tariff from marketplace reference data', () => {
     const input = fixture(); input.tariff = null;
@@ -108,7 +108,7 @@ describe('lossless numbers and unknown expense', () => {
     const input = fixture(); input.receipt!.buyerCostMicro = 1;
     input.receipt!.usage!.tokens = { input: '1', output: '0', cacheRead: '0', cacheWrite: '0', reasoning: '0' };
     input.tariff!.usdPerMillionTokens = { input: '0.000000000000000000000001', output: '0', cacheRead: '0', cacheWrite: '0', reasoning: '0' };
-    expect(evaluateSurplusReceipt(input).userChargeUsd).toBe('0.000000000000000000000000000001');
+    expect(evaluateSurplusReceipt(input).userChargeUsd).toBe('0.00001'); // flat 10x actual, tariff no longer caps
   });
   it('rejects a calculated ceiling beyond the accounting bound, without overflow', () => {
     const input = fixture(); input.receipt!.usage!.tokens.input = '999999999999999999';
@@ -124,7 +124,7 @@ describe('lossless numbers and unknown expense', () => {
     expect(evaluateSurplusReceipt(input)).toMatchObject({ status: 'chargeable', userChargeUsd: '0', actualCostUsd: '0' });
     input.receipt!.buyerCostMicro = 100;
     for (const key of Object.keys(input.tariff!.usdPerMillionTokens)) input.tariff!.usdPerMillionTokens[key as keyof SurplusTokenCounts] = '0';
-    expect(evaluateSurplusReceipt(input)).toMatchObject({ userChargeUsd: '0', absorbedCostUsd: '0.0001', officialCeilingUsd: '0' });
+    expect(evaluateSurplusReceipt(input)).toMatchObject({ userChargeUsd: '0.001', absorbedCostUsd: '0', officialCeilingUsd: '0' });
   });
 });
 

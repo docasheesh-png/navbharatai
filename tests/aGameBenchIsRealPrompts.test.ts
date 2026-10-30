@@ -26,10 +26,8 @@ describe('the corpus', () => {
   });
   it('every prompt is a game to the platform\'s own classifier or the contract', () => {
     const notGame = fx.prompts.filter((p) => analyzeRequirementGaps(p.prompt).domain !== 'game' && buildGameContract(p.prompt).genre === 'unknown');
-    // 🔎 FINDING (Phase 4, 2026-10-30): the Hindi word "khel" (game) is recognised by neither
-    // RequirementGapAnalyzer nor the Phase 1 contract, so this real prompt is not classified as a game.
-    // Kept in the corpus ON PURPOSE — the bench should measure it. Remove from this list when fixed.
-    expect(notGame.map((p) => p.prompt)).toEqual(['ek car wala khel banao']);
+    // Phase 4 found "ek car wala khel banao" unclassified ("khel" = game); fixed in Phase 5.
+    expect(notGame.map((p) => p.prompt)).toEqual([]);
   });
   it('covers 2D, 3D, DOM (quiz/board/card/puzzle) games and Hinglish', () => {
     const genres = new Set(fx.prompts.map((p) => buildGameContract(p.prompt).genre));

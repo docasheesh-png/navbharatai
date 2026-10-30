@@ -68,6 +68,9 @@ export function userDatabaseContext(vaultSecrets: Record<string, string> | null 
     // success. Named per FAMILY so every brand of the same engine gets identical, correct instructions.
     `- ${familyGuidance(spec.family)}`,
     '- Wire any data/auth/storage the app needs to THIS connected database.',
+    spec.id === 'firebase'
+      ? "- Firestore paths MUST match the user's security rules: private per-user data under `users/{uid}/...`, publicly readable data under `public/...`. Use Firebase Auth for sign-in. Never tell the user to put Firestore in test mode or use `allow read, write: if true` — point them to **Settings → Database → Copy rules** instead."
+      : '',
     'You MUST NOT:',
     '- Provision, scaffold, or spin up a new/different database, an in-memory store, or a local file DB.',
     '- Substitute a different provider, or ask the user to create or configure a database — they already did.',

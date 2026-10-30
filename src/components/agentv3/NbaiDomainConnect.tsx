@@ -1382,6 +1382,9 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                     {registrarById(registrarId) && (
                       <p className="text-[10px] text-muted">{registrarById(registrarId)!.steps}</p>
                     )}
+                    {registrarById(registrarId)?.stepsHi && (
+                      <p className="text-[10px] text-faint">{registrarById(registrarId)!.stepsHi}</p>
+                    )}
                   </div>
                 </>
               )}

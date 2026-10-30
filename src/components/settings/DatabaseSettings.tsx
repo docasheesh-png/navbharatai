@@ -4,6 +4,7 @@ import { Database, ExternalLink, CheckCircle2, ShieldCheck } from 'lucide-react'
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { saveSecret } from '../../lib/secretsApi';
 import { SupabaseConnectCard } from './SupabaseConnectCard';
+import { FirestoreRulesCard } from './FirestoreRulesCard';
 
 /**
  * The provider catalogue and the credential → `.env` mapping now live in ONE shared place
@@ -231,6 +232,9 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
           {saving ? <TirangaLoader className="w-5 h-5" /> : <Database className="w-5 h-5" />}
           {saving ? 'Saving…' : 'Save & Sync to Secrets'}
         </button>
+
+        {/* Firebase is not finished at the keys — the rules step makes it safe (owner 2026-10-30). */}
+        {provider === 'firebase' && <FirestoreRulesCard projectId={formCreds.projectId} />}
 
         {/* Feedback */}
         {savedMsg && (

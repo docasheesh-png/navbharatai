@@ -14265,6 +14265,7 @@ async function noteBuildOutcome(
       // with the per-tier flag off. Aux calls (blueprint/plan/judge) reconcile into 'other' at settle.
       const providerLedger = createProviderUsageLedger();
       /** The cost ceiling fires at most once per build — see captureTurnUsage below. */
+      let costUnconfirmedNoted = false;
       let costCeilingFired = false;
       /**
        * The "this provider reported no tokens" notice fires at most once per build, same reasoning as
@@ -14396,11 +14397,13 @@ async function noteBuildOutcome(
             }
           } catch (error) {
             if (error instanceof SurplusAccountingUnavailableError) {
-              costCeilingFired = true;
-              buildDiag.record({ phase: 'build', severity: 'warning', code: 'DISCOUNT_COST_UNCONFIRMED', autoResolved: false,
-                message: 'Build stopped because an engine charge could not be verified; no estimated bill was substituted.' });
-              abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'cost-cap');
-              throw error;
+              // BMI autopsy DNA: unverifiable Surplus usage is absorbed at ₹0 (#4025) — never a build stop,
+              // never labelled cost-cap / size limit. Record once and keep building.
+              if (!costUnconfirmedNoted) {
+                costUnconfirmedNoted = true;
+                try { buildDiag.record({ phase: 'build', severity: 'info', code: 'DISCOUNT_COST_UNCONFIRMED', autoResolved: true,
+                  message: 'An engine charge could not be verified; absorbed at ₹0 and the build continued.' }); } catch { /* best-effort */ }
+              }
             }
             // A ceiling we could not evaluate must never end somebody's build. Failing OPEN here is
             // the same call the affordability gate makes on an unreadable balance.

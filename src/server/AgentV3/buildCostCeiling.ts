@@ -33,7 +33,7 @@
 // justify — never earlier. Reporting it as complete would be the lie; under-reading it is merely
 // cautious.
 
-import { realProviderCostUsd, type ProviderCostEntry } from './providerRates';
+import { realProviderCostUsd, SurplusAccountingUnavailableError, type ProviderCostEntry } from './providerRates';
 
 /** The default ceiling on ONE build's real provider cost (USD). See the header for its provenance. */
 export const DEFAULT_BUILD_COST_CEILING_USD = 5;
@@ -67,7 +67,18 @@ export function buildCostCeilingUsd(env: NodeJS.ProcessEnv = process.env, weakSc
 /** What the live ledger currently prices at, in USD. Pure — it never reads the environment. */
 export function ledgerCostUsd(entries: ProviderCostEntry[]): number {
   if (!Array.isArray(entries) || entries.length === 0) return 0;
-  return realProviderCostUsd(entries);
+  // DNA (BMI autopsy 2026-10-30): a Surplus call whose receipt carried no usage is ABSORBED at ₹0
+  // since #4025/#4026 — so the mid-build ceiling must price it at 0 too, not throw. The throw used
+  // to abort a rendering Surplus build as 'cost-cap' (shown as size limit / cost ceiling) at ₹0 spend.
+  try { return realProviderCostUsd(entries); }
+  catch (error) {
+    if (!(error instanceof SurplusAccountingUnavailableError)) throw error;
+    const settled = entries.filter(e => {
+      if (e.provider.toUpperCase() !== 'SURPLUS') return true;
+      try { realProviderCostUsd([e]); return true; } catch { return false; }
+    });
+    return settled.length ? realProviderCostUsd(settled) : 0;
+  }
 }
 
 export interface CeilingVerdict {

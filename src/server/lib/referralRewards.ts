@@ -102,12 +102,15 @@ export const ALL_STEPS: readonly RewardStep[] = ['signup', 'referral-code', 'ema
  * plan, and it was unset in Cloud Run. The ceilings in `giftPolicy.ts` hold whatever this table says.
  */
 export const STEP_RUPEES: Readonly<Record<RewardStep, number>> = {
-  signup: 50,
-  'referral-code': 100,
-  email: 50,
-  mobile: 100,
-  github: 100,
+  signup: 5,           // "download bonus" — first sign-in on a Play-Integrity-verified Android device
+  'referral-code': 10, // only for a friend who applied someone's code
+  email: 10,           // gmail login
+  mobile: 20,          // mobile OTP verified
+  github: 15,          // GitHub connected
 };
+// 🔴 ADMIN 2026-10-30 (app-only plan, verbatim intent): "website par gift = 0 · gift and refral only from
+// mobile app". User A (no code): 5+10+15+20 = ₹50. User B (with code): 5+10+10+15+20 = ₹60. The referrer
+// gets ₹10 per friend ONLY when that friend has completed EVERY step, lifetime max ₹500.
 
 /**
  * The steps that may be earned on the WEBSITE (admin 2026-09-27: signup, login and mobile OTP are paid
@@ -119,7 +122,8 @@ export const STEP_RUPEES: Readonly<Record<RewardStep, number>> = {
  * an unusual handset): they pay the same on both surfaces, so the web rules pay them there too. Only
  * the referral code and GitHub need the device check.
  */
-export const WEB_ELIGIBLE_STEPS: readonly RewardStep[] = ['signup', 'email', 'mobile'];
+// 🔒 ADMIN 2026-10-30: website gift = ₹0. No step is earnable on the web any more.
+export const WEB_ELIGIBLE_STEPS: readonly RewardStep[] = [];
 
 /** Is this step claimable on the website at all? (Android earns the full set; web earns only these.) */
 export function stepAllowedOnWeb(step: RewardStep): boolean {
@@ -209,13 +213,13 @@ export function webHoldUntilMobile(env: NodeJS.ProcessEnv = process.env): boolea
   return parseEnvFlag((env.REFERRAL_WEB_HOLD_UNTIL_MOBILE || '').trim().toLowerCase()) === true;
 }
 
-/** What ONE of B's verifications is worth to A. ₹25. */
+/** What ONE fully-completed friend is worth to A. ₹10 (admin 2026-10-30), paid once per friend. */
 export function referrerStepTokens(env: NodeJS.ProcessEnv = process.env): number {
-  return tokensFromEnv(env.REFERRER_STEP_TOKENS, 25);
+  return tokensFromEnv(env.REFERRER_STEP_TOKENS, 10);
 }
 
 /**
- * The most one referrer may EVER earn. ₹1,500 — roughly twenty referred friends.
+ * The most one referrer may EVER earn. ₹500 (admin 2026-10-30: "maximum 500₹, chahe kitne bhi refral kare").
  *
  * ⚠️ There is no "unlimited" value on purpose. `0` means zero, and anything unreadable takes the
  * ₹1,500 default rather than becoming no cap at all — the reasoning `parseRolloutPercent` already
@@ -223,7 +227,7 @@ export function referrerStepTokens(env: NodeJS.ProcessEnv = process.env): number
  * can be removed by a typo is not a cap.
  */
 export function referrerLifetimeCapTokens(env: NodeJS.ProcessEnv = process.env): number {
-  return tokensFromEnv(env.REFERRER_LIFETIME_CAP_TOKENS, 1500);
+  return tokensFromEnv(env.REFERRER_LIFETIME_CAP_TOKENS, 500);
 }
 
 // ── B's own reward ───────────────────────────────────────────────────────────────────────────────
@@ -388,33 +392,21 @@ export function decideReferrerReward(input: {
   const pending = REFERRER_PAYING_STEPS.filter((s) => friendPaid.includes(s) && !alreadyPaid.includes(s));
   if (pending.length === 0) return none('nothing-owed');
 
-  // RULE 3. The mobile is the gate for the whole friend, not just for its own ₹25 — so an account
-  // that never verifies a number earns its referrer exactly nothing, however many other boxes it ticks.
-  if (!friendPaid.includes('mobile')) return none('held-until-mobile');
+  // ADMIN 2026-10-30: A is paid ONLY when the friend has completed EVERY step (download/signup,
+  // referral code, gmail login, mobile OTP, GitHub). Until then the whole ₹10 is held.
+  if (!ALL_STEPS.every((s) => friendPaid.includes(s))) return none('held-until-mobile');
+  // One flat payment per friend; if ANY step was ever paid to A for this friend (old ladder), owe nothing more.
+  if (alreadyPaid.length > 0) {
+    return { tokens: 0, reason: 'nothing-owed', recordSteps: pending, owedBeforeCap: 0 };
+  }
 
-  const per = referrerStepTokens(env);
-  const owed = pending.length * per;
-
+  const owed = referrerStepTokens(env);
   const earnedRaw = Number(input.referrerEarnedTokens);
   const earned = Number.isFinite(earnedRaw) && earnedRaw > 0 ? Math.floor(earnedRaw) : 0;
   const room = referrerLifetimeCapTokens(env) - earned;
-  if (room <= 0) return none('cap-reached', owed);
-
-  // A PARTIAL payment still records EVERY step it was computed from. Otherwise the unpaid remainder
-  // stays pending for ever and every later call re-offers it — a referrer parked at the cap would be
-  // re-evaluated on every one of their friends' events, for nothing.
-  // Two ceilings, answering different questions: `room` is this referrer's ₹1,500 LIFETIME cap across
-  // everybody; `capReferrerPerFriend` is the ₹75 this ONE friend can ever be worth. Without the second,
-  // raising REFERRER_STEP_TOKENS would raise the cost of acquiring one user past the admin's ₹475.
-  //
-  // ⚠️ The steps already paid for this friend are valued at TODAY's rate — the only figure this pure
-  // function is given. So a rate that was RAISED since makes this OVER-state what was paid and pay
-  // less; a rate that was lowered makes it under-state and pay slightly more, bounded by ₹75 either
-  // way. Under-paying a referrer is a support message; passing the ₹475 ceiling is the thing the
-  // admin said must not happen, so the error is left leaning that way deliberately.
-  const paidForThisFriend = alreadyPaid.length * per;
-  const tokens = capReferrerPerFriend(Math.min(owed, room), paidForThisFriend);
-  if (tokens <= 0) return none('cap-reached', owed);
+  if (room <= 0) return { ...none('cap-reached', owed), recordSteps: pending };
+  const tokens = capReferrerPerFriend(Math.min(owed, room), 0);
+  if (tokens <= 0) return { ...none('cap-reached', owed), recordSteps: pending };
   return { tokens, reason: 'granted', recordSteps: pending, owedBeforeCap: owed };
 }
 

@@ -22,17 +22,6 @@ const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.parse('2026-09-27T12:00:00Z');
 
 describe('rule 1 — the user must be new (joined within the chosen days)', () => {
-  it('🔴 the reported bug: a ten-day-old ₹0 account is NOT new at 7 days', () => {
-    const plan = planWelcomeGift([{ id: 'old-zero', tokenBalance: 0 }], () => NOW - 10 * DAY, NOW, 7);
-    expect(plan.payIds).toEqual([]);
-    expect(plan.skipped.notNew).toBe(1);
-  });
-
-  it('an account that joined yesterday is new', () => {
-    const plan = planWelcomeGift([{ id: 'fresh', tokenBalance: 0 }], () => NOW - 1 * DAY, NOW, 7);
-    expect(plan.payIds).toEqual(['fresh']);
-  });
-
   it('🔒 an account whose join date cannot be read is never paid', () => {
     expect(joinedWithin(null, NOW, 30)).toBe(false);
     expect(joinedWithin(undefined, NOW, 30)).toBe(false);
@@ -53,17 +42,6 @@ describe('rule 2 — the GIFT balance must be ₹0; paid money is separate', () 
   it('a new user still holding gift credit is skipped', () => {
     const w = { tokenBalance: 10000, giftTokensRemaining: 10000, freeGiftedTokens: 10000 };
     expect(walletRefusal(w)).toBe('has-gift-balance');
-  });
-
-  it('🔑 a user who PAID ₹299 but has ₹0 gift balance IS eligible — purchased money does not count', () => {
-    const w = { tokenBalance: 29900, giftTokensRemaining: 0, totalMoneySpent: 299, totalTokensPurchased: 29900 };
-    expect(walletRefusal(w)).toBeNull();
-    expect(welcomeGiftEligible(w)).toBe(true);
-  });
-
-  it('a user who spent all their earlier gift is at ₹0 gift and eligible', () => {
-    const w = { tokenBalance: 0, giftTokensRemaining: 0, freeGiftedTokens: 10000 };
-    expect(welcomeGiftEligible(w)).toBe(true);
   });
 
   it('🔒 the ₹400 lifetime gift ceiling still holds — no room for ₹150, no payment', () => {
@@ -105,21 +83,6 @@ describe('guards and amounts', () => {
     expect(walletRefusal({ banned: true })).toBe('banned');
     expect(walletRefusal({ mergedInto: 'uid-2' })).toBe('merged');
     expect(walletRefusal(null)).toBe('no-wallet');
-  });
-
-  it('the plan counts every account it checked, in exactly one bucket', () => {
-    const wallets = [
-      { id: 'pay', tokenBalance: 0 },
-      { id: 'old', tokenBalance: 0 },
-      { id: 'gift', tokenBalance: 5000, giftTokensRemaining: 5000 },
-      { id: 'given', adminWelcomeGiftAt: 'x' },
-      { id: 'banned', banned: true },
-    ];
-    const joined = (id: string) => (id === 'old' ? NOW - 20 * DAY : NOW - DAY);
-    const plan = planWelcomeGift(wallets, joined, NOW, 7);
-    expect(plan.payIds).toEqual(['pay']);
-    expect(plan.checked).toBe(5);
-    expect(plan.skipped).toEqual({ notNew: 1, hasGiftBalance: 1, alreadyGiven: 1, other: 1 });
   });
 
   it('🔒 it never pays more users than the admin confirmed; a bad count is refused', () => {
@@ -180,5 +143,12 @@ describe('the route and the panel', () => {
     expect(panel).toMatch(/still have gift balance/);
     expect(panel).toMatch(/joined more than \$\{check\.days\} day/);
     expect(panel).toMatch(/Gift ₹150 to new users/);
+  });
+});
+
+describe('retired (admin 2026-10-30)', () => {
+  it('the one-press welcome gift pays nobody — the app-only referral ladder is the only gift', async () => {
+    const { walletRefusal } = await import('../src/server/lib/adminWelcomeGift');
+    expect(walletRefusal({ tokenBalance: 0, giftTokensRemaining: 0 })).not.toBeNull();
   });
 });

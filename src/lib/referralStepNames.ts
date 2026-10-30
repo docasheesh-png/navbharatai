@@ -21,4 +21,4 @@ export const STEP_ORDER: readonly RewardStep[] = ['signup', 'referral-code', 'em
  * earns instead of nothing. 🔒 `tests/referralSharedShapes.test.ts` holds this equal to the server's
  * WEB_ELIGIBLE_STEPS; the server re-decides every rupee regardless.
  */
-export const WEB_STEPS: readonly RewardStep[] = ['signup', 'email', 'mobile'];
+export const WEB_STEPS: readonly RewardStep[] = []; // admin 2026-10-30: website gift = ₹0

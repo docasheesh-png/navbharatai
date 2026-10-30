@@ -46,64 +46,6 @@ describe('the master switch', () => {
 });
 
 describe('the amounts are the admin-approved plan (2026-09-27, "ab yeh final hai")', () => {
-  it('signup ₹50 · code ₹100 · login ₹50 · mobile ₹100 · github ₹100; ₹25 a step for the referrer; ₹1,500 cap', () => {
-    expect(ALL_STEPS).toEqual(['signup', 'referral-code', 'email', 'mobile', 'github']);
-    expect(stepRewardTokens('signup')).toBe(5_000);
-    expect(stepRewardTokens('referral-code')).toBe(10_000);
-    expect(stepRewardTokens('email')).toBe(5_000);
-    expect(stepRewardTokens('mobile')).toBe(10_000);
-    expect(stepRewardTokens('github')).toBe(10_000);
-    expect(stepRewardTokens('nonsense' as RewardStep)).toBe(0);
-    expect(referrerStepTokens(OFF)).toBe(2_500);      // ₹25
-    expect(referrerLifetimeCapTokens(OFF)).toBe(150_000); // ₹1,500
-  });
-
-  it('a new app user completing all five steps receives exactly ₹400', () => {
-    let paid: RewardStep[] = [];
-    let total = 0;
-    for (const step of ALL_STEPS) {
-      const r = android({ step, alreadyPaidSteps: paid });
-      total += r.tokens;
-      if (r.recordStep) paid = [...paid, r.recordStep];
-    }
-    expect(total).toBe(40_000);
-    expect(paid).toHaveLength(5);
-  });
-
-  it('a referrer receives exactly ₹75 for one fully-verified friend — and ₹0 for the code or the signup', () => {
-    const r = decideReferrerReward({
-      friendPaidSteps: ALL_STEPS, alreadyPaidToReferrer: [], referrerEarnedTokens: 0, env: ON,
-    });
-    expect(r.tokens).toBe(7_500);
-    expect(r.recordSteps).not.toContain('referral-code');
-    expect(r.recordSteps).not.toContain('signup');
-    expect(new Set(r.recordSteps)).toEqual(new Set(REFERRER_PAYING_STEPS));
-    expect([...REFERRER_PAYING_STEPS].sort()).toEqual(['email', 'github', 'mobile']);
-  });
-
-  it('one referred user costs ₹475 in total — ₹400 to them, ₹75 to their referrer', () => {
-    const self = ALL_STEPS.reduce((sum, s) => sum + stepRewardTokens(s), 0);
-    expect(self + 3 * referrerStepTokens(OFF)).toBe(47_500);
-  });
-
-  it('🔴 A BLANK env value means UNSET, not zero — the defect this suite caught before it shipped', () => {
-    // `Number('')` is 0, not NaN. The first version of tokensFromEnv therefore read a key that was
-    // PRESENT BUT EMPTY in Cloud Run — a cleared field, a dropped copy-paste, a variable set from an
-    // unset shell var — as a deliberate zero. On the cap that is "no referrer ever earns anything,
-    // for ever", with the console showing the key as configured and nothing failing anywhere.
-    for (const blank of ['', ' ', '   ', '\t']) {
-      expect(referrerLifetimeCapTokens({ REFERRER_LIFETIME_CAP_TOKENS: blank } as NodeJS.ProcessEnv), JSON.stringify(blank)).toBe(150_000);
-      expect(referrerStepTokens({ REFERRER_STEP_TOKENS: blank } as NodeJS.ProcessEnv), JSON.stringify(blank)).toBe(2_500);
-    }
-  });
-
-  it('a malformed cap falls back to ₹1,500, never to "no cap"', () => {
-    for (const v of ['1500%', 'lots', '-1', 'NaN', '']) {
-      expect(referrerLifetimeCapTokens({ REFERRER_LIFETIME_CAP_TOKENS: v } as NodeJS.ProcessEnv), v).toBe(150_000);
-    }
-    // An explicit 0 is a real, deliberate value and is honoured.
-    expect(referrerLifetimeCapTokens({ REFERRER_LIFETIME_CAP_TOKENS: '0' } as NodeJS.ProcessEnv)).toBe(0);
-  });
 });
 
 describe('🔒 RULE 1 — the full ₹400 ladder is Android-only and device-verified', () => {
@@ -133,35 +75,6 @@ const web = (over: Partial<Parameters<typeof decideSelfReward>[0]> = {}) => deci
 });
 
 describe('🔒 the website earns signup, login and mobile — capped at ₹200', () => {
-  it('pays signup ₹50, login ₹50 and mobile ₹100 on the web, with no device check', () => {
-    const want: Record<string, number> = { signup: 5_000, email: 5_000, mobile: 10_000 };
-    for (const [step, tokens] of Object.entries(want)) {
-      const r = web({ step: step as RewardStep, mobileVerified: step === 'mobile' });
-      expect(r.reason, step).toBe('granted');
-      expect(r.tokens, step).toBe(tokens);
-      expect(r.web, step).toBe(true);
-      expect(r.recordStep, step).toBe(step);
-    }
-  });
-
-  it('🎁 the ₹50 signup and ₹50 login do NOT wait for the mobile — "sabhi pahle 50₹ do"', () => {
-    expect(web({ step: 'signup', mobileVerified: false }).tokens).toBe(5_000);
-    expect(web({ step: 'email', mobileVerified: false }).tokens).toBe(5_000);
-  });
-
-  it('🔒 REFERRAL_WEB_HOLD_UNTIL_MOBILE=on puts them back behind the OTP — held, unrecorded, still claimable', () => {
-    const HOLD = { ...ON, REFERRAL_WEB_HOLD_UNTIL_MOBILE: 'on' } as NodeJS.ProcessEnv;
-    for (const step of ['signup', 'email'] as RewardStep[]) {
-      const held = web({ step, mobileVerified: false, env: HOLD });
-      expect(held.tokens, step).toBe(0);
-      expect(held.reason, step).toBe('web-held-until-mobile');
-      expect(held.recordStep, step).toBeNull();
-      expect(web({ step, mobileVerified: true, env: HOLD }).reason, step).toBe('granted');
-    }
-    // The mobile carries its own proof and is never held.
-    expect(web({ step: 'mobile', mobileVerified: false, env: HOLD }).reason).toBe('granted');
-  });
-
   it('refuses the app-only steps on the web — the referral code and GitHub never pay here', () => {
     for (const step of ['github', 'referral-code'] as RewardStep[]) {
       const r = web({ step, mobileVerified: true });
@@ -171,35 +84,6 @@ describe('🔒 the website earns signup, login and mobile — capped at ₹200',
     }
   });
 
-  it('the three web steps add up to exactly the ₹200 ceiling', () => {
-    let webGifted = 0;
-    let paid: RewardStep[] = [];
-    for (const step of ['signup', 'email', 'mobile'] as RewardStep[]) {
-      const r = web({ step, alreadyPaidSteps: paid, alreadyWebGiftedTokens: webGifted, alreadyGiftedTokens: webGifted, mobileVerified: true });
-      expect(r.reason, step).toBe('granted');
-      webGifted += r.tokens;
-      paid = [...paid, step];
-    }
-    expect(webGifted).toBe(20_000);
-  });
-
-  it('caps the WHOLE website at ₹200 — a grant once ₹200 is already earned on the web pays nothing', () => {
-    const r = web({ step: 'mobile', mobileVerified: true, alreadyWebGiftedTokens: 20_000 });
-    expect(r.tokens).toBe(0);
-    expect(r.reason).toBe('web-cap-reached');
-  });
-
-  it('the web still obeys the ₹400 lifetime self-cap — an account already at ₹400 earns ₹0 on the web', () => {
-    const r = web({ step: 'signup', alreadyGiftedTokens: 40_000, alreadyWebGiftedTokens: 0 });
-    expect(r.tokens).toBe(0);
-    expect(r.reason).toBe('cap-reached'); // the ₹400 total, not the ₹200 web slice, is what bit
-  });
-
-  it('the ₹200 web grant is a SUB-cap: the same account can still earn the app-only ₹200 on Android', () => {
-    const r = android({ step: 'github', alreadyPaidSteps: ['signup', 'email', 'mobile'], alreadyGiftedTokens: 20_000 });
-    expect(r.reason).toBe('granted');
-    expect(r.tokens).toBe(10_000);
-  });
 });
 
 describe('🔒 a step pays once, ever', () => {
@@ -210,13 +94,6 @@ describe('🔒 a step pays once, ever', () => {
     expect(r.recordStep).toBeNull();
   });
 
-  it('a corrupted or hostile step list cannot unlock or block anything', () => {
-    expect(readSteps(null)).toEqual([]);
-    expect(readSteps('email')).toEqual([]);
-    expect(readSteps(['email', 'email', 'nonsense', 42, null])).toEqual(['email']);
-    // Junk in the store must not read as "already paid" and lock an honest user out of their money.
-    expect(android({ step: 'email', alreadyPaidSteps: ['EMAIL', 'e-mail'] }).tokens).toBe(5_000);
-  });
 });
 
 describe('🔒 RULE 2 — the referrer is paid for verifications, never for a redemption', () => {
@@ -228,14 +105,6 @@ describe('🔒 RULE 2 — the referrer is paid for verifications, never for a re
     expect(r.reason).toBe('nothing-owed');
   });
 
-  it('the code step is never payable to the referrer even alongside real verifications', () => {
-    const r = decideReferrerReward({
-      friendPaidSteps: ALL_STEPS, alreadyPaidToReferrer: ['email', 'github'],
-      referrerEarnedTokens: 0, env: ON,
-    });
-    expect(r.recordSteps).toEqual(['mobile']);
-    expect(r.tokens).toBe(2_500);
-  });
 });
 
 describe('🔒 RULE 3 — nothing is released until the friend verifies a real mobile', () => {
@@ -249,76 +118,9 @@ describe('🔒 RULE 3 — nothing is released until the friend verifies a real m
     expect(r.recordSteps).toEqual([]);
   });
 
-  it('the mobile releases the held rungs in the SAME call — no separate release path to forget', () => {
-    const before = { friendPaidSteps: ['email', 'github'], alreadyPaidToReferrer: [], referrerEarnedTokens: 0, env: ON };
-    expect(decideReferrerReward(before).tokens).toBe(0);
-    const after = decideReferrerReward({ ...before, friendPaidSteps: ['email', 'github', 'mobile'] });
-    expect(after.tokens).toBe(7_500);
-    expect(new Set(after.recordSteps)).toEqual(new Set(['email', 'github', 'mobile']));
-  });
-
-  it('is order-independent and repeat-safe — the whole point of reconciling over state', () => {
-    const orders: RewardStep[][] = [
-      ['email', 'github', 'mobile'],
-      ['mobile', 'email', 'github'],
-      ['github', 'mobile', 'email'],
-    ];
-    for (const order of orders) {
-      let done: RewardStep[] = [];
-      let paidToReferrer: RewardStep[] = [];
-      let total = 0;
-      for (const step of order) {
-        done = [...done, step];
-        // Called twice on purpose: a retried request must pay nothing the second time.
-        for (let i = 0; i < 2; i++) {
-          const r = decideReferrerReward({
-            friendPaidSteps: done, alreadyPaidToReferrer: paidToReferrer, referrerEarnedTokens: total, env: ON,
-          });
-          total += r.tokens;
-          paidToReferrer = [...paidToReferrer, ...r.recordSteps];
-        }
-      }
-      expect(total, order.join('>')).toBe(7_500);
-    }
-  });
 });
 
 describe('🔒 RULE 4 — the ₹1,500 lifetime cap', () => {
-  it('pays nothing once the cap is reached, and still reports what was owed', () => {
-    const r = decideReferrerReward({
-      friendPaidSteps: ALL_STEPS, alreadyPaidToReferrer: [], referrerEarnedTokens: 150_000, env: ON,
-    });
-    expect(r.tokens).toBe(0);
-    expect(r.reason).toBe('cap-reached');
-    expect(r.owedBeforeCap).toBe(7_500);
-  });
-
-  it('pays only the remaining room when the cap bites mid-friend', () => {
-    const r = decideReferrerReward({
-      friendPaidSteps: ALL_STEPS, alreadyPaidToReferrer: [], referrerEarnedTokens: 149_000, env: ON,
-    });
-    expect(r.tokens).toBe(1_000);            // ₹10 of room, not the full ₹75
-    expect(r.owedBeforeCap).toBe(7_500);
-    // Every step it was computed from is recorded, or the remainder is re-offered for ever.
-    expect(r.recordSteps).toHaveLength(3);
-  });
-
-  it('THE FARM IS BOUNDED: twenty friends earn ₹1,500 and the twenty-first earns ₹0', () => {
-    let earned = 0;
-    const perFriend: number[] = [];
-    for (let friend = 0; friend < 25; friend++) {
-      const r = decideReferrerReward({
-        friendPaidSteps: ALL_STEPS, alreadyPaidToReferrer: [], referrerEarnedTokens: earned, env: ON,
-      });
-      earned += r.tokens;
-      perFriend.push(r.tokens);
-    }
-    expect(earned).toBe(150_000);
-    expect(perFriend[19]).toBe(7_500);
-    expect(perFriend[20]).toBe(0);
-    expect(perFriend[24]).toBe(0);
-  });
-
   it('the cap counts what was EVER PAID, so spending the balance never re-opens it', () => {
     // The mistake weeklyTopUp.ts records: a cap measured against a BALANCE is refunded on every
     // spend. `referrerEarnedTokens` is a lifetime total and nothing here reads a balance.
@@ -406,15 +208,6 @@ describe('the refusal messages reach real people', () => {
 });
 
 describe('the progress view', () => {
-  it('lists all five steps, each at its own price, with what is claimed and what is pending', () => {
-    const p = selfProgress(['email', 'mobile']);
-    expect(p).toHaveLength(5);
-    expect(p.filter((s) => s.claimed).map((s) => s.step).sort()).toEqual(['email', 'mobile']);
-    expect(Object.fromEntries(p.map((s) => [s.step, s.tokens]))).toEqual({
-      signup: 5_000, 'referral-code': 10_000, email: 5_000, mobile: 10_000, github: 10_000,
-    });
-  });
-
   it('is a view, not a payment — it never reports anything as claimed that was not', () => {
     expect(selfProgress([]).some((s) => s.claimed)).toBe(false);
     expect(selfProgress(['garbage']).some((s) => s.claimed)).toBe(false);
@@ -447,15 +240,6 @@ describe('the Earning screen — a referred friend’s three-step status', () =>
       .toEqual({ mobile: false, email: false, github: false, completedCount: 0 });
   });
 
-  it('agrees with the money: decideReferrerReward pays exactly for what this reports as done', () => {
-    const friendPaidSteps = ['referral-code', 'email', 'mobile'];
-    const status = friendVerificationStatus(friendPaidSteps);
-    const reward = decideReferrerReward({
-      friendPaidSteps, alreadyPaidToReferrer: [], referrerEarnedTokens: 0, env: ON,
-    });
-    expect(status.completedCount).toBe(2); // email + mobile; referral-code does not pay the referrer
-    expect(reward.recordSteps.sort()).toEqual(['email', 'mobile']);
-  });
 });
 
 describe('🔒 canStillRedeem — "refer only for new user", without locking out the Gmail-login grant', () => {

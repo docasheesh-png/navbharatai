@@ -36,14 +36,14 @@ export const LEGAL_META: LegalMeta[] = [
     subtitle: 'What data we collect, why, where it lives, and your rights (DPDP Act)',
     // Kept as a literal because this file must not import the policy BODY (see the header). The two
     // dates are held equal by tests/appCheck.test.ts instead.
-    updated: '21 October 2026',
+    updated: '30 October 2026',
     settingsTile: true,
   },
   {
     id: 'legal_terms',
     title: 'Terms of Service',
     subtitle: 'The rules of using NavBharatAI — tokens, payments, your app ownership',
-    updated: '21 October 2026',
+    updated: '30 October 2026',
     settingsTile: true,
   },
   {

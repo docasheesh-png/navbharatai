@@ -74,7 +74,11 @@ export type WalletRefusal =
   | 'banned'
   | 'merged'
   | 'has-gift-balance'
-  | 'gift-ceiling';
+  | 'gift-ceiling'
+  | 'retired';
+
+/** The one-press admin welcome gift is retired (admin 2026-10-30). */
+export const ADMIN_WELCOME_GIFT_RETIRED = true;
 
 /** PURE: the wallet-side refusal, or null when the wallet may be paid. */
 export function walletRefusal(wallet: Record<string, unknown> | null | undefined): WalletRefusal | null {
@@ -84,6 +88,9 @@ export function walletRefusal(wallet: Record<string, unknown> | null | undefined
   if (wallet.mergedInto) return 'merged';
   if (giftRemaining(wallet as Parameters<typeof giftRemaining>[0]) > 0) return 'has-gift-balance';
   if (capSelfGift(ADMIN_WELCOME_GIFT_TOKENS, num(wallet.freeGiftedTokens)) < ADMIN_WELCOME_GIFT_TOKENS) return 'gift-ceiling';
+  // 🔴 RETIRED (admin 2026-10-30): the app-only referral ladder is the ONLY gift. The one-press welcome
+  // credit pays nobody any more; every wallet is refused here, so the plan and the transaction agree.
+  if (ADMIN_WELCOME_GIFT_RETIRED) return 'retired';
   return null;
 }
 

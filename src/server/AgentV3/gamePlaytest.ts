@@ -36,6 +36,7 @@
 //
 // PURE. The runner is a STRING built here and executed by the caller in the sandbox.
 
+import { missingLayerFiles } from '../lib/gameRecipeLayers';
 import { scopeMatch, type GameScopeContract } from './gameIntent';
 import { browserScriptRunLine, parseScriptDiagnostic, playwrightImport } from './sandboxBrowserScript';
 import { newPageOptionsExpr } from './signInExplore';
@@ -209,9 +210,12 @@ NBAI_EOF
 ${browserScriptRunLine({ toolsDir: TOOLS_DIR, scriptPath: '/tmp/nbai-playtest.mjs', marker: PLAYTEST_RESULT_MARKER })}`;
 }
 
-export function gamePlaytestConfig(previewUrl: string, storageState: string | null = null, startLabels: readonly string[] = []): Record<string, unknown> {
+export function gamePlaytestConfig(previewUrl: string, storageState: string | null = null, startLabels: readonly string[] = [], env: NodeJS.ProcessEnv = process.env): Record<string, unknown> {
   return {
     base: String(previewUrl ?? '').trim(),
+    // Game Engine Ultra Phase 2: a fixed Math.random seed so two playtests of the same game see the same
+    // spawns and layouts. null when AGENTV3_GAME_PLAYTEST_SEED=off.
+    seed: playtestSeed(env),
     marker: PLAYTEST_RESULT_MARKER,
     loadMs: LOAD_MS,
     // The "same picture" floor, so the script can tell when the accelerator probe saw nothing move (Q-865).
@@ -244,6 +248,13 @@ export function gamePlaytestModule(cfg: Record<string, unknown>, importLine: str
 const cfg = ${JSON.stringify(cfg)};
 const say = (o) => console.log(cfg.marker + JSON.stringify(o));
 const noise = new RegExp(cfg.noise, cfg.noiseFlags);
+
+// Deterministic randomness (Game Engine Ultra Phase 2): Math.random becomes a seeded mulberry32, so the
+// same game is played against the same spawns every run. crypto.getRandomValues is left alone.
+const seedRandom = (seed) => {
+  let a = seed >>> 0;
+  Math.random = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+};
 
 // Frames are counted by DISTINCT timestamps, so a game with three requestAnimationFrame loops is not
 // counted three times; a gap over 100ms is a long frame (a visible hitch).
@@ -627,6 +638,7 @@ try {
   const ctx = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 1280, height: 720 } });
   await ctx.addInitScript(frameCounter);
   await ctx.addInitScript(sceneHook);
+  if (cfg.seed != null) await ctx.addInitScript(seedRandom, cfg.seed);
   const page = await ctx.newPage();
   watch(page);
   await page.goto(cfg.base, { waitUntil: 'load', timeout: cfg.loadMs });
@@ -1474,4 +1486,87 @@ export function gameScopeVerdict(contract: GameScopeContract, files: Record<stri
     return { code: 'GAME_SCOPE_OK', severity: 'info', autoResolved: true, message: `Every feature the request named is in the game's code: ${m.present.join(', ')}.` };
   }
   return { code: 'GAME_SCOPE_GAP', severity: 'info', autoResolved: true, message: `The request named ${m.missing.join(', ')}, and the game's own code shows no sign of ${m.missing.length === 1 ? 'it' : 'them'} (found: ${m.present.join(', ') || 'none of the named features'}). Read from code, not played — evidence only.` };
+}
+
+// ─── GAME ENGINE ULTRA PHASE 2 — SEED, NON-CANVAS GAMES, STRUCTURED DEFECTS ─────────────────────────────
+
+/** The fixed seed the playtest gives Math.random. `AGENTV3_GAME_PLAYTEST_SEED=off` → null (the game's own randomness). */
+export const PLAYTEST_SEED = 20261030;
+export function playtestSeed(env: NodeJS.ProcessEnv = process.env): number | null {
+  return String(env.AGENTV3_GAME_PLAYTEST_SEED ?? '').trim().toLowerCase() === 'off' ? null : PLAYTEST_SEED;
+}
+
+/**
+ * A game drawn in the PAGE, not on a canvas (quiz, card, board, word/number puzzle). The canvas playtest
+ * reads pixels of a game surface; it cannot score these, so it must say so rather than stay silent or fake a
+ * score. Read from the contract's genre (gameIntent.ts) and from the code. null = not a DOM game. PURE.
+ */
+export type DomGameKind = 'quiz' | 'card' | 'board' | 'puzzle';
+const DOM_GAME_CODE: ReadonlyArray<[DomGameKind, RegExp]> = [
+  ['quiz', /\b(questions?\s*[:=]|correctAnswer|currentQuestion|quizState)/],
+  ['board', /\b(board\s*[:=]\s*\[|checkWinner|isCheckmate|currentPlayer)/],
+  ['card', /\b(deck\s*[:=]|shuffleDeck|drawCard|dealCards?)/],
+  ['puzzle', /\b(grid\s*[:=]\s*\[|isSolved|checkSolution)/],
+];
+export function domGameKind(files: Record<string, string>, contract?: GameScopeContract | null): DomGameKind | null {
+  if (isCanvasGameProject(files)) return null;
+  const g = contract?.genre;
+  if (g === 'quiz' || g === 'card' || g === 'board' || g === 'puzzle') return g;
+  for (const [path, content] of Object.entries(files || {})) {
+    if (/(^|\/)node_modules\//.test(path) || !CODE_FILE.test(path) || typeof content !== 'string') continue;
+    if (/(^|\/)src\/(?:game\/(?:core|fx)|audio)\//.test(path)) continue;
+    for (const [kind, re] of DOM_GAME_CODE) if (re.test(content)) return kind;
+  }
+  return null;
+}
+
+/** The honest line for a DOM game the canvas playtest does not play: no score, never a pass. PURE. */
+export function domGameNotPlayedVerdict(kind: DomGameKind): PlaytestVerdict {
+  return {
+    code: 'GAME_PLAYTEST_NOT_RUN', severity: 'info', autoResolved: true, score: null,
+    message: `This ${kind} game is drawn in the page, not on a game canvas, so the canvas playtest did not play it and gave no Game Quality Score. Its buttons are pressed by the click explorer; a ${kind}-specific playthrough is not built yet.`,
+  };
+}
+
+/**
+ * STRUCTURED DEFECT CODES for Phase 3 (repair) to consume — each from a measurement this file already makes
+ * or from an autopsy pattern, never a guess. Evidence only: recorded as one GAME_DEFECTS info line.
+ */
+export type GameDefectCode =
+  | 'GAME_DEFECT_START_STUCK'     // build 46e2d74b / Q-1203: no surface after pressing start
+  | 'GAME_DEFECT_BLANK'           // runs = 0: blank or a single colour (Q-913)
+  | 'GAME_DEFECT_INPUT_IGNORED'   // runs > 0, responds = 0
+  | 'GAME_DEFECT_NO_TOUCH'        // mobile = 0
+  | 'GAME_DEFECT_RUNTIME_ERROR'   // uncaught errors while played
+  | 'GAME_DEFECT_CAMERA_WRONG'    // Q-861: camera faces the vehicle / steering mirrored
+  | 'GAME_DEFECT_VEHICLE_STALLED' // build 46e2d74b: the car never moves
+  | 'GAME_DEFECT_MISSING_LAYER';  // autopsy 6a55d939: imports a kit layer that is not on disk
+export interface GameDefect { code: GameDefectCode; evidence: string }
+
+export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | null, missingLayerPaths: readonly string[] = []): GameDefect[] {
+  const out: GameDefect[] = [];
+  if (run && !run.ok && run.started && /no game surface/i.test(run.error ?? '')) out.push({ code: 'GAME_DEFECT_START_STUCK', evidence: `pressed "${run.started}", no game surface appeared` });
+  if (score) {
+    const d = score.dimensions;
+    if (d.runs === 0) out.push({ code: 'GAME_DEFECT_BLANK', evidence: 'game surface blank or a single colour' });
+    else if (d.responds === 0) out.push({ code: 'GAME_DEFECT_INPUT_IGNORED', evidence: 'picture did not change more with controls than without' });
+    if (d.mobile === 0) out.push({ code: 'GAME_DEFECT_NO_TOUCH', evidence: 'phone drag/tap changed nothing and no on-screen controls' });
+    if (score.cameraFacesVehicle || score.steeringMirrored) out.push({ code: 'GAME_DEFECT_CAMERA_WRONG', evidence: score.cameraFacesVehicle ? 'road moved up the screen while driving' : 'view panned left when LEFT was held' });
+    if (score.stalledVehicle) out.push({ code: 'GAME_DEFECT_VEHICLE_STALLED', evidence: 'picture still at idle and with the accelerator held' });
+  }
+  const errs = run ? (run.errorCount ?? run.errors?.length ?? 0) : 0;
+  if (run && errs > 0) out.push({ code: 'GAME_DEFECT_RUNTIME_ERROR', evidence: String(run.errors?.[0] ?? `${errs} error(s)`).slice(0, 160) });
+  if (missingLayerPaths.length > 0) out.push({ code: 'GAME_DEFECT_MISSING_LAYER', evidence: `imports kit files not on disk: ${missingLayerPaths.slice(0, 5).join(', ')}` });
+  return out;
+}
+
+/** The admin line for GAME_DEFECTS ('' when none). PURE. */
+export function gameDefectsMessage(defects: readonly GameDefect[]): string {
+  if (defects.length === 0) return '';
+  return `Game defects measured (evidence, not a gate): ${defects.map((d) => `${d.code} — ${d.evidence}`).join('; ')}.`;
+}
+
+/** The kit layer files the project imports but does not have (gameRecipeLayers.ts). PURE. */
+export function missingKitLayerPaths(files: Record<string, string>): string[] {
+  try { return [...missingLayerFiles(files, new Set(Object.keys(files || {}))).keys()]; } catch { return []; }
 }

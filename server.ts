@@ -92,6 +92,7 @@ import { registerCreateOrderRoute } from './src/server/routes/createOrder';
 import { registerAuditRoutes } from './src/server/routes/audit';
 import { registerFreeAnswerQuotaRoutes } from './src/server/lib/freeAnswerQuota';
 import { registerChatRoutes } from './src/server/routes/chat';
+import { brandScrubMiddleware } from './src/server/lib/brandScrubMiddleware';
 import { registerProRoutes } from './src/server/routes/pro';
 import { registerSdaRoutes } from './src/server/routes/sda';
 import { registerProfessionalsRoutes } from './src/server/routes/professionals';
@@ -306,6 +307,8 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
   // text/plain NDJSON progress, chat's event-stream). See responseCompression.ts for the reasoning
   // and the measured numbers; mounted early so it wraps routes AND the static bundle below.
   app.use(responseCompression());
+  // White-label backstop: user-facing error JSON / stream error events never name a backend vendor.
+  app.use(brandScrubMiddleware());
 
   // Bundled native shell CORS + OPTIONS preflight (Capacitor): for native shells (Android/iOS app)
   // whose WebView runs locally (https://localhost, capacitor://localhost), every API call is cross-origin.

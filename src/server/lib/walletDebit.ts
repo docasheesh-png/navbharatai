@@ -244,6 +244,11 @@ export function computeDebitedWallet(
   return { wallet, tokensDebited: tokens, applied: true, debitedInr: billedInr, absorbedInr: floored.absorbedInr > 0 ? floored.absorbedInr : 0 };
 }
 
+/** Features the gift may NEVER pay for (admin 2026-10-30: only chat + coding). */
+export function isPaidOnlyFeature(feature: unknown): boolean {
+  return typeof feature === 'string' && (feature === 'hosting' || feature.startsWith('hosting-'));
+}
+
 export interface WalletRollupTx {
   /** Which feature this bucket belongs to — see WalletDebitTx.feature. */
   feature?: WalletFeature;
@@ -344,15 +349,18 @@ export function computeRolledUpDebit(
   if (tx.allOrNothing && floored.clamped) {
     return { wallet: w, tokensDebited: 0, applied: false, refused: true };
   }
+  // 🔒 ADMIN 2026-10-30: gift ₹ is for CHAT + CODING only. Hosting traffic is a paid service, so the gift
+  // is treated exactly as when the free program is paused: unavailable, never consumed, no overdraft.
+  const giftBlocked = freeProgramPausedHint() || isPaidOnlyFeature(tx.feature);
   // FREE PROGRAM PAUSED: a price taken BEFORE the work (a hold) must be covered by the user's OWN money — the gift
   // is not spendable, so a wallet holding only gift is refused exactly like an empty one (lib/freeProgram.ts).
-  if (tx.allOrNothing && freeProgramPausedHint() && inrToDebitTokens(floored.chargedInr) > paidSpendableTokens(w) + 1e-9) {
+  if (tx.allOrNothing && giftBlocked && inrToDebitTokens(floored.chargedInr) > paidSpendableTokens(w) + 1e-9) {
     return { wallet: w, tokensDebited: 0, applied: false, refused: true };
   }
   const carriedIn = Math.min(Math.max(n(w[TOKEN_CARRY_FIELD]), 0), 1);
   const owedForThis = inrToDebitTokens(floored.chargedInr);
   const owed = owedForThis + carriedIn;
-  const paused = freeProgramPausedHint();
+  const paused = giftBlocked;
   const protectedTokens = unavailableGiftTokens(w, paused, false);
   const capacity = Math.max(0, n(w.tokenBalance) - protectedTokens
     + (protectedTokens > 0 ? 0 : (Number.isFinite(tx.floorInr) && tx.floorInr! >= 0 ? tx.floorInr! : DEFAULT_OVERDRAFT_FLOOR_INR) * TOKENS_PER_RUPEE));
@@ -368,8 +376,8 @@ export function computeRolledUpDebit(
 
   const rollupBalance = n(w.tokenBalance) - tokens;
   const provenance = w.adminBuildTokensRemaining === undefined ? null
-    : giftUsagePatch(w, tokens, freeProgramPausedHint(), false);
-  const nextGift = provenance?.giftTokensRemaining ?? Math.max(0, Math.min(giftAfterSpend(w, tokens, freeProgramPausedHint()), rollupBalance));
+    : giftUsagePatch(w, tokens, giftBlocked, false);
+  const nextGift = provenance?.giftTokensRemaining ?? Math.max(0, Math.min(giftAfterSpend(w, tokens, giftBlocked), rollupBalance));
   // Open holds ride along on EVERY rewrite of the row, a plain charge included — a row rewritten without
   // them would make an in-flight hold impossible to give back.
   const holds = tx.holdId

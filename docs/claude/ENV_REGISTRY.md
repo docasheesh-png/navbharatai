@@ -1624,6 +1624,16 @@ the code (it is actually read somewhere) on 2026-07-11.
   ✅ **AND THIS REPORT SETTLED THE STREAMING ENTRY'S ONE OPEN QUESTION: Z.ai DOES honour
   `stream_options.include_usage`** — real per-call input/output/cache token counts came back on every
   streamed call. The "0 in / 0 out" risk that entry warns to watch for did not materialise.
+- **🎁 APP-ONLY REFERRAL (admin 2026-10-30) — SUPERSEDES every referral/gift entry below.** Website gift **₹0**
+  (no step earnable on web). Android + Play Integrity only: download/first sign-in ₹5 · referral code ₹10 ·
+  Gmail login ₹10 · GitHub ₹15 · mobile OTP ₹20 (A without code ₹50, B with code ₹60; self ceiling ₹60).
+  Referrer: **₹10 per friend, only after the friend completed ALL steps**; lifetime cap **₹500**
+  (`REFERRER_STEP_TOKENS` default 1000, `REFERRER_LIFETIME_CAP_TOKENS` default 50000 — leave unset).
+  Referral is **split from the Free Program pause**: it follows `REFERRAL_REWARDS=on` only. New key
+  **`REFERRAL_FOLLOWS_FREE_PAUSE`** (NOT set; default OFF): `on` restores pause ⇒ referral off. Gift ₹ is
+  spendable on chat + coding only — hosting traffic (`feature: hosting*`) can no longer use gift; plans,
+  add-ons, remix, APK were already paid-only. The admin one-press ₹150 welcome gift is retired.
+  ⚠️ While the Free Program pause is ON, existing gift-spend rules still make ALL gift unspendable.
 - **🎁 THE FREE-CREDIT STEPS, FINAL PLAN (admin 2026-09-27, verbatim: *"sabhi pahle 50₹ do! (mobile +
   website) · fir refral code ke 100₹ (only mobile') · fir login par 50₹ (dono par) · fir mobile otp
   verification par 100₹ (dono par) · fir github connect (100₹ mobile only) — ab yeh final hai"*). SUPERSEDES

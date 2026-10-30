@@ -1,7 +1,8 @@
 // THE WELCOME GIFT BUYS APP USE, NOT A PURCHASE (admin 2026-09-13, widened 2026-10-09:
 // "gift welcome token only app use me istemal ho sakte hai, kuch bhi purchase me nahi").
 //
-// App use is a build, a chat turn, and measured hosting traffic. A purchase is a hosting plan, an
+// App use is a build and a chat turn (admin 2026-10-30: chat + coding ONLY — hosting traffic is NOT app use,
+// see walletDebit.isPaidOnlyFeature). A purchase is a hosting plan, an
 // add-on, a paid remix, or the ₹1 charge for a built app file. The gift may not pay any of those.
 //
 // ── WHY A MODULE AND NOT AN `if` AT THE PURCHASE ─────────────────────────────────────────────────

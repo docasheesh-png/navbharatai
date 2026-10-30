@@ -171,12 +171,12 @@ export function PromoRewardsTab(props: PromoRewardsTabProps) {
   } = props;
   // FREE PROGRAM PAUSED (admin 2026-10-22): nothing here may hint that rewards ever existed. The referral card and
   // friends list go; the code box stays, because a PURCHASED gift code is redeemed in it, and says "gift code".
-  const { freeProgramPaused } = usePublicFlags();
+  const { freeProgramPaused, referralLive } = usePublicFlags();
 
   return (
     <div className="space-y-5">
       {/* REFER A FRIEND — the code and the earned steps. Every number in it is the server's. */}
-      {!freeProgramPaused && <ReferralPanel
+      {referralLive && <ReferralPanel
         userId={userId}
         enabled={referral.enabled}
         code={referral.code}
@@ -197,7 +197,7 @@ export function PromoRewardsTab(props: PromoRewardsTabProps) {
         onToast={onToast}
       />}
 
-      {!freeProgramPaused && referral.enabled && <ReferredFriendsList userId={userId} refreshKey={referral.earnedRupees} />}
+      {referralLive && referral.enabled && <ReferredFriendsList userId={userId} refreshKey={referral.earnedRupees} />}
 
       {/* A PROMO CODE the person was given. Each code can be applied once — the server enforces it. */}
       <section aria-labelledby="promo-code-heading" className="space-y-3 rounded-2xl border border-line bg-card p-5">

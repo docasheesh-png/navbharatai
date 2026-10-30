@@ -51,20 +51,12 @@ describe('what is ready to be paid right now', () => {
     expect(readyReferralSteps(claimedSome, 'android')).toEqual(['referral-code', 'mobile', 'github']);
   });
 
-  it('🔒 the website is offered only what it can be paid for — never GitHub or the code (2026-09-27)', () => {
+  it('🔒 the website is offered NOTHING — gift is app-only (admin 2026-10-30)', () => {
     expect(readyReferralSteps(facts({ githubLinked: true, referred: true }), 'web')).toEqual([]);
     expect(readyReferralSteps(facts({ githubLinked: true, phoneVerified: true, emailVerified: true }), 'web'))
-      .toEqual(['email', 'mobile']);
+      .toEqual([]);
   });
 
-  it('🎁 the ₹50 signup is ready for every signed-in account, on both surfaces', () => {
-    const withSignup = {
-      ...facts(),
-      steps: [{ step: 'signup' as const, claimed: false }, ...facts().steps],
-    };
-    expect(readyReferralSteps(withSignup, 'web')).toEqual(['signup']);
-    expect(readyReferralSteps(withSignup, 'android')).toEqual(['signup']);
-  });
 });
 
 describe('the card', () => {
@@ -97,18 +89,6 @@ describe('the card', () => {
     const m = rewardsChecklistModel(input())!;
     expect(m.rows.find((r) => r.step === 'referral-code')!.target).toBe('wallet');
     for (const s of ['email', 'mobile', 'github'] as const) expect(m.rows.find((r) => r.step === s)!.target).toBe('profile');
-  });
-
-  it('📱 the website card has its three rows and says where the other two rewards are', () => {
-    const m = rewardsChecklistModel(input({
-      surface: 'web', rows: rows([], ['signup', 'email', 'mobile']), emailVerified: true, webCapRupees: 200,
-    }))!;
-    expect(m.rows.map((r) => r.step)).toEqual(['signup', 'email', 'mobile']);
-    expect(m.rows.find((r) => r.step === 'signup')!.state).toBe('claim');
-    expect(m.rows.find((r) => r.step === 'email')!.state).toBe('claim');
-    expect(m.rows.find((r) => r.step === 'mobile')!.state).toBe('complete');
-    expect(m.surfaceNote).toMatch(/up to ₹200/);
-    expect(m.surfaceNote).toMatch(/GitHub rewards are in the Android app/);
   });
 
   it('all claimed collapses to one line, and still says what was earned', () => {

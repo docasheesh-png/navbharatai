@@ -33,10 +33,10 @@ import { TOKENS_PER_RUPEE } from './payments';
  * Deliberately NOT `4 × REFERRAL_STEP_TOKENS`: deriving it from the tunable would let the tunable
  * raise its own ceiling, which is the whole failure mode this constant exists to prevent.
  */
-export const MAX_SELF_GIFT_TOKENS = 400 * TOKENS_PER_RUPEE;
+export const MAX_SELF_GIFT_TOKENS = 60 * TOKENS_PER_RUPEE; // admin 2026-10-30: 5+10+10+15+20
 
 /** The most a referrer may be paid for ONE friend. ₹75 — that friend's three verifications. */
-export const MAX_REFERRER_PER_FRIEND_TOKENS = 75 * TOKENS_PER_RUPEE;
+export const MAX_REFERRER_PER_FRIEND_TOKENS = 10 * TOKENS_PER_RUPEE; // admin 2026-10-30
 
 /**
  * The most an account may EVER be gifted through the WEBSITE. ₹200 — since 2026-09-27 the three web
@@ -51,7 +51,7 @@ export const MAX_REFERRER_PER_FRIEND_TOKENS = 75 * TOKENS_PER_RUPEE;
  * it sits under `MAX_SELF_GIFT_TOKENS`, never above it, so an account that took ₹200 on the web can
  * still earn the remaining ₹200 on a verified Android device (gmail-login + referral code).
  */
-export const MAX_WEB_GIFT_TOKENS = 200 * TOKENS_PER_RUPEE;
+export const MAX_WEB_GIFT_TOKENS = 0; // admin 2026-10-30: website gift = ₹0
 
 /** What acquiring one user may cost NavBharatAI, all in. ₹475. Stated so the sum is checkable. */
 export const MAX_ACQUISITION_COST_TOKENS = MAX_SELF_GIFT_TOKENS + MAX_REFERRER_PER_FRIEND_TOKENS;

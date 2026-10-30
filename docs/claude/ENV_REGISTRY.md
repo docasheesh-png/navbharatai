@@ -429,6 +429,13 @@ the code (it is actually read somewhere) on 2026-07-11.
   `AGENTV3_GAME_SCOPE_CONTRACT` (Phase 1, PR #4036 — game scope contract in the kit handoff + GAME_SCOPE_OK/GAP evidence),
   `AGENTV3_GAME_PLAYTEST_SEED` (Phase 2 — the playtest seeds `Math.random` with a fixed seed so runs are repeatable).
   Existing siblings: `AGENTV3_GAME_PLAYTEST`, `AGENTV3_GAME_KIT_SEED`.
+  **Phase 3 — default OFF, `=on` enables (NOT set in Cloud Run; admin decision required before setting):**
+  `AGENTV3_GAME_AUTO_REPAIR` — one verified model repair of a game the playtest measured broken. ⚠️ It SPENDS
+  model calls; as built, the platform absorbs that spend (billing phase `game-repair` is always barren), so the
+  user is never charged. Charging the user for a kept repair needs an explicit admin decision and a separate PR.
+  `AGENTV3_GAME_COMPLETE_GATE` — a game still unplayable (blank / input ignored / start stuck / runtime error /
+  missing kit layer) or missing a feature the user named is reported RED, not shippable. Never flips `ok`, never
+  changes a bill.
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
   `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),

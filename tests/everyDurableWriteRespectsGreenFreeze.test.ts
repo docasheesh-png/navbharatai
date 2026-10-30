@@ -22,7 +22,8 @@ type Verdict =
 const VERDICT: Record<string, [Verdict, number]> = {
   // Shared automatic restore: applySnapshotRestore passes only successful sandbox writes to persist.
   'mergeWorkspaceFiles | workspaceId, files': ['landed', 1],
-  'mergeWorkspaceFiles | workspaceId, Object.fromEntries(writtenFiles)': ['landed', 3],
+  // ×4 since 2026-10-30: the kept game repair (gameRepair.ts) persists what landed through the freeze, as the explorer repair does.
+  'mergeWorkspaceFiles | workspaceId, Object.fromEntries(writtenFiles)': ['landed', 4],
   'mergeWorkspaceFiles | workspaceId, files as Record<string, string>': ['user-asked', 1],
   'mergeWorkspaceFiles | workspaceId, foundation.files': ['pre-latch', 1],
   'mergeWorkspaceFiles | workspaceId, importedFiles': ['pre-latch', 1],

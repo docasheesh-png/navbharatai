@@ -163,8 +163,11 @@ describe('the allowlist — the user\'s own requests still write to a green app'
     // freeze protected the breakage. Safe by construction rather than by judgement: it writes the pre-heal
     // bytes, which are the very content the latch protects, and only for the files the heal just wrote —
     // the same argument this list already makes for 'green-guard-restore' and 'sandbox-file-restore'.
+    // 'game-repair' was added 2026-10-30 (Game Engine Ultra Phase 3, gameRepair.ts) — a game the playtest
+    // PLAYED and measured broken. Off unless AGENTV3_GAME_AUTO_REPAIR=on; kept only if the game, played again,
+    // is strictly better (else undone); no .env file. Same restraints as the explorer repair.
     expect([...ALLOWED_PASSES].sort()).toEqual([
-      'design-consistency-heal', 'design-heal-revert', 'explorer-repair', 'feature-presence-heal',
+      'design-consistency-heal', 'design-heal-revert', 'explorer-repair', 'feature-presence-heal', 'game-repair',
       'green-guard-restore', 'reviewer-functional-repair', 'runtime-error-autofix', 'sandbox-file-restore',
       'vaccine-repair',
     ]);

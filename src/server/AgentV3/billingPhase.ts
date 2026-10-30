@@ -59,6 +59,12 @@ export const PHASE_POST_BUILD_REVIEW = 'post-build-review';
 export const PHASE_EXPLORER_REPAIR = 'explorer-repair';
 
 /**
+ * Game Engine Ultra Phase 3 (gameRepair.ts). Behind AGENTV3_GAME_AUTO_REPAIR (default off). Until the admin
+ * decides otherwise, this phase is ALWAYS barren — kept or undone, the platform absorbs the repair.
+ */
+export const PHASE_GAME_REPAIR = 'game-repair';
+
+/**
  * The one review after an applied C9 repair (Q-157, postFixReview.ts). Its own phase, so a re-review that
  * gives no verdict (no room, timed out, threw) is left out of the bill ON ITS OWN — marking the first
  * review's phase barren would hand back a review that did deliver.

@@ -626,8 +626,11 @@ describe('5 · L-18: press-run → playtest → the explorer\'s repair', () => {
     const calls = [...ROUTE.matchAll(/await runGamePlaytest\((?:startLabelsFromExplore\(exploreRun\.presses\))?\);/g)];
     expect(calls).toHaveLength(2);
     expect(ROUTE).toContain('if (gamePlaytestDone) return;');
-    // The script is started from inside the closure only.
-    expect([...ROUTE.matchAll(/gamePlaytestScript\(/g)]).toHaveLength(1);
+    // The script is started from inside the closure — plus, since Game Engine Ultra Phase 3, the ONE replay of
+    // a repaired game (gameRepair.ts), which runs only after the closure and only when AGENTV3_GAME_AUTO_REPAIR=on.
+    const scripts = [...ROUTE.matchAll(/gamePlaytestScript\(/g)].map((m) => m.index ?? 0);
+    expect(scripts).toHaveLength(2);
+    expect(ROUTE.lastIndexOf('GAME ENGINE ULTRA PHASE 3', scripts[1])).toBeGreaterThan(ROUTE.indexOf('const runGamePlaytest = async'));
     expect(ROUTE.indexOf('gamePlaytestScript(')).toBeGreaterThan(ROUTE.indexOf('const runGamePlaytest = async'));
   });
 

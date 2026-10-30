@@ -7,12 +7,13 @@ import { SECURE_FIRESTORE_RULES, firestoreRulesConsoleUrl, FIRESTORE_RULES_STEPS
  * in Hindi + English. Without it a user's database is left in "test mode" (open to everyone, then
  * auto-locked after 30 days) — the app works today and breaks next month.
  */
-export function FirestoreRulesCard({ projectId }: { projectId?: string }) {
+export function FirestoreRulesCard({ projectId, rules }: { projectId?: string; rules?: string }) {
+  const text = rules && rules.trim() ? rules : SECURE_FIRESTORE_RULES;
   const [copied, setCopied] = useState(false);
   const [show, setShow] = useState(false);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(SECURE_FIRESTORE_RULES);
+      await navigator.clipboard.writeText(text);
     } catch {
       setShow(true); // clipboard blocked → reveal the text so it can be selected by hand
       return;
@@ -54,10 +55,13 @@ export function FirestoreRulesCard({ projectId }: { projectId?: string }) {
         </button>
       </div>
       {show && (
-        <textarea readOnly value={SECURE_FIRESTORE_RULES} rows={14} onFocus={(e) => e.currentTarget.select()}
+        <textarea readOnly value={text} rows={14} onFocus={(e) => e.currentTarget.select()}
           aria-label="Firestore security rules"
           className="w-full bg-surface border border-line rounded-xl p-3 text-[11px] font-mono text-ink" />
       )}
+      <p className="text-[11px] text-muted leading-relaxed" data-testid="firestore-rules-perapp-note">
+        Each app needs its own rules — Pro chat writes them for your app (with a Copy button) whenever the app saves data. This card is only a safe starter. (हर app के rules अलग होते हैं — Pro chat आपकी app के लिए खुद बनाकर Copy के साथ दिखाता है; यह सिर्फ़ शुरुआती सुरक्षित rules हैं।)
+      </p>
       <p className="text-[10px] text-faint leading-relaxed">
         No Firestore yet? In Firebase: Build → Firestore Database → Create database → choose a location near India (asia-south1) → then do the 3 steps above.
       </p>

@@ -697,7 +697,7 @@ import { isAnswerOnlyTurn, answeredInsteadOfBuilding, previewFailedSeverity, pre
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
-import { gameScopeVerdict, gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestSkipReason, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
+import { gameScopeVerdict, domGameKind, domGameNotPlayedVerdict, playtestDefects, gameDefectsMessage, missingKitLayerPaths, gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestSkipReason, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
 import { recordManualEdits, consumeManualEditsWithOwned, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { createPrepSteps } from '../AgentV3/prepClock';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
@@ -23588,9 +23588,15 @@ async function noteBuildOutcome(
         ) {
           try {
             const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
-            const verdict = playtestVerdict(parsePlaytest(out.stdout), replayFromCode(playtestFiles));
+            const playRun = parsePlaytest(out.stdout);
+            const verdict = playtestVerdict(playRun, replayFromCode(playtestFiles));
             buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
             gameProof = { outcome: playtestOutcome(verdict.code), score: verdict.score?.overall ?? null };
+            // Game Engine Ultra Phase 2: structured defect codes for Phase 3 — evidence only.
+            try {
+              const defectsMsg = gameDefectsMessage(playtestDefects(playRun, verdict.score, missingKitLayerPaths(playtestFiles)));
+              if (defectsMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_DEFECTS', message: defectsMsg, autoResolved: true });
+            } catch { /* observation only */ }
             // Scope match (gameIntent.ts) — evidence only, never a gate or a charge.
             try {
               const scope = gameContract ? gameScopeVerdict(gameContract, playtestFiles) : null;
@@ -23630,6 +23636,15 @@ async function noteBuildOutcome(
               gameProof = { outcome: playtestOutcome(notRun.code), score: null };
             }
           } catch { /* an honest line is best-effort and must never touch a build */ }
+          // Game Engine Ultra Phase 2: a quiz/card/board/puzzle game drawn in the page is SAID, never silent or scored.
+          try {
+            const domKind = gamePlaytestEnabled() && result?.ok && !isImportTurn && !abort.signal.aborted && !isCanvasGameProject(playtestFiles) ? domGameKind(playtestFiles, gameContract) : null;
+            if (domKind) {
+              const dom = domGameNotPlayedVerdict(domKind);
+              buildDiag.record({ phase: 'preview', severity: dom.severity, code: dom.code, message: dom.message, autoResolved: dom.autoResolved });
+              gameProof = { outcome: playtestOutcome(dom.code), score: null };
+            }
+          } catch { /* observation only */ }
         }
       };
       // The journey above drives ONE form. Nothing pressed the rest of the app, so the commonest

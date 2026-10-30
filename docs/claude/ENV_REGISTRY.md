@@ -425,6 +425,10 @@ the code (it is actually read somewhere) on 2026-07-11.
   already have — the precise false-positive `appUpdate.ts` names as the way this feature becomes
   hated. From release #2 onward: **upload → wait for Play to say live → then set the number.** The
   first release is the only one where the order does not matter.
+- **Game Engine Ultra kill switches (code-only, NOT set in Cloud Run; default ON, `=off` disables) — 2026-10-30:**
+  `AGENTV3_GAME_SCOPE_CONTRACT` (Phase 1, PR #4036 — game scope contract in the kit handoff + GAME_SCOPE_OK/GAP evidence),
+  `AGENTV3_GAME_PLAYTEST_SEED` (Phase 2 — the playtest seeds `Math.random` with a fixed seed so runs are repeatable).
+  Existing siblings: `AGENTV3_GAME_PLAYTEST`, `AGENTV3_GAME_KIT_SEED`.
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
   `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),

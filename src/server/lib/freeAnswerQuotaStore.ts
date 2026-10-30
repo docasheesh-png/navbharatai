@@ -16,7 +16,7 @@ const digest = /^[a-f0-9]{64}$/;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 type Db = Pick<Firestore, 'doc' | 'runTransaction'>;
 
-/** limit: 5 (guest) / 20 (signed-in) on main; config-driven when UNIFIED_WALLET_ENABLED (see unifiedWallet/policy.ts). */
+/** limit: 10 (guest) / 50 (signed-in, incl. 5 free images) since 2026-10-30; config-driven when UNIFIED_WALLET_ENABLED (see unifiedWallet/policy.ts). */
 export interface FreeAnswerQuotaSubject { key: string; limit: number; ipKey?: string; guest?: boolean }
 export interface FreeAnswerReservation {
   id: string;

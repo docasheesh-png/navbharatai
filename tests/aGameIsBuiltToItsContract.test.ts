@@ -27,6 +27,9 @@ describe('the contract is read from the request', () => {
   it('a candy match-3 is a puzzle', () => {
     expect(buildGameContract('candy crush jaisa match-3 game banao with lives').requiredFeatures).toContain('lives');
   });
+  it('Hindi "khel" is a game (Phase 4 finding, admin report prompt)', () => {
+    expect(buildGameContract('ek car wala khel banao').genre).toBe('racing');
+  });
   it('never throws on empty input', () => {
     expect(buildGameContract(undefined).genre).toBe('unknown');
     expect(gameContractBlock(buildGameContract(''))).toBe('');

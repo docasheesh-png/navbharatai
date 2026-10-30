@@ -70,6 +70,8 @@ export interface RuntimeEvidence {
    * an omitted value keeps the original wording.
    */
   previewUrlPublished?: boolean;
+  /** Game Engine Ultra Phase 3 (gameRepair.ts, AGENTV3_GAME_COMPLETE_GATE=on): why a played game is not shippable. */
+  gameIncomplete?: string | null;
   /**
    * The dev server would not stay up. Infrastructure, not a judgement of the app.
    * Only changes the wording of an unproven preview (`not-run`). Never a verdict
@@ -236,7 +238,7 @@ export interface GateVerdict {
 // ⚠️ Every field added to RuntimeEvidence that is NOT a runtime CHECK must be excluded here, or it
 // silently becomes a row the gate tries to label and grade. tsc catches the omission, which is
 // how `stoppedByUser` was caught the moment it was added.
-export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'previewServerDown' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'awaitingShell' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy' | 'journeyNoneWhy' | 'journeyReloaded'>;
+export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'previewServerDown' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'awaitingShell' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy' | 'journeyNoneWhy' | 'journeyReloaded' | 'gameIncomplete'>;
 
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
 const RUNTIME_LABEL: Record<CheckKey, string> = {
@@ -418,6 +420,7 @@ export function releaseGate(
   if (pressedOk) proven.push(`pressing ${ev.explorePresses} of its controls in a real browser broke nothing`);
 
   if (f.blockers > 0) failures.push(`${f.blockers} build-breaking blocker(s)${namedFindings(f.blockers, f.blockerLabels)}`);
+  if (ev.gameIncomplete) failures.push(`the game is not complete: ${ev.gameIncomplete}`);
   if (f.highSeverity > 0) failures.push(`${f.highSeverity} high-severity security/privacy finding(s)`);
 
   // RED — something we looked at is actually broken.

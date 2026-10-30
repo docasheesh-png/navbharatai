@@ -7,6 +7,7 @@
   "include": [
     "scripts/agentv3-reliability-bench.ts",
     "scripts/agentv3-reliability-compare.ts",
-    "scripts/lib/reliabilityRequest.ts"
+    "scripts/lib/reliabilityRequest.ts",
+    "src/server/AgentV3/reliability/gameBench.ts"
   ]
 }

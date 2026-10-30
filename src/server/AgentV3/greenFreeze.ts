@@ -127,6 +127,9 @@ export const ALLOWED_PASSES: ReadonlySet<string> = new Set([
   // still renders, else undone (routes/agentv3.ts). It may never touch a secret file, and never a TEST file
   // — "fix the source, do not weaken the test" is enforced here rather than merely asked for.
   'vaccine-repair',
+  // Game Engine Ultra Phase 3 (gameRepair.ts): a game the playtest PROVED broken, repaired once and kept only
+  // if the game, played again, is strictly better — otherwise undone. Off unless AGENTV3_GAME_AUTO_REPAIR=on.
+  'game-repair',
 ]);
 
 /**
@@ -178,6 +181,7 @@ const SECRET_FILE_DENIED_PASSES: ReadonlySet<string> = new Set([
   'vaccine-repair',
   'reviewer-functional-repair',
   'explorer-repair',
+  'game-repair',
   ...CREATE_ONLY_PASSES,
 ]);
 

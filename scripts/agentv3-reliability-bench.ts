@@ -22,7 +22,9 @@
  *      BENCH_RUNS (attempts per prompt, default 1), BENCH_ONLY (comma ids), BENCH_FLAGS (comma, recorded only),
  *      BENCH_TIMEOUT_S (per build, default 1800), BENCH_AUTH_TOKEN (current ID token),
  *      BENCH_POWER_LEVEL (required exact tier; this pilot uses weak),
- *      BENCH_OUTPUT_DIR (optional artifact directory), BENCH_CONFIRM=yes (actually run).
+ *      BENCH_OUTPUT_DIR (optional artifact directory), BENCH_CONFIRM=yes (actually run),
+ *      BENCH_FIXTURE (reliability|game, default reliability — game = Game Engine Ultra Phase 4 corpus,
+ *      scripts/fixtures/game-bench-prompts.json; adds playtest/GQS/defects/scope/repair/gate per run).
  */
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -31,6 +33,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { parseNdjson, metricsFromEvents, type BuildMetrics } from '../src/server/AgentV3/BakeoffMetrics';
 import { breakdown, buildSucceeded, formatEvidenceSummary, selectBenchPrompts, successRate, summarizeEvidence, validateBenchFixture, verifiedOutcome, type BenchResultFile, type BenchRun } from '../src/server/AgentV3/reliability/benchHarness';
+import { benchFixtureFile, gameSignalsFromEvents, gameFailClass, summarizeGameBench } from '../src/server/AgentV3/reliability/gameBench';
 import { benchmarkEndpoint, benchmarkRequest, benchmarkToken, benchmarkTier } from './lib/reliabilityRequest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -44,10 +47,12 @@ const FLAGS = (env.BENCH_FLAGS || '').split(',').map((s) => s.trim()).filter(Boo
 const TIMEOUT_MS = Math.max(60, parseInt(env.BENCH_TIMEOUT_S || '1800', 10) || 1800) * 1000;
 const CONFIRMED = env.BENCH_CONFIRM === 'yes';
 const REQUESTED_TIER = benchmarkTier(env.BENCH_POWER_LEVEL);
+const FIXTURE_FILE = benchFixtureFile(env.BENCH_FIXTURE);
+const IS_GAME = FIXTURE_FILE.includes('game-bench');
 
 const FAILED: BuildMetrics = { filesCreated: 0, ok: false, readinessScore: null, billedUsd: null, toolCalls: 0, toolErrors: 0, providerFallbacks: 0, geminiTrap: false, errored: true };
 
-async function runOneBuild(request: ReturnType<typeof benchmarkRequest>, endpoint: string): Promise<BuildMetrics> {
+async function runOneBuild(request: ReturnType<typeof benchmarkRequest>, endpoint: string): Promise<{ metrics: BuildMetrics; events: Array<Record<string, unknown>> }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
@@ -57,19 +62,20 @@ async function runOneBuild(request: ReturnType<typeof benchmarkRequest>, endpoin
     });
     // Do not echo arbitrary server response bodies (or credentials) into shared benchmark artifacts.
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return metricsFromEvents(parseNdjson(await res.text()));
+    const events = parseNdjson(await res.text());
+    return { metrics: metricsFromEvents(events), events };
   } finally {
     clearTimeout(timer);
   }
 }
 
 async function main(): Promise<void> {
-  const fixtureBytes = readFileSync(join(HERE, 'fixtures/reliability-bench-prompts.json'), 'utf8');
+  const fixtureBytes = readFileSync(join(HERE, FIXTURE_FILE), 'utf8');
   const fx = validateBenchFixture(JSON.parse(fixtureBytes));
   const prompts = selectBenchPrompts(fx, SET, ONLY);
   if (!prompts.length) { console.error('No prompts selected (check BENCH_ONLY).'); process.exit(1); }
   const endpoint = benchmarkEndpoint(BASE_URL);
-  console.log(`Reliability bench "${LABEL}" — ${SET} set, ${prompts.length} prompts × ${RUNS} → ${BASE_URL}`);
+  console.log(`${IS_GAME ? 'Game' : 'Reliability'} bench "${LABEL}" — ${SET} set, ${prompts.length} prompts × ${RUNS} → ${BASE_URL}`);
   if (!CONFIRMED) {
     console.log('\nDRY RUN (no build started). These would be sent:');
     for (const p of prompts) console.log(`  - [${p.lang}/${p.complexity}] ${p.id}: ${p.prompt}`);
@@ -105,8 +111,9 @@ async function main(): Promise<void> {
         failure: 'request-in-progress' });
       save();
       let metrics: BuildMetrics;
+      let events: Array<Record<string, unknown>> = [];
       let failure: BenchRun['failure'];
-      try { metrics = await runOneBuild(request, endpoint); } catch (err) {
+      try { ({ metrics, events } = await runOneBuild(request, endpoint)); } catch (err) {
         // A timeout does not cancel the remote build or prove it was free. Never retry it automatically.
         const message = err instanceof Error && /^HTTP \d{3}$/.test(err.message) ? err.message : 'transport-or-timeout';
         failure = message;
@@ -119,6 +126,7 @@ async function main(): Promise<void> {
       }
       const run: BenchRun = { id: p.id, lang: p.lang, complexity: p.complexity, attempt, seconds: (Date.now() - t0) / 1000, metrics, success: buildSucceeded(metrics),
         requestId: request.requestId, sessionId: request.sessionId, ...(failure ? { failure } : {}) };
+      if (IS_GAME) { const signals = gameSignalsFromEvents(events); run.game = { signals, cls: gameFailClass(run, signals) }; }
       runs[row] = run;
       save();
       if (failure) {
@@ -135,6 +143,7 @@ async function main(): Promise<void> {
   console.log('By complexity:', JSON.stringify(breakdown(runs, 'complexity')));
   console.log('By language:', JSON.stringify(breakdown(runs, 'lang')));
   console.log(formatEvidenceSummary(summarizeEvidence(runs), LABEL));
+  if (IS_GAME) console.log('Game:', JSON.stringify(summarizeGameBench(runs.map((r) => ({ seconds: r.seconds, realCostUsd: r.metrics.evidence?.realCostUsd ?? null, cls: r.game?.cls ?? gameFailClass(r, null), game: r.game?.signals ?? null })))));
   out.execution!.status = 'complete';
   save();
   console.log(`Results → ${file}`);

@@ -477,7 +477,7 @@ describe('§6 · class census over the route and AgentRunner', () => {
       if (!prop) { clients.push(`NO CLIENT @${lineOf(route, n)}`); return; }
       clients.push(ts.isShorthandPropertyAssignment(prop) ? 'client' : ts.isPropertyAssignment(prop) ? prop.initializer.getText(route).replace(/\s+/g, ' ') : 'OTHER');
     });
-    expect(clients.length).toBe(18);
+    expect(clients.length).toBe(19); // +1 2026-10-30: the game repair (gameRepair.ts), on buildTurnRunner(healRunnerOpts())
     for (const c of clients) expect(c).toMatch(/^(?:buildTurnRunner\(|client$|planGrok \?\? client$)/);
     // …and every sub-agent runs on the main client (SubAgent.ts uses deps.client).
     expect(codeOnlyText(read('src/server/routes/agentv3.ts'))).toContain('client, actuator, workspaceId, state, events, model: requestModel, onlyOpus,');

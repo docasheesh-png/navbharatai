@@ -41,7 +41,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('actual Builder route Surplus settlement branch', () => {
-  it.each([['1000', 0.01], ['2000', 0.011]] as const)('charges min(10x actual, official) for %s micro without applying legacy2.5 again', (cost, expected) => {
+  it.each([['1000', 0.01], ['2000', 0.02]] as const)('charges flat 10x actual (no tariff cap) for %s micro without applying legacy2.5 again', (cost, expected) => {
     const ledger = createProviderUsageLedger();
     expect(add(ledger, fixture('one', cost)).status).toBe('chargeable');
     const result = bill(ledger);
@@ -68,9 +68,9 @@ describe('actual Builder route Surplus settlement branch', () => {
     const ledger = createProviderUsageLedger();
     add(ledger, fixture('one', '1000')); add(ledger, fixture('two', '2000')); add(ledger, fixture('one', '1000'));
     expect(ledger.entries()).toHaveLength(2);
-    expect(bill(ledger).effectiveBilledUsd).toBe(0.021);
+    expect(bill(ledger).effectiveBilledUsd).toBe(0.03);
     expect(bill(ledger).realCostUsd).toBe(0.003);
-    expect(surplusBuildCharges([...ledger.entries(), ...ledger.entries()], new Set()).chargeUsd).toBe('0.021');
+    expect(surplusBuildCharges([...ledger.entries(), ...ledger.entries()], new Set()).chargeUsd).toBe('0.03');
   });
   it.each(['discarded', 'partially_discarded', 'failed', 'malformed'] as const)('absorbs entire %s call while retaining supplier expense', disposition => {
     const ledger = createProviderUsageLedger(); const input = fixture(); input.disposition = disposition;

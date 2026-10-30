@@ -101,7 +101,7 @@ async function setup(costMicro = '1', signal?: AbortSignal, maxSteps = 4) {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('reviewed Surplus native builder loop through judged completion', () => {
-  it.each([['1', 0.00003], ['2', 0.000042]] as const)('writes, round-trips, judges and settles %s micro per call', async (micro, expectedBill) => {
+  it.each([['1', 0.00003], ['2', 0.00006]] as const)('writes, round-trips, judges and settles %s micro per call', async (micro, expectedBill) => {
     vi.stubEnv('AGENTV3_REALCOST_BILLING', 'on');
     vi.stubEnv('UNIFIED_WALLET_MARGIN_BUILD', '2.5');
     const h = await setup(micro);

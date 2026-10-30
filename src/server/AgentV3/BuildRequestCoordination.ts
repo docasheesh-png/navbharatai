@@ -1,5 +1,5 @@
 import type { Request, Response, RequestHandler } from 'express';
-import { renewWorkspaceBuild, LEASE_HEARTBEAT_MS, LEASE_STALE_MS, type BuildLeaseStore } from './workspaceBuildLease';
+import { renewWorkspaceBuildDetailed, LEASE_HEARTBEAT_MS, LEASE_STALE_MS, type BuildLeaseStore } from './workspaceBuildLease';
 import type { RunningBuild } from './runningBuildRegistry';
 import { abortBuild } from './buildAbortCause';
 import { hasBuildBodyExitHold } from './stoppingBuild';
@@ -322,9 +322,18 @@ export function startBuildLeaseHeartbeat(opts: {
         await opts.release(); return;
       }
       const heartbeatAt = Date.now();
-      const renewal = await renewWorkspaceBuild(opts.store, { workspaceId: opts.workspaceId, token: opts.token, nowMs: heartbeatAt });
+      // Transient store errors/timeouts are retried with jitter inside this beat; the loss reason is logged.
+      // Abort margin: two beats before the lease could lapse, so the NEXT beat (after a recovered store)
+      // still finds our own live lease and keeps a successor out while the aborted body drains. Once at
+      // risk, a single bounded attempt — retries must never push the decision past the lease's life.
+      const atRiskBeforeCall = heartbeatAt - lastConfirmedAt >= LEASE_STALE_MS - 2 * LEASE_HEARTBEAT_MS;
+      const detail = await renewWorkspaceBuildDetailed(opts.store, { workspaceId: opts.workspaceId, token: opts.token, nowMs: heartbeatAt, attempts: atRiskBeforeCall ? 1 : undefined });
+      const renewal = detail.renewal;
       if (renewal !== 'unknown') lastConfirmedAt = heartbeatAt;
-      const authorityAtRisk = Date.now() - lastConfirmedAt >= LEASE_STALE_MS - LEASE_HEARTBEAT_MS;
+      if (renewal === 'unknown' || renewal === 'lost') {
+        console.warn(`[BUILD_LEASE] renewal ${renewal} workspace=${opts.workspaceId} reason=${detail.reason ?? 'unknown'} attempts=${detail.attempts} unconfirmedForMs=${Date.now() - lastConfirmedAt}${detail.error ? ` error=${detail.error}` : ''}`);
+      }
+      const authorityAtRisk = Date.now() - lastConfirmedAt >= LEASE_STALE_MS - 2 * LEASE_HEARTBEAT_MS;
       if (renewal === 'unknown' && build && !build.exited && authorityAtRisk) {
         // An unavailable store is not permission to keep building until another worker takes over.
         // Abort cooperatively, but retain the local/body hold and keep trying to renew: an abort

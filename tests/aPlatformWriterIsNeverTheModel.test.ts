@@ -440,7 +440,7 @@ describe('🔒 census — every write the route makes after the model answers na
     // Three per-site restore writers moved to ONE shared door before this region (46 → 43).
     // Keep an exact count plus that door's census below, so deleting a writer or moving one out of
     // the checked region cannot silently weaken the invariant.
-    expect(sites).toHaveLength(43);
+    expect(sites).toHaveLength(44); // +1 2026-10-30: the game repair runner (gameRepair.ts), inside runInPass(GAME_REPAIR_PASS)
     expect(runnerVars.size).toBeGreaterThanOrEqual(10);
   });
   it('the shared automatic restore is named and every caller uses an allowlisted restore pass', () => {

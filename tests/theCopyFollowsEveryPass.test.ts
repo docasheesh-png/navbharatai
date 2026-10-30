@@ -35,7 +35,7 @@ describe('the end-of-build refresh', () => {
     const restores = [...route.matchAll(/\bapplyGreenSnapshotRestore\s*\(/g)];
     const verifiedRepairRestores = [...route.matchAll(/revert:\s*revertToGreenSnapshot\b/g)];
     expect(restores).toHaveLength(4);
-    expect(verifiedRepairRestores).toHaveLength(5);
+    expect(verifiedRepairRestores).toHaveLength(6); // +1 2026-10-30: the game repair (gameRepair.ts)
     for (const call of [...restores, ...verifiedRepairRestores]) expect(call.index).toBeLessThan(refreshAt);
   });
 

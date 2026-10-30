@@ -1,3 +1,10 @@
+## 2026-10-30 — Game Engine Ultra Phases 1–3 (PRs #4036 → #4037 → Phase 3, stacked, none merged)
+
+- **Phase 1 (#4036):** `gameIntent.ts` reads a scope contract (genre, view, controls, named features, win/lose) from the request; it rides in the kit handoff (`GAME_CONTRACT`) and is compared with the built code after the playtest (`GAME_SCOPE_OK` / `GAME_SCOPE_GAP`, info). Kill switch `AGENTV3_GAME_SCOPE_CONTRACT=off` (default on).
+- **Phase 2 (#4037):** playtest seeds `Math.random` (`AGENTV3_GAME_PLAYTEST_SEED=off`), names quiz/card/board/puzzle DOM games as not played (no score), and records `GAME_DEFECTS` with structured `GAME_DEFECT_*` codes.
+- **Phase 3:** `gameRepair.ts` — one focused repair on measured defects/scope gap, replayed, kept only if strictly better, else undone (`GAME_REPAIRED` / `GAME_REPAIR_UNREPAIRED` / `GAME_REPAIR_SKIPPED`); platform absorbs the cost (`PHASE_GAME_REPAIR` always barren). Incomplete-delivery gate makes the release gate RED (`GAME_COMPLETE_GATE_BLOCKED`), never flips `ok`, never touches a bill. Both `AGENTV3_GAME_AUTO_REPAIR` and `AGENTV3_GAME_COMPLETE_GATE` default **OFF** — admin decides.
+- **Open:** a real quiz/card/board playthrough is not built; who pays for a kept game repair is an admin decision; `AppKnowledgeBase.ts` to be updated when the gate is switched on.
+
 ## 2026-10-29 — Batch configure failure diagnostics
 
 The live batch configuration failed before inference, but both server and UI discarded the useful cause. This correction returns only an allowlisted stage/reason, upstream HTTP status/error code, expected field presence/types and a fresh correlation ID to verified admins. Configuration/quote/database/revision failures remain distinct; raw bodies, credentials and arbitrary messages are excluded. UI displays this safe evidence. No parser relaxation, budget policy or dispatch change. Current runner maximum remains32; it does not establish the newly requested1000simultaneous capacity. No paid calls or live Save retries performed during this correction.

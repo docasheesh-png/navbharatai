@@ -422,6 +422,7 @@ import { continueFastLaneGeneration, isTruncatedStop, MAX_CONTINUATIONS } from '
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
 import { recordReasoningStays } from '../AgentV3/FastLaneBudget';
 import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
+import { buildGameContract, gameContractBlock, gameScopeContractEnabled, type GameScopeContract } from '../AgentV3/gameIntent';
 import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
@@ -696,7 +697,7 @@ import { isAnswerOnlyTurn, answeredInsteadOfBuilding, previewFailedSeverity, pre
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
-import { gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestSkipReason, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
+import { gameScopeVerdict, gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestSkipReason, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
 import { recordManualEdits, consumeManualEditsWithOwned, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { createPrepSteps } from '../AgentV3/prepClock';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
@@ -18553,6 +18554,7 @@ async function noteBuildOutcome(
       // Kill switch AGENTV3_GAME_KIT_SEED=off.
       /** The recipes laid down before the first model call; empty when none were (see `gameKitSkipReason`). */
       const gameKitSeeded: string[] = [];
+      let gameContract: GameScopeContract | null = null;
       /** Path → the exact content the game-kit seed wrote (the kit, its layers, package.json). See `builderWroteCount`. */
       const kitSeededFiles = new Map<string, string>();
       /**
@@ -18631,7 +18633,17 @@ async function noteBuildOutcome(
               for (const r of kitResults) if (r.ok) gameKitSeeded.push(r.recipe);
               if (gameKitSeeded.length > 0) {
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_KIT_SEEDED', autoResolved: true, message: gameKitSeededMessage(kitResults, kitFiles, Date.now() - kitStartedAt) });
-                buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(prompt) })}\n\n---\n\n${buildPrompt}`;
+                // Game Engine Ultra Phase 1 (gameIntent.ts): the request's scope contract rides in the handoff.
+                // Kill switch AGENTV3_GAME_SCOPE_CONTRACT=off. Pure, best-effort — never touches the build.
+                let contractText = '';
+                try {
+                  if (gameScopeContractEnabled()) {
+                    gameContract = buildGameContract(prompt);
+                    contractText = gameContractBlock(gameContract);
+                    if (contractText) buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_CONTRACT', autoResolved: true, message: `Game scope contract: ${JSON.stringify(gameContract)}` });
+                  }
+                } catch { gameContract = null; contractText = ''; }
+                buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(prompt), contract: contractText })}\n\n---\n\n${buildPrompt}`;
               } else {
                 gameKitSeedFailed = kitResults.length > 0;
                 gameKitSkipReason = kitResults.length > 0
@@ -23579,6 +23591,11 @@ async function noteBuildOutcome(
             const verdict = playtestVerdict(parsePlaytest(out.stdout), replayFromCode(playtestFiles));
             buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
             gameProof = { outcome: playtestOutcome(verdict.code), score: verdict.score?.overall ?? null };
+            // Scope match (gameIntent.ts) — evidence only, never a gate or a charge.
+            try {
+              const scope = gameContract ? gameScopeVerdict(gameContract, playtestFiles) : null;
+              if (scope) buildDiag.record({ phase: 'preview', severity: scope.severity, code: scope.code, message: scope.message, autoResolved: scope.autoResolved });
+            } catch { /* observation only */ }
           } catch (err) {
             // A playtest that timed out or crashed is a check that could not look — the same open warning
             // the runner's own "never played" answer gives, never an info line that reads as a pass.

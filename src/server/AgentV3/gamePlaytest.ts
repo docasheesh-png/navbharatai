@@ -36,6 +36,7 @@
 //
 // PURE. The runner is a STRING built here and executed by the caller in the sandbox.
 
+import { scopeMatch, type GameScopeContract } from './gameIntent';
 import { browserScriptRunLine, parseScriptDiagnostic, playwrightImport } from './sandboxBrowserScript';
 import { newPageOptionsExpr } from './signInExplore';
 import { CONSOLE_NOISE, NEVER_PRESS } from './clickExplorer';
@@ -1460,4 +1461,17 @@ export function playtestOutcome(code: string | null | undefined): 'passed' | 'fa
   if (c === 'GAME_PLAYTEST_OK') return 'passed';
   if (c === 'GAME_PLAYTEST_ISSUES') return 'failed';
   return 'not-run';
+}
+
+// 🎯 GAME ENGINE ULTRA PHASE 1 — SCOPE MATCH AS EVIDENCE (gameIntent.ts). The playtest answers "can it be
+// played?"; this answers "is it the game that was asked for?" from the code the builder wrote, against the
+// features the request NAMED. Never a gate and never a charge: an info line for the admin timeline.
+export interface GameScopeVerdict { code: 'GAME_SCOPE_OK' | 'GAME_SCOPE_GAP'; severity: 'info'; message: string; autoResolved: true }
+export function gameScopeVerdict(contract: GameScopeContract, files: Record<string, string>): GameScopeVerdict | null {
+  if (!contract || contract.requiredFeatures.length === 0) return null;
+  const m = scopeMatch(contract, files);
+  if (m.missing.length === 0) {
+    return { code: 'GAME_SCOPE_OK', severity: 'info', autoResolved: true, message: `Every feature the request named is in the game's code: ${m.present.join(', ')}.` };
+  }
+  return { code: 'GAME_SCOPE_GAP', severity: 'info', autoResolved: true, message: `The request named ${m.missing.join(', ')}, and the game's own code shows no sign of ${m.missing.length === 1 ? 'it' : 'them'} (found: ${m.present.join(', ') || 'none of the named features'}). Read from code, not played — evidence only.` };
 }

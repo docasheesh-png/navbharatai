@@ -1268,7 +1268,7 @@ export function shouldRunIntegrityHeal(opts: {
 
 // Build-outcome summaries moved to AgentV3/buildOutcomeSummaries.ts (item 5); re-exported for existing importers.
 export { emptyBuildFailureSummary, emptyBuildOutcomeIssue, verifiedNoChangeSummary, finalSyntaxErrorSummary } from '../AgentV3/buildOutcomeSummaries';
-import { emptyBuildFailureSummary, emptyBuildOutcomeIssue, verifiedNoChangeSummary, finalSyntaxErrorSummary } from '../AgentV3/buildOutcomeSummaries';
+import { emptyBuildFailureSummary, emptyBuildOutcomeIssue, verifiedNoChangeSummary, finalSyntaxErrorSummary, terminalOutcomeCode, terminalOutcomeRecord } from '../AgentV3/buildOutcomeSummaries';
 
 /**
  * The STABLE durable-conversation id for a session's workspace — one conversation record per session,
@@ -26080,10 +26080,7 @@ async function noteBuildOutcome(
             buildDiag.record(initialTerminalDecline && !abort.signal.aborted ? {
               phase: 'build', severity: 'info', code: 'OUTCOME_INITIAL_DECLINED', autoResolved: true,
               message: 'Build outcome: DECLINED — an initial build lane declined to build and wrote no files. Its original answer was preserved, not retried.',
-            } : {
-              phase: 'build', severity: 'error', code: 'OUTCOME_UNEXPLAINED', autoResolved: false,
-              message: 'Build outcome: NOT OK — the run ended without an outcome code. The engine did not record why; this is not a fact about the app.',
-            });
+            } : terminalOutcomeRecord(terminalOutcomeCode({ messages: [String(result.summary ?? ''), ...buildDiag.report().issues.map(i => String(i.message ?? ''))] })));
           }
         } catch { /* the record must never be what breaks the build it is describing */ }
       }
@@ -27968,16 +27965,14 @@ async function noteBuildOutcome(
             message: crash.summary,
           });
         }
-        if (crash.code === 'BUILD_EXCEPTION') {
-          try {
-            if (!outcomeCodeOf(buildDiagRef?.report()?.issues ?? [])) {
-              buildDiagRef?.record({
-                phase: 'build', severity: 'error', code: 'OUTCOME_UNEXPLAINED', autoResolved: false,
-                message: 'Build outcome: NOT OK — the run ended without an outcome code. The engine did not record why; this is not a fact about the app.',
-              });
-            }
-          } catch { /* naming the hole must not replace the crash record */ }
-        }
+        // EVERY crash ends with a named OUTCOME_* (failedbr 617–630): Surplus/provider death mid-build is
+        // OUTCOME_ENGINE_UNAVAILABLE/TIMEOUT, a sandbox-recovery crash OUTCOME_SANDBOX_UNAVAILABLE (it used
+        // to get none), and only a truly unknown exception is OUTCOME_UNEXPLAINED.
+        try {
+          if (!outcomeCodeOf(buildDiagRef?.report()?.issues ?? [])) {
+            buildDiagRef?.record(terminalOutcomeRecord(terminalOutcomeCode({ error: err, crashCode: crash.code }), crash.phase));
+          }
+        } catch { /* naming the hole must not replace the crash record */ }
         // SAME STALE-SUMMARY SIBLING AS THE WATCHDOG PATH (see the comment beside `pauseMsgForReport`
         // above): `ingestEvent`'s `case 'done'` sets `this.summary` unconditionally on every mid-build
         // `done` event, and `finish()` only overwrites it when a summary is actually passed. Calling

@@ -244,3 +244,29 @@ export function finalSyntaxErrorSummary(fileCount: number): string {
     `compile yet — so it isn't runnable. You have NOT been charged for this build. Reply "continue" and I'll finish the fix.`
   );
 }
+
+/**
+ * 🔴 EVERY TERMINAL PATH NAMES ITS OUTCOME (failedbr 617–630, 2026-10-30). A Surplus/provider death
+ * mid-build surfaced as a generic BUILD_EXCEPTION and was stamped OUTCOME_UNEXPLAINED ("ended without an
+ * outcome code"); a sandbox-recovery crash got no OUTCOME_* at all. PURE: picks the named outcome for a
+ * crash (thrown error + its crash code) or for a not-ok result from its recorded issue messages.
+ */
+export type TerminalOutcomeCode = 'OUTCOME_ENGINE_UNAVAILABLE' | 'OUTCOME_ENGINE_TIMEOUT' | 'OUTCOME_SANDBOX_UNAVAILABLE' | 'OUTCOME_UNEXPLAINED';
+const ENGINE_UNAVAILABLE_TEXT = 'The build engine is temporarily unavailable';
+const ENGINE_TIMEOUT_TEXT = 'The build step timed out';
+export function terminalOutcomeCode(input: { error?: unknown; crashCode?: string; messages?: ReadonlyArray<string> }): TerminalOutcomeCode {
+  const texts = [...(input.messages ?? [])];
+  if (input.error instanceof Error) texts.push(input.error.message);
+  else if (typeof input.error === 'string') texts.push(input.error);
+  if (texts.some(t => typeof t === 'string' && t.includes(ENGINE_TIMEOUT_TEXT))) return 'OUTCOME_ENGINE_TIMEOUT';
+  if (texts.some(t => typeof t === 'string' && (t.includes(ENGINE_UNAVAILABLE_TEXT) || /DISCOUNT_BUILD_UNAVAILABLE|engine_unavailable/.test(t)))) return 'OUTCOME_ENGINE_UNAVAILABLE';
+  if (input.crashCode && input.crashCode !== 'BUILD_EXCEPTION' && /SANDBOX/.test(input.crashCode)) return 'OUTCOME_SANDBOX_UNAVAILABLE';
+  return 'OUTCOME_UNEXPLAINED';
+}
+export function terminalOutcomeRecord(code: TerminalOutcomeCode, phase: 'build' | 'sandbox' = 'build') {
+  const message = code === 'OUTCOME_ENGINE_UNAVAILABLE' ? 'Build outcome: ENGINE_UNAVAILABLE — the build engine became unavailable mid-build. Engine/provider condition, not the app or the prompt.'
+    : code === 'OUTCOME_ENGINE_TIMEOUT' ? 'Build outcome: ENGINE_TIMEOUT — a build engine step hit its wall clock. Engine condition, not the app.'
+    : code === 'OUTCOME_SANDBOX_UNAVAILABLE' ? 'Build outcome: SANDBOX_UNAVAILABLE — the build sandbox could not be recovered. Infrastructure condition, not the app or the prompt.'
+    : 'Build outcome: NOT OK — the run ended without an outcome code. The engine did not record why; this is not a fact about the app.';
+  return { phase, severity: 'error' as const, code, message, autoResolved: false as const };
+}

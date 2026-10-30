@@ -325,6 +325,8 @@ export const PROCESS_ONLY_CODES = new Set([
   'OUTCOME_STOPPED', 'OUTCOME_BUILD_TIMEOUT', 'OUTCOME_ABORTED_UNKNOWN',
   // …and the sandbox that could not be set up (a9f8d186): infrastructure, the same class as a provider outage.
   'OUTCOME_SANDBOX_UNAVAILABLE',
+  // …and the build engine (Surplus/provider) dying mid-build (failedbr 617–630): infra, never the app.
+  'OUTCOME_ENGINE_UNAVAILABLE', 'OUTCOME_ENGINE_TIMEOUT',
   // …and the admin's AI pause (aiMaintenance.ts): the service, not the app (autopsy 81a0eda5).
   'OUTCOME_AI_PAUSED',
   // …and a turn that ended by asking the user a question (autopsy 35bd9e17): a hand-back, not a finding.

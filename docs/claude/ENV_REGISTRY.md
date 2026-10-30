@@ -1880,6 +1880,7 @@ the code (it is actually read somewhere) on 2026-07-11.
   device id the app sends (`x-nb-guest`, `src/lib/guestId.ts`), because Indian mobile networks share one IP among
   many phones; the IP (the LAST `X-Forwarded-For` entry) is only the backstop. The day is India's. Refusal is
   **403 `guest_limit_reached`** — never 401, which the free-chat client reads as an expired session.
+  ⚠️ **The old browser counter (`FREE_DAILY_MESSAGES`) is gone on purpose; do not reintroduce a client-side count.**
 - **💳 FREE CHAT QUOTA + ₹0.10 PAST IT — `UNIFIED_WALLET_ENABLED` (admin 2026-10-30, PRs #4030/#4031).**
   `UNIFIED_WALLET_ENABLED` (code default **ON** since 2026-10-30 when unset — prod Cloud Run value not yet verified; `off`/`0`/`false` = disabled ⇒
   quota exhausted = blocked, never charged). Read by `src/server/lib/unifiedWallet/policy.ts` (`unifiedWalletEnabled`).
@@ -1891,7 +1892,6 @@ the code (it is actually read somewhere) on 2026-07-11.
     (`UNIFIED_WALLET_CHAT_MESSAGE_MILLI`, default 100 milli-credit). Per-minute gate `UNIFIED_WALLET_PER_MINUTE` (20) /
     `UNIFIED_WALLET_GUEST_PER_MINUTE` (6); surfaces `UNIFIED_WALLET_CHARGED_SURFACES` (default all). Full design: `docs/UNIFIED_WALLET.md`.
   - Independent switch: `UNIFIED_WALLET_MARGIN` (default OFF) — not part of this quota. `AI_WALLET_SPEND` is the separate tools/Doctor flag.
-  ⚠️ **The old browser counter (`FREE_DAILY_MESSAGES`) is gone on purpose; do not reintroduce a client-side count.**
 - **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
   `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
   publish and the hit route recording; apps already published keep their script until republished,

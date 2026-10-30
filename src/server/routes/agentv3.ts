@@ -478,7 +478,7 @@ import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, r
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
 import { tieredMarkupUsd, realProviderCostUsd, SurplusAccountingUnavailableError } from '../AgentV3/providerRates';
 import { splitUnbilledCost, absorbedWorkDetail } from '../AgentV3/unbilledTurns';
-import { runInBillingPhase, currentBillingPhase, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_POST_FIX_REVIEW, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
+import { runInBillingPhase, currentBillingPhase, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_GAME_REPAIR, PHASE_POST_FIX_REVIEW, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
 import { bugHuntCostReading, bugHuntCostLine } from '../AgentV3/bugHuntCost';
 import { postFixRecheckBudgetMs, postFixRecheckOutcome } from '../AgentV3/postFixReview';
 import { createUsageSink } from '../AgentV3/UsageSink';
@@ -697,6 +697,8 @@ import { isAnswerOnlyTurn, answeredInsteadOfBuilding, previewFailedSeverity, pre
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
+import { gameAutoRepairEnabled, gameCompleteGateEnabled, runGameRepair, gameRepairRecord, gameIncompleteReason, GAME_REPAIR_PASS } from '../AgentV3/gameRepair';
+import { scopeMatch } from '../AgentV3/gameIntent';
 import { gameScopeVerdict, domGameKind, domGameNotPlayedVerdict, playtestDefects, gameDefectsMessage, missingKitLayerPaths, gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestSkipReason, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
 import { recordManualEdits, consumeManualEditsWithOwned, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { createPrepSteps } from '../AgentV3/prepClock';
@@ -23576,6 +23578,9 @@ async function noteBuildOutcome(
       // (`startLabelsFromExplore`) reach the playtest's own browser as known starts, so the control that
       // started the game for the explorer is the one the playtest presses first.
       let gamePlaytestDone = false;
+      // Game Engine Ultra Phase 3 inputs (gameRepair.ts): the last measured defects and still-missing named features.
+      type GamePlayed = { defects: ReturnType<typeof playtestDefects>; scopeMissing: string[] };
+      const gamePlayedRef: { cur: GamePlayed | null } = { cur: null };
       const runGamePlaytest = async (startLabels: readonly string[] = []): Promise<void> => {
         if (gamePlaytestDone) return;
         gamePlaytestDone = true;
@@ -23594,7 +23599,9 @@ async function noteBuildOutcome(
             gameProof = { outcome: playtestOutcome(verdict.code), score: verdict.score?.overall ?? null };
             // Game Engine Ultra Phase 2: structured defect codes for Phase 3 — evidence only.
             try {
-              const defectsMsg = gameDefectsMessage(playtestDefects(playRun, verdict.score, missingKitLayerPaths(playtestFiles)));
+              const measured = playtestDefects(playRun, verdict.score, missingKitLayerPaths(playtestFiles));
+              gamePlayedRef.cur = { defects: measured, scopeMissing: gameContract ? scopeMatch(gameContract, playtestFiles).missing : [] };
+              const defectsMsg = gameDefectsMessage(measured);
               if (defectsMsg) buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_DEFECTS', message: defectsMsg, autoResolved: true });
             } catch { /* observation only */ }
             // Scope match (gameIntent.ts) — evidence only, never a gate or a charge.
@@ -23795,6 +23802,59 @@ async function noteBuildOutcome(
       // The explorer did not run (switched off, no time, or it failed before its presses were in): the game
       // is still played. A no-op when it already ran above.
       await runGamePlaytest();
+      // 🎮 GAME ENGINE ULTRA PHASE 3 (gameRepair.ts) — both switches default OFF. Repair: one focused pass on the
+      // measured defects, replayed, kept only if strictly better, else undone; the platform absorbs its cost
+      // (PHASE_GAME_REPAIR is always barren). Gate: a game still unplayable or missing named features is RED.
+      let gamePlayed = gamePlayedRef.cur;
+      if (gamePlayed && (gamePlayed.defects.length > 0 || gamePlayed.scopeMissing.length > 0) && !abort.signal.aborted) {
+        if (gameAutoRepairEnabled() && lastPreviewUrl && actuator.runCommand) {
+          try {
+            const previewUrl = lastPreviewUrl;
+            const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt);
+            const snap = (await collectWorkspaceFiles(actuator, workspaceId)).files;
+            const outcome = await runGameRepair(gamePlayed.defects, gamePlayed.scopeMissing, prompt, {
+              repairMs: explorerRepairPlan(headroomMs).repairMs, snapshot: snap, buildSignal: abort.signal,
+              io: {
+                repair: async (repairPrompt, signal) => {
+                  const runner = new AgentRunner({
+                    ...baseRunnerOpts, signal, client: buildTurnRunner(healRunnerOpts()), platformRequest: true, focusedRepair: true,
+                    tools: withoutPlatformCheckTools(baseRunnerOpts.tools), model: resolveModel(powerLevelReqEffective),
+                    persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+                  });
+                  const r = await runInBillingPhase(PHASE_GAME_REPAIR, () => runInPass(GAME_REPAIR_PASS, () => runner.run(repairPrompt)));
+                  return !!r?.ok;
+                },
+                replay: async () => {
+                  const files = (await collectWorkspaceFiles(actuator, workspaceId)).files;
+                  const out = await withTimeout(actuator.runCommand!(workspaceId, gamePlaytestScript(previewUrl, { storageState: signedInState() })), PLAYTEST_BUDGET_MS + 20_000, 'game-repair-replay');
+                  const run = parsePlaytest(out.stdout);
+                  const v = playtestVerdict(run, replayFromCode(files));
+                  return { defects: playtestDefects(run, v.score, missingKitLayerPaths(files)), scopeMissing: gameContract ? scopeMatch(gameContract, files).missing : [] };
+                },
+                changedSince: async (s0) => changedWorkspacePaths(s0, (await collectWorkspaceFiles(actuator, workspaceId)).files).length,
+                revert: revertToGreenSnapshot,
+              },
+            });
+            barrenPhases.add(PHASE_GAME_REPAIR);
+            buildDiag.record({ phase: 'preview', ...gameRepairRecord(outcome) });
+            if (outcome.kept && outcome.after) {
+              gamePlayed = { defects: gamePlayed.defects.filter((d) => outcome.after!.includes(d.code)), scopeMissing: outcome.scopeAfter ?? gamePlayed.scopeMissing };
+              if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
+            }
+          } catch (e) {
+            try { buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_REPAIR_SKIPPED', autoResolved: true, message: `Game repair could not run: ${e instanceof Error ? e.message : String(e)}` }); } catch { /* best-effort */ }
+          }
+        }
+        if (gameCompleteGateEnabled()) {
+          try {
+            const why = gameIncompleteReason(gamePlayed.defects, gamePlayed.scopeMissing);
+            if (why) {
+              gateEvidence.gameIncomplete = why;
+              buildDiag.record({ phase: 'preview', severity: 'warning', code: 'GAME_COMPLETE_GATE_BLOCKED', autoResolved: false, message: `Not reported complete: ${why}.` });
+            }
+          } catch { /* the gate is best-effort and never touches the build */ }
+        }
+      }
       // 🔴 THE CARD IS EMITTED WHERE ITS EVIDENCE IS FINAL, NOT HERE (buildProofCard.ts). At this point
       // in the route the app's own test suite has not run, the render proof has not been reconciled and
       // the last-chance proof has not happened — so a card built here could only ever carry the journey

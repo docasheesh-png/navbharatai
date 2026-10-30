@@ -126,7 +126,7 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
     // bar covered this sheet's bottom — and because the sheet IS the scroll container, scrolling to
     // its end still left those controls underneath the bar. The shared overlay reserves the bar's real
     // height, and reserves nothing where the bar is not rendered.
-    <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-scrim flex items-end sm:items-center justify-center" onClick={onClose}>
+    <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-scrim flex items-center justify-center nb-modal-safe" onClick={onClose}>
       <div
         // 92% is the DESIGN's height; `nb-sheet-partial` clamps it to what is actually left once the
         // tab bar and insets are reserved. Unclamped, 92dvh exceeds the remaining room on any phone

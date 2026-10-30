@@ -1794,7 +1794,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
           overrides only zeroes and gives the desktop dialog its gutter. */}
       {/* ── App detail ── */}
       {detailApp && (
-        <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-scrim flex items-end sm:items-center justify-center sm:p-4" onClick={() => setDetailApp(null)}>
+        <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-scrim flex items-center justify-center nb-modal-safe" onClick={() => setDetailApp(null)}>
           <div className="nb-sheet w-full sm:max-w-lg bg-surface border border-line rounded-t-2xl sm:rounded-2xl p-5 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-3 mb-3">
               <div className="w-12 h-12 rounded-xl bg-raised flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -1871,7 +1871,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
           here: the next caller that opens this sheet from somewhere else inherits the rule instead of
           having to remember it. */}
       {openApp && !HIDE_ANDROID_INSTALLS && (
-        <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-scrim flex items-end sm:items-center justify-center sm:p-4" onClick={() => setOpenApp(null)}>
+        <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-scrim flex items-center justify-center nb-modal-safe" onClick={() => setOpenApp(null)}>
           <div
             className="nb-sheet w-full sm:max-w-lg overflow-y-auto bg-card border border-line rounded-t-2xl sm:rounded-2xl p-4 sm:p-5"
             onClick={(e) => e.stopPropagation()}

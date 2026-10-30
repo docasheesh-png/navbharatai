@@ -102,7 +102,7 @@ export function RateNavBharatCard({ onDone }: { onDone: () => void }): React.Rea
 
   return createPortal(
     <div
-      className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 flex items-end justify-center bg-scrim sm:items-center sm:p-4"
+      className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 flex items-center justify-center bg-scrim nb-modal-safe"
       style={{ zIndex: RATING_Z }}
       role="dialog"
       aria-modal="true"

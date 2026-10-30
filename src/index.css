@@ -954,3 +954,20 @@ html.nb-native-shell .nb-selectable {
   button, a, [role="button"], [role="tab"] { transition: none; }
   button:active, a:active, [role="button"]:active, [role="tab"]:active { transform: none; }
 }
+
+/* Centered, never-cropped modal frame (owner 2026-10-30: sheets were hiding under the
+   Pro bottom tab bar / Safari chrome). Overlay pads by safe-area + header/footer room,
+   and the dialog box can never exceed the padded height, so it sits in the visual middle. */
+.nb-modal-safe {
+  padding-top: calc(var(--nb-safe-top, 0px) + 16px);
+  padding-bottom: calc(var(--nb-safe-bottom, 0px) + 80px);
+  padding-left: calc(var(--nb-safe-left, 0px) + 12px);
+  padding-right: calc(var(--nb-safe-right, 0px) + 12px);
+}
+@media (min-width: 640px) {
+  .nb-modal-safe { padding-bottom: calc(var(--nb-safe-bottom, 0px) + 16px); }
+}
+.nb-modal-safe > :not([aria-label="Close"]):not(.absolute) {
+  max-height: 100% !important;
+  border-radius: 1rem;
+}

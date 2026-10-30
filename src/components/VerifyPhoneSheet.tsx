@@ -203,7 +203,7 @@ export const VerifyPhoneSheet: React.FC<VerifyPhoneSheetProps> = ({ auth, open, 
     // `-over-nav` because z-400 paints ABOVE the tab bar, so it must not hold a strip for it.
     // `p-0` is gone on purpose: a padding utility beats the overlay class on source order and
     // zeroes every reserve (the bug that was live in NavAppStore's two sheets).
-    <div className="nb-sheet-overlay-flush nb-sheet-over-nav fixed inset-0 z-[400] flex items-end sm:items-center justify-center bg-scrim sm:p-4" role="dialog" aria-modal="true" aria-label="Verify your mobile number">
+    <div className="nb-sheet-overlay-flush nb-sheet-over-nav fixed inset-0 z-[400] flex items-center justify-center bg-scrim nb-modal-safe" role="dialog" aria-modal="true" aria-label="Verify your mobile number">
       <div className="nb-sheet w-full sm:max-w-md bg-surface border border-line rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl overflow-y-auto">
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex items-center gap-2">

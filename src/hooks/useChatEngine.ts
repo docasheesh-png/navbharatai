@@ -27,6 +27,7 @@ import { loadVials, saveVial } from '../lib/vialMemory';
 import { chatBuildMeta } from '../lib/chatBuildMeta';
 import { platformHeader } from '../lib/platformHeader';
 import { consumeChatResponseStream, ChatStreamTerminalError, gatewayChatFailure } from '../lib/chatResponseStream';
+import { chatFailureNotice, browserOffline, USER_FACING_CHAT_CODES } from '../lib/chatFailureNotice';
 export interface ChatEngineDeps {
   // values read
   input: string;
@@ -176,7 +177,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
       if (terminal) throw new ChatStreamTerminalError(terminal);
       if (axios.isCancel(error) || !error.response || error.response.status >= 500) {
         // An aborted request may already have generated/billed. Never create a second logical request.
-        throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The AI service could not confirm the reply. Please retry when the service is available.', partial: false });
+        throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: chatFailureNotice({}).text, partial: false });
       }
       
       let errMsg = "AI request failed.";
@@ -188,6 +189,11 @@ export function useChatEngine(deps: ChatEngineDeps) {
         throw Object.assign(new Error(notice), { guestLimit: true });
       }
 
+      const axCode = error.response?.data?.code; const axStatus = error.response?.status;
+      if ((typeof axCode === 'string' && USER_FACING_CHAT_CODES[axCode]) || axStatus === 402 || axStatus === 429) {
+        const notice = chatFailureNotice({ status: axStatus, code: axCode, serverText: error.response?.data?.reply ?? error.response?.data?.error });
+        throw new ChatStreamTerminalError({ code: typeof axCode === 'string' ? axCode : notice.reason, message: notice.text, partial: false });
+      }
       if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') errMsg = "Network connection failed. Please check your internet or the backend availability.";
       else if (error.response?.status === 401) errMsg = "API key invalid or expired. Go to Settings → Secrets & API Keys to update your key.";
       else if (error.response?.status === 500) errMsg = "Backend runtime failure detected.";
@@ -501,7 +507,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
         }); } catch (error) {
           if (userAbort.signal.aborted) throw error;
           // No response is not proof of non-dispatch. Do not issue a new logical request.
-          throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The connection ended before the reply was confirmed. Please retry when the service is available.', partial: false });
+          throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: chatFailureNotice({ offline: browserOffline(), networkError: true }).text, partial: false });
         }
 
         assertActiveTurn(turn!);
@@ -516,9 +522,15 @@ export function useChatEngine(deps: ChatEngineDeps) {
           }
           const errData = await response.json().catch(() => ({}));
           assertActiveTurn(turn!);
+          const errCode = (errData as any)?.code;
+          if (typeof errCode === 'string' && USER_FACING_CHAT_CODES[errCode]) {
+            const notice = chatFailureNotice({ status: response.status, code: errCode, serverText: (errData as any).reply ?? (errData as any).error });
+            throw new ChatStreamTerminalError({ code: errCode, message: notice.text, partial: false });
+          }
+          if (response.status === 402) throw new ChatStreamTerminalError({ code: 'INSUFFICIENT_BALANCE', message: chatFailureNotice({ status: 402 }).text, partial: false });
           const terminal = gatewayChatFailure(errData);
           if (terminal) throw new ChatStreamTerminalError(terminal);
-          if (response.status >= 500) throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The AI service could not confirm the reply. Please retry when the service is available.', partial: false });
+          if (response.status >= 500) throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: chatFailureNotice({}).text, partial: false });
           if (response.status === 401) {
             setUser(null);
             setShowAuth(true);
@@ -724,7 +736,11 @@ export function useChatEngine(deps: ChatEngineDeps) {
       
       const errorMessage: Message = {
         id: `reply-${answerRequestId}`,
-        text: "NavBharatAI is temporarily unable to respond. Please try again shortly.",
+        text: chatFailureNotice({
+          status: error?.response?.status ?? (error?.message?.includes('Session expired') ? 401 : error?.message?.includes('Too many requests') ? 429 : undefined),
+          offline: browserOffline(),
+          networkError: errType === 'NETWORK',
+        }).text,
         sender: 'ai',
         timestamp: new Date(),
       };

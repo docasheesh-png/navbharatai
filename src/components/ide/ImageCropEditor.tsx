@@ -106,7 +106,7 @@ export function ImageCropEditor({ image, frame, onDone, onClose }: Props) {
     // `nb-sheet-overlay` / `nb-sheet` rather than a bare `vh` cap — the shared sheet geometry, for
     // the reason recorded in index.css: on a phone `vh` is the LARGE viewport, so a tall panel puts
     // its own footer off the bottom of the screen the moment the browser chrome shows.
-    <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-scrim">
+    <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center bg-scrim nb-modal-safe">
       <div className="nb-sheet w-full sm:max-w-lg flex flex-col overflow-y-auto bg-surface sm:rounded-2xl rounded-t-2xl border border-line">
 
         <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-4 py-3 bg-card border-b border-line">

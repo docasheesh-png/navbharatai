@@ -127,7 +127,7 @@ export function ReportAiContent({ surface, content, getImage, onReported, view, 
           z-400 paints above the bar's 150. No `p-*` on the overlay: it would cancel the contract. */}
       {open && typeof document !== 'undefined' && createPortal(
         <div
-          className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 flex items-end sm:items-center justify-center bg-scrim sm:p-4"
+          className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 flex items-center justify-center bg-scrim nb-modal-safe"
           style={{ zIndex: 400 }}
           role="dialog"
           aria-modal="true"

@@ -391,7 +391,7 @@ export function CommentsSection({ appKey, onOpenProfile, onCounts, onOpenLikers 
 function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   if (typeof document === 'undefined') return null;
   return createPortal(
-    <div className="nb-sheet-overlay-flush fixed inset-0 z-[60] bg-scrim flex items-end sm:items-center justify-center sm:p-4" onClick={onClose}>
+    <div className="nb-sheet-overlay-flush fixed inset-0 z-[60] bg-scrim flex items-center justify-center nb-modal-safe" onClick={onClose}>
       <div className="nb-sheet w-full sm:max-w-lg bg-surface border border-line rounded-t-2xl sm:rounded-2xl p-5 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-bold text-ink">{title}</h2>

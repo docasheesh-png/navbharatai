@@ -20,6 +20,7 @@ import { AttachMenu } from '../AttachMenu';
 import { SecretRequestCard } from './SecretRequestCard';
 import { HeaderBadges } from './HeaderBadges';
 import { UserActionTray } from './UserActionTray';
+import { NextStepCard, useLiveDomain } from './NextStepCard';
 import { useUserActions } from './useUserActions';
 import { askPrompt, isLiveOnly, type LiveAsks, type UserActionView } from './userActionView';
 import { saveSecret, listSecrets } from '../../lib/secretsApi';
@@ -3447,6 +3448,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     setAiNoticeUnseen(false);
   }, [aiNoticeKey]);
   const previewDwellMs = usePreviewDwell(showWorkspace && tab === 'preview' && !!state.previewUrl);
+  // Live custom-domain verdict (Firebase Hosting) — feeds both the navigator dot and the NEXT STEP card.
+  const liveDomain = useLiveDomain(state.workspaceId, customDomainsEnabled && !running, `${running}|${publishing}`);
   const navActions = useMemo(() => pendingActions({
     building: running,
     buildFinished: state.done,
@@ -3456,9 +3459,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     // Offered only where the server flag is on AND there is a workspace to attach a domain to —
     // the same two conditions HostingChooser already gates that card on.
     customDomainOffered: customDomainsEnabled && !!state.workspaceId,
+    customDomainConnected: liveDomain === undefined ? undefined : !!liveDomain.domain,
     reportsSentForThisBuild: reportCount,
     appAiNoticeUnseen: aiNoticeUnseen,
-  }), [running, state.done, state.ok, previewDwellMs, publishState?.freshness, customDomainsEnabled, state.workspaceId, reportCount, aiNoticeUnseen]);
+  }), [running, state.done, state.ok, previewDwellMs, publishState?.freshness, customDomainsEnabled, state.workspaceId, reportCount, aiNoticeUnseen, liveDomain]);
 
   // The old single-purpose dot, now derived from the navigator so this screen and the Publish sheet
   // can never disagree. `needsPublishDot`'s verdict is unchanged — it is the same 'changed' case,
@@ -4689,6 +4693,35 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           )}
         </div>
       </div>
+
+      {/* THE NEXT STEP (admin 2026-10-30): one line, always the single next thing, from live facts. */}
+      {(() => {
+        const open = userActions.actions.filter((a) => a.status === 'open');
+        const top = open.find((a) => a.blocking) ?? open[0];
+        return (
+          <NextStepCard
+            facts={{
+              building: running,
+              buildFinished: state.done,
+              buildOk: state.ok,
+              blockingAsks: open.filter((a) => a.blocking).length,
+              openAsks: open.filter((a) => !a.blocking).length,
+              topAskTitle: top?.title,
+              topAskIsDatabase: top?.cta?.view === 'settings' && top.cta.settingsScreen === 'database',
+              publishFreshness: publishState?.freshness,
+              domain: liveDomain?.domain,
+              domainActive: liveDomain?.active,
+              liveUrl,
+            }}
+            onGo={(target) => {
+              if (target === 'tray') userActions.setTrayOpen(true);
+              else if (target === 'publish') setShowHostingChooser(true);
+              else if (target === 'report') askForReportNote();
+              else if (target === 'database') window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'settings', settingsScreen: 'database' } }));
+            }}
+          />
+        );
+      })()}
 
       <div ref={splitContainerRef} className="flex flex-col sm:flex-row flex-1 min-h-0">
         {/* LEFT: the chat. Full width when the workspace is collapsed. When the

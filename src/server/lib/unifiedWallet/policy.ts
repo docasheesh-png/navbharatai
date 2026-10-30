@@ -27,14 +27,15 @@ const num = (v: string | undefined, d: number, min: number, max: number): number
 export const truthy = (v: string | undefined): boolean => parseEnvFlag(v) === true;
 
 /**
- * FOUR INDEPENDENT SWITCHES (review 2026-10-23), all default OFF — any one can be turned on alone:
+ * FOUR INDEPENDENT SWITCHES (review 2026-10-23), default OFF except UNIFIED_WALLET_ENABLED (default ON since 2026-10-30) — any one can be turned on alone:
  *   UNIFIED_WALLET_ENABLED          paid chat past the free quota (0.1 credit) + per-minute gate
  *   UNIFIED_WALLET_FREE_LIMIT       (legacy, no effect since 2026-10-30: limits are 50 signed-in / 10 guest)
  *   UNIFIED_WALLET_MARGIN           real cost × 2.5 (or the number given) for every metered service
  *   UNIFIED_WALLET_IMAGE_COUNTS_TEXT  a delivered free image also uses one daily text message
  */
 export function unifiedWalletEnabled(env: Env = process.env): boolean {
-  return truthy(env.UNIFIED_WALLET_ENABLED);
+  // Owner 2026-10-30: ON by default (₹0.10/text after the free quota). Explicit off/0/false disables.
+  return parseEnvFlag(env.UNIFIED_WALLET_ENABLED) !== false;
 }
 export function freeLimitEnabled(env: Env = process.env): boolean { return truthy(env.UNIFIED_WALLET_FREE_LIMIT); }
 /**

@@ -1,4 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
+// These cover the legacy no-wallet free-quota path; the wallet is ON by default since 2026-10-30.
+process.env.UNIFIED_WALLET_ENABLED = 'off';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import express, { type Request, type Response } from 'express';

@@ -34,10 +34,11 @@ const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0
 const NOW = '2026-10-23T10:00:00.000Z';
 
 describe('unified wallet policy', () => {
-  it('is OFF by default and owner defaults are config-driven', () => {
-    expect(unifiedWalletEnabled({})).toBe(false);
+  it('is ON by default and owner defaults are config-driven', () => {
+    expect(unifiedWalletEnabled({})).toBe(true); // owner 2026-10-30: default ON
+    expect(unifiedWalletEnabled({ UNIFIED_WALLET_ENABLED: 'off' })).toBe(false);
     const c = unifiedWalletConfig({});
-    expect(c).toMatchObject({ enabled: false, chatMessageMilli: 100, guestDailyMessages: 10, signedInDailyMessages: 50, buildMargin: 2.5 }); // owner 2026-10-30
+    expect(c).toMatchObject({ enabled: true, chatMessageMilli: 100, guestDailyMessages: 10, signedInDailyMessages: 50, buildMargin: 2.5 }); // owner 2026-10-30
     expect('minRechargeInr' in c).toBe(false); // existing ₹1 minimum stays; no new minimum
     expect(c.rechargePacksInr).toEqual([20, 50, 100, 500]);
     expect(unifiedWalletConfig({ UNIFIED_WALLET_RECHARGE_PACKS: '500, 10, 50,50' }).rechargePacksInr).toEqual([10, 50, 500]); // any ₹ ≥ 1, deduped, sorted
@@ -202,7 +203,7 @@ describe('chat charge orchestration', () => {
 describe('charged surfaces: every Free surface, explicit list', () => {
   it('default: all known surfaces charged after the quota, only with UNIFIED_WALLET_ENABLED', () => {
     for (const s of ['chat', 'professionals', 'exam', 'repo-analyst']) {
-      expect(surfaceIsCharged(s, {})).toBe(false);
+      expect(surfaceIsCharged(s, { UNIFIED_WALLET_ENABLED: 'off' })).toBe(false);
       expect(surfaceIsCharged(s, { UNIFIED_WALLET_ENABLED: '1' })).toBe(true);
     }
     expect(surfaceIsCharged(undefined, { UNIFIED_WALLET_ENABLED: '1' })).toBe(false);

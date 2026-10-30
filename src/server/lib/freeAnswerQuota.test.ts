@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// These cover the legacy no-wallet free-quota path; the wallet is ON by default since 2026-10-30.
+process.env.UNIFIED_WALLET_ENABLED = 'off';
 import { EventEmitter } from 'node:events';
 const m = vi.hoisted(() => ({ reserve: vi.fn(), renew: vi.fn(), settle: vi.fn(), status: vi.fn(), identify: vi.fn(), limiter: vi.fn() }));
 vi.mock('./freeAnswerQuotaStore', async original => ({ ...await original<typeof import('./freeAnswerQuotaStore')>(), FreeAnswerQuotaStore: class { reserve=m.reserve; renew=m.renew; settle=m.settle; status=m.status; } }));

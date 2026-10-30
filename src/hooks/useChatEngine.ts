@@ -1,4 +1,5 @@
 import { chatReplyLanguageFromPicker, resolveChatReplyLanguage } from '../lib/chatReplyLanguage';
+import { scrubVendorBrands } from '../shared/brandScrub';
 import { newFreeAnswerRequestId, notifyFreeAnswerChanged } from '../lib/freeAnswerStatus';
 // useChatEngine — the free (NBI) chat engine, lifted out of the App.tsx God component (P3.1, behavior-
 // preserving). Owns the send pipeline: handleSendForTab (the core turn handler — intent routing, GitHub
@@ -192,8 +193,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
       else if (error.response?.status === 500) errMsg = "Backend runtime failure detected.";
       else if (error.response?.status === 403) errMsg = "AI permission/authentication failure detected.";
       else if (error.message.includes('failed to fetch')) errMsg = "Frontend could not reach backend service.";
-      else if (error.message.includes('timeout')) errMsg = "Vertex AI inference timeout.";
-      else errMsg = error.response?.data?.error || error.message || "Application runtime error detected.";
+      else if (error.message.includes('timeout')) errMsg = "NavBharatAI is busy right now. Please try again.";
+      else errMsg = scrubVendorBrands(String(error.response?.data?.error || error.message || "Application runtime error detected."));
 
       // A 402 used to open the ₹100 Vishwakarma entry-pass modal. That pass is deleted, and no server
       // route ever sent the `requirePass` flag this also watched for, so the honest response to a 402
@@ -608,7 +609,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
         } catch (frontendErr: any) {
           assertActiveTurn(turn);
           if (frontendErr instanceof ChatStreamTerminalError || frontendErr?.guestLimit === true) throw frontendErr;
-          console.warn('Frontend Gemini failed, trying backend fallback...', frontendErr.message);
+          console.warn('Frontend path failed, trying backend fallback...', frontendErr.message);
           data = await callWithRetry();
         }
       } else {
@@ -626,7 +627,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
           text: data.reply || 'No response received.',
           sender: 'ai',
           timestamp: new Date(),
-          modelUsed: data.model
+          modelUsed: 'navBharatAI'
         };
         replyMsgId = aiMessage.id;
         setMessagesForTab((prev) => {
@@ -637,10 +638,10 @@ export function useChatEngine(deps: ChatEngineDeps) {
         // Update modelUsed on the streaming message
         const sid = streamingMsgId;
         if (data.model && data.model !== 'streaming' && sid) {
-          setMessagesForTab(prev => prev.map(m => m.id === sid ? { ...m, modelUsed: data.model } : m));
+          setMessagesForTab(prev => prev.map(m => m.id === sid ? { ...m, modelUsed: 'navBharatAI' } : m));
         }
       }
-      addLog(`AI Response received via ${data.model || 'streaming'}`, 'success');
+      addLog('AI Response received via NavBharatAI', 'success');
 
       // Sync CSS/HTML/JS if build mode
       if (currentMode === 'build' && data.reply) {
@@ -702,8 +703,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
       if (error instanceof ChatStreamTerminalError) {
         // The server's honest unavailable/interrupted notice already lives in the stream bubble.
         // Streaming has started, so callWithRetry cannot issue another provider request.
-        if (!error.displayed) setMessagesForTab(prev => [...prev, { id: `terminal-${answerRequestId}`, text: error.message, sender: 'ai', timestamp: new Date() }]);
-        setErrorContext({ type: classifyError(error), message: error.message, lastInput: messageToSend });
+        if (!error.displayed) setMessagesForTab(prev => [...prev, { id: `terminal-${answerRequestId}`, text: scrubVendorBrands(error.message), sender: 'ai', timestamp: new Date() }]);
+        setErrorContext({ type: classifyError(error), message: scrubVendorBrands(error.message), lastInput: messageToSend });
         addLog(`AI Error: ${error.message}`, 'error');
         return; // finally clears loading; do not append a misleading second answer.
       }
@@ -713,7 +714,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
       const errType = classifyError(error);
       setErrorContext({
         type: errType,
-        message: error.message || 'Connection failed',
+        message: scrubVendorBrands(error.message || 'Connection failed'),
         lastInput: messageToSend
       });
 

@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
+import { scrubVendorBrands } from '../shared/brandScrub';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
@@ -26,7 +27,10 @@ const COLORS: Record<ToastType, string> = {
 export function useToast() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const addToast = useCallback((message: string, type: ToastType = 'info') => {
+  const addToast = useCallback((rawMessage: string, type: ToastType = 'info') => {
+    // White-label: users only ever see NavBharatAI (admin screens keep real names).
+    const onAdmin = typeof window !== 'undefined' && window.location?.pathname?.startsWith('/admin');
+    const message = onAdmin ? rawMessage : scrubVendorBrands(String(rawMessage ?? ''));
     const id = Math.random().toString(36).slice(2);
     // F1/D3: Error/warning toasts stay longer; success also gets 5s to be readable
     const duration = type === 'error' ? 8000 : type === 'warning' ? 6000 : type === 'success' ? 5000 : 4000;

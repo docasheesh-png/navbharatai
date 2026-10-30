@@ -13,6 +13,7 @@
 // user-facing message (build/validation guidance) — those pass a clean public message in.
 
 import type { Response } from 'express';
+import { VENDOR_BRAND_PATTERNS } from '../../shared/brandScrub';
 
 /** True in the deployed environment (Cloud Run sets NODE_ENV=production). */
 export function isProduction(): boolean {
@@ -32,26 +33,8 @@ export function errToString(err: unknown): string {
   }
 }
 
-// Vendor / model tokens that must NEVER reach an end user (white-label law). Case-insensitive.
-const VENDOR_PATTERNS: RegExp[] = [
-  /\bz\.?ai\b/gi,
-  /\bglm[-\s]?[0-9.a-z]*/gi,
-  /\bkimi[-\s]?[0-9.a-z]*/gi,
-  /\bmoonshot\b/gi,
-  /\banthropic\b/gi,
-  /\bclaude[-\s]?[0-9.a-z]*/gi,
-  /\bsonnet\b/gi,
-  /\bopus\b/gi,
-  /\bhaiku\b/gi,
-  /\bgemini[-\s]?[0-9.a-z]*/gi,
-  /\bvertex(?:\s*ai)?\b/gi,
-  /\bgrok[-\s]?[0-9.a-z]*/gi,
-  /\bxai\b/gi,
-  /\bdeepseek\b/gi,
-  /\bopenai\b/gi,
-  /\bbedrock\b/gi,
-  /\bE2B\b/g,
-];
+// Vendor / model tokens that must NEVER reach an end user (white-label law) — one shared list.
+const VENDOR_PATTERNS: readonly RegExp[] = VENDOR_BRAND_PATTERNS;
 
 /**
  * Turn any raw error text into a client-safe string: strip URLs (incl. token-embedded clone
@@ -65,7 +48,7 @@ export function toSafeClientMessage(raw: unknown, fallback = 'Something went wro
     .replace(/https?:\/\/[^\s)]+/gi, '[link]')
     .replace(/x-access-token:[^@\s]+/gi, '[token]')
     .replace(/\b(bearer|token|key|secret|password|api[_-]?key)[\s:=]+[A-Za-z0-9._\-]{6,}/gi, '$1 [redacted]');
-  for (const re of VENDOR_PATTERNS) s = s.replace(re, 'NavBharatAI');
+  for (const re of VENDOR_PATTERNS) { re.lastIndex = 0; s = s.replace(re, 'NavBharatAI'); }
   s = s.replace(/\s+/g, ' ').trim().slice(0, 200);
   return s || fallback;
 }

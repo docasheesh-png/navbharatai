@@ -12,6 +12,7 @@ import type { PowerLevel } from '../powerLevel';
  */
 import type { BuildMetrics } from '../BakeoffMetrics';
 import type { GateStateName, PreviewEvidence } from './benchEvidence';
+import type { GameBenchSignals, GameFailClass } from './gameBench';
 
 export interface BenchPrompt {
   id: string;
@@ -71,6 +72,8 @@ export interface BenchRun {
   sessionId?: string;
   /** Transport failures leave the remote outcome and spend unknown. */
   failure?: string;
+  /** Game corpus only (BENCH_FIXTURE=game): read from the build's own GAME_* diagnostics (gameBench.ts). */
+  game?: { signals: GameBenchSignals; cls: GameFailClass };
 }
 
 export interface BenchResultFile {

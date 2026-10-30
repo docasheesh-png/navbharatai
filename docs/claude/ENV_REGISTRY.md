@@ -436,6 +436,8 @@ the code (it is actually read somewhere) on 2026-07-11.
   `AGENTV3_GAME_COMPLETE_GATE` — a game still unplayable (blank / input ignored / start stuck / runtime error /
   missing kit layer) or missing a feature the user named is reported RED, not shippable. Never flips `ok`, never
   changes a bill.
+  **Phase 4 — bench-runner env only (local script, never Cloud Run):** `BENCH_FIXTURE` (`reliability` default | `game`)
+  for `scripts/agentv3-reliability-bench.ts`; spends real money only with `BENCH_CONFIRM=yes`.
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
   `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),

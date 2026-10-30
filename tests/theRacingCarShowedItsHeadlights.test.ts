@@ -350,7 +350,7 @@ describe('1d · the route seeds the kit before the first model call, behind ever
   it('remembers every seeded file as ours, hands the builder the kit, and says so in the report', () => {
     expect(block).toContain('preseededGolden.set(kp, kc);');
     expect(block).toContain('kitSeededFiles.set(kp, kc);');
-    expect(block).toContain('buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(prompt) })}\\n\\n---\\n\\n${buildPrompt}`;');
+    expect(block).toContain('buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(prompt), contract: contractText })}\\n\\n---\\n\\n${buildPrompt}`;');
     expect(block).toContain("code: 'GAME_KIT_SEEDED'");
     expect(block).toContain("code: 'GAME_KIT_NOT_SEEDED'");
     expect(block).toContain('futilityState = armedFutilityState(');

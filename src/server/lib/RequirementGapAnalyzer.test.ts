@@ -281,6 +281,8 @@ describe('game domain', () => {
       'Build an endless runner for mobile',
       'a tower defence game with waves of enemies',
       'racing game with three tracks',
+      'ek car wala khel banao',
+      'बच्चों के लिए एक खेल बनाओ',
     ]) {
       expect(analyzeRequirementGaps(prompt).domain, prompt).toBe('game');
     }

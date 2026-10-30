@@ -38,7 +38,7 @@ export function gameScopeContractEnabled(env: NodeJS.ProcessEnv = process.env): 
 }
 
 const GENRES: ReadonlyArray<[GameGenre, RegExp]> = [
-  ['racing', /\b(rac(e|ing)|car game|kart|drift|bike game|motorcycle)\b/i],
+  ['racing', /\b(rac(e|ing)|car game|kart|drift|bike game|motorcycle|car wal[ae] khel|gaadi wal[ae] khel)\b/i],
   ['snake', /\bsnake\b/i],
   ['quiz', /\b(quiz|trivia)\b/i],
   ['card', /\b(card game|solitaire|poker|uno|teen ?patti|rummy)\b/i],

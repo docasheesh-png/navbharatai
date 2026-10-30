@@ -58,8 +58,9 @@ describe('real Free chat hook terminal request handling', () => {
   it('keeps an unexpected failure neutral while retaining its diagnostic error internally', async () => {
     const f = fixture(); f.deps.incrementDailyUsage = () => { throw new Error('synthetic provider budget failure'); };
     await f.engine().handleSend();
-    expect(f.messages().at(-1)?.text).toBe('NavBharatAI is temporarily unable to respond. Please try again shortly.');
-    expect(f.messages().at(-1)?.text).not.toMatch(/traffic|load|provider|budget/i);
+    // Admin 2026-10-30: an unknown failure says "high server load" (trust), never a raw provider detail.
+    expect(f.messages().at(-1)?.text).toBe('High server load right now. Please try again after some time.');
+    expect(f.messages().at(-1)?.text).not.toMatch(/provider|budget|trouble reaching/i);
     expect(f.deps.setErrorContext).toHaveBeenCalledWith(expect.objectContaining({ message: 'synthetic provider budget failure' }));
     expect(f.deps.addLog).not.toHaveBeenCalledWith(expect.stringContaining('AI Response received'), 'success');
   });

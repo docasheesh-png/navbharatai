@@ -69,3 +69,14 @@ describe('client wiring', () => {
     expect(client).toContain('target="_blank"');
   });
 });
+
+describe('registrar guide — Hindi + records path', () => {
+  it('the majors (incl. Hostinger) carry Hindi steps and a records path', () => {
+    for (const id of ['hostinger', 'godaddy', 'namecheap', 'bigrock', 'other']) {
+      const r = registrarById(id)!;
+      expect(r.stepsHi, id).toMatch(/[\u0900-\u097F]/);
+      expect(r.recordsSteps!.length, id).toBeGreaterThan(20);
+    }
+    expect(registrarById('hostinger')!.recordsSteps).toMatch(/hPanel/);
+  });
+});

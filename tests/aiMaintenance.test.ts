@@ -205,8 +205,8 @@ describe('real maintenance spending gate', () => {
     const next = vi.fn(); const res = mockRes();
     await aiMaintenanceGuard(store)({ ...mockReq(), method: 'POST', path: '/api/agentv3/chat' } as never, res as never, next);
     expect(next).toHaveBeenCalledOnce();
-    // Age past the fail-open window (45s) — latch closed, but still not the maintenance sentence.
-    now += 45_001;
+    // Age past the fail-open window (10 min) — latch closed, but still not the maintenance sentence.
+    now += 10 * 60_000 + 1;
     const closed = await store.read();
     expect(closed).toMatchObject({ enabled: true, unavailable: true });
     const next2 = vi.fn(); const res2 = mockRes();
@@ -215,4 +215,20 @@ describe('real maintenance spending gate', () => {
     expect(res2.body).toMatchObject({ statusUnavailable: true, maintenance: false, error: STATUS_UNAVAILABLE_MESSAGE });
   });
 
+});
+
+describe('maintenance fail-open after a watch error (guest chat 503 DNA)', () => {
+  it('a known-OFF setting stays served when the watch drops and a later read times out', async () => {
+    let now = 1_000_000; let fail = false; let onErr: (() => void) | undefined;
+    const backend = {
+      read: async () => { if (fail) throw Error('slow firestore'); return { enabled: false, autoEnabled: true, failures: [] }; },
+      change: async () => { throw Error('offline'); },
+      subscribe: (_fn: (d: unknown) => void, err: () => void) => { onErr = err; return () => {}; },
+    };
+    const store = new AiMaintenanceStore(() => backend as never, () => now);
+    store.start();
+    await expect(store.read()).resolves.toMatchObject({ enabled: false });
+    onErr?.(); fail = true; now += 5_000;
+    await expect(store.read()).resolves.toMatchObject({ enabled: false, unavailable: true });
+  });
 });

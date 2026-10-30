@@ -9,7 +9,7 @@ import { addressRateKey } from './clientAddress';
 import { GUEST_ID_HEADER, readGuestId } from './guestDailyQuota';
 import { FreeAnswerQuotaStore, FreeAnswerQuotaWindowChangedError, type FreeAnswerQuotaSubject } from './freeAnswerQuotaStore';
 import { getServerDb } from './serverDb';
-import { unifiedWalletConfig, signedInDailyLimit, surfaceIsCharged, type ChatSurface, detectLang, insufficientBalanceMessage, lowBalanceNotice, rateLimitedMessage } from './unifiedWallet/policy';
+import { unifiedWalletConfig, signedInDailyLimit, guestFreeDailyLimit, surfaceIsCharged, type ChatSurface, detectLang, insufficientBalanceMessage, lowBalanceNotice, rateLimitedMessage } from './unifiedWallet/policy';
 import { UnifiedWalletGate, holdChatMessage, closeChatHold } from './unifiedWallet/store';
 
 const leases = new WeakMap<Request, { controller: AbortController; leaseUntil: number; answered: boolean; failed: boolean; disconnected: boolean }>();
@@ -27,11 +27,11 @@ function reject(res: Response, reason: string): void {
 }
 async function subjectFor(req: Request, options: {uid?: string | null}): Promise<FreeAnswerQuotaSubject> {
   const uid = Object.prototype.hasOwnProperty.call(options, 'uid') ? options.uid : await verifyFirebaseToken(req);
-  // 20 on main; 25 only while UNIFIED_WALLET_FREE_LIMIT is on (its own switch). Guests stay 5.
+  // Owner 2026-10-30: signed-in 50/day (incl. 5 free images), guest 10/day.
   if (uid) return {key: `user:${uid}`, limit: signedInDailyLimit()};
   const ip = addressRateKey(req);
   const device = readGuestId(req.headers[GUEST_ID_HEADER]);
-  return {key: device ? `guest-device:${device}` : `guest-address:${ip}`, limit:5, ipKey:ip};
+  return {key: device ? `guest-device:${device}` : `guest-address:${ip}`, limit:guestFreeDailyLimit(), ipKey:ip, guest:true};
 }
 export function freeAnswerSignal(req: Request): AbortSignal | undefined { return leases.get(req)?.controller.signal; }
 export function assertFreeAnswerActive(req: Request): void {

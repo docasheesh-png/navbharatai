@@ -10,5 +10,5 @@ export interface FreeAnswerQuotaStatus {
   inProgress: boolean;
   resetsAt: number;
 }
-export const FREE_ANSWER_AUTHENTICATED_LIMIT = 20;
-export const FREE_ANSWER_GUEST_LIMIT = 5;
+export const FREE_ANSWER_AUTHENTICATED_LIMIT = 50;
+export const FREE_ANSWER_GUEST_LIMIT = 10;

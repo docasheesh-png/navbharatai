@@ -29,7 +29,7 @@ export const truthy = (v: string | undefined): boolean => parseEnvFlag(v) === tr
 /**
  * FOUR INDEPENDENT SWITCHES (review 2026-10-23), all default OFF — any one can be turned on alone:
  *   UNIFIED_WALLET_ENABLED          paid chat past the free quota (0.1 credit) + per-minute gate
- *   UNIFIED_WALLET_FREE_LIMIT       signed-in free quota 20 → 25/day (guests stay 5)
+ *   UNIFIED_WALLET_FREE_LIMIT       (legacy, no effect since 2026-10-30: limits are 50 signed-in / 10 guest)
  *   UNIFIED_WALLET_MARGIN           real cost × 2.5 (or the number given) for every metered service
  *   UNIFIED_WALLET_IMAGE_COUNTS_TEXT  a delivered free image also uses one daily text message
  */
@@ -37,9 +37,17 @@ export function unifiedWalletEnabled(env: Env = process.env): boolean {
   return truthy(env.UNIFIED_WALLET_ENABLED);
 }
 export function freeLimitEnabled(env: Env = process.env): boolean { return truthy(env.UNIFIED_WALLET_FREE_LIMIT); }
-/** Signed-in daily free messages: main's 20, or the owner's 25 (UNIFIED_WALLET_SIGNED_IN_DAILY) when FREE_LIMIT is on. */
+/**
+ * Owner 2026-10-30: old 20/25 limits removed. Signed-in = 50 texts/day (the 5 free images count inside
+ * these 50), guest = 10/day. UNIFIED_WALLET_SIGNED_IN_DAILY can still override; no flag needed.
+ */
+export const SIGNED_IN_DAILY_DEFAULT = 50;
+export const GUEST_DAILY_DEFAULT = 10;
 export function signedInDailyLimit(env: Env = process.env): number {
-  return freeLimitEnabled(env) ? int(env.UNIFIED_WALLET_SIGNED_IN_DAILY, 25, 0, 100_000) : 20;
+  return int(env.UNIFIED_WALLET_SIGNED_IN_DAILY, SIGNED_IN_DAILY_DEFAULT, 0, 100_000);
+}
+export function guestFreeDailyLimit(env: Env = process.env): number {
+  return int(env.UNIFIED_WALLET_GUEST_DAILY, GUEST_DAILY_DEFAULT, 0, 1000);
 }
 
 /**
@@ -99,7 +107,7 @@ export function unifiedWalletConfig(env: Env = process.env): UnifiedWalletConfig
   return {
     enabled: unifiedWalletEnabled(env),
     chatMessageMilli: chat % MILLI_PER_TOKEN === 0 ? chat : 100,
-    guestDailyMessages: int(env.UNIFIED_WALLET_GUEST_DAILY, 5, 0, 1000),
+    guestDailyMessages: guestFreeDailyLimit(env),
     signedInDailyMessages: signedInDailyLimit(env),
     buildMargin: unifiedMargin('build', env),
     perMinuteSignedIn: int(env.UNIFIED_WALLET_PER_MINUTE, 20, 1, 10_000),
@@ -117,7 +125,7 @@ export function milliToTokens(milli: number): number {
 /** ₹ for the existing wallet API (which takes ₹). Exact: tokens/100 is a 2-dp value. */
 export function milliToInr(milli: number): number { return milliToTokens(milli) / TOKENS_PER_RUPEE; }
 
-/** Daily free-message allowance before the wallet is debited: guest 5, signed-in 25 (config). */
+/** Daily free-message allowance before the wallet is debited: guest 10, signed-in 50 (config). */
 export function dailyAllowance(cfg: UnifiedWalletConfig, who: { signedIn: boolean }): number {
   return who.signedIn ? cfg.signedInDailyMessages : cfg.guestDailyMessages;
 }

@@ -37,7 +37,7 @@ describe('unified wallet policy', () => {
   it('is OFF by default and owner defaults are config-driven', () => {
     expect(unifiedWalletEnabled({})).toBe(false);
     const c = unifiedWalletConfig({});
-    expect(c).toMatchObject({ enabled: false, chatMessageMilli: 100, guestDailyMessages: 5, signedInDailyMessages: 20, buildMargin: 2.5 }); // 25 only with UNIFIED_WALLET_FREE_LIMIT
+    expect(c).toMatchObject({ enabled: false, chatMessageMilli: 100, guestDailyMessages: 10, signedInDailyMessages: 50, buildMargin: 2.5 }); // owner 2026-10-30
     expect('minRechargeInr' in c).toBe(false); // existing ₹1 minimum stays; no new minimum
     expect(c.rechargePacksInr).toEqual([20, 50, 100, 500]);
     expect(unifiedWalletConfig({ UNIFIED_WALLET_RECHARGE_PACKS: '500, 10, 50,50' }).rechargePacksInr).toEqual([10, 50, 500]); // any ₹ ≥ 1, deduped, sorted
@@ -51,11 +51,11 @@ describe('unified wallet policy', () => {
     expect(() => milliToTokens(0)).toThrow();
     expect(unifiedWalletConfig({ UNIFIED_WALLET_CHAT_MESSAGE_MILLI: '105' }).chatMessageMilli).toBe(100);
   });
-  it('allowances: guest 5, signed-in 25, then pay-and-use', () => {
-    const c = unifiedWalletConfig({ UNIFIED_WALLET_FREE_LIMIT: '1' });
-    expect(dailyAllowance(c, { signedIn: false })).toBe(5);
-    expect(dailyAllowance(c, { signedIn: true })).toBe(25);
-    expect(dailyAllowance(unifiedWalletConfig({ UNIFIED_WALLET_ENABLED: '1' }), { signedIn: true })).toBe(20); // independent switch
+  it('allowances: guest 10, signed-in 50 (incl. 5 free images), then pay-and-use', () => {
+    const c = unifiedWalletConfig({});
+    expect(dailyAllowance(c, { signedIn: false })).toBe(10);
+    expect(dailyAllowance(c, { signedIn: true })).toBe(50);
+    expect(dailyAllowance(unifiedWalletConfig({ UNIFIED_WALLET_FREE_LIMIT: '1' }), { signedIn: true })).toBe(50); // legacy flag no effect
   });
   it('recharge packs show GST-inclusive price and what they buy', () => {
     const v = rechargePackView(unifiedWalletConfig({}));
@@ -273,9 +273,9 @@ describe('generic service debit (hosting, database, APK, App Mart, API can plug 
 });
 
 describe('free image also uses a daily text message (own switch)', () => {
-  it('is off unless UNIFIED_WALLET_IMAGE_COUNTS_TEXT is on, independent of the other switches', () => {
-    expect(imageCountsAgainstText({})).toBe(false);
-    expect(imageCountsAgainstText({ UNIFIED_WALLET_ENABLED: '1' })).toBe(false);
+  it('is on by default (50 includes 5 images); off only when UNIFIED_WALLET_IMAGE_COUNTS_TEXT=off', () => {
+    expect(imageCountsAgainstText({})).toBe(true);
+    expect(imageCountsAgainstText({ UNIFIED_WALLET_IMAGE_COUNTS_TEXT: 'off' })).toBe(false);
     expect(imageCountsAgainstText({ UNIFIED_WALLET_IMAGE_COUNTS_TEXT: '1' })).toBe(true);
   });
   it('lets ordinary image-text accounting use the store live clock, retaining an explicit fixture seam', async () => {
@@ -284,22 +284,22 @@ describe('free image also uses a daily text message (own switch)', () => {
     const settle = vi.fn(async () => true);
     const store = { reserve, settle } as unknown as FreeAnswerQuotaStore;
     expect(await countDeliveredFreeImage('synthetic-user', { UNIFIED_WALLET_IMAGE_COUNTS_TEXT: '1' }, store)).toBe(true);
-    expect(reserve).toHaveBeenCalledWith({ key: 'user:synthetic-user', limit: 20 }, expect.any(String), undefined);
+    expect(reserve).toHaveBeenCalledWith({ key: 'user:synthetic-user', limit: 50 }, expect.any(String), undefined);
     expect(settle).toHaveBeenCalledWith(reservation, 'answered', undefined);
   });
   it('counts only after delivery, so no failure path (timeout, abort, async) can strand a unit', async () => {
     const { db } = fixture(); const store = new FreeAnswerQuotaStore(db as any);
     const t = Date.parse(NOW); const env = { UNIFIED_WALLET_IMAGE_COUNTS_TEXT: '1', UNIFIED_WALLET_FREE_LIMIT: '1' };
     expect(await countDeliveredFreeImage('u1', env, store, () => t)).toBe(true);
-    expect(await store.status({ key: 'user:u1', limit: 25 }, t + 1)).toMatchObject({ used: 1, remaining: 24, inProgress: false });
-    expect(await countDeliveredFreeImage('u1', {}, store, () => t + 2)).toBe(false); // switch off
+    expect(await store.status({ key: 'user:u1', limit: 50 }, t + 1)).toMatchObject({ used: 1, remaining: 49, inProgress: false });
+    expect(await countDeliveredFreeImage('u1', { UNIFIED_WALLET_IMAGE_COUNTS_TEXT: 'off' }, store, () => t + 2)).toBe(false); // switch off
     const route = (await import('node:fs')).readFileSync('src/server/routes/imageGen.ts', 'utf8');
     const deliveredAt = route.indexOf('delivered = true;');
     expect(route.indexOf('countDeliveredFreeImage(account.uid)')).toBeGreaterThan(deliveredAt); // never before delivery
   });
   it('a full text quota never blocks the image', async () => {
     const { db } = fixture(); const store = new FreeAnswerQuotaStore(db as any); const t = Date.parse(NOW);
-    for (let n = 0; n < 20; n++) await countDeliveredFreeImage('u1', { UNIFIED_WALLET_IMAGE_COUNTS_TEXT: '1' }, store, () => t + n);
-    expect(await countDeliveredFreeImage('u1', { UNIFIED_WALLET_IMAGE_COUNTS_TEXT: '1' }, store, () => t + 50)).toBe(false);
+    for (let n = 0; n < 50; n++) await countDeliveredFreeImage('u1', { UNIFIED_WALLET_IMAGE_COUNTS_TEXT: '1' }, store, () => t + n);
+    expect(await countDeliveredFreeImage('u1', { UNIFIED_WALLET_IMAGE_COUNTS_TEXT: '1' }, store, () => t + 80)).toBe(false);
   });
 });

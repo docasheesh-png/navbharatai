@@ -2,6 +2,7 @@ import { assertCanaryLegacyAllowed } from '../../AgentV3/reliability/canarySpend
 import { PublicBuildEngineError } from '../../lib/buildEngineError';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { BuildStoppedError } from '../../AgentV3/stopSignal';
+import { Agent } from 'undici';
 
 const URL = 'https://api.surplusintelligence.ai/min90/v1/chat/completions';
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
@@ -10,9 +11,31 @@ const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 // Owner 2026-10-31 (stay-alive): long game-file turns legitimately exceed 60s; do not cut a working reply.
 export const SURPLUS_TRANSPORT_TIMEOUT_MS = (() => { const n = Number(process.env.SURPLUS_TRANSPORT_TIMEOUT_MS); return Number.isFinite(n) && n >= 30_000 && n <= 600_000 ? Math.floor(n) : 180_000; })();
 /** First try + bounded retries for transient marketplace / network failures. */
-export const SURPLUS_TRANSPORT_MAX_ATTEMPTS = 3;
+export const SURPLUS_TRANSPORT_MAX_ATTEMPTS = 5;
 export const SURPLUS_TRANSPORT_RETRY_BASE_MS = 250;
-export const SURPLUS_TRANSPORT_RETRY_MAX_MS = 2_000;
+export const SURPLUS_TRANSPORT_RETRY_MAX_MS = 5_000;
+
+/**
+ * Owner 2026-10-31 ("Surplus disconnect kam se kam"): one sticky, process-wide keep-alive pool to
+ * Surplus. Reuses warm TLS sockets (no fresh handshake per turn), enables TCP keepalive probes so
+ * idle NAT/LB paths are not silently dropped mid-game, and gives long game-file turns a generous
+ * body/headers window (overall deadline above still bounds it). Lazily created; never on import.
+ */
+let surplusPool: Agent | undefined;
+export function surplusKeepAliveDispatcher(): Agent | undefined {
+  try {
+    surplusPool ??= new Agent({
+      keepAliveTimeout: 60_000,
+      keepAliveMaxTimeout: 300_000,
+      connections: 32,
+      pipelining: 1,
+      headersTimeout: SURPLUS_TRANSPORT_TIMEOUT_MS,
+      bodyTimeout: SURPLUS_TRANSPORT_TIMEOUT_MS,
+      connect: { keepAlive: true, keepAliveInitialDelay: 15_000, timeout: 15_000 },
+    });
+    return surplusPool;
+  } catch { return undefined; }
+}
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
 const REQUEST_KEYS = new Set(['model', 'provider', 'si_route', 'messages', 'tools', 'tool_choice', 'max_tokens', 'stream', 'reasoning_effort']);
 const RESPONSE_HEADERS = ['x-si-provider-family', 'x-si-served-by', 'x-si-truncated', 'x-si-adapted-params', 'x-si-route-objective'] as const;
@@ -238,8 +261,10 @@ export function createSurplusBuildTransport(env: NodeJS.ProcessEnv = process.env
       if (deadline.aborted) throw lastRetryableError ?? new SurplusBuildTransportError('network');
       const combined = combineSignals(signal, deadline);
       try {
+        const dispatcher = fetcher === globalThis.fetch ? surplusKeepAliveDispatcher() : undefined;
         const response = await fetcher(URL, {
           method: 'POST', redirect: 'error', signal: combined,
+          ...(dispatcher ? { dispatcher } as Record<string, unknown> : {}),
           headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json' },
           body,
         });

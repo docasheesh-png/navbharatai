@@ -27,6 +27,7 @@
  * already-granted plans keep their badge-removal (taking back something paid-for would be theft).
  */
 
+import { isZTestAccount } from './zTestAccount';
 import { hostingOverageInrPerGb } from '../AgentV3/hostingCost';
 import { usdInrRate } from './UsdInrRate';
 import { BoundedCache } from './boundedCache';
@@ -238,7 +239,7 @@ export function computePlanPurchase(
   current: Record<string, any>,
   nowIso: string,
   tierId: HostingTierId | string = HOSTING_TIERS[0].id,
-  opts: { agreedToTerms?: boolean; autoRenew?: boolean } = {},
+  opts: { agreedToTerms?: boolean; autoRenew?: boolean; waiveCharge?: boolean } = {},
 ): PlanPurchaseOutcome {
   if (!hostingPlansEnabled()) return { ok: false, reason: 'disabled' };
   // Pro only while PLAN_MODEL_PRO is on, at its configured price. Starter/Growth stay purchasable
@@ -279,7 +280,8 @@ export function computePlanPurchase(
       }
     : w;
 
-  const needed = inrToDebitTokens(tier.priceInr);
+  // 🧪 z@gmail.com test account (lib/zTestAccount.ts): plan granted, nothing charged. Remove later.
+  const needed = opts.waiveCharge ? 0 : inrToDebitTokens(tier.priceInr);
   const balance = typeof startWallet.tokenBalance === 'number' && Number.isFinite(startWallet.tokenBalance) ? startWallet.tokenBalance : 0;
   if (balance < needed) {
     return { ok: false, reason: 'insufficient', shortfallTokens: Math.ceil(needed - balance) };
@@ -292,7 +294,7 @@ export function computePlanPurchase(
   // ⚠️ ORDER MATTERS: this sits AFTER the plain affordability check on purpose. A user with too
   // little of anything should be told they need more money, which is the simpler and more useful
   // sentence; only a user who genuinely HAS the balance needs to hear that it is gift money.
-  const giftBlock = checkPlanPayable(startWallet, needed);
+  const giftBlock = opts.waiveCharge ? null : checkPlanPayable(startWallet, needed);
   if (giftBlock) {
     return {
       ok: false,
@@ -310,7 +312,7 @@ export function computePlanPurchase(
   const expiresAt = new Date(periodStartMs + tier.days * 24 * 60 * 60 * 1000).toISOString();
   const buildRef = `hostingplan_${tier.id}_${periodStartMs}`;
 
-  const debited = computeDebitedWallet(startWallet, {
+  const debited = opts.waiveCharge ? { applied: false, wallet: startWallet } : computeDebitedWallet(startWallet, {
     billedInr: tier.priceInr,
     buildRef,
     feature: 'hosting-plan',
@@ -402,7 +404,7 @@ export interface LazyRenewalResult {
  * idempotency ref is keyed on the OLD expiry, so two concurrent reads can only renew once.
  * Insufficient balance or autoRenew off ⇒ untouched (the plan stays honestly expired).
  */
-export function computeLazyRenewal(current: Record<string, any>, nowIso: string): LazyRenewalResult {
+export function computeLazyRenewal(current: Record<string, any>, nowIso: string, waiveCharge = false): LazyRenewalResult {
   const w = current || {};
   if (!hostingPlansEnabled()) return { wallet: w, renewed: false, applied: false };
   const p = w.hostingPlan as HostingPlanRecord | undefined;
@@ -417,6 +419,10 @@ export function computeLazyRenewal(current: Record<string, any>, nowIso: string)
   const days = planDays(p.id);
   const tier = tierForPlanId(p.id);
   const label = p.id === LEGACY_HOSTING_PLAN_ID ? 'Custom Domain' : (tier?.name ?? 'Hosting');
+  // 🧪 z@gmail.com test account: free renewal, no debit, no bundled credit. Remove later.
+  if (waiveCharge) {
+    return { wallet: { ...w, hostingPlan: { ...p, expiresAt: new Date(nowMs + days * 24 * 60 * 60 * 1000).toISOString() } }, renewed: true, applied: true };
+  }
   const needed = inrToDebitTokens(price);
   const balance = typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0;
   if (balance < needed) return { wallet: w, renewed: false, applied: false };
@@ -479,7 +485,7 @@ export function decidePlanSweepStep(
   const DAY = 24 * 60 * 60 * 1000;
 
   // 1) renewal first — a renewed plan needs no reminder and no lapse.
-  const renewal = computeLazyRenewal(w, nowIso);
+  const renewal = computeLazyRenewal(w, nowIso, isZTestAccount(null, typeof w.userId === 'string' ? w.userId : null));
   if (renewal.renewed) return { wallet: renewal.wallet, applied: true, action: { kind: 'renewed' } };
 
   // 2) reminders — fire the SMALLEST reached window, and burn every larger one with it.
@@ -659,7 +665,7 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
       const snap = await t.get(ref);
       if (!snap.exists()) return null;
       const current = snap.data();
-      const renewal = computeLazyRenewal(current, nowIso ?? new Date().toISOString());
+      const renewal = computeLazyRenewal(current, nowIso ?? new Date().toISOString(), isZTestAccount(null, userId) || isZTestAccount(null, ownerId));
       if (renewal.applied) t.set(ref, renewal.wallet);
       return renewal.wallet;
     });
@@ -740,7 +746,7 @@ export async function purchaseHostingPlan(
           return { ok: true, replay: true, wallet: current, plan, charged: false, creditedInr: 0, bundledCreditInr: 0 } as any;
         }
       }
-      const result = computePlanPurchase(current, nowIso ?? new Date().toISOString(), tierId, opts);
+      const result = computePlanPurchase(current, nowIso ?? new Date().toISOString(), tierId, { ...opts, waiveCharge: isZTestAccount(null, userId) || isZTestAccount(null, ownerId) });
       if (result.ok) t.set(ref, withLedgerV2(t, (c, i) => doc(db, c, i), ownerId, snap.exists() ? current : null, result.wallet, `plan:${String(tierId)}`));
       if (result.ok && opRef) t.set(opRef, { kind: 'plan', ownerId, tierId: String(tierId), at: new Date().toISOString() });
       return result;
@@ -867,6 +873,8 @@ export function _clearPlanCacheForTests(): void {
  *     legitimately paying user's setup).
  */
 export async function probeHostingPlan(userId: string | null | undefined): Promise<PlanProbe> {
+  // 🧪 z@gmail.com test account (lib/zTestAccount.ts): domain connect / badge-free hosting without buying. Remove later.
+  if (isZTestAccount(null, userId)) return { active: true, known: true };
   if (!userId || !hostingPlansEnabled()) {
     // Plans off ⇒ no badge removal and no gating anywhere — but that is a KNOWN answer, not a failure.
     return { active: false, known: true };

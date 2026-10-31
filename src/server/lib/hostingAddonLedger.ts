@@ -15,6 +15,7 @@
  * There is no second "mark it active later" step in which the money and the slot could disagree.
  */
 
+import { isZTestAccount } from './zTestAccount';
 import { doc, getDoc, runTransaction } from './serverDb';
 import { computeDebitedWallet } from './walletDebit';
 import { ledgerPatch } from './walletStatement';
@@ -51,7 +52,7 @@ export function computeAddonPurchase(
   current: Record<string, any> | null | undefined,
   nowIso: string,
   addonId: string,
-  opts: { agreedToTerms?: boolean; clientRef?: unknown },
+  opts: { agreedToTerms?: boolean; clientRef?: unknown; waiveCharge?: boolean },
 ): AddonPurchaseOutcome {
   if (!hostingPlansEnabled()) return { ok: false, reason: 'disabled' };
   const addon = addonById(addonId);
@@ -71,12 +72,13 @@ export function computeAddonPurchase(
 
   if (activeAddonCount(w, addon.id, nowMs) >= addon.max) return { ok: false, reason: 'at_cap' };
 
-  const needed = inrToDebitTokens(addon.priceInr);
+  // 🧪 z@gmail.com test account (lib/zTestAccount.ts): slot granted free. Remove later.
+  const needed = opts.waiveCharge ? 0 : inrToDebitTokens(addon.priceInr);
   const balance = typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0;
   if (balance < needed) {
     return { ok: false, reason: 'insufficient', shortfallTokens: Math.ceil(needed - balance) };
   }
-  const giftBlock = checkPlanPayable(w, needed);
+  const giftBlock = opts.waiveCharge ? null : checkPlanPayable(w, needed);
   if (giftBlock) {
     return {
       ok: false,
@@ -95,7 +97,7 @@ export function computeAddonPurchase(
     expiresAt: new Date(periodStartMs + addon.days * 24 * 60 * 60 * 1000).toISOString(),
     agreedAt: nowIso,
   };
-  const debited = computeDebitedWallet(w, {
+  const debited = opts.waiveCharge ? { applied: false, wallet: w } : computeDebitedWallet(w, {
     billedInr: addon.priceInr,
     buildRef: `hostingaddon_${clientRef}`,
     feature: 'hosting-addon',
@@ -305,7 +307,7 @@ export async function purchaseHostingAddon(
     const outcome = await runTransaction(db, async (t: any) => {
       const snap = await t.get(ref);
       const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
-      const result = computeAddonPurchase(current, when, addonId, opts);
+      const result = computeAddonPurchase(current, when, addonId, { ...opts, waiveCharge: isZTestAccount(null, userId) || isZTestAccount(null, ownerId) });
       if (result.ok) t.set(ref, result.wallet);
       return result;
     });

@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from 'express';
+import { isZTestAccount } from '../lib/zTestAccount';
 import { domainOpsRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, enforceNotBanned } from '../lib/authMiddleware';
 import { sendSafeError } from '../lib/httpError';
 import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan, readHostingPlanStatus } from '../lib/hostingPlan';
@@ -317,7 +318,8 @@ export function registerNbaiDomainsRoutes(app: Express): void {
    * a legitimate paying user's setup. Only a KNOWN "no active plan" AND no domain add-on refuses.
    */
   async function refusedForNoPlan(res: Response, uid: string, email: GrantEmail | null): Promise<boolean> {
-    if (!hostingPlansEnabled() || isAgentV3FreeUser(uid, email)) return false;
+    // 🧪 z@gmail.com test account (lib/zTestAccount.ts): free domain connect. Remove later.
+    if (!hostingPlansEnabled() || isAgentV3FreeUser(uid, email) || isZTestAccount(email, uid)) return false;
     const plan = await probeHostingPlan(uid);
     if (!plan.known || plan.active) return false;
     // A paid extra-domain slot is itself the right to connect one domain. Read through the same
@@ -351,7 +353,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
     }
     // PLAN GATE — see `refusedForNoPlan`, which both this route and the auto-DNS start share.
     if (await refusedForNoPlan(res, verifiedUid, identityGrantEmail(identity))) return;
-    if (hostingPlansEnabled() && !isAgentV3FreeUser(verifiedUid, identityGrantEmail(identity))) {
+    if (hostingPlansEnabled() && !isAgentV3FreeUser(verifiedUid, identityGrantEmail(identity)) && !isZTestAccount(null, verifiedUid)) {
       /**
        * THE TIER'S DOMAIN COUNT, ENFORCED (2026-09-10). Starter includes 1 domain and Growth 3, and
        * a number printed on a plan card that nothing checks is a fake feature — the second absolute

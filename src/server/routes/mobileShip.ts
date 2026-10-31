@@ -63,6 +63,7 @@ import { CHARGE_PRICE_HEADER, CHARGE_APPLIED_HEADER } from '../../lib/apkChargeN
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { isAgentV3FreeUser, identityGrantEmail } from '../AgentV3/featureFlag';
 import { debitWalletForBuild } from '../lib/walletDebit';
+import { isZTestAccount } from '../lib/zTestAccount';
 import { appBuildStore } from '../lib/AppBuildStore';
 import { saveApkFailureReport } from '../lib/AdminApkReportStore';
 import { getServerDb } from '../lib/serverDb';
@@ -500,6 +501,8 @@ export function registerMobileShipRoutes(app: Express): void {
           // overwrite the workflow and the user's chosen app name with values this route does not know.
           void appBuildStore.setLatestRun(identity.uid, String(owner), String(repo), String(runId));
           if (isAgentV3FreeUser(identity.uid, identityGrantEmail(identity))) break;
+          // 🧪 z@gmail.com test account (lib/zTestAccount.ts): app publish/APK free. Remove later.
+          if (isZTestAccount(identityGrantEmail(identity), identity.uid)) break;
           // The welcome gift cannot pay this ₹1. `paid-only` refuses the charge when the paid
           // part of the wallet cannot cover it, and the gift is left where it is. The file is
           // already on the user's own GitHub — this route cannot unpublish it — so the list below

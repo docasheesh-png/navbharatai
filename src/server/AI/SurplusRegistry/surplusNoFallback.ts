@@ -1,17 +1,13 @@
+import { isZTestAccount } from '../../lib/zTestAccount';
 import { rawErrorText } from '../../AgentV3/rawErrorDetail';
 /**
  * Owner 2026-10-29: per-profile opt-out of Surplus → Weak fail-open (coding / Pro builder).
  * For these emails ONLY, a Surplus failure stays/fails on Surplus — no SURPLUS_FALLBACK to the
  * Weak ladder (GLM/Kimi). Everyone else keeps the existing fallback unchanged.
  */
-const SURPLUS_NO_FALLBACK_EMAILS: ReadonlySet<string> = new Set(['z@gmail.com']);
-
-/** Same owner debug profile by verified uid, so a token without an email claim can't silently fall back. */
-const SURPLUS_NO_FALLBACK_UIDS: ReadonlySet<string> = new Set(['GiYNmFcDMVYSWW48Nrurm7j41gv1']);
-
+// The list lives in lib/zTestAccount.ts (one helper for every z@gmail.com special case).
 export function surplusFallbackDisabledFor(email: string | null | undefined, uid?: string | null): boolean {
-  if (typeof uid === 'string' && SURPLUS_NO_FALLBACK_UIDS.has(uid)) return true;
-  return typeof email === 'string' && SURPLUS_NO_FALLBACK_EMAILS.has(email.trim().toLowerCase());
+  return isZTestAccount(email, uid);
 }
 
 /**

@@ -229,7 +229,15 @@ export default function App() {
     } catch { /* ignore */ }
     return 'auto';
   });
-  const [effectiveDeviceMode, setEffectiveDeviceMode] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
+  // CLS 0.211 ON DESKTOP (bench 2026-10-31): this used to start as 'mobile' and flip to 'desktop' in a
+  // post-paint effect, so the 288px side rail popped in after first paint and shoved the whole
+  // workspace sideways. Resolve the real mode on the FIRST render so the rail is there from frame one.
+  const [effectiveDeviceMode, setEffectiveDeviceMode] = useState<'mobile' | 'tablet' | 'desktop'>(() => {
+    if (deviceMode !== 'auto') return deviceMode;
+    if (typeof window === 'undefined') return 'mobile';
+    const width = window.innerWidth;
+    return width < 768 ? 'mobile' : width < 1024 ? 'tablet' : 'desktop';
+  });
   // REPORT A PROBLEM, FROM ANYWHERE (admin 2026-08-21). Shake opens it on a phone; the visible entry
   // in the sidebar opens the same sheet, because an invisible gesture cannot be the only way in (and
   // iOS will not give a page motion access unasked). `reportOpen` lives at the app root so the sheet

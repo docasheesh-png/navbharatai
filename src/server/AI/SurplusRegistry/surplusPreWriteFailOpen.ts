@@ -40,6 +40,7 @@ export const SURPLUS_PRE_WRITE_FAIL_OPEN_REASONS = [
   'mid_build_timeout',
   'mid_build_transport',
   'mid_build_engine_unavailable',
+  'mid_build_after_write',
 ] as const;
 
 export type SurplusPreWriteFailOpenReason = (typeof SURPLUS_PRE_WRITE_FAIL_OPEN_REASONS)[number];
@@ -95,17 +96,29 @@ export function isSurplusPublicBuildEngineFailure(error: unknown): boolean {
 }
 
 /**
- * Fail-open when Surplus died for ANY public-engine reason before any user code
- * was written (transport, timeout or public engine boundary). Once the model has
- * authored files, do not restart on Weak mid-build.
+ * Fail-open when Surplus died for ANY public-engine reason (transport, timeout or public
+ * engine boundary) — BEFORE or AFTER the model authored files.
+ *
+ * DNA (bench 2026-10-31 ~5PM IST, hard games on Weak): platformer / tower-defence / physics
+ * builds wrote 2–4 of 10–13 plan steps, then Surplus died mid-build. The old Files=0 guard
+ * refused recovery, so the build ended at 90% with "build engine temporarily unavailable",
+ * leaving App.tsx importing a never-written `./game/Game` (Vite error) or the starter
+ * Hello World — 3/4 hard games unusable. The wrapper never restarts the build: it retries the
+ * SAME turn (same params = same conversation + files already on disk) on the Weak ladder, and a
+ * turn that threw applied no tool calls, so continuing after writes is as safe as before them.
  */
 export function shouldFailOpenSurplusPreWrite(opts: {
   userFilesWritten: number;
   error: unknown;
   alreadyDropped?: boolean;
+  /** Only the per-turn wrapper (same-turn retry) may continue after writes; scope recovery may not. */
+  allowAfterWrite?: boolean;
 }): boolean {
   if (opts.alreadyDropped) return false;
-  if (opts.userFilesWritten !== 0) return false;
+  const n = opts.userFilesWritten;
+  const proven = Number.isInteger(n) && n >= 0;
+  if (!proven) return false;
+  if (n !== 0 && !opts.allowAfterWrite) return false;
   return isSurplusPublicBuildEngineFailure(opts.error);
 }
 
@@ -118,15 +131,16 @@ export function shouldFailOpenSurplusPreWrite(opts: {
 export function tryConsumeSurplusPreWriteFailOpen(
   hooks: SurplusPreWriteFailOpenHooks,
   error: unknown,
+  opts: { allowAfterWrite?: boolean } = {},
 ): SurplusPreWriteFailOpenReason | null {
   if (hooks.noFallback) return null;
   let files: number;
   try { files = hooks.userFilesWritten(); } catch { return null; }
-  if (!shouldFailOpenSurplusPreWrite({ userFilesWritten: files, error, alreadyDropped: hooks.state.dropped })) {
+  if (!shouldFailOpenSurplusPreWrite({ userFilesWritten: files, error, alreadyDropped: hooks.state.dropped, allowAfterWrite: opts.allowAfterWrite })) {
     return null;
   }
   hooks.state.dropped = true;
-  const reason = surplusPreWriteFailOpenReason(error);
+  const reason: SurplusPreWriteFailOpenReason = files > 0 ? 'mid_build_after_write' : surplusPreWriteFailOpenReason(error);
   // Spike signal for the admit circuit — next builds skip Surplus during cool-down.
   try { recordSurplusMidBuildDeath(reason); } catch { /* never block fail-open */ }
   try { hooks.onFailOpen?.(reason); } catch { /* audit must never block fail-open */ }
@@ -158,7 +172,7 @@ export function wrapSurplusRunnerPreWriteFailOpen(
         return result;
       } catch (error) {
         try { hooks.onSurplusError?.(error); } catch { /* observer must never alter the turn */ }
-        if (params.signal?.aborted || !tryConsumeSurplusPreWriteFailOpen(hooks, error)) throw error;
+        if (params.signal?.aborted || !tryConsumeSurplusPreWriteFailOpen(hooks, error, { allowAfterWrite: true })) throw error;
         return getWeak().runTurn(params);
       }
     },

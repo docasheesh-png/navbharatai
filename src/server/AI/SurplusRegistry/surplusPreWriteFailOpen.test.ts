@@ -60,10 +60,20 @@ describe('shouldFailOpenSurplusPreWrite', () => {
     })).toBe(true);
   });
 
-  it('does NOT fail-open once any user file exists (partial Surplus work)', () => {
+  it('fail-opens after user files exist ONLY for the same-turn wrapper (bench 2026-10-31)', () => {
     expect(shouldFailOpenSurplusPreWrite({
       userFilesWritten: 1,
       error: new PublicBuildEngineError(),
+    })).toBe(false);
+    expect(shouldFailOpenSurplusPreWrite({
+      userFilesWritten: 1,
+      error: new PublicBuildEngineError(),
+      allowAfterWrite: true,
+    })).toBe(true);
+    expect(shouldFailOpenSurplusPreWrite({
+      userFilesWritten: NaN,
+      error: new PublicBuildEngineError(),
+      allowAfterWrite: true,
     })).toBe(false);
   });
 
@@ -153,16 +163,19 @@ describe('wrapSurplusRunnerPreWriteFailOpen', () => {
     expect(circuitMocks.death).not.toHaveBeenCalled();
   });
 
-  it('rethrows when user files already exist — no Weak restart after partial write', async () => {
+  it('continues the SAME turn on Weak after a partial write (no restart, reason mid_build_after_write)', async () => {
     const surplusRun = vi.fn(async () => { throw new PublicBuildEngineError(); });
     const weakRun = vi.fn(async () => emptyTurn());
+    const onFailOpen = vi.fn();
     const wrapped = wrapSurplusRunnerPreWriteFailOpen(
       { runTurn: surplusRun } as TurnRunner,
       () => ({ runTurn: weakRun } as TurnRunner),
-      { state: { dropped: false }, userFilesWritten: () => 3 },
+      { state: { dropped: false }, userFilesWritten: () => 3, onFailOpen },
     );
-    await expect(wrapped.runTurn(params())).rejects.toThrow(PUBLIC_BUILD_ENGINE_UNAVAILABLE);
-    expect(weakRun).not.toHaveBeenCalled();
+    const p = params();
+    await wrapped.runTurn(p);
+    expect(weakRun).toHaveBeenCalledWith(p);
+    expect(onFailOpen).toHaveBeenCalledWith('mid_build_after_write');
   });
 
   it('routes subsequent turns straight to Weak after one fail-open (shared state)', async () => {

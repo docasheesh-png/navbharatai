@@ -112,7 +112,7 @@ describe('dedicated min90 build transport', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
   it('passes a hard transport timeout so hung Surplus HTTP cannot pin the builder forever', async () => {
-    expect(SURPLUS_TRANSPORT_TIMEOUT_MS).toBe(60_000);
+    expect(SURPLUS_TRANSPORT_TIMEOUT_MS).toBe(180_000);
     const { dispatch, fetcher } = setup();
     await dispatch(request(), signal());
     const init = fetcher.mock.calls[0]?.[1] as RequestInit | undefined;

@@ -7,7 +7,8 @@ const URL = 'https://api.surplusintelligence.ai/min90/v1/chat/completions';
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 /** Hard ceiling (all attempts combined) so hung Surplus HTTP cannot pin the Pro builder forever. */
-export const SURPLUS_TRANSPORT_TIMEOUT_MS = 60_000;
+// Owner 2026-10-31 (stay-alive): long game-file turns legitimately exceed 60s; do not cut a working reply.
+export const SURPLUS_TRANSPORT_TIMEOUT_MS = (() => { const n = Number(process.env.SURPLUS_TRANSPORT_TIMEOUT_MS); return Number.isFinite(n) && n >= 30_000 && n <= 600_000 ? Math.floor(n) : 180_000; })();
 /** First try + bounded retries for transient marketplace / network failures. */
 export const SURPLUS_TRANSPORT_MAX_ATTEMPTS = 3;
 export const SURPLUS_TRANSPORT_RETRY_BASE_MS = 250;

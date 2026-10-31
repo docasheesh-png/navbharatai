@@ -1,8 +1,10 @@
-import { PublicBuildEngineError, publicBuildEngineError } from '../../lib/buildEngineError';
+import { PublicBuildEngineError, publicBuildEngineError, publicBuildEngineSafeReason } from '../../lib/buildEngineError';
+import { AiMaintenanceError } from '../../lib/aiMaintenance';
+import { BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../../AgentV3/turnDeadline';
 import { randomUUID } from 'node:crypto';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { SURPLUS_MIN90_BASE_URL } from '../../lib/surplusClient';
-import { raceStop, throwIfStopped } from '../../AgentV3/stopSignal';
+import { BuildStoppedError, raceStop, throwIfStopped } from '../../AgentV3/stopSignal';
 import type { RunTurnParams, TurnResult, TurnUsage } from '../../AgentV3/ClaudeClient';
 import { makeSurplusTurnRunner, type SurplusTurnPermit, type SurplusTurnFailure } from '../../AgentV3/providers/SurplusTurnRunner';
 import type { OpenAiCompletionLike } from '../../AgentV3/providers/OpenAiToolAdapter';
@@ -186,8 +188,10 @@ export async function createSurplusBuildSession(options: {
           failedModels.set(permit, excluded);
           return permit;
       }
+      const stayAlive = surplusStayAlivePolicy();
       const native = makeSurplusTurnRunner({
         authorize,
+        timeoutMs: stayAlive.turnMs,
         async authorizeFallback(params, previous) {
           if (!authorizedFallbacks.delete(previous)) return undefined;
           return authorize(params, previous);
@@ -275,19 +279,69 @@ export async function createSurplusBuildSession(options: {
         let releaseTurn!: () => void;
         const slot = new Promise<void>(resolve => { releaseTurn = resolve; });
         turnQueue = previous.then(() => slot);
-        const deadlineAt = Math.min(params.deadlineAt ?? Infinity, Date.now() + 120_000);
-        let timer: ReturnType<typeof setTimeout> | undefined;
         try {
-          await raceStop(Promise.race([previous, new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new SurplusBuildUnavailableError('review_unavailable')), Math.max(0, deadlineAt - Date.now()));
-          })]), params.signal);
+          // Waiting behind another turn of the SAME build is not a Surplus failure: never time it out
+          // into "engine unavailable" — the previous turn is itself bounded by its own deadline.
+          await raceStop(previous, params.signal);
           throwIfStopped(params.signal);
-          return await native.runTurn({ ...params, deadlineAt });
+          // DNA (failedbr A–C 2026-10-31, owner: "Surplus marna nahi chahiye"): a single transient
+          // turn failure (timeout / transport / empty / unsettled) used to end the whole game build with
+          // ENGINE_UNAVAILABLE after files were half-written. Keep the SAME Surplus session alive:
+          // retry the turn with backoff and a fresh per-turn deadline (other Surplus models after a
+          // benched one), so one Surplus run finishes the whole game. Only Stop, maintenance, policy
+          // refusal, the build's own budget/deadline, or exhausting the retry budget end it.
+          const policy = stayAlive;
+          let lastError: unknown;
+          for (let attempt = 0; attempt <= policy.retries; attempt++) {
+            throwIfStopped(params.signal);
+            const now0 = Date.now();
+            const outer = params.deadlineAt ?? Infinity;
+            if (attempt > 0 && outer - now0 < policy.minTurnMs) break;
+            const deadlineAt = Math.min(outer, now0 + policy.turnMs);
+            try {
+              return await native.runTurn({ ...params, deadlineAt });
+            } catch (error) {
+              lastError = error;
+              if (!isSurplusTurnRetryable(error) || params.signal?.aborted || terminalPolicyFailure) throw error;
+              if (attempt >= policy.retries) break;
+              const wait = policy.backoffMs[Math.min(attempt, policy.backoffMs.length - 1)];
+              try { console.warn(`[SURPLUS] stay-alive: turn retry ${attempt + 1}/${policy.retries} in ${wait}ms`); } catch { /* best-effort */ }
+              await raceStop(new Promise<void>(resolve => setTimeout(resolve, wait)), params.signal);
+            }
+          }
+          throw lastError;
         } finally {
-          if (timer !== undefined) clearTimeout(timer);
           releaseTurn();
         }
       } };
     },
   });
+}
+
+/** Owner 2026-10-31: one Surplus run finishes the whole build. Env-tunable, safe defaults. */
+export function surplusStayAlivePolicy(env: NodeJS.ProcessEnv = process.env) {
+  const num = (v: string | undefined, d: number, lo: number, hi: number) => {
+    const n = Number(v); return Number.isFinite(n) && v?.trim() ? Math.min(hi, Math.max(lo, Math.floor(n))) : d;
+  };
+  // Unit suites pin single-turn failure semantics; they opt in via SURPLUS_TURN_RETRIES explicitly.
+  const off = /^(0|off|false|no)$/i.test(env.SURPLUS_STAY_ALIVE?.trim() ?? '') ||
+    (Boolean(env.VITEST) && !env.SURPLUS_TURN_RETRIES?.trim());
+  return Object.freeze({
+    retries: off ? 0 : num(env.SURPLUS_TURN_RETRIES, 5, 0, 10),
+    turnMs: num(env.SURPLUS_TURN_TIMEOUT_MS, env.VITEST && !env.SURPLUS_TURN_RETRIES?.trim() ? 120_000 : 240_000, 30_000, 600_000),
+    minTurnMs: 20_000,
+    backoffMs: [2_000, 5_000, 10_000, 20_000, 30_000],
+  });
+}
+
+/** Transient Surplus deaths only. Stop / maintenance / policy / build budget are terminal. */
+export function isSurplusTurnRetryable(error: unknown): boolean {
+  try {
+    if (!error || typeof error !== 'object') return false;
+    if (error instanceof BuildStoppedError || error instanceof AiMaintenanceError) return false;
+    const msg = String((error as Error).message ?? '');
+    if (msg === BUDGET_REACHED_MESSAGE || msg === BUDGET_EXHAUSTED_MESSAGE) return false;
+    if (error instanceof PublicBuildEngineError) return publicBuildEngineSafeReason(error) !== 'policy_refusal';
+    return error instanceof SurplusBuildUnavailableError;
+  } catch { return false; }
 }

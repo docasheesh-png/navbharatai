@@ -204,7 +204,7 @@ import { getServerDb as getDb } from '../lib/serverDb';
 import { randomUUID } from 'crypto';
 import { processOwnerId } from '../lib/jobLease';
 import {
-  claimWorkspaceBuild, releaseWorkspaceBuild, workspaceBuildIsLive,
+  claimWorkspaceBuild, claimWorkspaceBuildAwaitingRelease, releaseWorkspaceBuild, workspaceBuildIsLive,
   BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
 } from '../AgentV3/workspaceBuildLease';
 import { getConnection } from '../lib/supabaseConnectionStore';
@@ -10662,7 +10662,7 @@ async function noteBuildOutcome(
       if (buildLeaseHeld) return true;
     if (leaseWorkspaceId) {
       const admittedAt = Date.now();
-      const claim = await claimWorkspaceBuild(buildLeaseStore, { workspaceId: leaseWorkspaceId, token: buildLeaseToken, owner: processOwnerId(), userId, nowMs: admittedAt });
+      const claim = await claimWorkspaceBuildAwaitingRelease(buildLeaseStore, { workspaceId: leaseWorkspaceId, token: buildLeaseToken, owner: processOwnerId(), userId, nowMs: admittedAt }, claimWorkspaceBuild);
       if (!claim.ok) {
         releaseBuildLock(buildKey, buildLockToken);
         if (claim.reason === 'unavailable') {

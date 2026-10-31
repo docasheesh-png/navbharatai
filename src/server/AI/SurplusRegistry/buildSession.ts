@@ -109,7 +109,12 @@ export async function createSurplusBuildSession(options: {
     : planSurplusDispatchCandidate(eligibleSnapshot(initialState, initialWorkload, now()), initialState.reviews, initialWorkload, now(), initialState.floorContract);
   if (initial.status !== 'estimated_candidate' || !initial.selection) return fail(initial.reason);
   let model = initial.selection.model;
-  let poisoned = false;
+  // DNA (failedbr 627/630, 2026-10-30): a mid-build turn that failed (budget/deadline abort, transport,
+  // empty) or whose failure receipt could not be settled used to poison the session, so EVERY later turn died
+  // with previous_call_accounting_unavailable (503 DISCOUNT_BUILD_UNAVAILABLE → "engine unavailable").
+  // Billing never blocks inference: the failed turn's cost is absorbed, its model is benched for this
+  // session, and the next turn moves to another Surplus-internal model (AI2/AI3) — never Weak.
+  const benchedModels = new Set<string>();
   let terminalPolicyFailure: PublicBuildEngineError | undefined;
   // Serialize inference across ALL runners of this build. Parallel tool execution is unchanged.
   // A queued call may be cancelled before spending; only durably resolved safe failures can get a new attempt.
@@ -133,12 +138,19 @@ export async function createSurplusBuildSession(options: {
       const authorizedFallbacks = new WeakSet<object>();
       async function authorize(params: RunTurnParams, previous?: SurplusTurnPermit) {
           if (terminalPolicyFailure) throw terminalPolicyFailure;
-          if (poisoned) return fail('previous_call_accounting_unavailable');
           const workload = estimate(params), state = await adapter.readState(), at = now();
           // A winning model stays sticky. Only a durably resolved safe failed turn may change it.
           const excluded = previous ? new Set([...(failedModels.get(previous) ?? []), previous.model]) : new Set<string>();
+          for (const m of benchedModels) excluded.add(m);
           let snapshot = eligibleSnapshot(state, workload, at, previous ? undefined : model, excluded);
           let plan = planSurplusDispatchCandidate(snapshot, state.reviews, workload, at, state.floorContract);
+          if ((plan.status !== 'estimated_candidate' || !plan.selection) && benchedModels.size > 0 && !previous) {
+            // Every alternative is benched: un-bench once and retry on Surplus rather than refusing the build.
+            for (const m of benchedModels) excluded.delete(m);
+            benchedModels.clear();
+            snapshot = eligibleSnapshot(state, workload, at, undefined, excluded);
+            plan = planSurplusDispatchCandidate(snapshot, state.reviews, workload, at, state.floorContract);
+          }
           // DNA (z@ live 2026-10-29): the sticky model is the small flash scope model; a full build turn
           // (system+tools) can exceed its reviewed context/output, which filtered the ONLY allowed offer
           // and threw DISCOUNT_BUILD_UNAVAILABLE. Stickiness is a preference: move to another eligible
@@ -159,7 +171,6 @@ export async function createSurplusBuildSession(options: {
             requestRouting: Object.freeze({ ...requestRouting }),
             assertCurrent() {
               if (terminalPolicyFailure) throw terminalPolicyFailure;
-              if (poisoned) return fail('previous_call_accounting_unavailable');
               const checked = planSurplusDispatchCandidate(frozenState.snapshot, frozenState.reviews, workload, now(), frozenState.floorContract);
               if (checked.status !== 'estimated_candidate' || !checked.selection) return fail(checked.reason);
               capability(frozenState, { model: selectedModel, providerId: review.providerId, offerId: plan.selection!.offerId }, now(), workload);
@@ -178,13 +189,13 @@ export async function createSurplusBuildSession(options: {
       const native = makeSurplusTurnRunner({
         authorize,
         async authorizeFallback(params, previous) {
-          if (!authorizedFallbacks.delete(previous) || poisoned) return undefined;
+          if (!authorizedFallbacks.delete(previous)) return undefined;
           return authorize(params, previous);
         },
         async dispatch(request, signal, permit) {
           await acquire(permit, signal);
           const grant = issued.get(permit);
-          if (poisoned || !grant || grant.used || grant.review.expiresAt <= now()) { release(permit); return fail('expired_or_replayed_dispatch'); }
+          if (!grant || grant.used || grant.review.expiresAt <= now()) { release(permit); return fail('expired_or_replayed_dispatch'); }
           const rechecked = planSurplusDispatchCandidate(grant.state.snapshot, grant.state.reviews, grant.workload, now(), grant.state.floorContract);
           if (rechecked.status !== 'estimated_candidate' || !rechecked.selection) { release(permit); return fail(rechecked.reason); }
           try {
@@ -236,9 +247,18 @@ export async function createSurplusBuildSession(options: {
               result.usage.surplusReceipt = await adapter.receipt(raw, permit, result);
               callbacks.onTurnComplete?.(result, 'SURPLUS');
             }
-            poisoned = true;
-          } catch (error) { poisoned = true; throw error; }
+          } catch (error) {
+            // Unsettled failure accounting is absorbed (user charge 0) and logged; it never poisons the session.
+            console.warn(`[SURPLUS] failure receipt unavailable (non-fatal, absorbed): ${error instanceof Error ? error.message.slice(0, 120) : 'unknown'}`);
+          }
           finally { release(permit); }
+          if (!terminalPolicyFailure) {
+            benchedModels.add(permit.model);
+            if (model === permit.model) {
+              const alt = (initialState.snapshot?.offers ?? []).map(o => o.model).find(m => !benchedModels.has(m) && !(options.tier === 'weak' && /claude|sonnet|opus/i.test(m)));
+              if (alt) model = alt;
+            }
+          }
         },
         onProviderUsed: permit => { model = permit.model; try { callbacks.onProviderUsed?.(permit); } catch { /* observation cannot hold the inference queue */ } },
         onTurnComplete(result, used) {

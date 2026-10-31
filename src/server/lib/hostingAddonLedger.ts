@@ -15,7 +15,7 @@
  * There is no second "mark it active later" step in which the money and the slot could disagree.
  */
 
-import { isZTestAccount } from './zTestAccount';
+import { zTestFreeBilling } from './zTestAccount';
 import { doc, getDoc, runTransaction } from './serverDb';
 import { computeDebitedWallet } from './walletDebit';
 import { ledgerPatch } from './walletStatement';
@@ -307,7 +307,7 @@ export async function purchaseHostingAddon(
     const outcome = await runTransaction(db, async (t: any) => {
       const snap = await t.get(ref);
       const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
-      const result = computeAddonPurchase(current, when, addonId, { ...opts, waiveCharge: isZTestAccount(null, userId) || isZTestAccount(null, ownerId) });
+      const result = computeAddonPurchase(current, when, addonId, { ...opts, waiveCharge: zTestFreeBilling(null, userId) || zTestFreeBilling(null, ownerId) });
       if (result.ok) t.set(ref, result.wallet);
       return result;
     });

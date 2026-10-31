@@ -4791,3 +4791,9 @@ providers. Two Weak build reports after the flag flip still showed GLM→Kimi wi
 delivery — admission fail-open suspected; build-report observability follow-up in progress.
 No credential value is recorded here. Live credential validity and the deployed revision have
 not been independently verified. This note is not runtime authority — Admin/server env wins.
+
+- **`Z_TEST_ACCOUNT_FREE`** (`on` default / `off`) — kill switch for the TEMPORARY owner test-account
+  (z@gmail.com) free publish + hosting plan + renewal + domain connect + add-ons + hosting overage + APK
+  charge waivers (`src/server/lib/zTestAccount.ts` → `zTestFreeBilling`). Unset/`on` ⇒ free; `off` ⇒ z is
+  charged like everyone else. Does NOT affect the Surplus no-fallback/raw-error debug for z. Remove the
+  whole thing later by deleting `zTestAccount.ts` call sites.

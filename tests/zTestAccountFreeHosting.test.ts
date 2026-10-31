@@ -50,3 +50,22 @@ describe('free hosting plan / add-on for z only', () => {
     expect(await probeHostingPlan(Z_UID)).toEqual({ active: true, known: true });
   });
 });
+
+describe('Z_TEST_ACCOUNT_FREE kill switch', () => {
+  it('on/unset ⇒ free; off ⇒ z billed like anyone; Surplus debug unaffected', async () => {
+    const { zTestFreeBilling } = await import('../src/server/lib/zTestAccount');
+    const { _clearPlanCacheForTests } = await import('../src/server/lib/hostingPlan');
+    delete process.env.Z_TEST_ACCOUNT_FREE;
+    expect(zTestFreeBilling(null, Z_UID)).toBe(true);
+    process.env.Z_TEST_ACCOUNT_FREE = 'off';
+    try {
+      expect(zTestFreeBilling('z@gmail.com', Z_UID)).toBe(false);
+      _clearPlanCacheForTests();
+      expect((await probeHostingPlan(Z_UID)).active).toBe(false);
+      const plan = { id: STARTER.id, purchasedAt: NOW, expiresAt: '2026-10-01T00:00:00.000Z', autoRenew: true };
+      expect(decidePlanSweepStep({ ...empty(Z_UID), hostingPlan: plan }, NOW).action).not.toEqual({ kind: 'renewed' });
+      expect(surplusFallbackDisabledFor('z@gmail.com')).toBe(true);
+      expect(isZTestAccount(null, Z_UID)).toBe(true);
+    } finally { delete process.env.Z_TEST_ACCOUNT_FREE; }
+  });
+});

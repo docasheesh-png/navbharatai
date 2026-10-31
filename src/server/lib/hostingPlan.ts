@@ -27,7 +27,7 @@
  * already-granted plans keep their badge-removal (taking back something paid-for would be theft).
  */
 
-import { isZTestAccount } from './zTestAccount';
+import { zTestFreeBilling } from './zTestAccount';
 import { hostingOverageInrPerGb } from '../AgentV3/hostingCost';
 import { usdInrRate } from './UsdInrRate';
 import { BoundedCache } from './boundedCache';
@@ -485,7 +485,7 @@ export function decidePlanSweepStep(
   const DAY = 24 * 60 * 60 * 1000;
 
   // 1) renewal first — a renewed plan needs no reminder and no lapse.
-  const renewal = computeLazyRenewal(w, nowIso, isZTestAccount(null, typeof w.userId === 'string' ? w.userId : null));
+  const renewal = computeLazyRenewal(w, nowIso, zTestFreeBilling(null, typeof w.userId === 'string' ? w.userId : null));
   if (renewal.renewed) return { wallet: renewal.wallet, applied: true, action: { kind: 'renewed' } };
 
   // 2) reminders — fire the SMALLEST reached window, and burn every larger one with it.
@@ -665,7 +665,7 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
       const snap = await t.get(ref);
       if (!snap.exists()) return null;
       const current = snap.data();
-      const renewal = computeLazyRenewal(current, nowIso ?? new Date().toISOString(), isZTestAccount(null, userId) || isZTestAccount(null, ownerId));
+      const renewal = computeLazyRenewal(current, nowIso ?? new Date().toISOString(), zTestFreeBilling(null, userId) || zTestFreeBilling(null, ownerId));
       if (renewal.applied) t.set(ref, renewal.wallet);
       return renewal.wallet;
     });
@@ -746,7 +746,7 @@ export async function purchaseHostingPlan(
           return { ok: true, replay: true, wallet: current, plan, charged: false, creditedInr: 0, bundledCreditInr: 0 } as any;
         }
       }
-      const result = computePlanPurchase(current, nowIso ?? new Date().toISOString(), tierId, { ...opts, waiveCharge: isZTestAccount(null, userId) || isZTestAccount(null, ownerId) });
+      const result = computePlanPurchase(current, nowIso ?? new Date().toISOString(), tierId, { ...opts, waiveCharge: zTestFreeBilling(null, userId) || zTestFreeBilling(null, ownerId) });
       if (result.ok) t.set(ref, withLedgerV2(t, (c, i) => doc(db, c, i), ownerId, snap.exists() ? current : null, result.wallet, `plan:${String(tierId)}`));
       if (result.ok && opRef) t.set(opRef, { kind: 'plan', ownerId, tierId: String(tierId), at: new Date().toISOString() });
       return result;
@@ -874,7 +874,7 @@ export function _clearPlanCacheForTests(): void {
  */
 export async function probeHostingPlan(userId: string | null | undefined): Promise<PlanProbe> {
   // 🧪 z@gmail.com test account (lib/zTestAccount.ts): domain connect / badge-free hosting without buying. Remove later.
-  if (isZTestAccount(null, userId)) return { active: true, known: true };
+  if (zTestFreeBilling(null, userId)) return { active: true, known: true };
   if (!userId || !hostingPlansEnabled()) {
     // Plans off ⇒ no badge removal and no gating anywhere — but that is a KNOWN answer, not a failure.
     return { active: false, known: true };

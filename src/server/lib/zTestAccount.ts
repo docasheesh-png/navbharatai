@@ -18,3 +18,19 @@ export function isZTestAccount(email?: string | null, uid?: string | null): bool
   if (typeof uid === 'string' && Z_TEST_UIDS.has(uid)) return true;
   return typeof email === 'string' && Z_TEST_EMAILS.has(email.trim().toLowerCase());
 }
+
+/**
+ * KILL SWITCH for every FREE billing waiver (publish / hosting / domain / add-on / overage).
+ * Env `Z_TEST_ACCOUNT_FREE` — unset or `on` ⇒ free (today); `off` / `false` / `0` ⇒ z@gmail.com is
+ * charged exactly like everyone else. Read per call, so a Cloud Run env change applies on the next
+ * revision with no code change. Does NOT touch the Surplus no-fallback (that uses `isZTestAccount`).
+ */
+export function zTestAccountFreeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = String(env.Z_TEST_ACCOUNT_FREE ?? '').trim().toLowerCase();
+  return !(v === 'off' || v === 'false' || v === '0' || v === 'no');
+}
+
+/** Billing call sites use THIS, never `isZTestAccount` directly. */
+export function zTestFreeBilling(email?: string | null, uid?: string | null): boolean {
+  return zTestAccountFreeEnabled() && isZTestAccount(email, uid);
+}

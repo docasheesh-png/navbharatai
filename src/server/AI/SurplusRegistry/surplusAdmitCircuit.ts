@@ -26,9 +26,10 @@ export const SURPLUS_ADMIT_CIRCUIT_OPEN_REASON = 'admit_circuit_open' as const;
  */
 export const SURPLUS_ADMIT_CIRCUIT_FAILURE_THRESHOLD = 2;
 /** Base cool-down once open (2 minutes). Escalates on further deaths up to max. */
-export const SURPLUS_ADMIT_CIRCUIT_BASE_COOLDOWN_MS = 120_000;
+// Owner 2026-10-31: recover faster so mid-game builds get Surplus back quickly (half-open probe soon).
+export const SURPLUS_ADMIT_CIRCUIT_BASE_COOLDOWN_MS = 60_000;
 /** Cap so a bad evening cannot park Surplus for hours without a half-open probe. */
-export const SURPLUS_ADMIT_CIRCUIT_MAX_COOLDOWN_MS = 600_000;
+export const SURPLUS_ADMIT_CIRCUIT_MAX_COOLDOWN_MS = 180_000;
 
 export type SurplusAdmitCircuitState = 'closed' | 'open' | 'half_open';
 

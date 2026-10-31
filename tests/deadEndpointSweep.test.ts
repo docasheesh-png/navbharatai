@@ -67,8 +67,14 @@ function registeredPaths(): string[] {
   const files = [join(process.cwd(), 'server.ts'), ...walk(join(process.cwd(), 'src/server')).filter((f) => f.endsWith('.ts'))];
   const paths = new Set<string>();
   for (const file of files) {
-    for (const m of [...stripComments(readFileSync(file, 'utf8')).matchAll(REGISTRATION)]) {
-      if (m[1].startsWith('/')) paths.add(m[1]);
+    const src = stripComments(readFileSync(file, 'utf8'));
+    // A file that mounts its own `router` at a prefix (`app.use('/api/x', router)`) serves every
+    // `router.<verb>('/y')` at `/api/x/y` — compose them so mounted sub-routes are seen too.
+    const mounts = [...src.matchAll(/app\.use\(\s*['"`](\/[^'"`]+)['"`]\s*,\s*router\s*\)/g)].map((m) => m[1]);
+    for (const m of [...src.matchAll(REGISTRATION)]) {
+      if (!m[1].startsWith('/')) continue;
+      paths.add(m[1]);
+      if (/^\s*router\./.test(m[0])) for (const prefix of mounts) paths.add(prefix.replace(/\/$/, '') + m[1]);
     }
   }
   return [...paths];

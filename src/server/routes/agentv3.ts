@@ -3963,6 +3963,45 @@ function setAdmittedSurplusScope(session: SurplusBuildSession | undefined, enabl
   if (session) activateSurplusBuildForCurrentRequest(enabled);
 }
 
+// Kept OUT of the chat handler (Q-979 branch budget): owner-debug + pre-stream refusal helpers.
+/** DNA (z@ transcript 404, 2026-10-29): a PRE-STREAM refusal (Surplus admission / engine unavailable)
+ * returned 503 JSON without ever writing a ConversationStore record, yet the client had already added the
+ * v3_<sid> history entry → reopening it hit 404. Persist the prompt + refusal turn under the SAME stable id. */
+async function persistPreStreamRefusalTurn(i: { wsId: string; userId: string | null | undefined; prompt: string; typedPrompt: string | null | undefined }): Promise<void> {
+  try {
+    await raceTimeout(upsertConversationTurn(getConversationStore(), {
+      conversationId: conversationIdForWorkspace(i.wsId),
+      userId: i.userId ?? 'anon',
+      workspaceId: i.wsId,
+      title: deriveTitle(i.prompt),
+      turn: [
+        { role: 'user', content: i.typedPrompt || i.prompt, ts: Date.now() - 1 },
+        { role: 'assistant', content: 'The build could not start — the engine was temporarily unavailable. Please try again.', ts: Date.now() },
+      ],
+      patch: { status: 'error', updatedAt: Date.now() },
+    }), 5_000, 'persistPreStreamRefusal');
+  } catch { /* best-effort — never blocks the refusal */ }
+}
+
+/** Surplus is a reasoning model: its scope ask gets the longer deadline; other engines keep the default. */
+function surplusScopeTimeoutOpts(surplusSession: unknown): { timeoutMs?: number } {
+  return surplusSession ? { timeoutMs: SURPLUS_SCOPE_TIMEOUT_MS } : {};
+}
+
+/** Owner debug profiles only (surplusNoFallback): the raw admission reason; undefined for everyone else. */
+function surplusAdmissionDebugDetail(debug: boolean, diag: { code?: string; reason?: string; model?: string } | undefined): string | undefined {
+  if (!debug) return undefined;
+  return `admission ${diag?.code ?? 'NO_DIAG'} reason=${diag?.reason ?? 'unknown'}${diag?.model ? ` model=${diag.model}` : ''}`;
+}
+
+/** Owner debug profiles only: WHY Weak scope blocked, appended to the soft copy. '' for everyone else. */
+function surplusScopeDebugSuffix(debug: boolean, weakAdmission: { scope?: unknown; failure?: { stage?: string; reason?: string } } | null | undefined, earlySurplusFailure: unknown): string {
+  if (!debug || weakAdmission?.scope !== null) return '';
+  const why = earlySurplusFailure !== undefined ? rawErrorText(earlySurplusFailure)
+    : `stage=${weakAdmission.failure?.stage ?? 'unknown'} reason=${weakAdmission.failure?.reason ?? 'unknown'}`;
+  return `\n\n🛠️ Surplus raw error (debug, this profile only): scope ${why}`;
+}
+
 function respondBuilderEngineUnavailable(res: Response, tier: PowerLevel, debugDetail?: string): void {
       const tierName = tierDisplayName(toPowerLevel(tier));
       const soft = tierName === 'Weak'
@@ -11376,21 +11415,7 @@ async function noteBuildOutcome(
     // returned 503 JSON without ever writing a ConversationStore record, yet the client had already
     // added the v3_<sid> history entry → reopening it hit GET /conversations/:id → 404 "Conversation not
     // found". Persist the prompt + refusal turn under the SAME stable id first, so the transcript loads.
-    const persistPreStreamRefusal = async (wsId: string): Promise<void> => {
-      try {
-        await raceTimeout(upsertConversationTurn(getConversationStore(), {
-          conversationId: conversationIdForWorkspace(wsId),
-          userId: userId ?? 'anon',
-          workspaceId: wsId,
-          title: deriveTitle(prompt),
-          turn: [
-            { role: 'user', content: typedPrompt || prompt, ts: Date.now() - 1 },
-            { role: 'assistant', content: 'The build could not start — the engine was temporarily unavailable. Please try again.', ts: Date.now() },
-          ],
-          patch: { status: 'error', updatedAt: Date.now() },
-        }), 5_000, 'persistPreStreamRefusal');
-      } catch { /* best-effort — never blocks the refusal */ }
-    };
+    const persistPreStreamRefusal = (wsId: string): Promise<void> => persistPreStreamRefusalTurn({ wsId, userId, prompt, typedPrompt });
     const earlySurplusTurns: Array<import('../AgentV3/ClaudeClient').TurnResult> = [];
     const earlySurplusRecords: Array<Omit<import('../AgentV3/BuildDiagnostics').LlmCallRecord, 'ts'>> = [];
     let earlySurplusFailure: unknown;
@@ -11413,9 +11438,7 @@ async function noteBuildOutcome(
       releaseBuildLock(buildKey, buildLockToken);
       audit('AGENTV3_TIER_ENGINE_UNAVAILABLE', { userId, tier: powerLevelReqEffective, afterSurplusFallback: surplusAdmitGate.afterSurplusFallback }, 'warn');
       await persistPreStreamRefusal(intentWorkspaceId);
-      respondBuilderEngineUnavailable(res, powerLevelReqEffective, surplusFallbackDisabledFor(email, userId)
-        ? `admission ${surplusAdmitGate.diag?.code ?? 'NO_DIAG'} reason=${surplusAdmitGate.diag?.reason ?? 'unknown'}${surplusAdmitGate.diag?.model ? ` model=${surplusAdmitGate.diag.model}` : ''}`
-        : undefined);
+      respondBuilderEngineUnavailable(res, powerLevelReqEffective, surplusAdmissionDebugDetail(surplusFallbackDisabledFor(email, userId), surplusAdmitGate.diag));
       return;
     }
     surplusSession = surplusAdmitGate.session;
@@ -11426,7 +11449,7 @@ async function noteBuildOutcome(
       createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
         audit('AGENTV3_DISCOUNT_SCOPE_CALL', scopeCallAudit(scopeRequestId, intentWorkspaceId, row), 'info');
       }, error => { earlySurplusFailure = error; }),
-      surplusSession ? { timeoutMs: SURPLUS_SCOPE_TIMEOUT_MS } : {});
+      surplusScopeTimeoutOpts(surplusSession));
     recordScopeFailure(scopeRequestId, intentWorkspaceId, weakAdmission, audit);
     const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(
       req.body.weakForceContinue, powerLevelReqEffective, weakAdmission,
@@ -11546,11 +11569,7 @@ async function noteBuildOutcome(
         if (weakScopeBlocked) {
           reply = weakAdmissionReply(weakAdmission?.scope ?? null);
           // Owner debug profiles only (surplusNoFallback): show WHY scope blocked instead of the soft copy alone.
-          if (surplusFallbackDisabledFor(email, userId) && weakAdmission?.scope === null) {
-            const why = earlySurplusFailure !== undefined ? rawErrorText(earlySurplusFailure)
-              : `stage=${weakAdmission.failure?.stage ?? 'unknown'} reason=${weakAdmission.failure?.reason ?? 'unknown'}`;
-            reply += `\n\n🛠️ Surplus raw error (debug, this profile only): scope ${why}`;
-          }
+          reply += surplusScopeDebugSuffix(surplusFallbackDisabledFor(email, userId), weakAdmission, earlySurplusFailure);
         } else if (clarity && !echoesPlatformNotice) {
           // Written by the PLATFORM, not a model: one short question in the user's language + 3–4 chips. Billed 0.
           const r = clarifyReply(clarity.category, voiceOf(String(prompt ?? '')));

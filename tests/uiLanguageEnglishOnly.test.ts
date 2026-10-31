@@ -42,6 +42,11 @@ const DEVANAGARI = /[\u0900-\u097F]/;
 const ALLOWED: Record<string, string> = {
   // Matches what the USER TYPES so the assistant can mirror their greeting. The key is handed to a
   // model in a system prompt ("mirror this style"); it is never rendered as a label.
+  'src/components/agentv3/NextStepCard.tsx': 'owner-requested bilingual NEXT STEP card (#4045, Hindi+English for first-time Indian builders); every string has an English line beside it',
+  'src/components/settings/FirestoreRulesCard.tsx': 'owner-requested bilingual Firestore safe-rules card (#4043/#4044); English primary, Hindi helper beside it',
+  'src/lib/firestoreRules.ts': 'owner-requested {en, hi} step pairs for the Firestore rules card (#4043); English always present',
+  'src/lib/registrarGuide.ts': 'owner-requested Hindi registrar DNS steps (#4043) beside the English steps for each registrar',
+  'src/lib/nextStepGuide.ts': 'owner-requested {en, hi} copy pairs for the NEXT STEP card (#4045); English always present',
   'src/lib/apnapanEngine.ts': 'greeting DETECTION patterns + a key passed to the AI, never shown as UI',
   // A translation editor the user runs on THEIR OWN app. A language picker must print each language
   // in its own script — "Hindi" written in Latin is exactly what a Hindi reader cannot find.

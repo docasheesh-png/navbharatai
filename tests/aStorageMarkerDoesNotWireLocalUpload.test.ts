@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { auditSummaryClaims, claimCorrection } from '../src/server/AgentV3/claimAudit';
 import { LOCAL_UPLOAD_LIMITS, provenLocalUploadPath } from '../src/server/AgentV3/localUploadPath';
@@ -6,6 +6,11 @@ import { LOCAL_UPLOAD_NOTICE } from '../src/server/AgentV3/localUploadNotice';
 import { findFakeFeatures, fakeFeatureNotice, fakeFeatureReportLine, honestyBannerLines, impliedRequirementsFor,
   keysForFinding, withHonestyBanner, fakeFeatureWriteNote, type FakeFeatureFinding } from '../src/server/AgentV3/fakeFeatureScan';
 import { HONESTY_BANNER_OPEN, HONESTY_BANNER_CLOSE } from '../src/lib/honestyBanner';
+
+// Semantic fixtures test recognition, not host scheduling under coverage.
+// The explicit injected-clock expiry cases below still enforce the production work budget.
+beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(0); });
+afterEach(() => vi.restoreAllMocks());
 
 // Invented current-code regression, not retained source or historical causality evidence.
 const COMPONENT = `import { useState } from 'react';

@@ -99971,3 +99971,7 @@ Completed aggregate on 41a1024fd: 3,173 files; 48,030 passed / 2 failed / 85 ski
 ### 2026-11-01 — Router One offline export observations (follow-up to #4057)
 
 Added a pure, disconnected CSV validator with synthetic tests and explicit unverified-export/billingAuthorized:false output. Exact micro-USD parsing, unknown versus zero, schema/quoting limits, file-local duplicate/conflict quarantine and retained cancellation charges are covered. No accepted receipts, production caller, wallet writes, real private fixtures or live imports. Supplied export establishes observed schema only; provider finality/account binding and durable request-to-attempt correlation remain prerequisites. Targeted tests passed on the initial implementation; final-tree verification is recorded separately before publication.
+
+### 2026-11-01 — Offline validator placement correction
+
+The disconnected parser belongs in scripts/lib, not application src. Moved it and its synthetic tests without adding a production caller or modifying deadCodeGuard. The superseded full-coverage run exposed that guard failure and was terminated at 23 minutes (exit143), not reported green. Final-tree verification follows on the corrected tooling placement.

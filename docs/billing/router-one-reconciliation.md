@@ -50,7 +50,7 @@ Required outside actions: supplier-confirmed settlement contract/export fixture 
 
 ## Offline export validation (2026-11-01)
 
-`src/server/lib/routerOneExport.ts` is a pure, disconnected parser for the observed
+`scripts/lib/routerOneExport.ts` is a pure, disconnected parser for the observed
 18-column Logs export schema. It returns `kind: unverified-export` and
 `billingAuthorized: false` in every case. It has no production caller, network,
 filesystem or wallet access. No real export or private identifiers are fixtures.

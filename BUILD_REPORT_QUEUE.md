@@ -812,3 +812,5 @@ Every cfd01074 retained item has its own pending row; class-prevention evidence 
 ### 2026-11-01 — Router One offline export validator
 
 Pure parsing and quarantine only, with synthetic regression fixtures. Does not complete positive actual-times10 settlement. Provider finality, account/key ownership, trusted provenance and durable request binding remain blocked. No historical wallet mutations or production integration. Final verification pending.
+
+Offline validator placement corrected to scripts/lib; dead-code guard unchanged. Superseded coverage run stopped with known placement failure; final-tree verification pending.

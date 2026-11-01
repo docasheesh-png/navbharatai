@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ROUTER_ONE_EXPORT_HEADERS as headers, validateRouterOneExport as validate } from './routerOneExport';
+import { ROUTER_ONE_EXPORT_HEADERS as headers, validateRouterOneExport as validate } from '../scripts/lib/routerOneExport';
 const base = ['2026-01-01 12:00:00', 'synthetic-request', 'synthetic-model', 'Synthetic key', 'synthetic-key', '200', '100', '20', '50', '0', '120', '9.99', '10', '30', '', 'Wallet', '0.000001', ''];
 const quote = (s: string) => `"${s.replaceAll('"', '""')}"`;
 const file = (...rows: string[][]) => [headers, ...rows].map(r => r.map(quote).join(',')).join('\r\n');

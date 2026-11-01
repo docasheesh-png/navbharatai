@@ -808,3 +808,7 @@ Every cfd01074 retained item has its own pending row; class-prevention evidence 
 | ID | Report | Problem | State | Owner | Last action / required unblock |
 |---|---|---|---|---|---|
 | Q-2272 | Router One supplier-cost billing | ENGINE_R1 token rates were billed through the Sonnet fallback; verified expense times 10 needs a supplier settlement contract | 🟡 BLOCKED | fix/routerone-receipt-billing (local) | **What:** positive actual-times-10 settlement and publication. **Why blocked:** no reviewed authenticated per-request settlement transport; required emulator download returns HTTP 403. **Needs:** documented account/key/request-bound settled wallet expense with a redacted real response, and access to the pinned emulator for the full gate. **Already tried:** reviewed public OpenAPI and accounting docs, prepared fail-closed mitigation, fixed seven baseline defects with targeted regressions, documented disabled trusted-record reconciliation; prior official download attempts confirmed enforced network-policy denial (not retried). No tariff or aggregate balance estimate accepted. |
+
+### 2026-11-01 — Router One offline export validator
+
+Pure parsing and quarantine only, with synthetic regression fixtures. Does not complete positive actual-times10 settlement. Provider finality, account/key ownership, trusted provenance and durable request binding remain blocked. No historical wallet mutations or production integration. Final verification pending.

@@ -100191,3 +100191,19 @@ those service obligations separately from the CC0 asset licence when wiring the 
   required emulator drills and the local private-storage drill passed. The signature gate remains
   explicitly failed/blocked from the prior 403 and was not retried. Starting complete coverage on the
   corrected checkpoint; prior complete failures are retained in the evidence directory.
+
+### 2026-11-01 — terminal full coverage checkpoint
+
+- Code commit 2e97244d61e7520f5d22ab8b629665dfa3ef288b completed full coverage with exit 0.
+  3,188 files passed; 48,211 tests passed, 85 existing skips; duration 956.14 seconds.
+  Statements 75.53%, branches 71.45%, functions 78.15%, lines 77.50%; thresholds passed.
+  Evidence: /workspace/navbharat-asset-verification/coverage-verified-tree.log. Session 97491 ended.
+- No owned verification process remains running. This documentation-only checkpoint follows the
+  verified source; no further implementation change was made after that coverage run.
+- Required signature verification remains failed/blocked by the prior TUF HTTP 403; no retry or
+  bypass. Provider API access to api.polyhaven.com and api.github.com remains denied. Minimal third
+  evidenced host needed for the signature gate is tuf-repo-cdn.sigstore.dev. Download hosts remain
+  unknown until authorized official metadata can be inspected.
+- Zero actual external models admitted/downloaded; production catalogue empty and feature off.
+  Synthetic rendering/animation/artifact/reload/storage evidence does not establish six complete
+  real-asset games, physical mobile performance or live publication. No push, PR, merge or deployment.

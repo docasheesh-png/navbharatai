@@ -76,7 +76,12 @@ approve access; this implementation does not change network/security settings.
 Evidence logs reside in `/workspace/navbharat-asset-verification` in the working environment.
 Checks use CI's Node 22.23.4/npm 11.18.0; browser harnesses also passed with these versions.
 Affected-suite run: 37 files, 657 tests passed. A subsequent four-file asset run passed 35 tests;
-these overlap and must not be summed. Full coverage is separately tracked in PROGRESS.md.
+these overlap and must not be summed. Final targeted guards/assets: 10 files / 93 tests passed.
+Full coverage on code commit `2e97244d61e7520f5d22ab8b629665dfa3ef288b` completed with exit 0:
+3,188 files passed; 48,211 tests passed and 85 existing skips (956.14 seconds). Coverage thresholds
+passed: statements 75.53%, branches 71.45%, functions 78.15%, lines 77.50%. Evidence:
+`/workspace/navbharat-asset-verification/coverage-verified-tree.log`. No owned test remains running.
+The required signature gate remains blocked, so this is not a claim of fully green required CI.
 
 Real system Chromium with Playwright 1.49.1 and Three.js rendered a synthetic textured animated GLB:
 SHA-256 `59838f141dcb34473eb380f97b4935545d26e036ceaf38dead0e710f54862d25`,
@@ -128,7 +133,8 @@ remain pending quality/animation-preserving implementation and real-asset accept
 The first completed full suite had one genuine failure: a synthetic fixture was located under
 production source and the dead-code guard rejected it. It was moved to `tests/fixtures` without
 changing the guard or adding an allowlist entry. That run had 48,200 passing tests, one failure and
-85 existing skips; it was not a green coverage result. The corrected tree is being verified again.
+85 existing skips; it was not a green coverage result. The corrected final tree subsequently passed
+the complete coverage suite as recorded above; both earlier failure logs are retained.
 
 ### Local private-storage spill/cache evidence
 

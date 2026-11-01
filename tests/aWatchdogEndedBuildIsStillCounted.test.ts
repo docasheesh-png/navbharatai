@@ -41,6 +41,6 @@ describe('a watchdog-ended build is still counted', () => {
   it('both exits share one cost expression', () => {
     const hits = route.match(/realProviderCostUsd\(/g) || [];
     expect(hits).toHaveLength(1);
-    expect(route).toContain('realProviderCostUsd(i.entries.filter(e => !isRouterOneAccountingProvider(e.provider)), i.remainder); } catch { return 0; } })() + Math.max(0, i.sandboxUsd || 0)');
+    expect(route).toContain('ledgerCostUsd(i.entries) + realProviderCostUsd([], i.remainder); } catch { return 0; } })() + Math.max(0, i.sandboxUsd || 0)');
   });
 });

@@ -50,11 +50,11 @@ describe('actual Builder route Surplus settlement branch', () => {
     expect(result.absorbedUnbilledUsd).toBe(0);
     expect(result.realCostRemainder).toEqual({ inputTokens: 0, outputTokens: 0 });
   });
-  it('preserves legacy model and VM charges separately under2.5 margin', () => {
+  it('keeps the model margin separate from internal VM expense', () => {
     const legacy = createProviderUsageLedger();
     legacy.add('GLM', { inputTokens: 1_000_000, outputTokens: 0 }, 'glm-5.3');
     const original = bill(legacy, 0.2);
-    expect(original.effectiveBilledUsd).toBeCloseTo(4);
+    expect(original.effectiveBilledUsd).toBeCloseTo(3.5);
     const mixed = createProviderUsageLedger();
     mixed.add('GLM', { inputTokens: 1_000_000, outputTokens: 0 }, 'glm-5.3');
     add(mixed);

@@ -194,7 +194,7 @@ describe('census: every door asks the switch', () => {
     expect(registrations).toHaveLength(1);
     const args = registrations[0].arguments;
     expect(args.slice(1, -1).map(arg => arg.getText(parsed))).toEqual([
-      'buildRateLimiter()', 'enforceNotBanned()', 'enforceFreeProgramPause()', 'surplusBuildInferenceScope',
+      'buildRateLimiter()', 'enforceNotBanned()', 'enforceFreeProgramPause()', 'surplusBuildInferenceScope', 'routerOneAccountingScope',
     ]);
     const handler = args[args.length - 1];
     expect(ts.isCallExpression(handler) && handler.expression.getText(parsed) === 'withBuildRequestCleanup').toBe(true);

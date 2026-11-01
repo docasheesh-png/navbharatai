@@ -19,9 +19,9 @@ function snapshot(): PublicPriceSnapshot {
 }
 function harness(raw: unknown = { model, usage, choices: [{ message: { content: 'done' } }] }) {
   const create = vi.fn(async () => raw);
-  const store: CatalogueAttemptStore = { reserve: vi.fn(async () => {}), finish: vi.fn(async () => {}) };
+  const store: CatalogueAttemptStore = { reserve: vi.fn(async () => {}), finish: vi.fn(async () => {}), releaseVerified: vi.fn(async () => {}) };
   const prices = { snapshot: vi.fn(async () => snapshot()) };
-  const client = cataloguePricedRouterOneClient({ chat: { completions: { create } } } as OpenAiChatClient, 'synthetic-credential', { store, prices, now: () => now });
+  const client = cataloguePricedRouterOneClient({ chat: { completions: { create } } } as OpenAiChatClient, `synthetic-credential-${crypto.randomUUID()}`, { store, prices, maxDurationMs: 60000, now: () => now });
   const call = () => cataloguePricedRouterOneText(() => client.chat.completions.create({ model, messages: [], max_tokens: 1000 }));
   return { create, store, prices, client, call };
 }
@@ -73,6 +73,17 @@ describe('catalogue dispatch and pending spend fence', () => {
       expect(await h.call()).toMatchObject({ model });
       await expect(h.call()).rejects.toThrow(); expect(h.create).toHaveBeenCalledTimes(1);
       expect(currentRouterOneCatalogueReceipts()).toEqual([]);
+    });
+  });
+  it('retains acknowledged billable evidence if the release acknowledgement is lost', async () => {
+    const h = harness(); vi.mocked(h.store.releaseVerified).mockRejectedValue(new Error('release acknowledgement lost'));
+    await runInRouterOneAccountingScope(binding, async () => {
+      expect(await h.call()).toMatchObject({ model });
+      const receipts = currentRouterOneCatalogueReceipts();
+      expect(receipts).toHaveLength(1);
+      expect(isRouterOneCatalogueReceipt(receipts[0])).toBe(true);
+      expect(receipts[0].costAttoUsd).toBe('3672000000000000');
+      await expect(h.call()).rejects.toThrow(); expect(h.create).toHaveBeenCalledTimes(1);
     });
   });
   it('requires a bound request scope and fences transport ambiguity', async () => {

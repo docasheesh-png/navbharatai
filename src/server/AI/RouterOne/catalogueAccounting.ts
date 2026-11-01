@@ -9,7 +9,7 @@ import { audit } from '../../lib/audit';
 import { getServerDb } from '../../lib/serverDb';
 import { calculateCatalogueChatCost, catalogueSnapshotIssue } from './catalogueMath';
 import { RouterOnePublicPriceSource, routerOnePublicPrices, ROUTER_ONE_PRICE_MAX_AGE_MS, type PublicPriceSnapshot } from './publicPriceSource';
-import { RouterOneAccountingUnavailableError } from './accounting';
+import { isRouterOneAccountingProvider, RouterOneAccountingUnavailableError } from './accounting';
 
 export interface CatalogueCallBinding { buildId: string; uid: string; workspaceId: string }
 export interface RouterOneCatalogueReceipt extends CatalogueCallBinding {
@@ -23,34 +23,62 @@ export function isRouterOneCatalogueReceipt(v: unknown): v is RouterOneCatalogue
   return !!v && typeof v === 'object' && issued.has(v);
 }
 export interface CatalogueAttemptStore {
-  reserve(binding: CatalogueCallBinding, callId: string, credentialSha256: string, snapshot: PublicPriceSnapshot): Promise<void>;
+  reserve(binding: CatalogueCallBinding, callId: string, credentialSha256: string, snapshot: PublicPriceSnapshot, deadlineAt: number): Promise<void>;
+  releaseVerified(callId: string, credentialSha256: string): Promise<void>;
   finish(callId: string, credentialSha256: string, result: RouterOneCatalogueReceipt | { kind: 'pending'; reason: string; requestId: string | null }): Promise<void>;
 }
-/** One outstanding request per key across workers. A crash or ambiguous response leaves
- * the key blocked; only an explicit future reconciliation can reopen it. No automatic refunds.
- */
+/** Normal requests share the key concurrently. Only unresolved or expired attempts
+ * fence new dispatches. Completion is acknowledged before its hold is released. */
+type KeyState = { version: 2; active: Record<string, number>; unresolved: Record<string, true> };
+function keyState(value: unknown): KeyState {
+  if (value === undefined) return { version: 2, active: {}, unresolved: {} };
+  const v = value as KeyState;
+  if (v.version !== 2 || !v.active || !v.unresolved
+    || Object.values(v.active).some(t => !Number.isSafeInteger(t) || t <= 0)
+    || Object.values(v.unresolved).some(t => t !== true)) throw new RouterOneAccountingUnavailableError();
+  return { version: 2, active: { ...v.active }, unresolved: { ...v.unresolved } };
+}
 export class FirestoreCatalogueAttemptStore implements CatalogueAttemptStore {
-  constructor(private readonly db: Pick<Firestore, 'doc' | 'runTransaction'>) {}
-  async reserve(binding: CatalogueCallBinding, callId: string, key: string, snapshot: PublicPriceSnapshot): Promise<void> {
+  constructor(private readonly db: Pick<Firestore, 'doc' | 'runTransaction'>, private readonly now = Date.now) {}
+  async reserve(binding: CatalogueCallBinding, callId: string, key: string, snapshot: PublicPriceSnapshot, deadlineAt: number): Promise<void> {
+    if (!Number.isSafeInteger(deadlineAt) || deadlineAt <= this.now()) throw new RouterOneAccountingUnavailableError();
     const state = this.db.doc(`router_one_accounting_keys/${key}`);
     const attempt = this.db.doc(`router_one_catalogue_attempts/${callId}`);
-    await this.db.runTransaction(async tx => {
-      const previous = await tx.get(state);
-      if (previous.exists && (previous.data()?.pending !== false || previous.data()?.inflight !== null)) throw new RouterOneAccountingUnavailableError();
-      tx.create(attempt, { ...binding, callId, credentialSha256: key, snapshot, status: 'reserved', createdAt: Date.now() });
-      tx.set(state, { inflight: callId, pending: false });
+    const admitted = await this.db.runTransaction(async tx => {
+      const previous = await tx.get(state), next = keyState(previous.exists ? previous.data() : undefined);
+      for (const [id, deadline] of Object.entries(next.active)) if (deadline <= this.now()) next.unresolved[id] = true;
+      if (Object.keys(next.unresolved).length) { tx.set(state, next); return false; }
+      if (next.active[callId]) throw new RouterOneAccountingUnavailableError();
+      next.active[callId] = deadlineAt;
+      tx.create(attempt, { ...binding, callId, credentialSha256: key, snapshot, status: 'reserved', createdAt: this.now(), deadlineAt });
+      tx.set(state, next); return true;
     });
+    if (!admitted) throw new RouterOneAccountingUnavailableError();
   }
   async finish(callId: string, key: string, result: RouterOneCatalogueReceipt | { kind: 'pending'; reason: string; requestId: string | null }): Promise<void> {
     const state = this.db.doc(`router_one_accounting_keys/${key}`), attempt = this.db.doc(`router_one_catalogue_attempts/${callId}`);
     await this.db.runTransaction(async tx => {
-      const previous = await tx.get(state);
-      if (previous.data()?.inflight !== callId) throw new RouterOneAccountingUnavailableError();
-      tx.update(attempt, { status: result.kind, result, completedAt: Date.now() });
-      tx.set(state, { inflight: null, pending: result.kind === 'pending', lastCallId: callId });
+      const previous = await tx.get(state), row = await tx.get(attempt);
+      const next = keyState(previous.exists ? previous.data() : undefined);
+      if (!next.active[callId] || row.data()?.status !== 'reserved') throw new RouterOneAccountingUnavailableError();
+      // Retained until the caller has received the write acknowledgement and issued evidence.
+      next.unresolved[callId] = true;
+      tx.update(attempt, { status: result.kind, result, completedAt: this.now() });
+      tx.set(state, next);
+    });
+  }
+  async releaseVerified(callId: string, key: string): Promise<void> {
+    const state = this.db.doc(`router_one_accounting_keys/${key}`), attempt = this.db.doc(`router_one_catalogue_attempts/${callId}`);
+    await this.db.runTransaction(async tx => {
+      const previous = await tx.get(state), row = await tx.get(attempt);
+      const next = keyState(previous.exists ? previous.data() : undefined);
+      if (!next.active[callId] || !next.unresolved[callId] || row.data()?.status !== 'catalogue-calculated') throw new RouterOneAccountingUnavailableError();
+      delete next.active[callId]; delete next.unresolved[callId];
+      tx.set(state, next);
     });
   }
 }
+const uncertainKeys = new Set<string>();
 interface Scope { binding?: CatalogueCallBinding; stopped: boolean; receipts: RouterOneCatalogueReceipt[] }
 interface Attempt {
   callId: string; key: string; snapshot: PublicPriceSnapshot; scope: Scope; store: CatalogueAttemptStore;
@@ -65,10 +93,10 @@ export const routerOneAccountingScope: RequestHandler = (_req, res, next) => {
   res.once('close', () => { scope.stopped = true; });
   scopes.run(scope, next);
 };
-export function bindRouterOneAccountingScope(binding: CatalogueCallBinding): void {
+export function bindRouterOneAccountingScope(binding: Omit<CatalogueCallBinding, 'uid'> & { uid: string | null | undefined }): void {
   const scope = scopes.getStore();
-  if (!scope || scope.binding || !binding.uid || !binding.buildId || !binding.workspaceId) return;
-  scope.binding = Object.freeze({ ...binding });
+  if (!scope || scope.binding || typeof binding.uid !== 'string' || !binding.uid || !binding.buildId || !binding.workspaceId) return;
+  scope.binding = Object.freeze({ ...binding, uid: binding.uid });
 }
 export function recordRouterOneRequestId(requestId: string | null): void {
   const attempt = dispatches.getStore(); if (attempt) attempt.requestId = requestId;
@@ -96,6 +124,9 @@ async function finish(attempt: Attempt, model: string, usage: unknown, complete:
       reason: calculated.kind === 'pending' ? calculated.reason : 'incomplete-usage', requestId: attempt.requestId });
     if (receipt) {
       issued.add(receipt); attempt.receipt = receipt; attempt.scope.receipts.push(receipt);
+      // A release failure cannot revoke acknowledged, billable evidence or replay output.
+      try { await attempt.store.releaseVerified(attempt.callId, attempt.key); }
+      catch { attempt.scope.stopped = true; uncertainKeys.add(attempt.key); }
       try { audit('ROUTER_ONE_CATALOGUE_PRICED', { buildId: receipt.buildId, callId: receipt.callId,
         model: receipt.model, expenseEvidence: receipt.expenseEvidence, settledWalletDebit: false,
         costAttoUsd: receipt.costAttoUsd, modelSubtotalAttoUsd: receipt.modelSubtotalAttoUsd,
@@ -107,7 +138,8 @@ async function finish(attempt: Attempt, model: string, usage: unknown, complete:
         callId: attempt.callId, reason: calculated.kind === 'pending' ? calculated.reason : 'incomplete-usage', furtherDispatchBlocked: true }); } catch { /* observation only */ }
     }
   } catch {
-    // Reserved durable state fences the key even if final persistence fails. Preserve returned work.
+    uncertainKeys.add(attempt.key);
+    // Stop this worker immediately. Across workers, a failed write remains fenced by its persisted deadline.
     attempt.scope.stopped = true;
   }
 }
@@ -115,10 +147,11 @@ export interface RouterOneAccountingDependencies {
   prices?: Pick<RouterOnePublicPriceSource, 'snapshot'>;
   store?: CatalogueAttemptStore;
   now?: () => number;
+  maxDurationMs: number;
 }
 /** Wrap each physical SDK request, not a logical retry. No credentials are persisted. */
 export function cataloguePricedRouterOneClient(client: OpenAiChatClient, key: string,
-  deps: RouterOneAccountingDependencies = {}): OpenAiChatClient {
+  deps: RouterOneAccountingDependencies): OpenAiChatClient {
   return { chat: { completions: { create: async (request, options) => {
     const scope = scopes.getStore(), turn = turns.getStore();
     if (!scope?.binding || scope.stopped || !turn || options?.signal?.aborted) throw new RouterOneAccountingUnavailableError();
@@ -132,7 +165,8 @@ export function cataloguePricedRouterOneClient(client: OpenAiChatClient, key: st
     if (!store || scope.stopped || options?.signal?.aborted) throw new RouterOneAccountingUnavailableError();
     const attempt: Attempt = { callId: randomUUID(), key: createHash('sha256').update(key).digest('hex'), snapshot,
       scope, store, requestId: null, done: false };
-    await store.reserve(scope.binding, attempt.callId, attempt.key, snapshot);
+    if (uncertainKeys.has(attempt.key) || !Number.isSafeInteger(deps.maxDurationMs) || deps.maxDurationMs <= 0) throw new RouterOneAccountingUnavailableError();
+    await store.reserve(scope.binding, attempt.callId, attempt.key, snapshot, (deps.now ?? Date.now)() + deps.maxDurationMs);
     turn.attempts.push(attempt);
     try {
       if (scope.stopped || options?.signal?.aborted) throw new RouterOneAccountingUnavailableError();
@@ -208,4 +242,15 @@ export function routerOneCatalogueBuildCharges(entries: Array<{ model?: string; 
     if (!entry.unbilled && !(entry.phase && barren.has(entry.phase))) billable += cost;
   }
   return { costUsd: Number(total) / 1e18, billedUsd: Number(billable * 5n / 2n) / 1e18, absorbedUsd: Number(total - billable) / 1e18 };
+}
+
+/** Keep accounting branches outside the bounded chat handler. */
+export function recordRouterOneScopeUsage(ledger: Pick<import('../../AgentV3/ProviderUsageLedger').ProviderUsageLedger, 'add'>): void {
+  for (const receipt of currentRouterOneCatalogueReceipts()) ledger.add('ENGINE_R1', {
+    inputTokens: receipt.inputTokens, outputTokens: receipt.outputTokens,
+    cacheReadInputTokens: receipt.cacheReadTokens ?? 0, routerOneReceipt: receipt,
+  }, receipt.model);
+}
+export function routerOneCostUnconfirmed(provider: string, receipt: unknown): boolean {
+  return isRouterOneAccountingProvider(provider) && !isRouterOneCatalogueReceipt(receipt);
 }

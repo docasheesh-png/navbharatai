@@ -260,13 +260,20 @@ usage to zero. Reasoning is already in completion tokens; cached input is includ
 in prompt tokens once. A successful calculation is explicitly
 `expenseEvidence: official-public-tariff` and `settledWalletDebit: false`.
 
-A key has at most one outstanding physical request across workers. Missing usage,
-conflicting model/counters, transport ambiguity or uncertain persistence leaves the
-key blocked in durable storage, including across subsequent builds and restarts.
-There is no timed automatic release of this hold. A response already returned is
-preserved; accounting failure does not replay its actions. Later attempts skip to
-the approved provider fallback chain. This conservative concurrency limit may reduce
-Router One throughput; it bounds unresolved exposure while reconciliation is absent.
+Normal requests sharing a key can execute concurrently under existing admission and
+pacing controls. Each has a persisted deadline derived from its SDK timeout. Missing
+usage, conflicting counters or transport ambiguity persists an unresolved hold;
+new dispatches then skip Router One. A crashed worker's expired attempt is marked
+unresolved on the next admission, never automatically released. Already in-flight
+calls can finish; each successful completion clears only its own hold.
+
+Completion is two-phase: persist the calculated result and hold, acknowledge that
+write and issue billable evidence, then release that call's hold. A lost completion
+acknowledgement leaves the durable hold in place. A failed release cannot revoke
+issued evidence or replay successful work. If the completion write itself fails,
+the current worker blocks the key immediately; other workers detect its outstanding
+attempt at the persisted deadline. This bounds the uncertainty window rather than
+claiming instantaneous cross-worker knowledge of a failed database write.
 Reopening a pending key requires a separately reviewed reconciliation action; no
 admin bypass, automatic import or historical wallet adjustment is supplied here.
 

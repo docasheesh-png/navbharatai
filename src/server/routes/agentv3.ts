@@ -1,4 +1,4 @@
-import { routerOneAccountingScope, bindRouterOneAccountingScope, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, currentRouterOneCatalogueReceipts, isRouterOneCatalogueReceipt, routerOneCatalogueBuildCharges } from '../AI/RouterOne/catalogueAccounting';
+import { routerOneAccountingScope, bindRouterOneAccountingScope, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges } from '../AI/RouterOne/catalogueAccounting';
 import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
 import { PRO_SANDBOX_FEE_PCT, proSandboxFee, proSandboxFeeFields, proSubtotalNotice } from '../AgentV3/proSandboxFee';
 import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
@@ -2706,7 +2706,7 @@ export function openAiCompatRunners(
           fetch: isRouterOneAccountingProvider(name)
             ? routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId); audit('ROUTER_ONE_REQUEST', trace); }) : canaryFetch() });
         const pricedClient = isRouterOneAccountingProvider(name)
-          ? cataloguePricedRouterOneClient(client as unknown as OpenAiChatClient, apiKey) : client as unknown as OpenAiChatClient;
+          ? cataloguePricedRouterOneClient(client as unknown as OpenAiChatClient, apiKey, { maxDurationMs: sdkTimeoutMs }) : client as unknown as OpenAiChatClient;
         const turnRunner = new OpenAiToolRunner(pricedClient, { model, ...runnerOpts, timeoutMs });
         const runner = pacedRunner(sizeGatedRunner(isRouterOneAccountingProvider(name)
           ? cataloguePricedRouterOneRunner(turnRunner) : turnRunner, floorMaxPromptChars), name);
@@ -3535,7 +3535,7 @@ function routerOneScopeAsk(): (system: string, user: string, signal?: AbortSigna
       try {
         const client = new OpenAI({ apiKey: key, baseURL: routerOneBaseUrl(), timeout: 60_000, maxRetries: 0,
           fetch: routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId); audit('ROUTER_ONE_REQUEST', trace); }) });
-        const r = await cataloguePricedRouterOneText(() => cataloguePricedRouterOneClient(client as unknown as OpenAiChatClient, key).chat.completions.create({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1024 }, { signal }));
+        const r = await cataloguePricedRouterOneText(() => cataloguePricedRouterOneClient(client as unknown as OpenAiChatClient, key, { maxDurationMs: 60000 }).chat.completions.create({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1024 }, { signal }));
         if (!('choices' in r)) throw new Error(ROUTER_ONE_NOT_CONFIGURED);
         return { text: String(r.choices?.[0]?.message?.content ?? '') };
       } catch (e) { lastErr = e; if (signal?.aborted) break; }
@@ -11531,7 +11531,7 @@ async function noteBuildOutcome(
     const earlySurplusRecords: Array<Omit<import('../AgentV3/BuildDiagnostics').LlmCallRecord, 'ts'>> = [];
     let earlySurplusFailure: unknown;
     const scopeRequestId = randomUUID();
-    bindRouterOneAccountingScope({ buildId: scopeRequestId, uid: userId ?? '', workspaceId: intentWorkspaceId });
+    bindRouterOneAccountingScope({ buildId: scopeRequestId, uid: userId, workspaceId: intentWorkspaceId });
     // Buffered until buildDiag exists later (module keeps Weak-only + report branches out of this handler — TS2563).
     let surplusAdmissionDiag: SurplusAdmissionDiag | undefined;
     // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders. Branches live in surplusChatAdmission.
@@ -14428,7 +14428,7 @@ async function noteBuildOutcome(
        * measuring it.
        */
       recordWeakAdmissionUsage(weakAdmission, (usage) => providerLedger.add('GLM', usage, WEAK_SCOPE_MODEL));
-      for (const receipt of currentRouterOneCatalogueReceipts()) providerLedger.add('ENGINE_R1', { inputTokens: receipt.inputTokens, outputTokens: receipt.outputTokens, cacheReadInputTokens: receipt.cacheReadTokens ?? 0, routerOneReceipt: receipt }, receipt.model);
+      recordRouterOneScopeUsage(providerLedger);
       const shadowFastLaneLedger = createProviderUsageLedger();
       const captureShadowUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string): void => {
         shadowFastLaneLedger.add(used, usage, model);
@@ -14449,7 +14449,7 @@ async function noteBuildOutcome(
         );
       }
       const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
-        if (isRouterOneAccountingProvider(used) && !isRouterOneCatalogueReceipt(usage.routerOneReceipt) && !costUnconfirmedNoted) {
+        if (routerOneCostUnconfirmed(used, usage.routerOneReceipt) && !costUnconfirmedNoted) {
           costUnconfirmedNoted = true;
           try { buildDiag.record({ phase: 'build', severity: 'info', code: 'DISCOUNT_COST_UNCONFIRMED', autoResolved: true,
             message: 'Engine usage accounting is pending; this portion is excluded from the wallet charge and further requests on the key are blocked.',

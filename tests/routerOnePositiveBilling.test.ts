@@ -15,7 +15,7 @@ async function ledger(phase?: string) {
   return runInRouterOneAccountingScope({ buildId: 'synthetic', uid: 'synthetic', workspaceId: 'synthetic' }, async () => {
     const client = cataloguePricedRouterOneClient({ chat: { completions: { create: async () => ({ model,
       usage: { prompt_tokens: 1000, completion_tokens: 500, prompt_tokens_details: { cached_tokens: 500 } }, choices: [] }) } } } as OpenAiChatClient,
-      'synthetic', { prices: { snapshot: async () => snapshot }, store: { reserve: async () => {}, finish: async () => {} }, now: () => 1000 });
+      'synthetic', { prices: { snapshot: async () => snapshot }, store: { reserve: async () => {}, finish: async () => {}, releaseVerified: async () => {} }, maxDurationMs: 60000, now: () => 1000 });
     await cataloguePricedRouterOneText(() => client.chat.completions.create({ model, max_tokens: 1000, messages: [] }));
     const l = createProviderUsageLedger();
     l.add('ENGINE_R1', { inputTokens: 1000, outputTokens: 500, cacheReadInputTokens: 500, routerOneReceipt: currentRouterOneCatalogueReceipts()[0] }, model, { phase });

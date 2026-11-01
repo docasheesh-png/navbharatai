@@ -15,6 +15,7 @@
  *   ROUTER_ONE_MAX_OUT_PER_M   optional USD/1M output-token ceiling for candidates
  *   ROUTER_ONE_EXCLUDE         comma list of model ids (or substrings) never to use
  */
+import { routerOnePublicPrices, type RouterOnePublicPriceSource } from './publicPriceSource';
 import { getServerDb } from '../../lib/serverDb';
 
 export const ROUTER_ONE_CATALOG_DOC = 'live_ai_registry/router-one-catalog';
@@ -130,7 +131,7 @@ async function loadPersisted(): Promise<void> {
   }
 }
 
-export async function syncRouterOneCatalog(opts: { fetchImpl?: typeof fetch; env?: NodeJS.ProcessEnv } = {}): Promise<RouterOneRanking | null> {
+export async function syncRouterOneCatalog(opts: { fetchImpl?: typeof fetch; env?: NodeJS.ProcessEnv; priceSource?: Pick<RouterOnePublicPriceSource, 'snapshot'> } = {}): Promise<RouterOneRanking | null> {
   const env = opts.env ?? process.env;
   if (!routerOneSyncEnabled(env)) return lastGood;
   if (inflight) return inflight;
@@ -143,7 +144,20 @@ export async function syncRouterOneCatalog(opts: { fetchImpl?: typeof fetch; env
       });
       if (!res.ok) throw new Error(`catalog HTTP ${res.status}`);
       const parsed = parseRouterOneCatalog(await res.json());
-      const ranked = rankForCoding(parsed, env);
+      // Legacy discovery prices are hints only. Rank solely on verified public tariffs.
+      const verified: RouterOneModelEntry[] = [];
+      const candidates = [...new Map(parsed.map(entry => [entry.id, entry])).values()].slice(0, 100);
+      let cursor = 0;
+      await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, async () => {
+        while (cursor < candidates.length) {
+          const entry = candidates[cursor++];
+          try {
+            const tariff = await (opts.priceSource ?? routerOnePublicPrices).snapshot(entry.id);
+            verified.push({ ...entry, inPerM: Number(tariff.bands[0].inputUsdPerMillion), outPerM: Number(tariff.bands[0].outputUsdPerMillion) });
+          } catch { /* unpriceable models are excluded; never guessed or zeroed */ }
+        }
+      }));
+      const ranked = rankForCoding(verified, env);
       if (ranked.length === 0) throw new Error(`catalog had no priced coding models (${parsed.length} parsed)`);
       const next: RouterOneRanking = { syncedAt: Date.now(), ranked, total: parsed.length, source: 'live' };
       lastGood = next;

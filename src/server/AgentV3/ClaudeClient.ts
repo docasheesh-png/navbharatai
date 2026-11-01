@@ -69,6 +69,7 @@ export interface ToolUse {
  * the type has ONE meaning and every bill prices the shares at their own rates (`tokenCostUsd`).
  */
 export interface TurnUsage {
+  routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt;
   /** Server-issued, per-call Surplus accounting evidence; never inferred from token prices. */
   surplusReceipt?: SurplusReceiptDecision;
   /** Actual output ceiling selected by a verified registry endpoint, not a usage count. */

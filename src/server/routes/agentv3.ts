@@ -1,3 +1,4 @@
+import { routerOneAccountingScope, bindRouterOneAccountingScope, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, currentRouterOneCatalogueReceipts, isRouterOneCatalogueReceipt, routerOneCatalogueBuildCharges } from '../AI/RouterOne/catalogueAccounting';
 import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
 import { PRO_SANDBOX_FEE_PCT, proSandboxFee, proSandboxFeeFields, proSubtotalNotice } from '../AgentV3/proSandboxFee';
 import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
@@ -1882,8 +1883,8 @@ export function decideBuildBilledUsd(
 } {
   const routerOneEntries = providerLedger.entries().filter(e => isRouterOneAccountingProvider(e.provider));
   if (routerOneEntries.length) {
-    // No documented request-settlement API is available for this adapter. Absorb this portion,
-    // as Surplus does for unavailable accounting. Tokens remain visible but are not a receipt.
+    // Separate catalogue-calculated expense from other providers before any legacy markup.
+    // Pending attempts remain unresolved and the dispatch guard fences further spend.
     // Remove them from BOTH ledgers so they cannot return as a Sonnet-priced aux remainder.
     const excluded = routerOneEntries.reduce((sum, e) => ({ inputTokens: sum.inputTokens + e.usage.inputTokens,
       outputTokens: sum.outputTokens + e.usage.outputTokens }), { inputTokens: 0, outputTokens: 0 });
@@ -1897,7 +1898,10 @@ export function decideBuildBilledUsd(
       byProvider: () => Object.fromEntries(Object.entries(providerLedger.byProvider()).filter(([p]) => !isRouterOneAccountingProvider(p))),
     };
     const priced = decideBuildBilledUsd(remaining, subtract(sinkTotal), powerLevel, userId, email, sandboxUsd, barrenPhases);
-    return { ...priced, reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal) };
+    const catalogue = routerOneCatalogueBuildCharges(routerOneEntries, barrenPhases);
+    return { ...priced, effectiveBilledUsd: priced.effectiveBilledUsd + catalogue.billedUsd,
+      realCostUsd: priced.realCostUsd + catalogue.costUsd, absorbedUnbilledUsd: priced.absorbedUnbilledUsd + catalogue.absorbedUsd,
+      reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal) };
   }
   const surplusEntries = providerLedger.entries().filter(e => e.provider.toUpperCase() === 'SURPLUS');
   if (surplusEntries.length) {
@@ -2700,8 +2704,12 @@ export function openAiCompatRunners(
         const sdkTimeoutMs = buildStreamingEnabled() ? Math.max(timeoutMs, streamHardCapMs()) : timeoutMs;
         const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0,
           fetch: isRouterOneAccountingProvider(name)
-            ? routerOneAccountingFetch(canaryFetch(), model, trace => audit('ROUTER_ONE_ACCOUNTING_UNSETTLED', trace)) : canaryFetch() });
-        const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts, timeoutMs }), floorMaxPromptChars), name);
+            ? routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId); audit('ROUTER_ONE_REQUEST', trace); }) : canaryFetch() });
+        const pricedClient = isRouterOneAccountingProvider(name)
+          ? cataloguePricedRouterOneClient(client as unknown as OpenAiChatClient, apiKey) : client as unknown as OpenAiChatClient;
+        const turnRunner = new OpenAiToolRunner(pricedClient, { model, ...runnerOpts, timeoutMs });
+        const runner = pacedRunner(sizeGatedRunner(isRouterOneAccountingProvider(name)
+          ? cataloguePricedRouterOneRunner(turnRunner) : turnRunner, floorMaxPromptChars), name);
         out.push(k === 0
           ? { name, runner, modelId: model }
           : { name: `${name}#${k + 1}`, runner, reportAs: name, modelId: model });
@@ -3526,8 +3534,9 @@ function routerOneScopeAsk(): (system: string, user: string, signal?: AbortSigna
     for (const model of routerOneModels()) {
       try {
         const client = new OpenAI({ apiKey: key, baseURL: routerOneBaseUrl(), timeout: 60_000, maxRetries: 0,
-          fetch: routerOneAccountingFetch(canaryFetch(), model, trace => audit('ROUTER_ONE_ACCOUNTING_UNSETTLED', trace)) });
-        const r = await client.chat.completions.create({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1024 }, { signal });
+          fetch: routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId); audit('ROUTER_ONE_REQUEST', trace); }) });
+        const r = await cataloguePricedRouterOneText(() => cataloguePricedRouterOneClient(client as unknown as OpenAiChatClient, key).chat.completions.create({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1024 }, { signal }));
+        if (!('choices' in r)) throw new Error(ROUTER_ONE_NOT_CONFIGURED);
         return { text: String(r.choices?.[0]?.message?.content ?? '') };
       } catch (e) { lastErr = e; if (signal?.aborted) break; }
     }
@@ -3569,7 +3578,7 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
  * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
  */
-export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; plan?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void; onAttemptWasted?: (family: string, kind: WasteKind, ms: number) => void;
+export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; plan?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt; measured?: boolean; producedNothing?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void; onAttemptWasted?: (family: string, kind: WasteKind, ms: number) => void;
   /** Retired-rung memory owned by the CALLER, so it can span several runner instances — the fast
    *  lane's per-file runners share ONE build's map. Omitted ⇒ each runner keeps its own, as before.
    *  See MultiProviderOptions.deadRungs for why this is caller-owned and never a singleton. */
@@ -10241,7 +10250,7 @@ async function noteBuildOutcome(
     }
   });
 
-  app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), enforceFreeProgramPause(), surplusBuildInferenceScope, withBuildRequestCleanup(async (req: Request, res: Response, registerCleanup) => {
+  app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), enforceFreeProgramPause(), surplusBuildInferenceScope, routerOneAccountingScope, withBuildRequestCleanup(async (req: Request, res: Response, registerCleanup) => {
     // ⏱️ THE USER'S WAIT STARTS HERE — the first statement, before every await of the preamble (autopsy 303e8a6f,
     // adversarial review): the build's event stream used to take its own construction time as the origin, up to
     // ~30 s of checks later, so "Still working — Ns so far" still undercounted. Every user-visible clock reads this.
@@ -11522,6 +11531,7 @@ async function noteBuildOutcome(
     const earlySurplusRecords: Array<Omit<import('../AgentV3/BuildDiagnostics').LlmCallRecord, 'ts'>> = [];
     let earlySurplusFailure: unknown;
     const scopeRequestId = randomUUID();
+    bindRouterOneAccountingScope({ buildId: scopeRequestId, uid: userId ?? '', workspaceId: intentWorkspaceId });
     // Buffered until buildDiag exists later (module keeps Weak-only + report branches out of this handler — TS2563).
     let surplusAdmissionDiag: SurplusAdmissionDiag | undefined;
     // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders. Branches live in surplusChatAdmission.
@@ -13160,7 +13170,7 @@ async function noteBuildOutcome(
     }) => ({
       category: classifyFailure(i.rootCause || i.summary || '', outcomeCodeOf(i.issues)).category,
       framework,
-      realUsd: (() => { try { return realProviderCostUsd(i.entries.filter(e => !isRouterOneAccountingProvider(e.provider)), i.remainder); } catch { return 0; } })() + Math.max(0, i.sandboxUsd || 0), // known subtotal only; unavailable supplier expense must not crash the failure ledger
+      realUsd: (() => { try { return ledgerCostUsd(i.entries) + realProviderCostUsd([], i.remainder); } catch { return 0; } })() + Math.max(0, i.sandboxUsd || 0), // known subtotal only; unavailable supplier expense must not crash the failure ledger
       inputTokens: i.inputTokens || 0,
       outputTokens: i.outputTokens || 0,
       ms: Math.max(0, Date.now() - i.startedAt),
@@ -14418,6 +14428,7 @@ async function noteBuildOutcome(
        * measuring it.
        */
       recordWeakAdmissionUsage(weakAdmission, (usage) => providerLedger.add('GLM', usage, WEAK_SCOPE_MODEL));
+      for (const receipt of currentRouterOneCatalogueReceipts()) providerLedger.add('ENGINE_R1', { inputTokens: receipt.inputTokens, outputTokens: receipt.outputTokens, cacheReadInputTokens: receipt.cacheReadTokens ?? 0, routerOneReceipt: receipt }, receipt.model);
       const shadowFastLaneLedger = createProviderUsageLedger();
       const captureShadowUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string): void => {
         shadowFastLaneLedger.add(used, usage, model);
@@ -14437,12 +14448,12 @@ async function noteBuildOutcome(
           () => { liveCostDiscountPct = 0; }, // unreadable ⇒ 0% — the ordinary price, as at settle
         );
       }
-      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
-        if (isRouterOneAccountingProvider(used) && !costUnconfirmedNoted) {
+      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
+        if (isRouterOneAccountingProvider(used) && !isRouterOneCatalogueReceipt(usage.routerOneReceipt) && !costUnconfirmedNoted) {
           costUnconfirmedNoted = true;
           try { buildDiag.record({ phase: 'build', severity: 'info', code: 'DISCOUNT_COST_UNCONFIRMED', autoResolved: true,
-            message: 'Engine supplier expense is unverified; this portion is excluded from the wallet charge.',
-            detail: 'ENGINE_R1 reports token usage but no verified request settlement. Its expense is unknown, not measured zero. Reported real cost excludes it. No list-price estimate, cache tariff, balance delta, or legacy markup is charged. Reconcile with supplier request logs before enabling actual-cost billing.' }); } catch { /* observation only */ }
+            message: 'Engine usage accounting is pending; this portion is excluded from the wallet charge and further requests on the key are blocked.',
+            detail: 'ENGINE_R1 catalogue pricing or complete usage could not be verified. The unresolved attempt is retained; unknown cost is not measured zero. Verified calls use official posted tariffs, not a supplier-settled wallet debit. Reconciliation is required before reopening a blocked key.' }); } catch { /* observation only */ }
         }
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the

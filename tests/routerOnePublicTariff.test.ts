@@ -1,7 +1,9 @@
+import deepseek from './fixtures/routerOnePublicTariffs/deepseek-jsonld.json';
+import luna from './fixtures/routerOnePublicTariffs/luna-jsonld.json';
 import { describe, expect, it } from 'vitest';
-import { parsePublicProductTariff, parsePublicTariffHtml } from '../scripts/lib/routerOnePublicTariff';
+import { parsePublicProductTariff, parsePublicTariffHtml } from '../src/server/AI/RouterOne/publicTariff';
 const component = (name: string, price: string) => ({ name, price, referenceQuantity: { value: 1000000, unitText: 'tokens' } });
-const offer = () => ({ priceCurrency: 'USD', priceSpecification: { priceComponent: [
+const offer = () => ({ '@type': 'Offer', name: 'Pay-as-you-go, input rate per 1M tokens', price: '0.60', availability: 'https://schema.org/InStock', priceCurrency: 'USD', priceSpecification: { '@type': 'CompoundPriceSpecification', price: '0.60', priceCurrency: 'USD', priceComponent: [
   component('Input tokens', '0.60'), component('Output tokens', '2.40'),
   component('Cache write tokens', '0.60'), component('Cached input tokens', '0.012'),
 ] } });
@@ -24,7 +26,7 @@ describe('offline observed public JSON-LD tariff contract', () => {
     for (const components of [offer().priceSpecification.priceComponent.slice(1),
       [...offer().priceSpecification.priceComponent, component('Input tokens', '1')],
       [...offer().priceSpecification.priceComponent, component('Image tokens', '1')]]) {
-      expect(parse({ ...product(), offers: [{ ...offer(), priceSpecification: { priceComponent: components } }] })).toMatchObject({ kind: 'unpriceable' });
+      expect(parse({ ...product(), offers: [{ ...offer(), priceSpecification: { ...offer().priceSpecification, priceComponent: components } }] })).toMatchObject({ kind: 'unpriceable' });
     }
   });
   it('rejects missing units and per-token numbers instead of guessing a multiplier', () => {
@@ -65,5 +67,24 @@ describe('inert JSON-LD extraction', () => {
   it('rejects duplicate products across scripts', () => {
     const block = html(JSON.stringify(product()));
     expect(parseHtml(block + block)).toMatchObject({ kind: 'unpriceable' });
+  });
+});
+
+describe('captured official Product JSON-LD', () => {
+  it('accepts the exact DeepSeek SKU and posted tariff', () => {
+    expect(parsePublicProductTariff(deepseek, 'deepseek-v4.1-flash', 'https://router.one/models/deepseek-v4-1-flash', 1000)).toMatchObject({
+      kind: 'parsed-public-tariff', billingAuthorized: false, snapshot: { bands: [{ inputUsdPerMillion: '0.600000', outputUsdPerMillion: '2.400000', cacheReadUsdPerMillion: '0.012000' }] },
+    });
+  });
+  it('never aliases the Luna slug to its SKU and excludes unsupported Chat write pricing', () => {
+    const source = 'https://router.one/models/gpt-6-luna';
+    expect(parsePublicProductTariff(luna, 'gpt-6-luna', source, 1000)).toMatchObject({ reason: 'ambiguous-product-or-model' });
+    expect(parsePublicProductTariff(luna, 'openai/gpt-6-luna', source, 1000)).toMatchObject({ reason: 'unsupported-chat-cache-write-tariff' });
+  });
+  it('rejects retired offers and conflicting compound currency', () => {
+    const retired = structuredClone(deepseek); retired[0].offers[0].availability = 'https://schema.org/Discontinued';
+    expect(parsePublicProductTariff(retired, 'deepseek-v4.1-flash', 'https://router.one/models/deepseek-v4-1-flash', 1000)).toMatchObject({ reason: 'unavailable-offer' });
+    const currency = structuredClone(deepseek); currency[0].offers[0].priceSpecification.priceCurrency = 'EUR';
+    expect(parsePublicProductTariff(currency, 'deepseek-v4.1-flash', 'https://router.one/models/deepseek-v4-1-flash', 1000)).toMatchObject({ reason: 'conflicting-currency' });
   });
 });

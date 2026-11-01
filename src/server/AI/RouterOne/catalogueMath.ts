@@ -52,7 +52,7 @@ export function catalogueSnapshotIssue(snapshot: CatalogueSnapshot, now: number,
   let previous = -2;
   for (let i = 0; i < snapshot.bands.length; i++) {
     const b = snapshot.bands[i];
-    if (!rec(b) || !Number.isSafeInteger(b.aboveInputTokens) || b.aboveInputTokens <= previous
+    if (!rec(b) || typeof b.aboveInputTokens !== 'number' || !Number.isSafeInteger(b.aboveInputTokens) || b.aboveInputTokens <= previous
       || (i === 0 && b.aboveInputTokens !== -1) || (i > 0 && b.aboveInputTokens < 0)) return 'invalid-rate-bands';
     const prices = [b.inputUsdPerMillion, b.outputUsdPerMillion, b.cacheReadUsdPerMillion, b.cacheWriteUsdPerMillion].map(rate);
     if (prices.some(p => p === null)) return 'invalid-price';

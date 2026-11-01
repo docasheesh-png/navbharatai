@@ -1,7 +1,7 @@
 /** Strict reader for observed public Product JSON-LD, not a supplier debit receipt.
  * Offline until authentic page fixtures and the production snapshot path are verified.
  */
-import { catalogueSnapshotIssue, type CatalogueSnapshot, type CatalogueRateBand } from './routerOneCatalogueMath';
+import { catalogueSnapshotIssue, type CatalogueSnapshot, type CatalogueRateBand } from './catalogueMath';
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const array = (v: unknown): unknown[] => Array.isArray(v) ? v : [v];
 const decimal = (v: unknown): string | null => {
@@ -20,7 +20,9 @@ export function parsePublicProductTariff(document: unknown, model: string, sourc
   if (!offers.length || offers.length > 16) return reject('invalid-offers');
   const bands: Array<{ min: number; max: number; band: CatalogueRateBand }> = [];
   for (const offer of offers) {
-    if (!object(offer) || offer.priceCurrency !== 'USD' || !object(offer.priceSpecification)) return reject('invalid-currency-or-specification');
+    if (!object(offer) || offer['@type'] !== 'Offer' || typeof offer.name !== 'string' || !offer.name.startsWith('Pay-as-you-go, input rate per 1M tokens') || offer.priceCurrency !== 'USD' || !object(offer.priceSpecification)) return reject('invalid-currency-or-specification');
+    if (offer.availability !== 'https://schema.org/InStock') return reject('unavailable-offer');
+    if (offer.priceSpecification['@type'] !== 'CompoundPriceSpecification' || offer.priceSpecification.priceCurrency !== 'USD') return reject('conflicting-currency');
     const components = array(offer.priceSpecification.priceComponent);
     const names = ['Input tokens', 'Output tokens', 'Cache write tokens', 'Cached input tokens'];
     const prices = new Map<string, string>();
@@ -35,6 +37,8 @@ export function parsePublicProductTariff(document: unknown, model: string, sourc
       prices.set(component.name, price);
     }
     if (prices.size !== names.length) return reject('missing-component');
+    if (decimal(offer.price) === null || decimal(offer.priceSpecification.price) === null
+      || Number(offer.price) !== Number(prices.get('Input tokens')) || Number(offer.priceSpecification.price) !== Number(prices.get('Input tokens'))) return reject('conflicting-input-price');
     let min = 0, max = Number.MAX_SAFE_INTEGER;
     if (offer.eligibleQuantity !== undefined) {
       const q = offer.eligibleQuantity;

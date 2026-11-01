@@ -1,6 +1,10 @@
-# Router One settlement reconciliation — disabled design
+# Router One catalogue billing and settlement reconciliation
 
-Status: offline observation validator only; no importer, scheduled settlement, receipt acceptance endpoint, wallet write, or production activation is implemented. The billing guard rejects inferred Router One prices. It is not evidence that inference has become automatically billable. Deploying the guard alone would absorb unknown model expense; it must not be presented as completed 2.5x billing or used to enable free production traffic.
+Current branch status: the production catalogue-calculated path is implemented and
+under verification; it is not yet published or deployed. Supplier-wallet settlement
+and CSV receipt promotion remain disabled. See the latest implementation section
+below for the active policy; earlier receipt-only proposals are superseded for
+prospective catalogue billing. Public tariffs are never labelled settled expense.
 
 ## Verified contract and missing prerequisite
 
@@ -227,3 +231,60 @@ using synthetic fixtures; authentic artifact acceptance remains pending. It reje
 incomplete or overlapping tier intervals and unsupported cache-write tariffs instead
 of admitting a model at an invented price. Its outputs do not authorize dispatch
 or billing. No production caller or page fetcher has been installed by this step.
+
+
+## Production catalogue path (2026-11-01, verification in progress)
+
+The public JSON-LD reader and integer arithmetic now live in
+`src/server/AI/RouterOne/publicTariff.ts` and `catalogueMath.ts`. The supplied decoded
+DeepSeek fixture passes exact-SKU, explicit USD/per-million and cache-rate validation.
+The Luna fixture is excluded: its SKU is `openai/gpt-6-luna`, and its distinct cache
+write price cannot be calculated with the verified Chat counters. Unsupported IDs,
+variants, aliases, units, offers and tier shapes are skipped, never assigned another
+model's rates. The raw HTML transport remains unverified in this executor.
+
+`publicPriceSource.ts` discovers a candidate detail link on the official models
+page and requires its Product SKU to match the requested model. Slug normalization
+is only a discovery hint; it cannot authorize an alias. Only static JSON-LD is read.
+HTML is bounded, redirects are rejected, and snapshots expire after five minutes.
+Snapshots preserve source URL, SHA-256 of retrieved HTML, parser version, currency,
+units, rates and retrieval time. A refresh never modifies an in-flight snapshot.
+The catalogue ranking validates public rates before ranking discovered candidates.
+
+`catalogueAccounting.ts` reserves a physical attempt before sending it. The durable
+record binds the build request, authenticated user, workspace, generated call ID,
+credential hash and immutable tariff. X-Request-ID is retained when received.
+No prompts, responses or secret credentials are stored in these accounting records.
+Raw Chat counters are checked before the generic tool adapter defaults absent
+usage to zero. Reasoning is already in completion tokens; cached input is included
+in prompt tokens once. A successful calculation is explicitly
+`expenseEvidence: official-public-tariff` and `settledWalletDebit: false`.
+
+A key has at most one outstanding physical request across workers. Missing usage,
+conflicting model/counters, transport ambiguity or uncertain persistence leaves the
+key blocked in durable storage, including across subsequent builds and restarts.
+There is no timed automatic release of this hold. A response already returned is
+preserved; accounting failure does not replay its actions. Later attempts skip to
+the approved provider fallback chain. This conservative concurrency limit may reduce
+Router One throughput; it bounds unresolved exposure while reconciliation is absent.
+Reopening a pending key requires a separately reviewed reconciliation action; no
+admin bypass, automatic import or historical wallet adjustment is supplied here.
+
+The provider ledger retains each issued call independently and rejects serialized
+lookalikes. Duplicate callbacks count once; conflicting callbacks quarantine the
+call. Existing discarded/empty/barren-work absorption rules remain in force.
+Positive catalogue costs feed the existing build cost ceiling. Scope classification
+uses the same dispatch guard and its measured expense is included in the build.
+
+For billable work, Router One model subtotal is catalogue cost multiplied by 2.5
+exactly once. Surplus keeps its existing 10x receipt policy; other providers keep
+their existing policy. After existing failure, Stop, waiver and free-build rules,
+apply the configured discount (the existing maximum is 50%) with the existing AI
+cost floor. The sandbox service fee is 2.5% of that discounted subtotal. Therefore,
+if that subtotal is P, final build charge is P * 1.025, subject to the existing
+wallet conversion/rounding/affordability rules. Actual configured sandbox expense
+is internal telemetry, not an additional user component or discount floor. Hosting
+and database subscriptions are separate. No previous wallet is recalculated.
+
+Release still requires final-tree aggregate tests, required remote CI and verified
+deployment. Fixture acceptance is not a live network or paid-inference test.

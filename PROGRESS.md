@@ -100060,3 +100060,14 @@ excluded. Offline outputs remain billingAuthorized:false. Authentic previously c
 page fixtures are pending transfer from the parent; no live parser acceptance claimed.
 Verification: 4 files / 65 tests passed; npm run typecheck passed before the final small
 HTML extraction addition (that addition passed targeted Vitest). No process running.
+
+2026-11-01 catalogue integration milestone (unpublished, verification ongoing):
+inline captured public JSON-LD fixtures accepted for exact DeepSeek SKU; Luna rejected
+for unsupported write usage and unverified short alias. Moved parser/math to server;
+added public snapshot source, durable pre-dispatch attempt/key fence, raw usage capture,
+request-ID association, issued evidence ledger attribution and separate 2.5x settlement.
+Scope classifiers and tool runners share guards. Positive cost feeds existing ceilings;
+unknown/uncertain responses preserve output and block more requests on that key.
+Public ranking checks explicit tariffs. No CSV promotion, historic wallet changes,
+paid calls or live network bypass. 14 files / 214 targeted tests and server typecheck
+passed before the last malformed-state hardening. Final gates and coverage pending.

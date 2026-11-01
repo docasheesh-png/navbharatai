@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateCatalogueChatCost, catalogueSnapshotIssue, type CatalogueSnapshot } from '../scripts/lib/routerOneCatalogueMath';
+import { calculateCatalogueChatCost, catalogueSnapshotIssue, type CatalogueSnapshot } from '../src/server/AI/RouterOne/catalogueMath';
 const now = 100_000, ttl = 60_000;
 const snapshot = (): CatalogueSnapshot => ({ kind: 'posted-wallet-token-tariff', provider: 'ENGINE_R1',
   model: 'synthetic-model', currency: 'USD', unit: 'USD/1000000-tokens', source: 'https://router.one/models/synthetic-model', fetchedAt: 90_000,

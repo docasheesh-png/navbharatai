@@ -1,6 +1,6 @@
 # Router One settlement reconciliation — disabled design
 
-Status: design only; no importer, scheduled settlement, receipt acceptance endpoint, wallet write, or production activation is implemented. The billing guard rejects inferred Router One prices. It is not evidence that inference has become automatically billable. Deploying the guard alone would absorb unknown model expense; it must not be presented as completed 10x billing or used to enable free production traffic.
+Status: offline observation validator only; no importer, scheduled settlement, receipt acceptance endpoint, wallet write, or production activation is implemented. The billing guard rejects inferred Router One prices. It is not evidence that inference has become automatically billable. Deploying the guard alone would absorb unknown model expense; it must not be presented as completed 10x billing or used to enable free production traffic.
 
 ## Verified contract and missing prerequisite
 
@@ -47,3 +47,40 @@ For a newly authorized, unsettled prospective build only:
 Keep the import path absent/disabled until trusted records and the supported adapter exist. Required tests before activation: exact account/key/request/model binding; cache included-in-input semantics; explicit zero versus pending/null; provider-settled estimated charges with zero tokens; 499 and abort-before-headers; independent retries; duplicate and conflicting imports in either order; simultaneous transactions; failed/absorbed work; plan charges; mixed providers and sandbox; exactly-once 10x; discount-last and floor; restart after uncertain commit; correction evidence without historical wallet mutation. Use synthetic fixtures for public code and restricted redacted provider evidence for adapter acceptance.
 
 Required outside actions: supplier-confirmed settlement contract/export fixture and identity binding; administrator-approved import trust/storage workflow; permission for any future rollout. Current tests of fail-closed handling cannot certify this unimplemented positive settlement workflow.
+
+## Offline export validation (2026-11-01)
+
+`scripts/lib/routerOneExport.ts` is a pure, disconnected parser for the observed
+18-column Logs export schema. It returns `kind: unverified-export` and
+`billingAuthorized: false` in every case. It has no production caller, network,
+filesystem or wallet access. No real export or private identifiers are fixtures.
+
+The supplied export establishes observed column names, not finality or account
+ownership. `Wallet charged (USD)` is preserved as a reported observation, never
+an accepted receipt. `Cost (USD)` is not used for expense or fallback. Empty/null
+wallet values are unknown, explicit zero remains reported zero, and decimals are
+converted exactly to integer micro-USD strings. More than six decimal places,
+negative/scientific/nonfinite amounts and unsupported charge sources quarantine
+the row; they are never rounded or priced from tokens. Six places is this
+validator's conservative supported precision, not a claim about the provider's
+maximum precision. Plan observations are not evidence of confirmed plan semantics.
+
+Quoted fields, escaped quotes, CRLF/LF and a leading BOM are supported. All headers
+are required exactly once; reordering is allowed, extra headers are rejected.
+Malformed CSV rejects the file. Input is bounded to 2 million JS characters and
+10,000 records. Record locators are CSV record numbers, not physical lines when
+quoted fields contain newlines. Token/time/status fields receive syntax checks
+only; token arithmetic never establishes supplier expense or attribution.
+
+Duplicate handling is file-local: identical key/request evidence is marked as a
+duplicate; any changed field quarantines every version, in either order. This is
+conservative even for formatting-only changes. It does not establish cross-file
+or durable transaction idempotency, and amounts must not be summed for billing.
+Returned identifiers are private evidence and must not be logged publicly.
+
+Still blocked: provider-confirmed wallet finality/precision/amendments and export
+semantics; administrator-confirmed account/key ownership and trusted provenance;
+durable request-ID-to-build/physical-attempt binding. Pending, plan, cancelled499,
+retry and correction examples need authentic acceptance evidence. No automatic
+lookup endpoint has been established. No historical charge, accepted-receipt
+promotion, production route or import activation is authorized by parsing a file.

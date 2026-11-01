@@ -99967,3 +99967,11 @@ Completed aggregate on 7bfcd542c: 3,173 files, 48,031 passed / 1 failed / 85 ski
 ### Coverage recovery: bounded census and deterministic semantic clocks (2026-11-01)
 
 Completed aggregate on 41a1024fd: 3,173 files; 48,030 passed / 2 failed / 85 skipped; 1,733.39 seconds. Upload fixture fix passed. Terminal evidence confirms the entire AST census exceeded the existing 20-second per-test timeout (23 seconds) and a local-login semantic test returned no finding under its 40 ms production budget (84 ms test duration). Isolated census 18/18 and login 107/107 passed. Split the SAME complete census into <=128-file batches with an exact once-only completeness assertion; no sampling or timeout increase. Freeze Date.now only in the two semantic scanner test suites, retaining their explicit injected-clock expiry assertions, all security expectations, and production 40/80 ms budgets. No application behavior changes. Fresh final coverage remains required.
+
+### 2026-11-01 — Router One offline export observations (follow-up to #4057)
+
+Added a pure, disconnected CSV validator with synthetic tests and explicit unverified-export/billingAuthorized:false output. Exact micro-USD parsing, unknown versus zero, schema/quoting limits, file-local duplicate/conflict quarantine and retained cancellation charges are covered. No accepted receipts, production caller, wallet writes, real private fixtures or live imports. Supplied export establishes observed schema only; provider finality/account binding and durable request-to-attempt correlation remain prerequisites. Targeted tests passed on the initial implementation; final-tree verification is recorded separately before publication.
+
+### 2026-11-01 — Offline validator placement correction
+
+The disconnected parser belongs in scripts/lib, not application src. Moved it and its synthetic tests without adding a production caller or modifying deadCodeGuard. The superseded full-coverage run exposed that guard failure and was terminated at 23 minutes (exit143), not reported green. Final-tree verification follows on the corrected tooling placement.

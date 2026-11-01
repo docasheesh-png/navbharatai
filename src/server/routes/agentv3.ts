@@ -428,7 +428,8 @@ import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame }
 import { recordReasoningStays } from '../AgentV3/FastLaneBudget';
 import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { buildGameContract, gameContractBlock, gameScopeContractEnabled, type GameScopeContract } from '../AgentV3/gameIntent';
-import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
+import { prepareGameAssets } from '../AgentV3/gameAssets/assetSeed';
+import { gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
@@ -18755,6 +18756,7 @@ async function noteBuildOutcome(
               const writtenBeforeKit = new Map(writtenFiles);
               const kitStartedAt = Date.now();
               const kitResults: GameKitSeedResult[] = [];
+              let localGameAssetHandoff = '';
               platformSeedInFlight = true;
               try {
                 for (const recipe of kitPlan) {
@@ -18763,6 +18765,15 @@ async function noteBuildOutcome(
                   const recipeInput = gameKitRecipeInput(recipe, kitPlan);
                   const r = await dispatcher.dispatch({ id: `game-kit-${recipe}`, name: 'run_recipe', input: { name: recipe, ...(recipeInput ? { input: recipeInput } : {}) } }, 'architect', { signal: abort.signal });
                   kitResults.push({ recipe, ok: !r.is_error, content: String(r.content ?? '') });
+                }
+                if (gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted) {
+                  // Default-off L3; all bytes and manifests are acknowledged durably before handoff.
+                  // Source/provider failures leave the successful L1/L2 kit intact.
+                  try {
+                    const assets = await prepareGameAssets({ prompt, workspaceId, workspace: actuator, signal: abort.signal, verifiedOwnerUid: verified?.uid });
+                    for (const [path, content] of Object.entries(assets.files)) writtenFiles.set(path, content);
+                    localGameAssetHandoff = assets.handoff;
+                  } catch { /* The procedural kit remains the floor. */ }
                 }
               } finally {
                 platformSeedInFlight = false;
@@ -18793,6 +18804,7 @@ async function noteBuildOutcome(
                     if (contractText) buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_CONTRACT', autoResolved: true, message: `Game scope contract: ${JSON.stringify(gameContract)}` });
                   }
                 } catch { gameContract = null; contractText = ''; }
+                if (localGameAssetHandoff) buildPrompt = `${localGameAssetHandoff}\n\n${buildPrompt}`;
                 buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(prompt), contract: contractText })}\n\n---\n\n${buildPrompt}`;
               } else {
                 gameKitSeedFailed = kitResults.length > 0;

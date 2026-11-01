@@ -100087,3 +100087,67 @@ Completed the requested aggregate coverage on 14feb7a580110cc08c29c52c934c990a2f
 The fourth failure correctly identified new unbounded module-level uncertainKeys state. Replaced it with the repository BoundedCache, hard limit64 credential hashes. Holds are never evicted to enable spending: saturation blocks this worker's Router One dispatch until restart; durable attempt deadlines remain intact. Only uncertain persistence populates this local fence, not normal requests. Added capacity/overflow regression coverage and documentation; the census guard remains unchanged.
 
 Follow-up, unchanged timeouts with supported --maxWorkers=1: all four failed files plus Router One persistence/accounting/positive billing passed, 7files/76tests (44.63s), non-coverage. Server typecheck passed. The aggregate above remains FAILED and full coverage has not been rerun after this small correction. Required remote CI and full-tree green evidence remain outstanding. No publication retry/push, emulator or public-site network retry, paid call, merge or deployment. Publication approval is still pending in the parent conversation. Logs: /workspace/routerone-25-verification/final-14feb7a-coverage.log, final-bounded-targeted.log, final-bounded-typecheck.log.
+
+## 2026-11-01 — L3 external asset engine audit and local foundation (NOT COMPLETE)
+
+Branch `feat/universal-3d-assets`, based on main `504b79298` (billing preserved). Audited
+Game3DGenerator/gameKitSeed/buildAssets/WorkspaceAssetStore/publishing and existing SSRF guard.
+Added local GLB policy, exact subject/license filtering, bounded guarded downloader, cache-first
+acquisition core with mandatory parse/storage acknowledgements, and optional Three.js loader source.
+GLB now participates in the central binary classifier; publishing knows GLB/glTF MIME types.
+The acquisition core and loader are not wired into the game seed; no provider catalogue is deployed.
+
+Provider access BLOCKED — requests to api.polyhaven.com/assets?t=models and api.github.com's official
+KayKit repository tree failed with proxy 403; environment status confirms both hosts absent from its
+enforced restricted allowlist. No alternate-host download retry/bypass. Parent/environment owner
+must authorize needed provider API/download hosts or supply reviewed offline assets/provenance.
+No actual external models downloaded; all current test assets are synthetic. No paid calls.
+
+Dependency install succeeded after moving npm's cache to writable /tmp. Environment Node24.19.0 /
+npm11.9.0 differs from CI22.23.4 / npm11.18.0. Targeted verification checkpoint: 4 files / 45 tests,
+server typecheck and unused-import check passed; subsequent geometry-work bound is under final
+recheck. Full coverage/emulator/CI/browser/mobile/restart/publish verification not completed.
+No commit, push, PR, merge or deployment attempted. Do not claim this as the completed engine.
+Detailed work/evidence/gaps: docs/game-engine/l3-implementation-status.md. Logs: /tmp/navbharat-asset-*.
+
+L3 final local checkpoint: re-ran after geometry-work bounding; 4 files / 45 tests PASS,
+frontend and server typechecks PASS, unused imports/locals PASS, git diff --check PASS.
+No background test processes remain. All full-CI/live-model limitations above still apply.
+Poly Haven's current official API terms were read: commercial use needs no key/payment;
+identifying User-Agent and visible credit when surfacing live API content are required. Preserve
+those service obligations separately from the CC0 asset licence when wiring the provider.
+
+### 2026-11-01 — L3 independent implementation and verification follow-up
+
+- Extended the initial foundation into the guarded 3D kit seed: default-off flag, reviewed provider
+  registry, private content-addressed cache, bounded single-flight download, reviewed glTF resource
+  bundling, sandbox render proof, acknowledged binary/text persistence, generated local loader,
+  attribution, and restore/publish format support. Production catalogue remains empty.
+- Added explicit real Chromium harness and local-only Firestore persistence harness. Chromium rendered
+  and animated the synthetic textured fixture and verified runtime normalization, credit cleanup,
+  missing-file fallback and reload. Firestore saved model+manifest and a fresh process restored
+  identical bytes/provenance. No real provider assets, cloud bucket spill or published game claim.
+- Affected 37 files / 657 tests passed; later 4 asset files / 35 tests passed (overlapping).
+  Full coverage remains running separately; initial interrupted attempt exposed a seed-writer census
+  assertion, which was extended with explicit guard assertions before restarting the full run.
+- CI Node 22.23.4/npm 11.18.0: audit, license, SBOM, frontend/server/benchmark types, unused/native
+  guards, OAuth check, build, bundle, boot and dependency gate passed. Four existing Firestore emulator
+  drills passed on Java 21 and verified Firestore emulator 1.22.0.
+- Required npm signature gate failed HTTP 403 (Sigstore TUF host); not waived. Provider API hosts
+  api.polyhaven.com and api.github.com were already denied. No retries via alternate hosts, security
+  changes, paid inference, production activation, PR or merge. Exact download origins need verified
+  metadata before an environment-access request can name them.
+- Updated docs/game-engine/l3-implementation-status.md with current implementation and limitations.
+  Remaining acceptance includes real licensed catalogue assets, six complete games, mobile and live
+  publication, optimizer/LOD scope and required CI completion. This is not a completed universal engine.
+- Added and passed a production Vite-build browser harness: synthetic GLB and manifest survive the
+  real build byte-for-byte; nested `/published/` base renders/animates after reload without provider
+  URLs. This is local artifact acceptance, not a cloud deployment. Browser checks also passed under
+  CI-matching Node 22.23.4.
+- The single-worker full-coverage attempt was interrupted without a reported test failure because
+  3,186 files were progressing too slowly. Restarted the unchanged complete suite with four workers
+  after confirming four CPUs and a 16 GiB container limit; no test/coverage gate was removed.
+- Final security review found repeated mesh nodes could multiply rendered triangles beyond the
+  geometry-only budget. Policy now sums mesh instances before any browser decoding/rendering;
+  added synthetic under/over-budget cases. The in-progress full run was interrupted for this real
+  source correction; targeted checks and the complete suite are being rerun on the corrected source.

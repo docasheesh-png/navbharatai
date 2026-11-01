@@ -29,6 +29,8 @@
 // PURE builder → the caller writes the files. The generated code imports three; the generator does not.
 
 import { kitTypeContract } from './kitTypeContract';
+// L3 is emitted only by acknowledged build-time acquisition, never by the default procedural kit.
+export { generateGameAssetRuntime } from './GameAssetRuntimeGenerator';
 
 export interface Game3DResult {
   files: Record<string, string>;

@@ -4813,3 +4813,19 @@ no longer overrides Weak, including the test profile; other bands retain the pin
 No environment values or credentials were changed by this code revision.
 Router One's prospective expense multiplier is 2.5; automatic positive settlement
 remains unavailable without trusted final request/account-bound supplier receipts.
+
+## 2026-11-01 — L3 reviewed game assets (not enabled)
+
+- `AGENTV3_EXTERNAL_GAME_ASSETS`: **default OFF**, enabled only by exact `on`. No Cloud Run setting
+  changed. Read by `gameAssets/assetPlan.ts`; called inside the successful new-project 3D kit seed.
+  It does not authorize unreviewed catalogue entries, paid providers, or credentialless Sketchfab
+  downloads. Initial catalogue is intentionally empty pending real provenance/browser fixtures.
+- Reuses the existing private `WORKSPACE_ASSETS_BUCKET` fallback resolution for a public-licensed
+  shared content cache under `game-assets-public-cc/v1/`. At most 64 curated hashes, each <=5 MiB.
+  No new bucket/ACL. Project copies stay in the existing owner-aware workspace asset store and erase
+  lifecycle. Shared cache never accepts user uploads or private models.
+- Poly Haven live metadata requests identify NavBharatAI and require a visible source credit when
+  content is surfaced. Runtime renders the reviewed service credit; source/asset licensing is retained
+  separately in the published manifest/ATTRIBUTION.txt. A cached CC0 copy alone does not incur API calls.
+- No rollout to users until actual assets, all six game scenarios, mobile/reload/publish and required
+  local/remote CI checks pass. Turning the flag off restores the existing L1/L2 generation path.

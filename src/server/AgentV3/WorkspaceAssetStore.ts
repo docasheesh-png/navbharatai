@@ -347,3 +347,34 @@ export async function restoreWorkspaceAssets(sink: BinaryFileSink, workspaceId: 
     return 0;
   }
 }
+
+/** Read back one indexed asset with a byte ceiling, for delivery-critical L3 acknowledgements. */
+export async function readWorkspaceAssetBytes(workspaceId: string, path: string, maxBytes: number): Promise<Buffer | null> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 5 * 1024 * 1024) return null;
+  const db = getDb(); if (!db) return null;
+  try {
+    const root = db.collection(COLLECTION).doc(workspaceId);
+    const meta = await root.get();
+    if (!Array.isArray(meta.data()?.paths) || !meta.data()!.paths.includes(path)) return null;
+    const doc = await root.collection('assets').doc(assetDocId(path)).get();
+    const data = doc.data(); if (data?.path !== path) return null;
+    if (typeof data.dataUri === 'string') {
+      if (data.dataUri.length > Math.ceil(maxBytes / 3) * 4 + 256) return null;
+      const parsed = parseDataUri(data.dataUri); if (!parsed) return null;
+      const bytes = Buffer.from(parsed.base64, 'base64');
+      return bytes.length <= maxBytes ? bytes : null;
+    }
+    const bucket = workspaceAssetBucketName();
+    if (typeof data.storageObject !== 'string' || !bucket) return null;
+    const stream = admin.storage().bucket(bucket).file(data.storageObject).createReadStream({ validation: 'crc32c' });
+    const timer = setTimeout(() => stream.destroy(new Error('Workspace model read timed out')), 10_000); timer.unref();
+    try {
+      const chunks: Buffer[] = []; let size = 0;
+      for await (const chunk of stream) {
+        size += chunk.length; if (size > maxBytes) throw new Error('Workspace model exceeds budget');
+        chunks.push(Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks, size);
+    } finally { clearTimeout(timer); stream.destroy(); }
+  } catch { return null; }
+}

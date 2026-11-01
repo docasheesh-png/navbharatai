@@ -94,3 +94,11 @@ The benchmark renders the same scene, camera, lighting and renderer for BEFORE a
 - a tiled house.
 
 It shoots views from the side, from behind (the chase view), close-ups of the human and the animals, and the whole line.
+
+## L3 implementation checkpoint (2026-11-01)
+
+The requested external-asset layer is under development, not available in generated games yet.
+See [the implementation status](l3-implementation-status.md) for the audited storage path, local
+security/cache/runtime components, provider-access blocker and outstanding end-to-end verification.
+The L1/L2 builders above remain the active game kit. No downloaded model or live-provider success
+is claimed by this checkpoint.

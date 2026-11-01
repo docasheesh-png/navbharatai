@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { auditSummaryClaims, claimCorrection } from '../src/server/AgentV3/claimAudit';
 import { LOCAL_LOGIN_LIMITS, provenLocalLoginPath } from '../src/server/AgentV3/localLoginPath';
@@ -7,6 +7,11 @@ import {
   findFakeFeatures, fakeFeatureNotice, fakeFeatureReportLine, honestyBannerLines,
   impliedRequirementsFor, keysForFinding, withHonestyBanner, fakeFeatureWriteNote,
 } from '../src/server/AgentV3/fakeFeatureScan';
+
+// Semantic fixtures test recognition, not host scheduling under coverage.
+// The explicit injected-clock expiry cases below still enforce the production work budget.
+beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(0); });
+afterEach(() => vi.restoreAllMocks());
 
 const PROVIDER = "import { createClient } from '@supabase/supabase-js'; export const supabase = createClient(url, key);";
 const LOCAL_LOGIN = `import { useState } from 'react';

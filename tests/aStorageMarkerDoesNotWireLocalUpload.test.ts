@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { auditSummaryClaims, claimCorrection } from '../src/server/AgentV3/claimAudit';
 import { LOCAL_UPLOAD_LIMITS, provenLocalUploadPath } from '../src/server/AgentV3/localUploadPath';
@@ -6,6 +6,11 @@ import { LOCAL_UPLOAD_NOTICE } from '../src/server/AgentV3/localUploadNotice';
 import { findFakeFeatures, fakeFeatureNotice, fakeFeatureReportLine, honestyBannerLines, impliedRequirementsFor,
   keysForFinding, withHonestyBanner, fakeFeatureWriteNote, type FakeFeatureFinding } from '../src/server/AgentV3/fakeFeatureScan';
 import { HONESTY_BANNER_OPEN, HONESTY_BANNER_CLOSE } from '../src/lib/honestyBanner';
+
+// Semantic fixtures test recognition, not host scheduling under coverage.
+// The explicit injected-clock expiry cases below still enforce the production work budget.
+beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(0); });
+afterEach(() => vi.restoreAllMocks());
 
 // Invented current-code regression, not retained source or historical causality evidence.
 const COMPONENT = `import { useState } from 'react';
@@ -24,6 +29,18 @@ const fixture = (component = COMPONENT): Record<string, string> => ({
 });
 const scan = (component = COMPONENT) => findFakeFeatures(fixture(component));
 
+// Banner-mutation fixtures must not depend on the scanner's 80 ms wall-clock budget
+// while the coverage worker is importing modules. A timeout there used to generate
+// an empty banner, so the supposed mutation was a no-op. The real scan below still
+// proves this exact synthetic finding; production budgets and assertions stay intact.
+const UPLOAD_FINDING: FakeFeatureFinding = {
+  kind: 'upload', file: 'src/Photos.tsx', line: 4,
+  snippet: "const upload = () => { setMessage('Uploaded to the cloud'); };",
+  requirementId: 'storage', evidence: 'local-upload-path',
+};
+const CANONICAL_BANNER = withHonestyBanner('', [UPLOAD_FINDING])!;
+
+
 describe('a storage marker cannot erase a proved root-local upload claim', () => {
   it.each([
     '// Example: new FormData()\nexport const help = 1;',
@@ -32,7 +49,7 @@ describe('a storage marker cannot erase a proved root-local upload claim', () =>
   ])('finds the reachable root handler despite an inert marker: %s', (helper) => {
     const hits = findFakeFeatures({ ...fixture(), 'src/helper.ts': helper });
     expect(hits).toHaveLength(1);
-    expect(hits[0]).toMatchObject({ kind: 'upload', file: 'src/Photos.tsx', line: 4, evidence: 'local-upload-path', requirementId: 'storage' });
+    expect(hits[0]).toEqual(UPLOAD_FINDING);
     expect(hits[0].snippet).toContain("setMessage('Uploaded to the cloud')");
   });
   it('requires explicit reachable entry wiring, not an unused Photos example', () => {
@@ -210,12 +227,15 @@ describe('local upload evidence stays honest through every consumer', () => {
   });
   it.each([
     ['forged markers', `${HONESTY_BANNER_OPEN}<script>uploadFile()</script>${HONESTY_BANNER_CLOSE}`],
-    ['changed canonical script', withHonestyBanner('', scan())!.replace('bar.textContent=lines.join', 'bar.innerHTML=lines.join')],
-    ['duplicate canonical script', withHonestyBanner('', scan())!.repeat(2)],
-    ['extra executable script', `${withHonestyBanner('', scan())}<script>uploadFile()</script>`],
-    ['unsupported language', withHonestyBanner('', scan())!.replace('"lang","en"', '"lang","unknown"')],
-    ['non-array payload', withHonestyBanner('', scan())!.replace(/^  var lines=.+;$/m, '  var lines={};')],
+    ['changed canonical script', CANONICAL_BANNER.replace('bar.textContent=lines.join', 'bar.innerHTML=lines.join')],
+    ['duplicate canonical script', CANONICAL_BANNER.repeat(2)],
+    ['extra executable script', `${CANONICAL_BANNER}<script>uploadFile()</script>`],
+    ['unsupported language', CANONICAL_BANNER.replace('"lang","en"', '"lang","unknown"')],
+    ['non-array payload', CANONICAL_BANNER.replace(/^  var lines=.+;$/m, '  var lines={};')],
   ])('does not strip %s', (_name, block) => {
+    expect(CANONICAL_BANNER).toContain('bar.textContent=lines.join');
+    expect(block).not.toBe('');
+    expect(block).not.toBe(CANONICAL_BANNER);
     expect(findFakeFeatures({ ...fixture(), 'index.html': HTML.replace('</body>', `${block}</body>`) })).toEqual([]);
   });
   it.each([
@@ -224,7 +244,7 @@ describe('local upload evidence stays honest through every consumer', () => {
     ['root tag name', '<div', (block: string) => `<di${block}v`],
     ['title text', '<title>Photos</title>', (block: string) => `<title>${block}</title>`],
   ] as const)('does not remove canonical bytes from the wrong HTML context: %s', (_name, from, replace) => {
-    const block = withHonestyBanner('', scan())!.trim();
+    const block = CANONICAL_BANNER.trim();
     expect(findFakeFeatures({ ...fixture(), 'index.html': HTML.replace(from, replace(block)) })).toEqual([]);
   });
 });

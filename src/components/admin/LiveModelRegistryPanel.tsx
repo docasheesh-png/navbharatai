@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import { SurplusRegistryPanel } from './SurplusRegistryPanel';
+import { RouterOneCatalogPanel } from './RouterOneCatalogPanel';
 import type { AdminRegistryView } from '../../server/AI/LiveRegistry/types';
 import { EMPTY_REGISTRY_FILTERS, REGISTRY_STATUSES, effectiveRegistryStatus, filterRegistryModels, isRegistryView, registryActionReason, registryTimestamp, safeRegistrySource, type RegistryFilters, type RegistryModelView } from '../../lib/liveModelRegistryView';
 
@@ -101,6 +102,7 @@ export function LiveModelRegistryPanel({ adminToken }: { adminToken: string }): 
 
   return <div className="space-y-8">
     <SurplusRegistryPanel adminToken={adminToken} />
+    <RouterOneCatalogPanel adminToken={adminToken} />
     <section aria-label="Live Model Registry" className="space-y-4">
     <div className="rounded-xl border border-line bg-card p-4 space-y-3">
       <div className="flex flex-wrap justify-between gap-3">

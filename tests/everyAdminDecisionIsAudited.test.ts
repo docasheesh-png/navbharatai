@@ -73,6 +73,13 @@ describe('every admin-guarded write is audited, whichever file it lives in', () 
     expect(routes.find(r => r.key === key)?.body).toContain('audit(');
   });
 
+  it('records the authenticated catalog administrator and the observed refresh result', () => {
+    const body = routes.find(r => r.key === 'post /api/agentv3/router-one/catalog/refresh')?.body;
+    expect(body).toContain("audit('ADMIN_ROUTER_ONE_CATALOG_REFRESH', { admin: adminUsername(), phase: 'requested' }");
+    expect(body).toContain("phase: 'completed', enabled: status.enabled, hasError: Boolean(status.lastError)");
+    expect(body).not.toContain("headers['x-admin-token']");
+  });
+
   it('keeps no stale exemption', () => {
     const keys = new Set(routes.map((r) => r.key));
     expect(Object.keys(NO_AUDIT_NEEDED).filter((k) => !keys.has(k))).toEqual([]);

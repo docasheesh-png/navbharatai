@@ -12,6 +12,7 @@ vi.mock('react', async original => ({
   useEffect: (fn: () => (() => void) | void) => { hooks.effects.push(fn); },
 }));
 vi.mock('./SurplusRegistryPanel', () => ({ SurplusRegistryPanel: () => null }));
+vi.mock('./RouterOneCatalogPanel', () => ({ RouterOneCatalogPanel: () => null }));
 import { LiveModelRegistryPanel, RegistryModelCard } from './LiveModelRegistryPanel';
 let cleanup: (() => void)[] = [];
 const root = () => { hooks.cursor = 0; hooks.refCursor = 0; return LiveModelRegistryPanel({ adminToken: 'never-display-token' }); };

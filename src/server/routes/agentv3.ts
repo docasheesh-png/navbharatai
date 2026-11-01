@@ -1,4 +1,6 @@
 import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
+import { admitWithRouterOnePin, scopeAskWithRouterOnePin } from '../AI/RouterOne/admission';
+import { isRouterOneAccountingProvider, routerOneAccountingFetch } from '../AI/RouterOne/accounting';
 import { createSurplusScopeAsk, SURPLUS_SCOPE_TIMEOUT_MS } from '../AI/SurplusRegistry/scopeAdmission';
 import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibility';
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
@@ -792,7 +794,7 @@ import {
   workspacePrefixFor,
   safeWorkspaceUid,
 } from '../lib/workspaceIdentity';
-import { adminRequestOk, requireAdmin } from '../lib/adminAuth';
+import { adminRequestOk, requireAdmin, adminUsername } from '../lib/adminAuth';
 import { previewFidelityCaveats, previewFidelityNotice } from '../AgentV3/previewFidelity';
 import { journeyUserSummary } from '../AgentV3/journeyUserSummary';
 import { platformChecksProof, browserAlreadySaid, phoneOutcomeFromCode, type PhoneOutcome } from '../AgentV3/buildProofCard';
@@ -1881,6 +1883,25 @@ export function decideBuildBilledUsd(
    */
   absorbedUnbilledUsd: number;
 } {
+  const routerOneEntries = providerLedger.entries().filter(e => isRouterOneAccountingProvider(e.provider));
+  if (routerOneEntries.length) {
+    // No documented request-settlement API is available for this adapter. Absorb this portion,
+    // as Surplus does for unavailable accounting. Tokens remain visible but are not a receipt.
+    // Remove them from BOTH ledgers so they cannot return as a Sonnet-priced aux remainder.
+    const excluded = routerOneEntries.reduce((sum, e) => ({ inputTokens: sum.inputTokens + e.usage.inputTokens,
+      outputTokens: sum.outputTokens + e.usage.outputTokens }), { inputTokens: 0, outputTokens: 0 });
+    const subtract = (total: { inputTokens: number; outputTokens: number }) => ({
+      inputTokens: Math.max(0, total.inputTokens - excluded.inputTokens),
+      outputTokens: Math.max(0, total.outputTokens - excluded.outputTokens),
+    });
+    const remaining: BillingLedgerView = {
+      entries: () => providerLedger.entries().filter(e => !isRouterOneAccountingProvider(e.provider)),
+      total: () => subtract(providerLedger.total()),
+      byProvider: () => Object.fromEntries(Object.entries(providerLedger.byProvider()).filter(([p]) => !isRouterOneAccountingProvider(p))),
+    };
+    const priced = decideBuildBilledUsd(remaining, subtract(sinkTotal), powerLevel, userId, email, sandboxUsd, barrenPhases);
+    return { ...priced, reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal) };
+  }
   const surplusEntries = providerLedger.entries().filter(e => e.provider.toUpperCase() === 'SURPLUS');
   if (surplusEntries.length) {
     // DNA (z@ live 2026-10-30, counter app — SURPLUS_ADMITTED, GREEN_GUARD_SAVE, READY 92/100, then
@@ -2680,7 +2701,9 @@ export function openAiCompatRunners(
         // becomes the hang signal (openAiStream.ts); the runner is handed the same number, so the pair
         // stays honest in both modes. Flag off ⇒ this is the old line to the byte.
         const sdkTimeoutMs = buildStreamingEnabled() ? Math.max(timeoutMs, streamHardCapMs()) : timeoutMs;
-        const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0, fetch: canaryFetch() });
+        const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0,
+          fetch: isRouterOneAccountingProvider(name)
+            ? routerOneAccountingFetch(canaryFetch(), model, trace => audit('ROUTER_ONE_ACCOUNTING_UNSETTLED', trace)) : canaryFetch() });
         const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts, timeoutMs }), floorMaxPromptChars), name);
         out.push(k === 0
           ? { name, runner, modelId: model }
@@ -3486,10 +3509,11 @@ function routerOneScopeAsk(): (system: string, user: string, signal?: AbortSigna
   return async (system, user, signal) => {
     const key = routerOneApiKey();
     if (!key) throw new Error(ROUTER_ONE_NOT_CONFIGURED);
-    const client = new OpenAI({ apiKey: key, baseURL: routerOneBaseUrl(), timeout: 60_000, maxRetries: 1 });
     let lastErr: unknown;
     for (const model of routerOneModels()) {
       try {
+        const client = new OpenAI({ apiKey: key, baseURL: routerOneBaseUrl(), timeout: 60_000, maxRetries: 0,
+          fetch: routerOneAccountingFetch(canaryFetch(), model, trace => audit('ROUTER_ONE_ACCOUNTING_UNSETTLED', trace)) });
         const r = await client.chat.completions.create({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1024 }, { signal });
         return { text: String(r.choices?.[0]?.message?.content ?? '') };
       } catch (e) { lastErr = e; if (signal?.aborted) break; }
@@ -4651,8 +4675,11 @@ export function registerAgentV3Routes(app: Express): void {
     res.json(routerOneCatalogStatus());
   });
   app.post('/api/agentv3/router-one/catalog/refresh', requireAdmin, async (_req: Request, res: Response) => {
+    audit('ADMIN_ROUTER_ONE_CATALOG_REFRESH', { admin: adminUsername(), phase: 'requested' });
     await syncRouterOneCatalog();
-    res.json(routerOneCatalogStatus());
+    const status = routerOneCatalogStatus();
+    audit('ADMIN_ROUTER_ONE_CATALOG_REFRESH', { admin: adminUsername(), phase: 'completed', enabled: status.enabled, hasError: Boolean(status.lastError), syncedAt: status.lastGood?.syncedAt ?? null });
+    res.json(status);
   });
   app.get('/api/agentv3/diag', requireAdmin, async (req: Request, res: Response) => {
     const diag = { ...agentV3KeyDiag(), sandbox: sandboxDiag() };
@@ -11496,9 +11523,7 @@ async function noteBuildOutcome(
     // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders. Branches live in surplusChatAdmission.
     // Router One pin (z@gmail.com): skip Surplus admission entirely — this profile builds on Router One only.
     const routerOnePinned = routerOnePinnedFor(email, userId);
-    const surplusAdmitGate = routerOnePinned
-      ? { ok: true as const, session: undefined, diag: undefined }
-      : await runWeakSurplusAdmissionForChat({
+    const surplusAdmitGate = await admitWithRouterOnePin(routerOnePinned, () => runWeakSurplusAdmissionForChat({
       powerLevel: powerLevelReqEffective,
       intent,
       hasImportIntent,
@@ -11507,7 +11532,7 @@ async function noteBuildOutcome(
       tierEngineAvailable: () => tierEngineAvailable(powerLevelReqEffective),
       audit,
       noFallback: surplusFallbackDisabledFor(email, userId),
-    });
+    }));
     surplusAdmissionDiag = surplusAdmitGate.diag;
     if (!surplusAdmitGate.ok) {
       releaseBuildLock(buildKey, buildLockToken);
@@ -11521,9 +11546,9 @@ async function noteBuildOutcome(
     if (surplusBuilderEnabled() && !(await checkPaidBuildAdmission())) return;
     // Scope is checked before sandbox/setup. Imports need their files inspected and keep the import pipeline.
     const weakAdmission = await weakAdmissionForTurn({ prompt, intent, importing: hasImportIntent, tier: powerLevelReqEffective },
-      routerOnePinned ? routerOneScopeAsk() : createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
+      scopeAskWithRouterOnePin(routerOnePinned, routerOneScopeAsk, () => createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
         audit('AGENTV3_DISCOUNT_SCOPE_CALL', scopeCallAudit(scopeRequestId, intentWorkspaceId, row), 'info');
-      }, error => { earlySurplusFailure = error; }),
+      }, error => { earlySurplusFailure = error; })),
       surplusScopeTimeoutOpts(surplusSession));
     recordScopeFailure(scopeRequestId, intentWorkspaceId, weakAdmission, audit);
     const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(
@@ -13128,7 +13153,7 @@ async function noteBuildOutcome(
     }) => ({
       category: classifyFailure(i.rootCause || i.summary || '', outcomeCodeOf(i.issues)).category,
       framework,
-      realUsd: (() => { try { return realProviderCostUsd(i.entries, i.remainder); } catch { return 0; } })() + Math.max(0, i.sandboxUsd || 0), // unsettled Surplus receipt must not crash the failure ledger
+      realUsd: (() => { try { return realProviderCostUsd(i.entries.filter(e => !isRouterOneAccountingProvider(e.provider)), i.remainder); } catch { return 0; } })() + Math.max(0, i.sandboxUsd || 0), // known subtotal only; unavailable supplier expense must not crash the failure ledger
       inputTokens: i.inputTokens || 0,
       outputTokens: i.outputTokens || 0,
       ms: Math.max(0, Date.now() - i.startedAt),
@@ -14402,6 +14427,12 @@ async function noteBuildOutcome(
         );
       }
       const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
+        if (isRouterOneAccountingProvider(used) && !costUnconfirmedNoted) {
+          costUnconfirmedNoted = true;
+          try { buildDiag.record({ phase: 'build', severity: 'info', code: 'DISCOUNT_COST_UNCONFIRMED', autoResolved: true,
+            message: 'Engine supplier expense is unverified; this portion is excluded from the wallet charge.',
+            detail: 'ENGINE_R1 reports token usage but no verified request settlement. Its expense is unknown, not measured zero. Reported real cost excludes it. No list-price estimate, cache tariff, balance delta, or legacy markup is charged. Reconcile with supplier request logs before enabling actual-cost billing.' }); } catch { /* observation only */ }
+        }
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
         // exact misreading autopsy f04421ef already paid for once, arriving here through a different

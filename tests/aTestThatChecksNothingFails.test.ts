@@ -163,8 +163,21 @@ describe('a test that checks nothing fails', () => {
     },
   );
 
-  it('CENSUS: no test file has an empty test or an empty loop', () => {
-    const offenders = testFiles().flatMap((f) => emptyTestBodies(readFileSync(f, 'utf8'), f).map((h) => `${f}: ${h}`));
+  // The complete AST census exceeded the shared 20 s timeout under coverage.
+  // Bound each test's work instead of raising its timeout or sampling fewer files.
+  const files = testFiles().sort();
+  const batches = Array.from({ length: Math.ceil(files.length / 128) }, (_, index) => ({
+    index: index + 1, files: files.slice(index * 128, (index + 1) * 128),
+  }));
+  it('CENSUS: batches cover every discovered file exactly once', () => {
+    expect(files.length).toBeGreaterThan(0);
+    expect(batches.flatMap(batch => batch.files)).toEqual(files);
+    expect(new Set(files).size).toBe(files.length);
+  });
+  it.each(batches)('CENSUS batch $index: no test file has an empty test or an empty loop', ({ files: batch }) => {
+    expect(batch.length).toBeGreaterThan(0);
+    expect(batch.length).toBeLessThanOrEqual(128);
+    const offenders = batch.flatMap((f) => emptyTestBodies(readFileSync(f, 'utf8'), f).map((h) => `${f}: ${h}`));
     expect(offenders).toEqual([]);
   });
 });

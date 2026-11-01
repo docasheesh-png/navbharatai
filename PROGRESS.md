@@ -100051,3 +100051,12 @@ Normal raw-page GET returned HTTP403; current enforced executor allowlist exclud
 router.one. No alternate-route retry was attempted. Need approved source access or
 authentic supplied raw HTML to validate live parsing, followed by production
 snapshot/usage/billing integration. No new runtime edits, paid calls, PR or deploy.
+
+2026-11-01 public JSON-LD reader foundation: added scripts/lib/routerOnePublicTariff.ts
+and synthetic regression tests. Strict Product SKU, USD, explicit per-million units,
+complete unique token components and contiguous whole-request tier validation; inert
+JSON-LD decoding only, no script execution. Unsupported Chat cache-write tariffs are
+excluded. Offline outputs remain billingAuthorized:false. Authentic previously captured
+page fixtures are pending transfer from the parent; no live parser acceptance claimed.
+Verification: 4 files / 65 tests passed; npm run typecheck passed before the final small
+HTML extraction addition (that addition passed targeted Vitest). No process running.

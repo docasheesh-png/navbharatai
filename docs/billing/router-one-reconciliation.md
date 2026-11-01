@@ -219,3 +219,11 @@ for a tested live parser. An approved environment policy update permitting the
 source, or supplied authentic raw page evidence, can remove this parser-evidence
 blocker. No API key or paid inference call is necessary for public-page evidence.
 Production catalogue integration and broad Router One release remain on hold.
+
+Observed JSON-LD provides a preferable adapter boundary: Product.sku and token
+price components carry explicit currencies and reference quantities. The offline
+reader in scripts/lib/routerOnePublicTariff.ts validates that observed structure
+using synthetic fixtures; authentic artifact acceptance remains pending. It rejects
+incomplete or overlapping tier intervals and unsupported cache-write tariffs instead
+of admitting a model at an invented price. Its outputs do not authorize dispatch
+or billing. No production caller or page fetcher has been installed by this step.

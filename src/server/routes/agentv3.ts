@@ -1,5 +1,5 @@
 import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
-import { isRouterOneAccountingProvider } from '../AI/RouterOne/accounting';
+import { isRouterOneAccountingProvider, routerOneAccountingFetch } from '../AI/RouterOne/accounting';
 import { createSurplusScopeAsk, SURPLUS_SCOPE_TIMEOUT_MS } from '../AI/SurplusRegistry/scopeAdmission';
 import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibility';
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
@@ -2700,7 +2700,10 @@ export function openAiCompatRunners(
         // becomes the hang signal (openAiStream.ts); the runner is handed the same number, so the pair
         // stays honest in both modes. Flag off ⇒ this is the old line to the byte.
         const sdkTimeoutMs = buildStreamingEnabled() ? Math.max(timeoutMs, streamHardCapMs()) : timeoutMs;
-        const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0, fetch: canaryFetch() });
+        const transport = canaryFetch();
+        const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0,
+          fetch: isRouterOneAccountingProvider(name)
+            ? routerOneAccountingFetch(transport, model, trace => audit('ROUTER_ONE_ACCOUNTING_UNSETTLED', trace)) : transport });
         const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts, timeoutMs }), floorMaxPromptChars), name);
         out.push(k === 0
           ? { name, runner, modelId: model }
@@ -3506,10 +3509,11 @@ function routerOneScopeAsk(): (system: string, user: string, signal?: AbortSigna
   return async (system, user, signal) => {
     const key = routerOneApiKey();
     if (!key) throw new Error(ROUTER_ONE_NOT_CONFIGURED);
-    const client = new OpenAI({ apiKey: key, baseURL: routerOneBaseUrl(), timeout: 60_000, maxRetries: 1 });
     let lastErr: unknown;
     for (const model of routerOneModels()) {
       try {
+        const client = new OpenAI({ apiKey: key, baseURL: routerOneBaseUrl(), timeout: 60_000, maxRetries: 1,
+          fetch: routerOneAccountingFetch(canaryFetch(), model, trace => audit('ROUTER_ONE_ACCOUNTING_UNSETTLED', trace)) });
         const r = await client.chat.completions.create({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1024 }, { signal });
         return { text: String(r.choices?.[0]?.message?.content ?? '') };
       } catch (e) { lastErr = e; if (signal?.aborted) break; }

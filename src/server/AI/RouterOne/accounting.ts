@@ -12,3 +12,20 @@ export class RouterOneAccountingUnavailableError extends PublicBuildEngineError 
     Object.defineProperty(this, 'code', { value: 'ROUTER_ONE_ACCOUNTING_UNAVAILABLE', enumerable: false });
   }
 }
+
+/** X-Request-ID is the documented settlement correlation key, not the completion id.
+ * Preserve metadata only; never read or buffer prompts, answers, or streaming bodies.
+ * This is audit evidence, not a receipt and never authorizes a wallet charge.
+ */
+export function routerOneAccountingFetch(transport: typeof globalThis.fetch, model: string,
+  record: (trace: { requestId: string | null; model: string; status: number; expenseEvidence: 'unknown' }) => void,
+): typeof globalThis.fetch {
+  return async (input, init) => {
+    const response = await transport(input, init);
+    const rawId = response.headers.get('x-request-id');
+    const requestId = rawId && /^[a-zA-Z0-9_.:-]{1,256}$/.test(rawId) ? rawId : null;
+    try { record({ requestId, model, status: response.status, expenseEvidence: 'unknown' }); }
+    catch { /* A failed audit sink must not discard a provider response. */ }
+    return response;
+  };
+}

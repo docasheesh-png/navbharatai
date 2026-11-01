@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { realProviderCostUsd, realRateFor } from '../src/server/AgentV3/providerRates';
-import { RouterOneAccountingUnavailableError } from '../src/server/AI/RouterOne/accounting';
+import { RouterOneAccountingUnavailableError, routerOneAccountingFetch } from '../src/server/AI/RouterOne/accounting';
 import { ledgerCostUsd } from '../src/server/AgentV3/buildCostCeiling';
 import { createProviderUsageLedger } from '../src/server/AgentV3/ProviderUsageLedger';
 import { decideBuildBilledUsd } from '../src/server/routes/agentv3';
@@ -63,5 +63,24 @@ describe('unavailable Router One settlement is absorbed separately at every bill
     expect(bill.effectiveBilledUsd).toBe(0);
     expect(bill.realCostRemainder).toEqual({ inputTokens: 0, outputTokens: 0 });
     expect(bill.reconciledProviderUsage.ENGINE_R1.inputTokens).toBe(2 * usage.inputTokens);
+  });
+});
+
+describe('Router One audit transport', () => {
+  it('preserves the documented request header without consuming the response or inventing an expense', async () => {
+    const response = new Response('data: streamed-content', { headers: { 'X-Request-ID': 'request-123' } });
+    const transport = vi.fn(async () => response);
+    const record = vi.fn();
+    const result = await routerOneAccountingFetch(transport, model, record)('https://example.invalid/v1/chat/completions');
+    expect(result).toBe(response);
+    expect(result.bodyUsed).toBe(false);
+    expect(record).toHaveBeenCalledExactlyOnceWith({ requestId: 'request-123', model, status: 200, expenseEvidence: 'unknown' });
+    expect(await result.text()).toBe('data: streamed-content');
+  });
+  it('records unavailable correlation on failed responses and tolerates audit failure', async () => {
+    const response = new Response('failed', { status: 500 });
+    const record = vi.fn(() => { throw new Error('audit unavailable'); });
+    expect(await routerOneAccountingFetch(async () => response, model, record)('https://example.invalid')).toBe(response);
+    expect(record).toHaveBeenCalledWith({ requestId: null, model, status: 500, expenseEvidence: 'unknown' });
   });
 });

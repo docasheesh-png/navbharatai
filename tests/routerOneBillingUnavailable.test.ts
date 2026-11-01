@@ -67,6 +67,21 @@ describe('unavailable Router One settlement is absorbed separately at every bill
 });
 
 describe('Router One audit transport', () => {
+  it('keeps cancelled zero-token responses and retried requests as separate unsettled evidence', async () => {
+    const responses = [
+      new Response(JSON.stringify({ usage: { total_tokens: 0 } }), { status: 499, headers: { 'x-request-id': 'cancelled-attempt' } }),
+      new Response('data: partial\n\ndata: [DONE]', { headers: { 'x-request-id': 'next-attempt' } }),
+    ];
+    const record = vi.fn();
+    const transport = routerOneAccountingFetch(vi.fn().mockResolvedValueOnce(responses[0]).mockResolvedValueOnce(responses[1]), model, record);
+    expect(await transport('https://example.invalid')).toBe(responses[0]);
+    expect(await transport('https://example.invalid')).toBe(responses[1]);
+    expect(record.mock.calls.map(([row]) => row)).toEqual([
+      { requestId: 'cancelled-attempt', model, status: 499, expenseEvidence: 'unknown' },
+      { requestId: 'next-attempt', model, status: 200, expenseEvidence: 'unknown' },
+    ]);
+    expect(responses.every(response => !response.bodyUsed)).toBe(true);
+  });
   it('propagates a transport guard refusal instead of absorbing it as an accounting failure', async () => {
     const record = vi.fn();
     const guarded = vi.fn(async () => { throw new Error('canary denied'); });

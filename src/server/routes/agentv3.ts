@@ -1,4 +1,5 @@
 import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
+import { admitWithRouterOnePin, scopeAskWithRouterOnePin } from '../AI/RouterOne/admission';
 import { isRouterOneAccountingProvider, routerOneAccountingFetch } from '../AI/RouterOne/accounting';
 import { createSurplusScopeAsk, SURPLUS_SCOPE_TIMEOUT_MS } from '../AI/SurplusRegistry/scopeAdmission';
 import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibility';
@@ -793,7 +794,7 @@ import {
   workspacePrefixFor,
   safeWorkspaceUid,
 } from '../lib/workspaceIdentity';
-import { adminRequestOk, requireAdmin } from '../lib/adminAuth';
+import { adminRequestOk, requireAdmin, adminUsername } from '../lib/adminAuth';
 import { previewFidelityCaveats, previewFidelityNotice } from '../AgentV3/previewFidelity';
 import { journeyUserSummary } from '../AgentV3/journeyUserSummary';
 import { platformChecksProof, browserAlreadySaid, phoneOutcomeFromCode, type PhoneOutcome } from '../AgentV3/buildProofCard';
@@ -3511,7 +3512,7 @@ function routerOneScopeAsk(): (system: string, user: string, signal?: AbortSigna
     let lastErr: unknown;
     for (const model of routerOneModels()) {
       try {
-        const client = new OpenAI({ apiKey: key, baseURL: routerOneBaseUrl(), timeout: 60_000, maxRetries: 1,
+        const client = new OpenAI({ apiKey: key, baseURL: routerOneBaseUrl(), timeout: 60_000, maxRetries: 0,
           fetch: routerOneAccountingFetch(canaryFetch(), model, trace => audit('ROUTER_ONE_ACCOUNTING_UNSETTLED', trace)) });
         const r = await client.chat.completions.create({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1024 }, { signal });
         return { text: String(r.choices?.[0]?.message?.content ?? '') };
@@ -4674,8 +4675,11 @@ export function registerAgentV3Routes(app: Express): void {
     res.json(routerOneCatalogStatus());
   });
   app.post('/api/agentv3/router-one/catalog/refresh', requireAdmin, async (_req: Request, res: Response) => {
+    audit('ADMIN_ROUTER_ONE_CATALOG_REFRESH', { admin: adminUsername(), phase: 'requested' });
     await syncRouterOneCatalog();
-    res.json(routerOneCatalogStatus());
+    const status = routerOneCatalogStatus();
+    audit('ADMIN_ROUTER_ONE_CATALOG_REFRESH', { admin: adminUsername(), phase: 'completed', enabled: status.enabled, hasError: Boolean(status.lastError), syncedAt: status.lastGood?.syncedAt ?? null });
+    res.json(status);
   });
   app.get('/api/agentv3/diag', requireAdmin, async (req: Request, res: Response) => {
     const diag = { ...agentV3KeyDiag(), sandbox: sandboxDiag() };
@@ -11519,9 +11523,7 @@ async function noteBuildOutcome(
     // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders. Branches live in surplusChatAdmission.
     // Router One pin (z@gmail.com): skip Surplus admission entirely — this profile builds on Router One only.
     const routerOnePinned = routerOnePinnedFor(email, userId);
-    const surplusAdmitGate = routerOnePinned
-      ? { ok: true as const, session: undefined, diag: undefined }
-      : await runWeakSurplusAdmissionForChat({
+    const surplusAdmitGate = await admitWithRouterOnePin(routerOnePinned, () => runWeakSurplusAdmissionForChat({
       powerLevel: powerLevelReqEffective,
       intent,
       hasImportIntent,
@@ -11530,7 +11532,7 @@ async function noteBuildOutcome(
       tierEngineAvailable: () => tierEngineAvailable(powerLevelReqEffective),
       audit,
       noFallback: surplusFallbackDisabledFor(email, userId),
-    });
+    }));
     surplusAdmissionDiag = surplusAdmitGate.diag;
     if (!surplusAdmitGate.ok) {
       releaseBuildLock(buildKey, buildLockToken);
@@ -11544,9 +11546,9 @@ async function noteBuildOutcome(
     if (surplusBuilderEnabled() && !(await checkPaidBuildAdmission())) return;
     // Scope is checked before sandbox/setup. Imports need their files inspected and keep the import pipeline.
     const weakAdmission = await weakAdmissionForTurn({ prompt, intent, importing: hasImportIntent, tier: powerLevelReqEffective },
-      routerOnePinned ? routerOneScopeAsk() : createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
+      scopeAskWithRouterOnePin(routerOnePinned, routerOneScopeAsk, () => createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
         audit('AGENTV3_DISCOUNT_SCOPE_CALL', scopeCallAudit(scopeRequestId, intentWorkspaceId, row), 'info');
-      }, error => { earlySurplusFailure = error; }),
+      }, error => { earlySurplusFailure = error; })),
       surplusScopeTimeoutOpts(surplusSession));
     recordScopeFailure(scopeRequestId, intentWorkspaceId, weakAdmission, audit);
     const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(

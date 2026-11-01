@@ -99948,3 +99948,14 @@ Completed the unchanged c5d8a0159 aggregate run: 3,171 files, 48,002 passed test
 The transport census now recognizes only an audit observer that wraps canaryFetch(), checks both arms of conditional transports, and rejects unguarded or unknown observers. Negative cases and guard-refusal propagation are tested. Existing SDK count and retry-policy assertions are unchanged; the pre-existing scope constructor still prevents a green census. This is an explicit validation of the new composition, not a baseline waiver.
 
 Emulator recovery diagnosis: CONNECT is denied by the environment proxy; current enforced restricted network policy excludes storage.googleapis.com. The installed official firebase-tools downloader points to that host and its normal cache is empty. No alternate-host bypass was attempted. Need an allowed-host configuration change or the exact verified official cached artifact. CLAUDE.md lines 472 and 727 require green verification before every push; no draft or baseline waiver was found. Publication remains unattempted. Final validation after these narrow corrections is required and recorded separately.
+
+### Router One billing recovery — baseline defects authorized (2026-11-01)
+
+User explicitly authorized fixing the seven reproduced baseline failures. Continued `fix/routerone-receipt-billing` without replacing prior commits; main remained ddfceb0cb and no overlapping open PR was found.
+
+- Removed the scope classifier SDK retry; admitted its guarded constructor to the exact census (five factories), retaining guard and zero-retry assertions for every construction. Reviewed both Router One/Weak delegates in the exact eight-call census and asserted completion-callback propagation.
+- Extracted the existing lazy pin admission/scope selection into a tested helper; chat budget remains 537, never raised.
+- Wired catalog read/refresh into the existing admin registry, with authenticated requests, unconfirmed/error states, disabled refresh until status is read, and administrator/result audit. Catalog prices are explicitly not settlement evidence.
+- Added cancelled/zero-token and separate-request audit coverage. Broader targeted run: 15 files / 188 tests passed. Final-tree aggregate and remaining CI gates are still pending at this checkpoint; no claim of green/full verification.
+- Rechecked official accounting docs. Positive actual-times-10 remains blocked by absent verified settlement transport. `docs/billing/router-one-reconciliation.md` specifies a disabled, trusted-record reconciliation design including identity binding, conflicts, cancellations, retries, absorption, exact arithmetic and idempotency. No importer, wallet changes or production activation.
+- Enforced network policy still excludes the official Firestore download host; no available cached artifact. No forbidden retry or alternate route attempted. Publication remains gated on required checks and emulator access.

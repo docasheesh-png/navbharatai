@@ -48,7 +48,7 @@ describe('canary physical transport census', () => {
     const declaration = (file.statements[0] as ts.VariableStatement).declarationList.declarations[0];
     expect(isCanaryProtectedFetch(declaration.initializer!, file)).toBe(expected);
   });
-  it('wraps every OpenAI construction in the four admitted builder factories, not only the call-site label', () => {
+  it('wraps every OpenAI construction in the five admitted builder factories, not only the call-site label', () => {
     const paths = ['src/server/routes/agentv3.ts', 'src/server/AgentV3/weakBuildAdmissionAsk.ts', 'src/server/AgentV3/clarityJudgeAsk.ts'];
     let count = 0;
     for (const path of paths) {
@@ -66,7 +66,7 @@ describe('canary physical transport census', () => {
       };
       visit(file);
     }
-    expect(count).toBe(4);
+    expect(count).toBe(5);
   });
   it('requires review when any new SDK construction appears anywhere in the builder tree', () => {
     const walk = (directory: string): string[] => readdirSync(resolve(__dirname, '../../../..', directory), { withFileTypes: true }).flatMap(entry => {
@@ -97,6 +97,7 @@ describe('canary physical transport census', () => {
       'src/server/AgentV3/clarityJudgeAsk.ts:OpenAI',
       'src/server/AgentV3/weakBuildAdmissionAsk.ts:OpenAI',
       'src/server/routes/agentv3.ts:OpenAI',
+      'src/server/routes/agentv3.ts:OpenAI', // reviewed Router One scope classifier; guarded, no hidden retries
       'src/server/routes/agentv3.ts:OpenAI',
     ].sort());
   });

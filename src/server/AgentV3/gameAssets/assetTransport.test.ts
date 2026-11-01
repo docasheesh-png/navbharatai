@@ -23,6 +23,8 @@ it('honors provider backoff and refuses other metadata origins before any fetch'
     await expect(polyHavenTransport.get('https://api.polyhaven.com/info/tree',signal)).rejects.toThrow('unavailable');
     await expect(polyHavenTransport.get('https://api.polyhaven.com/info/tree',signal)).rejects.toThrow('rate limit');
     await expect(polyHavenTransport.get('https://metadata.google.internal/info/tree',signal)).rejects.toThrow('Unapproved');
+    await expect(polyHavenTransport.get('https://private:credential@api.polyhaven.com/info/tree',signal)).rejects.toThrow('Unapproved');
+    await expect(polyHavenTransport.get('https://api.polyhaven.com/info/tree#secret',signal)).rejects.toThrow('Unapproved');
     expect(fetch).toHaveBeenCalledOnce();
   } finally { vi.unstubAllGlobals(); }
 });

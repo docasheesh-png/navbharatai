@@ -120,3 +120,8 @@ it('persists optimized provenance and reuses derived bytes from the durable cach
     expect(Buffer.from([...r.binary.values()][0].split(',')[1],'base64')).toEqual(bytes);
   } finally {vi.unstubAllGlobals();}
 });
+
+it('uses the shared boolean flag convention and stays off for unset/unknown/negative values', () => {
+  for(const value of ['on','ON',' true ','1','yes'])expect(externalGameAssetsEnabled({AGENTV3_EXTERNAL_GAME_ASSETS:value})).toBe(true);
+  for(const value of [undefined,'','off','FALSE','0','typo'])expect(externalGameAssetsEnabled({AGENTV3_EXTERNAL_GAME_ASSETS:value})).toBe(false);
+});

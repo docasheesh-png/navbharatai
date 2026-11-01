@@ -1,5 +1,6 @@
 // Real local Firestore save -> fresh-process restore. Never runs against a cloud database.
 import assert from 'node:assert/strict';
+import { envFlag } from '../../src/server/lib/envFlag.ts';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { createHash, generateKeyPairSync } from 'node:crypto';
@@ -10,7 +11,7 @@ async function main() {
 const endpoint = process.env.FIRESTORE_EMULATOR_HOST;
 assert.match(endpoint ?? '', /^127\.0\.0\.1:\d+$/, 'Requires an explicit local emulator');
 assert.equal(process.env.VITEST, undefined);
-const storageMode=process.env.NBAI_STORAGE_DRILL==='1';
+const storageMode=envFlag('NBAI_STORAGE_DRILL');
 if(storageMode){
   assert.match(process.env.FIREBASE_STORAGE_EMULATOR_HOST??'',/^127\.0\.0\.1:\d+$/);
   assert.equal(process.env.STORAGE_EMULATOR_HOST,'http://'+process.env.FIREBASE_STORAGE_EMULATOR_HOST);

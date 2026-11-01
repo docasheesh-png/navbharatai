@@ -100178,3 +100178,16 @@ those service obligations separately from the CC0 asset licence when wiring the 
   + local emulator; the harness waits 10 ms for deliberate abort cleanup, without retrying requests or
   weakening assertions. Production-cloud same-tick recovery remains unverified.
 - Final full coverage will run on this local checkpoint; no PR/push, merge or feature activation.
+
+- Second complete full run: 3,186 files passed, one failed; 48,206 tests passed, one failed, 85 existing
+  skips. The failure was the new local harness's direct boolean env read. Changed both that reader and
+  L3's opt-in reader to the existing shared parser; no guard exemption or assertion weakening.
+- Removed the provider-backoff truncation and extended bounded per-origin spacing/backoff to binary
+  downloads. Added long numeric/date Retry-After, concurrent cooldown, cancellation and no-second-fetch
+  checks. No denied network request was retried; these provider checks use mocked responses.
+- Targeted guards/assets: ten files / 93 tests passed. Final CI-equivalent gates and complete coverage
+  are being repeated on the corrected tree. Signature access remains blocked.
+- Shared-parser/backoff checkpoint: 93 targeted tests, all available CI-equivalent gates, all four
+  required emulator drills and the local private-storage drill passed. The signature gate remains
+  explicitly failed/blocked from the prior 403 and was not retried. Starting complete coverage on the
+  corrected checkpoint; prior complete failures are retained in the evidence directory.

@@ -1,9 +1,10 @@
+import { parseEnvFlag } from '../../lib/envFlag';
 import type { AssetRequirement } from './assetPolicy';
 import type { ReviewedAsset } from './providers';
 
 /** Default OFF; enabling does not approve any unreviewed catalogue entry or paid service. */
 export function externalGameAssetsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.AGENTV3_EXTERNAL_GAME_ASSETS === 'on';
+  return parseEnvFlag(env.AGENTV3_EXTERNAL_GAME_ASSETS) ?? false;
 }
 const ALIASES: Readonly<Record<string, readonly string[]>> = {
   car: ['car', 'cars', 'racing', 'gaadi'], train: ['train', 'trains', 'railway'],

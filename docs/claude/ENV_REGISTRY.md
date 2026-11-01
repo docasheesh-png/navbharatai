@@ -4816,7 +4816,7 @@ remains unavailable without trusted final request/account-bound supplier receipt
 
 ## 2026-11-01 — L3 reviewed game assets (not enabled)
 
-- `AGENTV3_EXTERNAL_GAME_ASSETS`: **default OFF**, enabled only by exact `on`. No Cloud Run setting
+- `AGENTV3_EXTERNAL_GAME_ASSETS`: **default OFF**, uses the shared boolean parser (`on` is canonical). No Cloud Run setting
   changed. Read by `gameAssets/assetPlan.ts`; called inside the successful new-project 3D kit seed.
   It does not authorize unreviewed catalogue entries, paid providers, or credentialless Sketchfab
   downloads. Initial catalogue is intentionally empty pending real provenance/browser fixtures.

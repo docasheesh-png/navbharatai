@@ -1,3 +1,4 @@
+import { assetProviderPermit, recordAssetProviderResponse } from './assetProviderBudget';
 import { publicOnlyInit } from '../../lib/ssrfGuard';
 import { ASSET_LIMITS, type AssetCandidate } from './assetPolicy';
 
@@ -17,11 +18,14 @@ export async function downloadGameAsset(
   signal: AbortSignal,
 ): Promise<Uint8Array> {
   const url = assetDownloadUrl(candidate.downloadUrl, allowedOrigins);
+  const permit = assetProviderPermit(url.origin, signal);
+  if (permit) await permit;
   const response = await fetch(url, publicOnlyInit({
     redirect: 'error',
     signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
     headers: { 'User-Agent': 'NavBharatAI-AssetEngine/1.0 (+https://navbharatai.com)', 'Accept-Encoding': 'identity' },
   }));
+  recordAssetProviderResponse(url.origin, response);
   const encoding = response.headers.get('content-encoding');
   const length = response.headers.get('content-length');
   if (!response.ok || !response.body || (encoding && encoding !== 'identity') || (length && (!/^\d+$/.test(length) || Number(length) > ASSET_LIMITS.bytes))) {

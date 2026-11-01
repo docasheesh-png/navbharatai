@@ -7,7 +7,7 @@ Branch: `feat/universal-3d-assets`. Existing L1/L2 generation remains available.
 ## Architecture and implementation
 
 `routes/agentv3.ts` prepares optional external assets after a successful 3D kit recipe,
-inside the existing new-build/non-import/untouched-starter guard. The exact opt-in flag is
+inside the existing new-build/non-import/untouched-starter guard. The opt-in flag uses the shared boolean parser; canonical activation is
 `AGENTV3_EXTERNAL_GAME_ASSETS=on`. The production reviewed catalogue is deliberately empty;
 therefore neither the default nor an empty-catalogue opt-in makes provider requests.
 
@@ -25,7 +25,7 @@ Sketchfab is disabled pending verified authorized API access and terms. No provi
 verified production catalogue entry yet. Never infer asset rights from a GitHub code license.
 
 Transport uses existing socket-level SSRF protection, exact HTTPS origins, no redirects/credentials,
-bounded streaming, timeouts, per-origin metadata rate limits and bounded shared in-flight downloads.
+bounded streaming, timeouts, shared per-origin metadata/download rate limits and bounded shared in-flight downloads.
 GLB validation rejects external references, unsupported extensions, malformed ranges, cyclic nodes,
 unsafe numbers and excess geometry/texture budgets. Supported formats are self-contained GLB 2 and
 reviewed relative-resource glTF + BIN + PNG deterministically bundled into GLB. Initial policy:
@@ -149,3 +149,14 @@ An immediate metadata request after deliberately aborting a read reproduced `ECO
 10 ms for local socket cleanup after deliberate aborts; size and CRC assertions are unchanged and no
 request is retried. Same-tick connection recovery in production is not claimed. The diagnostic log is
 `asset-storage-raw-sdk-diagnosis.log` in the verification directory.
+
+### Flag and provider-backoff convention
+
+Both the opt-in L3 flag and local storage-drill flag use the repository's shared boolean parser,
+with OFF as the default. The second complete suite caught a direct string read in the newly added
+harness; it was corrected without changing the guard. Provider metadata and binary downloads now
+share bounded per-origin request spacing and Retry-After cooldowns. Numeric and HTTP-date intervals
+are honored without the earlier five-minute truncation; concurrent responses cannot shorten an
+existing cooldown. This is per-process throttling, not a claimed cross-instance global rate limit.
+The initial licence policy accepts CC0-1.0 and CC-BY-4.0; other licences require further implementation
+and review. No catalogue entry or live provider access has been enabled.

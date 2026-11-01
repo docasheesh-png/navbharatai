@@ -34,6 +34,7 @@
 // cautious.
 
 import { realProviderCostUsd, SurplusAccountingUnavailableError, type ProviderCostEntry } from './providerRates';
+import { isRouterOneAccountingProvider, RouterOneAccountingUnavailableError } from '../AI/RouterOne/accounting';
 
 /** The default ceiling on ONE build's real provider cost (USD). See the header for its provenance. */
 export const DEFAULT_BUILD_COST_CEILING_USD = 5;
@@ -72,9 +73,9 @@ export function ledgerCostUsd(entries: ProviderCostEntry[]): number {
   // to abort a rendering Surplus build as 'cost-cap' (shown as size limit / cost ceiling) at ₹0 spend.
   try { return realProviderCostUsd(entries); }
   catch (error) {
-    if (!(error instanceof SurplusAccountingUnavailableError)) throw error;
+    if (!(error instanceof SurplusAccountingUnavailableError) && !(error instanceof RouterOneAccountingUnavailableError)) throw error;
     const settled = entries.filter(e => {
-      if (e.provider.toUpperCase() !== 'SURPLUS') return true;
+      if (e.provider.toUpperCase() !== 'SURPLUS' && !isRouterOneAccountingProvider(e.provider)) return true;
       try { realProviderCostUsd([e]); return true; } catch { return false; }
     });
     return settled.length ? realProviderCostUsd(settled) : 0;

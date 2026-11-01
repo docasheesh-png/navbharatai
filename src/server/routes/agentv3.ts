@@ -1,4 +1,5 @@
 import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
+import { isRouterOneAccountingProvider } from '../AI/RouterOne/accounting';
 import { createSurplusScopeAsk, SURPLUS_SCOPE_TIMEOUT_MS } from '../AI/SurplusRegistry/scopeAdmission';
 import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibility';
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
@@ -1881,6 +1882,25 @@ export function decideBuildBilledUsd(
    */
   absorbedUnbilledUsd: number;
 } {
+  const routerOneEntries = providerLedger.entries().filter(e => isRouterOneAccountingProvider(e.provider));
+  if (routerOneEntries.length) {
+    // No documented request-settlement API is available for this adapter. Absorb this portion,
+    // as Surplus does for unavailable accounting. Tokens remain visible but are not a receipt.
+    // Remove them from BOTH ledgers so they cannot return as a Sonnet-priced aux remainder.
+    const excluded = routerOneEntries.reduce((sum, e) => ({ inputTokens: sum.inputTokens + e.usage.inputTokens,
+      outputTokens: sum.outputTokens + e.usage.outputTokens }), { inputTokens: 0, outputTokens: 0 });
+    const subtract = (total: { inputTokens: number; outputTokens: number }) => ({
+      inputTokens: Math.max(0, total.inputTokens - excluded.inputTokens),
+      outputTokens: Math.max(0, total.outputTokens - excluded.outputTokens),
+    });
+    const remaining: BillingLedgerView = {
+      entries: () => providerLedger.entries().filter(e => !isRouterOneAccountingProvider(e.provider)),
+      total: () => subtract(providerLedger.total()),
+      byProvider: () => Object.fromEntries(Object.entries(providerLedger.byProvider()).filter(([p]) => !isRouterOneAccountingProvider(p))),
+    };
+    const priced = decideBuildBilledUsd(remaining, subtract(sinkTotal), powerLevel, userId, email, sandboxUsd, barrenPhases);
+    return { ...priced, reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal) };
+  }
   const surplusEntries = providerLedger.entries().filter(e => e.provider.toUpperCase() === 'SURPLUS');
   if (surplusEntries.length) {
     // DNA (z@ live 2026-10-30, counter app — SURPLUS_ADMITTED, GREEN_GUARD_SAVE, READY 92/100, then
@@ -13128,7 +13148,7 @@ async function noteBuildOutcome(
     }) => ({
       category: classifyFailure(i.rootCause || i.summary || '', outcomeCodeOf(i.issues)).category,
       framework,
-      realUsd: (() => { try { return realProviderCostUsd(i.entries, i.remainder); } catch { return 0; } })() + Math.max(0, i.sandboxUsd || 0), // unsettled Surplus receipt must not crash the failure ledger
+      realUsd: (() => { try { return realProviderCostUsd(i.entries.filter(e => !isRouterOneAccountingProvider(e.provider)), i.remainder); } catch { return 0; } })() + Math.max(0, i.sandboxUsd || 0), // known subtotal only; unavailable supplier expense must not crash the failure ledger
       inputTokens: i.inputTokens || 0,
       outputTokens: i.outputTokens || 0,
       ms: Math.max(0, Date.now() - i.startedAt),
@@ -14402,6 +14422,12 @@ async function noteBuildOutcome(
         );
       }
       const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
+        if (isRouterOneAccountingProvider(used) && !costUnconfirmedNoted) {
+          costUnconfirmedNoted = true;
+          try { buildDiag.record({ phase: 'build', severity: 'info', code: 'DISCOUNT_COST_UNCONFIRMED', autoResolved: true,
+            message: 'Engine supplier expense is unverified; this portion is excluded from the wallet charge.',
+            detail: 'ENGINE_R1 reports token usage but no verified request settlement. Its expense is unknown, not measured zero. Reported real cost excludes it. No list-price estimate, cache tariff, balance delta, or legacy markup is charged. Reconcile with supplier request logs before enabling actual-cost billing.' }); } catch { /* observation only */ }
+        }
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
         // exact misreading autopsy f04421ef already paid for once, arriving here through a different

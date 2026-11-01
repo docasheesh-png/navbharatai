@@ -18,6 +18,37 @@ workflow must appear here, so the document cannot silently rot.
 The pipeline has **three phases**. GitHub's green ticks are only Phase B; half of what decides whether a
 build survives happens before GitHub ever sees the app, and the recovery happens after.
 
+## Reliability hardening (2026-11-01)
+
+- Generated APK/AAB Gradle commands enable `pipefail` and retain the failing command's exit code.
+  `tee` succeeding cannot hide a broken build. Network failures get up to three attempts; deterministic
+  compile failures stop immediately and reach the existing repair loop.
+- Every generated app-artifact upload uses `if-no-files-found: error`. The panel reserves 100% for a
+  nonempty artifact of the requested Android kind, retries delayed/failed artifact reads, and lets the
+  user collect the same finished build again without dispatching another run.
+- All generated workflows accept an optional `build_request_id` and include it in their run name.
+  Dispatch checks the actual workflow before sending the input, preserving older repositories. The
+  panel matches the request and branch, then polls that exact run id instead of whichever run is newest.
+- GitHub status, log and download reads have request timeouts and at most three transient attempts.
+  Dispatch retries only explicit workflow-indexing rejections (404 or missing dispatch trigger), never
+  an ambiguous timeout or server error that could have occurred after the build started.
+- npm registry fetches use bounded retries/timeouts; lockfile installs also get the peer-dependency
+  fallback. Missing-wrapper downloads use a temporary file so interrupted downloads cannot masquerade
+  as a complete wrapper, normalize Gradle release tags, and validate the JAR and wrapper main class.
+  An absent Gradle script or unusable wrapper triggers recovery.
+- Monitoring allows an hour for runner queueing and compilation. Stopping a repair cycle prevents its
+  next dispatch; cancellation targets the tracked build. An unconfirmed cancellation is stated as such.
+- Generated Android workflows verify the archive, bundled page, package/launcher and real APK
+  signature before upload. Release workflows also verify the signed AAB. Stale generated binary outputs
+  are removed before Gradle runs, so an old APK cannot masquerade as this build's output.
+- Shared artifact extraction verifies transport ZIP CRCs; server and browser reject empty/non-ZIP
+  app downloads. Saved apps preserve the real APK/AAB/IPA filename, show download errors, allow
+  status/file rechecks and retain the app list through a temporary connection failure.
+
+These changes prevent specific false successes and recover transient failures. They do not guarantee
+success during GitHub/registry outages or for invalid source, missing credentials or exhausted runner
+quotas. Live runner success and installation on a phone still require an actual dispatched APK build.
+
 ---
 
 ## Phase A — inside NavBharatAI, BEFORE GitHub sees anything (`POST /api/mobile-ship/setup`)
@@ -75,7 +106,7 @@ Wrong JDK for the app's Capacitor major → Gradle dies later. Classifier: `JAVA
 repair raises the pin to what the governed toolchain says THIS app needs.
 
 ### Step B4 — "Install the app's libraries"
-`package-lock.json` present → `npm ci || npm install`; absent → `npm install || npm install
+`package-lock.json` present → `npm ci || npm install || npm install --legacy-peer-deps`; absent → `npm install || npm install
 --legacy-peer-deps`. Everything that can die here, and its coverage:
 - **Package does not exist** (registry 404) → `NPM_PACKAGE_NOT_FOUND`
 - **Version does not exist** (npm ETARGET, "No matching version found for pkg@range" — the classic
@@ -156,10 +187,19 @@ wrapper jar is written by the workflow itself (G14), so the key deliberately doe
 with **up to 3 attempts, retried ONLY when the log matches a transient-network pattern** (G10) — a
 deterministic compile failure exits immediately, never burning the user's Actions minutes on a bug.
 `SDK_LICENSE_NOT_ACCEPTED` covers the runner image demanding license acceptance. The debug APK signs with
-Android's universal debug key — zero secrets, which is what makes the whole flow one click. (The signed
+the runner's generated debug key — zero secrets, which is what makes the whole flow one click. That
+key is not a stable app identity across fresh runners; updates requiring the same signature must use
+the signed-release workflow and keep its signing key. (The signed
 `.aab` workflow adds: a fail-early check for the four signing secrets — `MISSING_SIGNING_SECRET`, the one
 genuinely user-only failure — keystore restore + Gradle signing wiring — `SIGNING_CREDENTIALS_WRONG` —
 and a unique `versionCode` stamped from the run number, because Play rejects a re-used one.)
+
+### Step B7b — "Verify the Android app files"
+Requires a nonempty APK with complete ZIP CRCs, its Android manifest, executable code and bundled
+`assets/public/index.html`. The installed Android SDK's `apksigner` verifies the real APK signature and
+`aapt` verifies the package and launcher. A release build additionally verifies the AAB archive and
+required entries plus its JAR signature; legitimate self-signed upload certificates are supported.
+Nothing is uploaded when verification fails.
 
 ### Step B8 — "Upload the .apk"
 The artifact (`app-apk`, 14-day retention). GitHub holds it in the user's own repo.

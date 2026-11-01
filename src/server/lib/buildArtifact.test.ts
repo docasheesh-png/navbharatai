@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import JSZip from 'jszip';
 import {
   fetchBuildArtifact, pickBinaryName, isValidArtifactId, isValidRepoRef,
   type ArtifactFetcher,
@@ -11,6 +12,7 @@ const zipOf = (files: Record<string, string>) => async () => ({
 });
 
 const okFetcher = (): ArtifactFetcher => async () => ({ status: 200, data: new ArrayBuffer(8) });
+const appBytes = 'PK\x03\x04APP_BYTES';
 
 describe('pickBinaryName — hand back the app, not the archive', () => {
   it('prefers .aab (what a Play submission wants) over .apk', () => {
@@ -30,6 +32,10 @@ describe('pickBinaryName — hand back the app, not the archive', () => {
 
   it('is case-insensitive about the extension', () => {
     expect(pickBinaryName(['App-Release.APK'])).toBe('App-Release.APK');
+  });
+
+  it('skips nested resource forks and names unsafe for download headers', () => {
+    expect(pickBinaryName(['out/__MACOSX/fake.apk', 'out/._fake.apk', 'bad\r\n.apk', 'bad".apk', 'out/app.apk'])).toBe('out/app.apk');
   });
 
   it('returns null when nothing is installable, so the caller can fail honestly', () => {
@@ -59,10 +65,10 @@ describe('fetchBuildArtifact', () => {
   const base = { owner: 'o', repo: 'r', artifactId: '99', token: 't' };
 
   it('returns the unwrapped binary and the plain file name', async () => {
-    const r = await fetchBuildArtifact(base, okFetcher(), zipOf({ 'out/app-release.aab': 'BYTES' }));
+    const r = await fetchBuildArtifact(base, okFetcher(), zipOf({ 'out/app-release.aab': appBytes }));
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.bytes.toString()).toBe('BYTES');
+      expect(r.bytes.toString()).toBe(appBytes);
       // The user asked for their app, not a nested path.
       expect(r.fileName).toBe('app-release.aab');
     }
@@ -110,5 +116,31 @@ describe('fetchBuildArtifact', () => {
   it('a non-2xx that is not 404 is a generic fetch failure', async () => {
     const r = await fetchBuildArtifact(base, async () => ({ status: 500, data: new ArrayBuffer(0) }), zipOf({}));
     expect(r).toMatchObject({ ok: false, failure: 'fetch-failed' });
+  });
+
+  it.each(['', '<html>upstream error</html>', 'not an APK'])('refuses an empty or invalid mobile binary (%j)', async (payload) => {
+    expect(await fetchBuildArtifact(base, okFetcher(), zipOf({ 'app.apk': payload }))).toMatchObject({ ok: false, failure: 'not-app' });
+  });
+
+  it('recognizes GitHub Gone as an expired build', async () => {
+    expect(await fetchBuildArtifact(base, async () => ({ status: 410, data: new ArrayBuffer(0) }))).toMatchObject({ ok: false, failure: 'expired' });
+  });
+
+  it('the real shared loader extracts complete app bytes without changing them', async () => {
+    const inner = await new JSZip().file('AndroidManifest.xml', 'manifest').generateAsync({ type: 'nodebuffer' });
+    const outer = await new JSZip().file('app.apk', inner).generateAsync({ type: 'nodebuffer', compression: 'STORE' });
+    const result = await fetchBuildArtifact(base, async () => ({ status: 200, data: outer.buffer.slice(outer.byteOffset, outer.byteOffset + outer.byteLength) as ArrayBuffer }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.bytes.equals(inner)).toBe(true);
+  });
+
+  it('rejects silent byte corruption detected by the transport archive CRC', async () => {
+    const payload = Buffer.from(appBytes);
+    const outer = await new JSZip().file('app.apk', payload).generateAsync({ type: 'nodebuffer', compression: 'STORE' });
+    const offset = outer.indexOf(payload);
+    expect(offset).toBeGreaterThan(-1);
+    outer[offset + payload.length - 1] ^= 1;
+    const result = await fetchBuildArtifact(base, async () => ({ status: 200, data: outer.buffer.slice(outer.byteOffset, outer.byteOffset + outer.byteLength) as ArrayBuffer }));
+    expect(result).toMatchObject({ ok: false, failure: 'fetch-failed' });
   });
 });

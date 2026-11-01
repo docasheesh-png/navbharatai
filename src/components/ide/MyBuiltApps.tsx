@@ -20,11 +20,11 @@
 //    the middle of fixing an old one, so every row's state is read live from GitHub rather than cached,
 //    and a build whose file has gone says so and offers a rebuild instead.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Package, RefreshCw, Trash2, AlertTriangle, Clock, CheckCircle2, X } from 'lucide-react';
 import { PublishToNavStore } from './PublishToNavStore';
-import { writeFailure } from '../../lib/serverAnswer';
-import { deliverFile } from '../../lib/downloadFile';
+import { deliverFile, deliveryMessage } from '../../lib/downloadFile';
+import { fetchMobileBuildFile, fetchMobileBuildJson, usableMobileBuildArtifacts } from '../../lib/mobileBuildWatch';
 
 export interface MyBuiltApp {
   id: string;
@@ -43,8 +43,8 @@ type AppState =
   | { kind: 'building' }
   /** Finished with a real file we can hand over. */
   | { kind: 'ready'; artifacts: Array<{ id: string | number; name: string; sizeBytes?: number }> }
-  /** Finished, but GitHub has deleted the artifact (14 days) — honest, and offers a rebuild. */
-  | { kind: 'expired' }
+  /** The run succeeded, but no app file is visible. It can be delayed, expired or removed. */
+  | { kind: 'unavailable' }
   /** The run itself failed. */
   | { kind: 'failed' }
   /** We could not ask. NOT a verdict on the build — see the message. */
@@ -64,17 +64,28 @@ export function MyBuiltApps({ ghHeaders }: { ghHeaders: (extra?: Record<string, 
   const [forgetError, setForgetError] = useState('');
   const [state, setState] = useState<Record<string, AppState>>({});
   const [openId, setOpenId] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState('');
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const live = useRef(true);
+  const listRequest = useRef(0);
+  const appRequests = useRef<Record<string, number>>({});
+  useEffect(() => {
+    live.current = true;
+    return () => { live.current = false; };
+  }, []);
 
   const loadApps = useCallback(async () => {
+    const request = ++listRequest.current;
     setListError('');
     try {
-      const res = await fetch('/api/mobile-ship/my-apps', { headers: await ghHeaders() });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) { setListError(data?.error || 'Could not load your apps.'); setApps([]); return; }
-      setApps(Array.isArray(data?.apps) ? data.apps : []);
+      const { response: res, data } = await fetchMobileBuildJson('/api/mobile-ship/my-apps', { headers: await ghHeaders() });
+      if (!live.current || request !== listRequest.current) return;
+      if (!res.ok || !Array.isArray(data?.apps)) { setListError(data?.error || 'Could not load your apps.'); setApps((previous) => previous ?? []); return; }
+      setApps(data.apps);
     } catch {
+      if (!live.current || request !== listRequest.current) return;
       setListError('Could not reach NavBharatAI. Check your connection.');
-      setApps([]);
+      setApps((previous) => previous ?? []);
     }
   }, [ghHeaders]);
 
@@ -88,59 +99,69 @@ export function MyBuiltApps({ ghHeaders }: { ghHeaders: (extra?: Record<string, 
    * for a build the user has not chosen to open.
    */
   const checkApp = useCallback(async (app: MyBuiltApp) => {
-    setState((s) => ({ ...s, [app.id]: { kind: 'checking' } }));
+    const request = (appRequests.current[app.id] || 0) + 1;
+    appRequests.current[app.id] = request;
+    const update = (next: AppState) => {
+      if (live.current && appRequests.current[app.id] === request) setState((s) => ({ ...s, [app.id]: next }));
+    };
+    update({ kind: 'checking' });
     try {
       const headers = await ghHeaders();
       const q = new URLSearchParams({ owner: app.owner, repo: app.repo, workflow: app.workflow || 'android-apk.yml' });
-      const runsRes = await fetch(`/api/mobile-ship/runs?${q}`, { headers });
-      const runsData = await runsRes.json().catch(() => null);
+      const { response: runsRes, data: runsData } = await fetchMobileBuildJson(`/api/mobile-ship/runs?${q}`, { headers });
       if (!runsRes.ok) {
-        setState((s) => ({ ...s, [app.id]: { kind: 'unknown', why: runsData?.error || 'Could not read this build from GitHub.' } }));
+        update({ kind: 'unknown', why: runsData?.error || 'Could not read this build from GitHub.' });
         return;
       }
-      const run = (runsData?.runs || [])[0];
-      if (!run) { setState((s) => ({ ...s, [app.id]: { kind: 'unknown', why: 'No builds found for this app yet.' } })); return; }
-      if (run.status !== 'completed') { setState((s) => ({ ...s, [app.id]: { kind: 'building' } })); return; }
-      if (run.conclusion !== 'success') { setState((s) => ({ ...s, [app.id]: { kind: 'failed' } })); return; }
+      const run = Array.isArray(runsData?.runs) ? runsData.runs[0] : undefined;
+      if (!run) { update({ kind: 'unknown', why: 'No builds found for this app yet.' }); return; }
+      if (run.status !== 'completed') { update({ kind: 'building' }); return; }
+      if (run.conclusion !== 'success') { update({ kind: 'failed' }); return; }
 
-      const aRes = await fetch(`/api/mobile-ship/artifacts?owner=${encodeURIComponent(app.owner)}&repo=${encodeURIComponent(app.repo)}&runId=${encodeURIComponent(String(run.id))}`, { headers });
-      const aData = await aRes.json().catch(() => null);
+      if (!live.current || appRequests.current[app.id] !== request) return;
+      const { response: aRes, data: aData } = await fetchMobileBuildJson(`/api/mobile-ship/artifacts?owner=${encodeURIComponent(app.owner)}&repo=${encodeURIComponent(app.repo)}&runId=${encodeURIComponent(String(run.id))}`, { headers });
       if (!aRes.ok) {
-        setState((s) => ({ ...s, [app.id]: { kind: 'unknown', why: aData?.error || 'Could not read the build files.' } }));
+        update({ kind: 'unknown', why: aData?.error || 'Could not read the build files.' });
         return;
       }
-      const artifacts = aData?.artifacts || [];
-      // A successful run with no artifact left means GitHub has deleted it — the 14-day window. Saying
-      // "ready" here and then failing the download is the lie this whole screen exists to avoid.
-      setState((s) => ({ ...s, [app.id]: artifacts.length ? { kind: 'ready', artifacts } : { kind: 'expired' } }));
+      const artifacts = usableMobileBuildArtifacts(aData?.artifacts);
+      // Empty is not proof of expiry: a just-finished run can precede artifact publication.
+      update(artifacts.length ? { kind: 'ready', artifacts } : { kind: 'unavailable' });
     } catch {
-      setState((s) => ({ ...s, [app.id]: { kind: 'unknown', why: 'Could not reach GitHub just now.' } }));
+      update({ kind: 'unknown', why: 'Could not reach GitHub just now.' });
     }
   }, [ghHeaders]);
 
   const open = useCallback((app: MyBuiltApp) => {
     const next = openId === app.id ? null : app.id;
     setOpenId(next);
-    if (next && !state[app.id]) void checkApp(app);
-  }, [openId, state, checkApp]);
+    if (next) void checkApp(app);
+  }, [openId, checkApp]);
 
   const forget = useCallback(async (app: MyBuiltApp) => {
     setForgetError('');
     try {
-      const res = await fetch(`/api/mobile-ship/my-apps/${encodeURIComponent(app.id)}`, { method: 'DELETE', headers: await ghHeaders() });
-      const failure = await writeFailure(res, 'That app could not be removed from the list.');
-      if (failure) setForgetError(failure);
-    } catch { setForgetError('That app could not be removed from the list (no connection).'); }
-    void loadApps();
+      const { response: res, data } = await fetchMobileBuildJson(`/api/mobile-ship/my-apps/${encodeURIComponent(app.id)}`, { method: 'DELETE', headers: await ghHeaders() });
+      if (!live.current) return;
+      if (!res.ok) { setForgetError(data?.error || 'That app could not be removed from the list.'); return; }
+      appRequests.current[app.id] = (appRequests.current[app.id] || 0) + 1;
+    } catch { if (live.current) setForgetError('That app could not be removed from the list (no connection).'); }
+    if (live.current) void loadApps();
   }, [ghHeaders, loadApps]);
 
   const download = useCallback(async (app: MyBuiltApp, artifactId: string | number, name: string) => {
+    setDownloadError('');
+    setDownloading(`${app.id}:${artifactId}`);
     try {
-      const res = await fetch(`/api/mobile-ship/download?owner=${encodeURIComponent(app.owner)}&repo=${encodeURIComponent(app.repo)}&artifactId=${encodeURIComponent(String(artifactId))}`, { headers: await ghHeaders() });
-      if (!res.ok) return;
-      const blob = await res.blob();
-      void deliverFile(name.endsWith('.apk') || name.endsWith('.aab') ? name : `${name}.apk`, blob);
-    } catch { /* the button simply does nothing rather than throwing at the user */ }
+      const { blob, filename } = await fetchMobileBuildFile(`/api/mobile-ship/download?owner=${encodeURIComponent(app.owner)}&repo=${encodeURIComponent(app.repo)}&artifactId=${encodeURIComponent(String(artifactId))}`, { headers: await ghHeaders() }, name);
+      if (!live.current) return;
+      const delivered = await deliverFile(filename, blob);
+      if (live.current && (delivered === 'failed' || delivered === 'cancelled')) setDownloadError(deliveryMessage(delivered, filename));
+    } catch (error) {
+      if (live.current) setDownloadError(error instanceof Error ? error.message : 'Could not download the app file. Please try again.');
+    } finally {
+      if (live.current) setDownloading(null);
+    }
   }, [ghHeaders]);
 
   if (apps === null) {
@@ -158,9 +179,11 @@ export function MyBuiltApps({ ghHeaders }: { ghHeaders: (extra?: Record<string, 
   return (
     <div className="space-y-2">
       {forgetError && <p role="alert" className="text-xs text-danger">{forgetError}</p>}
+      {downloadError && <p role="alert" className="text-xs text-danger">{downloadError}</p>}
+      {listError && <p role="alert" className="text-xs text-danger">{listError}</p>}
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-bold text-ink flex items-center gap-1.5"><Package size={14} /> Your apps</h4>
-        <button onClick={() => void loadApps()} className="text-faint hover:text-ink p-1" aria-label="Refresh list">
+        <button onClick={() => { void loadApps(); const app = apps.find((item) => item.id === openId); if (app) void checkApp(app); }} className="text-faint hover:text-ink p-1" aria-label="Refresh list">
           <RefreshCw size={13} />
         </button>
       </div>
@@ -200,10 +223,10 @@ export function MyBuiltApps({ ghHeaders }: { ghHeaders: (extra?: Record<string, 
                     <span>This build did not finish. Build it again from the app builder — a failed build was never charged.</span>
                   </p>
                 )}
-                {st?.kind === 'expired' && (
+                {st?.kind === 'unavailable' && (
                   <p className="text-xs text-warn flex items-start gap-2">
                     <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                    <span>GitHub keeps a built file for 14 days, and this one has passed that. Build it again to get a fresh file.</span>
+                    <span>The build finished, but its app file is not available yet. Check again; if it has expired or was removed, build a fresh file.</span>
                   </p>
                 )}
                 {st?.kind === 'unknown' && (
@@ -212,13 +235,16 @@ export function MyBuiltApps({ ghHeaders }: { ghHeaders: (extra?: Record<string, 
                     <AlertTriangle size={13} className="shrink-0 mt-0.5" /><span>{st.why}</span>
                   </p>
                 )}
+                {st && st.kind !== 'checking' && (
+                  <button onClick={() => void checkApp(app)} className="text-xs text-accent-text hover:underline">Check build again</button>
+                )}
                 {st?.kind === 'ready' && (
                   <>
                     <p className="text-xs text-success flex items-center gap-2"><CheckCircle2 size={13} /> Ready</p>
                     {st.artifacts.map((a) => (
-                      <button key={String(a.id)} onClick={() => void download(app, a.id, String(a.name))}
+                      <button key={String(a.id)} disabled={downloading !== null} onClick={() => void download(app, a.id, String(a.name))}
                         className="w-full text-left px-3 py-2 rounded-lg bg-indigo-600/90 hover:bg-indigo-500 text-on-accent text-xs font-bold">
-                        Download {String(a.name)}
+                        {downloading === `${app.id}:${a.id}` ? 'Downloading…' : `Download ${String(a.name)}`}
                       </button>
                     ))}
                     {/* App Mart takes only the .apk — the store installs apps, and a .aab is a Play

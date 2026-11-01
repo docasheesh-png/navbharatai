@@ -36,7 +36,9 @@ export function isValidRepoRef(owner: unknown, repo: unknown): boolean {
  */
 export function pickBinaryName(names: string[]): string | null {
   for (const ext of ['.aab', '.apk', '.ipa']) {
-    const hit = names.find((n) => n.toLowerCase().endsWith(ext) && !n.startsWith('__MACOSX/'));
+    const hit = names.find((n) => n.toLowerCase().endsWith(ext)
+      && !n.split('/').some((part) => part === '__MACOSX' || part.startsWith('._'))
+      && !/[\x00-\x1f\x7f"\\]/.test(n));
     if (hit) return hit;
   }
   return null;
@@ -66,6 +68,14 @@ export interface ArtifactError {
 /** The one HTTP call this needs, injected so tests need no network. Returns the raw zip bytes. */
 export type ArtifactFetcher = (url: string, token: string) => Promise<{ status: number; data: ArrayBuffer }>;
 
+type ArtifactZip = { files: Record<string, { async: (t: 'nodebuffer') => Promise<Buffer> }> };
+
+/** Both download and store submission verify the transport archive, including each entry's CRC. */
+export async function loadBuildArtifactZip(buf: Buffer): Promise<ArtifactZip> {
+  const JSZip = (await import('jszip')).default;
+  return await JSZip.loadAsync(buf, { checkCRC32: true }) as unknown as ArtifactZip;
+}
+
 /**
  * Fetch one finished build and return the installable binary inside it.
  *
@@ -76,7 +86,7 @@ export type ArtifactFetcher = (url: string, token: string) => Promise<{ status: 
 export async function fetchBuildArtifact(
   input: { owner: string; repo: string; artifactId: string; token: string },
   fetcher: ArtifactFetcher,
-  loadZip: (buf: Buffer) => Promise<{ files: Record<string, { async: (t: 'nodebuffer') => Promise<Buffer> }> }>,
+  loadZip: (buf: Buffer) => Promise<ArtifactZip> = loadBuildArtifactZip,
 ): Promise<ArtifactResult | ArtifactError> {
   if (!isValidRepoRef(input.owner, input.repo)) {
     return { ok: false, failure: 'bad-request', message: 'A valid GitHub owner and repository name are required.' };
@@ -92,7 +102,7 @@ export async function fetchBuildArtifact(
   let raw: ArrayBuffer;
   try {
     const res = await fetcher(url, input.token);
-    if (res.status === 404) {
+    if (res.status === 404 || res.status === 410) {
       return { ok: false, failure: 'expired',
         message: 'That file has expired on GitHub (builds are kept for 14 days). Run the build again.' };
     }
@@ -104,7 +114,7 @@ export async function fetchBuildArtifact(
     // axios throws on a 404, so the status has to be recovered from the error too — otherwise the most
     // common real case (an expired artifact) would surface as a generic failure.
     const status = (e as { response?: { status?: number } })?.response?.status;
-    if (status === 404) {
+    if (status === 404 || status === 410) {
       return { ok: false, failure: 'expired',
         message: 'That file has expired on GitHub (builds are kept for 14 days). Run the build again.' };
     }
@@ -118,6 +128,11 @@ export async function fetchBuildArtifact(
       return { ok: false, failure: 'not-app', message: 'That build did not contain an installable app file.' };
     }
     const bytes = await zip.files[name].async('nodebuffer');
+    // APK, AAB and IPA are ZIP containers. Never offer an empty file, an HTML error page or arbitrary
+    // bytes as a successful app download merely because its name ends in .apk.
+    if (bytes.length < 4 || bytes.readUInt32LE(0) !== 0x04034b50) {
+      return { ok: false, failure: 'not-app', message: 'That build contains an empty or invalid app file. Build it again to get a complete app.' };
+    }
     return { ok: true, bytes, fileName: name.split('/').pop() || name };
   } catch {
     return { ok: false, failure: 'fetch-failed', message: 'Could not read the app file from that build.' };

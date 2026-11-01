@@ -10,6 +10,7 @@ import { authedHeaders } from '../../lib/authHeaders';
 import { SHIP_WORKFLOWS, needsUserSecrets, type ShipWorkflowFile } from '../../lib/shipWorkflows';
 import { signingNotReadyMessageFor, signingPlatformOf } from '../../lib/signingReadiness';
 import { deliverFile, deliveryMessage } from '../../lib/downloadFile';
+import { collectMobileBuildArtifacts, fetchMobileBuildFile, fetchMobileBuildJson, findMobileBuildToCancel, mobileBuildDispatchTime, MOBILE_BUILD_WATCH_MS, selectMobileBuildRun, type MobileBuildIdentity, type MobileBuildRun } from '../../lib/mobileBuildWatch';
 
 // "Build my app and give me the file" — the real pipeline, end to end, inside NavBharatAI.
 //
@@ -64,12 +65,7 @@ interface RequiredSecret {
   where: string;
 }
 
-interface RunInfo {
-  id: number;
-  status: string;
-  conclusion: string | null;
-  url: string;
-}
+type RunInfo = MobileBuildRun;
 
 interface Artifact { id: number; name: string; sizeBytes: number }
 
@@ -191,13 +187,18 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   // STOP + BUILD REPORT (admin 2026-08-18: "bich me rokne ka koi button nahi hai… stop button banao;
   // build report bhi chahiye; fail ho to pura likh kar aye, JSON me download ho").
   const stopRef = useRef(false);
+  const cycleRef = useRef(0);
+  const activeBuildRef = useRef<MobileBuildIdentity | null>(null);
   const [stopping, setStopping] = useState(false);
   /** The failure half of the build report, fetched when a build dies, so the WHY is written in full. */
   const [failReport, setFailReport] = useState<BuildReportLite | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
 
   const liveRef = useRef(true);
-  useEffect(() => () => { liveRef.current = false; }, []);
+  useEffect(() => {
+    liveRef.current = true;
+    return () => { liveRef.current = false; };
+  }, []);
 
   // A once-a-second elapsed clock while a build runs, so the wait has an honest number even in the gaps
   // between the 5-second status polls. Stops the moment the build leaves the 'building' phase.
@@ -249,12 +250,11 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     // GitHub only packages it — which is why this can take a few minutes, and why the note says so.
     setBusyNote('Building your app here first, fixing anything broken, and sending the built app to your GitHub…');
     try {
-      const res = await fetch('/api/mobile-ship/setup', {
+      const { response: res, data } = await fetchMobileBuildJson('/api/mobile-ship/setup', {
         method: 'POST',
         headers: await ghHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ sessionId, appName, appId, iconDataUrl, backgroundColor, ios: true, powerLevel }),
-      });
-      const data = await res.json().catch(() => null);
+      }, 10 * 60 * 1000);
       if (!liveRef.current) return;
       if (!res.ok || !data?.ok) {
         setError(data?.error || 'Could not prepare your app for building.');
@@ -282,23 +282,54 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   }, [sessionId, appName, appId, iconDataUrl, backgroundColor, ghHeaders, receiveKeystore]);
 
   /**
-   * Start the workflow on GitHub. Returns false when GitHub refused, so the caller can stop the whole
+   * Start the workflow on GitHub. Returns null when GitHub refused, so the caller can stop the whole
    * cycle instead of watching for a run that was never created — the exact failure this feature shipped
    * with, where a rejected dispatch still left the panel spinning.
    */
-  const dispatch = useCallback(async (workflow: ShipWorkflowFile, inputs?: Record<string, string>): Promise<boolean> => {
-    if (!setup) return false;
-    const res = await fetch('/api/mobile-ship/trigger', {
+  const dispatch = useCallback(async (workflow: ShipWorkflowFile, inputs?: Record<string, string>): Promise<{ requestId?: string; dispatchedAt?: number } | null> => {
+    if (!setup) return null;
+    const buildRequestId = crypto.randomUUID();
+    const { response: res, data } = await fetchMobileBuildJson('/api/mobile-ship/trigger', {
       method: 'POST',
       headers: await ghHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ owner: setup.owner, repo: setup.repo, ref: setup.branch, workflow, ...(inputs ? { inputs } : {}) }),
-    });
+      body: JSON.stringify({ owner: setup.owner, repo: setup.repo, ref: setup.branch, workflow, buildRequestId, ...(inputs ? { inputs } : {}) }),
+    }, 90_000);
     if (!res.ok) {
-      const data = await res.json().catch(() => null);
       if (liveRef.current) setError(data?.error || 'Could not start the build.');
-      return false;
+      return null;
     }
-    return true;
+    return {
+      requestId: data?.buildRequestId === buildRequestId ? buildRequestId : undefined,
+      dispatchedAt: mobileBuildDispatchTime(data?.dispatchedAt),
+    };
+  }, [setup, ghHeaders]);
+
+  // Collection can be retried independently: a temporary read failure never needs another paid run.
+  const collectArtifacts = useCallback(async (finished: RunInfo, kind: BuildKind) => {
+    if (!setup || kind === 'ipa') return;
+    const cycleId = cycleRef.current;
+    const isActive = () => liveRef.current && !stopRef.current && cycleRef.current === cycleId;
+    setPhase('building');
+    setError('');
+    setProgressNote('Collecting your app file…');
+    try {
+      const found = await collectMobileBuildArtifacts(async () => {
+        const { response, data } = await fetchMobileBuildJson(
+          `/api/mobile-ship/artifacts?owner=${encodeURIComponent(setup.owner)}&repo=${encodeURIComponent(setup.repo)}&runId=${finished.id}`,
+          { headers: await ghHeaders() },
+        );
+        if (!response.ok) throw new Error(data?.error || 'The app was built, but its file could not be collected. Retry collecting it below.');
+        return Array.isArray(data?.artifacts) ? data.artifacts : [];
+      }, kind, isActive);
+      if (!found) return;
+      setArtifacts(found);
+      setProgress(100);
+      setPhase('built');
+    } catch (error) {
+      if (!isActive()) return;
+      setError((error as Error).message);
+      setPhase('failed');
+    }
   }, [setup, ghHeaders]);
 
   /**
@@ -308,13 +339,13 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
    */
   const fetchFailReport = useCallback(async (runId: number, kind: BuildKind) => {
     if (!setup) return;
+    const cycleId = cycleRef.current;
     try {
-      const res = await fetch(
+      const { data } = await fetchMobileBuildJson(
         `/api/mobile-ship/report?owner=${encodeURIComponent(setup.owner)}&repo=${encodeURIComponent(setup.repo)}&runId=${runId}&workflow=${workflowFor(kind)}`,
         { headers: await ghHeaders() },
       );
-      const data = await res.json().catch(() => null);
-      if (liveRef.current && data && 'failure' in data) setFailReport(data as BuildReportLite);
+      if (liveRef.current && !stopRef.current && cycleRef.current === cycleId && data && 'failure' in data) setFailReport(data as BuildReportLite);
     } catch { /* the one-line summary still stands */ }
   }, [setup, ghHeaders]);
 
@@ -340,12 +371,11 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     if (!setup || makingKey) return;
     setMakingKey(true);
     try {
-      const r = await fetch('/api/mobile-ship/signing-setup', {
+      const { response: r, data: d } = await fetchMobileBuildJson('/api/mobile-ship/signing-setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await ghHeaders()) },
         body: JSON.stringify({ owner: setup.owner, repo: setup.repo, appName: setup.repo }),
-      });
-      const d = await r.json().catch(() => null);
+      }, 2 * 60 * 1000);
       if (!r.ok || !d?.ok) {
         setError(d?.hint ? `${d.error} ${d.hint}` : (d?.error || 'The signing key could not be created.'));
         return;
@@ -364,8 +394,9 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     }
   }, [setup, ghHeaders, makingKey, receiveKeystore]);
 
-  const runCycle = useCallback(async (kind: BuildKind) => {
+  const runCycle = useCallback(async (kind: BuildKind, cycleId: number) => {
     if (!setup) return;
+    const isActive = () => liveRef.current && !stopRef.current && cycleRef.current === cycleId;
     const workflow = workflowFor(kind);
     const { owner, repo } = setup;
 
@@ -381,11 +412,11 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         // An iPhone build asks about its OWN Apple keys; asking it about Android's would be a question
         // about a platform it never touches (report SHANKU-AI/instamony, 2026-10-01).
         const platform = isIos(kind) ? 'ios' : 'android';
-        const r = await fetch(
+        const { response: r, data: d } = await fetchMobileBuildJson(
           `/api/mobile-ship/signing-status?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}${platform === 'ios' ? '&platform=ios' : ''}`,
           { headers: await ghHeaders() },
         );
-        const d = await r.json().catch(() => null);
+        if (!isActive()) return;
         if (r.ok && d?.verdict === 'missing') {
           const missing: string[] = Array.isArray(d.missing) ? d.missing : [];
           // Only the Android key can be made here; the button stays away from an iPhone build.
@@ -400,13 +431,21 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     // result would be reported as if it were this build.
     let seen = new Set<number>();
     try {
-      const res = await fetch(
+      const { response: res, data } = await fetchMobileBuildJson(
         `/api/mobile-ship/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&workflow=${workflow}`,
         { headers: await ghHeaders() },
       );
-      const data = await res.json().catch(() => null);
-      seen = new Set<number>((data?.runs || []).map((r: RunInfo) => r.id));
-    } catch { /* no history readable — every run we see next is new by definition */ }
+      // GitHub briefly returns 404 before indexing a newly pushed workflow. Its first dispatch is
+      // still safe: request correlation (and the creation-time check for legacy kits) exclude old runs.
+      if (res.status !== 404 && (!res.ok || !Array.isArray(data?.runs))) throw new Error('Build history unavailable');
+      seen = new Set<number>((Array.isArray(data?.runs) ? data.runs : []).map((r: RunInfo) => r.id));
+    } catch {
+      if (isActive()) {
+        setError('Could not check existing builds. Please try again — no new build was started.');
+        setPhase('ready');
+      }
+      return;
+    }
 
     // How many repairs really landed in the repository this cycle — what the final sentence is about —
     // and how many of them were built here first and passed, which is the half that is a fact.
@@ -419,49 +458,61 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     // failure that CAME BACK from a new one (and the model can correct its own change rather than
     // repeat it). One record per answer; the server trusts only its shape.
     const history: Array<{ code?: string; error?: string | null; fixedBy?: 'rules' | 'ai' | null; verified?: boolean; changed?: string[] }> = [];
-    for (let attempt = 0; attempt < MAX_AUTO_ATTEMPTS && liveRef.current; attempt++) {
+    for (let attempt = 0; attempt < MAX_AUTO_ATTEMPTS && isActive(); attempt++) {
       setAttempt(attempt);
       setProgressNote(attempt === 0 ? 'Sending your app to be built…' : 'Starting the build again…');
-      setProgress(ATTEMPT_BANDS[attempt][0]);
+      setProgress((p) => Math.max(p, ATTEMPT_BANDS[attempt][0]));
 
       // iOS has no installable file to hand back; a green build goes to the user's TestFlight, so we ask
       // the workflow to upload there (Apple's rule). Android just builds the file.
-      if (!(await dispatch(workflow, isIos(kind) ? { upload: 'true' } : undefined))) { if (liveRef.current) setPhase('ready'); return; }
-      if (!liveRef.current || stopRef.current) return;
+      let dispatchedAt = Date.now();
+      activeBuildRef.current = { seen, dispatchedAt, pending: true };
+      const dispatched = await dispatch(workflow, isIos(kind) ? { upload: 'true' } : undefined);
+      if (!dispatched) { if (isActive()) setPhase('ready'); return; }
+      if (!isActive()) return;
+      dispatchedAt = dispatched.dispatchedAt ?? dispatchedAt;
+      activeBuildRef.current = { seen, dispatchedAt, requestId: dispatched.requestId };
       setProgressNote('Building your app…');
 
       const startedAt = Date.now();
       let finished: RunInfo | null = null;
+      let watchedRunId: number | undefined;
       const bumpProgress = (next: number) => setProgress((p) => Math.max(p, next)); // never go backward
-      for (let i = 0; i < 150 && liveRef.current && !finished; i++) {
+      while (Date.now() - startedAt < MOBILE_BUILD_WATCH_MS && isActive() && !finished) {
         await new Promise((r) => setTimeout(r, 5000));
         // The user pressed Stop: stopBuild owns the cancel and the UI — this watcher just stands down.
-        if (!liveRef.current || stopRef.current) return;
+        if (!isActive()) return;
         try {
-          const res = await fetch(
-            `/api/mobile-ship/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&workflow=${workflow}`,
+          const { response: res, data } = await fetchMobileBuildJson(
+            `/api/mobile-ship/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&workflow=${workflow}&branch=${encodeURIComponent(setup.branch)}${watchedRunId ? `&runId=${watchedRunId}` : ''}`,
             { headers: await ghHeaders() },
           );
-          const data = await res.json().catch(() => null);
-          const ours = ((data?.runs || []) as RunInfo[]).find((r) => !seen.has(r.id));
+          if (!isActive()) return;
+          if (!res.ok || !Array.isArray(data?.runs)) continue;
+          const ours = selectMobileBuildRun(data.runs, seen, {
+            branch: setup.branch, dispatchedAt, runId: watchedRunId, requestId: dispatched.requestId,
+          });
           if (!ours) {
             // The run has not appeared yet — a brief gap; a time estimate keeps the bar honest-ish here.
             bumpProgress(buildProgressPercent(attempt, Date.now() - startedAt));
             continue;
           }
+          watchedRunId = ours.id;
+          activeBuildRef.current = { seen, dispatchedAt, requestId: dispatched.requestId, runId: ours.id };
           setRun(ours);
           // REAL progress from the run's actual steps. Falls back to the time estimate only if the steps
           // are not readable yet (the run is queued, or a single poll failed).
           let usedReal = false;
           try {
-            const sRes = await fetch(
+            const { data: s } = await fetchMobileBuildJson(
               `/api/mobile-ship/run-steps?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&runId=${ours.id}`,
               { headers: await ghHeaders() },
             );
-            const s = await sRes.json().catch(() => null);
+            if (!isActive()) return;
             if (s && typeof s.percent === 'number' && Array.isArray(s.steps) && s.steps.length) {
               usedReal = true;
-              bumpProgress(s.percent);
+              // 100% is reserved for a collected Android binary (or confirmed TestFlight upload).
+              bumpProgress(Math.min(99, s.percent));
               if (s.currentStep) setProgressNote(s.currentStep);
               setSteps(s.steps);
             }
@@ -472,38 +523,27 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
           // A single failed poll is not a failed build; keep watching.
         }
       }
-      if (!liveRef.current) return;
+      if (!isActive()) return;
 
       if (!finished) {
         setPhase('failed');
-        setError('The build is taking longer than usual. It is still running — open it on GitHub to see where it is.');
+        setError('The build status could not be confirmed within an hour. Check it on GitHub or in My Built Apps before starting another build.');
         return;
       }
       seen.add(finished.id);
 
       // ── Finished successfully ──
       if (finished.conclusion === 'success') {
-        setProgress(96);
+        bumpProgress(96);
         if (isIos(kind)) {
           // iOS has no file to collect — it went to TestFlight. Straight to the honest done state.
           setProgressNote('Sending to TestFlight…');
-          if (!liveRef.current) return;
+          if (!isActive()) return;
           setProgress(100);
           setPhase('built');
           return;
         }
-        setProgressNote('Collecting your app file…');
-        try {
-          const aRes = await fetch(
-            `/api/mobile-ship/artifacts?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&runId=${finished.id}`,
-            { headers: await ghHeaders() },
-          );
-          const aData = await aRes.json().catch(() => null);
-          setArtifacts(Array.isArray(aData?.artifacts) ? aData.artifacts : []);
-        } catch { setArtifacts([]); }
-        if (!liveRef.current) return;
-        setProgress(100);
-        setPhase('built');
+        await collectArtifacts(finished, kind);
         return;
       }
 
@@ -538,17 +578,17 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         changed?: string[]; summary?: string; code?: string; report?: string;
         detail?: Record<string, string | string[]> | null } | null = null;
       try {
-        const fRes = await fetch('/api/mobile-ship/autofix', {
+        const { data } = await fetchMobileBuildJson('/api/mobile-ship/autofix', {
           method: 'POST',
           headers: await ghHeaders({ 'Content-Type': 'application/json' }),
           // `sessionId` names the app's workspace, where its own sandbox can run the build a repair would
           // face on GitHub — so only a change that compiles is committed (2026-09-22). `history` is what
           // the earlier attempts of THIS cycle did, so the same failure coming back is recognised.
           body: JSON.stringify({ owner, repo, ref: setup.branch, workflow, history, runId: finished.id, powerLevel, sessionId }),
-        });
-        fix = await fRes.json().catch(() => null);
+        }, 5 * 60 * 1000);
+        fix = data;
       } catch { /* handled as "could not fix" below */ }
-      if (!liveRef.current) return;
+      if (!isActive()) return;
       if (fix && typeof fix === 'object') {
         history.push({
           code: fix.code,
@@ -612,11 +652,13 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
           ? `${fix.summary} This is a packaging step NavBharatAI cannot test here, so the phone build will tell us. Building again…`
           : `${fix.summary} NavBharatAI could not check this one here first. Building again to find out…`);
     }
-  }, [setup, sessionId, ghHeaders, dispatch, fetchFailReport]);
+  }, [setup, sessionId, ghHeaders, dispatch, fetchFailReport, collectArtifacts, powerLevel]);
 
   /** Step 2 — one press, and everything from here on happens on its own. */
   const build = useCallback((kind: BuildKind = 'apk') => {
     if (!setup) return;
+    const cycleId = ++cycleRef.current;
+    activeBuildRef.current = null;
     stopRef.current = false;
     setStopping(false);
     setFailReport(null);
@@ -632,36 +674,41 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     setElapsedSec(0);
     setProgress(ATTEMPT_BANDS[0][0]);
     setProgressNote('Sending your app to be built…');
-    void runCycle(kind);
+    void runCycle(kind, cycleId).catch(() => {
+      if (!liveRef.current || stopRef.current || cycleRef.current !== cycleId) return;
+      setError('The connection was interrupted. Check this build on GitHub or in My Built Apps before starting another build.');
+      setPhase('failed');
+    });
   }, [setup, runCycle]);
 
   /**
    * STOP the build (admin 2026-08-18). A REAL stop: GitHub is told to cancel the run, so the machine
-   * genuinely stops — not a UI that merely looks away while the build burns on. If the run has not
-   * shown up in the list yet, the newest unfinished run is looked up and cancelled, so a stop pressed
-   * in the first seconds still lands. A stopped build was never successful, so it charges nothing.
+   * receives the cancellation request. If dispatch is still pending, cancellation cannot be confirmed;
+   * otherwise only this build's correlated or pinned run is eligible, even if another run starts.
    */
   const stopBuild = useCallback(async () => {
     setStopping(true);
     stopRef.current = true; // the watching cycle checks this and stands down
+    cycleRef.current += 1;
+    const active = activeBuildRef.current;
+    const alreadyFinished = run?.id === active?.runId && run?.status === 'completed';
+    let cancellationConfirmed = !active || alreadyFinished;
     try {
-      if (setup) {
-        let runId: number | undefined = run?.id;
-        if (!runId) {
-          // The dispatch went out but the run has not been seen yet — find it so the stop is real.
-          const res = await fetch(
-            `/api/mobile-ship/runs?owner=${encodeURIComponent(setup.owner)}&repo=${encodeURIComponent(setup.repo)}&workflow=${workflowFor(buildKind)}`,
+      if (setup && active && !alreadyFinished) {
+        const runId = await findMobileBuildToCancel(active, setup.branch, async () => {
+          const { response: res, data } = await fetchMobileBuildJson(
+            `/api/mobile-ship/runs?owner=${encodeURIComponent(setup.owner)}&repo=${encodeURIComponent(setup.repo)}&workflow=${workflowFor(buildKind)}&branch=${encodeURIComponent(setup.branch)}`,
             { headers: await ghHeaders() },
           );
-          const data = await res.json().catch(() => null);
-          runId = ((data?.runs || []) as RunInfo[]).find((r) => r.status !== 'completed')?.id;
-        }
+          return res.ok && Array.isArray(data?.runs) ? data.runs : [];
+        });
         if (runId) {
-          await fetch('/api/mobile-ship/cancel', {
+          const { response: cancelled } = await fetchMobileBuildJson('/api/mobile-ship/cancel', {
             method: 'POST',
             headers: await ghHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ owner: setup.owner, repo: setup.repo, runId }),
           });
+          cancellationConfirmed = cancelled.ok;
         }
       }
     } catch { /* the wait still ends; an uncancelled run stops itself at the workflow's own timeout */ }
@@ -671,7 +718,9 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     setProgress(0);
     setSteps([]);
     setProgressNote('');
-    setError('Build stopped. Nothing was charged — you can start it again any time.');
+    setError(cancellationConfirmed
+      ? alreadyFinished || !active ? 'Build monitoring stopped.' : 'Build cancellation requested.'
+      : 'Stopped watching, but could not confirm cancellation. Check this build on GitHub or in My Built Apps before starting another build.');
   }, [setup, run, buildKind, ghHeaders]);
 
   /**
@@ -683,16 +732,14 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     if (!setup || !run) return;
     setReportBusy(true);
     try {
-      const res = await fetch(
+      const { response: res, data } = await fetchMobileBuildJson(
         `/api/mobile-ship/report?owner=${encodeURIComponent(setup.owner)}&repo=${encodeURIComponent(setup.repo)}&runId=${run.id}&workflow=${workflowFor(buildKind)}`,
         { headers: await ghHeaders() },
       );
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
         setError(data?.error || 'Could not read the build report.');
         return;
       }
-      const data = await res.json();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const reportName = `${setup.repo}-build-report.json`;
       const delivered = await deliverFile(reportName, blob);
@@ -710,29 +757,21 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     setDownloading(String(artifact.id));
     setError('');
     try {
-      const res = await fetch(
+      const { response: res, blob, filename } = await fetchMobileBuildFile(
         `/api/mobile-ship/download?owner=${encodeURIComponent(setup.owner)}&repo=${encodeURIComponent(setup.repo)}&artifactId=${artifact.id}`,
-        { headers: await ghHeaders() },
+        { headers: await ghHeaders() }, artifact.name,
       );
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        setError(data?.error || 'Could not download that file.');
-        return;
-      }
+      if (!liveRef.current) return;
       // TELL THE USER, EVERY TIME (admin 2026-08-10). The server reports what it charged; we say it
       // in plain words. `applied` is false for a free-list account or a zero price, so this can never
       // claim a charge nobody paid — and it names the per-BUILD rule, because "it charged me twice!"
       // is the guaranteed support message if a bare price is shown for a file people re-download.
       const charge = readChargeHeaders((n) => res.headers.get(n));
-      const blob = await res.blob();
-      const name = /apk/i.test(artifact.name)
-        ? (buildKind === 'apk' ? 'app-debug.apk' : 'app-release.apk')
-        : 'app-release.aab';
-      const delivered = await deliverFile(name, blob);
-      if (delivered === 'failed') setError(deliveryMessage(delivered, name));
+      const delivered = await deliverFile(filename, blob);
+      if (delivered === 'failed') setError(deliveryMessage(delivered, filename));
       setChargeNote(chargeReceipt({ priceInr: charge.priceInr, applied: charge.applied }));
-    } catch {
-      setError('Could not download that file.');
+    } catch (error) {
+      if (liveRef.current) setError(error instanceof Error ? error.message : 'Could not download that file.');
     } finally {
       if (liveRef.current) setDownloading('');
     }
@@ -1207,6 +1246,15 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
           >
             {reportBusy ? <Loader2 size={12} className="animate-spin" /> : <FileJson size={12} />}
             Download build report (JSON)
+          </button>
+        )}
+
+        {phase === 'failed' && run?.conclusion === 'success' && !isIos(buildKind) && (
+          <button
+            onClick={() => { stopRef.current = false; void collectArtifacts(run, buildKind); }}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-line hover:bg-raised transition-colors text-muted"
+          >
+            <RefreshCw size={12} /> Retry collecting app file
           </button>
         )}
 

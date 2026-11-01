@@ -30,7 +30,7 @@ describe('the returning user', () => {
   });
 
   it('opening an app is what reads it — nothing charges a user who never comes back', () => {
-    expect(panel).toContain('if (next && !state[app.id]) void checkApp(app);');
+    expect(panel).toContain('if (next) void checkApp(app);');
   });
 });
 

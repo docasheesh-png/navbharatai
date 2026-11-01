@@ -284,19 +284,36 @@ ${ENSURE_WEB_PAGE_GUARD}          if [ ! -d android ]; then
             npx cap add android
           fi
           npx cap sync android
-          # ./gradlew executes gradle-wrapper.jar; heal a missing binary jar deterministically.
-          if [ ! -f android/gradle/wrapper/gradle-wrapper.jar ]; then
+          # ./gradlew executes gradle-wrapper.jar; a nonempty truncated download is still unusable.
+          wrapper_jar_ok() {
+            [ -s android/gradle/wrapper/gradle-wrapper.jar ] || return 1
+            jar tf android/gradle/wrapper/gradle-wrapper.jar > "$RUNNER_TEMP/nbai-wrapper-entries.txt" 2>/dev/null || return 1
+            grep -Fx 'org/gradle/wrapper/GradleWrapperMain.class' "$RUNNER_TEMP/nbai-wrapper-entries.txt" >/dev/null
+          }
+          if ! wrapper_jar_ok; then
             VER=$(sed -n 's/.*gradle-\\([0-9.]*\\)-.*/\\1/p' android/gradle/wrapper/gradle-wrapper.properties 2>/dev/null | head -1)
-            if [ -z "$VER" ]; then VER=8.7; fi
-            echo "::warning::gradle-wrapper.jar missing — fetching it for Gradle $VER"
-            mkdir -p android/gradle/wrapper
-            curl -fsSL -o android/gradle/wrapper/gradle-wrapper.jar "https://raw.githubusercontent.com/gradle/gradle/v$VER/gradle/wrapper/gradle-wrapper.jar" || true
+            if [ -n "$VER" ]; then
+              # Distributions use 8.13, but the upstream git tag is v8.13.0. Patch releases keep theirs.
+              case "$VER" in *.*.*) TAG="$VER" ;; *) TAG="$VER.0" ;; esac
+              echo "::warning::gradle-wrapper.jar is incomplete — fetching it for Gradle $VER"
+              mkdir -p android/gradle/wrapper
+              # Write atomically: a failed transfer must not leave a partial jar that passes the guard.
+              if curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 -o android/gradle/wrapper/gradle-wrapper.jar.download "https://raw.githubusercontent.com/gradle/gradle/v$TAG/gradle/wrapper/gradle-wrapper.jar"; then
+                mv android/gradle/wrapper/gradle-wrapper.jar.download android/gradle/wrapper/gradle-wrapper.jar
+              fi
+              rm -f android/gradle/wrapper/gradle-wrapper.jar.download
+            fi
           fi
-          if [ ! -f android/gradle/wrapper/gradle-wrapper.jar ]; then
+          if [ ! -f android/gradlew ] || ! wrapper_jar_ok; then
             echo "::warning::re-scaffolding the Android project so the Gradle wrapper is complete"
             rm -rf android
             npx cap add android
             npx cap sync android
+          fi
+          if ! wrapper_jar_ok; then
+            echo "NBAI_FAILED_STAGE=capacitor"
+            echo "::error::The Android Gradle wrapper is damaged or incomplete after recovery."
+            exit 1
           fi
           # THE APP'S OWN LOGO, ICON AND SPLASH — never Capacitor's default (appBranding.ts, admin 2026-10-16). The script
           # records what the fresh project holds, picks the app's branding source (the user's logo, a generated one, or an
@@ -415,15 +432,21 @@ const GRADLE_NETWORK_PATTERN =
 
 const gradleBuildRun = (gradleCmd: string): string => `          cd android
           chmod +x ./gradlew
+          # Never reuse an APK or bundle committed by a previous build or left by an earlier task.
+          # Gradle recreates these generated outputs; removing them makes its up-to-date check honest.
+          rm -rf app/build/outputs/apk app/build/outputs/bundle
           set +e
+          # The implicit GitHub bash shell does not enable pipefail: tee must never hide a failed build.
+          set -o pipefail
           attempt=1
           max_attempts=3
           rc=1
           while [ "$attempt" -le "$max_attempts" ]; do
             if ./gradlew ${gradleCmd} 2>&1 | tee /tmp/nbai-gradle.log; then
               rc=0; break
+            else
+              rc=$?
             fi
-            rc=1
             if [ "$attempt" -ge "$max_attempts" ]; then break; fi
             if grep -qiE '${GRADLE_NETWORK_PATTERN}' /tmp/nbai-gradle.log; then
               wait_s=$((attempt * 15))
@@ -435,6 +458,53 @@ const gradleBuildRun = (gradleCmd: string): string => `          cd android
             fi
           done
           exit "$rc"`;
+
+// A successful command and an existing file are not proof of an installable app. Check the complete
+// archive, Capacitor's actual bundled page, the Android signature and a launchable activity before any
+// artifact is uploaded. Discover build-tools AFTER Gradle: it may have installed the version it needs.
+const verifyAndroidArtifacts = (release: boolean): string => `      - name: Verify the Android app files
+        run: |
+          set -euo pipefail
+          fail_app_file() {
+            echo "NBAI_FAILED_STAGE=android"
+            echo "::error::$1"
+            exit 1
+          }
+          APK=android/app/build/outputs/apk/${release ? 'release/app-release.apk' : 'debug/app-debug.apk'}
+          [ -s "$APK" ] || fail_app_file "The Android build produced no nonempty installable app file."
+          unzip -tq "$APK" >/dev/null || fail_app_file "The Android app file is incomplete or damaged."
+          unzip -Z1 "$APK" > "$RUNNER_TEMP/nbai-apk-entries.txt"
+          for entry in AndroidManifest.xml classes.dex assets/public/index.html; do
+            grep -Fx "$entry" "$RUNNER_TEMP/nbai-apk-entries.txt" >/dev/null || fail_app_file "The Android app file is missing $entry."
+          done
+          unzip -p "$APK" assets/public/index.html > "$RUNNER_TEMP/nbai-apk-index.html"
+          [ -s "$RUNNER_TEMP/nbai-apk-index.html" ] || fail_app_file "The Android app contains an empty web page."
+          SDK_ROOT="\${ANDROID_SDK_ROOT:-\${ANDROID_HOME:-}}"
+          BUILD_TOOLS=""
+          while IFS= read -r candidate; do
+            if [ -x "$candidate/apksigner" ] && [ -x "$candidate/aapt" ]; then
+              BUILD_TOOLS="$candidate"
+              break
+            fi
+          done < <(find "$SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -Vr)
+          [ -n "$BUILD_TOOLS" ] || fail_app_file "The Android build tools needed to verify the finished app are unavailable."
+          "$BUILD_TOOLS/apksigner" verify --verbose "$APK" || fail_app_file "The Android app signature could not be verified."
+          "$BUILD_TOOLS/aapt" dump badging "$APK" > "$RUNNER_TEMP/nbai-apk-badging.txt" || fail_app_file "The Android app manifest could not be read."
+          grep -q '^package: name=' "$RUNNER_TEMP/nbai-apk-badging.txt" || fail_app_file "The Android app has no valid package identity."
+          grep -q '^launchable-activity: name=' "$RUNNER_TEMP/nbai-apk-badging.txt" || fail_app_file "The Android app has no launchable screen."
+${release ? `          BUNDLE=android/app/build/outputs/bundle/release/app-release.aab
+          [ -s "$BUNDLE" ] || fail_app_file "The Android build produced no nonempty Play bundle."
+          unzip -tq "$BUNDLE" >/dev/null || fail_app_file "The Play bundle is incomplete or damaged."
+          unzip -Z1 "$BUNDLE" > "$RUNNER_TEMP/nbai-bundle-entries.txt"
+          for entry in BundleConfig.pb base/manifest/AndroidManifest.xml base/dex/classes.dex base/assets/public/index.html; do
+            grep -Fx "$entry" "$RUNNER_TEMP/nbai-bundle-entries.txt" >/dev/null || fail_app_file "The Play bundle is missing $entry."
+          done
+          # Upload certificates are legitimately self-signed. Do not use -strict, which rejects them;
+          # require the actual verification message because jarsigner can exit zero for unsigned jars.
+          LC_ALL=C jarsigner -verify "$BUNDLE" > "$RUNNER_TEMP/nbai-bundle-signature.txt" || fail_app_file "The Play bundle signature is invalid."
+          grep -q '^jar verified\\.' "$RUNNER_TEMP/nbai-bundle-signature.txt" || fail_app_file "The Play bundle is not signed."
+` : ''}          echo "The Android app files passed archive, signing and launcher checks."
+`;
 
 // BUILD THE WEB APP — ONE shared step for the APK, AAB and iOS workflows so the three can never drift.
 //
@@ -517,6 +587,23 @@ const gradleCacheSave = (java: number): string => `      - name: Save the Gradle
           key: nbai-gradle-\${{ runner.os }}-java${java}-\${{ hashFiles('package.json') }}
 `;
 
+// Every lane uses the same install recovery. npm retries failed registry fetches itself (with a
+// bounded request timeout); a lockfile's peer conflict must get the same recovery as a source-only app.
+const INSTALL_LIBRARIES_STEP = `      - name: Install the app's libraries
+        env:
+          NPM_CONFIG_FETCH_RETRIES: '3'
+          NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: '2000'
+          NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: '15000'
+          NPM_CONFIG_FETCH_TIMEOUT: '60000'
+        run: |
+          set -e
+          if [ -f package-lock.json ]; then
+            npm ci || npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
+          else
+            npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
+          fi
+`;
+
 // THE APP'S LOGO, BEFORE ANYTHING IS BUILT (admin 2026-10-21). The chosen logo — or, with none, the app's own mark (a Lucide symbol
 // that fits its name, else the first letter of its name) — is turned into the launcher source and splash, and into the web install
 // icons, BEFORE the web build, so the icons land in the bundle. The icon generator and the image library are installed into
@@ -557,9 +644,16 @@ const ANDROID_APK_WORKFLOW = (appName: string, java: number): string => `# Build
 # Run it: GitHub → Actions → "Build Android APK (installable)" → Run workflow.
 
 name: Build Android APK (installable)
+run-name: Build Android APK (installable) \${{ inputs.build_request_id }}
 
 on:
   workflow_dispatch:
+    inputs:
+      build_request_id:
+        description: 'Build request identifier (set automatically by NavBharatAI)'
+        type: string
+        required: false
+        default: ''
 
 jobs:
   build-apk:
@@ -592,15 +686,7 @@ jobs:
       #   2. When the real failure was a peer-dependency conflict (ERESOLVE), there was no recovery at
       #      all, even though npm ships the exact fix for it.
       # So: run the command that fits what is actually here, and keep ONE honest fallback.
-${NPM_CACHE_RESTORE}      - name: Install the app's libraries
-        run: |
-          set -e
-          if [ -f package-lock.json ]; then
-            npm ci || npm install --no-audit --no-fund
-          else
-            npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
-          fi
-
+${NPM_CACHE_RESTORE}${INSTALL_LIBRARIES_STEP}
 ${NPM_CACHE_SAVE}${WEB_BUILD_STEP}
 
       # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
@@ -620,12 +706,13 @@ ${gradleCacheRestore(java)}${ENSURE_ANDROID_STEP}
       - name: Build the installable APK
         run: |
 ${gradleBuildRun('assembleDebug --no-daemon')}
-${gradleCacheSave(java)}
+${gradleCacheSave(java)}${verifyAndroidArtifacts(false)}
       - name: Upload the .apk
         uses: actions/upload-artifact@v4
         with:
           name: app-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
           retention-days: 14
 
 ${FAILURE_DIAGNOSTIC()}
@@ -653,9 +740,16 @@ const ANDROID_WORKFLOW = (appName: string, java: number): string => `# Build a S
 #   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
 
 name: Build Android App Bundle (.aab, signed)
+run-name: Build Android App Bundle (.aab, signed) \${{ inputs.build_request_id }}
 
 on:
   workflow_dispatch:
+    inputs:
+      build_request_id:
+        description: 'Build request identifier (set automatically by NavBharatAI)'
+        type: string
+        required: false
+        default: ''
 
 jobs:
   build-aab:
@@ -707,15 +801,7 @@ jobs:
       #   2. When the real failure was a peer-dependency conflict (ERESOLVE), there was no recovery at
       #      all, even though npm ships the exact fix for it.
       # So: run the command that fits what is actually here, and keep ONE honest fallback.
-${NPM_CACHE_RESTORE}      - name: Install the app's libraries
-        run: |
-          set -e
-          if [ -f package-lock.json ]; then
-            npm ci || npm install --no-audit --no-fund
-          else
-            npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
-          fi
-
+${NPM_CACHE_RESTORE}${INSTALL_LIBRARIES_STEP}
 ${NPM_CACHE_SAVE}${WEB_BUILD_STEP}
 
       # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
@@ -773,12 +859,13 @@ ${gradleCacheRestore(java)}${ENSURE_ANDROID_STEP}
           KEY_PASS: \${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
 ${gradleBuildRun('bundleRelease assembleRelease')}
-${gradleCacheSave(java)}
+${gradleCacheSave(java)}${verifyAndroidArtifacts(true)}
       - name: Upload the .aab (for Google Play)
         uses: actions/upload-artifact@v4
         with:
           name: release-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
           retention-days: 14
 
       - name: Upload the .apk (install straight onto a phone)
@@ -786,6 +873,7 @@ ${gradleCacheSave(java)}
         with:
           name: release-apk
           path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
           retention-days: 14
 
       # Google Play judges the bundle it receives, not the source. This reads the permissions out of the finished
@@ -826,10 +914,16 @@ const IOS_WORKFLOW = (appName: string): string => `# Build a SIGNED iOS app (.ip
 # with this project's bundle id, so uploads have somewhere to land.
 
 name: Build iOS App (.ipa, signed)
+run-name: Build iOS App (.ipa, signed) \${{ inputs.build_request_id }}
 
 on:
   workflow_dispatch:
     inputs:
+      build_request_id:
+        description: 'Build request identifier (set automatically by NavBharatAI)'
+        type: string
+        required: false
+        default: ''
       upload:
         description: 'Upload to App Store Connect / TestFlight after building'
         type: boolean
@@ -895,15 +989,7 @@ jobs:
       #   2. When the real failure was a peer-dependency conflict (ERESOLVE), there was no recovery at
       #      all, even though npm ships the exact fix for it.
       # So: run the command that fits what is actually here, and keep ONE honest fallback.
-${NPM_CACHE_RESTORE}      - name: Install the app's libraries
-        run: |
-          set -e
-          if [ -f package-lock.json ]; then
-            npm ci || npm install --no-audit --no-fund
-          else
-            npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
-          fi
-
+${NPM_CACHE_RESTORE}${INSTALL_LIBRARIES_STEP}
 ${NPM_CACHE_SAVE}${WEB_BUILD_STEP}
 
       # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
@@ -1006,6 +1092,7 @@ ${indentLines(nativePermissionScript('ios'), 10)}
         with:
           name: release-ipa
           path: \${{ runner.temp }}/App.ipa
+          if-no-files-found: error
           retention-days: 14
 
       - name: Always remove the API key

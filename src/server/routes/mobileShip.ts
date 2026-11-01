@@ -11,6 +11,7 @@
 import type { Express, Request, Response } from 'express';
 import { ANDROID_BUILD_FIX_PREFIX } from '../../lib/platformFixRequest';
 import axios from 'axios';
+import { githubBuildGet, dispatchGithubBuild } from '../lib/githubBuildApi';
 import { generateShipKit } from '../lib/mobileShipKit';
 import { getAllPublishGuides, getPublishGuide, renderPublishGuideText, type StorePlatform } from '../lib/storePublishGuide';
 // ONE declaration of which header carries the GitHub token — this module used to read the Authorization
@@ -103,16 +104,10 @@ import { routeParam, routeParams } from '../lib/expressCompat';
 
 /** The real HTTP call, kept at the edge so the fetching logic itself stays testable without a network. */
 const githubZipFetcher: ArtifactFetcher = async (url, token) => {
-  const r = await axios.get(url, {
-    headers: { Authorization: `token ${token}` }, responseType: 'arraybuffer', maxRedirects: 5,
+  const r = await githubBuildGet(url, {
+    headers: { Authorization: `token ${token}` }, responseType: 'arraybuffer', maxRedirects: 5, timeout: 90_000,
   });
   return { status: r.status, data: r.data as ArrayBuffer };
-};
-
-/** JSZip is imported lazily — it is only needed on the download path. */
-const jsZipLoader = async (buf: Buffer) => {
-  const JSZip = (await import('jszip')).default;
-  return await JSZip.loadAsync(buf) as unknown as { files: Record<string, { async: (t: 'nodebuffer') => Promise<Buffer> }> };
 };
 
 export function registerMobileShipRoutes(app: Express): void {
@@ -152,7 +147,7 @@ export function registerMobileShipRoutes(app: Express): void {
     // before 2026-10-04 meant by this question, so their answers do not change.
     const required = signingSecretsFor(platform === 'ios' ? 'ios' : 'android');
     try {
-      const r = await axios.get(
+      const r = await githubBuildGet(
         `https://api.github.com/repos/${owner}/${repo}/actions/secrets?per_page=100`,
         { headers: githubApiHeaders(token) },
       );
@@ -256,20 +251,31 @@ export function registerMobileShipRoutes(app: Express): void {
   app.get('/api/mobile-ship/runs', async (req: Request, res: Response) => {
     const token = githubToken(req);
     if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
-    const { owner, repo, workflow } = req.query as Record<string, string>;
+    const { owner, repo, workflow, branch, runId } = req.query as Record<string, string>;
     if (!isValidRepoRef(owner, repo)) return res.status(400).json({ error: 'A valid GitHub owner and repository name are required.' });
     if (!isDispatchableWorkflow(workflow)) return res.status(400).json({ error: 'Unknown build workflow.' });
 
     try {
-      const r = await axios.get(
-        `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/runs?per_page=5`,
+      if (runId != null && !/^\d{1,20}$/.test(runId)) return res.status(400).json({ error: 'A valid build id is required.' });
+      const r = await githubBuildGet(
+        runId
+          ? `https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}`
+          : `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/runs?per_page=100${branch ? `&branch=${encodeURIComponent(branch)}` : ''}`,
         { headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' } },
       );
-      const runs = (r.data?.workflow_runs || []).map((w: Record<string, unknown>) => ({
+      // A pinned run must belong to this workflow. Do not let another simultaneous build's result
+      // become this build's result, even after it falls out of the recent-runs list.
+      if (runId && String(r.data?.path || '').split('@')[0] !== workflowPath(workflow)) {
+        return res.status(404).json({ error: 'That build does not belong to this workflow.' });
+      }
+      const runs = (runId ? [r.data] : r.data?.workflow_runs || []).map((w: Record<string, unknown>) => ({
         id: w.id,
         status: w.status,          // queued | in_progress | completed
         conclusion: w.conclusion,  // success | failure | cancelled | null
         createdAt: w.created_at,
+        branch: w.head_branch,
+        event: w.event,
+        displayTitle: w.display_title,
         url: w.html_url,
       }));
       // HOW DID IT END? (2026-08-27.) The durable record used to know a build STARTED and nothing
@@ -278,7 +284,7 @@ export function registerMobileShipRoutes(app: Express): void {
       // never delay or break the status the user is waiting on. The failure CODE is written by the
       // autofix path, which is the one place the failure is actually classified.
       try {
-        const done = runs.find((x: { status?: unknown; conclusion?: unknown }) => x.status === 'completed');
+        const done = runs[0]?.status === 'completed' ? runs[0] : undefined;
         const concl = done?.conclusion;
         if (concl === 'success' || concl === 'failure' || concl === 'cancelled') {
           const identity = await verifyFirebaseIdentity(req);
@@ -333,7 +339,7 @@ export function registerMobileShipRoutes(app: Express): void {
     if (!/^\d{1,20}$/.test(String(runId || ''))) return res.status(400).json({ error: 'A valid build id is required.' });
 
     try {
-      const r = await axios.get(
+      const r = await githubBuildGet(
         `https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/jobs`,
         { headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' } },
       );
@@ -388,7 +394,7 @@ export function registerMobileShipRoutes(app: Express): void {
       await axios.post(
         `https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/cancel`,
         {},
-        { headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' } },
+        { timeout: 15_000, headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' } },
       );
       res.json({ ok: true, stopped: true });
     } catch (err) {
@@ -424,8 +430,8 @@ export function registerMobileShipRoutes(app: Express): void {
     const headers = { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' };
     try {
       const [runRes, jobsRes] = await Promise.all([
-        axios.get(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}`, { headers }),
-        axios.get(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/jobs`, { headers }),
+        githubBuildGet(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}`, { headers }),
+        githubBuildGet(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/jobs`, { headers }),
       ]);
       const w = runRes.data as Record<string, unknown>;
       const job = (jobsRes.data?.jobs || [])[0] as { steps?: Array<Record<string, unknown>> } | undefined;
@@ -470,7 +476,7 @@ export function registerMobileShipRoutes(app: Express): void {
     if (!/^\d{1,20}$/.test(String(runId || ''))) return res.status(400).json({ error: 'A valid build id is required.' });
 
     try {
-      const r = await axios.get(
+      const r = await githubBuildGet(
         `https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/artifacts`,
         { headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' } },
       );
@@ -536,7 +542,7 @@ export function registerMobileShipRoutes(app: Express): void {
     if (!isValidRepoRef(owner, repo)) return res.status(400).json({ error: 'A valid GitHub owner and repository name are required.' });
     if (!isValidArtifactId(artifactId)) return res.status(400).json({ error: 'A valid file id is required.' });
 
-    const got = await fetchBuildArtifact({ owner, repo, artifactId, token }, githubZipFetcher, jsZipLoader);
+    const got = await fetchBuildArtifact({ owner, repo, artifactId, token }, githubZipFetcher);
     if (!got.ok) {
       const status = got.failure === 'expired' ? 404 : got.failure === 'not-app' ? 422 : got.failure === 'bad-request' ? 400 : 502;
       return res.status(status).json({ error: got.message });
@@ -641,7 +647,7 @@ export function registerMobileShipRoutes(app: Express): void {
     const token = githubToken(req);
     if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
 
-    const { owner, repo, workflow, ref = 'main', inputs } = (req.body || {}) as Record<string, unknown>;
+    const { owner, repo, workflow, ref = 'main', inputs, buildRequestId } = (req.body || {}) as Record<string, unknown>;
     if (!isValidRepoRef(owner, repo)) return res.status(400).json({ error: 'A valid GitHub owner and repository name are required.' });
     if (!isDispatchableWorkflow(workflow)) {
       return res.status(400).json({ error: `Only the generated build workflows can be started (${DISPATCHABLE_WORKFLOWS.join(', ')}).` });
@@ -702,10 +708,34 @@ export function registerMobileShipRoutes(app: Express): void {
       }
     }
 
+    // New kits label the run with a request id. Older kits remain runnable: only forward the
+    // optional input if the actual workflow on this ref declares it.
+    if (buildRequestId != null && (typeof buildRequestId !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(buildRequestId))) {
+      return res.status(400).json({ error: 'A valid build request id is required.' });
+    }
+    const buildInputs: Record<string, unknown> = inputs && typeof inputs === 'object' && !Array.isArray(inputs)
+      ? { ...inputs as Record<string, unknown> } : {};
+    let correlatedRequestId: string | undefined;
+    if (typeof buildRequestId === 'string') {
+      try {
+        const file = await githubBuildGet(
+          `https://api.github.com/repos/${owner}/${repo}/contents/${workflowPath(workflow)}?ref=${encodeURIComponent(ref)}`,
+          { headers: githubApiHeaders(token) },
+        );
+        const content = file.data?.encoding === 'base64' && typeof file.data?.content === 'string'
+          ? Buffer.from(file.data.content, 'base64').toString('utf8') : '';
+        if (/^\s{6}build_request_id:\s*$/m.test(content)) {
+          buildInputs.build_request_id = buildRequestId;
+          correlatedRequestId = buildRequestId;
+        }
+      } catch { /* legacy-compatible baseline matching if capability could not be read */ }
+    }
+
     try {
-      await axios.post(
+      const dispatchedAt = new Date().toISOString();
+      await dispatchGithubBuild(
         `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`,
-        { ref, ...(inputs && typeof inputs === 'object' ? { inputs } : {}) },
+        { ref, ...(Object.keys(buildInputs).length ? { inputs: buildInputs } : {}) },
         { headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' } },
       );
       // REMEMBER THIS APP (admin 2026-08-17: "galti se back ho gaya, ab wapas woh dikh hi nahi rahi").
@@ -727,17 +757,20 @@ export function registerMobileShipRoutes(app: Express): void {
           });
         }
       } catch { /* the list is a convenience; the build is the job */ }
-      // 204 No Content on success — GitHub does not return the run, so point the user at the Actions tab.
-      res.json({ ok: true, actionsUrl: `https://github.com/${owner}/${repo}/actions/workflows/${workflow}` });
+      // GitHub's 204 does not contain a run id. A new kit echoes buildRequestId in its run name so
+      // the panel can find exactly this dispatch, then pin its id for all subsequent reads.
+      res.json({ ok: true, dispatchedAt, ...(correlatedRequestId ? { buildRequestId: correlatedRequestId } : {}), actionsUrl: `https://github.com/${owner}/${repo}/actions/workflows/${workflow}` });
     } catch (err) {
       const status = (err as { response?: { status?: number } })?.response?.status || 500;
       const detail = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      const unconfirmed = status >= 500;
       const hint =
         status === 404 ? 'Workflow not found on that branch — push the ship kit to GitHub first.'
         : status === 403 || status === 401 ? 'GitHub refused the request — reconnect GitHub so the token includes the "workflow" permission.'
         : status === 422 ? 'GitHub could not start this workflow on that branch. Make sure the pushed workflow is on the branch you selected.'
+        : unconfirmed ? 'Could not confirm whether GitHub started the build. Check My Built Apps or GitHub before starting another build.'
         : 'Could not start the build on GitHub.';
-      res.status(status === 500 ? 502 : status).json({ error: hint, detail: detail || undefined });
+      res.status(status === 500 ? 502 : status).json({ error: hint, detail: detail || undefined, ...(unconfirmed ? { code: 'DISPATCH_UNCONFIRMED' } : {}) });
     }
   });
 
@@ -1091,8 +1124,8 @@ async function recordApkFailureReport(
   try {
     const headers = githubApiHeaders(token);
     const [runRes, jobsRes, log] = await Promise.all([
-      axios.get(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}`, { headers }),
-      axios.get(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/jobs`, { headers }),
+      githubBuildGet(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}`, { headers }),
+      githubBuildGet(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/jobs`, { headers }),
       failedJobLog(headers, owner, repo, runId).catch(() => ''),
     ]);
     const w = runRes.data as Record<string, unknown>;
@@ -1153,7 +1186,7 @@ async function failedJobLog(
   repo: string,
   runId: string,
 ): Promise<string> {
-  const jobsRes = await axios.get(
+  const jobsRes = await githubBuildGet(
     `https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/jobs?per_page=20`,
     { headers },
   );
@@ -1162,7 +1195,7 @@ async function failedJobLog(
   const parts: string[] = [];
   for (const job of failed.slice(0, 3)) {
     try {
-      const logRes = await axios.get(
+      const logRes = await githubBuildGet(
         `https://api.github.com/repos/${owner}/${repo}/actions/jobs/${job.id}/logs`,
         { headers, responseType: 'text', maxRedirects: 5, transformResponse: [(d) => d] },
       );
@@ -1189,7 +1222,7 @@ async function describeSigningPreflight(
   repo: string,
 ): Promise<{ couldCheck: boolean; reason?: string; note?: string }> {
   try {
-    await axios.get(
+    await githubBuildGet(
       `https://api.github.com/repos/${owner}/${repo}/actions/secrets?per_page=1`,
       { headers },
     );

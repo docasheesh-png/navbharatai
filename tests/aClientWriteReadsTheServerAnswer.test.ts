@@ -29,7 +29,6 @@ const BEST_EFFORT: Record<string, Record<string, string>> = {
     // Old entry: '/api/agentv3/shell/resize': 'terminal size; corrected by the next resize'
     // The resize POST now reads the response (409 SHELL_NOT_ON_THIS_INSTANCE reopens once).
   },
-  'src/components/ide/StoreBuildPanel.tsx': { '/api/mobile-ship/cancel': "an abandoned store build; the workflow's own timeout stops it" },
   'src/components/agentv3/PreviewSurface.tsx': { '/api/agentv3/preview-error': 'error telemetry for the platform; nothing is shown or promised to the user' },
   'src/hooks/useAgentV3Build.ts': { '/api/agentv3/queue/complete': "queue bookkeeping; a stale 'running' item self-heals to 'failed' on next load" },
   'src/lib/zipProjectUpload.ts': { '/api/zip-upload/abort': 'cleanup of an abandoned upload; the server sweeps stale uploads' },
@@ -97,6 +96,7 @@ describe('every client write either reads the answer or is argued safe', () => {
       ['src/components/AdminDashboard.tsx', '/api/admin/apk-reports'],
       ['src/components/AdminDashboard.tsx', '/api/admin/reports/'],
       ['src/hooks/useAgentV3Build.ts', '/api/agentv3/stop'],
+      ['src/components/ide/StoreBuildPanel.tsx', '/api/mobile-ship/cancel'],
       ['src/hooks/useAgentV3Build.ts', '/api/agentv3/respond'],
       ['src/hooks/useSessionManager.ts', '/api/agentv3/conversations/'],
       ['src/App.tsx', '/api/agentv3/delete-files'],

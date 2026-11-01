@@ -24,20 +24,16 @@ import { SharedReadCache } from '../lib/boundedCache';
 import { inspectApk, MAX_APK_BYTES, publishableApkLimitBytes } from '../lib/apkInspect';
 import axios from 'axios';
 import { fetchBuildArtifact, type ArtifactFetcher } from '../lib/buildArtifact';
+import { githubBuildGet } from '../lib/githubBuildApi';
 
 /** Real HTTP at the edge, so the artifact logic itself stays testable without a network. */
 const githubZipFetcher: ArtifactFetcher = async (url, token) => {
-  const r = await axios.get(url, {
-    headers: { Authorization: `token ${token}` }, responseType: 'arraybuffer', maxRedirects: 5,
+  const r = await githubBuildGet(url, {
+    headers: { Authorization: `token ${token}` }, responseType: 'arraybuffer', maxRedirects: 5, timeout: 90_000,
   });
   return { status: r.status, data: r.data as ArrayBuffer };
 };
 
-/** JSZip lazily — only the publish-from-build path needs it. */
-const jsZipLoader = async (buf: Buffer) => {
-  const JSZip = (await import('jszip')).default;
-  return await JSZip.loadAsync(buf) as unknown as { files: Record<string, { async: (t: 'nodebuffer') => Promise<Buffer> }> };
-};
 import { scanFile, isScanningConfigured, MAX_SCANNABLE_BYTES} from '../lib/malwareScan';
 import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 import {
@@ -419,7 +415,7 @@ export function registerNavStoreRoutes(app: Express): void {
     const repo = String(body.repo ?? '');
     const artifactId = String(body.artifactId ?? '');
 
-    const got = await fetchBuildArtifact({ owner, repo, artifactId, token }, githubZipFetcher, jsZipLoader);
+    const got = await fetchBuildArtifact({ owner, repo, artifactId, token }, githubZipFetcher);
     if (!got.ok) {
       const status = got.failure === 'expired' ? 404 : got.failure === 'not-app' ? 422 : got.failure === 'bad-request' ? 400 : 502;
       return res.status(status).json({ error: got.message, failure: got.failure });

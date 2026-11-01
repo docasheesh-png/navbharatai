@@ -59,6 +59,8 @@ export type SurplusPreWriteFailOpenHooks = {
   noFallback?: boolean;
   /** Observe every Surplus turn error (raw-error profiles). Never alters control flow. */
   onSurplusError?: (error: unknown) => void;
+  /** Router One pin (z@gmail.com): every runner of this build is Router One ONLY — no Surplus, no ladder. */
+  routerOneOnly?: boolean;
 };
 
 /** True when `reason` is one of the mid-build fail-open tokens (for tests / allowlist checks). */

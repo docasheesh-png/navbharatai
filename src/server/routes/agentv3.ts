@@ -491,6 +491,7 @@ import {
   type ProviderModelEntry,
 } from '../AgentV3/ProviderUsageLedger';
 import OpenAI from 'openai';
+import { ROUTER_ONE_LABEL, ROUTER_ONE_NOT_CONFIGURED, routerOneApiKey, routerOneBaseUrl, routerOneModels, routerOnePinnedFor, routerOnePublicFallbackEnabled } from '../AI/RouterOne/routerOne';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { withStopSignal } from '../AgentV3/stopSignal';
 import { withAnswerNotDeliberation } from '../AgentV3/answerNotDeliberate';
@@ -3455,6 +3456,47 @@ export function ladderRunners(rungs: readonly LadderRung[]): NamedRunner[] {
  * first use instead of borrowing another tier's model — "100% usi mode mein" holds even when the mode
  * cannot run at all. The pre-flight 503 catches this before a stream starts; this is the second net.
  */
+/**
+ * Router One runner: every rung is a Router One model (ROUTER_ONE_MODEL list). Used by the z@gmail.com
+ * pin (only engine, no fallback) and by the public after-Surplus fallback. Provider label is neutral.
+ */
+function routerOneTurnRunner(opts: Parameters<typeof buildTurnRunner>[0], mode: { pinned: boolean }): TurnRunner {
+  const key = routerOneApiKey();
+  const runners = key ? openAiCompatRunners(ROUTER_ONE_LABEL, key, routerOneBaseUrl(), routerOneModels()) : [];
+  if (runners.length === 0) {
+    return {
+      plannedModel: NO_ENGINE_CONFIGURED,
+      runTurn: async () => { throw new Error(mode.pinned ? ROUTER_ONE_NOT_CONFIGURED : `${ROUTER_ONE_LABEL} not configured`); },
+    } as unknown as TurnRunner;
+  }
+  try { opts.onChain?.(runners as unknown as ChainRung[]); } catch { /* observation only */ }
+  return makeMultiProviderTurnRunner(runners, {
+    onProviderUsed: (used, from) => opts.onProviderUsed?.(used, from),
+    onProviderError: (name, err) => {
+      console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`);
+      opts.onProviderError?.(name, err);
+    },
+    ...(opts.onTurnComplete ? { onTurnComplete: opts.onTurnComplete } : {}),
+  });
+}
+
+/** Router One text ask for the Weak scope classifier on the pinned profile (no other provider). */
+function routerOneScopeAsk(): (system: string, user: string, signal?: AbortSignal) => Promise<{ text: string }> {
+  return async (system, user, signal) => {
+    const key = routerOneApiKey();
+    if (!key) throw new Error(ROUTER_ONE_NOT_CONFIGURED);
+    const client = new OpenAI({ apiKey: key, baseURL: routerOneBaseUrl(), timeout: 60_000, maxRetries: 1 });
+    let lastErr: unknown;
+    for (const model of routerOneModels()) {
+      try {
+        const r = await client.chat.completions.create({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1024 }, { signal });
+        return { text: String(r.choices?.[0]?.message?.content ?? '') };
+      } catch (e) { lastErr = e; if (signal?.aborted) break; }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  };
+}
+
 function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKeys: string[]): TurnRunner {
   console.warn(`[AGENTV3] ${tierDisplayName(level)} engine unavailable — ladder ${ladderText}; missing keys: ${missingKeys.join(', ') || 'none named'}`);
   return {
@@ -3507,6 +3549,8 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
    */
   surplusPreWriteFailOpen?: SurplusPreWriteFailOpenHooks;
 }): TurnRunner {
+  // Router One pin (z@gmail.com): ONLY Router One models, never Surplus / Weak ladder / Claude.
+  if (opts.surplusPreWriteFailOpen?.routerOneOnly) return routerOneTurnRunner(opts, { pinned: true });
   if (opts.surplusSession) {
     const surplusRunner = opts.surplusSession.runner({
       onProviderUsed: () => opts.onProviderUsed?.('SURPLUS', []),
@@ -3517,13 +3561,30 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
     return wrapSurplusRunnerPreWriteFailOpen(
       surplusRunner,
       // Explicit tier + onTurnComplete so heal/tier static guards see attribution through the spread.
-      () => buildTurnRunner({
-        ...opts,
-        surplusSession: undefined,
-        surplusPreWriteFailOpen: undefined,
-        tier: opts.tier,
-        onTurnComplete: opts.onTurnComplete,
-      }),
+      () => {
+        const weakLadder = () => buildTurnRunner({
+          ...opts,
+          surplusSession: undefined,
+          surplusPreWriteFailOpen: undefined,
+          tier: opts.tier,
+          onTurnComplete: opts.onTurnComplete,
+        });
+        // Public Router One fallback AFTER Surplus (ROUTER_ONE_ENABLED=on). Off ⇒ unchanged Weak ladder.
+        if (!routerOnePublicFallbackEnabled()) return weakLadder();
+        const router = routerOneTurnRunner(opts, { pinned: false });
+        let ladder: TurnRunner | undefined;
+        return {
+          async runTurn(params) {
+            try { return await router.runTurn(params); }
+            catch (error) {
+              if (params.signal?.aborted) throw error;
+              console.warn(`[AGENTV3] ${ROUTER_ONE_LABEL} fallback failed (${error instanceof Error ? error.message : String(error)}); continuing on Weak ladder.`);
+              ladder ??= weakLadder();
+              return ladder.runTurn(params);
+            }
+          },
+        } as TurnRunner;
+      },
       opts.surplusPreWriteFailOpen,
     );
   }
@@ -11423,7 +11484,11 @@ async function noteBuildOutcome(
     // Buffered until buildDiag exists later (module keeps Weak-only + report branches out of this handler — TS2563).
     let surplusAdmissionDiag: SurplusAdmissionDiag | undefined;
     // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders. Branches live in surplusChatAdmission.
-    const surplusAdmitGate = await runWeakSurplusAdmissionForChat({
+    // Router One pin (z@gmail.com): skip Surplus admission entirely — this profile builds on Router One only.
+    const routerOnePinned = routerOnePinnedFor(email, userId);
+    const surplusAdmitGate = routerOnePinned
+      ? { ok: true as const, session: undefined, diag: undefined }
+      : await runWeakSurplusAdmissionForChat({
       powerLevel: powerLevelReqEffective,
       intent,
       hasImportIntent,
@@ -11446,7 +11511,7 @@ async function noteBuildOutcome(
     if (surplusBuilderEnabled() && !(await checkPaidBuildAdmission())) return;
     // Scope is checked before sandbox/setup. Imports need their files inspected and keep the import pipeline.
     const weakAdmission = await weakAdmissionForTurn({ prompt, intent, importing: hasImportIntent, tier: powerLevelReqEffective },
-      createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
+      routerOnePinned ? routerOneScopeAsk() : createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
         audit('AGENTV3_DISCOUNT_SCOPE_CALL', scopeCallAudit(scopeRequestId, intentWorkspaceId, row), 'info');
       }, error => { earlySurplusFailure = error; }),
       surplusScopeTimeoutOpts(surplusSession));
@@ -14591,6 +14656,7 @@ async function noteBuildOutcome(
       const surplusPreWriteFailOpen: SurplusPreWriteFailOpenHooks = {
         state: { dropped: false },
         noFallback: surplusFallbackDisabledFor(email, userId),
+        routerOneOnly: routerOnePinnedFor(email, userId),
         onSurplusError: surplusRawErrorReporter(email, (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }), userId),
         userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
         onFailOpen: (reason) => {

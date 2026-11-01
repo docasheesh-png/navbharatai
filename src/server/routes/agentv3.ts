@@ -2700,10 +2700,9 @@ export function openAiCompatRunners(
         // becomes the hang signal (openAiStream.ts); the runner is handed the same number, so the pair
         // stays honest in both modes. Flag off ⇒ this is the old line to the byte.
         const sdkTimeoutMs = buildStreamingEnabled() ? Math.max(timeoutMs, streamHardCapMs()) : timeoutMs;
-        const transport = canaryFetch();
         const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0,
           fetch: isRouterOneAccountingProvider(name)
-            ? routerOneAccountingFetch(transport, model, trace => audit('ROUTER_ONE_ACCOUNTING_UNSETTLED', trace)) : transport });
+            ? routerOneAccountingFetch(canaryFetch(), model, trace => audit('ROUTER_ONE_ACCOUNTING_UNSETTLED', trace)) : canaryFetch() });
         const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts, timeoutMs }), floorMaxPromptChars), name);
         out.push(k === 0
           ? { name, runner, modelId: model }

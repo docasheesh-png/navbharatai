@@ -67,6 +67,12 @@ describe('unavailable Router One settlement is absorbed separately at every bill
 });
 
 describe('Router One audit transport', () => {
+  it('propagates a transport guard refusal instead of absorbing it as an accounting failure', async () => {
+    const record = vi.fn();
+    const guarded = vi.fn(async () => { throw new Error('canary denied'); });
+    await expect(routerOneAccountingFetch(guarded, model, record)('https://example.invalid')).rejects.toThrow('canary denied');
+    expect(record).not.toHaveBeenCalled();
+  });
   it('preserves the documented request header without consuming the response or inventing an expense', async () => {
     const response = new Response('data: streamed-content', { headers: { 'X-Request-ID': 'request-123' } });
     const transport = vi.fn(async () => response);

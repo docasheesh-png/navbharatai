@@ -8,6 +8,13 @@ import { assertLegacyInferenceAllowed, runWithSurplusBuild } from '../../AI/infe
 import { assertNoUnclaimedGatewayDispatch, runWithGatewaySelection } from '../../AI/InferenceGateway/dispatchBoundary';
 import { createSurplusBuildTransport } from '../../AI/SurplusRegistry/transport';
 const source = (path: string) => readFileSync(resolve(__dirname, '../../../..', path), 'utf8');
+/** An observer may wrap the guard but may never replace it, including in a conditional branch. */
+function isCanaryProtectedFetch(node: ts.Expression, file: ts.SourceFile): boolean {
+  if (node.getText(file) === 'canaryFetch()') return true;
+  if (ts.isConditionalExpression(node)) return isCanaryProtectedFetch(node.whenTrue, file) && isCanaryProtectedFetch(node.whenFalse, file);
+  return ts.isCallExpression(node) && node.expression.getText(file) === 'routerOneAccountingFetch'
+    && node.arguments[0]?.getText(file) === 'canaryFetch()';
+}
 beforeEach(() => { mock.guard.mockReset(); });
 afterEach(() => vi.unstubAllEnvs());
 describe('canary dispatch boundaries', () => {
@@ -28,6 +35,19 @@ describe('canary dispatch boundaries', () => {
   });
 });
 describe('canary physical transport census', () => {
+  it.each([
+    ['canaryFetch()', true],
+    ['routerOneAccountingFetch(canaryFetch(), model, record)', true],
+    ['selected ? routerOneAccountingFetch(canaryFetch(), model, record) : canaryFetch()', true],
+    ['routerOneAccountingFetch(fetch, model, record)', false],
+    ['selected ? canaryFetch() : fetch', false],
+    ['selected ? fetch : canaryFetch()', false],
+    ['unknownObserver(canaryFetch())', false],
+  ] as const)('checks every transport branch without allowing an unguarded observer: %s', (expression, expected) => {
+    const file = ts.createSourceFile('transport.ts', `const transport = ${expression};`, ts.ScriptTarget.Latest, true);
+    const declaration = (file.statements[0] as ts.VariableStatement).declarationList.declarations[0];
+    expect(isCanaryProtectedFetch(declaration.initializer!, file)).toBe(expected);
+  });
   it('wraps every OpenAI construction in the four admitted builder factories, not only the call-site label', () => {
     const paths = ['src/server/routes/agentv3.ts', 'src/server/AgentV3/weakBuildAdmissionAsk.ts', 'src/server/AgentV3/clarityJudgeAsk.ts'];
     let count = 0;
@@ -39,7 +59,7 @@ describe('canary physical transport census', () => {
           const config = node.arguments?.[0];
           expect(config && ts.isObjectLiteralExpression(config), path).toBe(true);
           const properties = (config as ts.ObjectLiteralExpression).properties;
-          expect(properties.some(p => ts.isPropertyAssignment(p) && p.name.getText(file) === 'fetch' && p.initializer.getText(file) === 'canaryFetch()'), path).toBe(true);
+          expect(properties.some(p => ts.isPropertyAssignment(p) && p.name.getText(file) === 'fetch' && isCanaryProtectedFetch(p.initializer, file)), path).toBe(true);
           expect(properties.some(p => ts.isPropertyAssignment(p) && p.name.getText(file) === 'maxRetries' && p.initializer.getText(file) === '0'), path).toBe(true);
         }
         ts.forEachChild(node, visit);

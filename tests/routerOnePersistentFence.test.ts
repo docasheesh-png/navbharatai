@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FirestoreCatalogueAttemptStore } from '../src/server/AI/RouterOne/catalogueAccounting';
+import { FirestoreCatalogueAttemptStore, createRouterOneUncertainFence } from '../src/server/AI/RouterOne/catalogueAccounting';
 import type { Firestore } from 'firebase-admin/firestore';
 import type { PublicPriceSnapshot } from '../src/server/AI/RouterOne/publicPriceSource';
 /** Atomic in-memory transaction model; no emulator/network and no wallet methods. */
@@ -75,5 +75,18 @@ describe('persistent Router One unresolved-attempt fence', () => {
     await store.finish('one', 'key', pending);
     await expect(store.finish('one', 'key', pending)).rejects.toThrow();
     await expect(store.releaseVerified('one', 'key')).rejects.toThrow();
+  });
+});
+
+describe('bounded local uncertainty fence', () => {
+  it('does not evict uncertain keys and fails closed at capacity', () => {
+    const fence = createRouterOneUncertainFence(2);
+    fence.add('one'); fence.add('two'); fence.add('one');
+    expect(fence.has('one')).toBe(true); expect(fence.has('two')).toBe(true);
+    expect(fence.has('healthy')).toBe(false);
+    fence.add('three');
+    for (const key of ['one', 'two', 'three', 'healthy']) expect(fence.has(key)).toBe(true);
+    for (let i = 0; i < 10000; i++) fence.add(`overflow-${i}`);
+    expect(fence.has('new')).toBe(true);
   });
 });

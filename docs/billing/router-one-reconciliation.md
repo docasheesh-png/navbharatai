@@ -274,6 +274,10 @@ issued evidence or replay successful work. If the completion write itself fails,
 the current worker blocks the key immediately; other workers detect its outstanding
 attempt at the persisted deadline. This bounds the uncertainty window rather than
 claiming instantaneous cross-worker knowledge of a failed database write.
+The local uncertainty fence holds at most 64 credential hashes. It never evicts a
+blocking hold: exceeding that bound fails closed for Router One dispatch on that
+worker until restart, rather than growing memory or admitting uncertain spend.
+Normal traffic does not populate this fence; only uncertain persistence does.
 Reopening a pending key requires a separately reviewed reconciliation action; no
 admin bypass, automatic import or historical wallet adjustment is supplied here.
 

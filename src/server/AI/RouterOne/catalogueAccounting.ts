@@ -6,6 +6,7 @@ import { abandonedTurnUsage } from '../../AgentV3/unbilledTurns';
 import type { TurnRunner } from '../../AgentV3/ClaudeClient';
 import type { OpenAiChatClient, OpenAiChatStream } from '../../AgentV3/providers/OpenAiToolRunner';
 import { audit } from '../../lib/audit';
+import { BoundedCache } from '../../lib/boundedCache';
 import { getServerDb } from '../../lib/serverDb';
 import { calculateCatalogueChatCost, catalogueSnapshotIssue } from './catalogueMath';
 import { RouterOnePublicPriceSource, routerOnePublicPrices, ROUTER_ONE_PRICE_MAX_AGE_MS, type PublicPriceSnapshot } from './publicPriceSource';
@@ -78,7 +79,21 @@ export class FirestoreCatalogueAttemptStore implements CatalogueAttemptStore {
     });
   }
 }
-const uncertainKeys = new Set<string>();
+/** Never evict an unresolved hold to admit more spending. Saturation fences this
+ * worker's Router One dispatches until restart; durable attempt deadlines still apply. */
+export function createRouterOneUncertainFence(maxKeys = 64) {
+  const keys = new BoundedCache<string, true>({ maxEntries: maxKeys });
+  let saturated = false;
+  return {
+    has: (key: string): boolean => saturated || keys.has(key),
+    add(key: string): void {
+      if (keys.has(key) || saturated) return;
+      if (keys.size >= keys.maxEntries) { saturated = true; return; }
+      keys.set(key, true);
+    },
+  };
+}
+const uncertainKeys = createRouterOneUncertainFence();
 interface Scope { binding?: CatalogueCallBinding; stopped: boolean; receipts: RouterOneCatalogueReceipt[] }
 interface Attempt {
   callId: string; key: string; snapshot: PublicPriceSnapshot; scope: Scope; store: CatalogueAttemptStore;

@@ -40,7 +40,7 @@
     "capacitor:copy:after": "node scripts/stripServerFromNativeBundle.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^1.1.0",
+    "@anthropic-ai/sdk": "^1.3.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1129.0",
     "@babel/standalone": "^7.26.4",
     "@capacitor-community/in-app-review": "^8.0.0",

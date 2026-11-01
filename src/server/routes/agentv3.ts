@@ -1,12 +1,15 @@
+import { routerOneAccountingScope, bindRouterOneAccountingScope, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges } from '../AI/RouterOne/catalogueAccounting';
+import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
+import { PRO_SANDBOX_FEE_PCT, proSandboxFee, proSandboxFeeFields, proSubtotalNotice } from '../AgentV3/proSandboxFee';
 import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
-import { admitWithRouterOnePin, scopeAskWithRouterOnePin } from '../AI/RouterOne/admission';
+import { admitWithRouterOnePin, scopeAskWithRouterOnePin, weakScopeAsk } from '../AI/RouterOne/admission';
 import { isRouterOneAccountingProvider, routerOneAccountingFetch } from '../AI/RouterOne/accounting';
 import { createSurplusScopeAsk, SURPLUS_SCOPE_TIMEOUT_MS } from '../AI/SurplusRegistry/scopeAdmission';
 import { isBuildReviewProviderEligible } from '../AgentV3/surplusReviewEligibility';
 import { surplusBuildCharges } from '../AgentV3/surplusBuildBilling';
 import { surplusBuildInferenceScope, activateSurplusBuildForCurrentRequest, assertLegacyInferenceAllowed } from '../AI/inferencePolicy';
 import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRegistry/buildSession';
-import { surplusFallbackDisabledFor, surplusRawErrorReporter } from '../AI/SurplusRegistry/surplusNoFallback';
+import { surplusFallbackDisabledFor, surplusFallbackDisabledForTier, surplusRawErrorReporter } from '../AI/SurplusRegistry/surplusNoFallback';
 import { rawErrorText } from '../AgentV3/rawErrorDetail';
 import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
 import { wrapSurplusRunnerPreWriteFailOpen, tryConsumeSurplusPreWriteFailOpen, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
@@ -494,7 +497,7 @@ import {
 } from '../AgentV3/ProviderUsageLedger';
 import OpenAI from 'openai';
 import { routerOneCatalogStatus, startRouterOneCatalogSync, syncRouterOneCatalog } from '../AI/RouterOne/routerOneCatalog';
-import { ROUTER_ONE_LABEL, ROUTER_ONE_NOT_CONFIGURED, routerOneApiKey, routerOneBaseUrl, routerOneModels, routerOnePinnedFor, routerOnePublicFallbackEnabled } from '../AI/RouterOne/routerOne';
+import { ROUTER_ONE_LABEL, ROUTER_ONE_NOT_CONFIGURED, routerOneApiKey, routerOneBaseUrl, routerOneModels, routerOnePinnedForTier, routerOneWeakFallbackEnabled } from '../AI/RouterOne/routerOne';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { withStopSignal } from '../AgentV3/stopSignal';
 import { withAnswerNotDeliberation } from '../AgentV3/answerNotDeliberate';
@@ -720,7 +723,7 @@ import {
 } from '../AgentV3/versionPreview';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, fleetEmptyBasisNote, etaTaskKey, etaBuildKind, type EtaBuildKind } from '../AgentV3/etaHistory';
-import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
+import { sandboxCost, sandboxExpenseUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { scopeCallAudit, recordScopeFailure } from '../lib/scopeFailureReports';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
@@ -1549,6 +1552,9 @@ export interface UserCostBreakdown {
    */
   livePreviewSeconds: number;
   livePreviewInr: number;
+  sandboxFeeInr?: number;
+  sandboxFeePct?: number;
+  preSandboxSubtotalInr?: number;
   /**
    * THE BUILD DISCOUNT (admin 2026-09-25) — the admin-set percentage taken off this build, shown in
    * green under a discounted build (`buildDiscount.ts`). All three are 0 when nothing was taken off,
@@ -1581,6 +1587,7 @@ export function userCostBreakdown(
    * amount AFTER it. Omitted or with nothing taken off ⇒ the three discount fields are 0.
    */
   discount?: Pick<BuildDiscount, 'listUsd' | 'discountUsd' | 'pctApplied'> | null,
+  sandboxFee?: ReturnType<typeof proSandboxFee>,
 ): UserCostBreakdown {
   const key = powerLevel === true ? 'medium' : powerLevel === false ? 'off' : String(powerLevel);
   const lpSeconds = Math.max(0, Math.round(Number(livePreview?.seconds) || 0));
@@ -1595,8 +1602,10 @@ export function userCostBreakdown(
     engine: 'NavBharatAI Pro',
     // Seconds without a charge are not shown: a "0 min — ₹0.00" line on every build is noise that
     // teaches the user to stop reading the breakdown, and the whole point of it is to be read.
-    livePreviewSeconds: lpUsd > 0 ? lpSeconds : 0,
-    livePreviewInr: lpUsd > 0 ? Math.round(lpUsd * Math.max(0, rate) * 100) / 100 : 0,
+    livePreviewSeconds: !sandboxFee && lpUsd > 0 ? lpSeconds : 0,
+    livePreviewInr: !sandboxFee && lpUsd > 0 ? Math.round(lpUsd * Math.max(0, rate) * 100) / 100 : 0,
+    ...(sandboxFee ? { sandboxFeePct: PRO_SANDBOX_FEE_PCT, sandboxFeeInr: Math.round(sandboxFee.feeUsd * Math.max(0, rate) * 100) / 100,
+      preSandboxSubtotalInr: Math.round(sandboxFee.subtotalUsd * Math.max(0, rate) * 100) / 100 } : {}),
     ...discountFields(discount, rate),
   };
 }
@@ -1627,7 +1636,8 @@ function discountFields(
  * It also names the FREE alternative, on purpose. Teaching a user how to spend less is what a builder
  * they trust does; hiding it is how a total becomes something they audit instead of read. PURE.
  */
-export function livePreviewChargeLine(b: Pick<UserCostBreakdown, 'livePreviewSeconds' | 'livePreviewInr'>): string {
+export function livePreviewChargeLine(b: Pick<UserCostBreakdown, 'livePreviewSeconds' | 'livePreviewInr' | 'sandboxFeeInr' | 'sandboxFeePct'>): string {
+  if (b.sandboxFeeInr !== undefined) return b.sandboxFeeInr > 0 ? `Sandbox service fee (2.5% of subtotal): ₹${b.sandboxFeeInr.toFixed(2)}.` : '';
   if (!(b.livePreviewInr > 0) || !(b.livePreviewSeconds > 0)) return '';
   const mins = b.livePreviewSeconds / 60;
   const shown = mins >= 1 ? `${Math.round(mins)} min` : `${b.livePreviewSeconds} sec`;
@@ -1780,8 +1790,7 @@ function sandboxRestoreOf(actuator: unknown, workspaceId: string): string | null
 /**
  * `measuredSeconds` is a THIRD number, and it answers a different question from the other two.
  *
- * `seconds`/`usd` are what the USER was charged, and they are deliberately zero whenever sandbox
- * billing is off or no real rate is configured — a money path must never charge for something we
+ * `seconds`/`usd` are internal rate-priced expense, deliberately zero when no real rate is configured — a money path must never charge for something we
  * cannot price. But NavBharatAI still PAID for that VM time either way, and the admin's Monitor needs
  * that figure to answer "why is the E2B bill this size?".
  *
@@ -1820,10 +1829,9 @@ function billableSandboxDetail(
     if (!Number.isFinite(started) || started <= 0) return none;
     const buildSeconds = Math.max(0, (Date.now() - started) / 1000);
     const billable = Math.min(seconds, buildSeconds);
-    const usd = sandboxBillableUsd(sandboxCost(billable));
-    // Seconds travel only when they were CHARGED. Reporting time we did not bill for would put a
-    // number next to a ₹0 the user cannot reconcile. `measuredSeconds` carries the real VM time
-    // regardless, for the admin-only cost view — see the note on the return type.
+    const usd = sandboxExpenseUsd(sandboxCost(billable));
+    // Expense telemetry only. The user fee is derived separately from the settled subtotal.
+    // measuredSeconds retains measured time even when the verified hourly rate is unavailable.
     return usd > 0
       ? { seconds: billable, usd, measuredSeconds: billable }
       : { ...none, measuredSeconds: billable };
@@ -1838,20 +1846,10 @@ export function decideBuildBilledUsd(
   powerLevel: BillingPowerLevel | boolean,
   userId: string | null | undefined,
   email: GrantEmail | null | undefined,
-  /**
-   * What this build's E2B sandbox cost us (admin 2026-08-11: "e2b ka kharcha bill me jodo").
-   *
-   * Added to the REAL cost BEFORE the markup, which is the only place it belongs: the non-Opus
-   * formula is literally `tieredMarkup(real cost)`, and a cloud VM billed by wall-clock is as real a
-   * cost as a token. Until now NavBharatAI absorbed 100% of it, so a build that spent almost nothing
-   * on tokens but held a VM for forty minutes was pure loss.
-   *
-   * `sandboxBillableUsd` returns 0 unless the admin has BOTH switched it on AND set their real
-   * `E2B_USD_PER_HOUR` — the default rate is an admitted placeholder, and billing a placeholder is
-   * exactly the invented cost the billing law forbids. So the default behaviour is unchanged.
-   *
-   * The OPUS tiers are deliberately untouched: CLAUDE.md records that path as admin-confirmed at
-   * "real Opus × 2", and quietly changing a confirmed price is not mine to do.
+  /** Internal rate-priced VM expense, capped to this build. It does not enter the
+   * customer AI subtotal or its markup/floor. All Pro bands apply the shared 2.5%
+   * sandbox service fee only after settlement and discount rules. Missing configured
+   * hourly expense remains unavailable; the placeholder is never accepted as cost.
    */
   sandboxUsd = 0,
   /**
@@ -1885,8 +1883,8 @@ export function decideBuildBilledUsd(
 } {
   const routerOneEntries = providerLedger.entries().filter(e => isRouterOneAccountingProvider(e.provider));
   if (routerOneEntries.length) {
-    // No documented request-settlement API is available for this adapter. Absorb this portion,
-    // as Surplus does for unavailable accounting. Tokens remain visible but are not a receipt.
+    // Separate catalogue-calculated expense from other providers before any legacy markup.
+    // Pending attempts remain unresolved and the dispatch guard fences further spend.
     // Remove them from BOTH ledgers so they cannot return as a Sonnet-priced aux remainder.
     const excluded = routerOneEntries.reduce((sum, e) => ({ inputTokens: sum.inputTokens + e.usage.inputTokens,
       outputTokens: sum.outputTokens + e.usage.outputTokens }), { inputTokens: 0, outputTokens: 0 });
@@ -1900,7 +1898,10 @@ export function decideBuildBilledUsd(
       byProvider: () => Object.fromEntries(Object.entries(providerLedger.byProvider()).filter(([p]) => !isRouterOneAccountingProvider(p))),
     };
     const priced = decideBuildBilledUsd(remaining, subtract(sinkTotal), powerLevel, userId, email, sandboxUsd, barrenPhases);
-    return { ...priced, reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal) };
+    const catalogue = routerOneCatalogueBuildCharges(routerOneEntries, barrenPhases);
+    return { ...priced, effectiveBilledUsd: priced.effectiveBilledUsd + catalogue.billedUsd,
+      realCostUsd: priced.realCostUsd + catalogue.costUsd, absorbedUnbilledUsd: priced.absorbedUnbilledUsd + catalogue.absorbedUsd,
+      reconciledProviderUsage: reconcileWithSink(providerLedger.byProvider(), sinkTotal) };
   }
   const surplusEntries = providerLedger.entries().filter(e => e.provider.toUpperCase() === 'SURPLUS');
   if (surplusEntries.length) {
@@ -1954,7 +1955,7 @@ export function decideBuildBilledUsd(
   } else if (realCostBillingEnabled()) {
     // UNIFIED WALLET (flag, default OFF): tieredMarkupUsd applies the central margin (UNIFIED_WALLET_MARGIN,
     // default 2.5, override _BUILD) instead of the ×4/×3 curve. Cancelled-build rules downstream unchanged.
-    effectiveBilledUsd = tieredMarkupUsd(billableTokenCost + vmCost, 'build');
+    effectiveBilledUsd = tieredMarkupUsd(billableTokenCost, 'build');
   } else {
     effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
       ? perTierBilledUsd(reconciledProviderUsage, powerLevel)
@@ -2703,8 +2704,12 @@ export function openAiCompatRunners(
         const sdkTimeoutMs = buildStreamingEnabled() ? Math.max(timeoutMs, streamHardCapMs()) : timeoutMs;
         const client = new OpenAI({ apiKey, baseURL, timeout: sdkTimeoutMs, maxRetries: 0,
           fetch: isRouterOneAccountingProvider(name)
-            ? routerOneAccountingFetch(canaryFetch(), model, trace => audit('ROUTER_ONE_ACCOUNTING_UNSETTLED', trace)) : canaryFetch() });
-        const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts, timeoutMs }), floorMaxPromptChars), name);
+            ? routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId); audit('ROUTER_ONE_REQUEST', trace); }) : canaryFetch() });
+        const pricedClient = isRouterOneAccountingProvider(name)
+          ? cataloguePricedRouterOneClient(client as unknown as OpenAiChatClient, apiKey, { maxDurationMs: sdkTimeoutMs }) : client as unknown as OpenAiChatClient;
+        const turnRunner = new OpenAiToolRunner(pricedClient, { model, ...runnerOpts, timeoutMs });
+        const runner = pacedRunner(sizeGatedRunner(isRouterOneAccountingProvider(name)
+          ? cataloguePricedRouterOneRunner(turnRunner) : turnRunner, floorMaxPromptChars), name);
         out.push(k === 0
           ? { name, runner, modelId: model }
           : { name: `${name}#${k + 1}`, runner, reportAs: name, modelId: model });
@@ -3482,8 +3487,20 @@ export function ladderRunners(rungs: readonly LadderRung[]): NamedRunner[] {
  */
 /**
  * Router One runner: every rung is a Router One model (ROUTER_ONE_MODEL list). Used by the z@gmail.com
- * pin (only engine, no fallback) and by the public after-Surplus fallback. Provider label is neutral.
+ * pin on non-Weak bands. Weak Router One models share the ordinary guarded chain below.
  */
+function buildTierEngineAvailable(tier: PowerLevel): boolean {
+  return (tier === 'weak' && routerOneWeakFallbackEnabled()) || tierEngineAvailable(tier);
+}
+
+/** Preserve configured models and tail order; move only the first GLM rung to the front. */
+export function weakGlmFirst(rungs: readonly LadderRung[]): LadderRung[] {
+  const lead = rungs.find(rung => rung.provider === 'GLM')
+    ?? tierLadder('weak', { ...process.env, AGENTV3_LADDER_WEAK: undefined }).rungs.find(rung => rung.provider === 'GLM');
+  if (!lead) return [...rungs]; // Defensive: no model may be invented if the registry has no GLM rung.
+  return [lead, ...rungs.filter(rung => rung.provider !== lead.provider || rung.model !== lead.model)];
+}
+
 function routerOneTurnRunner(opts: Parameters<typeof buildTurnRunner>[0], mode: { pinned: boolean }): TurnRunner {
   const key = routerOneApiKey();
   const runners = key ? openAiCompatRunners(ROUTER_ONE_LABEL, key, routerOneBaseUrl(), routerOneModels()) : [];
@@ -3504,7 +3521,11 @@ function routerOneTurnRunner(opts: Parameters<typeof buildTurnRunner>[0], mode: 
   });
 }
 
-/** Router One text ask for the Weak scope classifier on the pinned profile (no other provider). */
+function eligibleRouterOneScopeAsk(): ReturnType<typeof routerOneScopeAsk> | undefined {
+  return routerOneWeakFallbackEnabled() ? routerOneScopeAsk() : undefined;
+}
+
+/** Router One text ask, with unresolved supplier accounting audited separately from classification. */
 function routerOneScopeAsk(): (system: string, user: string, signal?: AbortSignal) => Promise<{ text: string }> {
   return async (system, user, signal) => {
     const key = routerOneApiKey();
@@ -3513,8 +3534,9 @@ function routerOneScopeAsk(): (system: string, user: string, signal?: AbortSigna
     for (const model of routerOneModels()) {
       try {
         const client = new OpenAI({ apiKey: key, baseURL: routerOneBaseUrl(), timeout: 60_000, maxRetries: 0,
-          fetch: routerOneAccountingFetch(canaryFetch(), model, trace => audit('ROUTER_ONE_ACCOUNTING_UNSETTLED', trace)) });
-        const r = await client.chat.completions.create({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1024 }, { signal });
+          fetch: routerOneAccountingFetch(canaryFetch(), model, trace => { recordRouterOneRequestId(trace.requestId); audit('ROUTER_ONE_REQUEST', trace); }) });
+        const r = await cataloguePricedRouterOneText(() => cataloguePricedRouterOneClient(client as unknown as OpenAiChatClient, key, { maxDurationMs: 60000 }).chat.completions.create({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1024 }, { signal }));
+        if (!('choices' in r)) throw new Error(ROUTER_ONE_NOT_CONFIGURED);
         return { text: String(r.choices?.[0]?.message?.content ?? '') };
       } catch (e) { lastErr = e; if (signal?.aborted) break; }
     }
@@ -3556,7 +3578,7 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
  * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
  */
-export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; plan?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void; onAttemptWasted?: (family: string, kind: WasteKind, ms: number) => void;
+export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; plan?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt; measured?: boolean; producedNothing?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void; onAttemptWasted?: (family: string, kind: WasteKind, ms: number) => void;
   /** Retired-rung memory owned by the CALLER, so it can span several runner instances — the fast
    *  lane's per-file runners share ONE build's map. Omitted ⇒ each runner keeps its own, as before.
    *  See MultiProviderOptions.deadRungs for why this is caller-owned and never a singleton. */
@@ -3574,8 +3596,8 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
    */
   surplusPreWriteFailOpen?: SurplusPreWriteFailOpenHooks;
 }): TurnRunner {
-  // Router One pin (z@gmail.com): ONLY Router One models, never Surplus / Weak ladder / Claude.
-  if (opts.surplusPreWriteFailOpen?.routerOneOnly) return routerOneTurnRunner(opts, { pinned: true });
+  // The earlier profile pin survives only on other bands; Weak always uses the confirmed order.
+  if (toPowerLevel(opts.tier) !== 'weak' && opts.surplusPreWriteFailOpen?.routerOneOnly) return routerOneTurnRunner(opts, { pinned: true });
   if (opts.surplusSession) {
     const surplusRunner = opts.surplusSession.runner({
       onProviderUsed: () => opts.onProviderUsed?.('SURPLUS', []),
@@ -3586,30 +3608,13 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
     return wrapSurplusRunnerPreWriteFailOpen(
       surplusRunner,
       // Explicit tier + onTurnComplete so heal/tier static guards see attribution through the spread.
-      () => {
-        const weakLadder = () => buildTurnRunner({
-          ...opts,
-          surplusSession: undefined,
-          surplusPreWriteFailOpen: undefined,
-          tier: opts.tier,
-          onTurnComplete: opts.onTurnComplete,
-        });
-        // Public Router One fallback AFTER Surplus (ROUTER_ONE_ENABLED=on). Off ⇒ unchanged Weak ladder.
-        if (!routerOnePublicFallbackEnabled()) return weakLadder();
-        const router = routerOneTurnRunner(opts, { pinned: false });
-        let ladder: TurnRunner | undefined;
-        return {
-          async runTurn(params) {
-            try { return await router.runTurn(params); }
-            catch (error) {
-              if (params.signal?.aborted) throw error;
-              console.warn(`[AGENTV3] ${ROUTER_ONE_LABEL} fallback failed (${error instanceof Error ? error.message : String(error)}); continuing on Weak ladder.`);
-              ladder ??= weakLadder();
-              return ladder.runTurn(params);
-            }
-          },
-        } as TurnRunner;
-      },
+      () => buildTurnRunner({
+        ...opts,
+        surplusSession: undefined,
+        surplusPreWriteFailOpen: undefined,
+        tier: opts.tier,
+        onTurnComplete: opts.onTurnComplete,
+      }),
       opts.surplusPreWriteFailOpen,
     );
   }
@@ -3637,7 +3642,14 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
     const from = ladderFrom(rungs, opts.fromProvider);
     if (from.length > 0) rungs = from;
   }
-  const runners = ladderRunners(rungs);
+  // Owner Weak order applies to main, plan, heal and complex lanes; explicit retry/escalation
+  // may advance past a failed rung. Other bands retain their existing transformations.
+  if (level === 'weak' && !opts.afterLeadRung && !opts.fromProvider) rungs = weakGlmFirst(rungs);
+  const runners = [
+    ...(level === 'weak' && routerOneWeakFallbackEnabled()
+      ? openAiCompatRunners(ROUTER_ONE_LABEL, routerOneApiKey(), routerOneBaseUrl(), routerOneModels()) : []),
+    ...ladderRunners(rungs),
+  ];
   if (runners.length === 0) {
     const missing = [...new Set(rungs.map((r) => keyEnvFor(r.provider)))].filter((k) => !(process.env[k] && String(process.env[k]).trim()));
     return unavailableTierRunner(level, describeLadder(rungs), missing);
@@ -3682,6 +3694,7 @@ export function buildTurnRunner(opts: { surplusSession?: SurplusBuildSession; ti
  * checks it against the constructed chain on every tier. PURE (reads the same env the chain does).
  */
 export function buildChainOpensPastOpener(tier: PowerLevel | string | boolean | null | undefined, complex: boolean): boolean {
+  if (toPowerLevel(tier) === 'weak' && routerOneWeakFallbackEnabled()) return false;
   return openingRung(tierLadder(toPowerLevel(tier as PowerLevel | boolean | string | undefined | null)).rungs, { complex }) > 1;
 }
 
@@ -4071,7 +4084,7 @@ async function persistPreStreamRefusalTurn(i: { wsId: string; userId: string | n
 
 /** Surplus is a reasoning model: its scope ask gets the longer deadline; other engines keep the default. */
 function surplusScopeTimeoutOpts(surplusSession: unknown): { timeoutMs?: number } {
-  return surplusSession ? { timeoutMs: SURPLUS_SCOPE_TIMEOUT_MS } : {};
+  return surplusSession || routerOneWeakFallbackEnabled() ? { timeoutMs: SURPLUS_SCOPE_TIMEOUT_MS } : {};
 }
 
 /** Owner debug profiles only (surplusNoFallback): the raw admission reason; undefined for everyone else. */
@@ -10237,7 +10250,7 @@ async function noteBuildOutcome(
     }
   });
 
-  app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), enforceFreeProgramPause(), surplusBuildInferenceScope, withBuildRequestCleanup(async (req: Request, res: Response, registerCleanup) => {
+  app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), enforceFreeProgramPause(), surplusBuildInferenceScope, routerOneAccountingScope, withBuildRequestCleanup(async (req: Request, res: Response, registerCleanup) => {
     // ⏱️ THE USER'S WAIT STARTS HERE — the first statement, before every await of the preamble (autopsy 303e8a6f,
     // adversarial review): the build's event stream used to take its own construction time as the origin, up to
     // ~30 s of checks later, so "Still working — Ns so far" still undercounted. Every user-visible clock reads this.
@@ -10618,7 +10631,7 @@ async function noteBuildOutcome(
     // Generalised to EVERY tier (2026-09-14): a tier whose ladder has no keyed rung cannot build, and
     // the honest answer is a refusal naming the tier — never a build on some other tier's model.
     let surplusSession: SurplusBuildSession | undefined;
-    if (!surplusBuilderEnabled() && !tierEngineAvailable(powerLevelReqEffective)) {
+    if (!surplusBuilderEnabled() && !buildTierEngineAvailable(powerLevelReqEffective)) {
       releaseBuildLock(buildKey, buildLockToken);
       audit('AGENTV3_TIER_ENGINE_UNAVAILABLE', { userId, tier: powerLevelReqEffective }, 'warn');
       respondBuilderEngineUnavailable(res, powerLevelReqEffective);
@@ -11518,20 +11531,21 @@ async function noteBuildOutcome(
     const earlySurplusRecords: Array<Omit<import('../AgentV3/BuildDiagnostics').LlmCallRecord, 'ts'>> = [];
     let earlySurplusFailure: unknown;
     const scopeRequestId = randomUUID();
+    bindRouterOneAccountingScope({ buildId: scopeRequestId, uid: userId, workspaceId: intentWorkspaceId });
     // Buffered until buildDiag exists later (module keeps Weak-only + report branches out of this handler — TS2563).
     let surplusAdmissionDiag: SurplusAdmissionDiag | undefined;
     // Owner 2026-10-25: Surplus is Weak-only; Normal/Strong keep direct provider ladders. Branches live in surplusChatAdmission.
-    // Router One pin (z@gmail.com): skip Surplus admission entirely — this profile builds on Router One only.
-    const routerOnePinned = routerOnePinnedFor(email, userId);
+    // Weak uses the shared order for every profile; the legacy pin remains only on other bands.
+    const routerOnePinned = routerOnePinnedForTier(powerLevelReqEffective, email, userId);
     const surplusAdmitGate = await admitWithRouterOnePin(routerOnePinned, () => runWeakSurplusAdmissionForChat({
       powerLevel: powerLevelReqEffective,
       intent,
       hasImportIntent,
       prompt,
       buildId: scopeRequestId,
-      tierEngineAvailable: () => tierEngineAvailable(powerLevelReqEffective),
+      tierEngineAvailable: () => buildTierEngineAvailable(powerLevelReqEffective),
       audit,
-      noFallback: surplusFallbackDisabledFor(email, userId),
+      noFallback: surplusFallbackDisabledForTier(powerLevelReqEffective, email, userId),
     }));
     surplusAdmissionDiag = surplusAdmitGate.diag;
     if (!surplusAdmitGate.ok) {
@@ -11546,9 +11560,12 @@ async function noteBuildOutcome(
     if (surplusBuilderEnabled() && !(await checkPaidBuildAdmission())) return;
     // Scope is checked before sandbox/setup. Imports need their files inspected and keep the import pipeline.
     const weakAdmission = await weakAdmissionForTurn({ prompt, intent, importing: hasImportIntent, tier: powerLevelReqEffective },
-      scopeAskWithRouterOnePin(routerOnePinned, routerOneScopeAsk, () => createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
+      scopeAskWithRouterOnePin(routerOnePinned, routerOneScopeAsk, () => weakScopeAsk(createSurplusScopeAsk(surplusSession, earlySurplusTurns, earlySurplusRecords, row => {
         audit('AGENTV3_DISCOUNT_SCOPE_CALL', scopeCallAudit(scopeRequestId, intentWorkspaceId, row), 'info');
-      }, error => { earlySurplusFailure = error; })),
+      }, error => { earlySurplusFailure = error; }), eligibleRouterOneScopeAsk(), weakBuildAdmissionAsk, () => {
+        setAdmittedSurplusScope(surplusSession, false);
+        surplusSession = undefined;
+      })),
       surplusScopeTimeoutOpts(surplusSession));
     recordScopeFailure(scopeRequestId, intentWorkspaceId, weakAdmission, audit);
     const { blocked: weakScopeBlocked, admissionForBuild: weakAdmissionForBuild } = weakForceContinueDecision(
@@ -13153,7 +13170,7 @@ async function noteBuildOutcome(
     }) => ({
       category: classifyFailure(i.rootCause || i.summary || '', outcomeCodeOf(i.issues)).category,
       framework,
-      realUsd: (() => { try { return realProviderCostUsd(i.entries.filter(e => !isRouterOneAccountingProvider(e.provider)), i.remainder); } catch { return 0; } })() + Math.max(0, i.sandboxUsd || 0), // known subtotal only; unavailable supplier expense must not crash the failure ledger
+      realUsd: (() => { try { return ledgerCostUsd(i.entries) + realProviderCostUsd([], i.remainder); } catch { return 0; } })() + Math.max(0, i.sandboxUsd || 0), // known subtotal only; unavailable supplier expense must not crash the failure ledger
       inputTokens: i.inputTokens || 0,
       outputTokens: i.outputTokens || 0,
       ms: Math.max(0, Date.now() - i.startedAt),
@@ -13237,6 +13254,7 @@ async function noteBuildOutcome(
       let watchdogLivePreview = { seconds: 0, usd: 0, measuredSeconds: 0 };
       // The discount this path decided, carried to the user-facing breakdown below.
       let watchdogDiscount: BuildDiscount | null = null;
+      let watchdogSandboxFee = proSandboxFee(0);
       /** The Stop rules' line for the user when they decided this bill (round 4); shown in the result summary. */
       let watchdogStopNote: string | null = null;
       if (ok && billingCtx.providerLedger) {
@@ -13254,7 +13272,7 @@ async function noteBuildOutcome(
           const wdMarkup = decideMarkupOnProof({
             decidedBilledUsd: decided.effectiveBilledUsd,
             realCostUsd: decided.realCostUsd,
-            sandboxUsd: decided.sandboxUsd,
+            sandboxUsd: 0, // Actual sandbox expense is internal; the fixed fee is applied after discounts.
             // The same fact the settle reads (Q-727 = b): the final check's flag OR an in-build green pass
             // in the evidence ledger.
             previewProven: wdPreviewProven,
@@ -13291,15 +13309,15 @@ async function noteBuildOutcome(
                   editingExistingApp: isEditMode,
                   decidedBilledUsd: watchdogBilledUsd,
                   realCostUsd: decided.realCostUsd,
-                  sandboxUsd: decided.sandboxUsd,
+                  sandboxUsd: 0, // Fixed sandbox fee is applied after this settlement.
                 },
               });
               if (wdStop.kind === 'cancel-charge') {
                 watchdogBilledUsd = wdStop.billedUsd;
-                watchdogStopNote = wdStop.cancelBill.userMessage ? `🧾 ${wdStop.cancelBill.userMessage}` : null;
+                watchdogStopNote = wdStop.cancelBill.userMessage ? `🧾 ${proSubtotalNotice(wdStop.cancelBill.userMessage)}` : null;
                 buildDiagRef?.record({
                   phase: 'build', severity: 'info', code: 'CANCELLED_BUILD_CHARGED', autoResolved: true,
-                  message: `${wdStop.cancelBill.reason} (discount ${wdStop.cancelBill.discountPct}%, delivery: ${wdStop.cancelBill.delivery}; settled by the deadline finalizer).`,
+                  message: `${proSubtotalNotice(wdStop.cancelBill.reason)} (discount ${wdStop.cancelBill.discountPct}%, delivery: ${wdStop.cancelBill.delivery}; settled by the deadline finalizer).`,
                 });
               } else if (wdStop.kind === 'late-stop-free' || wdStop.kind === 'failed-free') {
                 watchdogBilledUsd = 0;
@@ -13318,7 +13336,7 @@ async function noteBuildOutcome(
             if (setting.pct > 0) {
               const d = applyBuildDiscount({
                 billedUsd: watchdogBilledUsd,
-                floorUsd: decided.realCostUsd + decided.sandboxUsd,
+                floorUsd: decided.realCostUsd,
                 pct: setting.pct,
               });
               if (d.discountUsd > 0) {
@@ -13334,6 +13352,8 @@ async function noteBuildOutcome(
               });
             }
           }
+          watchdogSandboxFee = proSandboxFee(watchdogBilledUsd);
+          watchdogBilledUsd = watchdogSandboxFee.totalUsd;
           recordBuildTelemetryOnce({
             ok,
             previewAllowed: buildObs.previewRendered,
@@ -13362,6 +13382,7 @@ async function noteBuildOutcome(
             billedInr: watchdogBilledInr,
             realCostUsd: Math.round(decided.realCostUsd * 1_000_000) / 1_000_000,
             sandboxCostUsd: Math.round(decided.sandboxUsd * 1_000_000) / 1_000_000,
+            ...proSandboxFeeFields(watchdogSandboxFee),
             powerMode: onlyOpus,
             powerLevel: powerLevelReqEffective,
             noClaude: noClaudeBuild,
@@ -13370,7 +13391,7 @@ async function noteBuildOutcome(
           if (!wdMarkup.markupApplied) {
             buildDiagRef?.record({
               phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW',
-              message: markupWaiverSettledLine(wdMarkup.reason, watchdogBilledUsd), autoResolved: true,
+              message: markupWaiverSettledLine(wdMarkup.reason, watchdogBilledUsd, undefined, true), autoResolved: true,
             });
           }
           // Same explanation as the normal settle records — the watchdog path bills through the SAME
@@ -13485,7 +13506,7 @@ async function noteBuildOutcome(
         }
         const billedInr = Math.round(watchdogBilledUsd * usdInrRate() * 100) / 100;
         const watchdogCostBreakdown = watchdogBilledUsd > 0
-          ? userCostBreakdown(buildUsage.total(), watchdogBilledUsd, powerLevelReqEffective, usdInrRate(), watchdogLivePreview, watchdogDiscount)
+          ? userCostBreakdown(buildUsage.total(), watchdogBilledUsd, powerLevelReqEffective, usdInrRate(), watchdogLivePreview, watchdogDiscount, watchdogSandboxFee)
           : null;
         const watchdogLine = watchdogCostBreakdown ? livePreviewChargeLine(watchdogCostBreakdown) : '';
         const watchdogDiscountLine = watchdogCostBreakdown ? buildDiscountLine({
@@ -14407,6 +14428,7 @@ async function noteBuildOutcome(
        * measuring it.
        */
       recordWeakAdmissionUsage(weakAdmission, (usage) => providerLedger.add('GLM', usage, WEAK_SCOPE_MODEL));
+      recordRouterOneScopeUsage(providerLedger);
       const shadowFastLaneLedger = createProviderUsageLedger();
       const captureShadowUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string): void => {
         shadowFastLaneLedger.add(used, usage, model);
@@ -14426,12 +14448,12 @@ async function noteBuildOutcome(
           () => { liveCostDiscountPct = 0; }, // unreadable ⇒ 0% — the ordinary price, as at settle
         );
       }
-      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
-        if (isRouterOneAccountingProvider(used) && !costUnconfirmedNoted) {
+      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean; surplusReceipt?: import('../AI/SurplusRegistry/receiptPolicy').SurplusReceiptDecision }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
+        if (routerOneCostUnconfirmed(used, usage.routerOneReceipt) && !costUnconfirmedNoted) {
           costUnconfirmedNoted = true;
           try { buildDiag.record({ phase: 'build', severity: 'info', code: 'DISCOUNT_COST_UNCONFIRMED', autoResolved: true,
-            message: 'Engine supplier expense is unverified; this portion is excluded from the wallet charge.',
-            detail: 'ENGINE_R1 reports token usage but no verified request settlement. Its expense is unknown, not measured zero. Reported real cost excludes it. No list-price estimate, cache tariff, balance delta, or legacy markup is charged. Reconcile with supplier request logs before enabling actual-cost billing.' }); } catch { /* observation only */ }
+            message: 'Engine usage accounting is pending; this portion is excluded from the wallet charge and further requests on the key are blocked.',
+            detail: 'ENGINE_R1 catalogue pricing or complete usage could not be verified. The unresolved attempt is retained; unknown cost is not measured zero. Verified calls use official posted tariffs, not a supplier-settled wallet debit. Reconciliation is required before reopening a blocked key.' }); } catch { /* observation only */ }
         }
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
@@ -14548,7 +14570,7 @@ async function noteBuildOutcome(
               const d = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, vm.usd, barrenPhases);
               const inr = liveCostInr({
                 charged: liveCostCharged, onboardingFreeBuildPossible: liveCostOnboarding,
-                billedUsd: d.effectiveBilledUsd, floorUsd: d.realCostUsd + d.sandboxUsd,
+                billedUsd: d.effectiveBilledUsd, floorUsd: d.realCostUsd,
                 discountPct: liveCostDiscountPct, usdInr: usdInrRate(),
               });
               if (inr !== null && shouldEmitLiveCost(liveCostLast, inr, now)) {
@@ -14696,8 +14718,8 @@ async function noteBuildOutcome(
       // Surplus-wrapped runner (main / fast / plan / heal) drops once together.
       const surplusPreWriteFailOpen: SurplusPreWriteFailOpenHooks = {
         state: { dropped: false },
-        noFallback: surplusFallbackDisabledFor(email, userId),
-        routerOneOnly: routerOnePinnedFor(email, userId),
+        noFallback: surplusFallbackDisabledForTier(powerLevelReqEffective, email, userId),
+        routerOneOnly: routerOnePinnedForTier(powerLevelReqEffective, email, userId),
         onSurplusError: surplusRawErrorReporter(email, (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }), userId),
         userFilesWritten: () => modelAuthoredPaths(writtenFiles).length,
         onFailOpen: (reason) => {
@@ -26927,7 +26949,7 @@ async function noteBuildOutcome(
       const markupDecision = decideMarkupOnProof({
         decidedBilledUsd: effectiveBilledUsd,
         realCostUsd: decidedRealCostUsd,
-        sandboxUsd: decidedSandboxUsd,
+        sandboxUsd: 0, // Actual VM expense is not a customer-priced component.
         previewProven: appSeenRunningForBill,
         expectsArtifacts,
         enabled: markupNeedsPreview(),
@@ -27177,7 +27199,7 @@ async function noteBuildOutcome(
           // the user less than the build cost US, on every stopped build. These two numbers floor it
           // at our real cost: a cancellation may take our margin, never our cost.
           realCostUsd: decidedRealCostUsd,
-          sandboxUsd: decidedSandboxUsd,
+          sandboxUsd: 0, // Fixed sandbox fee is applied after stop/discount rules.
         },
       });
       const cancelBill = stopSettlement.cancelBill;
@@ -27189,7 +27211,7 @@ async function noteBuildOutcome(
         zeroBillReason = undefined;
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'CANCELLED_BUILD_CHARGED',
-          message: `${charged.reason} (discount ${charged.discountPct}%, delivery: ${charged.delivery}).`,
+          message: `${proSubtotalNotice(charged.reason)} (discount ${charged.discountPct}%, delivery: ${charged.delivery}).`,
           autoResolved: true,
         });
         if (charged.userMessage) {
@@ -27198,7 +27220,7 @@ async function noteBuildOutcome(
           // ALSO fire and tell the user the same thing twice in different words. The cancellation
           // message is the more specific of the two and already says there is no service charge.
           waivedMarkupNotice = null;
-          events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${charged.userMessage}`, ts: Date.now() });
+          events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${proSubtotalNotice(charged.userMessage)}`, ts: Date.now() });
         }
       } else if (stopSettlement.kind === 'failed-free') {
         effectiveBilledUsd = 0;
@@ -27250,7 +27272,7 @@ async function noteBuildOutcome(
           if (setting.pct > 0) {
             const d = applyBuildDiscount({
               billedUsd: effectiveBilledUsd,
-              floorUsd: decidedRealCostUsd + decidedSandboxUsd,
+              floorUsd: decidedRealCostUsd,
               pct: setting.pct,
             });
             if (d.discountUsd > 0) {
@@ -27268,16 +27290,19 @@ async function noteBuildOutcome(
         } catch { /* a discount that cannot be decided is no discount — the ordinary price stands */ }
       }
 
+      const settledSandboxFee = proSandboxFee(effectiveBilledUsd);
+      effectiveBilledUsd = settledSandboxFee.totalUsd;
+
       // THE BILL IS NOW SETTLED — every zeroing rule above has had its say. Only here can the
       // waiver's explanation be true, and only if the waived amount is still what the user pays:
       // a later rule that zeroed the bill has already said why in its own words.
-      if (waivedMarkupNotice && effectiveBilledUsd > 0 && effectiveBilledUsd === markupDecision.billedUsd) {
-        events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${waivedMarkupNotice}`, ts: Date.now() });
+      if (waivedMarkupNotice && effectiveBilledUsd > 0 && settledSandboxFee.subtotalUsd === markupDecision.billedUsd) {
+        events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${proSubtotalNotice(waivedMarkupNotice)}`, ts: Date.now() });
       }
       if (!markupDecision.markupApplied) {
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW', autoResolved: true,
-          message: markupWaiverSettledLine(markupDecision.reason, effectiveBilledUsd, zeroBillReason),
+          message: markupWaiverSettledLine(markupDecision.reason, effectiveBilledUsd, zeroBillReason, true),
         });
       }
 
@@ -27589,6 +27614,7 @@ async function noteBuildOutcome(
             billedInr: settledBilledInr,
             realCostUsd: Math.round(decidedRealCostUsd * 1_000_000) / 1_000_000,
             sandboxCostUsd: Math.round(decidedSandboxUsd * 1_000_000) / 1_000_000,
+            ...proSandboxFeeFields(settledSandboxFee),
             ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited } : {}),
             // The HONEST charge (r6–r10): what left the wallet, and what the overdraft floor absorbed. billedInr above stays the bill.
             ...chargeRecordFields(walletDebit),
@@ -27847,7 +27873,7 @@ async function noteBuildOutcome(
       // consistent shape for every tier, so the client render can never crash on a per-tier mismatch.
       const costBreakdown = effectiveBilledUsd <= 0
         ? null
-        : userCostBreakdown(buildUsage.total(), effectiveBilledUsd, powerLevelReqEffective, usdInrRate(), livePreviewCharge, buildDiscount);
+        : userCostBreakdown(buildUsage.total(), effectiveBilledUsd, powerLevelReqEffective, usdInrRate(), livePreviewCharge, buildDiscount, settledSandboxFee);
       // THE CHARGE, IN THE MESSAGE THAT SAYS THE APP IS READY (admin 2026-08-22). It rides on the
       // summary rather than only the breakdown panel because a charge the user finds afterwards, folded
       // into one total, reads as a deduction no matter how correct it is. Only on a SUCCESSFUL build —
@@ -28228,7 +28254,7 @@ async function noteBuildOutcome(
         // line item (White-Label Law §3).
         buildDiagRef?.record({
           phase: 'build', severity: 'info', code: 'SANDBOX_BILLING',
-          message: sandboxBillingNote(sandboxCost(held), process.env, billedSandboxSeconds),
+          message: sandboxBillingNote(sandboxCost(held), process.env, billedSandboxSeconds, true),
           autoResolved: true,
         });
       } catch { /* a cost measurement must never affect a build */ }

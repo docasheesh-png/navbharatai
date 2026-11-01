@@ -7,7 +7,7 @@
 // missing. None of the builders this platform is measured against shows it plainly either.
 //
 // 🔒 ONE PRICE, TWO READINGS. The figure is not an estimate made up for display. It is the SAME
-// `decideBuildBilledUsd` the final bill uses, over the SAME live ledger, plus the SAME sandbox measure
+// `decideBuildBilledUsd` the final bill uses, over the SAME live ledger, plus the SAME subtotal sandbox service fee
 // and the SAME build discount — read early. A live number priced by a second formula would one day
 // disagree with the bill, and only the user would notice. What it cannot know yet is said, not hidden:
 // the rules that run at the end can only LOWER it (a build that fails is free; an app whose preview
@@ -21,6 +21,7 @@
 //
 // PURE. No I/O, no clock of its own, no environment reads except the kill switch.
 
+import { proSandboxFee } from './proSandboxFee';
 import { applyBuildDiscount } from '../lib/buildDiscount';
 
 /** Kill switch. Default ON; `off` sends no live figure (the build is otherwise unchanged). */
@@ -35,7 +36,7 @@ export interface LiveCostFacts {
   onboardingFreeBuildPossible: boolean;
   /** `decideBuildBilledUsd(...).effectiveBilledUsd` over the live ledger. */
   billedUsd: number;
-  /** Our own real cost (tokens + VM) — the floor a discount may never go below. */
+  /** Our own real AI cost (VM expense is internal) — the floor a discount may never go below. */
   floorUsd: number;
   /** The build discount percentage, read once for this build. */
   discountPct: number;
@@ -50,7 +51,7 @@ export function liveCostInr(f: LiveCostFacts): number | null {
   const payUsd = f.discountPct > 0
     ? applyBuildDiscount({ billedUsd: f.billedUsd, floorUsd: Math.max(0, f.floorUsd), pct: f.discountPct }).payUsd
     : f.billedUsd;
-  const inr = Math.round(payUsd * f.usdInr * 100) / 100;
+  const inr = Math.round(proSandboxFee(payUsd).totalUsd * f.usdInr * 100) / 100;
   return Number.isFinite(inr) && inr >= 0 ? inr : null;
 }
 

@@ -45,10 +45,11 @@ function chainFor(opts: Parameters<typeof buildTurnRunner>[0]): ChainRung[] {
 }
 
 describe('🔴 a COMPLEX build opens past the cheap flash rung — on the CONSTRUCTED chain', () => {
-  it('WEAK + complex: the first rung is KIMI, never the flash opener', () => {
+  it('WEAK + complex: GLM leads the retained tail, never the failed flash model', () => {
     const chain = chainFor({ tier: 'weak', noClaude: true, complex: true });
     expect(chain.length).toBeGreaterThan(0);
-    expect(chain[0].name).toBe('KIMI');
+    expect(chain[0].name).toBe('GLM');
+    expect(chain[0].modelId).toBe('glm-5.3');
     expect(chain.some((r) => isCheapFlashRung({ provider: r.name as never, model: r.modelId ?? '' }))).toBe(false);
   });
 

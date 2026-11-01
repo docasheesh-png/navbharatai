@@ -1,3 +1,4 @@
+import { isRouterOneCatalogueReceipt, type RouterOneCatalogueReceipt } from '../AI/RouterOne/catalogueAccounting';
 import { isSurplusReceiptDecision, type SurplusReceiptDecision } from '../AI/SurplusRegistry/receiptPolicy';
 import { SurplusAccountingUnavailableError } from './providerRates';
 import { isVerifiedFreeProof, type VerifiedFreeProof } from '../AI/LiveRegistry/proof';
@@ -34,6 +35,7 @@ import {
 } from './pricing';
 
 export interface ProviderTokens {
+  routerOneReceipt?: RouterOneCatalogueReceipt;
   surplusReceipt?: SurplusReceiptDecision;
   pricingProof?: VerifiedFreeProof;
   inputTokens: number;
@@ -49,6 +51,8 @@ export interface ProviderTokens {
 
 /** A per-(provider, model) attributed slice — feeds the REAL-cost billing (providerRates.ts). */
 export interface ProviderModelEntry {
+  routerOneReceipt?: RouterOneCatalogueReceipt;
+  routerOneAccountingConflict?: boolean;
   surplusReceipt?: SurplusReceiptDecision;
   surplusAbsorbed?: boolean;
   surplusAccountingConflict?: boolean;
@@ -162,6 +166,7 @@ function sliceKey(provider: string, model: string | undefined, phase: string | u
 export function createProviderUsageLedger(): ProviderUsageLedger {
   const buckets = new Map<string, ProviderTokens>();
   const calls = new Map<string, number>();
+  const routerOneIdentities = new Map<string, { fingerprint: string; row: ProviderModelEntry }>();
   const surplusIdentities = new Map<string, { fingerprint: string; row: ProviderModelEntry }>();
   let receiptSequence = 0;
   // Model-granular slices, keyed `${provider} ${model}` so provider+model are exact and can't
@@ -215,6 +220,25 @@ export function createProviderUsageLedger(): ProviderUsageLedger {
   return {
     add(provider, usage, model, opts) {
       const key = provider && provider.trim() ? provider : UNATTRIBUTED_PROVIDER;
+      if (key.toUpperCase() === 'ENGINE_R1') {
+        const receipt = isRouterOneCatalogueReceipt(usage.routerOneReceipt) ? usage.routerOneReceipt : undefined;
+        const phase = opts?.phase?.trim() || undefined;
+        const tokens: ProviderTokens = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens };
+        addCache(tokens, usage);
+        const fingerprint = JSON.stringify([model, phase, tokens, receipt, !!opts?.producedNothing, !!opts?.discardedOutput]);
+        const prior = receipt ? routerOneIdentities.get(receipt.callId) : undefined;
+        if (prior) {
+          if (prior.fingerprint !== fingerprint) prior.row.routerOneAccountingConflict = true;
+          return;
+        }
+        const row: ProviderModelEntry = { provider: key, model, usage: tokens,
+          ...(receipt ? { routerOneReceipt: receipt } : {}), ...(phase ? { phase } : {}),
+          ...(opts?.producedNothing || opts?.discardedOutput ? { unbilled: { ...tokens } } : {}) };
+        addTo(key, tokens); calls.set(key, (calls.get(key) ?? 0) + 1);
+        modelBuckets.set(`${sliceKey(key, model, phase)}\0router-one:${++receiptSequence}`, row);
+        if (receipt) routerOneIdentities.set(receipt.callId, { fingerprint, row });
+        return;
+      }
       if (key.toUpperCase() === 'SURPLUS') {
         // Only policy-issued, immutable decisions are trusted. Structural/serialized copies
         // retain their token usage but are explicitly unsettled, never upgraded to proof.
@@ -261,7 +285,7 @@ export function createProviderUsageLedger(): ProviderUsageLedger {
       const m = model && model.trim() ? model : undefined;
       const phase = opts?.phase && opts.phase.trim() ? opts.phase.trim() : undefined;
       const key = sliceKey(p, m, phase);
-      if (p.toUpperCase() === 'SURPLUS') {
+      if (p.toUpperCase() === 'SURPLUS' || p.toUpperCase() === 'ENGINE_R1') {
         // This legacy API has no call identity. Absorb every matching call rather than
         // inventing a token-proportional allocation of supplier receipt money.
         for (const row of modelBuckets.values()) {
@@ -306,6 +330,8 @@ export function createProviderUsageLedger(): ProviderUsageLedger {
         provider: e.provider,
         model: e.model,
         ...(e.surplusReceipt ? { surplusReceipt: e.surplusReceipt } : {}),
+        ...(e.routerOneReceipt ? { routerOneReceipt: e.routerOneReceipt } : {}),
+        ...(e.routerOneAccountingConflict ? { routerOneAccountingConflict: true } : {}),
         ...(e.surplusAbsorbed ? { surplusAbsorbed: true } : {}),
         ...(e.surplusAccountingConflict ? { surplusAccountingConflict: true } : {}),
         ...(e.pricingProof ? { pricingProof: e.pricingProof } : {}),

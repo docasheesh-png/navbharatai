@@ -206,17 +206,17 @@ describe('the wiring', () => {
     const body = call.slice(0, call.indexOf('const cancelBill = stopSettlement.cancelBill;'));
     expect(body.length).toBeGreaterThan(0);
     expect(body).toMatch(/realCostUsd:\s*decidedRealCostUsd/);
-    expect(body).toMatch(/sandboxUsd:\s*decidedSandboxUsd/);
+    expect(body).toMatch(/sandboxUsd:\s*0/);
     // …and the deadline finalizer (round 4) feeds the same decision its own measured pair.
     const wd = route.slice(route.indexOf('const wdStop = settleStopOrFailure({'));
     expect(wd.slice(0, 1200)).toMatch(/realCostUsd:\s*decided\.realCostUsd/);
-    expect(wd.slice(0, 1200)).toMatch(/sandboxUsd:\s*decided\.sandboxUsd/);
+    expect(wd.slice(0, 1200)).toMatch(/sandboxUsd:\s*0/);
   });
 
   it('they are the SAME two numbers the margin waiver is given — one cost, not two estimates', () => {
     const waiver = route.slice(route.indexOf('const markupDecision = decideMarkupOnProof({'));
     expect(waiver.slice(0, 600)).toMatch(/realCostUsd:\s*decidedRealCostUsd/);
-    expect(waiver.slice(0, 600)).toMatch(/sandboxUsd:\s*decidedSandboxUsd/);
+    expect(waiver.slice(0, 600)).toMatch(/sandboxUsd:\s*0/);
   });
 
   it('🔒 ONE money statement — the cancellation message clears the waived-margin notice', () => {
@@ -227,7 +227,7 @@ describe('the wiring', () => {
     const block = route.slice(emit, emit + 900);
     expect(block).toMatch(/waivedMarkupNotice = null;/);
     expect(block.indexOf('waivedMarkupNotice = null;'))
-      .toBeLessThan(block.indexOf('text: `🧾 ${charged.userMessage}`'));
+      .toBeLessThan(block.indexOf('text: `🧾 ${proSubtotalNotice(charged.userMessage)}`'));
   });
 
   it('the floor sits AFTER every ₹0 return, so it can never charge for an undelivered build', () => {

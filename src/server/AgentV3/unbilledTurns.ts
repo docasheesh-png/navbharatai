@@ -39,6 +39,7 @@ import { NO_BARREN_PHASES, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE
 
 /** The token counts of one turn, in the shape the ledger and the rate card both already use. */
 export interface UnbilledTokens {
+  routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt;
   inputTokens: number;
   outputTokens: number;
   /** The cache-hit share of `inputTokens` (already INCLUDED in it, never additional). */

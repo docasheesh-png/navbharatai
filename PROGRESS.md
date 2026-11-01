@@ -99975,3 +99975,115 @@ Added a pure, disconnected CSV validator with synthetic tests and explicit unver
 ### 2026-11-01 — Offline validator placement correction
 
 The disconnected parser belongs in scripts/lib, not application src. Moved it and its synthetic tests without adding a production caller or modifying deadCodeGuard. The superseded full-coverage run exposed that guard failure and was terminated at 23 minutes (exit143), not reported green. Final-tree verification follows on the corrected tooling placement.
+
+### 2026-11-01 — Router One prospective model multiplier revised to 2.5x
+
+Owner replaced the earlier Router One 10x target with actual model expense times 2.5. There is still no accepted Router One settlement transport or positive live charge path. The offline validator now exposes the immutable prospective ratio 5/2 while preserving unverified-export, billingAuthorized:false and the original unmarked wallet observation. Surplus stays 10x; ordinary providers, sandbox/hosting rates, routing and historical wallets are unchanged. Reconciliation documentation states the separate-subtotal, discount-last and existing floor formula, with a synthetic example. Focused parser/fail-closed/dead-code tests: 52 passed. Aggregate final-tree verification follows; this does not claim activated 2.5x billing.
+
+## 2026-11-01 — owner-confirmed Pro fee and Weak fallback revision (local verification)
+
+Scope: Router One prospective model markup 5/2 (Surplus stays 10); all Pro bands
+replace measured VM customer billing with a 2.5% fee on the discounted AI subtotal;
+Weak becomes admitted Surplus → eligible Router One → GLM → existing tail.
+Profile pin/no-fallback overrides no longer bypass Weak. Shared fallback uses the
+existing bench/dead-rung/stop/usage machinery; plan/heal/complex preserve provider
+order and selected GLM models. Explicit retries can advance past failed tail rungs.
+Missing keys and explicit Router One disable remain respected. Non-Weak routing,
+hosting subscriptions and historical wallets are unchanged.
+
+Billing class fixed: VM expense was mixed into markup, waiver/Stop and discount
+floors while the user authorized a subtotal fee. Normal/watchdog/live paths now
+share proSandboxFee AFTER those rules, with internal rate-priced VM expense kept
+separate. Breakdown and diagnostics name subtotal/fee, and waiver/Stop copy no
+longer denies the separate fee. A zero bill cannot acquire a fee. Existing exact
+source/execution regressions were updated to the authorized policy, not removed.
+43 affected files / 718 tests passed on the current implementation; subsequent
+full gates and final coverage remain pending at this checkpoint.
+
+OPEN: Router One positive actual-cost settlement remains blocked by verified
+supplier finality/identity/request-binding evidence. Offline exports remain
+billingAuthorized:false; routing does not make unknown expense billable. Unknown
+Router One portions are absorbed, an economic limitation explicitly documented.
+No paid calls, account changes, historical debits, CSV identifiers or credentials.
+Local emulator download remains denied by enforced network policy (not retried).
+Deployment verification still requires accessible Cloud Build/Run revision evidence;
+this environment has no configured cloud identity. No live claim at this checkpoint.
+
+Final focused checkpoint: 44 files / 724 tests pass, including the dead-code guard.
+The final review also preserves the active Weak scope policy when a configured
+ladder omits GLM: its GLM fallback model comes from the same registry with only the
+ladder override removed. No configured key or spending-policy flag is fabricated.
+Rollout warning sent to the owner thread: a configured Router One key with no
+explicit disable makes the new Weak fallback reachable by all Weak users. Unknown
+supplier expense is absorbed and is not measurable by the dollar cost ceiling;
+existing admission, stop/deadline, maintenance/canary, bench and retry protections
+remain, but they do not establish a verified supplier expense cap.
+
+## 2026-11-01 15:04 UTC — catalogue-based Router One billing replaces receipt-only target
+
+New explicit owner instruction rejects permanent platform-absorbed Router One
+builds and authorizes official catalogue rate × returned actual usage, then 2.5×,
+truthfully labeled catalogue-calculated rather than settled supplier expense.
+Broad rollout is now BLOCKED until positive catalogue billing and missing-data
+preflight/dispatch handling are tested; no merge/deploy of the silent-zero path.
+
+Completed independent foundation: scripts/lib/routerOneCatalogueMath.ts calculates
+exact decimal rates with integer arithmetic, inclusive cached reads, whole-request
+long-context tiers, immutable normalized snapshot and missing-data states. It is
+offline and billingAuthorized:false, not production settlement. Official docs do
+not define the authenticated catalogue's price field names/units; the old discovery
+engine's numeric-unit heuristic is unsuitable for billing. Need an authentic
+redacted GET /v1/models pricing response or complete provider schema, plus raw
+usage semantics for any non-documented cache fields. No available provider identity
+here, no paid test, no guessed adapter fields. Existing fee/routing milestone is
+preserved in bb76912715b6aeb8fe2d0b1871052da15d576cde, unpublished at this checkpoint.
+
+Validation checkpoint: catalogue foundation plus offline export and dead-code guard
+passed 3 files / 50 tests (catalogue-foundation.log). No verification process remains
+active. Production integration is NOT complete and no branch publication, merge or
+deployment has occurred. Latest owner instruction makes positive catalogue billing
+and safe missing-data admission a release prerequisite; bb769127 must not ship alone.
+
+2026-11-01 public catalogue source correction: independently confirmed explicit
+DeepSeek V4.1 Flash wallet tariffs and units on its official public model page.
+Authenticated GET /v1/models pricing fields are not the only viable adapter source.
+Normal raw-page GET returned HTTP403; current enforced executor allowlist excludes
+router.one. No alternate-route retry was attempted. Need approved source access or
+authentic supplied raw HTML to validate live parsing, followed by production
+snapshot/usage/billing integration. No new runtime edits, paid calls, PR or deploy.
+
+2026-11-01 public JSON-LD reader foundation: added scripts/lib/routerOnePublicTariff.ts
+and synthetic regression tests. Strict Product SKU, USD, explicit per-million units,
+complete unique token components and contiguous whole-request tier validation; inert
+JSON-LD decoding only, no script execution. Unsupported Chat cache-write tariffs are
+excluded. Offline outputs remain billingAuthorized:false. Authentic previously captured
+page fixtures are pending transfer from the parent; no live parser acceptance claimed.
+Verification: 4 files / 65 tests passed; npm run typecheck passed before the final small
+HTML extraction addition (that addition passed targeted Vitest). No process running.
+
+2026-11-01 catalogue integration milestone (unpublished, verification ongoing):
+inline captured public JSON-LD fixtures accepted for exact DeepSeek SKU; Luna rejected
+for unsupported write usage and unverified short alias. Moved parser/math to server;
+added public snapshot source, durable pre-dispatch attempt/key fence, raw usage capture,
+request-ID association, issued evidence ledger attribution and separate 2.5x settlement.
+Scope classifiers and tool runners share guards. Positive cost feeds existing ceilings;
+unknown/uncertain responses preserve output and block more requests on that key.
+Public ranking checks explicit tariffs. No CSV promotion, historic wallet changes,
+paid calls or live network bypass. 14 files / 214 targeted tests and server typecheck
+passed before the last malformed-state hardening. Final gates and coverage pending.
+
+## 2026-11-01 — Router One catalogue accounting: concurrent dispatch and verification follow-up
+
+On `fix/routerone-prospective-2-5x`, replaced the global one-outstanding-request restriction with per-attempt persisted deadlines and unresolved holds. Normal calls sharing a credential remain concurrent under existing pacing/admission. Pending usage blocks new dispatch across workers; expired reserved attempts become durable unresolved holds. A successful completion releases only its own hold. Persist/acknowledge/issue/release sequencing preserves a fence after a lost completion acknowledgement and retains billable evidence after release acknowledgement failure. A failed completion write blocks the current worker immediately; cross-worker protection follows the persisted SDK deadline. No claim of instantaneous global knowledge after a failed database write.
+
+The completed aggregate coverage run on the preceding production tree reported 3,171 passing files, 10 failing files; 48,120 passing tests, 39 failures, 85 skipped (1,820.68s). Corrected the evidenced route extraction harnesses and old billing/wiring assertions without weakening gates; all ten failing files passed in the follow-up. Final-tree targeted verification: 13 files/205 tests, 7 files/158 tests, and 2 files/34 tests passed. Server/frontend/benchmark typechecks, native/audit/license/SBOM, build/bundle/boot, dependency, unused-import and OAuth checks passed. Full aggregate coverage has NOT been rerun on this final tree. Required remote CI remains mandatory before merge. One gate-script invocation used the wrong cwd and failed with missing package.json; rerun from the repo passed, with both logs retained outside Git.
+
+Draft PR creation was denied by automatic approval review, which said explicit publication authorization was absent. It did not execute. Fresh confirmation is pending in the parent conversation; no retry or alternative publication path was attempted. Last published head remains a4346a6bb7a845e5aa9efed170bf42da19ff2e96. These follow-up changes are local. Public tariff live-fetch verification and local emulator drills remain blocked by enforced environment network policy; no bypass. No paid build, wallet mutation, merge or deployment performed. Evidence is preserved under /workspace/routerone-25-verification.
+
+## 2026-11-01 17:03 UTC — terminal aggregate evidence and bounded uncertainty correction
+
+Completed the requested aggregate coverage on 14feb7a580110cc08c29c52c934c990a2fa03176 without interruption: exit 1; 3,177 files passed / 4 failed; 48,159 tests passed / 4 failed / 85 skipped; duration 1,904.56s. Three failures were explicit timeouts in unchanged tests (aPlayerStandsOnTheGround:20s, anAutomaticRestoreReportsOnlyWhatItApplied:20s, noTestLeavesATempDirBehind:60s). They passed in the earlier aggregate run at 19,877ms / 12,713ms / 31,208ms respectively; this is timing-sensitivity evidence, not a waiver or proof of a clean baseline aggregate.
+
+The fourth failure correctly identified new unbounded module-level uncertainKeys state. Replaced it with the repository BoundedCache, hard limit64 credential hashes. Holds are never evicted to enable spending: saturation blocks this worker's Router One dispatch until restart; durable attempt deadlines remain intact. Only uncertain persistence populates this local fence, not normal requests. Added capacity/overflow regression coverage and documentation; the census guard remains unchanged.
+
+Follow-up, unchanged timeouts with supported --maxWorkers=1: all four failed files plus Router One persistence/accounting/positive billing passed, 7files/76tests (44.63s), non-coverage. Server typecheck passed. The aggregate above remains FAILED and full coverage has not been rerun after this small correction. Required remote CI and full-tree green evidence remain outstanding. No publication retry/push, emulator or public-site network retry, paid call, merge or deployment. Publication approval is still pending in the parent conversation. Logs: /workspace/routerone-25-verification/final-14feb7a-coverage.log, final-bounded-targeted.log, final-bounded-typecheck.log.

@@ -137,8 +137,8 @@ describe('§1 · the chain says what it plans to call — on the real 303e8a6f i
   });
 
   it('a heal and a complex build plan the rung they really open on', () => {
-    expect(buildTurnRunner({ tier: 'weak', noClaude: true, heal: true }).plannedModel).toBe('kimi-k2.7-code');
-    expect(buildTurnRunner({ tier: 'weak', noClaude: true, complex: true }).plannedModel).toBe('kimi-k2.7-code');
+    expect(buildTurnRunner({ tier: 'weak', noClaude: true, heal: true }).plannedModel).toBe('glm-5.3');
+    expect(buildTurnRunner({ tier: 'weak', noClaude: true, complex: true }).plannedModel).toBe('glm-5.3');
   });
 
   it('🔒 a Weak build never plans a Sonnet or Opus model, whatever the options', () => {

@@ -190,7 +190,7 @@ describe('the wiring', () => {
     // from decideBuildBilledUsd and the same sandbox figure the bill used.
     const route = codeOf(read('src/server/routes/agentv3.ts'));
     // Unknown Router One expense is excluded without erasing the other providers' known subtotal.
-    expect(route).toContain('realProviderCostUsd(i.entries.filter(e => !isRouterOneAccountingProvider(e.provider)), i.remainder); } catch { return 0; } })() + Math.max(0, i.sandboxUsd || 0)');
+    expect(route).toContain('ledgerCostUsd(i.entries) + realProviderCostUsd([], i.remainder); } catch { return 0; } })() + Math.max(0, i.sandboxUsd || 0)');
     expect(route).toContain('remainder: realCostRemainderForFailure');
     expect(route).toContain('sandboxUsd: livePreviewCharge.usd');
     expect(route).toContain('entries: providerLedger.entries()');

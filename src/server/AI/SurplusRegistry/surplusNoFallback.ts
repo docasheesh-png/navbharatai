@@ -24,3 +24,8 @@ export function surplusRawErrorReporter(
     try { emit(`🛠️ Surplus raw error (debug, this profile only): ${rawErrorText(error)}`); } catch { /* best-effort */ }
   };
 }
+
+/** Weak now uses the owner-confirmed fallback order for every profile. */
+export function surplusFallbackDisabledForTier(tier: string, email?: string | null, uid?: string | null): boolean {
+  return tier !== 'weak' && surplusFallbackDisabledFor(email, uid);
+}

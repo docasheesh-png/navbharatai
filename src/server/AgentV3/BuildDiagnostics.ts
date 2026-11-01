@@ -716,8 +716,11 @@ export interface BuildBillingRecord {
    * stored call log and says so.
    */
   realCostUsd?: number;
-  /** The sandbox VM's measured cost for the build (USD), 0 unless sandbox billing is configured. */
+  /** Internal VM expense at the configured hourly rate (USD); 0 is unavailable if no rate exists. Not the customer service fee. */
   sandboxCostUsd?: number;
+  preSandboxSubtotalUsd?: number;
+  sandboxFeeUsd?: number;
+  sandboxFeePct?: number;
   /** WHY a build was free when tokens were really spent (empty build / unrendered preview / onboarding). */
   zeroBillReason?: string;
   /** Power (Only Opus) mode. */

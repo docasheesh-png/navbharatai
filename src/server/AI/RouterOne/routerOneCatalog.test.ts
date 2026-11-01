@@ -26,7 +26,8 @@ describe('Router One catalog engine', () => {
   });
   it('keeps last good on fetch failure', async () => {
     const env = { ROUTER_ONE_API_KEY: 'k' } as NodeJS.ProcessEnv;
-    const ok = await syncRouterOneCatalog({ env, fetchImpl: (async () => new Response(JSON.stringify(catalog))) as typeof fetch });
+    const priceSource = { snapshot: async (model: string) => ({ model, bands: [{ inputUsdPerMillion: model === 'cheap-coder' ? '0.1' : '3', outputUsdPerMillion: model === 'cheap-coder' ? '0.4' : '15' }] }) as never };
+    const ok = await syncRouterOneCatalog({ env, priceSource, fetchImpl: (async () => new Response(JSON.stringify(catalog))) as typeof fetch });
     expect(ok?.ranked[0].id).toBe('cheap-coder');
     const after = await syncRouterOneCatalog({ env, fetchImpl: (async () => new Response('x', { status: 500 })) as typeof fetch });
     expect(after?.ranked[0].id).toBe('cheap-coder');

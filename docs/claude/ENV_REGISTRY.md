@@ -4797,3 +4797,19 @@ not been independently verified. This note is not runtime authority — Admin/se
   charge waivers (`src/server/lib/zTestAccount.ts` → `zTestFreeBilling`). Unset/`on` ⇒ free; `off` ⇒ z is
   charged like everyone else. Does NOT affect the Surplus no-fallback/raw-error debug for z. Remove the
   whole thing later by deleting `zTestAccount.ts` call sites.
+
+### 2026-11-01 owner pricing/routing revision
+
+The earlier sandbox-time billing entry is superseded for Pro builds. Customer
+sandbox service fee is 2.5% of the discounted pre-sandbox subtotal on every band;
+`AGENTV3_BILL_SANDBOX` no longer enables an additional measured-time charge.
+`E2B_USD_PER_HOUR` remains the configured internal expense rate; an unset rate
+cannot turn the placeholder into verified expense. Hosting subscriptions are separate.
+
+Weak uses Surplus → Router One → GLM → its existing tail. `ROUTER_ONE_API_KEY`
+is still required. `ROUTER_ONE_ENABLED` defaults eligible for Weak when unset;
+explicit `off`/`false`/`0`/`no` preserves the emergency disable. `ROUTER_ONE_PIN`
+no longer overrides Weak, including the test profile; other bands retain the pin.
+No environment values or credentials were changed by this code revision.
+Router One's prospective expense multiplier is 2.5; automatic positive settlement
+remains unavailable without trusted final request/account-bound supplier receipts.

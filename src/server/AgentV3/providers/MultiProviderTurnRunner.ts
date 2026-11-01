@@ -109,7 +109,7 @@ export interface MultiProviderOptions {
    */
   onTurnComplete?: (
     used: string,
-    usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean },
+    usage: { inputTokens: number; outputTokens: number; routerOneReceipt?: import('../../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean },
     model?: string,
     cacheReadInputTokens?: number,
     /** Q-343 — the share of input written to a prompt cache (priced at the provider's write rate). */
@@ -937,6 +937,7 @@ export function makeMultiProviderTurnRunner(
           try {
             opts.onTurnComplete?.(reportName, {
               inputTokens: result.usage?.inputTokens ?? 0,
+              ...(result.usage?.routerOneReceipt ? { routerOneReceipt: result.usage.routerOneReceipt } : {}),
               outputTokens: result.usage?.outputTokens ?? 0,
               // Carried, not re-derived: a turn whose provider reported nothing must stay
               // distinguishable from one that genuinely cost nothing (TurnUsage.measured). Reading
@@ -1002,6 +1003,7 @@ export function makeMultiProviderTurnRunner(
               if (abandoned) {
                 opts.onTurnComplete?.(reportName, {
                   inputTokens: abandoned.usage.inputTokens,
+                  ...(abandoned.usage.routerOneReceipt ? { routerOneReceipt: abandoned.usage.routerOneReceipt } : {}),
                   outputTokens: abandoned.usage.outputTokens,
                   producedNothing: true,
                 }, abandoned.model ?? chain[i].modelId, abandoned.usage.cacheReadInputTokens ?? 0, abandoned.usage.cacheCreationInputTokens ?? 0);
@@ -1028,6 +1030,7 @@ export function makeMultiProviderTurnRunner(
             if (abandoned) {
               opts.onTurnComplete?.(reportName, {
                 inputTokens: abandoned.usage.inputTokens,
+                  ...(abandoned.usage.routerOneReceipt ? { routerOneReceipt: abandoned.usage.routerOneReceipt } : {}),
                 outputTokens: abandoned.usage.outputTokens,
                 producedNothing: true,
               }, abandoned.model ?? chain[i].modelId, abandoned.usage.cacheReadInputTokens ?? 0, abandoned.usage.cacheCreationInputTokens ?? 0);

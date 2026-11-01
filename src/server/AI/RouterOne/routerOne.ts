@@ -17,6 +17,7 @@
  * Brand: the provider label is the neutral "ENGINE_R1"; nothing here reaches end-user copy.
  */
 import { isZTestAccount } from '../../lib/zTestAccount';
+import { resolveRouterOneModels } from './routerOneCatalog';
 
 export const ROUTER_ONE_LABEL = 'ENGINE_R1';
 export const ROUTER_ONE_DEFAULT_BASE_URL = 'https://api.router.one/v1';
@@ -33,7 +34,8 @@ export function routerOneBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
 }
 export function routerOneModels(env: NodeJS.ProcessEnv = process.env): string[] {
   const list = String(env.ROUTER_ONE_MODEL ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  return list.length ? list : [ROUTER_ONE_DEFAULT_MODEL];
+  // Catalog sync engine (routerOneCatalog.ts) ranks cheapest coding models; falls back to this env list.
+  return resolveRouterOneModels(list.length ? list : [ROUTER_ONE_DEFAULT_MODEL], env, list.length > 0);
 }
 /** Public fallback (after Surplus) for normal users: flag ON + key present. */
 export function routerOnePublicFallbackEnabled(env: NodeJS.ProcessEnv = process.env): boolean {

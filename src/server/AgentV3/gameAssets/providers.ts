@@ -14,6 +14,8 @@ export interface ReviewedAsset extends AssetCandidate {
   /** A live service obligation, independent of the asset's copyright licence. */
   serviceCredit?: string;
   format?: 'glb' | 'gltf';
+  /** Reviewed source AND derived output hashes are pinned; no automatic unreviewed rewrite. */
+  optimization?: 'compact-v1';
   sourceSha256?: string;
   resources?: readonly { path: string; url: string; sha256: string }[];
 }
@@ -30,6 +32,7 @@ export function validateCatalogue(assets: readonly ReviewedAsset[]): void {
       || !candidateMatches(c, { subject: c.subjects[0] }) || c.downloadOrigins.length > 4) throw new Error('Unreviewed catalogue entry');
     assetDownloadUrl(c.downloadUrl, new Set(c.downloadOrigins));
     for (const origin of c.downloadOrigins) if (new URL(origin).origin !== origin) throw new Error('Invalid reviewed origin');
+    if (c.optimization !== undefined && (c.optimization !== 'compact-v1' || !/^[a-f0-9]{64}$/.test(c.sourceSha256 ?? ''))) throw new Error('Unreviewed optimization source/version');
     if (c.format === 'gltf' && (!/^[a-f0-9]{64}$/.test(c.sourceSha256 ?? '') || !c.resources?.length)) throw new Error('Unreviewed glTF sources');
     if ((c.resources?.length ?? 0) > 16 || new Set(c.resources?.map(r => r.path)).size !== (c.resources?.length ?? 0)) throw new Error('Resource budget or duplicates');
     for (const r of c.resources ?? []) {

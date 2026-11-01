@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { syntheticGlb } from './assetFixtures.testSupport';
+import { syntheticGlb } from '../../../../tests/fixtures/gameAssetFixtures';
 import { bundleGltf, safeGltfResourcePath } from './gltfBundle';
 import { validateGlb } from './assetPolicy';
 function pack() {

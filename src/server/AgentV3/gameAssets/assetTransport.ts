@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { bundleGltf } from './gltfBundle';
+import { compactGlb } from './assetOptimize';
 import { ASSET_LIMITS } from './assetPolicy';
 import { BoundedCache } from '../../lib/boundedCache';
 import { publicOnlyInit } from '../../lib/ssrfGuard';
@@ -20,7 +21,11 @@ export async function downloadReviewedAsset(candidate: ReviewedAsset, signal: Ab
       const deadline = AbortSignal.timeout(15_000);
       const origins = new Set(candidate.downloadOrigins);
       const bytes = await downloadGameAsset(candidate, origins, deadline);
-      if (candidate.format !== 'gltf') return bytes;
+      if (candidate.format !== 'gltf') {
+        if (!candidate.optimization) return bytes;
+        if (candidate.optimization !== 'compact-v1' || createHash('sha256').update(bytes).digest('hex') !== candidate.sourceSha256) throw new Error('Optimization source/version mismatch');
+        return compactGlb(bytes).bytes;
+      }
       if (createHash('sha256').update(bytes).digest('hex') !== candidate.sourceSha256) throw new Error('glTF source hash mismatch');
       const resources = new Map<string, Uint8Array>(); let size = bytes.byteLength;
       for (const r of candidate.resources ?? []) {
@@ -30,7 +35,8 @@ export async function downloadReviewedAsset(candidate: ReviewedAsset, signal: Ab
         if (size > ASSET_LIMITS.bytes || createHash('sha256').update(resource).digest('hex') !== r.sha256) throw new Error('glTF resource hash/budget mismatch');
         resources.set(r.path, resource);
       }
-      return bundleGltf(bytes,resources);
+      const glb = bundleGltf(bytes,resources);
+      return candidate.optimization === 'compact-v1' ? compactGlb(glb).bytes : glb;
     })();
     pending.set(key, transfer);
     void transfer.finally(() => pending.delete(key)).catch(() => {});

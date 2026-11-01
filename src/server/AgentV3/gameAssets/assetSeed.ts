@@ -67,7 +67,7 @@ export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<
   const local = Object.fromEntries(ready.map(r => {
     const c = r.outcome.entry.candidate;
     const role = requirements.find(req => req.subject === r.subject)?.animation;
-    const reviewed = catalogue.find(a => a.sha256 === c.sha256 && a.provider === c.provider);
+    const reviewed = catalogue.find(a => a.sha256 === c.sha256 && a.provider === c.provider && a.id === c.id && a.revision === c.revision);
     return [r.subject, { sha256: c.sha256, height: c.height, yaw: c.yaw,
       ...(role ? { animation: c.animationRoles?.[role] ?? role } : {}),
       ...(reviewed?.serviceCredit ? { serviceCredit: reviewed.serviceCredit } : {}),
@@ -75,7 +75,8 @@ export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<
   }));
   const credits = ready.map(r => {
     const c = r.outcome.entry.candidate;
-    return `${r.subject}: ${c.license.author} — ${c.license.spdx}\n${c.license.attribution}\nSource: ${c.sourceUrl}\nLicense evidence: ${c.license.evidenceUrl}\nRevision: ${c.revision}\nChanges: glTF packaging when applicable; runtime scale, grounding and curated orientation normalization.\nSHA-256: ${c.sha256}`;
+    const reviewed = catalogue.find(a => a.sha256 === c.sha256 && a.provider === c.provider && a.id === c.id && a.revision === c.revision);
+    return `${r.subject}: ${c.license.author} — ${c.license.spdx}\n${c.license.attribution}\nSource: ${c.sourceUrl}\nLicense evidence: ${c.license.evidenceUrl}\nRevision: ${c.revision}\nChanges: ${reviewed?.optimization ? 'lossless GLB buffer compaction (compact-v1); ' : ''}glTF packaging when applicable; runtime scale, grounding and curated orientation normalization.\nSHA-256: ${c.sha256}${reviewed?.sourceSha256 ? '\nSource SHA-256: ' + reviewed.sourceSha256 : ''}`;
   }).join('\n\n');
   const files = {
     'public/game-assets/manifest.json': JSON.stringify(manifest, null, 2),

@@ -100151,3 +100151,30 @@ those service obligations separately from the CC0 asset licence when wiring the 
   geometry-only budget. Policy now sums mesh instances before any browser decoding/rendering;
   added synthetic under/over-budget cases. The in-progress full run was interrupted for this real
   source correction; targeted checks and the complete suite are being rerun on the corrected source.
+
+### 2026-11-01 — complete coverage diagnosis and lossless asset compaction
+
+- Local checkpoint 3610b09b3 preserved the default-off pipeline; no push or activation.
+- Full coverage reached terminal: 3,185 files passed, one file failed; 48,200 tests passed, one failed,
+  85 existing skips. The genuine failure was a test fixture in production source. Moved it into
+  tests/fixtures; the dead-code guard remains unchanged. No skip or allowlist was added.
+- Added bounded lossless compact-v1 packing, with reviewed source/output hash pinning, attribution
+  change metadata, and an offline no-overwrite admission CLI. Supports both reviewed GLB and bundled
+  glTF. It does not change triangles, texture pixels or animation tracks.
+- Optimized synthetic fixture saved 65,672 bytes. Real Chromium, actual Vite production artifact and
+  fresh-process emulator restore passed on the derived bytes. Provenance includes both hashes and
+  processing version. This does not establish actual-provider savings or live publication.
+- Investigated existing Three.js simplification: unsupported morph/skin attributes are discarded, so
+  universal automatic LOD remains disabled rather than risking character animation. No new dependency.
+- Required TUF signature gate and provider requests remain blocked; no denied request was retried.
+  Full final verification is pending on the corrected/optimized tree.
+- Corrected/optimized targeted suite: seven files / 49 tests passed, including unchanged dead-code
+  guard, source/output pinning, glTF resource hashes, CLI no-overwrite and optimized manifest/cache reuse.
+- All available CI-equivalent gates passed again on optimized production code. The driver retains
+  the prior signature failure; it intentionally makes no new request to the denied TUF service.
+  All four required emulator drills passed again using the locally verified Firestore jar.
+- Added and passed local private Storage-emulator spill/cache/fresh-process restore. Kept CRC and byte
+  caps intact. Independently reproduced an immediate post-abort keepalive reset in the unmodified SDK
+  + local emulator; the harness waits 10 ms for deliberate abort cleanup, without retrying requests or
+  weakening assertions. Production-cloud same-tick recovery remains unverified.
+- Final full coverage will run on this local checkpoint; no PR/push, merge or feature activation.

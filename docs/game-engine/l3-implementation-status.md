@@ -31,13 +31,17 @@ unsafe numbers and excess geometry/texture budgets. Supported formats are self-c
 reviewed relative-resource glTF + BIN + PNG deterministically bundled into GLB. Initial policy:
 5 MiB, 60,000 triangles, 512 nodes, 128 meshes/animations, 2048-square textures with aggregate cap.
 JPEG, archives, FBX/OBJ, compression codecs, geometry simplification, texture resizing and generated
-LODs are not implemented. Budget rejection is not optimization.
+LODs are not implemented. Reviewed `compact-v1` losslessly removes unused/duplicate buffer bytes;
+it preserves exact buffer-view contents, accessor metadata, images and animations. Both source and
+derived hashes must be pinned before admission. CPU work is bounded for overlapping views. An
+offline admission tool (`scripts/gameAssetCompact.mjs`) writes without overwriting existing files
+and reports hashes/savings; it does not infer licences or activate assets. Budget rejection is not optimization.
 
 The durable content cache stores only reviewed public assets under content hashes in the existing
 private bucket. Cache hits are rehashed and revalidated. At most 64 entries can be admitted in one
 catalogue; historical-object garbage collection is not implemented, so this is not a lifetime
 storage cap. `downloadedBytes` currently reports final acquired GLB bytes, not total HTTP traffic
-for multi-resource glTF. No external paid service or AI inference was used by these checks.
+for multi-resource glTF or pre-compaction sources. No external paid service or AI inference was used by these checks.
 
 Project persistence uses existing workspace binary storage with exact hash read-back before
 materialization. The source manifest, attribution file and runtime wrapper require durable text-save
@@ -70,7 +74,7 @@ approve access; this implementation does not change network/security settings.
 ## Verification and release boundary
 
 Evidence logs reside in `/workspace/navbharat-asset-verification` in the working environment.
-Checks use CI's Node 22.23.4/npm 11.18.0 except the explicitly documented browser harness.
+Checks use CI's Node 22.23.4/npm 11.18.0; browser harnesses also passed with these versions.
 Affected-suite run: 37 files, 657 tests passed. A subsequent four-file asset run passed 35 tests;
 these overlap and must not be summed. Full coverage is separately tracked in PROGRESS.md.
 
@@ -107,3 +111,41 @@ No production feature activation, deployment or merge is authorized by these syn
   Passed using the actual Vite production build at a nested `/published/` base: model hash and
   manifest preserved, rendering/animation/reload pass, only owned URLs requested. Synthetic fixture
   only. Browser and build harnesses also passed under CI-matching Node 22.23.4.
+
+### Lossless optimization evidence
+
+The optimized textured/animated synthetic fixture saved **65,672 bytes**. Source hash:
+`2c273be6c44a70f2458eb898b93c4d73c407a05c780f7f601c80dfd3d2ce2978`; derived hash:
+`3a7bfa6cf2fcf64e35ccaa7fab3fc799004fa2a8cd851586a941cf3722ca43fe`. Chromium still rendered
+4 triangles / 1,856 changed pixels with observable animation. The optimized bytes passed actual Vite
+build/reload and separate-process emulator persistence/restore, including source hash and processing
+provenance. These are synthetic savings, not a claim about provider assets or production bandwidth.
+
+The installed Three.js simplifier discards unsupported morph/skin attributes. It is not automatically
+applied to game characters. Lossless packing is not mesh simplification or LOD generation; those
+remain pending quality/animation-preserving implementation and real-asset acceptance.
+
+The first completed full suite had one genuine failure: a synthetic fixture was located under
+production source and the dead-code guard rejected it. It was moved to `tests/fixtures` without
+changing the guard or adding an allowlist entry. That run had 48,200 passing tests, one failure and
+85 existing skips; it was not a green coverage result. The corrected tree is being verified again.
+
+### Local private-storage spill/cache evidence
+
+The checked harness `scripts/checks/gameAssetStorage.check.mjs` runs the existing SDK against isolated
+Firestore 1.22.0 and Storage 1.1.3 emulators on loopback, with a synthetic demo project/bucket and
+throwaway test credentials. Both emulator jars are size/SHA-256 checked against installed Firebase
+Tools metadata; automatic downloads are disabled in the harness. The storage runtime was obtained
+from its verified official `storage.googleapis.com` test-artifact URL, not a model-provider bypass.
+
+A synthetic GLB larger than the inline Firestore limit passed actual private-bucket spill/read-back,
+content-addressed cache write/read with CRC32C enabled, oversize-read rejection, private cache metadata,
+and fresh-process model+manifest restore. Run with:
+`node scripts/checks/gameAssetStorage.check.mjs <verified-storage-emulator-cache-dir> <verified-firestore-jar>`.
+This strengthens local SDK/storage evidence, but is not a production-cloud or live-publication test.
+
+An immediate metadata request after deliberately aborting a read reproduced `ECONNRESET` in the
+**unmodified SDK plus local HTTP emulator**, independently of the asset adapter. The harness allows
+10 ms for local socket cleanup after deliberate aborts; size and CRC assertions are unchanged and no
+request is retried. Same-tick connection recovery in production is not claimed. The diagnostic log is
+`asset-storage-raw-sdk-diagnosis.log` in the verification directory.

@@ -8,14 +8,19 @@ import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { build } from 'vite';
 import { generateGameAssetRuntime } from '../../src/server/lib/GameAssetRuntimeGenerator';
-import { syntheticGlb, syntheticCandidate } from '../../src/server/AgentV3/gameAssets/assetFixtures.testSupport';
+import { paddedSyntheticGlb, syntheticCandidate } from '../../tests/fixtures/gameAssetFixtures';
+
+import { compactGlb } from '../../src/server/AgentV3/gameAssets/assetOptimize';
 
 async function main() {
   const [playwrightPath, chromiumPath] = process.argv.slice(2);
   assert.ok(playwrightPath && chromiumPath, 'Existing browser tooling required');
   const { default: playwright } = await import(pathToFileURL(resolve(playwrightPath)).href);
   const dir = await mkdtemp(join(tmpdir(), 'nbai-asset-build-'));
-  const bytes = syntheticGlb(true, true); const candidate = syntheticCandidate(bytes);
+  const optimized = compactGlb(paddedSyntheticGlb());
+  assert.ok(optimized.savedBytes > 64_000);
+  const bytes = Buffer.from(optimized.bytes); const candidate = syntheticCandidate(bytes);
+  console.log(`Lossless synthetic compaction saved ${optimized.savedBytes} bytes; source ${optimized.sourceSha256}; output ${optimized.sha256}`);
   let browser: any; let server: ReturnType<typeof createServer> | undefined;
   try {
     await symlink(resolve('node_modules'),join(dir,'node_modules'));

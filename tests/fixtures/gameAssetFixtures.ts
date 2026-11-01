@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { ReviewedAsset } from './providers';
+import type { ReviewedAsset } from '../../src/server/AgentV3/gameAssets/providers';
 
 /** Authored synthetic tetrahedron with observable translation. Never included in the production catalogue. */
 export function syntheticGlb(animated = true, textured = false): Buffer {
@@ -45,4 +45,25 @@ export function syntheticCandidate(bytes: Uint8Array): ReviewedAsset {
     license: { spdx: 'CC0-1.0', evidenceUrl: 'https://models.example/license', reviewedAt: '2026-11-01', author: 'NavBharatAI synthetic test fixture', attribution: '', commercial: true, redistributeInGame: true, redistributeSource: true },
     downloadOrigins: ['https://models.example'], review: { reviewer: 'automated-test-only', evidenceRevision: 'test-v1', freeDownload: true },
   };
+}
+
+/** Synthetic duplicate/unused bytes exercise compaction without third-party downloads. */
+export function paddedSyntheticGlb(): Buffer {
+  const source = syntheticGlb(true, true);
+  const n = source.readUInt32LE(12);
+  const doc = JSON.parse(source.subarray(20, 20 + n).toString('utf8'));
+  const bin = source.subarray(28 + n);
+  doc.bufferViews.push({ buffer: 0, byteOffset: bin.length, byteLength: 144 });
+  const expanded = Buffer.concat([bin, bin.subarray(0, 144), Buffer.alloc(64 * 1024)]);
+  doc.buffers[0].byteLength = expanded.length;
+  return encodeFixtureGlb(doc, expanded);
+}
+
+export function encodeFixtureGlb(doc: unknown, bin: Uint8Array): Buffer {
+  const raw = Buffer.from(JSON.stringify(doc)); const json = Buffer.alloc(Math.ceil(raw.length / 4) * 4, 32); raw.copy(json);
+  const result = Buffer.alloc(28 + json.length + bin.byteLength);
+  result.writeUInt32LE(0x46546c67, 0); result.writeUInt32LE(2, 4); result.writeUInt32LE(result.length, 8);
+  result.writeUInt32LE(json.length, 12); result.writeUInt32LE(0x4e4f534a, 16); json.copy(result, 20);
+  result.writeUInt32LE(bin.byteLength, 20 + json.length); result.writeUInt32LE(0x004e4942, 24 + json.length); result.set(bin, 28 + json.length);
+  return result;
 }

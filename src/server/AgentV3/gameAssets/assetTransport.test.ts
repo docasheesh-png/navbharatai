@@ -1,5 +1,5 @@
 import { it, expect, vi } from 'vitest';
-import { syntheticGlb, syntheticCandidate } from './assetFixtures.testSupport';
+import { syntheticGlb, syntheticCandidate } from '../../../../tests/fixtures/gameAssetFixtures';
 
 it('deduplicates simultaneous reviewed downloads, with independent cancellation', async () => {
   vi.resetModules(); const { downloadReviewedAsset } = await import('./assetTransport');

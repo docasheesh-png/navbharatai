@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createDurableAssetCache } from './assetCache';
 import { createAssetProviders, validateCatalogue, polyHavenContainsFile, REVIEWED_GAME_ASSETS } from './providers';
-import { syntheticGlb, syntheticCandidate } from './assetFixtures.testSupport';
+import { syntheticGlb, syntheticCandidate, paddedSyntheticGlb } from '../../../../tests/fixtures/gameAssetFixtures';
+import { compactGlb } from './assetOptimize';
 import { acquireGameAsset } from './assetEngine';
 import { persistProjectAsset, type GameAssetWorkspace } from './assetProject';
 import { prepareGameAssets } from './assetSeed';
@@ -9,8 +10,7 @@ import { externalGameAssetsEnabled, gameAssetRequirements } from './assetPlan';
 import { materializeAssets } from '../WorkspaceAssetStore';
 import { contentTypeFor } from '../bucketPublish';
 
-function rig() {
-  const bytes = syntheticGlb(); const candidate = syntheticCandidate(bytes);
+function rig(bytes = syntheticGlb(), candidate = syntheticCandidate(bytes)) {
   const objects = new Map<string, Uint8Array>(); const binary = new Map<string, string>(); const texts = new Map<string, string>();
   const disk = new Map<string, string>();
   const objectStore = { read: async (key: string) => objects.get(key) ?? null, write: async (key: string, data: Uint8Array) => { objects.set(key, data); } };
@@ -98,4 +98,25 @@ it('preserves a GLB at the existing decoded-byte limit without raising the cap',
   expect(result.saved).toEqual(['public/game-assets/boundary.glb']); expect(save).toHaveBeenCalledOnce();
   const over = await persistBuildAssets({ listFiles:async()=>['public/game-assets/over.glb'],readBinaryFile:async()=>Buffer.alloc(MAX_BUILD_ASSET_BYTES+1).toString('base64') },'fixture-workspace',{heldPaths:async()=>[],save});
   expect(over.skipped).toEqual(['public/game-assets/over.glb']); expect(save).toHaveBeenCalledOnce();
+});
+
+it('persists optimized provenance and reuses derived bytes from the durable cache', async () => {
+  const { downloadReviewedAsset } = await import('./assetTransport');
+  const original=paddedSyntheticGlb(); const optimized=compactGlb(original); const bytes=Buffer.from(optimized.bytes);
+  const c={...syntheticCandidate(bytes),optimization:'compact-v1' as const,sourceSha256:optimized.sourceSha256};
+  const r=rig(bytes,c); const fetch=vi.fn(async()=>new Response(original));vi.stubGlobal('fetch',fetch);
+  r.download.mockImplementation(async()=>Buffer.from(await downloadReviewedAsset(c,new AbortController().signal)));
+  try {
+    const options={prompt:'3D human walking game',workspaceId:'fixture-workspace',workspace:r.workspace,signal:new AbortController().signal,catalogue:[c],dependencies:r.deps,persistence:r.persistence,env:{AGENTV3_EXTERNAL_GAME_ASSETS:'on'}};
+    expect((await prepareGameAssets(options)).status).toBe('prepared');
+    const manifest=JSON.parse(r.texts.get('public/game-assets/manifest.json')!);
+    expect(manifest.assets[0].candidate.sourceSha256).toBe(optimized.sourceSha256);
+    expect(manifest.assets[0].candidate.optimization).toBe('compact-v1');
+    expect(manifest.assets[0].sha256).toBe(optimized.sha256);
+    expect(r.texts.get('public/game-assets/ATTRIBUTION.txt')).toContain('lossless GLB buffer compaction');
+    expect(r.texts.get('public/game-assets/ATTRIBUTION.txt')).toContain(optimized.sourceSha256);
+    expect((await prepareGameAssets(options)).outcomes[0].outcome).toMatchObject({kind:'model',cacheHit:true});
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(Buffer.from([...r.binary.values()][0].split(',')[1],'base64')).toEqual(bytes);
+  } finally {vi.unstubAllGlobals();}
 });

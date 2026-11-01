@@ -100043,3 +100043,11 @@ passed 3 files / 50 tests (catalogue-foundation.log). No verification process re
 active. Production integration is NOT complete and no branch publication, merge or
 deployment has occurred. Latest owner instruction makes positive catalogue billing
 and safe missing-data admission a release prerequisite; bb769127 must not ship alone.
+
+2026-11-01 public catalogue source correction: independently confirmed explicit
+DeepSeek V4.1 Flash wallet tariffs and units on its official public model page.
+Authenticated GET /v1/models pricing fields are not the only viable adapter source.
+Normal raw-page GET returned HTTP403; current enforced executor allowlist excludes
+router.one. No alternate-route retry was attempted. Need approved source access or
+authentic supplied raw HTML to validate live parsing, followed by production
+snapshot/usage/billing integration. No new runtime edits, paid calls, PR or deploy.

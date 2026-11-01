@@ -191,3 +191,31 @@ https://router.one/docs/openapi.json, https://router.one/llm-prompt-caching,
 https://router.one/pricing-methodology. The public pricing page and individual
 model pages can differ in plan-coverage statements; plan quota pricing must never
 be substituted for a posted wallet-token tariff or treated as actual wallet debit.
+
+## Public-page source correction (2026-11-01)
+
+An authenticated catalogue response is not the only acceptable source. The official
+public model detail pages explicitly publish wallet token tariffs and units. The
+DeepSeek V4.1 Flash page was independently read on 2026-11-01 and identifies
+`deepseek-v4.1-flash`, input USD 0.60, output USD 2.40, cache write USD 0.60 and
+cache read USD 0.012 per million tokens. Its ordinary and write rates coincide,
+so the documented Chat inclusive-input/read counters can price this tariff.
+These observations establish a viable source, not a hardcoded production rate.
+The methodology explicitly identifies published model rates as the pricing source.
+
+A live adapter may consume those official pages without guessing API JSON fields.
+It must verify the concrete model, explicit units and wallet-token pricing, reject
+ambiguous or unsupported tiers, retain source URL, content digest, parser version
+and retrieval time, and bind an immutable snapshot before each physical call.
+It must never interpret a subscription allowance as a token tariff. Rate changes
+apply to new attempts; refreshing must not rewrite an in-flight snapshot.
+
+Current verification limitation: the managed executor attempted a normal HTTPS
+GET of the public model page and received HTTP 403. Its current enforced network
+policy includes only package-manager presets and excludes router.one. No retry,
+proxy change or alternate route was used. Browser-extracted text established the
+rates above but does not establish the raw HTML/embedded-data structure required
+for a tested live parser. An approved environment policy update permitting the
+source, or supplied authentic raw page evidence, can remove this parser-evidence
+blocker. No API key or paid inference call is necessary for public-page evidence.
+Production catalogue integration and broad Router One release remain on hold.

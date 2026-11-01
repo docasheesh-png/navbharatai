@@ -5414,6 +5414,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       actually charged. It is the time the BUILD held our machine, capped at the build's own
                       duration, never a live preview the user opened — so it is not called one, and no
                       "free alternative" is offered for a choice the user never made. */}
+                  {typeof state.costBreakdown.sandboxFeeInr === 'number' && state.costBreakdown.sandboxFeeInr > 0 && (
+                    <div className="text-muted">
+                      Sandbox service fee (2.5% of subtotal): ₹{state.costBreakdown.sandboxFeeInr.toFixed(2)}
+                    </div>
+                  )}
                   {typeof state.costBreakdown.livePreviewInr === 'number' && state.costBreakdown.livePreviewInr > 0 && (
                     <span>
                       Build machine: {(state.costBreakdown.livePreviewSeconds ?? 0) >= 60

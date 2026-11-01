@@ -20,8 +20,8 @@ const facts = (over: Partial<LiveCostFacts> = {}): LiveCostFacts => ({
 
 describe('the figure', () => {
   it('is the bill in rupees, to the paisa', () => {
-    expect(liveCostInr(facts())).toBe(17.6);
-    expect(liveCostInr(facts({ billedUsd: 0.12345 }))).toBe(10.86);
+    expect(liveCostInr(facts())).toBe(18.04);
+    expect(liveCostInr(facts({ billedUsd: 0.12345 }))).toBe(11.14);
   });
 
   it('shows NOTHING to someone who will not pay it', () => {
@@ -31,9 +31,9 @@ describe('the figure', () => {
 
   it('applies the build discount exactly as the bill does, never below our own cost', () => {
     const f = facts({ billedUsd: 1, floorUsd: 0.9, discountPct: 50 });
-    const expected = Math.round(applyBuildDiscount({ billedUsd: 1, floorUsd: 0.9, pct: 50 }).payUsd * 88 * 100) / 100;
+    const expected = Math.round(applyBuildDiscount({ billedUsd: 1, floorUsd: 0.9, pct: 50 }).payUsd * 1.025 * 88 * 100) / 100;
     expect(liveCostInr(f)).toBe(expected);
-    expect(liveCostInr(f)).toBe(79.2); // floored at our 0.9 cost, not 50% off
+    expect(liveCostInr(f)).toBe(81.18); // floored at our 0.9 cost, not 50% off
   });
 
   it('refuses a number it cannot trust', () => {
@@ -110,7 +110,7 @@ describe('one price, two readings (source guards — nothing else can see a seco
     expect(live).toContain('decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, vm.usd, barrenPhases)');
     expect(route).toContain('decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd, barrenPhases)');
     // The discount floor is our own cost, as at settle.
-    expect(live).toContain('floorUsd: d.realCostUsd + d.sandboxUsd');
+    expect(live).toContain('floorUsd: d.realCostUsd');
   });
 
   // Q-1026/Q-1033: this guard used to pin the predicate's TEXT, which is why six copies of it could sit

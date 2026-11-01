@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { buildTurnRunner, ladderRunners, enforceNoClaude } from '../src/server/routes/agentv3';
+import { buildTurnRunner, weakGlmFirst, ladderRunners, enforceNoClaude } from '../src/server/routes/agentv3';
 import { TIER_LADDERS, healLadder } from '../src/server/AgentV3/tierLadder';
 import { sonnetModel, opusModel, haikuModel } from '../src/server/AgentV3/models';
 import { nemotronUltraModel, nemotronSuperModel } from '../src/server/AgentV3/nemotron';
@@ -125,12 +125,12 @@ describe('heal and escalation move WITHIN the ladder', () => {
   // app") applies again on BOTH tiers, so both heal chains drop their leading rung and open on KIMI.
   // Asserted against `healLadder(...)` rather than a hand-written list, so the two can never drift.
   it('a heal drops the cheap leading flash rung and opens on a different vendor', () => {
-    expect(seq(chainFor({ tier: 'weak', heal: true, noClaude: true }))).toEqual(ladderSeq(healLadder(TIER_LADDERS.weak)));
+    expect(seq(chainFor({ tier: 'weak', heal: true, noClaude: true }))).toEqual(ladderSeq(weakGlmFirst(healLadder(TIER_LADDERS.weak))));
     expect(seq(chainFor({ tier: 'off', heal: true }))).toEqual(ladderSeq(healLadder(TIER_LADDERS.off)));
     // …and "opens on a different vendor" is the POINT, not a side effect — pinned explicitly so a
     // future lead-rung change that happens to keep GLM first fails here instead of silently
     // reinstating "repair on the model that just broke it".
-    expect(seq(chainFor({ tier: 'weak', heal: true, noClaude: true }))[0]).toMatch(/^KIMI:/);
+    expect(seq(chainFor({ tier: 'weak', heal: true, noClaude: true }))[0]).toBe('GLM:glm-5.3');
     expect(seq(chainFor({ tier: 'off', heal: true }))[0]).toMatch(/^KIMI:/);
   });
   it('escalating Strong to Opus starts its OWN ladder at Opus', () => {

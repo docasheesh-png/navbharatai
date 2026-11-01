@@ -135,15 +135,11 @@ describe('a text-only call the build route makes is on the record too', () => {
 
   it('…and every remaining `runTurn` in the route is one of the known, recorded callers', () => {
     const lines = code.split('\n').filter((l) => l.includes('.runTurn('));
-    // Eight explicitly accounted sites: two fallback delegates and the Surplus judge are runner definitions,
-    // not an unrecorded classifier call. A new raw aux site still fails this exact census.
-    expect(lines.length).toBe(8);
+    // Six sites remain: Router One now shares the guarded multi-provider chain,
+    // removing two raw fallback delegates without introducing a new call door.
+    expect(lines.length).toBe(6);
     const joined = lines.join('\n');
-    // Delegates retain completion recording; they are not new raw aux calls.
-    expect(joined).toContain('try { return await router.runTurn(params); }');
-    expect(joined).toContain('return ladder.runTurn(params);');
-    expect(code).toContain('const router = routerOneTurnRunner(opts, { pinned: false });');
-    expect(code).toMatch(/const weakLadder = \(\) => buildTurnRunner\(\{[^]*?onTurnComplete: opts.onTurnComplete,/);
+    expect(code).toMatch(/surplusSession: undefined,[^]*?onTurnComplete: opts.onTurnComplete,/);
     expect(code).toContain('...(opts.onTurnComplete ? { onTurnComplete: opts.onTurnComplete } : {})');
     // Two planners that have always recorded both outcomes (asserted individually further down).
     expect(joined).toContain('const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({');

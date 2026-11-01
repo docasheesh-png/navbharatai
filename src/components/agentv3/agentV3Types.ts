@@ -30,6 +30,9 @@ export interface CostBreakdown {
    */
   livePreviewSeconds?: number;
   livePreviewInr?: number;
+  sandboxFeeInr?: number;
+  sandboxFeePct?: number;
+  preSandboxSubtotalInr?: number;
   /**
    * The admin-set build discount (2026-09-25): the price before it, what was taken off, and the
    * percentage actually applied. All 0 when there was no discount. OPTIONAL for the same reason as

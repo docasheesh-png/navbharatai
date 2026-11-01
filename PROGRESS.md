@@ -99979,3 +99979,42 @@ The disconnected parser belongs in scripts/lib, not application src. Moved it an
 ### 2026-11-01 — Router One prospective model multiplier revised to 2.5x
 
 Owner replaced the earlier Router One 10x target with actual model expense times 2.5. There is still no accepted Router One settlement transport or positive live charge path. The offline validator now exposes the immutable prospective ratio 5/2 while preserving unverified-export, billingAuthorized:false and the original unmarked wallet observation. Surplus stays 10x; ordinary providers, sandbox/hosting rates, routing and historical wallets are unchanged. Reconciliation documentation states the separate-subtotal, discount-last and existing floor formula, with a synthetic example. Focused parser/fail-closed/dead-code tests: 52 passed. Aggregate final-tree verification follows; this does not claim activated 2.5x billing.
+
+## 2026-11-01 — owner-confirmed Pro fee and Weak fallback revision (local verification)
+
+Scope: Router One prospective model markup 5/2 (Surplus stays 10); all Pro bands
+replace measured VM customer billing with a 2.5% fee on the discounted AI subtotal;
+Weak becomes admitted Surplus → eligible Router One → GLM → existing tail.
+Profile pin/no-fallback overrides no longer bypass Weak. Shared fallback uses the
+existing bench/dead-rung/stop/usage machinery; plan/heal/complex preserve provider
+order and selected GLM models. Explicit retries can advance past failed tail rungs.
+Missing keys and explicit Router One disable remain respected. Non-Weak routing,
+hosting subscriptions and historical wallets are unchanged.
+
+Billing class fixed: VM expense was mixed into markup, waiver/Stop and discount
+floors while the user authorized a subtotal fee. Normal/watchdog/live paths now
+share proSandboxFee AFTER those rules, with internal rate-priced VM expense kept
+separate. Breakdown and diagnostics name subtotal/fee, and waiver/Stop copy no
+longer denies the separate fee. A zero bill cannot acquire a fee. Existing exact
+source/execution regressions were updated to the authorized policy, not removed.
+43 affected files / 718 tests passed on the current implementation; subsequent
+full gates and final coverage remain pending at this checkpoint.
+
+OPEN: Router One positive actual-cost settlement remains blocked by verified
+supplier finality/identity/request-binding evidence. Offline exports remain
+billingAuthorized:false; routing does not make unknown expense billable. Unknown
+Router One portions are absorbed, an economic limitation explicitly documented.
+No paid calls, account changes, historical debits, CSV identifiers or credentials.
+Local emulator download remains denied by enforced network policy (not retried).
+Deployment verification still requires accessible Cloud Build/Run revision evidence;
+this environment has no configured cloud identity. No live claim at this checkpoint.
+
+Final focused checkpoint: 44 files / 724 tests pass, including the dead-code guard.
+The final review also preserves the active Weak scope policy when a configured
+ladder omits GLM: its GLM fallback model comes from the same registry with only the
+ladder override removed. No configured key or spending-policy flag is fabricated.
+Rollout warning sent to the owner thread: a configured Router One key with no
+explicit disable makes the new Weak fallback reachable by all Weak users. Unknown
+supplier expense is absorbed and is not measurable by the dollar cost ceiling;
+existing admission, stop/deadline, maintenance/canary, bench and retry protections
+remain, but they do not establish a verified supplier expense cap.

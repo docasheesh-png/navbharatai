@@ -491,6 +491,7 @@ import {
   type ProviderModelEntry,
 } from '../AgentV3/ProviderUsageLedger';
 import OpenAI from 'openai';
+import { routerOneCatalogStatus, startRouterOneCatalogSync, syncRouterOneCatalog } from '../AI/RouterOne/routerOneCatalog';
 import { ROUTER_ONE_LABEL, ROUTER_ONE_NOT_CONFIGURED, routerOneApiKey, routerOneBaseUrl, routerOneModels, routerOnePinnedFor, routerOnePublicFallbackEnabled } from '../AI/RouterOne/routerOne';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { withStopSignal } from '../AgentV3/stopSignal';
@@ -4644,6 +4645,15 @@ export function registerAgentV3Routes(app: Express): void {
   // configuration, and — with ?test=1 — a real paid call on NavBharatAI's account once every 30 seconds,
   // for any caller on the internet, with the provider's raw error text. Nothing in the app calls it; it is
   // the admin's own tool, so it is gated like every other admin tool (the `x-admin-token` header).
+  // Router One catalog sync engine: periodic + admin refresh; last good ranking kept on failure.
+  startRouterOneCatalogSync();
+  app.get('/api/agentv3/router-one/catalog', requireAdmin, (_req: Request, res: Response) => {
+    res.json(routerOneCatalogStatus());
+  });
+  app.post('/api/agentv3/router-one/catalog/refresh', requireAdmin, async (_req: Request, res: Response) => {
+    await syncRouterOneCatalog();
+    res.json(routerOneCatalogStatus());
+  });
   app.get('/api/agentv3/diag', requireAdmin, async (req: Request, res: Response) => {
     const diag = { ...agentV3KeyDiag(), sandbox: sandboxDiag() };
     if (req.query.test !== '1') {

@@ -814,3 +814,7 @@ Every cfd01074 retained item has its own pending row; class-prevention evidence 
 Pure parsing and quarantine only, with synthetic regression fixtures. Does not complete positive actual-times10 settlement. Provider finality, account/key ownership, trusted provenance and durable request binding remain blocked. No historical wallet mutations or production integration. Final verification pending.
 
 Offline validator placement corrected to scripts/lib; dead-code guard unchanged. Superseded coverage run stopped with known placement failure; final-tree verification pending.
+
+### 2026-11-01 — Prospective Router One 2.5x policy
+
+Replaced Router One's documented 10x target with 2.5x and added exact 5/2 offline policy metadata, never a charge. Existing fail-closed accounting and offline billingAuthorized:false remain enforced. Automatic settlement is blocked by verified finality/account/request binding; no historical debit or hosting/provider price changes. Final verification pending.

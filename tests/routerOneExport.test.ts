@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { ROUTER_ONE_EXPORT_HEADERS as headers, validateRouterOneExport as validate } from '../scripts/lib/routerOneExport';
+import { ROUTER_ONE_EXPORT_HEADERS as headers, ROUTER_ONE_PROSPECTIVE_MODEL_MARKUP, validateRouterOneExport as validate } from '../scripts/lib/routerOneExport';
 const base = ['2026-01-01 12:00:00', 'synthetic-request', 'synthetic-model', 'Synthetic key', 'synthetic-key', '200', '100', '20', '50', '0', '120', '9.99', '10', '30', '', 'Wallet', '0.000001', ''];
 const quote = (s: string) => `"${s.replaceAll('"', '""')}"`;
 const file = (...rows: string[][]) => [headers, ...rows].map(r => r.map(quote).join(',')).join('\r\n');
 const row = (changes: Record<string, string>) => base.map((v, i) => changes[headers[i]] ?? v);
 describe('offline Router One export observations', () => {
+  it('records the prospective 2.5x model policy without promoting any export into a bill', () => {
+    expect(ROUTER_ONE_PROSPECTIVE_MODEL_MARKUP).toEqual({ numerator: 5, denominator: 2 });
+    expect(Object.isFrozen(ROUTER_ONE_PROSPECTIVE_MODEL_MARKUP)).toBe(true);
+    for (const input of [file(base), file(base, base), file(row({ 'Wallet charged (USD)': '' })),
+      file(row({ 'Wallet charged (USD)': 'NaN' })), file(base, row({ Model: 'conflict' })), 'bad schema', '"unterminated']) {
+      const result = validate(input);
+      expect(result).toMatchObject({ kind: 'unverified-export', billingAuthorized: false,
+        prospectiveModelMarkup: { numerator: 5, denominator: 2 } });
+      expect(result).not.toHaveProperty('userChargeUsd');
+    }
+    // The reported expense remains unmarked: policy metadata is not a customer charge.
+    expect(validate(file(base)).observations[0].wallet).toEqual({ kind: 'reported', microUsd: '1' });
+  });
   it('preserves exact micro USD without using list price or cache reconstruction', () => {
     const r = validate(file(base));
     expect(r).toMatchObject({ kind: 'unverified-export', billingAuthorized: false, errors: [] });

@@ -1,6 +1,6 @@
 # Router One settlement reconciliation — disabled design
 
-Status: offline observation validator only; no importer, scheduled settlement, receipt acceptance endpoint, wallet write, or production activation is implemented. The billing guard rejects inferred Router One prices. It is not evidence that inference has become automatically billable. Deploying the guard alone would absorb unknown model expense; it must not be presented as completed 10x billing or used to enable free production traffic.
+Status: offline observation validator only; no importer, scheduled settlement, receipt acceptance endpoint, wallet write, or production activation is implemented. The billing guard rejects inferred Router One prices. It is not evidence that inference has become automatically billable. Deploying the guard alone would absorb unknown model expense; it must not be presented as completed 2.5x billing or used to enable free production traffic.
 
 ## Verified contract and missing prerequisite
 
@@ -37,14 +37,14 @@ Concurrent imports must acquire the same durable identity transactionally, with 
 For a newly authorized, unsettled prospective build only:
 
 1. Validate all Router One receipts and select only user-billable work under existing failure/absorption policy.
-2. Compute Router One amount as sum of verified actual USD wallet expenses multiplied by exactly 10, once. Use exact decimal/minor-unit arithmetic with a documented precision and one final rounding policy.
+2. Compute Router One amount as sum of verified actual USD wallet expenses multiplied by exactly 2.5 (5/2), once. Use exact decimal/minor-unit arithmetic with a documented precision and one final rounding policy.
 3. Compute sandbox and ordinary providers through their existing policy. Keep Surplus's own receipt policy unchanged. Do not send Router One's marked-up subtotal through legacy 4x or the unattributed-token fallback.
 4. Apply the configured build discount LAST to the combined bill, preserving the existing real-cost floor and absorption rules. Store all subtotals and the policy snapshot for audit; absent expense is not a measured zero floor.
 5. Commit the single wallet decision through the existing idempotent build settlement mechanism. Unsettled/conflicting portions remain explicitly unresolved according to the approved fail-closed policy. A later import must not retroactively debit a build already marked absorbed or settled.
 
 ## Activation gates and regression matrix
 
-Keep the import path absent/disabled until trusted records and the supported adapter exist. Required tests before activation: exact account/key/request/model binding; cache included-in-input semantics; explicit zero versus pending/null; provider-settled estimated charges with zero tokens; 499 and abort-before-headers; independent retries; duplicate and conflicting imports in either order; simultaneous transactions; failed/absorbed work; plan charges; mixed providers and sandbox; exactly-once 10x; discount-last and floor; restart after uncertain commit; correction evidence without historical wallet mutation. Use synthetic fixtures for public code and restricted redacted provider evidence for adapter acceptance.
+Keep the import path absent/disabled until trusted records and the supported adapter exist. Required tests before activation: exact account/key/request/model binding; cache included-in-input semantics; explicit zero versus pending/null; provider-settled estimated charges with zero tokens; 499 and abort-before-headers; independent retries; duplicate and conflicting imports in either order; simultaneous transactions; failed/absorbed work; plan charges; mixed providers and sandbox; exactly-once 2.5x; discount-last and floor; restart after uncertain commit; correction evidence without historical wallet mutation. Use synthetic fixtures for public code and restricted redacted provider evidence for adapter acceptance.
 
 Required outside actions: supplier-confirmed settlement contract/export fixture and identity binding; administrator-approved import trust/storage workflow; permission for any future rollout. Current tests of fail-closed handling cannot certify this unimplemented positive settlement workflow.
 
@@ -84,3 +84,48 @@ durable request-ID-to-build/physical-attempt binding. Pending, plan, cancelled49
 retry and correction examples need authentic acceptance evidence. No automatic
 lookup endpoint has been established. No historical charge, accepted-receipt
 promotion, production route or import activation is authorized by parsing a file.
+
+## Owner multiplier revision — 2026-11-01
+
+The owner replaced the earlier Router One model-expense target of 10x with **2.5x**.
+This supersedes the older Router One target only. Surplus retains its existing 10x
+receipt policy; other providers, hosting prices and historical wallets are unchanged.
+There is no active Router One positive settlement path to retune today. The offline
+validator exposes the immutable prospective ratio `{numerator:5, denominator:2}`
+for review, while every output remains `billingAuthorized:false`. It neither
+multiplies the exported wallet observation nor emits a customer charge. This is
+policy metadata, not an activated tariff or evidence of trusted settlement.
+
+For a future authorized successful billable build, let R be the sum of verified,
+user-billable Router One model expenses, and B be the existing bill for everything
+else after removing Router One from both the attributed ledger and token remainder.
+The intended pre-discount amount is **L = (5/2)R + B**. R never passes through the
+legacy 4x/3x curve or unified margin again. B continues to include Surplus under its
+own policy and the remaining providers/sandbox under their existing billing mode.
+Failed, barren, absorbed and already-settled work retain their existing exclusions.
+
+On the ordinary non-Opus real-cost path with unified margin disabled and the default
+settings, B uses `tieredMarkupUsd(O + S)` for billable ordinary-provider expense O
+and included measured sandbox expense S: first USD1 at 4x, excess at 3x. With unified
+margin enabled, that existing path uses its configured build margin instead. Legacy
+and Opus modes retain their existing formulas. S is included only under the existing
+sandbox switch plus explicit positive verified hourly rate, using measured/capped
+build time. No hosting or sandbox rate is changed by this owner decision.
+
+The configured discount is applied LAST using existing `applyBuildDiscount`, once,
+with L as billedUsd and the existing real-cost-plus-sandbox floor F augmented by
+verified Router One expense. The setting is normalized to a whole percent d in
+[0,50]. Zero bills remain zero. When d=0 or F>=L, L is unchanged (the discount never
+raises an already-absorbed bill). Otherwise the candidate is max(L*(1-d/100),F);
+if that saves less than one whole percent, the existing helper also leaves L
+unchanged. Otherwise the candidate is paid. Unknown expense never becomes a
+measured-zero floor. Existing conversion/final rounding still happens downstream.
+
+Synthetic example under ordinary default real-cost billing: R=$0.04, O=$0,
+S=$0.006 gives L=$0.10+$0.024=$0.124. With d=10 and F=$0.046, payment would be
+$0.1116 before existing final currency rounding. This is a policy illustration,
+not a live quote or a charge authorized from an unverified export.
+
+Until the receipt/provenance/account/request-binding prerequisites above are met,
+Router One's current model portion stays explicitly unsettled/absorbed. Changing
+the prospective ratio does not unlock automatic billing or historical debits.

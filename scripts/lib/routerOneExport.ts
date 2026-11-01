@@ -5,10 +5,16 @@ export const ROUTER_ONE_EXPORT_HEADERS = [
   'Cost (USD)', 'TTFT (ms)', 'Latency (ms)', 'Error', 'Charge source', 'Wallet charged (USD)', 'Plan quota units',
 ] as const;
 
+/** Owner decision 2026-11-01: prospective model expense only, never settlement authority.
+ * Keep the ratio exact. Surplus and ordinary-provider/sandbox policy are separate.
+ */
+export const ROUTER_ONE_PROSPECTIVE_MODEL_MARKUP = Object.freeze({ numerator: 5, denominator: 2 } as const);
+
 type Amount = { kind: 'unknown' } | { kind: 'reported'; microUsd: string } | { kind: 'invalid' };
 export interface UnverifiedRouterOneExport {
   kind: 'unverified-export';
   billingAuthorized: false;
+  prospectiveModelMarkup: typeof ROUTER_ONE_PROSPECTIVE_MODEL_MARKUP;
   errors: string[];
   observations: Array<{
     record: number;
@@ -60,7 +66,7 @@ function csv(text: string): string[][] {
 }
 
 export function validateRouterOneExport(text: string): UnverifiedRouterOneExport {
-  const result: UnverifiedRouterOneExport = { kind: 'unverified-export', billingAuthorized: false, errors: [], observations: [] };
+  const result: UnverifiedRouterOneExport = { kind: 'unverified-export', billingAuthorized: false, prospectiveModelMarkup: ROUTER_ONE_PROSPECTIVE_MODEL_MARKUP, errors: [], observations: [] };
   if (text.length > 2_000_000) { result.errors.push('file-too-large'); return result; }
   let rows: string[][];
   try { rows = csv(text.replace(/^\uFEFF/, '')); }

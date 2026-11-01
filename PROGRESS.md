@@ -99975,3 +99975,7 @@ Added a pure, disconnected CSV validator with synthetic tests and explicit unver
 ### 2026-11-01 — Offline validator placement correction
 
 The disconnected parser belongs in scripts/lib, not application src. Moved it and its synthetic tests without adding a production caller or modifying deadCodeGuard. The superseded full-coverage run exposed that guard failure and was terminated at 23 minutes (exit143), not reported green. Final-tree verification follows on the corrected tooling placement.
+
+### 2026-11-01 — Router One prospective model multiplier revised to 2.5x
+
+Owner replaced the earlier Router One 10x target with actual model expense times 2.5. There is still no accepted Router One settlement transport or positive live charge path. The offline validator now exposes the immutable prospective ratio 5/2 while preserving unverified-export, billingAuthorized:false and the original unmarked wallet observation. Surplus stays 10x; ordinary providers, sandbox/hosting rates, routing and historical wallets are unchanged. Reconciliation documentation states the separate-subtotal, discount-last and existing floor formula, with a synthetic example. Focused parser/fail-closed/dead-code tests: 52 passed. Aggregate final-tree verification follows; this does not claim activated 2.5x billing.

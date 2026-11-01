@@ -100018,3 +100018,28 @@ explicit disable makes the new Weak fallback reachable by all Weak users. Unknow
 supplier expense is absorbed and is not measurable by the dollar cost ceiling;
 existing admission, stop/deadline, maintenance/canary, bench and retry protections
 remain, but they do not establish a verified supplier expense cap.
+
+## 2026-11-01 15:04 UTC — catalogue-based Router One billing replaces receipt-only target
+
+New explicit owner instruction rejects permanent platform-absorbed Router One
+builds and authorizes official catalogue rate × returned actual usage, then 2.5×,
+truthfully labeled catalogue-calculated rather than settled supplier expense.
+Broad rollout is now BLOCKED until positive catalogue billing and missing-data
+preflight/dispatch handling are tested; no merge/deploy of the silent-zero path.
+
+Completed independent foundation: scripts/lib/routerOneCatalogueMath.ts calculates
+exact decimal rates with integer arithmetic, inclusive cached reads, whole-request
+long-context tiers, immutable normalized snapshot and missing-data states. It is
+offline and billingAuthorized:false, not production settlement. Official docs do
+not define the authenticated catalogue's price field names/units; the old discovery
+engine's numeric-unit heuristic is unsuitable for billing. Need an authentic
+redacted GET /v1/models pricing response or complete provider schema, plus raw
+usage semantics for any non-documented cache fields. No available provider identity
+here, no paid test, no guessed adapter fields. Existing fee/routing milestone is
+preserved in bb76912715b6aeb8fe2d0b1871052da15d576cde, unpublished at this checkpoint.
+
+Validation checkpoint: catalogue foundation plus offline export and dead-code guard
+passed 3 files / 50 tests (catalogue-foundation.log). No verification process remains
+active. Production integration is NOT complete and no branch publication, merge or
+deployment has occurred. Latest owner instruction makes positive catalogue billing
+and safe missing-data admission a release prerequisite; bb769127 must not ship alone.

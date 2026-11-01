@@ -141,3 +141,53 @@ existing multi-provider bench, dead-rung, stop and usage-attribution machinery.
 Planning, complex and heal Weak lanes preserve the prefix. Explicit retry or
 escalation may advance past failed tail rungs. A GLM-free override uses the existing default Weak GLM model rather than bypassing
 the confirmed prefix. Configured GLM models and the tail remain subject to key availability and the existing no-Sonnet/Opus guard.
+
+## Superseding owner decision — 2026-11-01 15:04 UTC
+
+The owner rejected permanent unknown-cost absorption as a general Router One
+product policy and explicitly authorized **posted catalogue rate × returned usage**
+as the billing basis. This is catalogue-calculated cost, not a settled wallet debit.
+A verified supplier settlement API is no longer a prerequisite for that separately
+labeled billing basis. It remains necessary for later actual-debit reconciliation;
+no historical debit/refund is authorized.
+
+**Release hold:** the broad Router One routing change above must not be deployed
+with the old silent absorption path. Production release requires a verified price
+adapter, durable immutable per-call/model/build snapshot, complete protocol usage,
+2.5× exactly once, and bounded missing-data behavior. Unpriceable models must be
+skipped BEFORE inference. Missing usage AFTER a successful call must not cause
+successful actions to replay or guessed tokens to be billed; stop further Router
+One dispatch for the affected build and preserve explicit pending evidence.
+
+Research found a concrete adapter prerequisite: the official GET /v1/models docs
+and OpenAPI say that entries include posted price fields but do not define their
+names or units. The existing discovery parser guesses per-token versus per-million
+from the numeric magnitude and is NOT acceptable billing evidence. An authentic
+redacted catalogue response with price fields, currency/units, cache rates and any
+context tiers, or a complete supplier schema, is needed before binding the adapter.
+No authenticated provider credential is configured in the current task environment.
+Do not invent provider fields to fill this gap.
+
+The official prompt-caching guide establishes Chat Completions prompt_tokens as
+inclusive of prompt_tokens_details.cached_tokens. It does not establish a separate
+Chat cache-write counter. The initial supported subset must therefore require
+write price = ordinary input price; other tariffs are unpriceable on this protocol
+until their write usage semantics are established. Missing discounted-read counters
+are pending, not assumed zero. Whole-request context tiers use strictly greater
+input thresholds and include cached input once. Reasoning is already output usage.
+
+`scripts/lib/routerOneCatalogueMath.ts` is an offline arithmetic foundation using
+explicit INTERNAL normalized fields, not an assertion about Router One API fields.
+It rejects unknown units, unsupported Chat write tariffs, stale/model-mismatched
+snapshots and incomplete/conflicting counters. Decimal prices and token products
+use integer arithmetic; the result distinguishes catalogue cost from wallet debit
+and retains an immutable snapshot. All outputs remain billingAuthorized:false.
+This is not the production adapter, persistence, pending-dispatch circuit or wallet
+integration, and its tests do not establish release readiness. The existing CSV
+validator remains unverified and is not promoted into settlement authority.
+
+References checked 2026-11-01: https://router.one/docs/models/listModels,
+https://router.one/docs/openapi.json, https://router.one/llm-prompt-caching,
+https://router.one/pricing-methodology. The public pricing page and individual
+model pages can differ in plan-coverage statements; plan quota pricing must never
+be substituted for a posted wallet-token tariff or treated as actual wallet debit.

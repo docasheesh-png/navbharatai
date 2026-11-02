@@ -237,6 +237,7 @@ import { analyzeRequirementCoverage, requirementCoverageSummary, currentRequestF
 import { binaryTextWriteRefusal } from './binaryTextWrite';
 import { isKeyboardOnlyGame, touchGameNoteEnabled, touchPlayableNote } from './touchPlayableGame';
 import { vehicleShapeHalves, vehicleShapeFindings, handWrittenVehicleNote, type VehicleShapeHalves } from './handWrittenVehicleScan';
+import { groundShapeHalves, groundShapeFindings, handWrittenGroundNote, type GroundShapeHalves } from './handWrittenGroundScan';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
@@ -1076,6 +1077,9 @@ export class ToolDispatcher {
    */
   private _vehicleShapeIndex = new Map<string, VehicleShapeHalves>();
   private _vehicleShapeNoted = false;
+  /** Hand-written flat roads / pinned vehicle y / own trains on hilly terrain (handWrittenGroundScan.ts, 2026-11-02). */
+  private _groundShapeIndex = new Map<string, GroundShapeHalves>();
+  private _groundShapeNoted = false;
   /** Recipe-known packages a hand-written import already had its one install attempt for (see below). */
   private _importInstallTried = new Set<string>();
   /** Q-862: imports whose install stood down because the background install held the lock — retried, and how often. */
@@ -4579,6 +4583,15 @@ export class ToolDispatcher {
         for (const p of paths) this._vehicleShapeIndex.set(p, vehicleShapeHalves(p, files[p]));
         const found = vehicleShapeFindings(this._vehicleShapeIndex);
         if (found.length > 0) { vehicle = handWrittenVehicleNote(found); this._vehicleShapeNoted = true; }
+      } catch { /* a note is best-effort */ }
+    }
+    // ⛰️ A hand-written road, rail or driven y that ignores the hills (admin 2026-11-02, build be6aae96) — a
+    // note once per build with the file open; never a build failure.
+    if (!this._groundShapeNoted) {
+      try {
+        for (const p of paths) this._groundShapeIndex.set(p, groundShapeHalves(p, files[p]));
+        const found = groundShapeFindings(this._groundShapeIndex);
+        if (found.length > 0) { vehicle += handWrittenGroundNote(found); this._groundShapeNoted = true; }
       } catch { /* a note is best-effort */ }
     }
     const style = await this.styleWriteNotes(files);

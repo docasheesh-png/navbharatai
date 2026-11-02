@@ -117,3 +117,10 @@ and a pinned offline CC0 Eagle conversion. The train-station fixture uses a proc
 and rails, not an externally sourced station. All six local interactive scenarios pass build/reload,
 movement and animation where applicable. These fixtures do not establish physical mobile or live game
 publication. Exact license, conversion and network limitations are in [the admission report](l3-reviewed-assets.md).
+
+### Demand-driven admission
+
+The catalogue is optional metadata, not a preloaded library. The new [on-demand path](l3-on-demand.md)
+checks cache first, then exact curated models, then bounded live Poly Haven discovery for six supported
+static object types. Models download during a requested build and persist with the game; gameplay uses
+local assets. No additional third-party models were downloaded for this continuation. L3 remains OFF.

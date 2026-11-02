@@ -100275,3 +100275,25 @@ those service obligations separately from the CC0 asset licence when wiring the 
 - Source checkpoint is verified locally, not by remote PR CI. PR still paused after approval denial;
   main/billing unchanged, L3 OFF, no merge/deployment/activation. See l3-reviewed-assets.md for exact
   real-vs-procedural fixture limits, license evidence, formats, cache bytes and remaining acceptance work.
+
+### 2026-11-02 — demand-driven source d580c7fa3 (full coverage pending)
+
+- No startup, bulk or gameplay provider downloads. The existing new-game build hook checks verified
+  cache, exact curated candidates, then bounded official Poly Haven discovery for requested table,
+  chair, bench, rock, tree or plant. Empty curated catalogue is supported; no raw prompt leaves the app.
+- Added first-admission provider-policy checks, source/final SHA-256 provenance, 1k self-contained glTF
+  packaging, visible service credit and six bounded private discovery cache pointers. Model bytes stay
+  private/content-addressed. Actual production guarded network transport is still blocked by EAI_AGAIN.
+- Added bounded baseline/progressive JPEG inspection plus actual decode of every texture, Hindi/Spanish
+  canonical vocabulary, conservative negation and static Three.js LOD (rigs/morphs/instances excluded).
+  Real train switches 1,742->1,388 triangles; ship 858->472. No physical-device performance claim.
+- 90 targeted tests pass. Synthetic demand pipeline passes actual browser admission, durable project
+  acknowledgement, fresh-process cache hit, Vite build/reload and visible credit with no vendor requests
+  during play. Real private Storage emulator verifies discovery pointers/model bytes and zero provider
+  calls on fresh-process reuse. No additional third-party models downloaded in this continuation.
+- Corrected an invalid synthetic PNG and the history-command fixture's missing new helper dependencies;
+  no checks weakened. Incomplete coverage runs were stopped and restarted against corrected source.
+- Non-coverage gates pass at a1f704378; required checks are rerunning for d580c7fa3. One unchanged Phase 2
+  race drill initially returned an unconfirmed-store result; separate unchanged rerun passes 21/21.
+  Initial failure retained, no queue/billing code changed. See docs/game-engine/l3-on-demand.md.
+- Branch checkpoints only. L3 OFF; previously denied PR creation paused, no merge/deploy/activation.

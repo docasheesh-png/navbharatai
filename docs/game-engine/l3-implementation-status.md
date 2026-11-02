@@ -1,3 +1,9 @@
+# Demand-driven continuation — 2026-11-02
+
+See [the on-demand implementation and verification report](l3-on-demand.md) for the latest provider
+discovery, JPEG decoder gates, multilingual matching and static LOD support. L3 remains OFF; guarded
+network transport remains unverified. Earlier checkpoint reports below retain their historical limits.
+
 # Current continuation — 2026-11-02
 
 Seven real reviewed models, bounded animation selection and reviewed GLB resource embedding are implemented.

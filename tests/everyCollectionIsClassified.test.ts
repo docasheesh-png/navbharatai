@@ -400,10 +400,12 @@ const SCOPED_DOCUMENT_RECEIVERS: Record<string, Record<string, { why: string; as
     ref: { why: 'controlRef returns the fixed free_chat_chain/state document; its actions child has an explicit 180-day subcollection retention policy',
       assignment: /const ref = controlRef\(db\)/ },
   },
-  'src/server/lib/buildReportNumbering.ts': {
+  // Moved from buildReportNumbering.ts (2026-11-02): the rank scan there was retired; the same read-only
+  // walk of each workspace's history now lives in the registry's one-time backfill inventory.
+  'src/server/lib/buildReportRegistry.ts': {
     ref: {
       why: 'parent is a workspace_diagnostics_v3 query document snapshot; its history is the existing workspace subcollection, read-only here',
-      assignment: /const history = parent\.ref\.collection\('history'\)/,
+      assignment: /parent\.ref\.collection\('history'\)\.orderBy\(FieldPath\.documentId\(\)\)/,
     },
   },
   'src/server/lib/failedReportAutopsy.ts': {

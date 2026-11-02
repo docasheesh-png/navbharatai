@@ -5066,7 +5066,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   )}
                 />
                 <p className="text-[10px] text-muted">
-                  Newest build first. Chronological ranks (#1 oldest → newest) across retained latest-per-workspace reports, before filters — separate from the retained-failure chronological ranks on /failedbr; existing permanent IDs are shown separately. Existing ranks may use a 10-minute snapshot; new builds refresh after a short cooldown. Temporary failures retry twice. Retention can change these ranks. Missing ranks show — n/a. Showing {allBuilds.length}
+                  Newest build first. Each build shows its permanent build report number — the same number /failedbr shows for it, given once when the build started and never changed, before filters. Temporary failures retry twice. Missing numbers show — n/a. Showing {allBuilds.length}
                   {allBuildsFetched && allBuildsFetched.fetched >= allBuildsFetched.limit
                     /* Honest about the fetch ceiling: at the limit there may be OLDER builds this
                        list has not looked at, so "0 failed" must not read as "none exist". */

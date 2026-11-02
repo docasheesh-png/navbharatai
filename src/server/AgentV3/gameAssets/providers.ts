@@ -14,6 +14,8 @@ export interface ReviewedAsset extends AssetCandidate {
   review: { reviewer: string; evidenceRevision: string; freeDownload: true };
   /** A live service obligation, independent of the asset's copyright licence. */
   serviceCredit?: string;
+  /** Licensed derivative shipped privately with the server image; read only on demand. */
+  packaged?: true;
   format?: 'glb' | 'gltf' | 'glb-resources';
   /** Reviewed source AND derived output hashes are pinned; no automatic unreviewed rewrite. */
   optimization?: 'compact-v1' | 'animation-selection-v1';
@@ -32,6 +34,7 @@ export function validateCatalogue(assets: readonly ReviewedAsset[]): void {
     if (!GAME_ASSET_PROVIDERS.includes(c.provider) || !c.review?.reviewer || !c.review.evidenceRevision || c.review.freeDownload !== true
       || !c.subjects.length || c.subjects.length > 16 || !c.subjects.every(s => /^[a-z][a-z -]{0,63}$/.test(s))
       || !candidateMatches(c, { subject: c.subjects[0] }) || c.downloadOrigins.length > 4) throw new Error('Unreviewed catalogue entry');
+    if (c.packaged && (c.id !== 'eagle-flying' || c.provider !== 'quaternius' || c.sha256 !== '4e8915ef238773ca0b11576fd71dddb49449ce0aa6b575f0fce9e65e79e03f75')) throw new Error('Unreviewed packaged model');
     assetDownloadUrl(c.downloadUrl, new Set(c.downloadOrigins));
     for (const origin of c.downloadOrigins) if (new URL(origin).origin !== origin) throw new Error('Invalid reviewed origin');
     if (c.optimization !== undefined && (!['compact-v1', 'animation-selection-v1'].includes(c.optimization) || !/^[a-f0-9]{64}$/.test(c.sourceSha256 ?? ''))) throw new Error('Unreviewed optimization source/version');

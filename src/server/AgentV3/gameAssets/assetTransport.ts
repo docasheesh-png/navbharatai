@@ -1,3 +1,5 @@
+import { open } from 'node:fs/promises';
+import { join } from 'node:path';
 import { isDiscoverySubject } from './discoveryPolicy';
 import { assetProviderPermit, recordAssetProviderResponse } from './assetProviderBudget';
 import { createHash } from 'node:crypto';
@@ -16,6 +18,24 @@ const pending = new BoundedCache<string, Promise<Uint8Array>>({ maxEntries: 4 })
 /** Public immutable catalogue downloads only; never coalesce private/authenticated requests. */
 export async function downloadReviewedAsset(candidate: ReviewedAsset, signal: AbortSignal): Promise<Uint8Array> {
   signal.throwIfAborted();
+  if (candidate.packaged) {
+    if (candidate.provider !== 'quaternius' || candidate.id !== 'eagle-flying' || candidate.sha256 !== '4e8915ef238773ca0b11576fd71dddb49449ce0aa6b575f0fce9e65e79e03f75') throw Error('Unreviewed packaged model');
+    const file = await open(join(process.cwd(), 'assets/game-models', candidate.sha256 + '.glb'), 'r');
+    try {
+      const size = (await file.stat()).size;
+      if (size !== 2064220 || size > ASSET_LIMITS.bytes) throw Error('Packaged model size mismatch');
+      const buffer = Buffer.alloc(size + 1); let total = 0;
+      while (total < buffer.length) {
+        const { bytesRead } = await file.read(buffer, total, buffer.length - total, total);
+        if (!bytesRead) break; total += bytesRead;
+      }
+      if (total !== size) throw Error('Packaged model size changed');
+      const bytes = buffer.subarray(0, total);
+      signal.throwIfAborted();
+      if (createHash('sha256').update(bytes).digest('hex') !== candidate.sha256) throw Error('Packaged model hash mismatch');
+      return bytes;
+    } finally { await file.close(); }
+  }
   const key = `${candidate.provider}:${candidate.sha256}`;
   let transfer = pending.get(key);
   if (!transfer) {

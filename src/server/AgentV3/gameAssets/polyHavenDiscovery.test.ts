@@ -95,3 +95,9 @@ it('rejects a lamp component even with matching lighting category and lamp token
   expect(await f.deps().discover({subject:'lamp'},new AbortController().signal)).toBeNull();
   expect(f.download).not.toHaveBeenCalled();
 });
+it('accepts metadata-declared shared 8k geometry while refusing 8k texture URLs', async () => {
+  const f=fixture();f.files.gltf['1k'].gltf.include['model.bin'].url=f.files.gltf['1k'].gltf.include['model.bin'].url.replace('/gltf/1k/','/gltf/8k/');
+  expect((await f.deps().discover({subject:'table'},new AbortController().signal))?.candidate.subjects).toEqual(['table']);
+  f.files.gltf['1k'].gltf.include['model.bin'].url=f.files.gltf['1k'].gltf.include['model.bin'].url.replace('/gltf/8k/','/jpg/8k/').replace('.bin','.jpg');
+  f.download.mockClear();await expect(f.deps().discover({subject:'table'},new AbortController().signal)).rejects.toThrow('Unapproved provider file');expect(f.download).not.toHaveBeenCalled();
+});

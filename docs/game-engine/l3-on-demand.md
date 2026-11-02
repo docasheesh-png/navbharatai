@@ -197,3 +197,29 @@ It has read-only repository permissions, no secrets or deployment credentials, a
 logs/screenshots/results (not a model library). This is verification on ordinary hosted-runner egress,
 not a proxy workaround for this executor. The worker's known DNS limitation is not retried locally.
 New-source full local coverage and hosted acceptance results are pending until recorded below.
+
+
+### Hosted findings and corrected admission
+
+Hosted run 41403994481 proves unchanged guarded transport, hash verification and browser rendering for
+six real models (Knight, sedan, building, Fox, train, ship), including required human/Fox animation.
+The managed executor's EAI_AGAIN is therefore environment-specific; hosted network success is not proof
+of the deployed Cloud Run network. Two admission failures were retained and fixed rather than waived:
+
+- The official 1k Poly Haven Side Table package declares its shared BIN under `gltf/8k`, with only
+  117,784 geometry bytes. Admission now allows that exact geometry-only path class, while keeping
+  8k texture URLs rejected and retaining source hashes, 5 MiB aggregate and decoded texture budgets.
+- Eagle's derived GLB was incorrectly treated as a public raw URL in this private repository. It now
+  loads on demand from the reviewed CC0 file shipped privately with the server image. Exact size/hash
+  and catalogue identity are checked; arbitrary packaged paths/hashes are rejected. No repository
+  credentials are sent to asset hosts. Six other curated models still exercise actual secure transfer.
+  The original public FBX is provenance, not a runtime converter/download fallback. The existing
+  engine `downloadedBytes` field reports admitted bytes on a cache miss, including packaged bytes;
+  it is not a network billing meter. Test evidence separately identifies packaged versus live transport.
+
+The first hosted browser setup failed because ubuntu-latest selected 26.04, unsupported by pinned
+Playwright 1.57.0. Only this new acceptance job is pinned to Ubuntu 24.04. Shell pipefail is explicit;
+failed assertions fail the job, and independent reviewed-model checks continue after table failure.
+Local coverage started before these fixes was stopped (exit 130) and will be rerun for corrected source.
+User now explicitly authorizes merge only after all required local and hosted checks pass. L3 remains
+OFF; no paid game builds, activation or unrequested public game publication is authorized.

@@ -95,6 +95,8 @@ ENV NODE_ENV=production
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+# Reviewed CC0 derivative and license: private server files, loaded only for a requested bird.
+COPY --from=builder /app/assets/game-models ./assets/game-models
 
 ENV PORT=8080
 

@@ -44,7 +44,7 @@ async function main() {
         downloads++;
         // Explicit offline mode uses already-reviewed final bytes. It does not claim live transport proof.
         if (mode === 'offline-reviewed') { assert.ok(admittedPath); const bytes = await readFile(join(resolve(admittedPath), c.sha256 + '.glb')); assert.equal(hash(bytes), c.sha256); return bytes; }
-        return downloadReviewedAsset(c, new AbortController().signal);
+        try { return await downloadReviewedAsset(c, new AbortController().signal); } catch (e) { console.error(c.id, 'admission transfer failed', e); throw e; }
       },
       async parse(bytes: Uint8Array) {
         await write(join(fixture, `.nbai-asset-${c.sha256}.glb`), bytes);
@@ -60,7 +60,7 @@ async function main() {
     const again = await acquireGameAsset(requirement, dependencies, new AbortController().signal);
     assert.equal(again.kind, 'model'); if (again.kind === 'model') { assert.equal(again.cacheHit, true); assert.equal(again.downloadedBytes, 0); }
     assert.ok(downloads <= 1);
-    outcomes.push({ id: c.id, outcome: first, downloads });
+    outcomes.push({ id: c.id, outcome: first, downloads, transport: c.packaged ? 'packaged licensed derivative (no network)' : mode === 'offline-reviewed' ? 'offline-reviewed' : 'secure live download' });
   }
   execFileSync(process.execPath, ['--import', resolve('node_modules/tsx/dist/loader.mjs'), resolve('scripts/checks/gameAssetReal.check.ts'), dir, resolve(playwrightPath), resolve(chromiumPath), 'cache-probe'], { encoding: 'utf8', stdio: 'inherit' });
   const assets = REVIEWED_GAME_ASSETS.map(c => ({ sha256: c.sha256, height: c.height, yaw: c.yaw,

@@ -265,7 +265,8 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
     "id": "eagle-flying",
     "revision": "dea756baf3b3a4889d8c245e456a4791f961578a",
     "sourceUrl": "https://github.com/beep2bleep/FreeAssetsByKenneyNLandQuaternius/blob/dea756baf3b3a4889d8c245e456a4791f961578a/FreeModels%20by%20Quaternius%5BPatreon%5D/Characters%20and%20Animals/Animal%20Pack%20Vol.2%20-%20Jul%202017/FBX/Eagle.fbx",
-    "downloadUrl": "https://raw.githubusercontent.com/docasheesh-png/navbharatai/b320b6f4e3362e175f1fc6fa33dc1ef6c6a3d47f/assets/game-models/4e8915ef238773ca0b11576fd71dddb49449ce0aa6b575f0fce9e65e79e03f75.glb",
+    "downloadUrl": "https://raw.githubusercontent.com/beep2bleep/FreeAssetsByKenneyNLandQuaternius/dea756baf3b3a4889d8c245e456a4791f961578a/FreeModels%20by%20Quaternius%5BPatreon%5D/Characters%20and%20Animals/Animal%20Pack%20Vol.2%20-%20Jul%202017/FBX/Eagle.fbx",
+    "packaged": true,
     "sha256": "4e8915ef238773ca0b11576fd71dddb49449ce0aa6b575f0fce9e65e79e03f75",
     "subjects": [
       "eagle",

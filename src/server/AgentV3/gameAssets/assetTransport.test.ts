@@ -28,3 +28,18 @@ it('honors provider backoff and refuses other metadata origins before any fetch'
     expect(fetch).toHaveBeenCalledOnce();
   } finally { vi.unstubAllGlobals(); }
 });
+it('loads only the reviewed packaged derivative without network or private repository credentials', async () => {
+  const { downloadReviewedAsset } = await import('./assetTransport');
+  const { REVIEWED_GAME_ASSETS } = await import('./providers');
+  const { createHash } = await import('node:crypto');
+  const { readFile } = await import('node:fs/promises');
+  const c=REVIEWED_GAME_ASSETS.find(c=>c.id==='eagle-flying')!;
+  const fetch=vi.fn(async()=>{throw Error('packaged asset must not fetch')});vi.stubGlobal('fetch',fetch);
+  try {
+    const bytes=await downloadReviewedAsset(c,new AbortController().signal);
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(c.sha256);expect(bytes.length).toBe(2064220);
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(downloadReviewedAsset({...c,sha256:'0'.repeat(64)},new AbortController().signal)).rejects.toThrow('Unreviewed packaged');
+    expect(await readFile('Dockerfile','utf8')).toContain('COPY --from=builder /app/assets/game-models ./assets/game-models');
+  } finally {vi.unstubAllGlobals()}
+});

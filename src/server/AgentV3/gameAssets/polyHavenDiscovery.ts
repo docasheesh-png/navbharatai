@@ -20,7 +20,7 @@ function fileUrl(raw: unknown, id: string): string {
   if (typeof raw !== 'string') throw Error('Missing official file URL');
   const u = new URL(raw);
   if (u.origin !== 'https://dl.polyhaven.org' || u.search || u.hash || u.username || u.password
-    || !new RegExp('^/file/ph-assets/Models/(gltf|jpg|png)/(1k|2k|4k)/'+id+'/[A-Za-z0-9_.-]+\\.(gltf|bin|jpg|png)$').test(u.pathname)) throw Error('Unapproved provider file');
+    || !new RegExp('^/file/ph-assets/Models/(?:(gltf|jpg|png)/(1k|2k|4k)/'+id+'/[A-Za-z0-9_.-]+\\.(gltf|bin|jpg|png)|gltf/8k/'+id+'/[A-Za-z0-9_.-]+\\.bin)$').test(u.pathname)) throw Error('Unapproved provider file');
   return raw;
 }
 /** Revalidate server-owned discovery cache records; never use user manifests as cache authority. */

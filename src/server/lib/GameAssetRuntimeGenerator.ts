@@ -1,5 +1,5 @@
-import { gameAssetLodSource } from './GameAssetLodGenerator';
-import { gameAssetTextureVerifier } from './GameAssetTextureVerifier';
+import { gameAssetLodSource } from './GameAssetLodGenerator.ts';
+import { gameAssetTextureVerifier } from './GameAssetTextureVerifier.ts';
 /** Optional L3 runtime. Kept separate from the L1/L2 kit until build-time acquisition is enabled. */
 export function generateGameAssetRuntime(): string {
   return `import * as THREE from 'three';

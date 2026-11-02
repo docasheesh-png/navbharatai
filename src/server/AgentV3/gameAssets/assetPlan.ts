@@ -36,7 +36,7 @@ function mentioned(text: string, phrase: string): boolean {
 export function gameAssetRequirements(prompt: string, catalogue: readonly ReviewedAsset[]): AssetRequirement[] {
   const clauses = prompt.slice(0, 16000).normalize('NFKC').toLowerCase()
     .split(/[,;.!?।]|\b(?:and|but)\b|(?:^|\s)(?:और|लेकिन|y|pero)(?=\s|$)/u).slice(0, 128)
-    .map(normalized).filter(c => c && !['no', 'not', 'without', 'exclude', 'excluding', 'avoid', 'नहीं', 'बिना', 'मत', 'sin', 'excepto'].some(n => mentioned(c, n)));
+    .map(normalized).filter(c => c && !['no', 'not', 'don t', 'dont', 'doesn t', 'isn t', 'can t', 'never', 'without', 'exclude', 'excluding', 'avoid', 'omit', 'remove', 'except', 'नहीं', 'न', 'बिना', 'मत', 'sin', 'excepto'].some(n => mentioned(c, n)));
   const subjects = [...new Set([...Object.keys(ALIASES), ...catalogue.slice(0, 64).flatMap(c => c.subjects.slice(0, 16))])];
   const matching = (subject: string, clause: string) => {
     let scoped = ` ${clause} `;

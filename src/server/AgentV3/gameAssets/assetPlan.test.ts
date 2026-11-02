@@ -39,3 +39,7 @@ it('keeps separate generic bird requirements and bounds work/output', () => {
 it('falls back for unsupported specialized objects and non-object senses rather than broadening them', () => {
   for (const prompt of ['table tennis', 'a coffee table', 'office chair', 'rock music', 'decision tree', 'formula 1 car']) expect(gameAssetRequirements(prompt, [])).toEqual([]);
 });
+
+it('does not download objects negated by common contractions or Hindi न', () => {
+  for (const prompt of ["don't add a table", 'don’t add a chair', 'never add a tree', 'मेज न बनाओ', 'कार नहीं चाहिए']) expect(gameAssetRequirements(prompt, [])).toEqual([]);
+});

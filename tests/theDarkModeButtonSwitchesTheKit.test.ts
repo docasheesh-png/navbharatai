@@ -33,8 +33,8 @@ const blockOf = (prelude: string) => blocks.find((b) => b.prelude === prelude);
 
 describe('1 · the kit styles the switch, from one palette', () => {
   const light = decls(blockOf(':root')!.body);
-  const media = blocks.find((b) => /prefers-color-scheme:\s*dark/.test(b.prelude))!;
-  const dark = decls(parseCssBlocks(media.body).find((r) => r.prelude === ':root')!.body);
+  // Since 2026-11-02 the dark palette lives ONLY behind the switch: the kit no longer follows the device.
+  const dark = decls(blockOf(KIT_DARK_SWITCH)!.body);
 
   it('both switch blocks exist, on <html> and <body>, for the class and for data-theme', () => {
     for (const sel of [':root.dark', ':root[data-theme="dark"]', 'body.dark', 'body[data-theme="dark"]']) expect(KIT_DARK_SWITCH).toContain(sel);
@@ -55,16 +55,22 @@ describe('1 · the kit styles the switch, from one palette', () => {
   it('a token computed from a switched one (--ring) is re-declared, so <body> switches it too', () => {
     expect(decls(blockOf(KIT_DARK_SWITCH)!.body)['--ring']).toBe(light['--ring']);
   });
-  it('the system-preference block itself is unchanged', () => {
+  it('☀️ the old device-following palette is the dark switch palette, value for value — and the device block is gone', () => {
+    // 2026-11-02 (admin: light unless the user asks for dark). The palette did not change; only WHO turns it on did.
     const was = parseCssBlocks(KIT_BEFORE).find((b) => /prefers-color-scheme:\s*dark/.test(b.prelude))!;
-    expect(media.body).toBe(was.body);
+    const old = decls(parseCssBlocks(was.body).find((r) => r.prelude === ':root')!.body);
+    for (const [k, v] of Object.entries(old)) expect(dark[k], k).toBe(v);
+    expect(blocks.some((b) => /prefers-color-scheme/.test(b.prelude))).toBe(false);
   });
   it('generated theme-switch blocks cannot drift when unrelated components evolve', () => {
     // The historical fixture retains its original component CSS. The game button now pulses without
     // moving; that intentional component change must not turn a palette-generation test into a snapshot.
+    // The fixture predates the game tokens (2026-11-02), so each of ITS generated declarations must match ours.
     const generated = parseCssBlocks(withThemeSwitch(KIT_BEFORE));
+    expect(generated.some((b) => /prefers-color-scheme/.test(b.prelude))).toBe(false);
     for (const selector of [KIT_DARK_SWITCH, KIT_LIGHT_SWITCH]) {
-      expect(generated.find((b) => b.prelude === selector)).toEqual(blockOf(selector));
+      const ours = decls(blockOf(selector)!.body);
+      for (const [k, v] of Object.entries(decls(generated.find((b) => b.prelude === selector)!.body))) expect(ours[k], `${selector} ${k}`).toBe(v);
     }
   });
   it('the dead-switch detector now sees both hooks as styled in a kit project', () => {
@@ -137,7 +143,9 @@ describe('4 · the preview panel\'s own switch', () => {
 describe('5 · both lanes are told the hooks the kit styles', () => {
   it('the architect', () => {
     const p = read('src/server/AgentV3/systemPrompt.ts');
-    expect(p).toContain('a light/dark SWITCH sets `data-theme="dark"` / `"light"` (or the class');
+    expect(p).toContain('The design kit is LIGHT whatever the');
+    expect(p).toContain('it is dark only when the app sets `data-theme="dark"` (or the class `dark`) on <html>');
+    expect(p).not.toContain('The design kit follows the device');
     expect(p).not.toContain('the scaffold already does via prefers-color-scheme + src/theme.tsx');
   });
   it('the fast lane', () => {
@@ -149,7 +157,7 @@ const PW = '/opt/node22/lib/node_modules/playwright/index.js';
 const BROWSERS = '/opt/pw-browsers';
 const haveBrowser = existsSync(PW) && existsSync(BROWSERS);
 
-describe.skipIf(!haveBrowser)('2 · in a real browser, every switch beats the device setting', () => {
+describe.skipIf(!haveBrowser)('2 · in a real browser, the app is light on every device, and every switch works', () => {
   it('dark and light, class and data-theme, <html> and <body>, on a light and on a dark device', () => {
     const dir = makeTempDir('nbai-theme-switch-');
     writeFileSync(join(dir, 'kit.css'), DESIGN_KIT_CSS);
@@ -183,7 +191,9 @@ describe.skipIf(!haveBrowser)('2 · in a real browser, every switch beats the de
     const LIGHT = '#f6f7fb';
     const DARK = '#0d0d12';
     for (const scheme of ['light', 'dark']) {
-      expect(out[`${scheme} none`], `${scheme} device, no switch: follows the device`).toBe(scheme === 'dark' ? DARK : LIGHT);
+      // ☀️ THE ADMIN'S RULE, in a real browser (2026-11-02): a phone set to DARK still gets a LIGHT app until the
+      // app itself chooses dark. This line said "follows the device" — the defect.
+      expect(out[`${scheme} none`], `${scheme} device, no switch: LIGHT`).toBe(LIGHT);
       for (const where of ['html', 'body']) {
         expect(out[`${scheme} ${where}.dark`], `${scheme} device, ${where}.dark`).toBe(DARK);
         expect(out[`${scheme} ${where}.light`], `${scheme} device, ${where}.light`).toBe(LIGHT);

@@ -155,7 +155,9 @@ describe('kitRestorePatch — the kit\'s own rules, put back by construction', (
   it('adds the tokens the restored rules read, light AND dark, and nothing else', () => {
     const patch = kitRestorePatch(files, {} as NodeJS.ProcessEnv)!;
     expect(patch.tokens).toEqual(['--fg', '--muted']);
-    expect(patch.content).toMatch(/prefers-color-scheme: dark[\s\S]*--muted/);
+    // ☀️ The dark value travels ONLY behind the switch (2026-11-02): a restore never makes the app follow the phone.
+    expect(patch.content).toMatch(/:root\.dark[^{]*\{[^}]*--muted/);
+    expect(patch.content).not.toContain('prefers-color-scheme');
     expect(patch.content).not.toMatch(/--accent:/);
   });
 

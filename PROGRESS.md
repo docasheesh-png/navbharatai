@@ -1,3 +1,17 @@
+## 2026-11-02 — failedbr: every build report, permanent numbers, filter and sort
+
+Admin: *"usme bas failed build report ati hai, aur numbering bhi stable nahi hai … 1. sabhi build report failedbr me aye. sort/filter option bana do. 2. numbering rocksolid karo"*.
+
+- **Root cause 1 (numbers moved):** the number shown was a RANK — `buildReportNumbering.ts` scanned up to 5,000 documents per read and sorted retained failures by start time. A report expiring off the 180-day clock, or a late arrival, shifted every number after it.
+- **Root cause 2 (no permanent number ever):** the permanent allocator (`reportNumber`, failures only) read `admin_failed_report_numbers/counter`, which nothing ever created, so every report was saved with `counter_uninitialized`. Confirmed live: no row carried `permanentReportId`.
+- **Root cause 3 (failures only):** every reader filtered with `settledFailure()`; there was no list of all reports.
+- **Fix (class, not instance):** `buildReportRegistry.ts` — one row per report in `build_report_numbers` (id `${workspaceId}~${startedAt}`), its number taken once from `admin_build_report_counter/counter` inside the same transaction as the report's FIRST history write, for EVERY outcome (failed / succeeded / stopped / unfinished). Re-saves keep the number and only update the outcome. Readers look the number up (`numberBuildReports`, no scan, no cache); every screen and tool shows the same number. A leased, resumable, oldest-first backfill (`build-report-numbering` job, every 15 min, `exclusive`; one read once done) numbers older reports and then sweeps the ones saved while it ran. Numbers are never reused: expiry and erasure leave gaps.
+- **Plugin:** new MCP tools `list_build_reports` (outcome: all|failed|succeeded|stopped|unfinished, order: newest|oldest, cursor bound to its filter/order) and `get_build_report` (any outcome, with number and digest); REST `/api/failedbr/all-reports[/:workspaceId/:historyId]`. `list_failed_builds` stays, with permanent numbers. Server version 1.3.0.
+- **Retention/erase:** registry on the report's own 180-day clock (`lastSavedAt`), erased with the workspace (doc-id range); counter RETAINED_INDEFINITELY.
+- **Locks:** `tests/buildReportRegistry.test.ts`, `tests/buildReportNumbering.test.ts` (expiry and late-arrival lock + class source guard), `tests/diagnosticsHistoryWriterIntegrity.test.ts`. Reversion-proved: renumber-on-save (5 fail), allocate-while-backfilling (3), no oldest-first order (4), failures-only numbering (6), rank on read (2).
+- **What to watch after deploy:** the first `[build-report-numbering] numbered N` log line; until then lists say "numbering pending". The legacy `admin_failed_report_numbers` counter is retired (still classified, nothing writes it).
+- **Not built:** an "all reports" view with these filters on the admin `/failedbr` web page — the page still lists failures (now with permanent numbers). The plugin has the full feature.
+
 ## 2026-10-30 — Game Engine Ultra Phases 1–3 (PRs #4036 → #4037 → Phase 3, stacked, none merged)
 
 - **Phase 1 (#4036):** `gameIntent.ts` reads a scope contract (genre, view, controls, named features, win/lose) from the request; it rides in the kit handoff (`GAME_CONTRACT`) and is compared with the built code after the playtest (`GAME_SCOPE_OK` / `GAME_SCOPE_GAP`, info). Kill switch `AGENTV3_GAME_SCOPE_CONTRACT=off` (default on).

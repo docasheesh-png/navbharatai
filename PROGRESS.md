@@ -100297,3 +100297,19 @@ those service obligations separately from the CC0 asset licence when wiring the 
   race drill initially returned an unconfirmed-store result; separate unchanged rerun passes 21/21.
   Initial failure retained, no queue/billing code changed. See docs/game-engine/l3-on-demand.md.
 - Branch checkpoints only. L3 OFF; previously denied PR creation paused, no merge/deploy/activation.
+
+
+### 2026-11-02 — demand-driven final local verification, source d580c7fa3
+
+- Full coverage terminal PASS: 3,195 files, 48,253 tests, 85 existing skips, 1,051.29 seconds.
+  Coverage: statements 75.60%, branches 71.54%, functions 78.21%, lines 77.58%; thresholds passed.
+- Final required local gates and all six emulator/drill groups pass on this source. Signatures:
+  1,375 packages / 197 attestations verified. 90 targeted tests and all recorded browser/cache/runtime
+  checks pass. All owned runs are terminal; prior incomplete runs/failures remain documented.
+- No new model downloads in this continuation. Demand-only Poly Haven discovery covers six canonical
+  static subjects; other providers remain exact curated candidates. JPEG and bounded static LOD added.
+- Production secure downloader remains zero-byte EAI_AGAIN per the parent's fresh-worker verification.
+  No DNS/proxy bypass. Full generated games, physical devices and cloud publication remain unverified.
+- Source checkpoint d580c7fa355086af746de3cd5e5915da3499ed4b; documentation-only commits follow it.
+  L3 OFF. PR creation remains paused after automatic approval-review denial. No merge/deploy/activation.
+  See docs/game-engine/l3-on-demand.md for exact gate evidence, scope, limits and failure disclosure.

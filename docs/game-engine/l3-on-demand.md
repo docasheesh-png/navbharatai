@@ -1,6 +1,6 @@
 # Demand-driven 3D asset admission — 2026-11-02
 
-Source checkpoint: `d580c7fa3` (final full coverage pending at initial publication of this note).
+Source checkpoint: `d580c7fa355086af746de3cd5e5915da3499ed4b` (final local verification complete).
 L3 remains OFF by default. No PR, merge, deployment or activation is authorized in this continuation.
 
 ## When downloads occur
@@ -134,8 +134,8 @@ the connection-level SSRF guarantee. It did not add a proxy, alternate DNS, pinn
 change. Managed HTTPS metadata reads confirmed the official API response shape; they are not guarded
 production transport proof. Do not ask for additional domains to fix this observed DNS failure.
 
-Full coverage and all required final gates are being run against the source checkpoint above. A final
-terminal result will be appended. Physical devices, actual live discovery/download/render in a compatible
+Full coverage and all required local final gates passed against the source checkpoint above; terminal
+results follow below. Physical devices, actual live discovery/download/render in a compatible
 production network, full sandbox restart and cloud-published game acceptance remain unverified. L3 OFF;
 PR creation paused; no merge/deployment. Broader provider discovery requires each provider's legitimate
 interface and asset-level rights, not a blanket "free model" assumption.
@@ -151,3 +151,31 @@ snapshots showed a paused queue and stopped successor lease; they are not a fina
 The same unchanged drill was rerun separately after concurrent browser/build checks finished and
 passed all 21 cases. No deadline, queue/billing logic or assertion was altered. Contention is a plausible
 explanation, not an established root-cause diagnosis; the initial failure is retained in the evidence.
+
+## Terminal verification — source d580c7fa3
+
+- Full coverage exit 0: **3,195 files, 48,253 tests passed, 85 existing skips**, 1,051.29 seconds.
+  Statements 75.60%, branches 71.54%, functions 78.21%, lines 77.58%; configured thresholds passed.
+  Log: `/workspace/asset-evidence/demand-complete-coverage.log`. Metadata-server 403 warnings occurred
+  during tests; they did not fail the suite and are retained in the log.
+- All final local gates exit 0: audit, license, SBOM, three typechecks, native guard, build, bundle,
+  boot, server dependencies, unused imports, OAuth failed-report and game-asset policy checks.
+  Package verification: 1,375 registry signatures and 197 attestations verified.
+- All final emulator/drill groups exit 0: Phase 2 Firestore, failed-report autopsy, DeepInfra comparison,
+  session revocation, durable asset persistence and private Storage. The earlier Phase 2 race failure
+  above remains disclosed; the final whole drill run passed with unchanged assertions.
+- 90 targeted tests, actual browser texture checks, generated-runtime strict TypeScript, seven reviewed
+  asset fixtures, six local scenarios, synthetic demand integration and fresh-process discovery Storage
+  restoration passed. Synthetic discovery responses are not evidence of a live provider transfer.
+- Node 22.23.4/npm 11.18.0 match the CI versions used here. Java is Debian OpenJDK 21.0.12.1 rather than
+  CI's Temurin 21. Local checks do not establish remote PR CI, hosted deployment or physical-phone results.
+- All owned verification runs are terminal. No new third-party model download, paid AI build, PR,
+  merge, deployment or activation occurred. Earlier billing base 504b79298 remains an ancestor.
+
+Remaining acceptance: actual guarded live transfer in a compatible approved network; physical-device
+budgets/quality; six complete generated games; sandbox restart and cloud-published asset availability.
+The fresh worker's zero-byte EAI_AGAIN remains the transport blocker. This worker still has the older
+four-host custom allowlist, confirmed through the environment skill; it was not used to retry the CDN.
+No additional domain request or proxy bypass is proposed. Broader provider discovery and animated LOD
+are not implemented. PR creation remains paused after the earlier automatic approval-review denial;
+only branch checkpoint pushes were performed.

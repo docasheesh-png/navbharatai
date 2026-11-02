@@ -181,3 +181,9 @@ are honored without the earlier five-minute truncation; concurrent responses can
 existing cooldown. This is per-process throttling, not a claimed cross-instance global rate limit.
 The initial licence policy accepts CC0-1.0 and CC-BY-4.0; other licences require further implementation
 and review. No catalogue entry or live provider access has been enabled.
+
+
+Final demand-driven source d580c7fa3 verification: 3,195 files / 48,253 tests pass, 85 existing skips;
+coverage thresholds and all required local gates/drills pass. All owned runs are terminal. See
+[l3-on-demand.md](./l3-on-demand.md#terminal-verification--source-d580c7fa3) for precise evidence and
+remaining network/production acceptance blockers. L3 OFF; no PR, merge, deployment or activation.

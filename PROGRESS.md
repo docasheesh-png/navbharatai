@@ -100313,3 +100313,21 @@ those service obligations separately from the CC0 asset licence when wiring the 
 - Source checkpoint d580c7fa355086af746de3cd5e5915da3499ed4b; documentation-only commits follow it.
   L3 OFF. PR creation remains paused after automatic approval-review denial. No merge/deploy/activation.
   See docs/game-engine/l3-on-demand.md for exact gate evidence, scope, limits and failure disclosure.
+
+
+### 2026-11-02 — PR 4064 live acceptance and conditional merge
+
+- User explicitly authorized draft PR creation, then merge after all local and hosted required CI.
+  PR https://github.com/docasheesh-png/navbharatai/pull/4064 is open. No approval review or check bypass.
+- Production source 05b8b939d: ten bounded canonical Poly Haven subjects; official category mappings;
+  exact object names/components guarded. Six real curated assets securely downloaded/rendered in CI;
+  Eagle now ships privately as a reviewed CC0 derivative instead of a private-repository hotlink.
+- Hosted live acceptance job 125144700590 / run 41404930510 PASS: real side_table_01 discovery,
+  actual guarded transfer/browser admission, persistence, fresh-process cache hit, production artifact
+  reload/service credit; all seven reviewed models and six local scenario fixtures pass.
+- Fixed real failures: 1k packs can share bounded geometry under gltf/8k; only that BIN path class was
+  added, not 8k textures. Browser job pinned to supported Ubuntu 24.04. Assertions/SSRF unchanged.
+- Local required non-coverage gates/drills pass on corrected source; full local and hosted suites
+  remain owned until terminal. Final exact-head validation is recorded in PR #4064's report/checks.
+- L3 OFF. Remaining: deployed-network, physical-device, full generated-game and cloud-publication
+  acceptance. Main merge triggers existing Cloud Build deployment; do not start a duplicate deploy.

@@ -127,7 +127,7 @@ bytes; the train station and several animals remain procedural. No additional th
 downloaded in this continuation. Generated runtime strict TypeScript passes with the recipe-equivalent
 Three.js 0.180.0 declarations installed only in an isolated verification prefix.
 
-**Live transport remains blocked/unverified.** The parent's fresh executor confirms all five domains
+**Historical managed-worker limitation (hosted live verification now passes below).** The parent's fresh executor confirms all five domains
 allowed, yet actual guarded downloads fail `EAI_AGAIN` for both Poly Haven and Fox with zero bytes.
 This continuation audited server transport use and found no approved proxy-aware replacement preserving
 the connection-level SSRF guarantee. It did not add a proxy, alternate DNS, pinned IP or security-setting
@@ -137,7 +137,7 @@ production transport proof. Do not ask for additional domains to fix this observ
 Full coverage and all required local final gates passed against the source checkpoint above; terminal
 results follow below. Physical devices, actual live discovery/download/render in a compatible
 production network, full sandbox restart and cloud-published game acceptance remain unverified. L3 OFF;
-PR creation paused; no merge/deployment. Broader provider discovery requires each provider's legitimate
+PR #4064 is open; merge is conditional on all checks passing. Broader provider discovery requires each provider's legitimate
 interface and asset-level rights, not a blanket "free model" assumption.
 
 The full-suite history-command test exposed a fixture that copied only the former fixed generator
@@ -177,8 +177,8 @@ budgets/quality; six complete generated games; sandbox restart and cloud-publish
 The fresh worker's zero-byte EAI_AGAIN remains the transport blocker. This worker still has the older
 four-host custom allowlist, confirmed through the environment skill; it was not used to retry the CDN.
 No additional domain request or proxy bypass is proposed. Broader provider discovery and animated LOD
-are not implemented. PR creation remains paused after the earlier automatic approval-review denial;
-only branch checkpoint pushes were performed.
+are not implemented. The earlier PR-creation denial was subsequently resolved by explicit user authorization;
+PR #4064 is open, with merge conditional on all checks passing.
 
 
 ## PR continuation — 2026-11-02
@@ -223,3 +223,30 @@ failed assertions fail the job, and independent reviewed-model checks continue a
 Local coverage started before these fixes was stopped (exit 130) and will be rerun for corrected source.
 User now explicitly authorizes merge only after all required local and hosted checks pass. L3 remains
 OFF; no paid game builds, activation or unrequested public game publication is authorized.
+
+
+### Successful hosted live acceptance — source 05b8b939d
+
+[CI run 41404930510](https://github.com/docasheesh-png/navbharatai/actions/runs/41404930510),
+job 125144700590, completed successfully. The production dispatcher was unchanged:
+
+- Real `side_table_01` discovery: four official metadata calls and five bounded file transfers;
+  final SHA-256 `397ed7c2df3d003750a0074300b1949f15bdb87466568a937d34f78e56565dca`.
+  Actual browser admission, durable project writes, fresh-process cache reuse with zero provider
+  calls, Vite production artifact/reload and visible service credit passed.
+- Six curated models used actual guarded downloads: Knight, sedan, building, Fox, train and ship.
+  Eagle used the licensed packaged derivative, with no network request. All seven passed hashes,
+  browser rendering, required animations and fresh-process cache restoration.
+- All six local playable scenario fixtures passed in hosted Chromium at 390x844, including keyboard/
+  button movement, animation, LOD and production artifact reload. The station and several animals
+  remain procedural. These are deterministic fixtures, not six paid/AI-generated production games.
+- [Test evidence artifact](https://github.com/docasheesh-png/navbharatai/actions/runs/41404930510/artifacts/13123056678)
+  contains logs, screenshots and scenario results; no model library or user game was publicly published.
+
+This resolves the guarded live-transfer verification gap on GitHub-hosted runners. It does not change
+this managed worker's DNS restrictions or prove the deployed Cloud Run network. Physical devices,
+six complete generated user games, sandbox restart and cloud-published asset acceptance remain open.
+L3 remains OFF. No new paid services, tokens, security-setting changes or provider authentication.
+Local full coverage and hosted build-and-test are owned through completion; consult PR #4064's final
+validation report/checks for terminal exact-head results. The earlier source d580c7fa3 full coverage
+result above is historical, not a substitute for the current source's required final suite.

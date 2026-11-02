@@ -1,4 +1,3 @@
-import { isZTestAccount } from '../../lib/zTestAccount';
 import { rawErrorText } from '../../AgentV3/rawErrorDetail';
 /**
  * Owner 2026-10-29: per-profile opt-out of Surplus → Weak fail-open (coding / Pro builder).
@@ -6,8 +5,9 @@ import { rawErrorText } from '../../AgentV3/rawErrorDetail';
  * Weak ladder (GLM/Kimi). Everyone else keeps the existing fallback unchanged.
  */
 // The list lives in lib/zTestAccount.ts (one helper for every z@gmail.com special case).
-export function surplusFallbackDisabledFor(email: string | null | undefined, uid?: string | null): boolean {
-  return isZTestAccount(email, uid);
+// Owner 2026-11-02: z@gmail.com now routes like every other user of its tier — no profile opts out.
+export function surplusFallbackDisabledFor(_email: string | null | undefined, _uid?: string | null): boolean {
+  return false;
 }
 
 /**

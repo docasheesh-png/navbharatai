@@ -2,11 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { routerOnePinnedFor, routerOnePublicFallbackEnabled, routerOneModels, routerOneBaseUrl, ROUTER_ONE_DEFAULT_BASE_URL } from './routerOne';
 
 describe('Router One routing flags', () => {
-  it('pins z@gmail.com only (no flag needed), kill-switch ROUTER_ONE_PIN=off', () => {
-    expect(routerOnePinnedFor('z@gmail.com', null, {})).toBe(true);
-    expect(routerOnePinnedFor(' Z@Gmail.com ', null, {})).toBe(true);
-    expect(routerOnePinnedFor('someone@gmail.com', null, {})).toBe(false);
-    expect(routerOnePinnedFor('z@gmail.com', null, { ROUTER_ONE_PIN: 'off' })).toBe(false);
+  it('no profile pin: z@gmail.com routes same as any user (2026-11-02)', () => {
+    for (const env of [{}, { ROUTER_ONE_PIN: 'on' }, { ROUTER_ONE_PIN: 'off' }] as NodeJS.ProcessEnv[]) {
+      expect(routerOnePinnedFor('z@gmail.com', null, env)).toBe(false);
+      expect(routerOnePinnedFor(' Z@Gmail.com ', 'GiYNmFcDMVYSWW48Nrurm7j41gv1', env)).toBe(false);
+      expect(routerOnePinnedFor('someone@gmail.com', null, env)).toBe(false);
+      expect(routerOnePinnedFor('z@gmail.com', null, env)).toBe(routerOnePinnedFor('someone@gmail.com', null, env));
+    }
   });
   it('public fallback needs flag ON and a key; default OFF', () => {
     expect(routerOnePublicFallbackEnabled({})).toBe(false);

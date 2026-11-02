@@ -583,7 +583,7 @@ export class CameraRig {
 
 const WORLD = `import * as THREE from 'three';
 import { sharedMaterial, paletteColor, type PaletteName } from './materials';
-import { surfaceMaterial, enableAO, getDetailLevel, mergeGeometries, type Detail, type SurfaceKind } from './surfaces';
+import { surfaceMaterial, enableAO, getDetailLevel, mergeGeometries, setGround, type Detail, type SurfaceKind } from './surfaces';
 
 /**
  * Procedural world building — an environment with no asset library.
@@ -645,17 +645,12 @@ export function createTerrain(options: TerrainOptions = {}): THREE.Mesh {
   const geo = new THREE.PlaneGeometry(size, size, segments, segments);
   geo.rotateX(-Math.PI / 2);
 
+  // 🔒 ONE HEIGHT FUNCTION. The vertices are set from terrainHeightFn() and the surface sampler reads
+  // the SAME vertex heights back, triangle by triangle, so what the car stands on is exactly what is drawn.
+  const field = terrainHeightFn(options);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
   if (!options.flat) {
-    const noise = valueNoise2D(options.seed ?? 1);
-    const amp = options.amplitude ?? 6;
-    const freq = options.frequency ?? 0.02;
-    const pos = geo.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), z = pos.getZ(i);
-      // Two octaves: a broad shape plus a finer detail pass. One octave looks like rolling blobs.
-      const h = noise(x * freq, z * freq) * amp + noise(x * freq * 3.7, z * freq * 3.7) * amp * 0.25;
-      pos.setY(i, h);
-    }
+    for (let i = 0; i < pos.count; i++) pos.setY(i, field(pos.getX(i), pos.getZ(i)));
     pos.needsUpdate = true;
     // Without recomputed normals the lighting is flat and the hills are invisible.
     geo.computeVertexNormals();
@@ -694,7 +689,44 @@ export function createTerrain(options: TerrainOptions = {}): THREE.Mesh {
   }
   const mesh = new THREE.Mesh(geo, material);
   mesh.receiveShadow = true;
+  const heightAt = surfaceSampler(pos, size, segments, mesh);
+  mesh.userData.heightAt = heightAt;
+  setGround(heightAt);   // every driveVehicle() now follows these hills — no opt-in to forget
   return mesh;
+}
+
+/**
+ * The analytic height field createTerrain() displaces its vertices with (0 everywhere when flat). Two
+ * octaves: a broad shape plus a finer detail pass. One octave looks like rolling blobs.
+ */
+export function terrainHeightFn(options: TerrainOptions = {}): (x: number, z: number) => number {
+  if (options.flat) return () => 0;
+  const noise = valueNoise2D(options.seed ?? 1);
+  const amp = options.amplitude ?? 6;
+  const freq = options.frequency ?? 0.02;
+  return (x, z) => noise(x * freq, z * freq) * amp + noise(x * freq * 3.7, z * freq * 3.7) * amp * 0.25;
+}
+
+/**
+ * The height of the DRAWN surface at world (x, z): the grid's vertex heights interpolated over the same
+ * two triangles per cell PlaneGeometry draws (diagonal from (ix, iz+1) to (ix+1, iz)). Follows the mesh
+ * if the game moves it. Outside the terrain it clamps to the edge.
+ */
+function surfaceSampler(pos: THREE.BufferAttribute, size: number, segments: number, mesh: THREE.Object3D) {
+  const n = segments + 1;
+  const step = size / segments;
+  const half = size / 2;
+  const hAt = (ix: number, iz: number) => pos.getY(iz * n + ix);
+  return (wx: number, wz: number): number => {
+    const x = wx - mesh.position.x, z = wz - mesh.position.z;
+    const gx = Math.min(segments - 1e-6, Math.max(0, (x + half) / step));
+    const gz = Math.min(segments - 1e-6, Math.max(0, (z + half) / step));
+    const ix = Math.floor(gx), iz = Math.floor(gz);
+    const fx = gx - ix, fz = gz - iz;
+    const a = hAt(ix, iz), b = hAt(ix, iz + 1), c = hAt(ix + 1, iz + 1), d = hAt(ix + 1, iz);
+    const h = fx + fz <= 1 ? a + (d - a) * fx + (b - a) * fz : c + (b - c) * (1 - fx) + (d - c) * (1 - fz);
+    return h * mesh.scale.y + mesh.position.y;
+  };
 }
 
 export interface ScatterOptions {
@@ -805,6 +837,58 @@ export type Detail = 'real' | 'lite';
 let DEFAULT_DETAIL: Detail = 'lite';
 export function setDetailLevel(detail: Detail): void { DEFAULT_DETAIL = detail; }
 export function getDetailLevel(): Detail { return DEFAULT_DETAIL; }
+
+// ── THE GROUND (2026-11-02, "car zameen me dhas jaati hai") ──────────────────────────────────────
+// 🔴 createTerrain() pushed its vertices up into hills, but the height lived ONLY in the mesh: nothing
+// else could ask "how high is the ground here?", and driveVehicle() moved x and z and never touched y.
+// So every car in every racing game drove at the y it was born at (ROAD_SURFACE_Y) — straight through
+// the first hill. The ONE height registry lives here, where world.ts (which builds the hills) and
+// objects.ts (which drives on them) both already import from. createTerrain() registers itself, so a
+// game never has to opt in.
+export type GroundHeight = (x: number, z: number) => number;
+let ACTIVE_GROUND: GroundHeight | null = null;
+/** The ground every vehicle follows by default. createTerrain() sets it; pass null to clear it. */
+export function setGround(heightAt: GroundHeight | null): void { ACTIVE_GROUND = heightAt; }
+/** The active ground's height function, or null when no terrain has been made. */
+export function getGround(): GroundHeight | null { return ACTIVE_GROUND; }
+
+// WATER IS THE ONLY PLACE A THING MAY GO BELOW THE GROUND, and only where a game SAYS there is water.
+const WATER: Array<(x: number, z: number) => boolean> = [];
+/** Declare a water region (a lake, a river course): groundScene() lets objects over it sink or float. */
+export function addWater(isWater: (x: number, z: number) => boolean): void { WATER.push(isWater); }
+export function clearWater(): void { WATER.length = 0; }
+export function isWaterAt(x: number, z: number): boolean { return WATER.some((w) => w(x, z)); }
+
+/**
+ * 🔒 NOTHING SINKS (admin 2026-11-02, t311u): keep ONE object's origin at or above the ground under it
+ * (plus userData.groundOffset, default 0). Opt-outs are explicit: userData.ground = false (a bird, a
+ * plane, a projectile, a hand-placed bridge deck), or a declared water region under it.
+ */
+export function groundObject(obj: THREE.Object3D, ground: GroundHeight | null = ACTIVE_GROUND): boolean {
+  if (!ground || obj.userData.ground === false || obj.userData.heightAt) return false;
+  const x = obj.position.x, z = obj.position.z;
+  if (WATER.length && isWaterAt(x, z)) return false;
+  const floor = ground(x, z) + (Number(obj.userData.groundOffset) || 0);
+  if (obj.position.y < floor) { obj.position.y = floor; return true; }
+  return false;
+}
+
+/**
+ * Ground every top-level dynamic thing in a scene — vehicles, the player, NPCs, animals, props, trains —
+ * after each fixed step. The game shell calls this itself, so a game cannot forget it. Lights, cameras,
+ * particle systems, instanced batches (already placed per instance) and the terrain itself are skipped.
+ * Returns how many objects were lifted out of the ground this step.
+ */
+export function groundScene(root: THREE.Object3D, ground: GroundHeight | null = ACTIVE_GROUND): number {
+  if (!ground) return 0;
+  let lifted = 0;
+  for (const obj of root.children) {
+    const o = obj as THREE.Object3D & { isLight?: boolean; isCamera?: boolean; isPoints?: boolean; isInstancedMesh?: boolean; isSprite?: boolean; isLine?: boolean };
+    if (o.isLight || o.isCamera || o.isPoints || o.isInstancedMesh || o.isSprite || o.isLine) continue;
+    if (groundObject(o, ground)) lifted++;
+  }
+  return lifted;
+}
 
 export type SurfaceKind =
   | 'brick' | 'plaster' | 'wood' | 'bark' | 'stone' | 'asphalt'
@@ -1618,7 +1702,7 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
 // feature this codebase forbids. Say "real-looking", never "photorealistic".
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 const OBJECTS = `import * as THREE from 'three';
-import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, mergeGeometries, type SurfaceKind, type Detail } from './surfaces';
+import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, mergeGeometries, getGround, addWater, type SurfaceKind, type Detail } from './surfaces';
 
 // The detail tier lives in surfaces.ts so the ground reads the same setting as the objects; it is
 // re-exported here so \`import { setDetailLevel } from './objects'\` keeps working everywhere.
@@ -2682,8 +2766,58 @@ export interface VehicleTuning {
   steerRate?: number;
   /** Speed at start. NOT zero: a racing/driving game whose car sits still reads as broken. */
   startSpeed?: number;
+  /**
+   * The ground to drive on: a height function, or false for none (a boat, a plane, a track you place
+   * yourself). Default: the last createTerrain(), so a car follows the hills with no extra call.
+   */
+  ground?: ((x: number, z: number) => number) | false;
+  /** Height of the model's origin above the ground (createCar's origin is at the tyres: default 0.03). */
+  rideHeight?: number;
+  /** Wheelbase and track used to read the slope under the car (pitch and roll), metres. */
+  length?: number;
+  width?: number;
 }
-export interface VehicleState { speed: number; heading: number }
+export interface VehicleState { speed: number; heading: number; pitch?: number; roll?: number }
+
+/**
+ * Put a vehicle ON the ground under it: y follows the surface with a soft suspension on the way DOWN
+ * (never below it on the way up — a car does not sink into a hill), and the body pitches and rolls to
+ * the slope read under its four corners. Returns the new pitch and roll, or null with no ground.
+ */
+export function settleOnGround(
+  vehicle: THREE.Object3D,
+  heading: number,
+  dt: number,
+  tuning: VehicleTuning = {},
+  prev: { pitch?: number; roll?: number } = {},
+): { pitch: number; roll: number } | null {
+  const ground = tuning.ground === false ? null : (tuning.ground ?? getGround());
+  if (!ground) return null;
+  const ride = tuning.rideHeight ?? 0.03;
+  const L = (tuning.length ?? 2.6) / 2, W = (tuning.width ?? 1.6) / 2;
+  const x = vehicle.position.x, z = vehicle.position.z;
+  const fx = Math.sin(heading), fz = Math.cos(heading);   // the nose (+Z of the model)
+  const lx = Math.cos(heading), lz = -Math.sin(heading);  // the driver's left (+X of the model)
+  const fl = ground(x + fx * L + lx * W, z + fz * L + lz * W), fr = ground(x + fx * L - lx * W, z + fz * L - lz * W);
+  const bl = ground(x - fx * L + lx * W, z - fz * L + lz * W), br = ground(x - fx * L - lx * W, z - fz * L - lz * W);
+  const hF = (fl + fr) / 2, hB = (bl + br) / 2, hLft = (fl + bl) / 2, hRgt = (fr + br) / 2;
+  const floor = Math.max(ground(x, z), (hF + hB) / 2) + ride;
+  const k = 1 - Math.exp(-14 * Math.max(0, dt));
+  // Up is instant (the tyres are ON the surface); down is sprung — never below the floor.
+  const y = vehicle.position.y;
+  vehicle.position.y = y <= floor ? floor : Math.max(floor, y + (floor - y) * k);
+  // Positive rotation.x tips +Z DOWN: a nose higher than the tail is a NEGATIVE pitch.
+  const pitchT = Math.atan2(hB - hF, 2 * L);
+  // Positive rotation.z lifts +X (the driver's left): left side higher is a POSITIVE roll.
+  const rollT = Math.atan2(hLft - hRgt, 2 * W);
+  const p0 = prev.pitch ?? pitchT, r0 = prev.roll ?? rollT;
+  const pitch = p0 + (pitchT - p0) * k;
+  const roll = r0 + (rollT - r0) * k;
+  vehicle.rotation.order = 'YXZ';   // heading first, then the slope — pitch is about the CAR's own axis
+  vehicle.rotation.x = pitch;
+  vehicle.rotation.z = roll;
+  return { pitch, roll };
+}
 
 /**
  * The vehicle's state, starting from where the model already points (its rotation.y). It also marks the
@@ -2692,7 +2826,10 @@ export interface VehicleState { speed: number; heading: number }
  */
 export function createVehicleState(vehicle: THREE.Object3D, tuning: VehicleTuning = {}): VehicleState {
   noteVehicle(vehicle, null);
-  return { speed: tuning.startSpeed ?? 5, heading: vehicle.rotation.y };
+  const heading = vehicle.rotation.y;
+  // Start ON the ground, wherever the game put it (a car born at y = 0.03 on a 4 m hill is inside it).
+  const slope = settleOnGround(vehicle, heading, 1, tuning);
+  return { speed: tuning.startSpeed ?? 5, heading, ...(slope ?? {}) };
 }
 
 /**
@@ -2741,9 +2878,12 @@ export function driveVehicle(
   vehicle.rotation.y = heading;
   vehicle.position.x += Math.sin(heading) * speed * dt;
   vehicle.position.z += Math.cos(heading) * speed * dt;
+  // 🔴 FOLLOW THE GROUND. This used to stop at x/z, so y stayed wherever the car was born and every
+  // racing game drove into its first hill. settleOnGround reads the same heights the terrain is drawn from.
+  const slope = settleOnGround(vehicle, heading, dt, tuning, state);
   rollWheels(vehicle, speed, dt);   // every wheel of a car, a bike or a cycle — a no-op for a horse
   noteVehicle(vehicle, axis);
-  return { speed, heading };
+  return slope ? { speed, heading, pitch: slope.pitch, roll: slope.roll } : { speed, heading };
 }
 
 // ── TREE ─────────────────────────────────────────────────────────────────────────────────────────
@@ -2923,6 +3063,14 @@ export function createRiver(options: RiverOptions = {}): River {
     m.geometry.computeVertexNormals();
   };
   update(0);
+  m.userData.ground = false;   // the water surface is placed by the river itself
+  // Its meandering course is WATER: the one place groundScene() lets a thing go below the grass.
+  addWater((x, z) => {
+    const lz = z - m.position.z;
+    if (Math.abs(lz) > L / 2) return false;
+    const cx = m.position.x + Math.sin(lz * 0.03) * W * 0.9 + Math.sin(lz * 0.011) * W * 1.6;
+    return Math.abs(x - cx) < W / 2;
+  });
   return { mesh: m, update };
 }
 
@@ -4498,7 +4646,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '// DRIVING. Every model faces +Z (MODEL_FORWARD). driveVehicle owns the control signs; the camera stays BEHIND.\n' +
       'const car = createCar({ color: 0xb42b2b });\n' +
       'car.rotation.y = Math.PI; // local +Z nose faces world -Z, into the screen\n' +
-      'car.position.y = ROAD_SURFACE_Y;   // wheels ON the asphalt, which sits 3 cm above the ground\n' +
+      'car.position.y = ROAD_SURFACE_Y;   // on hills, driveVehicle keeps it ON the terrain (y, pitch, roll)\n' +
       'scene.add(car);\n' +
       'let drive = createVehicleState(car);   // starts moving, pointing where the model points\n' +
       "const rig = new CameraRig({ kind: 'chase', collidables: [terrain, house] });\n" +
@@ -4545,7 +4693,9 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '  only said 3D. A hand-written box car beside these reads as a bug, not a style.\n' +
       '- 🔴 ANYTHING DRIVEN OR RIDDEN: move it with driveVehicle(vehicle, state, input.axis(), dt) — the raw\n' +
       "  axis, never a sign you worked out — and frame it with a 'chase' rig (rig.update(vehicle, dt)) or\n" +
-      '  rig.follow(vehicle, dt). The camera then sits BEHIND it: the player sees the TAIL lights, and LEFT\n' +
+      '  rig.follow(vehicle, dt). driveVehicle also keeps it ON the hills of createTerrain() (height, pitch,\n' +
+      '  roll): never set a driven vehicle\'s position.y yourself; terrain.userData.heightAt(x, z) is the\n' +
+      '  ground height for anything else you place. The camera then sits BEHIND it: the player sees the TAIL lights, and LEFT\n' +
       '  turns it to the left of the screen. A camera you place yourself at +Z of the car is IN FRONT of it\n' +
       '  (every model faces +Z) — the player sees the headlights and every control reads as reversed.\n' +
       "- 🌦️ An outdoor world gets atmosphere.ts: createAtmosphere({ scene, renderer, camera, lighting })\n" +

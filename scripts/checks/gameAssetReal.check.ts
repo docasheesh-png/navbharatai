@@ -34,7 +34,9 @@ async function main() {
   const imports = `import { chromium } from ${JSON.stringify(pathToFileURL(resolve(playwrightPath)).href)};`;
   const outcomes = [];
   for (const c of REVIEWED_GAME_ASSETS) {
-    const requirement = { subject: c.subjects[0], ...(c.animationRoles?.walk ? { animation: 'walk' } : {}) };
+    const role = c.animationRoles?.walk ? 'walk' : c.animationRoles?.fly ? 'fly' : undefined;
+    const clip = role ? c.animationRoles?.[role] : undefined;
+    const requirement = { subject: c.subjects[0], ...(role ? { animation: role } : {}) };
     let downloads = 0;
     const dependencies = {
       cache, providers: createAssetProviders(REVIEWED_GAME_ASSETS),
@@ -46,7 +48,7 @@ async function main() {
       },
       async parse(bytes: Uint8Array) {
         await write(join(fixture, `.nbai-asset-${c.sha256}.glb`), bytes);
-        await write(join(fixture, 'proof.mjs'), assetBrowserProofModule(c.sha256, c.animationRoles?.walk, imports, resolve(chromiumPath)));
+        await write(join(fixture, 'proof.mjs'), assetBrowserProofModule(c.sha256, clip, imports, resolve(chromiumPath)));
         const result = execFileSync(process.execPath, ['proof.mjs'], { cwd: fixture, encoding: 'utf8', timeout: 30000 });
         assert.match(result, /"rendered":true/); if (requirement.animation) assert.match(result, /"animated":true/);
         console.log(c.id, result.trim());
@@ -62,7 +64,7 @@ async function main() {
   }
   execFileSync(process.execPath, ['--import', resolve('node_modules/tsx/dist/loader.mjs'), resolve('scripts/checks/gameAssetReal.check.ts'), dir, resolve(playwrightPath), resolve(chromiumPath), 'cache-probe'], { encoding: 'utf8', stdio: 'inherit' });
   const assets = REVIEWED_GAME_ASSETS.map(c => ({ sha256: c.sha256, height: c.height, yaw: c.yaw,
-    ...(c.animationRoles?.walk ? { animation: c.animationRoles.walk } : {}),
+    ...((c.animationRoles?.walk ?? c.animationRoles?.fly) ? { animation: c.animationRoles?.walk ?? c.animationRoles?.fly } : {}),
     ...(c.license.spdx === 'CC-BY-4.0' ? { attributionCredit: c.license.author + ' — CC BY 4.0' } : {}) }));
   await write(join(fixture, 'public/game-assets/manifest.json'), JSON.stringify(REVIEWED_GAME_ASSETS, null, 2));
   await write(join(fixture, 'public/game-assets/ATTRIBUTION.txt'), REVIEWED_GAME_ASSETS.map(c => `${c.id}\n${c.license.attribution}\n${c.license.evidenceUrl}\nSource: ${c.sourceUrl}\nProcessing: ${c.optimization ?? 'none'}\n`).join('\n'));
@@ -106,7 +108,7 @@ window.__realProof=()=>({sources:handles.map(h=>h.source),animated:after.some((v
       await page.goto(origin + '/published/'); await page.waitForFunction('Boolean(window.__realProof)');
       await page.keyboard.press('ArrowUp'); await page.locator('#move').click();
       const proof = await page.evaluate('window.__realProof()');
-      assert.deepEqual(proof.sources, ['model', 'model', 'model', 'model']); assert.equal(proof.animated, true);
+      assert.deepEqual(proof.sources, REVIEWED_GAME_ASSETS.map(() => 'model'));  assert.equal(proof.animated, true);
       assert.equal(proof.moves, 2); assert.equal(proof.z, 1); assert.equal(proof.width, proof.viewport);
       assert.ok(proof.triangles > 0 && proof.triangles < 60000 && proof.drawCalls < 32);
       console.log('production artifact', proof);

@@ -14,7 +14,7 @@ export interface ReviewedAsset extends AssetCandidate {
   review: { reviewer: string; evidenceRevision: string; freeDownload: true };
   /** A live service obligation, independent of the asset's copyright licence. */
   serviceCredit?: string;
-  format?: 'glb' | 'gltf';
+  format?: 'glb' | 'gltf' | 'glb-resources';
   /** Reviewed source AND derived output hashes are pinned; no automatic unreviewed rewrite. */
   optimization?: 'compact-v1' | 'animation-selection-v1';
   retainedAnimations?: readonly string[];
@@ -35,11 +35,11 @@ export function validateCatalogue(assets: readonly ReviewedAsset[]): void {
     assetDownloadUrl(c.downloadUrl, new Set(c.downloadOrigins));
     for (const origin of c.downloadOrigins) if (new URL(origin).origin !== origin) throw new Error('Invalid reviewed origin');
     if (c.optimization !== undefined && (!['compact-v1', 'animation-selection-v1'].includes(c.optimization) || !/^[a-f0-9]{64}$/.test(c.sourceSha256 ?? ''))) throw new Error('Unreviewed optimization source/version');
-    if (c.optimization === 'animation-selection-v1' && (c.format === 'gltf' || !c.retainedAnimations?.length
+    if (c.optimization === 'animation-selection-v1' && ((c.format !== undefined && c.format !== 'glb') || !c.retainedAnimations?.length
       || c.retainedAnimations.length > 16 || new Set(c.retainedAnimations).size !== c.retainedAnimations.length
       || c.retainedAnimations.some(n => !n || n.length > 128)
       || c.animations.some(n => !c.retainedAnimations!.includes(n)))) throw new Error('Unreviewed animation selection');
-    if (c.format === 'gltf' && (!/^[a-f0-9]{64}$/.test(c.sourceSha256 ?? '') || !c.resources?.length)) throw new Error('Unreviewed glTF sources');
+    if (['gltf', 'glb-resources'].includes(c.format ?? '') && (!/^[a-f0-9]{64}$/.test(c.sourceSha256 ?? '') || !c.resources?.length)) throw new Error('Unreviewed glTF sources');
     if ((c.resources?.length ?? 0) > 16 || new Set(c.resources?.map(r => r.path)).size !== (c.resources?.length ?? 0)) throw new Error('Resource budget or duplicates');
     for (const r of c.resources ?? []) {
       if (!safeGltfResourcePath(r.path) || !/^[a-f0-9]{64}$/.test(r.sha256)) throw new Error('Unreviewed resource');

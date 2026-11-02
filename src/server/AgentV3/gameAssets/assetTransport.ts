@@ -1,6 +1,7 @@
 import { assetProviderPermit, recordAssetProviderResponse } from './assetProviderBudget';
 import { createHash } from 'node:crypto';
 import { bundleGltf } from './gltfBundle';
+import { bundleGlbResources } from './glbResourceBundle';
 import { compactGlb } from './assetOptimize';
 import { selectGlbAnimations } from './assetAnimationSelection';
 import { ASSET_LIMITS } from './assetPolicy';
@@ -22,7 +23,7 @@ export async function downloadReviewedAsset(candidate: ReviewedAsset, signal: Ab
       const deadline = AbortSignal.timeout(15_000);
       const origins = new Set(candidate.downloadOrigins);
       const bytes = await downloadGameAsset(candidate, origins, deadline);
-      if (candidate.format !== 'gltf') {
+      if (candidate.format !== 'gltf' && candidate.format !== 'glb-resources') {
         if (!candidate.optimization) return bytes;
         if (createHash('sha256').update(bytes).digest('hex') !== candidate.sourceSha256) throw new Error('Optimization source/version mismatch');
         if (candidate.optimization === 'animation-selection-v1') return selectGlbAnimations(bytes, candidate.sourceSha256!, candidate.retainedAnimations ?? []);
@@ -38,7 +39,7 @@ export async function downloadReviewedAsset(candidate: ReviewedAsset, signal: Ab
         if (size > ASSET_LIMITS.bytes || createHash('sha256').update(resource).digest('hex') !== r.sha256) throw new Error('glTF resource hash/budget mismatch');
         resources.set(r.path, resource);
       }
-      const glb = bundleGltf(bytes,resources);
+      const glb = candidate.format === 'glb-resources' ? bundleGlbResources(bytes, resources) : bundleGltf(bytes,resources);
       return candidate.optimization === 'compact-v1' ? compactGlb(glb).bytes : glb;
     })();
     pending.set(key, transfer);

@@ -185,5 +185,117 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
       "run": "Run",
       "idle": "Survey"
     }
+  },
+  {
+    "provider": "kenney",
+    "id": "train-diesel-a",
+    "revision": "b593073ea756efa2bba003b9cd2d1ebd3a7488e6",
+    "sourceUrl": "https://github.com/Zalamancer/train-game/blob/b593073ea756efa2bba003b9cd2d1ebd3a7488e6/assets/kenney_train-kit/Models/glb/train-diesel-a.glb",
+    "downloadUrl": "https://raw.githubusercontent.com/Zalamancer/train-game/b593073ea756efa2bba003b9cd2d1ebd3a7488e6/assets/kenney_train-kit/Models/glb/train-diesel-a.glb",
+    "sha256": "83d64b6f67c49aa34abe8cebbccf18edd24070fa8e8ee4a94354603807cdf4e6",
+    "subjects": [
+      "train"
+    ],
+    "animations": [],
+    "height": 3.5,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://raw.githubusercontent.com"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "b593073ea756efa2bba003b9cd2d1ebd3a7488e6",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://github.com/Zalamancer/train-game/blob/b593073ea756efa2bba003b9cd2d1ebd3a7488e6/assets/kenney_train-kit/License.txt",
+      "reviewedAt": "2026-11-02",
+      "author": "Kenney; additional credits Guus Vermeulen and Tony Schaer",
+      "attribution": "train-diesel-a: Kenney; additional credits Guus Vermeulen and Tony Schaer. CC0 1.0 Universal.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    },
+    "format": "glb-resources",
+    "optimization": "compact-v1",
+    "sourceSha256": "20c6c7c23c005e8cda1c1e922473c0fc9c93fc7c1d1bc5a637d640424f811cc3",
+    "resources": [
+      {
+        "path": "Textures/colormap.png",
+        "url": "https://raw.githubusercontent.com/Zalamancer/train-game/b593073ea756efa2bba003b9cd2d1ebd3a7488e6/assets/kenney_train-kit/Models/glb/Textures/colormap.png",
+        "sha256": "e264660f3fc9ecbd642bdb7fb7b7dc10755a061560a66651baf48274c729af09"
+      }
+    ]
+  },
+  {
+    "provider": "quaternius",
+    "id": "cruise-ship",
+    "revision": "c664c6f231d3dd522b38ba52fc39ec33028624e2",
+    "sourceUrl": "https://github.com/trebeljahr/quaternius-showcase/blob/c664c6f231d3dd522b38ba52fc39ec33028624e2/public/glb/ships_pack/CruiseShip.glb",
+    "downloadUrl": "https://raw.githubusercontent.com/trebeljahr/quaternius-showcase/c664c6f231d3dd522b38ba52fc39ec33028624e2/public/glb/ships_pack/CruiseShip.glb",
+    "sha256": "e0ce08909dfaed9d8896321079bf2d14a9a740a426efd23a646530caa5b89569",
+    "subjects": [
+      "ship"
+    ],
+    "animations": [],
+    "height": 4,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://raw.githubusercontent.com"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "c664c6f231d3dd522b38ba52fc39ec33028624e2",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://github.com/trebeljahr/quaternius-showcase/blob/c664c6f231d3dd522b38ba52fc39ec33028624e2/LICENSES.md",
+      "reviewedAt": "2026-11-02",
+      "author": "Quaternius",
+      "attribution": "cruise-ship: Quaternius. CC0 1.0 Universal.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    }
+  },
+  {
+    "provider": "quaternius",
+    "id": "eagle-flying",
+    "revision": "dea756baf3b3a4889d8c245e456a4791f961578a",
+    "sourceUrl": "https://github.com/beep2bleep/FreeAssetsByKenneyNLandQuaternius/blob/dea756baf3b3a4889d8c245e456a4791f961578a/FreeModels%20by%20Quaternius%5BPatreon%5D/Characters%20and%20Animals/Animal%20Pack%20Vol.2%20-%20Jul%202017/FBX/Eagle.fbx",
+    "downloadUrl": "https://raw.githubusercontent.com/docasheesh-png/navbharatai/b320b6f4e3362e175f1fc6fa33dc1ef6c6a3d47f/assets/game-models/4e8915ef238773ca0b11576fd71dddb49449ce0aa6b575f0fce9e65e79e03f75.glb",
+    "sha256": "4e8915ef238773ca0b11576fd71dddb49449ce0aa6b575f0fce9e65e79e03f75",
+    "subjects": [
+      "eagle",
+      "bird"
+    ],
+    "animations": [
+      "EagleArmature|EagleArmature|Flying"
+    ],
+    "height": 0.65,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://raw.githubusercontent.com"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "dea756baf3b3a4889d8c245e456a4791f961578a",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://github.com/beep2bleep/FreeAssetsByKenneyNLandQuaternius/blob/dea756baf3b3a4889d8c245e456a4791f961578a/FreeModels%20by%20Quaternius%5BPatreon%5D/License.txt",
+      "reviewedAt": "2026-11-02",
+      "author": "Quaternius",
+      "attribution": "eagle-flying: Quaternius. CC0 1.0 Universal. Offline Blender conversion; materials changed and skin influences limited to four; Flying action retained.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    },
+    "animationRoles": {
+      "fly": "EagleArmature|EagleArmature|Flying"
+    }
   }
 ];

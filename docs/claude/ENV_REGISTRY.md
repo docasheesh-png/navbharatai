@@ -4795,7 +4795,8 @@ not been independently verified. This note is not runtime authority — Admin/se
 - **`Z_TEST_ACCOUNT_FREE`** (`on` default / `off`) — kill switch for the TEMPORARY owner test-account
   (z@gmail.com) free publish + hosting plan + renewal + domain connect + add-ons + hosting overage + APK
   charge waivers (`src/server/lib/zTestAccount.ts` → `zTestFreeBilling`). Unset/`on` ⇒ free; `off` ⇒ z is
-  charged like everyone else. Does NOT affect the Surplus no-fallback/raw-error debug for z. Remove the
+  charged like everyone else. (2026-11-02: z's Surplus no-fallback, raw-error debug and Router One pin were
+  retired — z routes like any same-tier user; only this billing waiver remains.) Remove the
   whole thing later by deleting `zTestAccount.ts` call sites.
 
 ### 2026-11-01 owner pricing/routing revision
@@ -4809,7 +4810,11 @@ cannot turn the placeholder into verified expense. Hosting subscriptions are sep
 Weak uses Surplus → Router One → GLM → its existing tail. `ROUTER_ONE_API_KEY`
 is still required. `ROUTER_ONE_ENABLED` defaults eligible for Weak when unset;
 explicit `off`/`false`/`0`/`no` preserves the emergency disable. `ROUTER_ONE_PIN`
-no longer overrides Weak, including the test profile; other bands retain the pin.
+is retired (2026-11-02): no profile is pinned on any band.
+
+- **`AGENTV3_EXTERNAL_GAME_ASSETS`** (default off) — L3 assets. `on` ⇒ every user; `admin` ⇒ limited
+  rollout to the owner test uid (z@gmail.com) plus verified uids in `AGENTV3_EXTERNAL_GAME_ASSETS_UIDS`
+  (comma list); anything else ⇒ off.
 No environment values or credentials were changed by this code revision.
 Router One's prospective expense multiplier is 2.5; automatic positive settlement
 remains unavailable without trusted final request/account-bound supplier receipts.

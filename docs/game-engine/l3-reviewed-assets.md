@@ -67,3 +67,42 @@ Quaternius test models were inspected for discovery; their exact model rights/ad
 completed and no models from them were downloaded. Sketchfab remains disabled pending authorized
 commercial download access. Train/station, flying bird, ship, dog/cow/horse/deer are not represented in
 the four-entry catalogue; they retain procedural fallback rather than receiving unrelated models.
+
+## Additional acceptance and final local gate
+
+A separate real-model fixture drill subsequently built with the installed **Vite CLI**, then exercised
+keyboard and on-screen movement, animation, 390×844 layout and reload in three isolated scenes:
+
+| Local fixture | Actual sources | Rendered triangles / draw calls |
+|---|---|---:|
+| Walking human | Downloaded, selected Knight clips | 6,954 / 16 |
+| Driving car | Downloaded sedan plus existing procedural road | 1,234 / 11 |
+| Animals/environment | Downloaded animated Fox plus existing procedural dog/cow/horse/tree | 7,320 / 65 |
+
+These are small controlled fixtures, not completed user games or a racing-game feature test. In the
+animals fixture, only the Fox is a downloaded animal. Screenshots were visually checked. The transient
+programmatic Vite invocation encountered a modulepreload-resolution error; the actual installed Vite
+CLI built the same scene files successfully. The 608.57 kB raw / 157.08 kB gzip fixture JS chunk emitted
+the normal 500 kB warning; the repository's own bundle gate separately passed. Physical-device frame
+rate is not established. Train/station, flying bird and moving ship have no exact reviewed candidates:
+acquisition returned procedural with zero unrelated downloads, but those scenes remain unrendered.
+
+The real selected Knight also passed actual local Firestore inline save/read and separate-process
+restore, plus private Storage-emulator cache write/read, CRC and oversize-read rejection. This does not
+claim real Knight project spill: the selected file fits the inline path. The separate synthetic large
+file drill verifies spill. These additional exploratory harnesses/results are in
+`/workspace/asset-evidence/{scenarios.ts,scenarios.log,scenarios/,real-storage.log,missing-scenarios.log}`.
+
+Environment diagnosis: independent Python system DNS lookups fail for api.github.com,
+api.polyhaven.com, tuf-repo-cdn.sigstore.dev and raw.githubusercontent.com; managed ordinary HTTPS
+requests succeed and the environment supplies HTTP(S) proxy configuration. This points to the local
+direct-DNS path, not an established production downloader defect. No IP pinning, alternate resolver,
+proxy dispatcher or SSRF exception was introduced. Actual automatic downloader remains unverified.
+
+On source commit `80c1e4e0ceadb1aa14d3a6032fa6e02413c4f783`, full coverage completed with exit 0:
+**3,189 files; 48,216 passing tests; 85 existing skips; 980.82 seconds**. Statements 75.54%, branches
+71.47%, functions 78.16%, lines 77.51%; thresholds passed. All other CI-equivalent local gates and all
+four database drills passed. Node 22.23.4/npm 11.18.0 match CI; local Java is Debian OpenJDK 21.0.12.1,
+where CI requests Temurin 21. Signature audit passed (1,375 signatures, 197 attestations). Hosted CI,
+production deployment, actual sandbox VM restart and release activation are not established by these
+local results. No owned local verification process remains running.

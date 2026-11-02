@@ -100228,3 +100228,19 @@ those service obligations separately from the CC0 asset licence when wiring the 
   cloud publication and broad semantic discovery remain incomplete. Feature OFF; no publish/activation.
 - Current final CI-equivalent suite and database drills are being run; prior-run evidence is not reused
   as a current pass. See docs/game-engine/l3-reviewed-assets.md for exact admission and commands.
+
+### 2026-11-02 — terminal verification for reviewed asset source commit 80c1e4e0c
+
+- Full coverage passed: 3,189 files, 48,216 tests, 85 existing skips; 980.82 s. Thresholds passed:
+  statements 75.54%, branches 71.47%, functions 78.16%, lines 77.51%. No assertions/skips weakened.
+- All CI-equivalent non-coverage gates, all four database drills, synthetic persistence/private-storage
+  drills and real Knight inline project/private-cache/fresh-process restore passed. Node/npm match CI;
+  Java is Debian OpenJDK 21 rather than Temurin 21. No local verification process remains owned/running.
+- Separate controlled human/car/animals fixtures passed actual Vite CLI artifact build, movement,
+  animation where applicable, mobile viewport and reload. Animals mix downloaded Fox with existing
+  procedural dog/cow/horse/tree. They do not complete train/station, bird or ship acceptance.
+- System DNS fails independently for all checked allowed hosts while managed HTTPS succeeds. Kept
+  connection-level SSRF protection intact; production downloader remains unverified, not diagnosed as
+  a production code defect. Poly Haven dl.polyhaven.org remains not allowed/not attempted.
+- Feature stays OFF. No production game publication, activation, deployment or merge. The preceding
+  source commit is the full-suite-tested code; this following change only records evidence.

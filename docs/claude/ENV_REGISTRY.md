@@ -4829,3 +4829,10 @@ remains unavailable without trusted final request/account-bound supplier receipt
   separately in the published manifest/ATTRIBUTION.txt. A cached CC0 copy alone does not incur API calls.
 - No rollout to users until actual assets, all six game scenarios, mobile/reload/publish and required
   local/remote CI checks pass. Turning the flag off restores the existing L1/L2 generation path.
+
+### 2026-11-02 — L3 catalogue continuation (still not enabled)
+
+The initial empty catalogue now has four hash-pinned, asset-licensed models, reviewed in
+`docs/game-engine/l3-reviewed-assets.md`. `AGENTV3_EXTERNAL_GAME_ASSETS` remains default OFF and no
+Cloud Run variable changed. Local artifacts and emulator checks do not authorize broad activation;
+secure live-download and full six-scenario/mobile/publication acceptance remain incomplete.

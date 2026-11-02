@@ -4,9 +4,9 @@ import { tryConsumeSurplusPreWriteFailOpen } from './surplusPreWriteFailOpen';
 import { PUBLIC_BUILD_ENGINE_UNAVAILABLE } from '../../lib/buildEngineError';
 
 describe('surplusFallbackDisabledFor', () => {
-  it('matches only z@gmail.com (case/space-insensitive)', () => {
-    expect(surplusFallbackDisabledFor('z@gmail.com')).toBe(true);
-    expect(surplusFallbackDisabledFor(' Z@Gmail.com ')).toBe(true);
+  it('no profile opts out of fallback — z@gmail.com same as others (2026-11-02)', () => {
+    expect(surplusFallbackDisabledFor('z@gmail.com')).toBe(false);
+    expect(surplusFallbackDisabledFor(' Z@Gmail.com ')).toBe(false);
     expect(surplusFallbackDisabledFor('a@gmail.com')).toBe(false);
     expect(surplusFallbackDisabledFor('xz@gmail.com')).toBe(false);
     expect(surplusFallbackDisabledFor(null)).toBe(false);
@@ -26,22 +26,22 @@ describe('surplusFallbackDisabledFor', () => {
 });
 
 describe('surplusRawErrorReporter', () => {
-  it('only z@gmail.com gets raw errors; others undefined', async () => {
+  it('nobody (incl. z@gmail.com) gets raw errors; scrubbed copy for all', async () => {
     const { surplusRawErrorReporter } = await import('./surplusNoFallback');
-    const { tagRawErrorDetail } = await import('../../AgentV3/rawErrorDetail');
     expect(surplusRawErrorReporter('a@b.com', () => {})).toBeUndefined();
-    const out: string[] = [];
-    const r = surplusRawErrorReporter('z@gmail.com', (t) => out.push(t))!;
-    r(tagRawErrorDetail(new Error(PUBLIC_BUILD_ENGINE_UNAVAILABLE), new Error('400 bad param max_tokens')));
-    expect(out[0]).toContain('400 bad param max_tokens');
+    expect(surplusRawErrorReporter('z@gmail.com', () => {})).toBeUndefined();
+    expect(surplusRawErrorReporter(null, () => {}, 'GiYNmFcDMVYSWW48Nrurm7j41gv1')).toBeUndefined();
   });
 });
 
 describe('surplusFallbackDisabledFor uid match (2026-10-29 stale_or_missing_snapshot fallback leak)', () => {
-  it('matches the owner debug uid even when the token has no email claim', async () => {
-    const { surplusFallbackDisabledFor } = await import('./surplusNoFallback');
-    expect(surplusFallbackDisabledFor(null, 'GiYNmFcDMVYSWW48Nrurm7j41gv1')).toBe(true);
+  it('z uid routes normally on every tier, same as other users', async () => {
+    const { surplusFallbackDisabledFor, surplusFallbackDisabledForTier } = await import('./surplusNoFallback');
+    expect(surplusFallbackDisabledFor(null, 'GiYNmFcDMVYSWW48Nrurm7j41gv1')).toBe(false);
     expect(surplusFallbackDisabledFor(null, 'someone-else')).toBe(false);
-    expect(surplusFallbackDisabledFor(' Z@gmail.com ')).toBe(true);
+    for (const tier of ['weak', 'normal', 'strong', 'surplus']) {
+      expect(surplusFallbackDisabledForTier(tier, 'z@gmail.com', 'GiYNmFcDMVYSWW48Nrurm7j41gv1'))
+        .toBe(surplusFallbackDisabledForTier(tier, 'a@b.com', 'someone-else'));
+    }
   });
 });

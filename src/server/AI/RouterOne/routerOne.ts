@@ -11,11 +11,10 @@
  *   ROUTER_ONE_ENABLED   Weak defaults eligible with key; explicit off disables (other-band pin is separate)
  *   ROUTER_ONE_MODEL     comma list of Router One model ids, tried in order (all Router One)
  *   ROUTER_ONE_BASE_URL  default https://api.router.one/v1
- *   ROUTER_ONE_PIN       off ⇒ z@gmail.com goes back to the old Surplus-only path
+ *   ROUTER_ONE_PIN       retired 2026-11-02 — no profile is pinned (z@gmail.com routes normally)
  *
  * Brand: the provider label is the neutral "ENGINE_R1"; nothing here reaches end-user copy.
  */
-import { isZTestAccount } from '../../lib/zTestAccount';
 import { resolveRouterOneModels } from './routerOneCatalog';
 
 export const ROUTER_ONE_LABEL = 'ENGINE_R1';
@@ -40,10 +39,9 @@ export function routerOneModels(env: NodeJS.ProcessEnv = process.env): string[] 
 export function routerOnePublicFallbackEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return on(env.ROUTER_ONE_ENABLED) && routerOneApiKey(env) !== '';
 }
-/** z@gmail.com pin: Router One ONLY, no fallback. Independent of ROUTER_ONE_ENABLED. */
-export function routerOnePinnedFor(email?: string | null, uid?: string | null, env: NodeJS.ProcessEnv = process.env): boolean {
-  if (off(env.ROUTER_ONE_PIN)) return false;
-  return isZTestAccount(email, uid);
+/** Profile pin retired 2026-11-02: z@gmail.com routes like any user of the same tier. */
+export function routerOnePinnedFor(_email?: string | null, _uid?: string | null, _env: NodeJS.ProcessEnv = process.env): boolean {
+  return false;
 }
 
 export const ROUTER_ONE_NOT_CONFIGURED = 'Router One pin: ROUTER_ONE_API_KEY is not set on this server (no fallback for this profile).';

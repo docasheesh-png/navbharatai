@@ -44,6 +44,7 @@ import { startMeta, mountMetaToasts, combo } from './core/meta';
 import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
+import { groundScene } from './three/surfaces';
 import { CameraRig, type CameraKind } from './three/camera';
 import { watchVehicles, isVehicle } from './three/objects';
 import { CharacterController } from './play/character';
@@ -412,6 +413,9 @@ export class Game {
       }
       // The shell listens while the game runs, so a vehicle it drives is known without being declared.
       this.asGame(() => this.options.update?.(this.context, delta));
+      // 🔒 NOTHING SINKS: every top-level object (car, NPC, animal, prop, train) is kept on the terrain
+      // after the game moved it — the kit enforces it, so no generated game can forget it (2026-11-02).
+      groundScene(this.scene);
       this.syncTouchLayout();   // back to the joystick if the car has left the scene
       this.particles.update(delta);
     }

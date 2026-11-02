@@ -19,20 +19,25 @@ function database(workspaces: Record<string, { report?: unknown; history: Record
     const history = () => ({ ...query(Object.entries(d?.history ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => snap(k, { report: v, reportNumber: numbers[`${id}/${k}`] }))), doc: (k: string) => ({ get: async () => snap(k, d?.history[k] === undefined ? undefined : { report: d.history[k] }) }) });
     return { collection: history, get: async () => snap(id, d ? { report: d.report } : undefined) };
   };
-  return { runTransaction: async (fn: (tx: any) => unknown) => fn({ get: (q: any) => q.get() }), collection: () => ({ ...query(Object.keys(workspaces).sort().map((id) => snap(id, { report: workspaces[id].report }, parent(id)))), doc: parent }) };
+  // The build report registry: `numbers` maps 'workspace/startedAt' to the report's permanent number.
+  const registry = { doc: (key: string) => ({ get: async () => {
+    const i = key.lastIndexOf('~'); const n = numbers[`${key.slice(0, i)}/${key.slice(i + 1)}`];
+    return snap(key, n === undefined ? undefined : { number: n });
+  } }) };
+  const counter = { doc: () => ({ get: async () => snap('counter', { state: 'ready', nextNumber: Math.max(0, ...Object.values(numbers)) + 1 }) }) };
+  return { runTransaction: async (fn: (tx: any) => unknown) => fn({ get: (q: any) => q.get() }), collection: (name: string) => name === 'build_report_numbers' ? registry : name === 'admin_build_report_counter' ? counter : ({ ...query(Object.keys(workspaces).sort().map((id) => snap(id, { report: workspaces[id].report }, parent(id)))), doc: parent }) };
 }
 beforeEach(() => { state.db = null; });
 describe('private retained failed history', () => {
-  it('projects complete chronological ranks on paginated legacy records while preserving distinct allocation IDs', async () => {
-    state.db = database({ a: { history: { '200': fail(200) } }, z: { history: { '100': fail(100) } }, x: { history: { '150': fail(150) } } }, { 'z/100': 7, 'a/200': 3 });
+  it('every page carries the permanent registry number, whatever the page order; an unnumbered report says so', async () => {
+    state.db = database({ a: { history: { '200': fail(200) } }, z: { history: { '100': fail(100) } }, x: { history: { '150': fail(150) } } }, { 'z/100': 7, 'a/200': 9 });
     const first = await readFailedBuildPage(undefined, 1);
-    expect(first.reports[0]).toMatchObject({ workspaceId: 'a', permanentReportId: 3, numbering: { ordinal: 3, total: 3 } });
+    expect(first.reports[0]).toMatchObject({ workspaceId: 'a', permanentReportId: 9, numbering: { ordinal: 9, total: 9 } });
     const next = await readFailedBuildPage(first.nextCursor, 1);
-    expect(next.reports[0]).toMatchObject({ workspaceId: 'x', numbering: { ordinal: 2, total: 3 } });
+    expect(next.reports[0]).toMatchObject({ workspaceId: 'x', numbering: { ordinal: null, reason: 'not_numbered' } });
     expect(next.reports[0].permanentReportId).toBeUndefined();
     const last = await readFailedBuildPage(next.nextCursor, 1);
-    expect(last.reports[0]).toMatchObject({ workspaceId: 'z', permanentReportId: 7, numbering: { ordinal: 1, total: 3 } });
-    expect(first.reports[0].numbering?.asOf).toBe(last.reports[0].numbering?.asOf);
+    expect(last.reports[0]).toMatchObject({ workspaceId: 'z', permanentReportId: 7, numbering: { ordinal: 7, total: 9 } });
   });
   it('reads a failure even after the same workspace succeeds, and never duplicates latest', async () => {
     state.db = database({ app: { report: { ...fail(200), ok: true }, history: { '100': fail(100), '200': { ...fail(200), ok: true } } } });

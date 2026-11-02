@@ -102,18 +102,6 @@ export function registerFailedReportRoutes(app: Express): void {
       failure(res, err);
     }
   });
-  // Every build report, by permanent number, with outcome filter and newest/oldest order.
-  app.get('/api/failedbr/all-reports', readGate, async (req, res) => {
-    try { res.json(await readBuildReportList({ cursor: req.query.cursor, limit: req.query.limit, outcome: req.query.outcome, order: req.query.order })); }
-    catch (err) { failure(res, err); }
-  });
-  app.get('/api/failedbr/all-reports/:workspaceId/:historyId', readGate, async (req, res) => {
-    try {
-      const evidence = await readBuildReportWithDigest(routeParam(req.params.workspaceId), routeParam(req.params.historyId));
-      if (!evidence) { res.status(404).json({ error: 'No retained build report at this reference.' }); return; }
-      res.json(evidence);
-    } catch (err) { failure(res, err); }
-  });
   app.get('/api/failedbr/reports', readGate, async (req, res) => {
     try { res.json(await withFailedReportAutopsies(await readFailedBuildPage(req.query.cursor, req.query.limit))); }
     catch (err) { failure(res, err); }

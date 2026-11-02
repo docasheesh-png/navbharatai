@@ -108,7 +108,7 @@ describe('private report HTTP boundary', () => {
 
 describe('every build report, with outcome filter and sort (list_build_reports / get_build_report)', () => {
   const call = (body: unknown, headers: Record<string, string> = bearer) => request('/api/v1/failedbr/mcp', { method: 'POST', headers, body });
-  it('passes the outcome filter, the order and the cursor through MCP and REST, behind the same read gate', async () => {
+  it('passes the outcome filter and the order through MCP, behind the same read gate', async () => {
     const tools = (await call(rpc('tools/list'))).body.result.tools;
     const list = tools.find((t: any) => t.name === 'list_build_reports');
     expect(list.inputSchema.properties.outcome.enum).toEqual(['all', 'failed', 'succeeded', 'stopped', 'unfinished']);
@@ -116,21 +116,15 @@ describe('every build report, with outcome filter and sort (list_build_reports /
     expect(list.annotations).toMatchObject({ readOnlyHint: true });
     await call(rpc('tools/call', { name: 'list_build_reports', arguments: { outcome: 'succeeded', order: 'oldest', limit: 5 } }));
     expect(mocked.allList).toHaveBeenLastCalledWith({ outcome: 'succeeded', order: 'oldest', limit: 5 });
-    expect((await request('/api/v1/failedbr/all-reports?outcome=stopped&order=newest&cursor=c', { headers: bearer })).status).toBe(200);
-    expect(mocked.allList).toHaveBeenLastCalledWith({ outcome: 'stopped', order: 'newest', cursor: 'c', limit: undefined });
-    mocked.allList.mockClear();
-    expect((await request('/api/v1/failedbr/all-reports')).status).toBe(401);
     expect((await request('/api/v1/failedbr/mcp', { method: 'POST', body: rpc('tools/call', { name: 'list_build_reports' }) })).status).toBe(401);
   });
-  it('an invalid filter is a 400 / -32602, never an empty list', async () => {
+  it('an invalid filter is -32602, never an empty list', async () => {
     const { FailedReportsInputError } = await import('../src/server/lib/failedBuildReports');
     mocked.allList.mockRejectedValue(new FailedReportsInputError('outcome must be one of: all, failed.'));
-    expect((await request('/api/v1/failedbr/all-reports?outcome=bogus', { headers: bearer })).status).toBe(400);
     expect((await call(rpc('tools/call', { name: 'list_build_reports', arguments: { outcome: 'bogus' } }))).body.error.code).toBe(-32602);
   });
   it('reads one report of any outcome with its number, or says it is not retained', async () => {
     expect((await call(rpc('tools/call', { name: 'get_build_report', arguments: { workspaceId: 'app', historyId: '100' } }))).body.result.isError).toBe(true);
-    expect((await request('/api/v1/failedbr/all-reports/app/100', { headers: bearer })).status).toBe(404);
     mocked.allDetail.mockResolvedValue({ report: { ok: true, startedAt: 100 }, reportDigest: 'd'.repeat(64), number: 7, outcome: 'succeeded' });
     const text = JSON.parse((await call(rpc('tools/call', { name: 'get_build_report', arguments: { workspaceId: 'app', historyId: '100' } }))).body.result.content[0].text);
     expect(text).toEqual({ ok: true, startedAt: 100, reportNumber: 7, outcome: 'succeeded', reportDigest: 'd'.repeat(64) });

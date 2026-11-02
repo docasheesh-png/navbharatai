@@ -18,3 +18,24 @@ describe('conservative semantic requirements', () => {
     expect(gameAssetRequirements('flying eagle bird', REVIEWED_GAME_ASSETS)).toEqual([{ subject: 'eagle', animation: 'fly' }]);
   });
 });
+
+it('matches Hindi subjects and motions without broadening a species', () => {
+  expect(gameAssetRequirements('चलता इंसान और दौड़ती लोमड़ी', [])).toEqual([{ subject: 'human', animation: 'walk' }, { subject: 'fox', animation: 'run' }]);
+  expect(gameAssetRequirements('उड़ता तोता और ट्रेन स्टेशन', [])).toEqual([{ subject: 'railway station' }, { subject: 'parrot', animation: 'fly' }]);
+  expect(gameAssetRequirements('ट्रेन और रेलवे स्टेशन', [])).toEqual([{ subject: 'train' }, { subject: 'railway station' }]);
+});
+it('matches bounded Spanish vocabulary and rejects negated clauses conservatively', () => {
+  expect(gameAssetRequirements('persona caminando y zorro corriendo', [])).toEqual([{ subject: 'human', animation: 'walk' }, { subject: 'fox', animation: 'run' }]);
+  expect(gameAssetRequirements('car and no dog and बिना गाय और पेड़', [])).toEqual([{ subject: 'car' }, { subject: 'tree' }]);
+  expect(gameAssetRequirements('sin pájaro y barco', [])).toEqual([{ subject: 'ship' }]);
+  expect(gameAssetRequirements('horse racing character', [])).toEqual([{ subject: 'horse' }]);
+});
+it('keeps separate generic bird requirements and bounds work/output', () => {
+  expect(gameAssetRequirements('flying bird and parrot', [])).toEqual([{ subject: 'bird', animation: 'fly' }, { subject: 'parrot' }]);
+  expect(gameAssetRequirements('car '.repeat(10000)+'fox', [])).toEqual([{ subject: 'car' }]);
+  expect(gameAssetRequirements('car train bird ship human dog cow horse', [])).toHaveLength(6);
+});
+
+it('falls back for unsupported specialized objects and non-object senses rather than broadening them', () => {
+  for (const prompt of ['table tennis', 'a coffee table', 'office chair', 'rock music', 'decision tree', 'formula 1 car']) expect(gameAssetRequirements(prompt, [])).toEqual([]);
+});

@@ -1,3 +1,5 @@
+import { createPolyHavenDiscovery, withDiscoveredAssetCache, isDiscoveredAsset } from './polyHavenDiscovery';
+import { downloadGameAsset } from './assetDownload';
 import { acquireGameAsset, type AssetEngineDependencies, type AssetOutcome } from './assetEngine';
 import { createAssetProviders, REVIEWED_GAME_ASSETS, type ReviewedAsset } from './providers';
 import { createDurableAssetCache } from './assetCache';
@@ -9,6 +11,8 @@ import { proveAssetInSandbox } from './assetBrowserProof';
 import { saveWorkspaceAssets, readWorkspaceAssetBytes } from '../WorkspaceAssetStore';
 import { mergeWorkspaceFiles } from '../WorkspaceFileStore';
 import { generateGameAssetRuntime } from '../../lib/Game3DGenerator';
+
+const discover = createPolyHavenDiscovery(polyHavenTransport, (url, signal) => downloadGameAsset({ downloadUrl: url }, new Set(['https://dl.polyhaven.org']), signal));
 
 export interface GameAssetSeedResult {
   files: Record<string, string>;
@@ -34,8 +38,8 @@ export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<
   const out: GameAssetSeedResult = { files: {}, handoff: '', outcomes: [], status: 'off' };
   if (!externalGameAssetsEnabled(options.env)) return out;
   const catalogue = options.catalogue ?? REVIEWED_GAME_ASSETS;
-  if (!catalogue.length) return { ...out, status: 'empty-catalogue' };
   const requirements = gameAssetRequirements(options.prompt, catalogue);
+  if (!requirements.length) return { ...out, status: 'procedural' };
   const persistence: GameAssetPersistence = options.persistence ?? {
     saveBinary: (id, assets) => saveWorkspaceAssets(id, assets, options.verifiedOwnerUid),
     readBinary: readWorkspaceAssetBytes,
@@ -44,8 +48,10 @@ export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<
       if (result.status !== 'saved') throw new Error('Model manifest persistence not acknowledged');
     },
   };
+  const store = options.dependencies ? undefined : gameAssetObjectStore();
   const dependencies: AssetEngineDependencies = options.dependencies ?? {
-    cache: createDurableAssetCache(gameAssetObjectStore(), catalogue),
+    cache: withDiscoveredAssetCache(createDurableAssetCache(store!, catalogue), store!),
+    discover,
     providers: createAssetProviders(catalogue, polyHavenTransport),
     download(candidate, signal) {
       const approved = catalogue.find(c => c.sha256 === candidate.sha256 && c.provider === candidate.provider && c.id === candidate.id && c.revision === candidate.revision);
@@ -67,7 +73,7 @@ export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<
   const local = Object.fromEntries(ready.map(r => {
     const c = r.outcome.entry.candidate;
     const role = requirements.find(req => req.subject === r.subject)?.animation;
-    const reviewed = catalogue.find(a => a.sha256 === c.sha256 && a.provider === c.provider && a.id === c.id && a.revision === c.revision);
+    const reviewed = isDiscoveredAsset(c) ? c : catalogue.find(a => a.sha256 === c.sha256 && a.provider === c.provider && a.id === c.id && a.revision === c.revision);
     return [r.subject, { sha256: c.sha256, height: c.height, yaw: c.yaw,
       ...(role ? { animation: c.animationRoles?.[role] ?? role } : {}),
       ...(reviewed?.serviceCredit ? { serviceCredit: reviewed.serviceCredit } : {}),
@@ -75,8 +81,8 @@ export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<
   }));
   const credits = ready.map(r => {
     const c = r.outcome.entry.candidate;
-    const reviewed = catalogue.find(a => a.sha256 === c.sha256 && a.provider === c.provider && a.id === c.id && a.revision === c.revision);
-    return `${r.subject}: ${c.license.author} — ${c.license.spdx}\n${c.license.attribution}\nSource: ${c.sourceUrl}\nLicense evidence: ${c.license.evidenceUrl}\nRevision: ${c.revision}\nChanges: ${reviewed?.optimization === 'animation-selection-v1' ? 'retained clips ' + reviewed.retainedAnimations?.join(', ') + '; removed other clips and unused data (animation-selection-v1); ' : reviewed?.optimization === 'compact-v1' ? 'lossless GLB buffer compaction (compact-v1); ' : ''}glTF packaging when applicable; runtime scale, grounding and curated orientation normalization.\nSHA-256: ${c.sha256}${reviewed?.sourceSha256 ? '\nSource SHA-256: ' + reviewed.sourceSha256 : ''}`;
+    const reviewed = isDiscoveredAsset(c) ? c : catalogue.find(a => a.sha256 === c.sha256 && a.provider === c.provider && a.id === c.id && a.revision === c.revision);
+    return `${r.subject}: ${c.license.author} — ${c.license.spdx}\n${c.license.attribution}\nSource: ${c.sourceUrl}\nLicense evidence: ${c.license.evidenceUrl}\nRevision: ${c.revision}\nChanges: ${reviewed?.optimization === 'animation-selection-v1' ? 'retained clips ' + reviewed.retainedAnimations?.join(', ') + '; removed other clips and unused data (animation-selection-v1); ' : reviewed?.optimization === 'compact-v1' ? 'lossless GLB buffer compaction (compact-v1); ' : ''}glTF packaging when applicable; runtime scale, grounding, curated orientation normalization and eligible bounded static LOD generation.\nSHA-256: ${c.sha256}${reviewed?.sourceSha256 ? '\nSource SHA-256: ' + reviewed.sourceSha256 : ''}`;
   }).join('\n\n');
   const files = {
     'public/game-assets/manifest.json': JSON.stringify(manifest, null, 2),

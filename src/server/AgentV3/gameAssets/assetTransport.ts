@@ -53,7 +53,9 @@ export async function downloadReviewedAsset(candidate: ReviewedAsset, signal: Ab
 export const polyHavenTransport: ProviderJsonTransport = {
   async get(url, signal) {
     const parsed = new URL(url);
-    if (parsed.origin !== 'https://api.polyhaven.com' || !/^\/(info|files)\/[a-z0-9_]+$/.test(parsed.pathname) || parsed.search || parsed.username || parsed.password || parsed.hash) throw new Error('Unapproved metadata endpoint');
+    const infoPath = /^\/(info|files)\/[a-z0-9_]+$/.test(parsed.pathname) && !parsed.search;
+    const searchPath = parsed.pathname === '/search' && /^\?q=(table|chair|bench|rock|tree|plant)&t=models$/.test(parsed.search);
+    if (parsed.origin !== 'https://api.polyhaven.com' || !(infoPath || searchPath) || parsed.username || parsed.password || parsed.hash) throw new Error('Unapproved metadata endpoint');
     const permit = assetProviderPermit(parsed.origin, signal);
     if (permit) await permit;
     const r = await fetch(url, publicOnlyInit({ redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),

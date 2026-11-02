@@ -1,13 +1,20 @@
+import { gameAssetLodSource } from './GameAssetLodGenerator';
+import { gameAssetTextureVerifier } from './GameAssetTextureVerifier';
 /** Optional L3 runtime. Kept separate from the L1/L2 kit until build-time acquisition is enabled. */
 export function generateGameAssetRuntime(): string {
   return `import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
+${gameAssetLodSource()}
 
+${gameAssetTextureVerifier(true)}
 export interface LocalGameAsset {
   sha256: string;
   height: number;
   yaw: number;
   animation?: string;
+  /** Disable bounded static mesh LOD generation when exact geometry at all distances is required. */
+  lod?: boolean;
   serviceCredit?: string;
   attributionCredit?: string;
 }
@@ -61,13 +68,16 @@ export async function loadGameAsset(
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
     if (Array.from(digest, n => n.toString(16).padStart(2, '0')).join('') !== asset.sha256) throw Error('Model integrity mismatch');
     // Server policy accepts self-contained GLBs only. Block every URI even if storage is corrupted.
+    await verifyGameAssetTextures(bytes);
     const manager = new THREE.LoadingManager();
+    let textureFailed = false; manager.onError = () => { textureFailed = true; };
     manager.setURLModifier(url => {
       if (url.startsWith('blob:' + location.origin + '/')) return url;
       throw Error('External model reference refused');
     });
     const gltf = await new GLTFLoader(manager).parseAsync(bytes.buffer, '');
     loaded = gltf.scene;
+    if (textureFailed) throw Error('Texture load failed');
     signal?.throwIfAborted();
     const clip = asset.animation ? gltf.animations.find(a => a.name === asset.animation) : undefined;
     if (asset.animation && !clip) throw Error('Required animation unavailable');
@@ -82,6 +92,7 @@ export async function loadGameAsset(
     pivot.position.set(-(bounds.min.x + bounds.max.x) * scale / 2, -bounds.min.y * scale, -(bounds.min.z + bounds.max.z) * scale / 2);
     root.add(pivot);
     visual.traverse(o => { if (o instanceof THREE.Mesh) { o.castShadow = true; o.receiveShadow = true; } });
+    if (asset.lod !== false) addStaticGameAssetLods(visual, asset.height, gltf.animations.length > 0);
     const mixer = clip ? new THREE.AnimationMixer(visual) : undefined;
     if (mixer && clip) mixer.clipAction(clip).play();
     const creditText = [asset.serviceCredit, asset.attributionCredit].filter(Boolean).join(' · ');

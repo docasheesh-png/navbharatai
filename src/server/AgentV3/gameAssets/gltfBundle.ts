@@ -6,7 +6,7 @@ export function safeGltfResourcePath(path: string): boolean {
     && path.split('/').every(part => part !== '' && part !== '.' && part !== '..');
 }
 
-/** Deterministic, bounded glTF+BIN+PNG → self-contained GLB. No native code or archive extraction. */
+/** Deterministic, bounded glTF+BIN+PNG/JPEG → self-contained GLB. No native code or archive extraction. */
 export function bundleGltf(json: Uint8Array, resources: ReadonlyMap<string, Uint8Array>): Uint8Array {
   if (json.byteLength > 1024 * 1024 || resources.size > 16) throw new Error('glTF resource budget');
   let total = json.byteLength;
@@ -46,7 +46,10 @@ export function bundleGltf(json: Uint8Array, resources: ReadonlyMap<string, Uint
     if (image.uri !== undefined) {
       if (image.bufferView !== undefined) throw new Error('Ambiguous image source');
       const bytes = resource(image.uri);
-      image.mimeType = 'image/png'; // The final validator verifies actual PNG magic/dimensions, not this label.
+      const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+      const mime = jpeg ? 'image/jpeg' : 'image/png';
+      if (image.mimeType !== undefined && image.mimeType !== mime) throw new Error('Image MIME mismatch');
+      image.mimeType = mime; // Final policy checks dimensions/markers; browser admission must decode every image.
       image.bufferView = views.length; views.push({buffer:0,byteOffset:append(bytes),byteLength:bytes.byteLength});
       delete image.uri;
     }

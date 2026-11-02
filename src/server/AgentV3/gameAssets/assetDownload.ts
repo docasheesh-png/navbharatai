@@ -13,7 +13,7 @@ export function assetDownloadUrl(raw: string, allowedOrigins: ReadonlySet<string
 
 /** Stream bounded bytes; reject redirects, archives, encoded HTTP bodies and unbounded downloads. */
 export async function downloadGameAsset(
-  candidate: AssetCandidate,
+  candidate: Pick<AssetCandidate, 'downloadUrl'>,
   allowedOrigins: ReadonlySet<string>,
   signal: AbortSignal,
 ): Promise<Uint8Array> {

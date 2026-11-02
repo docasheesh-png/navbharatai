@@ -22,6 +22,8 @@ export interface AssetCache {
 export interface AssetEngineDependencies {
   providers: readonly AssetProvider[];
   cache: AssetCache;
+  /** Exact on-demand provider admission; invoked only after cache and reviewed catalogue misses. */
+  discover?(requirement: AssetRequirement, signal: AbortSignal): Promise<{ candidate: AssetCandidate; bytes: Uint8Array } | null>;
   download(candidate: AssetCandidate, signal: AbortSignal): Promise<Uint8Array>;
   /** Must load the model using the supported runtime and reject invalid scenes/animations. */
   parse(bytes: Uint8Array, requirement: AssetRequirement): Promise<void>;
@@ -86,6 +88,17 @@ export async function acquireGameAsset(
         } catch { /* Next exact subject candidate, never an unrelated substitute. */ }
       }
     } catch { /* Provider isolation: a failed source does not break the game. */ }
+  }
+  if (!signal.aborted && deps.discover) {
+    try {
+      const discovered = await deps.discover(requirement, signal);
+      if (discovered) {
+        const entry = await inspect(discovered.candidate, discovered.bytes);
+        await deps.persist(entry, discovered.bytes);
+        try { await deps.cache.put(entry, discovered.bytes); } catch { /* Project acknowledgement remains mandatory. */ }
+        return { kind: 'model', entry, cacheHit: false, downloadedBytes: discovered.bytes.byteLength };
+      }
+    } catch { /* Discovery has the same fail-closed procedural fallback as curated sources. */ }
   }
   return { kind: 'procedural', reason: signal.aborted ? 'cancelled' : 'no verified compatible model' };
 }

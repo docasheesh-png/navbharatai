@@ -9,7 +9,7 @@ export function syntheticGlb(animated = true, textured = false): Buffer {
     0,0,-.5, -.5,0,.5, 0,1,0,
     -.5,0,.5, 0,0,-.5, .5,0,.5,
   ];
-  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDTsAAAAASUVORK5CYII=', 'base64');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==', 'base64');
   const bin = Buffer.alloc(textured ? 272 + Math.ceil(png.length / 4) * 4 : 176);
   positions.forEach((n, i) => bin.writeFloatLE(n, i * 4));
   bin.writeFloatLE(0, 144); bin.writeFloatLE(1, 148);

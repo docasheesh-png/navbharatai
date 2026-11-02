@@ -4,13 +4,15 @@ import type { AssetObjectStore } from './assetCache';
 
 /** Reuse the existing private bucket; no public ACL, new bucket, credential or infrastructure mutation. */
 export function gameAssetObjectStore(): AssetObjectStore {
+  const index = (key: string) => /^game-assets-public-cc\/discovered\/v1\/(table|chair|bench|rock|tree|plant)\.json$/.test(key);
   const file = (key: string) => {
     const bucket = workspaceAssetBucketName();
-    if (!bucket || !/^game-assets-public-cc\/v1\/[a-f0-9]{64}\.glb$/.test(key)) throw new Error('Asset cache storage unavailable');
+    if (!bucket || !(/^game-assets-public-cc\/v1\/[a-f0-9]{64}\.glb$/.test(key) || index(key))) throw new Error('Asset cache storage unavailable');
     return admin.storage().bucket(bucket).file(key);
   };
   return {
     async read(key, maxBytes) {
+      maxBytes = Math.min(maxBytes, index(key) ? 65536 : 5 * 1024 * 1024);
       const stream = file(key).createReadStream({ validation: 'crc32c' });
       const timer = setTimeout(() => stream.destroy(new Error('Asset cache read timed out')), 10_000);
       timer.unref();
@@ -28,9 +30,10 @@ export function gameAssetObjectStore(): AssetObjectStore {
       } finally { clearTimeout(timer); stream.destroy(); }
     },
     async write(key, bytes, contentType) {
-      // Immutable content address: concurrent workers may write identical bytes, never project data.
+      if (bytes.length > (index(key) ? 65536 : 5 * 1024 * 1024) || contentType !== (index(key) ? 'application/json' : 'model/gltf-binary')) throw new Error('Asset cache write budget/type');
+      // Content-addressed models are immutable; the six private discovery pointers are replaceable.
       await file(key).save(Buffer.from(bytes), { resumable: false, validation: 'crc32c', contentType, timeout: 10_000,
-        metadata: { cacheControl: 'private, max-age=31536000, immutable' } });
+        metadata: { cacheControl: index(key) ? 'private, no-store' : 'private, max-age=31536000, immutable' } });
     },
   };
 }

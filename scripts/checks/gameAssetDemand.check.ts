@@ -1,0 +1,41 @@
+/** Synthetic provider responses through the real build/cache/browser pipeline. Never calls a provider. */
+import assert from 'node:assert/strict';
+import { mkdir, readFile, writeFile, stat, symlink } from 'node:fs/promises';
+import { resolve, join, dirname } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { createServer } from 'node:http';
+import { paddedSyntheticGlb } from '../../tests/fixtures/gameAssetFixtures';
+import { prepareGameAssets } from '../../src/server/AgentV3/gameAssets/assetSeed';
+import { createPolyHavenDiscovery, withDiscoveredAssetCache } from '../../src/server/AgentV3/gameAssets/polyHavenDiscovery';
+import { createDurableAssetCache } from '../../src/server/AgentV3/gameAssets/assetCache';
+import { persistProjectAsset } from '../../src/server/AgentV3/gameAssets/assetProject';
+import { assetBrowserProofModule } from '../../src/server/AgentV3/gameAssets/assetBrowserProof';
+async function main(){
+ const [output,playwrightPath,chromiumPath,mode]=process.argv.slice(2);assert.ok(output&&playwrightPath&&chromiumPath);
+ const root=resolve(output),fixture=join(root,'fixture');await mkdir(fixture,{recursive:true});try{await symlink(resolve('node_modules'),join(fixture,'node_modules'));}catch(e:any){if(e.code!=='EEXIST')throw e;}
+ const write=async(p:string,b:string|Uint8Array)=>{await mkdir(dirname(p),{recursive:true});await writeFile(p,b)};
+ const store={async read(key:string,max:number){try{const p=join(root,'cache',key);assert.ok((await stat(p)).size<=max);return await readFile(p);}catch{return null;}},async write(key:string,b:Uint8Array){await write(join(root,'cache',key),b)}};
+ const b=Buffer.from(paddedSyntheticGlb()),n=b.readUInt32LE(12),doc=JSON.parse(b.subarray(20,20+n).toString()),bin=b.subarray(28+n);doc.buffers[0].uri='model.bin';doc.animations=[];const source=Buffer.from(JSON.stringify(doc));
+ const prefix='https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/synthetic_table/';
+ const leaf=(name:string,bytes:Buffer)=>({url:prefix+name,size:bytes.length,md5:createHash('md5').update(bytes).digest('hex')});
+ const info={type:2,name:'Synthetic Table',categories:['table'],authors:{'Original synthetic fixture':'All'},date_published:1,polycount:4,files_hash:'1'.repeat(40)};
+ let calls=0,downloads=0;
+ const discover=createPolyHavenDiscovery({async get(url){assert.notEqual(mode,'cache-probe');calls++;return url.includes('/search?')?{results:[{slug:'synthetic_table'}]}:url.includes('/info/')?info:{gltf:{'1k':{gltf:{...leaf('synthetic_table.gltf',source),include:{'model.bin':leaf('model.bin',bin)}}}}};}},async url=>{assert.notEqual(mode,'cache-probe');downloads++;return url.endsWith('.gltf')?source:bin;});
+ const workspace={async writeFile(_id:string,p:string,s:string){await write(join(fixture,p),s)},async writeBinaryFile(_id:string,p:string,s:string){await write(join(fixture,p),Buffer.from(s,'base64'))},async runCommand(){throw Error('Unexpected sandbox command')}};
+ const persistence={async saveBinary(_id:string,assets:Record<string,string>){for(const[p,s]of Object.entries(assets))await write(join(root,'durable',p),Buffer.from(s.slice(s.indexOf(',')+1),'base64'))},async readBinary(_id:string,p:string,max:number){const b=await readFile(join(root,'durable',p));assert.ok(b.length<=max);return b},async saveText(_id:string,files:Record<string,string>){for(const[p,s]of Object.entries(files))await write(join(root,'durable',p),s)}};
+ const result=await prepareGameAssets({prompt:'मेज बनाओ',workspaceId:'synthetic-demand',workspace,persistence,catalogue:[],env:{AGENTV3_EXTERNAL_GAME_ASSETS:'on'},signal:new AbortController().signal,dependencies:{cache:withDiscoveredAssetCache(createDurableAssetCache(store,[]),store),providers:[],discover,download:async()=>{throw Error('Unexpected curated download')},persist:persistProjectAsset(workspace,'synthetic-demand',persistence),async parse(bytes){const hash=createHash('sha256').update(bytes).digest('hex');await write(join(fixture,`.nbai-asset-${hash}.glb`),bytes);await write(join(fixture,'proof.mjs'),assetBrowserProofModule(hash,undefined,`import { chromium } from ${JSON.stringify(pathToFileURL(resolve(playwrightPath)).href)};`,resolve(chromiumPath)));assert.match(execFileSync(process.execPath,['proof.mjs'],{cwd:fixture,encoding:'utf8',timeout:30000}),/"rendered":true/);}}});
+ assert.equal(result.status,'prepared');assert.equal(result.outcomes.length,1);const outcome=result.outcomes[0].outcome;assert.equal(outcome.kind,'model');if(outcome.kind!=='model')throw Error('not model');
+ if(mode==='cache-probe'){assert.equal(calls,0);assert.equal(downloads,0);assert.equal(outcome.cacheHit,true);console.log('PASS fresh process: no provider metadata or binary calls, revalidated rendered cache bytes, durable project restore');return;}
+ assert.equal(calls,4);assert.equal(downloads,2);assert.equal(outcome.cacheHit,false);
+ execFileSync(process.execPath,['--import',resolve('node_modules/tsx/dist/loader.mjs'),resolve('scripts/checks/gameAssetDemand.check.ts'),root,resolve(playwrightPath),resolve(chromiumPath),'cache-probe'],{stdio:'inherit',timeout:45000});
+ await write(join(fixture,'index.html'),'<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0}</style></head><body><script type="module" src="/main.ts"></script></body></html>');
+ await write(join(fixture,'main.ts'),`import * as THREE from 'three';import {loadRequestedAsset}from './src/game/three/assetModels';const h=await loadRequestedAsset('table',()=>{throw Error('Unexpected fallback')});const scene=new THREE.Scene();scene.add(h.root,new THREE.HemisphereLight(0xffffff,0x777777,3));const c=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,.01,100);c.position.set(2,2,4);c.lookAt(0,.4,0);const renderer=new THREE.WebGLRenderer();renderer.setSize(innerWidth,innerHeight);document.body.appendChild(renderer.domElement);renderer.render(scene,c);window.__demand={source:h.source,triangles:renderer.info.render.triangles};`);
+ execFileSync(process.execPath,[resolve('node_modules/vite/bin/vite.js'),'build','--base=/published/','--target=es2022'],{cwd:fixture,stdio:'inherit',timeout:60000});
+ const server=createServer(async(req,res)=>{try{const p=new URL(req.url??'/','http://localhost').pathname;assert.ok(p.startsWith('/published/'));const file=p.slice(11)||'index.html';res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.html')?'text/html':'application/octet-stream');res.end(await readFile(join(fixture,'dist',file)))}catch{res.statusCode=404;res.end()}});await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
+ const origin='http://127.0.0.1:'+(server.address()as any).port,{chromium}=await import(pathToFileURL(resolve(playwrightPath)).href);const browser=await chromium.launch({executablePath:resolve(chromiumPath),headless:true,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader']});
+ try{const page=await browser.newPage({viewport:{width:390,height:844}});const external:string[]=[];await page.route('**/*',route=>{if(new URL(route.request().url()).origin!==origin){external.push(route.request().url());return route.abort()}return route.continue()});for(let i=0;i<2;i++){await page.goto(origin+'/published/');await page.waitForFunction('Boolean(window.__demand)');assert.deepEqual(await page.evaluate('window.__demand'),{source:'model',triangles:4});assert.match(await page.locator('body').innerText(),/Powered by Poly Haven/);}assert.deepEqual(external,[]);await page.screenshot({path:join(root,'demand.png')});console.log('PASS synthetic on-demand discovery -> browser admission -> private disk cache -> durable project files -> production build/reload/service credit, with zero gameplay vendor requests. Not real provider transport or physical-device acceptance.');}
+ finally{await browser.close();await new Promise<void>(r=>server.close(()=>r()))}
+}
+main().catch(e=>{console.error(e);process.exitCode=1});

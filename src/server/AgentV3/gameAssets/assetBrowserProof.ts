@@ -1,3 +1,4 @@
+import { gameAssetTextureVerifier } from '../../lib/GameAssetTextureVerifier';
 import { playwrightImport, browserScriptRunLine } from '../sandboxBrowserScript';
 import type { AssetRequirement } from './assetPolicy';
 import type { GameAssetWorkspace } from './assetProject';
@@ -40,9 +41,14 @@ try {
   const result = await page.evaluate(async cfg => {
     const THREE = await import('/three.module.js');
     const { GLTFLoader } = await import('/loaders/GLTFLoader.js');
+    ${gameAssetTextureVerifier()}
+    const bytes = new Uint8Array(await (await fetch('/model.glb')).arrayBuffer());
+    await verifyGameAssetTextures(bytes);
     const manager = new THREE.LoadingManager();
+    let textureFailed = false; manager.onError = () => { textureFailed = true; };
     manager.setURLModifier(url => { if (url.startsWith('blob:' + location.origin + '/')) return url; throw Error('External resource'); });
-    const gltf = await new GLTFLoader(manager).parseAsync(await (await fetch('/model.glb')).arrayBuffer(), '');
+    const gltf = await new GLTFLoader(manager).parseAsync(bytes.buffer, '');
+    if (textureFailed) throw Error('Texture load failed');
     const root = gltf.scene;
     const bounds = new THREE.Box3().setFromObject(root);
     const size = bounds.getSize(new THREE.Vector3());

@@ -1,7 +1,7 @@
 import { ASSET_LIMITS } from './assetPolicy';
 import { bundleGltf } from './gltfBundle';
 
-/** Embed reviewed PNG dependencies of a hash-pinned GLB without ever resolving its URIs online. */
+/** Embed reviewed PNG/JPEG dependencies of a hash-pinned GLB without ever resolving its URIs online. */
 export function bundleGlbResources(input: Uint8Array, resources: ReadonlyMap<string, Uint8Array>): Uint8Array {
   const fail = (): never => { throw new Error('Unsupported reviewed GLB resources'); };
   const b = Buffer.from(input);

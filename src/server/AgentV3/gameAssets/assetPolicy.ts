@@ -1,3 +1,4 @@
+import { textureDimensions } from './texturePolicy.ts';
 /** Build-time policy for externally authored models. Never trust provider metadata as validation. */
 export const ASSET_LIMITS = Object.freeze({ bytes: 5 * 1024 * 1024, triangles: 60_000, nodes: 512, meshes: 128, animations: 128, texturePixels: 2048 * 2048, totalTexturePixels: 8 * 2048 * 2048 });
 
@@ -56,7 +57,7 @@ function records(value: unknown, max: number): Record<string, any>[] {
 
 /**
  * Conservative self-contained glTF 2 GLB subset. Reject external/data URIs, extensions, compressed
- * geometry and archives rather than invoking untrusted codecs. PNG textures only, dimensions
+ * geometry and archives rather than invoking untrusted codecs. PNG and bounded baseline/progressive JPEG textures, dimensions
  * checked before the browser decodes them. Full scene parsing remains part of the delivery test.
  */
 export function validateGlb(bytes: Uint8Array): ValidatedModel {
@@ -164,9 +165,7 @@ export function validateGlb(bytes: Uint8Array): ValidatedModel {
   for (const img of records(doc.images, 16)) {
     const v = views[integer(img.bufferView, views.length - 1)];
     const data = bin.subarray(v.byteOffset ?? 0, (v.byteOffset ?? 0) + v.byteLength);
-    // PNG is the initial audited codec. JPEG and compressed texture support requires a decoder gate.
-    if (img.mimeType !== 'image/png' || data.length < 33 || data.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' || data.toString('ascii', 12, 16) !== 'IHDR') fail('texture format');
-    const w = integer(data.readUInt32BE(16), 2048), h = integer(data.readUInt32BE(20), 2048);
+    const { width: w, height: h } = textureDimensions(data, img.mimeType);
     if (!w || !h || w * h > ASSET_LIMITS.texturePixels) fail('texture budget');
     pixels += w * h;
   }

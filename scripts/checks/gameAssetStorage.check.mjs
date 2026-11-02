@@ -6,7 +6,8 @@ import {createHash} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {join,resolve} from 'node:path';
 import net from 'node:net';
-const [cacheArg,firestoreArg]=process.argv.slice(2);
+const [cacheArg,firestoreArg,mode]=process.argv.slice(2);
+assert.ok(mode===undefined || mode==='--discovery','Unknown storage drill mode');
 assert.ok(cacheArg && firestoreArg,'Supply verified storage-emulator cache directory and Firestore jar');
 const require=createRequire(join(process.cwd(),'package.json'));
 const info=require('firebase-tools/lib/emulator/downloadableEmulatorInfo.json');
@@ -29,7 +30,7 @@ async function ready(port){
 }
 try{
   await EmulatorRegistry.start(storage);await Promise.all([ready(18782),ready(18783)]);
-  const worker=spawn(process.execPath,['scripts/checks/gameAssetPersistence.check.mjs'],{stdio:'inherit',env:{...process.env,NBAI_STORAGE_DRILL:'1',FIRESTORE_EMULATOR_HOST:'127.0.0.1:18782',FIREBASE_STORAGE_EMULATOR_HOST:'127.0.0.1:18783',STORAGE_EMULATOR_HOST:'http://127.0.0.1:18783',WORKSPACE_ASSETS_BUCKET:'demo-navbharatai-phase2.appspot.com'}});
+  const worker=spawn(process.execPath,[mode==='--discovery'?'scripts/checks/gameAssetDiscoveryPersistence.check.mjs':'scripts/checks/gameAssetPersistence.check.mjs'],{stdio:'inherit',env:{...process.env,NBAI_STORAGE_DRILL:'1',FIRESTORE_EMULATOR_HOST:'127.0.0.1:18782',FIREBASE_STORAGE_EMULATOR_HOST:'127.0.0.1:18783',STORAGE_EMULATOR_HOST:'http://127.0.0.1:18783',WORKSPACE_ASSETS_BUCKET:'demo-navbharatai-phase2.appspot.com'}});
   const timer=setTimeout(()=>worker.kill(),90000);
   const result=await new Promise(r=>worker.once('exit',r));clearTimeout(timer);assert.equal(result,0,'Storage persistence worker failed');
 }finally{await EmulatorRegistry.stop('storage');if(firestore.exitCode===null && firestore.signalCode===null){const stopped=new Promise(r=>firestore.once('exit',r));firestore.kill();await stopped;}await rm(dir,{recursive:true,force:true});}

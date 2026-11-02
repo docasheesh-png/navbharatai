@@ -7,33 +7,57 @@ export function externalGameAssetsEnabled(env: NodeJS.ProcessEnv = process.env):
   return parseEnvFlag(env.AGENTV3_EXTERNAL_GAME_ASSETS) ?? false;
 }
 const ALIASES: Readonly<Record<string, readonly string[]>> = {
-  car: ['car', 'cars', 'gaadi'], train: ['train', 'trains', 'locomotive'],
-  'railway station': ['railway station', 'train station'], bird: ['bird', 'birds'], eagle: ['eagle', 'eagles'], parrot: ['parrot', 'parrots'],
-  ship: ['ship', 'ships'], human: ['human', 'person', 'people', 'humanoid'],
-  dog: ['dog', 'dogs'], cow: ['cow', 'cows'], horse: ['horse', 'horses'], deer: ['deer'], fox: ['fox', 'foxes'],
-  tree: ['tree', 'trees'], building: ['building', 'buildings'], aircraft: ['aircraft', 'airplane'],
+  car: ['car', 'cars', 'कार', 'कारें', 'coche', 'coches', 'auto'],
+  train: ['train', 'trains', 'locomotive', 'ट्रेन', 'रेलगाड़ी', 'tren', 'trenes'],
+  'railway station': ['railway station', 'train station', 'रेलवे स्टेशन', 'ट्रेन स्टेशन', 'estación de tren'],
+  bird: ['bird', 'birds', 'पक्षी', 'चिड़िया', 'चिड़ियाँ', 'pájaro', 'pájaros'],
+  eagle: ['eagle', 'eagles', 'चील', 'águila'], parrot: ['parrot', 'parrots', 'तोता', 'तोते', 'loro'],
+  ship: ['ship', 'ships', 'जहाज', 'जहाज़', 'barco', 'barcos'],
+  human: ['human', 'person', 'people', 'humanoid', 'इंसान', 'मानव', 'persona', 'personas'],
+  dog: ['dog', 'dogs', 'कुत्ता', 'कुत्ते', 'perro'], cow: ['cow', 'cows', 'गाय', 'vaca'],
+  horse: ['horse', 'horses', 'घोड़ा', 'घोड़े', 'caballo'], deer: ['deer', 'हिरण', 'ciervo'],
+  fox: ['fox', 'foxes', 'लोमड़ी', 'zorro'], tree: ['tree', 'trees', 'पेड़', 'árbol'],
+  table: ['table', 'tables', 'मेज', 'मेज़', 'mesa'], chair: ['chair', 'chairs', 'कुर्सी', 'silla'],
+  bench: ['bench', 'benches', 'बेंच'], rock: ['rock', 'rocks', 'चट्टान', 'roca'], plant: ['plant', 'plants', 'पौधा', 'planta'],
+  building: ['building', 'buildings', 'इमारत', 'edificio'], aircraft: ['aircraft', 'airplane', 'विमान', 'avión'],
 };
-function mentioned(text: string, phrase: string): boolean {
-  return (` ${text.toLowerCase().replace(/[^a-z0-9 -]/g, ' ')} `).includes(` ${phrase} `);
+const MOTIONS: Readonly<Record<string, readonly string[]>> = {
+  fly: ['fly', 'flying', 'flight', 'flap', 'उड़ता', 'उड़ती', 'उड़ते', 'उड़ना', 'उड़ने', 'volando'],
+  walk: ['walk', 'walking', 'चलता', 'चलती', 'चलते', 'चलना', 'चलने', 'caminando'],
+  run: ['run', 'running', 'दौड़ता', 'दौड़ती', 'दौड़ते', 'दौड़ना', 'दौड़ने', 'corriendo'],
+};
+function normalized(text: string): string {
+  return text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}\p{M}]+/gu, ' ').trim().replace(/ +/g, ' ');
 }
-/** Deterministic extraction costs no inference. Curated subjects extend coverage without broad substitution. */
+function mentioned(text: string, phrase: string): boolean {
+  return (` ${text} `).includes(` ${normalized(phrase)} `);
+}
+/** Bounded deterministic vocabulary, with conservative clause rejection rather than guessed negation scope. */
 export function gameAssetRequirements(prompt: string, catalogue: readonly ReviewedAsset[]): AssetRequirement[] {
-  const text = prompt.slice(0, 16000).toLowerCase();
-  const clauses = text.split(/[,;.!?]|\band\b/).map(s => s.trim()).filter(Boolean);
-  const subjects = [...new Set([...Object.keys(ALIASES), ...catalogue.flatMap(c => c.subjects)])];
+  const clauses = prompt.slice(0, 16000).normalize('NFKC').toLowerCase()
+    .split(/[,;.!?।]|\b(?:and|but)\b|(?:^|\s)(?:और|लेकिन|y|pero)(?=\s|$)/u).slice(0, 128)
+    .map(normalized).filter(c => c && !['no', 'not', 'without', 'exclude', 'excluding', 'avoid', 'नहीं', 'बिना', 'मत', 'sin', 'excepto'].some(n => mentioned(c, n)));
+  const subjects = [...new Set([...Object.keys(ALIASES), ...catalogue.slice(0, 64).flatMap(c => c.subjects.slice(0, 16))])];
   const matching = (subject: string, clause: string) => {
-    // A train station does not imply a locomotive; species must never broaden to another bird.
-    const scoped = subject === 'train' ? clause.replace(/\btrain station\b/g, '') : clause;
-    return (ALIASES[subject] ?? [subject]).some(word => mentioned(scoped, word));
+    let scoped = ` ${clause} `;
+    const excludedPhrases: Record<string, readonly string[]> = {
+      table: ['table tennis', 'pool table', 'ping pong table', 'coffee table', 'dining table'],
+      chair: ['wheel chair', 'rocking chair', 'office chair'],
+      rock: ['rock music', 'rock band'], tree: ['tree diagram', 'decision tree'],
+      car: ['formula one car', 'formula 1 car', 'f1 car'], building: ['building a', 'building the'],
+    };
+    if ((excludedPhrases[subject] ?? []).some(p => mentioned(clause, p))) return false;
+
+    if (subject === 'train') for (const station of ALIASES['railway station']) scoped = scoped.replaceAll(` ${normalized(station)} `, ' ');
+    if (subject === 'bird' && ['eagle', 'parrot'].some(s => ALIASES[s].some(w => mentioned(clause, w)))) return false;
+    return (ALIASES[subject] ?? [subject]).some(word => mentioned(scoped.trim(), word));
   };
-  const found = subjects.filter(subject => clauses.some(c => matching(subject, c)));
-  return found.filter(subject => !(subject === 'bird' && found.some(s => ['eagle', 'parrot'].includes(s))))
-    .slice(0, 6).map(subject => {
-      const local = clauses.filter(c => matching(subject, c)).join(' ');
-      const animation = ['bird', 'eagle', 'parrot'].includes(subject) && /\b(fly|flying|flight|flap)\b/.test(local) ? 'fly'
-        : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox'].includes(subject)
-          ? /\b(run|running)\b/.test(local) ? 'run' : /\b(walk|walking)\b/.test(local) ? 'walk' : undefined
-          : undefined;
-      return { subject, ...(animation ? { animation } : {}) };
-    });
+  return subjects.filter(subject => clauses.some(c => matching(subject, c))).slice(0, 6).map(subject => {
+    const local = clauses.filter(c => matching(subject, c)).join(' ');
+    const motion = (role: string) => MOTIONS[role].some(word => mentioned(local, word));
+    const animation = ['bird', 'eagle', 'parrot'].includes(subject) && motion('fly') ? 'fly'
+      : ['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox'].includes(subject)
+        ? motion('run') ? 'run' : motion('walk') ? 'walk' : undefined : undefined;
+    return { subject, ...(animation ? { animation } : {}) };
+  });
 }

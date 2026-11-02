@@ -63,9 +63,33 @@ export function extractExportedDeclaration(source: string | null | undefined, na
   const alias = new RegExp(`export\\s+type\\s+${name}\\s*=`).exec(src);
   if (alias) {
     const end = src.indexOf(';', alias.index);
-    if (end > 0) return tidy(src.slice(alias.index, end + 1));
+    if (end > 0) {
+      const decl = tidy(src.slice(alias.index, end + 1));
+      // `keyof typeof PALETTES` names no value a builder can read, so it is spelled out from the very
+      // object it is keyed on (autopsy cf1706d2: paletteColor('steel', …), paletteColor('coal', …)).
+      const keyed = /=\s*keyof\s+typeof\s+(\w+)\s*;$/.exec(decl);
+      const keys = keyed ? objectKeys(src, keyed[1]) : null;
+      return keys && keys.length ? `export type ${name} = ${keys.map((k) => `'${k}'`).join(' | ')};` : decl;
+    }
   }
   return null;
+}
+
+/** The top-level keys of `const NAME = { … }` in the source, in order — or null when it cannot be read with certainty. */
+function objectKeys(src: string, name: string): string[] | null {
+  const m = new RegExp(`const\\s+${name}\\b[^=]*=\\s*\\{`).exec(src);
+  if (!m) return null;
+  let depth = 1; let i = m.index + m[0].length; const start = i;
+  for (; i < src.length && depth > 0; i++) { if (src[i] === '{' || src[i] === '[' || src[i] === '(') depth++; else if (src[i] === '}' || src[i] === ']' || src[i] === ')') depth--; }
+  if (depth !== 0) return null;
+  const body = src.slice(start, i - 1);
+  const keys: string[] = [];
+  let d = 0;
+  for (const line of body.split('\n')) {
+    if (d === 0) { const k = /^\s*['"]?([A-Za-z_$][\w$]*)['"]?\s*:/.exec(line); if (k) keys.push(k[1]); }
+    for (const c of line) { if ('{[('.includes(c)) d++; else if ('}])'.includes(c)) d--; }
+  }
+  return keys;
 }
 
 /** Comments out, blank lines collapsed — the shape, with nothing to re-read. */
@@ -97,7 +121,11 @@ const CONTRACT: readonly ContractEntry[] = [
   // What `touchControls: { buttons: [...] }` takes. The reported build passed strings.
   { file: 'src/game/ui/touchControls.ts', names: ['TouchButton', 'TouchLayout', 'TouchControlsOptions'] },
   // 1b38d662: livery/color were guessed and Motorcycle was passed as an Object3D instead of .root.
-  { file: 'src/game/three/objects.ts', names: ['RoadOptions', 'MotorcycleOptions', 'Motorcycle', 'VehicleTuning', 'VehicleState'] },
+  { file: 'src/game/three/objects.ts', names: ['RoadOptions', 'RailTrackOptions', 'MotorcycleOptions', 'Motorcycle', 'VehicleTuning', 'VehicleState'] },
+  // cf1706d2 (2026-11-02): sharedMaterial('plastic' | 'rubber', …) and paletteColor('steel' | 'coal', …) —
+  // six type errors and five fix-up rounds, because the two closed name lists were never handed over.
+  // (RailTrackOptions above: the same build passed { path } to createRailTrack.)
+  { file: 'src/game/three/materials.ts', names: ['MaterialKind', 'PaletteName'] },
 ];
 
 /** Every name the contract covers, for the census that keeps this honest. */

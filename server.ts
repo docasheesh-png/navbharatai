@@ -1146,6 +1146,31 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
             },
           });
           /**
+           * PERMANENT BUILD REPORT NUMBERS (admin 2026-11-02: "numbering rocksolid karo"). Every report is
+           * numbered by its own history write once the counter is ready; this job creates that counter
+           * by numbering every report saved before the registry existed, oldest first, then numbers the
+           * few saved while it ran. Once both are done a run is ONE document read and returns.
+           *
+           * 🔒 `exclusive` plus the counter's own lease: two runners can never hand out the same number.
+           */
+          scheduler.register({
+            id: 'build-report-numbering',
+            exclusive: true,
+            schedule: { kind: 'everyMs', ms: 15 * 60_000 },
+            handler: async () => {
+              await Promise.all([import('./src/server/lib/buildReportRegistry'), import('./src/server/lib/serverDb')])
+                .then(([{ runBuildReportNumbering }, { getServerDb }]) => {
+                  const db = getServerDb();
+                  return db ? runBuildReportNumbering(db, `${process.env.K_REVISION || 'local'}:${process.pid}:${Date.now()}`) : null;
+                })
+                .then((r) => {
+                  if (!r) { console.error('[build-report-numbering] Firestore unavailable; the next run retries.'); return; }
+                  if (r.status !== 'ready') console.log(`[build-report-numbering] ${r.status}: numbered ${r.numbered}, swept ${r.swept}`);
+                })
+                .catch((err) => { console.error('[build-report-numbering] run failed; the next run retries:', err instanceof Error ? err.message : err); });
+            },
+          });
+          /**
            * LIVE USD→INR — the rate every build's bill is converted at.
            *
            * 🔴 THE BUG THIS CLOSES (revenue audit 2026-09-10). `refreshUsdInrRate()` has existed, and

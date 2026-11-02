@@ -578,6 +578,10 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
    * permanent file on the people those ids name. `ts: Date.parse(…)` is a plain number ⇒ `epochMs`.
    */
   { collection: 'admin_audit_log', ttlDays: 180, timestampField: 'ts', timestampKind: 'epochMs' },
+  // One row per build report: its permanent number (buildReportRegistry.ts). On the SAME 180-day clock as
+  // the report it numbers (its history entry, `savedAt`), read from `lastSavedAt`, which every save of that
+  // report refreshes. The number is never reissued after expiry: the counter only moves forward.
+  { collection: 'build_report_numbers', ttlDays: 180, timestampField: 'lastSavedAt', timestampKind: 'epochMs' },
   /**
    * Flagged messages — the same 180-day story as the removal records above, and for the same reason:
    * an abuse record must outlive the account (see the exclusion note in USER_SCOPED_COLLECTIONS) and
@@ -847,6 +851,7 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
   // doc is replaced in place, but every settled build also writes `{workspace}/history/{startedAt}`, and
   // that subcollection grew for ever. It is on SUBCOLLECTION_RETENTION_POLICIES (180 days) now.
   { collection: 'workspace_diagnostics_v3', reason: "the latest report per workspace, replaced in place. Its `history` subcollection is on a 180-day clock (SUBCOLLECTION_RETENTION_POLICIES)" },
+  { collection: 'admin_build_report_counter', reason: 'singleton counter for permanent build report numbers (every outcome). Replaced in place; deleting it would let numbers be issued twice and break every reference to a report by number' },
   { collection: 'admin_failed_report_numbers', reason: 'singleton counter for permanent failed-build report numbers (max+1 on retain). Replaced in place; deleting it would allow number reuse and break agent references' },
   { collection: 'project_plans_v3', reason: "the plan the user's app is being built against" },
   { collection: 'app_engineering_memory_v1', reason: "the app's requirement ledger, open issues and change log — bounded per app, erased with the workspace" },

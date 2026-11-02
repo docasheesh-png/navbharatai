@@ -1,142 +1,62 @@
-import { settledFailure } from './failedReportEligibility';
-/** Read-only, bounded metadata snapshots. No index deployment or build-path writes.
- * Root traversal is bounded by the document/query/time budgets, not an independent
- * smaller parent cap that can reject an otherwise safe complete inventory.
- * Cache is instance-local: another cold server instance pays its own bounded scan.
- * Complete snapshots include parents with no failed reports. A parent-only cutoff can
- * reject an inventory that fits the existing cost budgets. Empty history queries incur reads.
- * No background refresh. Firestore read-only transactions
- * make one attempt; counters also live outside the callback to bound any future retry behavior.
+/**
+ * Report numbers for list rows — read from the build report registry, never computed.
+ *
+ * 🔴 THIS USED TO BE A RANK (until 2026-11-02): every read scanned up to 5,000 documents, sorted the
+ * retained reports by start time and handed out positions. A position moves whenever a report
+ * expires or a late one arrives, so "#555" today was a different report next week — the defect the
+ * admin reported as "numbering stable nahi hai". A number is now a stored fact about one report
+ * (`buildReportRegistry.ts`): looked up by the report's identity, the same for every cohort and
+ * every screen, and never renumbered. One read per row, no scan, no cache to go stale.
  */
-import { FieldPath, type Firestore, type Query, type Transaction } from 'firebase-admin/firestore';
+import type { Firestore } from 'firebase-admin/firestore';
 import { getServerDb } from './serverDb';
+import { counterRef, readyCounter, registryRef, validBuildReportNumber } from './buildReportRegistry';
 import type { BuildReportNumbering, ReportNumberFailure } from '../../lib/buildReportNumbering';
 
 export type ReportNumberingCohort = 'latest' | 'failed';
-const COLLECTION = 'workspace_diagnostics_v3';
-const PAGE = 100;
-const MAX_DOCUMENTS = 5000;
-const MAX_QUERIES = 2000;
-const MAX_MS = 30_000;
-const TTL = 10 * 60_000;
-const FAILURE_TTL = 30_000;
-const FIELDS = ['report.startedAt', 'report.endedAt', 'report.ok', 'savedAt'];
-interface Candidate { key: string; startedAt: number }
-interface Snapshot { ranks: Map<string, { ordinal: number; startedAt: number }>; asOf: number }
-interface CacheEntry { expires: number; pending: boolean; refreshedAt: number; reason?: ReportNumberFailure; promise: Promise<Snapshot | null> }
-const cache = new WeakMap<Firestore, Partial<Record<ReportNumberingCohort, CacheEntry>>>();
+const READ_CONCURRENCY = 50;
 const unavailable = (reason: ReportNumberFailure): BuildReportNumbering => ({ ordinal: null, total: null, asOf: null, reason });
-class NumberingScanError extends Error {
-  constructor(readonly reason: ReportNumberFailure) { super(reason); }
-}
-const keyOf = (workspaceId: string, historyId: string) => JSON.stringify([workspaceId, historyId]);
 const validTime = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0;
-async function scan(db: Firestore, cohort: ReportNumberingCohort, drained: () => void): Promise<Snapshot> {
-  const asOf = Date.now();
-  let cancelled = false, documents = 0, queries = 0;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const task = Promise.resolve().then(() => db.runTransaction(async (tx: Transaction) => {
-    const read = async (query: Query) => {
-      if (cancelled || Date.now() - asOf >= MAX_MS) throw new NumberingScanError('scan_timeout');
-      if (++queries > MAX_QUERIES) throw new NumberingScanError('scan_limit');
-      const page = await tx.get(query.limit(PAGE).select(...FIELDS));
-      documents += page.size;
-      if (cancelled) throw new NumberingScanError('scan_timeout');
-      if (documents > MAX_DOCUMENTS) throw new NumberingScanError('scan_limit');
-      return page;
-    };
-    const candidates: Candidate[] = [];
-    const roots = db.collection(COLLECTION).orderBy(FieldPath.documentId());
-    let query: Query = roots;
-    for (;;) {
-      const parents = await read(query);
-      // At most eight metadata history queries in flight; no full reports, prompts or identities.
-      for (let offset = 0; offset < parents.docs.length; offset += 8) {
-        const batch = parents.docs.slice(offset, offset + 8).map(async parent => {
-          const data = parent.data(), latest = data.report as Record<string, unknown> | undefined;
-          if (cohort === 'latest') {
-            // Match the existing savedAt-ordered list's universe, before its date/limit filters.
-            if (data.savedAt === undefined) return;
-            if (!validTime(latest?.startedAt)) throw new NumberingScanError('invalid_timestamp');
-            candidates.push({ key: keyOf(parent.id, String(latest.startedAt)), startedAt: latest.startedAt });
-            return;
-          }
-          const history = parent.ref.collection('history').orderBy(FieldPath.documentId());
-          let historyQuery: Query = history;
-          let latestHasHistory = false;
-          for (;;) {
-            const entries = await read(historyQuery);
-            for (const doc of entries.docs) {
-              if (doc.id === String(latest?.startedAt)) latestHasHistory = true;
-              const report = doc.data().report as Record<string, unknown> | undefined;
-              if (settledFailure(report)) candidates.push({ key: keyOf(parent.id, doc.id), startedAt: report!.startedAt as number });
-            }
-            if (entries.size < PAGE) break;
-            historyQuery = history.startAfter(entries.docs[entries.docs.length - 1]);
-          }
-          if (!latestHasHistory && settledFailure(latest)) candidates.push({ key: keyOf(parent.id, 'latest'), startedAt: latest!.startedAt as number });
-        });
-        try { await Promise.all(batch); } catch (error) {
-          cancelled = true;
-          await Promise.allSettled(batch);
-          throw error;
-        }
-      }
-      if (parents.size < PAGE) break;
-      query = roots.startAfter(parents.docs[parents.docs.length - 1]);
+
+async function readNumbers(db: Firestore, startedAts: Array<{ workspaceId: string; startedAt: number }>): Promise<Array<number | null>> {
+  const out: Array<number | null> = [];
+  for (let i = 0; i < startedAts.length; i += READ_CONCURRENCY) {
+    const snaps = await Promise.all(startedAts.slice(i, i + READ_CONCURRENCY).map((r) => registryRef(db, r.workspaceId, r.startedAt).get()));
+    for (const snap of snaps) {
+      const n = snap.data()?.number;
+      out.push(validBuildReportNumber(n) ? n : null);
     }
-    candidates.sort((a, b) => a.startedAt - b.startedAt || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-    return { ranks: new Map(candidates.map((row, index) => [row.key, { ordinal: index + 1, startedAt: row.startedAt }])), asOf };
-  }, { readOnly: true })).finally(drained);
-  try {
-    return await Promise.race([task, new Promise<never>((_, reject) => {
-      timer = setTimeout(() => { cancelled = true; reject(new NumberingScanError('scan_timeout')); }, MAX_MS);
-    })]);
-  } finally {
-    cancelled = true;
-    if (timer) clearTimeout(timer);
   }
+  return out;
 }
 
-/** Lazy authenticated-list reads only. A failure never replaces the report list or invents a rank. */
+/** Lazy authenticated-list reads only. A failure never replaces the report list or invents a number. */
 export async function numberBuildReports<T extends { workspaceId: string; startedAt?: number }>(
-  cohort: ReportNumberingCohort, rows: T[], historyId: (row: T) => string,
+  _cohort: ReportNumberingCohort, rows: T[], _historyId: (row: T) => string,
 ): Promise<Array<T & { numbering: BuildReportNumbering }>> {
   if (!rows.length) return [];
   const db = getServerDb();
   if (!db) return rows.map(row => ({ ...row, numbering: unavailable('storage_unavailable') }));
-  let entries = cache.get(db);
-  if (!entries) { entries = {}; cache.set(db, entries); }
-  const startScan = (): CacheEntry => {
-    const next: CacheEntry = { expires: Infinity, pending: true, refreshedAt: Date.now(), promise: Promise.resolve(null) };
-    next.promise = scan(db, cohort, () => { next.pending = false; }).then(snapshot => {
-      next.expires = Date.now() + TTL; return snapshot;
-    }, error => {
-      next.reason = error instanceof NumberingScanError ? error.reason : 'storage_unavailable';
-      next.expires = Date.now() + FAILURE_TTL;
-      return null;
+  try {
+    const timed = rows.filter((row): row is T & { startedAt: number } => validTime(row.startedAt));
+    const [counterSnap, numbers] = await Promise.all([counterRef(db).get(), readNumbers(db, timed)]);
+    const counter = readyCounter(counterSnap.data());
+    const byRow = new Map<T, number | null>(timed.map((row, i) => [row, numbers[i]]));
+    const asOf = Date.now();
+    return rows.map(row => {
+      if (!validTime(row.startedAt)) return { ...row, numbering: unavailable('invalid_timestamp') };
+      const n = byRow.get(row) ?? null;
+      if (n !== null) {
+        // `total` is the highest number ever assigned. A number below it whose report is gone left a
+        // gap on purpose: numbers are never reused.
+        const highest = counter ? Math.max(counter.nextNumber - 1, n) : n;
+        return { ...row, numbering: { ordinal: n, total: highest, asOf } };
+      }
+      return { ...row, numbering: unavailable(counter ? 'not_numbered' : 'numbering_pending') };
     });
-    entries![cohort] = next;
-    return next;
-  };
-  let entry = entries[cohort];
-  if (!entry || (!entry.pending && entry.expires <= Date.now())) entry = startScan();
-  let snapshot = await entry.promise;
-  // A cached rank belongs to an exact report identity, not merely its workspace. New builds
-  // must not wait the ten-minute TTL. Coalesce refreshes and keep a short read-budget cooldown
-  // so invalid references cannot induce one full scan per request.
-  const missing = () => rows.some(row => snapshot?.ranks.get(keyOf(row.workspaceId, historyId(row)))?.startedAt !== row.startedAt);
-  if (snapshot && missing() && !entry.pending && Date.now() - entry.refreshedAt >= FAILURE_TTL) {
-    if (entries[cohort] === entry) entry = startScan();
-    else entry = entries[cohort]!;
-    snapshot = await entry.promise;
+  } catch {
+    return rows.map(row => ({ ...row, numbering: unavailable('storage_unavailable') }));
   }
-  return rows.map(row => {
-    const rank = snapshot?.ranks.get(keyOf(row.workspaceId, historyId(row)));
-    const numbering = rank && rank.startedAt === row.startedAt
-      ? { ordinal: rank.ordinal, total: snapshot!.ranks.size, asOf: snapshot!.asOf } : unavailable(snapshot ? 'snapshot_miss' : entry.reason ?? 'storage_unavailable');
-    return { ...row, numbering };
-  });
 }
 
 export class ReportNumberingInputError extends Error {}

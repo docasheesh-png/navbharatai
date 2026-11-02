@@ -1,7 +1,8 @@
 # Current continuation — 2026-11-02
 
-Four real reviewed models and bounded animation selection are now implemented, with local Chromium
-production-artifact acceptance. Feature remains OFF. See [reviewed assets and exact limitations](l3-reviewed-assets.md).
+Seven real reviewed models, bounded animation selection and reviewed GLB resource embedding are implemented.
+Six separate local Chromium fixtures cover human, car, mixed animals/environment, train with procedural station,
+ship and animated eagle; these are not six generated games or physical-device acceptance. Feature remains OFF. See [reviewed assets and exact limitations](l3-reviewed-assets.md).
 Signature verification now passes. Production downloader direct DNS is blocked by EAI_AGAIN in this
 managed environment; successful real-asset artifact checks explicitly use offline reviewed bytes.
 The November 1 report below is historical evidence, not the current catalogue/network state.

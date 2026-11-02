@@ -109,3 +109,11 @@ The optional, default-off layer now includes four real reviewed models: KayKit K
 and the Khronos Fox sample with complete attribution. [Admission and acceptance evidence](l3-reviewed-assets.md)
 records exact limitations. L1/L2 remain unchanged. The historical “not built” paragraphs above describe
 Phase 2; the provider/manifest/cache layer is now implemented but broad activation has not occurred.
+
+### Additional admission (2026-11-02)
+
+The reviewed catalogue has seven entries after adding Kenney diesel locomotive, Quaternius cruise ship
+and a pinned offline CC0 Eagle conversion. The train-station fixture uses a procedural platform/canopy
+and rails, not an externally sourced station. All six local interactive scenarios pass build/reload,
+movement and animation where applicable. These fixtures do not establish physical mobile or live game
+publication. Exact license, conversion and network limitations are in [the admission report](l3-reviewed-assets.md).

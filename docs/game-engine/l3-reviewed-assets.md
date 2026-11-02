@@ -106,3 +106,81 @@ four database drills passed. Node 22.23.4/npm 11.18.0 match CI; local Java is De
 where CI requests Temurin 21. Signature audit passed (1,375 signatures, 197 attestations). Hosted CI,
 production deployment, actual sandbox VM restart and release activation are not established by these
 local results. No owned local verification process remains running.
+
+## Additional reviewed fixtures (2026-11-02, second continuation)
+
+The catalogue now has seven assets. Added:
+
+| Asset | License evidence | Final GLB | Triangles | Processing |
+| --- | --- | ---: | ---: | --- |
+| Kenney Train Kit 1.1 diesel locomotive | [Exact pack License.txt](https://github.com/Zalamancer/train-game/blob/b593073ea756efa2bba003b9cd2d1ebd3a7488e6/assets/kenney_train-kit/License.txt), CC0 | 141,564 bytes | 1,742 | Embed hash-pinned colormap PNG, remove strictly identity UV extension only, compact |
+| Quaternius cruise ship | [Pack-specific CC0 mapping and provenance](https://github.com/trebeljahr/quaternius-showcase/blob/c664c6f231d3dd522b38ba52fc39ec33028624e2/LICENSES.md), corroborated by original ships pack page | 61,856 bytes | 858 | Direct GLB |
+| Quaternius Eagle, Animal Pack Vol.2 July 2017 | [Scoped original CC0 license](https://github.com/beep2bleep/FreeAssetsByKenneyNLandQuaternius/blob/dea756baf3b3a4889d8c245e456a4791f961578a/FreeModels%20by%20Quaternius%5BPatreon%5D/License.txt) | 2,064,220 bytes | 24,800 | Offline Blender 4.3.2 conversion; Flying clip; adjusted materials; four joint influences |
+
+The eagle derivative and source/hash/license details are in `assets/game-models/README.md`. `scripts/gameAssetConvertEagle.py` requires the pinned source hash and Blender version. Invoke Blender with `--background --factory-startup --disable-autoexec --python scripts/gameAssetConvertEagle.py -- SOURCE.fbx OUTPUT.glb`. FBX is never parsed at runtime. Conversion is not lossless: export reduces/normalizes joint influences to four. No textures are present. The catalogue pins the derivative to its immutable repository commit.
+
+`glbResourceBundle.ts` supports a reviewed GLB's explicit, hash-pinned PNG dependencies without following model-supplied URLs. All previous size, resource-path and final structural checks apply. Only exact identity `KHR_texture_transform` on UV channel zero is removed; unknown extensions, nonidentity transforms and other UV channels fail closed. Source and final hashes remain distinct. Eight tests cover successful embedding, invalid transforms/headers/resources and transport hash enforcement.
+
+Semantic extraction no longer treats horse racing as a car, a train station as a locomotive, or a bird character as a human. Named parrot requests cannot select the eagle. Motion is scoped to conjunction/punctuation clauses. This remains bounded deterministic vocabulary matching, not universal language understanding; negation, complex multi-subject grammar and Hindi extraction are unfinished.
+
+### Repeatable local acceptance
+
+`scripts/checks/gameAssetReal.check.ts` admits all seven reviewed final files in explicit `offline-reviewed` mode, proves each model independently in Chromium (including Knight/Fox/Eagle animation), reuses the content-addressed cache with zero second-download bytes, restores that cache in a fresh Node process, and checks production artifact asset hashes and reload. The combined overview can frustum-cull objects: individual proof and the separate scenario fixtures establish visibility, not the overview's triangle count.
+
+Run the separate scenarios with:
+
+```sh
+npx tsx scripts/checks/gameAssetScenarios.check.ts OUTPUT_DIR ADMITTED_GLB_DIR PLAYWRIGHT_MODULE CHROMIUM_EXECUTABLE
+```
+
+This produces six isolated locally built interactive fixtures at a 390×844 viewport, each tested twice with keyboard/button movement, local assets, no vendor requests, no page errors, and production-artifact reload:
+
+| Scenario | Actual downloaded model | Procedural elements | Rendered triangles / draw calls |
+| --- | --- | --- | --- |
+| Walking human | KayKit Knight, Walking_A | Ground | 6,954 / 16 |
+| Racing/driving car | KayKit sedan | Road/ground | 1,234 / 11 |
+| Multiple animals/environment | Khronos Fox, Walk | Existing dog/cow/horse/tree/ground | 7,320 / 65 |
+| Train and railway station | Kenney diesel | Fixture-built station platform/canopy/rails/ground | 2,128 / 36 |
+| Moving ship | Quaternius cruise ship | Water-colored ground | 860 / 5 |
+| Flying bird | Quaternius Eagle, Flying | Ground | 24,802 / 5 |
+
+These are deterministic local integration fixtures, not six AI-generated games, a cloud publication, a full sandbox restart, or physical mobile tests. The train station is explicitly procedural; no city building is misrepresented as a railway station. Mobile layout and geometry checks do not establish device frame rate or thermal performance. Large Three.js fixture bundles emit Vite's size warning; no warning limit was changed.
+
+### Network and rejected sources
+
+System `getaddrinfo` fails with EAI_AGAIN for the allowed GitHub, Poly Haven, Google Storage and Sigstore hosts while the environment-managed HTTPS client can reach allowed services. The production downloader deliberately retains connection-level DNS/SSRF checks. Its automatic network path remains unverified here; no proxy-resolution workaround, alternate DNS or fixed IP bypass was added. Platform action is needed to provide direct DNS/HTTPS compatible with the guarded downloader, or a separately designed and reviewed safe transport contract.
+
+Poly Haven's exact `wooden_table_02` API metadata identifies `dl.polyhaven.org`. That host has not been requested because it is not on the effective allowlist; owner allowance is pending. No new host is needed for the seven reviewed catalogue assets beyond the existing raw GitHub origin. `npm audit signatures` passed after the user's Sigstore allowlist change (1,375 registry signatures; 197 attestations).
+
+The Rome Parrot/Flamingo candidates were rejected because the original model license is CC BY-NC-SA 3.0 despite their location in a software repository with permissive code licensing. A railway station candidate without asset-level redistribution permission was rejected. Newer Quaternius QAL terms must not be inferred to grant standalone redistribution; this admission is limited to the exact older CC0 packs and pinned evidence above.
+
+Broad live search, generated LODs, texture resampling and additional animated animal models remain unfinished. Feature activation stays OFF. Draft PR creation remains paused after automatic approval review denied that action; no PR, merge or deployment is implied by these local checks.
+
+The seven admitted final GLBs total 3,061,304 bytes. The explicit offline admission run read each once;
+second acquisition used the cache with zero downloaded bytes. This measures fixture/cache behavior,
+not network latency or API production cost. No paid asset API or paid AI build was used.
+The real 2,064,220-byte eagle also passed Firestore + private Storage spill acknowledgement, bounded
+CRC-checked cache reads, and exact fresh-process model/manifest restore in local emulators. The
+conversion script reproduced SHA-256 `4e8915ef238773ca0b11576fd71dddb49449ce0aa6b575f0fce9e65e79e03f75`.
+
+### Published configuration handoff (2026-11-02 04:58 UTC)
+
+The owner explicitly added `dl.polyhaven.org` and confirmed Publish. The parent reports catalog version
+`b82effea-ed47-4085-b463-7cd21d5dd1c3~cecfgver_6ae8177f7f9881a283d07ad40c0e7574`.
+The existing executor still reports its original version ending
+`6ae80b27205c81a2917a4210d73f511a`, observations current, restricted policy enforced, only the four
+additional hosts `api.github.com`, `api.polyhaven.com`, `storage.googleapis.com`, and
+`tuf-repo-cdn.sigstore.dev`. `dl.polyhaven.org` is absent from effective hosts. No CDN request was made.
+A fresh executor must verify its actual policy before trying the exact Poly Haven metadata URL.
+Adding this hostname does not itself establish that direct DNS required by the guarded downloader works.
+The setting publication grants no new PR authorization; the denied draft-PR operation remains paused.
+
+Source checkpoint `66d021504` is pushed. Its immutable eagle derivative URL was independently fetched
+with the allowed managed HTTPS client: HTTP 200, 2,064,220 bytes, expected SHA-256. This confirms source
+availability on GitHub, not a game deployment or production guarded-download success.
+
+At this handoff, 61 targeted tests and all non-coverage CI-equivalent gates, signature verification,
+four database drills, synthetic asset persistence/storage and real Eagle storage spill have passed.
+The final full coverage run is still owned by the original executor and pending; do not claim it passed
+or launch a duplicate until the final outcome is recorded. Earlier full coverage belongs to source
+`80c1e4e0c`, not this source checkpoint.

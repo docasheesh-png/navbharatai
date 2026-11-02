@@ -100244,3 +100244,21 @@ those service obligations separately from the CC0 asset licence when wiring the 
   a production code defect. Poly Haven dl.polyhaven.org remains not allowed/not attempted.
 - Feature stays OFF. No production game publication, activation, deployment or merge. The preceding
   source commit is the full-suite-tested code; this following change only records evidence.
+
+### 2026-11-02 — seven assets and six local fixtures, source 66d021504
+
+- Added Kenney diesel, Quaternius cruise ship and pinned CC0 Eagle derivative. Seven total reviewed
+  GLBs occupy 3,061,304 bytes. Exact license/source/output hashes retained. Offline Eagle conversion
+  is reproducible but not lossless: four skin influences and adjusted materials are disclosed.
+- Added bounded reviewed GLB/PNG embedding and conservative subject/clause matching; 61 asset tests pass.
+- Six local interactive fixtures pass render/movement/animation where applicable, mobile viewport,
+  Vite build and reload. Railway station and some animals are procedural. Not six generated games,
+  physical devices, a full sandbox restart, or a cloud publication.
+- Non-coverage CI-equivalent gates, signatures (1,375 signatures/197 attestations), four database drills,
+  synthetic persistence/storage and real Eagle spill/private-cache/fresh-process restore pass.
+- Final coverage remains running in original executor; its owner will record terminal result.
+- Owner published dl.polyhaven.org addition, catalog version ends 6ae8177f7f9881a283d07ad40c0e7574.
+  Current executor remains on 6ae80b27205c81a2917a4210d73f511a without CDN allowance. No CDN attempt.
+  Fresh executor needed; recheck actual policy and direct DNS separately. Do not bypass SSRF.
+- Source pushed, main/billing untouched. PR creation remains paused after automatic approval denial;
+  no new permission was granted by environment publication. Feature OFF; no merge/deploy/activation.

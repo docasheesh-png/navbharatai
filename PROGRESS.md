@@ -100331,3 +100331,22 @@ those service obligations separately from the CC0 asset licence when wiring the 
   remain owned until terminal. Final exact-head validation is recorded in PR #4064's report/checks.
 - L3 OFF. Remaining: deployed-network, physical-device, full generated-game and cloud-publication
   acceptance. Main merge triggers existing Cloud Build deployment; do not start a duplicate deploy.
+
+
+### 2026-11-02 — final local verification and hosted job allowance
+
+- Source 05b8b939d full local coverage PASS: 3,195 files / 48,263 tests, 85 existing skips;
+  1,236.10s; statements 75.60%, branches 71.54%, functions 78.21%, lines 77.59%. All local gates and
+  database/storage drills pass. Fresh 1,375 signatures / 197 attestations verified.
+- Runtime image build, non-root packaged Eagle hash/size/license and HTTP 200 health pass with no
+  network. Managed verification used CA secret mounts and matching image Node headers; canonical Git
+  file modes were restored after this executor's restrictive umask caused fixture-only EACCES.
+- Extra scheduled Trivy check blocked at database host mirror.gcr.io (Forbidden); no alternate mirror
+  or policy bypass. This is unverified and separate from configured PR CI.
+- Hosted final-head live asset acceptance and database drills pass. Prior run 41403264320's check
+  annotation explicitly says maximum 45m exceeded, while tests were still advancing. Main also had a
+  44m13s successful run and a cancelled 45m run. Raised only overall build-and-test allowance to 60m;
+  every test, coverage threshold and 20s test/hook timeout is unchanged. Require terminal green CI.
+- User conditionally authorizes deployment/activation after readiness. No GCP connector/CLI or cloud
+  identity is configured here; physical devices and production game acceptance are still unavailable.
+  No flag activation or new credentials/security configuration. PR report/checks carry final status.

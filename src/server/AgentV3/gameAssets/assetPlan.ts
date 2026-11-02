@@ -10,7 +10,7 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   car: ['car', 'cars', 'racing', 'gaadi'], train: ['train', 'trains', 'railway'],
   'railway station': ['railway station', 'train station'], bird: ['bird', 'birds', 'parrot'],
   ship: ['ship', 'ships'], human: ['human', 'person', 'people', 'character'],
-  dog: ['dog', 'dogs'], cow: ['cow', 'cows'], horse: ['horse', 'horses'], deer: ['deer'],
+  dog: ['dog', 'dogs'], cow: ['cow', 'cows'], horse: ['horse', 'horses'], deer: ['deer'], fox: ['fox', 'foxes'],
   tree: ['tree', 'trees'], building: ['building', 'buildings'], aircraft: ['aircraft', 'airplane'],
 };
 function mentioned(text: string, phrase: string): boolean {
@@ -22,6 +22,7 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
   return subjects.filter(subject => (ALIASES[subject] ?? [subject]).some(word => mentioned(prompt, word)))
     .slice(0, 6).map(subject => ({ subject,
       ...(subject === 'bird' && /\b(fly|flying|flight|flap)\b/i.test(prompt) ? { animation: 'fly' } : {}),
-      ...(subject === 'human' && /\b(walk|walking)\b/i.test(prompt) ? { animation: 'walk' } : {}),
+      ...(['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox'].includes(subject) && /\b(walk|walking)\b/i.test(prompt) ? { animation: 'walk' } : {}),
+      ...(['human', 'knight', 'dog', 'cow', 'horse', 'deer', 'fox'].includes(subject) && /\b(run|running)\b/i.test(prompt) ? { animation: 'run' } : {}),
     }));
 }

@@ -2,6 +2,7 @@ import { assetProviderPermit, recordAssetProviderResponse } from './assetProvide
 import { createHash } from 'node:crypto';
 import { bundleGltf } from './gltfBundle';
 import { compactGlb } from './assetOptimize';
+import { selectGlbAnimations } from './assetAnimationSelection';
 import { ASSET_LIMITS } from './assetPolicy';
 import { BoundedCache } from '../../lib/boundedCache';
 import { publicOnlyInit } from '../../lib/ssrfGuard';
@@ -23,7 +24,9 @@ export async function downloadReviewedAsset(candidate: ReviewedAsset, signal: Ab
       const bytes = await downloadGameAsset(candidate, origins, deadline);
       if (candidate.format !== 'gltf') {
         if (!candidate.optimization) return bytes;
-        if (candidate.optimization !== 'compact-v1' || createHash('sha256').update(bytes).digest('hex') !== candidate.sourceSha256) throw new Error('Optimization source/version mismatch');
+        if (createHash('sha256').update(bytes).digest('hex') !== candidate.sourceSha256) throw new Error('Optimization source/version mismatch');
+        if (candidate.optimization === 'animation-selection-v1') return selectGlbAnimations(bytes, candidate.sourceSha256!, candidate.retainedAnimations ?? []);
+        if (candidate.optimization !== 'compact-v1') throw new Error('Optimization source/version mismatch');
         return compactGlb(bytes).bytes;
       }
       if (createHash('sha256').update(bytes).digest('hex') !== candidate.sourceSha256) throw new Error('glTF source hash mismatch');

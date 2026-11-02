@@ -28,9 +28,17 @@ function rig(bytes = syntheticGlb(), candidate = syntheticCandidate(bytes)) {
 
 describe('L3 acquisition, durable restore and bundle contract (synthetic)', () => {
   it('is off by default, and the release catalogue contains no invented assets', async () => {
-    expect(externalGameAssetsEnabled({})).toBe(false); expect(REVIEWED_GAME_ASSETS).toEqual([]);
+    expect(externalGameAssetsEnabled({})).toBe(false);
+    expect(() => validateCatalogue(REVIEWED_GAME_ASSETS)).not.toThrow();
+    expect(REVIEWED_GAME_ASSETS.length).toBeGreaterThan(0);
+    expect(REVIEWED_GAME_ASSETS.every(c => c.downloadUrl.startsWith('https://raw.githubusercontent.com/') && /^[a-f0-9]{40}$/.test(c.revision))).toBe(true);
     const r = rig(); const result = await prepareGameAssets({ prompt:'3D car game', workspaceId:'fixture-workspace', workspace:r.workspace, signal:new AbortController().signal, dependencies:r.deps, catalogue:[r.candidate], env:{} });
     expect(result.status).toBe('off'); expect(r.download).not.toHaveBeenCalled(); expect(r.disk.size).toBe(0);
+  });
+  it('requests animal locomotion without substituting a fox for other animals or inventing clips', () => {
+    expect(gameAssetRequirements('walking foxes', REVIEWED_GAME_ASSETS)).toEqual([{ subject: 'fox', animation: 'walk' }]);
+    expect(gameAssetRequirements('running human', REVIEWED_GAME_ASSETS)).toEqual([{ subject: 'human', animation: 'run' }]);
+    expect(REVIEWED_GAME_ASSETS.filter(c => c.subjects.includes('dog'))).toEqual([]);
   });
   it.each([
     ['3D train and railway station game', ['train','railway station']],

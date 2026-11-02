@@ -1,6 +1,6 @@
 # Game graphics — hero object inventory and quality levels (Phase 2, 2026-10-05)
 
-Every object in a NavBharatAI 3D game is built by code in `src/server/lib/Game3DGenerator.ts`. The generated app writes these modules to `src/game/three/`. Nothing is downloaded, so a published game can never lose a model file.
+By default, every object in a NavBharatAI 3D game is built by code in `src/server/lib/Game3DGenerator.ts`. The generated app writes these modules to `src/game/three/`. Nothing is downloaded, so a published game can never lose a model file.
 
 This file lists what each hero object is today, measured from the geometry the generated app runs (`tests/aHeroObjectIsNotABox.test.ts`). It does not record what anyone hoped for.
 
@@ -102,3 +102,10 @@ See [the implementation status](l3-implementation-status.md) for the audited sto
 security/cache/runtime components, provider-access blocker and outstanding end-to-end verification.
 The L1/L2 builders above remain the active game kit. No downloaded model or live-provider success
 is claimed by this checkpoint.
+
+## L3 reviewed catalogue continuation (2026-11-02)
+
+The optional, default-off layer now includes four real reviewed models: KayKit Knight, sedan, building,
+and the Khronos Fox sample with complete attribution. [Admission and acceptance evidence](l3-reviewed-assets.md)
+records exact limitations. L1/L2 remain unchanged. The historical “not built” paragraphs above describe
+Phase 2; the provider/manifest/cache layer is now implemented but broad activation has not occurred.

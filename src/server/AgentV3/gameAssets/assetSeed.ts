@@ -76,7 +76,7 @@ export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<
   const credits = ready.map(r => {
     const c = r.outcome.entry.candidate;
     const reviewed = catalogue.find(a => a.sha256 === c.sha256 && a.provider === c.provider && a.id === c.id && a.revision === c.revision);
-    return `${r.subject}: ${c.license.author} — ${c.license.spdx}\n${c.license.attribution}\nSource: ${c.sourceUrl}\nLicense evidence: ${c.license.evidenceUrl}\nRevision: ${c.revision}\nChanges: ${reviewed?.optimization ? 'lossless GLB buffer compaction (compact-v1); ' : ''}glTF packaging when applicable; runtime scale, grounding and curated orientation normalization.\nSHA-256: ${c.sha256}${reviewed?.sourceSha256 ? '\nSource SHA-256: ' + reviewed.sourceSha256 : ''}`;
+    return `${r.subject}: ${c.license.author} — ${c.license.spdx}\n${c.license.attribution}\nSource: ${c.sourceUrl}\nLicense evidence: ${c.license.evidenceUrl}\nRevision: ${c.revision}\nChanges: ${reviewed?.optimization === 'animation-selection-v1' ? 'retained clips ' + reviewed.retainedAnimations?.join(', ') + '; removed other clips and unused data (animation-selection-v1); ' : reviewed?.optimization === 'compact-v1' ? 'lossless GLB buffer compaction (compact-v1); ' : ''}glTF packaging when applicable; runtime scale, grounding and curated orientation normalization.\nSHA-256: ${c.sha256}${reviewed?.sourceSha256 ? '\nSource SHA-256: ' + reviewed.sourceSha256 : ''}`;
   }).join('\n\n');
   const files = {
     'public/game-assets/manifest.json': JSON.stringify(manifest, null, 2),

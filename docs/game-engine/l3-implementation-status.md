@@ -1,3 +1,11 @@
+# Current continuation — 2026-11-02
+
+Four real reviewed models and bounded animation selection are now implemented, with local Chromium
+production-artifact acceptance. Feature remains OFF. See [reviewed assets and exact limitations](l3-reviewed-assets.md).
+Signature verification now passes. Production downloader direct DNS is blocked by EAI_AGAIN in this
+managed environment; successful real-asset artifact checks explicitly use offline reviewed bytes.
+The November 1 report below is historical evidence, not the current catalogue/network state.
+
 # L3 asset engine — implementation checkpoint, 2026-11-01
 
 **Default off; no reviewed production models yet; not end-to-end delivered.**

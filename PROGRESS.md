@@ -100207,3 +100207,24 @@ those service obligations separately from the CC0 asset licence when wiring the 
 - Zero actual external models admitted/downloaded; production catalogue empty and feature off.
   Synthetic rendering/animation/artifact/reload/storage evidence does not establish six complete
   real-asset games, physical mobile performance or live publication. No push, PR, merge or deployment.
+
+### 2026-11-02 — real reviewed asset continuation, feature remains OFF
+
+- Resumed exact remote checkpoint abf2d97; main remains billing merge 504b79298. No rewrite or billing change.
+- Published managed policy contains all four requested domains. API/TUF read-only requests return 200;
+  npm signatures now passes (1,375 signatures / 197 attestations). No security settings changed.
+- Four exact free model licences reviewed and source bytes downloaded: KayKit Knight, sedan and building
+  (CC0), Khronos Fox (model CC0; animation/conversion CC BY 4.0, full credit retained).
+- Added hash-pinned animation-selection-v1: removes unselected clips/data without changing retained skin,
+  geometry or animation samples. Knight shrinks 3,659,532 -> 490,608 bytes; unchanged policy validates it.
+- All four models actually rendered in Chromium; Knight and Fox walking clips moved. Local Vite artifact
+  with four models passed keyboard/button movement, animation, same-origin asset loading, 390x844 layout,
+  reload and fresh-process disk cache restore: 9,578 triangles / 22 draw calls. This is one local fixture.
+- OPEN: direct DNS in production guarded transport fails EAI_AGAIN for raw.githubusercontent.com here.
+  Ordinary permitted HTTPS client obtained the sources; successful artifact harness explicitly uses
+  offline-reviewed input. No guard/proxy bypass. Actual production downloader acceptance is not claimed.
+- OPEN: Poly Haven metadata identifies dl.polyhaven.org; not allowed, not requested. Owner permission
+  needed before download. Other providers, six complete game cases, physical mobile, generated LODs,
+  cloud publication and broad semantic discovery remain incomplete. Feature OFF; no publish/activation.
+- Current final CI-equivalent suite and database drills are being run; prior-run evidence is not reused
+  as a current pass. See docs/game-engine/l3-reviewed-assets.md for exact admission and commands.

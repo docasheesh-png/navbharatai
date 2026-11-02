@@ -2,6 +2,7 @@ import { candidateMatches, type AssetCandidate, type AssetRequirement } from './
 import type { AssetProvider } from './assetEngine';
 import { assetDownloadUrl } from './assetDownload';
 import { safeGltfResourcePath } from './gltfBundle';
+import { reviewedCatalogue } from './reviewedCatalogue';
 
 export const GAME_ASSET_PROVIDERS = ['polyhaven', 'kenney', 'quaternius', 'kaykit', 'github', 'sketchfab'] as const;
 export type GameAssetProviderId = typeof GAME_ASSET_PROVIDERS[number];
@@ -15,13 +16,14 @@ export interface ReviewedAsset extends AssetCandidate {
   serviceCredit?: string;
   format?: 'glb' | 'gltf';
   /** Reviewed source AND derived output hashes are pinned; no automatic unreviewed rewrite. */
-  optimization?: 'compact-v1';
+  optimization?: 'compact-v1' | 'animation-selection-v1';
+  retainedAnimations?: readonly string[];
   sourceSha256?: string;
   resources?: readonly { path: string; url: string; sha256: string }[];
 }
 
-/** Empty until real downloaded models have passed provenance, security and browser verification. */
-export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = [];
+/** Exact asset revisions verified locally; feature activation remains independently default OFF. */
+export const REVIEWED_GAME_ASSETS: readonly ReviewedAsset[] = reviewedCatalogue;
 
 export function validateCatalogue(assets: readonly ReviewedAsset[]): void {
   if (assets.length > 64) throw new Error('Catalogue exceeds the initial 320 MiB cache/storage budget');
@@ -32,7 +34,11 @@ export function validateCatalogue(assets: readonly ReviewedAsset[]): void {
       || !candidateMatches(c, { subject: c.subjects[0] }) || c.downloadOrigins.length > 4) throw new Error('Unreviewed catalogue entry');
     assetDownloadUrl(c.downloadUrl, new Set(c.downloadOrigins));
     for (const origin of c.downloadOrigins) if (new URL(origin).origin !== origin) throw new Error('Invalid reviewed origin');
-    if (c.optimization !== undefined && (c.optimization !== 'compact-v1' || !/^[a-f0-9]{64}$/.test(c.sourceSha256 ?? ''))) throw new Error('Unreviewed optimization source/version');
+    if (c.optimization !== undefined && (!['compact-v1', 'animation-selection-v1'].includes(c.optimization) || !/^[a-f0-9]{64}$/.test(c.sourceSha256 ?? ''))) throw new Error('Unreviewed optimization source/version');
+    if (c.optimization === 'animation-selection-v1' && (c.format === 'gltf' || !c.retainedAnimations?.length
+      || c.retainedAnimations.length > 16 || new Set(c.retainedAnimations).size !== c.retainedAnimations.length
+      || c.retainedAnimations.some(n => !n || n.length > 128)
+      || c.animations.some(n => !c.retainedAnimations!.includes(n)))) throw new Error('Unreviewed animation selection');
     if (c.format === 'gltf' && (!/^[a-f0-9]{64}$/.test(c.sourceSha256 ?? '') || !c.resources?.length)) throw new Error('Unreviewed glTF sources');
     if ((c.resources?.length ?? 0) > 16 || new Set(c.resources?.map(r => r.path)).size !== (c.resources?.length ?? 0)) throw new Error('Resource budget or duplicates');
     for (const r of c.resources ?? []) {

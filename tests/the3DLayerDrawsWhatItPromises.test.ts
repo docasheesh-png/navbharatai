@@ -77,10 +77,12 @@ describe('the road (render: black zebra stripes, one kerb)', () => {
     it(`${detail}: the asphalt sits ABOVE the ground plane and every marking sits above the asphalt`, () => {
       const road: THREE.Group = objects.createRoad({ detail, length: 100, width: 8 });
       const flat = road.children.filter((c) => (c as THREE.Mesh).geometry instanceof THREE.PlaneGeometry) as THREE.Mesh[];
+      // The strips are segmented and DRAPED (2026-11-02), so heights live in the vertices, not position.y.
+      const top = (m: THREE.Mesh) => { m.geometry.computeBoundingBox(); return m.geometry.boundingBox!.max.y + m.position.y; };
       const asphalt = flat[0];
-      expect(asphalt.position.y).toBeGreaterThanOrEqual(0.02);
-      expect(objects.ROAD_SURFACE_Y).toBe(asphalt.position.y);
-      for (const m of flat.slice(1)) expect(m.position.y, 'a marking in the asphalt plane z-fights').toBeGreaterThan(asphalt.position.y);
+      expect(top(asphalt)).toBeGreaterThanOrEqual(0.02);
+      expect(top(asphalt)).toBeCloseTo(objects.ROAD_SURFACE_Y, 6);   // no terrain: flat at ROAD_SURFACE_Y, as before
+      for (const m of flat.slice(1)) expect(top(m), 'a marking in the asphalt plane z-fights').toBeGreaterThan(top(asphalt));
     });
   }
 
@@ -91,11 +93,13 @@ describe('the road (render: black zebra stripes, one kerb)', () => {
       const g = (c as THREE.Mesh).geometry as THREE.PlaneGeometry;
       return g instanceof THREE.PlaneGeometry && g.parameters.width === 0.12;
     });
-    expect(lines.map((l) => Math.sign(l.position.x)).sort()).toEqual([-1, 1]);
+    // Strips are built in place (translated geometry), so read the centre from the geometry.
+    const cx = (c: THREE.Object3D) => { const g = (c as THREE.Mesh).geometry; g.computeBoundingBox(); return (g.boundingBox!.min.x + g.boundingBox!.max.x) / 2 + c.position.x; };
+    expect(lines.map((l) => Math.sign(cx(l))).sort()).toEqual([-1, 1]);
     const kerbs = road.children.filter((c) => (c as THREE.Mesh).geometry instanceof THREE.BoxGeometry);
     expect(kerbs).toHaveLength(2);
-    for (const k of kerbs) expect(Math.abs(k.position.x)).toBeGreaterThan(W / 2);
-    expect(kerbs.map((k) => Math.sign(k.position.x)).sort()).toEqual([-1, 1]);
+    for (const k of kerbs) expect(Math.abs(cx(k))).toBeGreaterThan(W / 2);
+    expect(kerbs.map((k) => Math.sign(cx(k))).sort()).toEqual([-1, 1]);
   });
 });
 

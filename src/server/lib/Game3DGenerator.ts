@@ -583,7 +583,8 @@ export class CameraRig {
 
 const WORLD = `import * as THREE from 'three';
 import { sharedMaterial, paletteColor, type PaletteName } from './materials';
-import { surfaceMaterial, enableAO, getDetailLevel, mergeGeometries, setGround, type Detail, type SurfaceKind } from './surfaces';
+import { surfaceMaterial, enableAO, getDetailLevel, mergeGeometries, registerTerrain, shapedHeight, type Detail, type SurfaceKind } from './surfaces';
+export { groundHeightAt, syncGround } from './surfaces';
 
 /**
  * Procedural world building — an environment with no asset library.
@@ -691,7 +692,19 @@ export function createTerrain(options: TerrainOptions = {}): THREE.Mesh {
   mesh.receiveShadow = true;
   const heightAt = surfaceSampler(pos, size, segments, mesh);
   mesh.userData.heightAt = heightAt;
-  setGround(heightAt);   // every driveVehicle() now follows these hills — no opt-in to forget
+  // Every driveVehicle(), groundScene() and createRoad() now follows these hills — no opt-in to forget.
+  // rebuild() re-cuts the ground under roads declared before OR after this terrain.
+  registerTerrain({
+    base: field, drawn: heightAt, step: size / segments, flat: !!options.flat,
+    rebuild: () => {
+      if (options.flat) return;
+      for (let i = 0; i < pos.count; i++) pos.setY(i, shapedHeight(pos.getX(i) + mesh.position.x, pos.getZ(i) + mesh.position.z) - mesh.position.y);
+      pos.needsUpdate = true;
+      geo.computeVertexNormals();
+      geo.computeBoundingSphere();
+      geo.computeBoundingBox();
+    },
+  });
   return mesh;
 }
 
@@ -845,12 +858,144 @@ export function getDetailLevel(): Detail { return DEFAULT_DETAIL; }
 // the first hill. The ONE height registry lives here, where world.ts (which builds the hills) and
 // objects.ts (which drives on them) both already import from. createTerrain() registers itself, so a
 // game never has to opt in.
+//
+// 🔴 ROOT CAUSE 2 (admin, same day): createRoad() laid a FLAT strip at ROAD_SURFACE_Y while the terrain
+// rose into hills around and over it — grass above the asphalt, and a car on the road read as sunk.
+// Roads, tracks and rails are now CORRIDORS declared here: the terrain is cut/filled under each one to a
+// smooth road profile (blended at the shoulders), the strip drapes onto that same profile, and movers
+// read the road surface from the same registry. Order-free: a road made before the terrain, or moved
+// after it, re-drapes on the next syncGround() (called by the terrain, the road's own render, every
+// driven vehicle and the shell's groundScene).
 export type GroundHeight = (x: number, z: number) => number;
-let ACTIVE_GROUND: GroundHeight | null = null;
-/** The ground every vehicle follows by default. createTerrain() sets it; pass null to clear it. */
-export function setGround(heightAt: GroundHeight | null): void { ACTIVE_GROUND = heightAt; }
-/** The active ground's height function, or null when no terrain has been made. */
-export function getGround(): GroundHeight | null { return ACTIVE_GROUND; }
+/** A strip the ground is shaped to: a road, a rail track, a path. Its centre line is the object's local Z. */
+export interface Corridor {
+  obj: THREE.Object3D;
+  halfWidth: number;
+  halfLength: number;
+  /** Metres over which the cut/fill blends back into the natural terrain. */
+  shoulder: number;
+  /** Height of the DRIVABLE surface above the profile (asphalt 0.03, rail top 0.53). */
+  surfaceOffset: number;
+  /** How far the terrain is dug below the profile under the corridor, so no grass pokes through. */
+  dig: number;
+  /** Re-lay the corridor's own meshes on the profile. */
+  drape?: () => void;
+  sig?: string;
+}
+interface TerrainReg { base: GroundHeight; drawn: GroundHeight; step: number; flat: boolean; rebuild: () => void }
+let OVERRIDE: GroundHeight | null = null;
+let TERRAIN: TerrainReg | null = null;
+const CORRIDORS: Corridor[] = [];
+let DIRTY = true;
+let TERRAIN_SIG = 0;
+
+/** Force a ground (tests, a custom world). null clears EVERYTHING: terrain, corridors and the override. */
+export function setGround(heightAt: GroundHeight | null): void {
+  OVERRIDE = heightAt;
+  if (!heightAt) { TERRAIN = null; CORRIDORS.length = 0; }
+  DIRTY = true;
+}
+/** createTerrain() registers itself here; a game never calls this. */
+export function registerTerrain(t: TerrainReg | null): void { TERRAIN = t; TERRAIN_SIG++; DIRTY = true; syncGround(); }
+/** Declare a road / track / path corridor. createRoad() and createRailTrack() do this themselves. */
+export function declareCorridor(c: Corridor): Corridor { CORRIDORS.push(c); DIRTY = true; syncGround(); return c; }
+export function removeCorridor(c: Corridor): void { const i = CORRIDORS.indexOf(c); if (i >= 0) { CORRIDORS.splice(i, 1); DIRTY = true; syncGround(); } }
+
+/** World centre and heading of an object placed by position + rotation.y (through its parents). */
+function frameOf(o: THREE.Object3D): { x: number; y: number; z: number; a: number } {
+  let x = 0, y = 0, z = 0, a = 0;
+  for (let n: THREE.Object3D | null = o; n; n = n.parent) {
+    const r = n.rotation.y, c = Math.cos(r), sn = Math.sin(r);
+    const nx = c * x + sn * z, nz = -sn * x + c * z;
+    x = nx + n.position.x; z = nz + n.position.z; y += n.position.y; a += r;
+  }
+  return { x, y, z, a };
+}
+/** Road-local (along, across) of a world point. */
+function localOf(c: Corridor, x: number, z: number) {
+  const f = frameOf(c.obj);
+  const dx = x - f.x, dz = z - f.z, sn = Math.sin(f.a), cs = Math.cos(f.a);
+  return { s: dx * sn + dz * cs, lat: dx * cs - dz * sn, f };
+}
+/**
+ * The corridor's smooth height profile at distance s along it: the natural terrain averaged over ±12 m
+ * of centre line, so the road climbs a hill as a gradient, not as every bump. 0 with no terrain.
+ */
+export function corridorProfile(c: Corridor, s: number): number {
+  if (!TERRAIN || TERRAIN.flat) return 0;
+  const f = frameOf(c.obj);
+  const sn = Math.sin(f.a), cs = Math.cos(f.a);
+  const sc = Math.max(-c.halfLength, Math.min(c.halfLength, s));
+  let sum = 0;
+  for (let k = -4; k <= 4; k++) { const t = sc + k * 3; sum += TERRAIN.base(f.x + sn * t, f.z + cs * t); }
+  return sum / 9;
+}
+const coreMargin = () => (TERRAIN && !TERRAIN.flat ? 1.5 * TERRAIN.step + 0.5 : 0);
+const smoothstep = (t: number) => { const u = Math.max(0, Math.min(1, t)); return u * u * (3 - 2 * u); };
+
+/** The height the TERRAIN is drawn at: natural hills, cut/filled under every corridor. */
+export function shapedHeight(x: number, z: number): number {
+  if (!TERRAIN) return 0;
+  const b = TERRAIN.base(x, z);
+  if (TERRAIN.flat) return b;
+  let h = b, bestW = 0;
+  for (const c of CORRIDORS) {
+    const { s, lat } = localOf(c, x, z);
+    const ds = Math.max(0, Math.abs(lat) - (c.halfWidth + coreMargin()));
+    const es = Math.max(0, Math.abs(s) - c.halfLength);
+    const dist = Math.hypot(ds, es);
+    if (dist >= c.shoulder) continue;
+    const w = 1 - smoothstep(dist / c.shoulder);
+    if (w <= bestW) continue;
+    bestW = w;
+    const target = corridorProfile(c, s) - c.dig;
+    h = b + (target - b) * w;
+  }
+  return h;
+}
+/** The drivable surface of a corridor under (x, z), or null when (x, z) is on no corridor. */
+export function corridorSurfaceAt(x: number, z: number): number | null {
+  let best: number | null = null;
+  for (const c of CORRIDORS) {
+    const { s, lat } = localOf(c, x, z);
+    if (Math.abs(lat) > c.halfWidth || Math.abs(s) > c.halfLength) continue;
+    const h = corridorProfile(c, s) + c.surfaceOffset;
+    if (best === null || h > best) best = h;
+  }
+  return best;
+}
+const GROUND_FN: GroundHeight = (x, z) => {
+  const road = CORRIDORS.length ? corridorSurfaceAt(x, z) : null;
+  if (road !== null) return road;
+  return TERRAIN ? TERRAIN.drawn(x, z) : 0;
+};
+/**
+ * The ground every mover follows: the road/rail surface on a corridor, the DRAWN terrain elsewhere.
+ * null when the world has neither (a space game, an arena you floored yourself).
+ */
+export function getGround(): GroundHeight | null {
+  if (OVERRIDE) return OVERRIDE;
+  return TERRAIN || CORRIDORS.length ? GROUND_FN : null;
+}
+/** Ground height at (x, z) for anything a game places — 0 when there is no ground. */
+export function groundHeightAt(x: number, z: number): number { const g = getGround(); return g ? g(x, z) : 0; }
+/**
+ * Bring terrain and corridors into agreement after either was created or moved. Cheap when nothing
+ * changed (a signature per corridor). Returns true when it re-shaped anything.
+ */
+export function syncGround(): boolean {
+  let changed = DIRTY;
+  for (const c of CORRIDORS) {
+    const f = frameOf(c.obj);
+    const sig = [f.x.toFixed(3), f.y.toFixed(3), f.z.toFixed(3), f.a.toFixed(4), TERRAIN_SIG].join('|');
+    if (sig !== c.sig) { c.sig = sig; changed = true; }
+  }
+  if (!changed) return false;
+  DIRTY = false;
+  TERRAIN?.rebuild();
+  for (const c of CORRIDORS) c.drape?.();
+  return true;
+}
 
 // WATER IS THE ONLY PLACE A THING MAY GO BELOW THE GROUND, and only where a game SAYS there is water.
 const WATER: Array<(x: number, z: number) => boolean> = [];
@@ -864,7 +1009,7 @@ export function isWaterAt(x: number, z: number): boolean { return WATER.some((w)
  * (plus userData.groundOffset, default 0). Opt-outs are explicit: userData.ground = false (a bird, a
  * plane, a projectile, a hand-placed bridge deck), or a declared water region under it.
  */
-export function groundObject(obj: THREE.Object3D, ground: GroundHeight | null = ACTIVE_GROUND): boolean {
+export function groundObject(obj: THREE.Object3D, ground: GroundHeight | null = getGround()): boolean {
   if (!ground || obj.userData.ground === false || obj.userData.heightAt) return false;
   const x = obj.position.x, z = obj.position.z;
   if (WATER.length && isWaterAt(x, z)) return false;
@@ -879,7 +1024,8 @@ export function groundObject(obj: THREE.Object3D, ground: GroundHeight | null = 
  * particle systems, instanced batches (already placed per instance) and the terrain itself are skipped.
  * Returns how many objects were lifted out of the ground this step.
  */
-export function groundScene(root: THREE.Object3D, ground: GroundHeight | null = ACTIVE_GROUND): number {
+export function groundScene(root: THREE.Object3D, ground: GroundHeight | null = getGround()): number {
+  syncGround();
   if (!ground) return 0;
   let lifted = 0;
   for (const obj of root.children) {
@@ -1702,11 +1848,12 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
 // feature this codebase forbids. Say "real-looking", never "photorealistic".
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 const OBJECTS = `import * as THREE from 'three';
-import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, mergeGeometries, getGround, addWater, type SurfaceKind, type Detail } from './surfaces';
+import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, mergeGeometries, getGround, addWater, declareCorridor, corridorProfile, syncGround, groundHeightAt, type Corridor, type SurfaceKind, type Detail } from './surfaces';
 
 // The detail tier lives in surfaces.ts so the ground reads the same setting as the objects; it is
 // re-exported here so \`import { setDetailLevel } from './objects'\` keeps working everywhere.
 export { setDetailLevel, getDetailLevel };
+export { groundHeightAt, syncGround };
 export type { Detail };
 
 interface BaseOpts { detail?: Detail; seed?: number }
@@ -2645,6 +2792,15 @@ export function createTraffic(options: TrafficOptions = {}): Traffic {
     v.object.rotation.y = v.dir === 1 ? 0 : Math.PI;
     root.add(v.object);
   }
+  root.userData.ground = false;   // each vehicle is grounded on its own, below — not the group's origin
+  // ON the road surface wherever the road climbs, not at a flat ROAD_SURFACE_Y under the hills.
+  const settle = (o: THREE.Object3D) => {
+    if (!getGround()) { o.position.y = ROAD_SURFACE_Y; return; }
+    root.updateMatrixWorld(true);
+    const w = o.getWorldPosition(new THREE.Vector3());
+    o.position.y += groundHeightAt(w.x, w.z) - w.y;
+  };
+  for (const v of vehicles) settle(v.object);
 
   /** Distance along v's direction of travel from v's nose to the nearest obstacle's tail in its lane. */
   const gapAhead = (v: TrafficVehicle, avoid: THREE.Object3D[]): { gap: number; speed: number } => {
@@ -2689,6 +2845,7 @@ export function createTraffic(options: TrafficOptions = {}): Traffic {
       // Round the end of the road, back on at the start of its own lane.
       const along = v.object.position.z * v.dir;
       if (along > L / 2) v.object.position.z = (along - L) * v.dir;
+      settle(v.object);
       rollWheels(v.object, v.speed, step);
     }
   };
@@ -2771,7 +2928,7 @@ export interface VehicleTuning {
    * yourself). Default: the last createTerrain(), so a car follows the hills with no extra call.
    */
   ground?: ((x: number, z: number) => number) | false;
-  /** Height of the model's origin above the ground (createCar's origin is at the tyres: default 0.03). */
+  /** Height of the model's origin above the ground (createCar's origin is at the tyres: default 0). */
   rideHeight?: number;
   /** Wheelbase and track used to read the slope under the car (pitch and roll), metres. */
   length?: number;
@@ -2791,9 +2948,11 @@ export function settleOnGround(
   tuning: VehicleTuning = {},
   prev: { pitch?: number; roll?: number } = {},
 ): { pitch: number; roll: number } | null {
+  if (tuning.ground === undefined) syncGround();
   const ground = tuning.ground === false ? null : (tuning.ground ?? getGround());
   if (!ground) return null;
-  const ride = tuning.rideHeight ?? 0.03;
+  // The ground already IS the asphalt (or rail top) on a corridor, so the tyres sit ON it: 0.
+  const ride = tuning.rideHeight ?? 0;
   const L = (tuning.length ?? 2.6) / 2, W = (tuning.width ?? 1.6) / 2;
   const x = vehicle.position.x, z = vehicle.position.z;
   const fx = Math.sin(heading), fz = Math.cos(heading);   // the nose (+Z of the model)
@@ -3130,10 +3289,11 @@ export function createRoad(options: RoadOptions = {}): THREE.Group {
   const W = options.width ?? 8;
   const lanes = options.lanes ?? 2;
   const group = new THREE.Group();
+  // 🔴 SEGMENTED, so it can bend over a hill: one vertex row every 2 m along the road.
+  const seg = Math.max(1, Math.ceil(L / 2));
 
-  const surface = mesh(new THREE.PlaneGeometry(W, L, 1, d === 'real' ? 60 : 1), shared('asphalt', d, 0x3a3c40, d === 'real' ? 40 : 1), d);
-  surface.rotation.x = -Math.PI / 2;
-  surface.position.y = ROAD_SURFACE_Y;
+  const surface = mesh(strip(W, L, seg, 0, 0), shared('asphalt', d, 0x3a3c40, d === 'real' ? 40 : 1), d);
+  surface.userData.drape = ROAD_SURFACE_Y;
   surface.castShadow = false;
   group.add(surface);
 
@@ -3143,21 +3303,21 @@ export function createRoad(options: RoadOptions = {}): THREE.Group {
   // Dashed centre line — 3 m mark, 6 m gap is close to the real Indian standard.
   const dashes = Math.floor(L / 9);
   for (let i = 0; i < dashes; i++) {
-    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 3), paint);
-    dash.rotation.x = -Math.PI / 2;
-    dash.position.set(0, ROAD_SURFACE_Y + 0.008, -L / 2 + i * 9 + 4.5);
+    const dash = new THREE.Mesh(strip(0.14, 3, 2, 0, -L / 2 + i * 9 + 4.5), paint);
+    dash.userData.drape = ROAD_SURFACE_Y + 0.008;
     group.add(dash);
   }
   // BOTH sides. This loop used to end in \`break\` after the first pass, so a road had one edge line and
   // one kerb — and that kerb, at (side * W) / 2 + 0.15, sat INSIDE the asphalt on the left.
   for (const side of [-1, 1]) {
-    const edge = new THREE.Mesh(new THREE.PlaneGeometry(0.12, L), paint);
-    edge.rotation.x = -Math.PI / 2;
-    edge.position.set(side * (W / 2 - 0.35), ROAD_SURFACE_Y + 0.008, 0);
+    const edge = new THREE.Mesh(strip(0.12, L, seg, side * (W / 2 - 0.35), 0), paint);
+    edge.userData.drape = ROAD_SURFACE_Y + 0.008;
     group.add(edge);
     if (d === 'real') {
-      const kerb = mesh(new THREE.BoxGeometry(0.3, 0.16, L), shared('stone', d, 0xb9b3a6, 20), d);
-      kerb.position.set(side * (W / 2 + 0.15), 0.08, 0);
+      const kg = new THREE.BoxGeometry(0.3, 0.16, L, 1, 1, seg);
+      kg.translate(side * (W / 2 + 0.15), 0, 0);
+      const kerb = mesh(kg, shared('stone', d, 0xb9b3a6, 20), d);
+      kerb.userData.drape = 0.08;
       group.add(kerb);
     }
   }
@@ -3168,13 +3328,97 @@ export function createRoad(options: RoadOptions = {}): THREE.Group {
     for (let lane = 0; lane < lanes; lane++) {
       const laneCentre = -W / 2 + (W / lanes) * (lane + 0.5);
       for (const off of [-0.75, 0.75]) {
-        const wear = new THREE.Mesh(new THREE.PlaneGeometry(0.55, L), wearMat);
-        wear.rotation.x = -Math.PI / 2;
-        wear.position.set(laneCentre + off, ROAD_SURFACE_Y + 0.004, 0);
+        const wear = new THREE.Mesh(strip(0.55, L, seg, laneCentre + off, 0), wearMat);
+        wear.userData.drape = ROAD_SURFACE_Y + 0.004;
         group.add(wear);
       }
     }
   }
+  layOnGround(group, surface, { halfWidth: W / 2 + (d === 'real' ? 0.3 : 0), halfLength: L / 2, surfaceOffset: ROAD_SURFACE_Y });
+  return group;
+}
+
+/** A flat strip along local Z (width across X), centred at (x, z), \`seg\` rows along its length. */
+function strip(width: number, length: number, seg: number, x: number, z: number): THREE.BufferGeometry {
+  const g = new THREE.PlaneGeometry(width, length, 1, seg);
+  g.rotateX(-Math.PI / 2);
+  g.translate(x, 0, z);
+  return g;
+}
+
+/**
+ * 🔒 Declare \`group\` as a corridor and drape every child mesh that has userData.drape (its height above
+ * the profile) onto the corridor's profile — vertex by vertex, along the group's local Z. The terrain
+ * under it is cut/filled to the same profile, so asphalt, rails and grass always agree. \`anchor\`
+ * re-syncs on render, so a road moved after creation re-drapes without the game doing anything.
+ */
+function layOnGround(group: THREE.Group, anchor: THREE.Mesh, o: { halfWidth: number; halfLength: number; surfaceOffset: number }): void {
+  group.userData.ground = false;   // laid by its corridor, never lifted by its origin
+  for (const m of group.children as THREE.Mesh[]) {
+    if (m.userData.drape === undefined || !m.geometry) continue;
+    const p = m.geometry.attributes.position as THREE.BufferAttribute;
+    const base = new Float32Array(p.count);
+    for (let i = 0; i < p.count; i++) base[i] = p.getY(i);
+    m.userData.baseY = base;
+  }
+  const corridor: Corridor = {
+    obj: group, halfWidth: o.halfWidth, halfLength: o.halfLength, shoulder: 10, surfaceOffset: o.surfaceOffset, dig: 0.06,
+    drape: () => {
+      for (const m of group.children as THREE.Mesh[]) {
+        const base = m.userData.baseY as Float32Array | undefined;
+        if (!base) continue;
+        const p = m.geometry.attributes.position as THREE.BufferAttribute;
+        for (let i = 0; i < p.count; i++) {
+          p.setY(i, base[i] + corridorProfile(corridor, p.getZ(i) + m.position.z) + Number(m.userData.drape) - m.position.y);
+        }
+        p.needsUpdate = true;
+        m.geometry.computeVertexNormals();
+        m.geometry.computeBoundingSphere();   // or frustum culling hides a road that climbed out of its old box
+        m.geometry.computeBoundingBox();
+      }
+    },
+  };
+  declareCorridor(corridor);   // drapes it now, and again whenever the terrain or the road moves
+  group.userData.corridor = corridor;
+  anchor.onBeforeRender = () => { syncGround(); };
+}
+
+/** Rail top above the track profile: a train's wheels (and getGround() on the track) sit here. */
+export const RAIL_TOP_Y = 0.53;
+export interface RailTrackOptions extends BaseOpts { length?: number; gauge?: number }
+
+/**
+ * A RAILWAY LINE that lies ON the land: a ballast bed, sleepers every 0.65 m and two steel rails, all
+ * draped on one smooth profile with the terrain cut and filled under it (the same corridor a road uses).
+ * Runs along local Z. A train on it: train.position.y = groundHeightAt(x, z) — that is the rail top.
+ */
+export function createRailTrack(options: RailTrackOptions = {}): THREE.Group {
+  const d = tier(options);
+  const L = options.length ?? 300;
+  const gauge = options.gauge ?? 1.676;   // Indian broad gauge
+  const seg = Math.max(1, Math.ceil(L / 2));
+  const group = new THREE.Group();
+  const bg = new THREE.BoxGeometry(3.2, 0.3, L, 1, 1, seg);
+  const ballast = mesh(bg, shared('stone', d, 0x7a746b, 30), d);
+  ballast.userData.drape = 0.15;
+  group.add(ballast);
+  const n = Math.floor(L / 0.65);
+  const sleeperList: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < n; i++) { const g = new THREE.BoxGeometry(2.6, 0.08, 0.24); g.translate(0, 0, -L / 2 + (i + 0.5) * 0.65); sleeperList.push(g); }
+  if (sleeperList.length) {
+    const sleepers = mesh(mergeGeometries(sleeperList), shared('wood', d, 0x5a4632, 4), d);
+    sleepers.userData.drape = 0.34;
+    group.add(sleepers);
+  }
+  const steel = new THREE.MeshStandardMaterial({ color: 0x8d9299, metalness: 0.85, roughness: 0.35 });
+  for (const side of [-1, 1]) {
+    const rg = new THREE.BoxGeometry(0.07, 0.15, L, 1, 1, seg);
+    rg.translate(side * gauge / 2, 0, 0);
+    const rail = new THREE.Mesh(rg, steel);
+    rail.userData.drape = RAIL_TOP_Y - 0.075;
+    group.add(rail);
+  }
+  layOnGround(group, ballast, { halfWidth: 1.6, halfLength: L / 2, surfaceOffset: RAIL_TOP_Y });
   return group;
 }
 
@@ -4623,7 +4867,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
       "import { createTerrain, scatterInstances, treeGeometry } from './game/three/world';\n" +
       "import { createHumanoid } from './game/three/humanoid';\n" +
       "import { createCar, createTree, createMountain, createRoad, createHouse, createRiver, createAnimal,\n" +
-      "  createMotorcycle, createVehicleState, driveVehicle, ROAD_SURFACE_Y } from './game/three/objects';\n" +
+      "  createMotorcycle, createRailTrack, createVehicleState, driveVehicle, groundHeightAt } from './game/three/objects';\n" +
       "import { CameraRig } from './game/three/camera';\n" +
       "import { Input } from './game/core/input';\n" +
       '\n' +
@@ -4635,7 +4879,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
       "applyEnvironment(scene, renderer, 'sunset');            // reflections — do NOT skip this\n" +
       "setDetailLevel('real');   // 'real' when the user asked for real/asli; 'lite' for plain 3D\n" +
       "const terrain = createTerrain({ palette: 'indianVillage' });\n" +
-      'scene.add(terrain, createTree({ height: 7 }), createMountain({ size: 140, height: 50 }), createRoad({ length: 400 }));\n' +
+      'scene.add(terrain, createTree({ height: 7 }), createMountain({ size: 140, height: 50 }), createRoad({ length: 400 }));   // the road drapes over the hills; the ground is cut to it\n' +
+      "const rail = createRailTrack({ length: 400 }); rail.position.x = 30; scene.add(rail);   // a train rides at groundHeightAt(x, z) on it\n" +
       "scene.add(scatterInstances(treeGeometry(), sharedMaterial('foliage', paletteColor('forest', 1)), { count: 400 }));\n" +
       "scene.add(new THREE.Mesh(enableAO(new THREE.BoxGeometry(6, 3, 0.3)), surfaceMaterial('brick', { repeat: 6 })));\n" +
       "const house = createHouse({ roof: 'flat', storeys: 2 }); house.position.set(16, 0, 0); house.rotation.y = -Math.PI / 2; scene.add(house); // door faces +Z — turn it to the road\n" +
@@ -4646,7 +4891,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '// DRIVING. Every model faces +Z (MODEL_FORWARD). driveVehicle owns the control signs; the camera stays BEHIND.\n' +
       'const car = createCar({ color: 0xb42b2b });\n' +
       'car.rotation.y = Math.PI; // local +Z nose faces world -Z, into the screen\n' +
-      'car.position.y = ROAD_SURFACE_Y;   // on hills, driveVehicle keeps it ON the terrain (y, pitch, roll)\n' +
+      'car.position.y = groundHeightAt(0, 0);   // ON the road surface; driveVehicle keeps it there over every hill\n' +
       'scene.add(car);\n' +
       'let drive = createVehicleState(car);   // starts moving, pointing where the model points\n' +
       "const rig = new CameraRig({ kind: 'chase', collidables: [terrain, house] });\n" +
@@ -4694,8 +4939,12 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '- 🔴 ANYTHING DRIVEN OR RIDDEN: move it with driveVehicle(vehicle, state, input.axis(), dt) — the raw\n' +
       "  axis, never a sign you worked out — and frame it with a 'chase' rig (rig.update(vehicle, dt)) or\n" +
       '  rig.follow(vehicle, dt). driveVehicle also keeps it ON the hills of createTerrain() (height, pitch,\n' +
-      '  roll): never set a driven vehicle\'s position.y yourself; terrain.userData.heightAt(x, z) is the\n' +
-      '  ground height for anything else you place. The camera then sits BEHIND it: the player sees the TAIL lights, and LEFT\n' +
+      '  roll): never set a driven vehicle\'s position.y yourself. groundHeightAt(x, z) is THE ground height\n' +
+      '  (road/rail surface on a road or track, terrain elsewhere) for anything else you place or move — a\n' +
+      '  train, traffic, NPCs, props. Roads are createRoad() and rails createRailTrack(): never a flat\n' +
+      '  PlaneGeometry at ROAD_SURFACE_Y over hilly terrain (the grass covers it and the car looks sunk).\n' +
+      '  The game shell grounds every scene object each step; set userData.ground = false only for a\n' +
+      '  flyer, and addWater(fn) for the only places something may sink. The camera then sits BEHIND it: the player sees the TAIL lights, and LEFT\n' +
       '  turns it to the left of the screen. A camera you place yourself at +Z of the car is IN FRONT of it\n' +
       '  (every model faces +Z) — the player sees the headlights and every control reads as reversed.\n' +
       "- 🌦️ An outdoor world gets atmosphere.ts: createAtmosphere({ scene, renderer, camera, lighting })\n" +

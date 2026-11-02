@@ -206,7 +206,10 @@ jobs:
   # Uses ordinary hosted-runner egress and the unchanged connection-level SSRF dispatcher.
   asset-live-acceptance:
     if: github.event_name == 'pull_request' && github.head_ref == 'feat/universal-3d-assets' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 15
     permissions:
       contents: read
@@ -218,7 +221,9 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - name: Install isolated browser verification tooling
+        id: browser
         run: |
+          mkdir -p "$RUNNER_TEMP/asset-acceptance"
           npm install --prefix "$RUNNER_TEMP/asset-browser" --no-save --ignore-scripts playwright@1.57.0
           "$RUNNER_TEMP/asset-browser/node_modules/.bin/playwright" install --with-deps chromium
           echo "ASSET_PLAYWRIGHT=$RUNNER_TEMP/asset-browser/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
@@ -228,10 +233,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/asset-acceptance"
           node --import ./node_modules/tsx/dist/loader.mjs scripts/checks/gameAssetDemand.check.ts "$RUNNER_TEMP/asset-acceptance/demand" "$ASSET_PLAYWRIGHT" "$ASSET_CHROMIUM" live 2>&1 | tee "$RUNNER_TEMP/asset-acceptance/demand.log"
       - name: Reviewed real models through production downloader, browser and fresh-process cache
-        if: success() || failure()
+        id: reviewed
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
         run: |
           node --import ./node_modules/tsx/dist/loader.mjs scripts/checks/gameAssetReal.check.ts "$RUNNER_TEMP/asset-acceptance/reviewed" "$ASSET_PLAYWRIGHT" "$ASSET_CHROMIUM" 2>&1 | tee "$RUNNER_TEMP/asset-acceptance/reviewed.log"
       - name: Six local game scenarios from admitted bytes and production artifacts
+        if: ${{ !cancelled() && steps.reviewed.outcome == 'success' }}
         run: |
           node --import ./node_modules/tsx/dist/loader.mjs scripts/checks/gameAssetScenarios.check.ts "$RUNNER_TEMP/asset-acceptance/scenarios" "$RUNNER_TEMP/asset-acceptance/reviewed/cache/game-assets-public-cc/v1" "$ASSET_PLAYWRIGHT" "$ASSET_CHROMIUM" 2>&1 | tee "$RUNNER_TEMP/asset-acceptance/scenarios.log"
       - name: Upload test evidence only (no model library or public game publication)

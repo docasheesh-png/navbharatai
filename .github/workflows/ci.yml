@@ -85,13 +85,11 @@ jobs:
 
   build-and-test:
     runs-on: ubuntu-latest
-    # Bounded well above the real cost (~10 min after the de-duplication below) so a genuine hang fails
-    # fast and legibly, instead of holding a runner for the six-hour default.
-    # 45, not 30 (merging session, 2026-10-04): with eight or nine PR runs in flight at once the shared
-    # runners slowed every run to 21-30 min, and three green-bound runs were cancelled at exactly 30:00
-    # ("The job has exceeded the maximum execution time of 30m0s"). A cancelled run is a re-run, i.e. the
-    # same minutes spent twice; a longer cap costs nothing when the job finishes early.
-    timeout-minutes: 45
+    # The full 48k-test coverage run remains mandatory. Main recently needed 44m13s and another
+    # main run plus PR run 41403264320 hit the former 45m job cap while tests were still advancing.
+    # Allow 60m for the complete gate on shared hosted runners; per-test/hook timeouts and coverage
+    # thresholds are unchanged. A cancelled/incomplete run never counts as passing.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
@@ -201,3 +199,54 @@ jobs:
       - name: Server production-dependency gate (every runtime import must survive `npm prune --omit=dev`)
         run: npm run deps:server-gate
 
+
+  # Explicit acceptance for this asset-engine PR only; never a runtime preload or scheduled crawl.
+  # Uses ordinary hosted-runner egress and the unchanged connection-level SSRF dispatcher.
+  asset-live-acceptance:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feat/universal-3d-assets' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: 'npm'
+      - run: npm ci
+      - name: Install isolated browser verification tooling
+        id: browser
+        run: |
+          mkdir -p "$RUNNER_TEMP/asset-acceptance"
+          npm install --prefix "$RUNNER_TEMP/asset-browser" --no-save --ignore-scripts playwright@1.57.0
+          "$RUNNER_TEMP/asset-browser/node_modules/.bin/playwright" install --with-deps chromium
+          echo "ASSET_PLAYWRIGHT=$RUNNER_TEMP/asset-browser/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
+          node --input-type=module -e "import {createRequire} from 'node:module';const r=createRequire(process.cwd()+'/package.json');const p=r(process.env.RUNNER_TEMP+'/asset-browser/node_modules/playwright');console.log('ASSET_CHROMIUM='+p.chromium.executablePath())" >> "$GITHUB_ENV"
+      - name: Live requested table discovery, secure transfer, browser admission and durable reload
+        run: |
+          mkdir -p "$RUNNER_TEMP/asset-acceptance"
+          node --import ./node_modules/tsx/dist/loader.mjs scripts/checks/gameAssetDemand.check.ts "$RUNNER_TEMP/asset-acceptance/demand" "$ASSET_PLAYWRIGHT" "$ASSET_CHROMIUM" live 2>&1 | tee "$RUNNER_TEMP/asset-acceptance/demand.log"
+      - name: Reviewed real models through production downloader, browser and fresh-process cache
+        id: reviewed
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
+        run: |
+          node --import ./node_modules/tsx/dist/loader.mjs scripts/checks/gameAssetReal.check.ts "$RUNNER_TEMP/asset-acceptance/reviewed" "$ASSET_PLAYWRIGHT" "$ASSET_CHROMIUM" 2>&1 | tee "$RUNNER_TEMP/asset-acceptance/reviewed.log"
+      - name: Six local game scenarios from admitted bytes and production artifacts
+        if: ${{ !cancelled() && steps.reviewed.outcome == 'success' }}
+        run: |
+          node --import ./node_modules/tsx/dist/loader.mjs scripts/checks/gameAssetScenarios.check.ts "$RUNNER_TEMP/asset-acceptance/scenarios" "$RUNNER_TEMP/asset-acceptance/reviewed/cache/game-assets-public-cc/v1" "$ASSET_PLAYWRIGHT" "$ASSET_CHROMIUM" 2>&1 | tee "$RUNNER_TEMP/asset-acceptance/scenarios.log"
+      - name: Upload test evidence only (no model library or public game publication)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: asset-acceptance-evidence
+          path: |
+            ${{ runner.temp }}/asset-acceptance/*.log
+            ${{ runner.temp }}/asset-acceptance/demand/*.png
+            ${{ runner.temp }}/asset-acceptance/scenarios/*.png
+            ${{ runner.temp }}/asset-acceptance/scenarios/results.json
+          if-no-files-found: error

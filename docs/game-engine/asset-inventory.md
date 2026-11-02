@@ -1,6 +1,6 @@
 # Game graphics — hero object inventory and quality levels (Phase 2, 2026-10-05)
 
-Every object in a NavBharatAI 3D game is built by code in `src/server/lib/Game3DGenerator.ts`. The generated app writes these modules to `src/game/three/`. Nothing is downloaded, so a published game can never lose a model file.
+By default, every object in a NavBharatAI 3D game is built by code in `src/server/lib/Game3DGenerator.ts`. The generated app writes these modules to `src/game/three/`. Nothing is downloaded, so a published game can never lose a model file.
 
 This file lists what each hero object is today, measured from the geometry the generated app runs (`tests/aHeroObjectIsNotABox.test.ts`). It does not record what anyone hoped for.
 
@@ -94,3 +94,33 @@ The benchmark renders the same scene, camera, lighting and renderer for BEFORE a
 - a tiled house.
 
 It shoots views from the side, from behind (the chase view), close-ups of the human and the animals, and the whole line.
+
+## L3 implementation checkpoint (2026-11-01)
+
+The requested external-asset layer is under development, not available in generated games yet.
+See [the implementation status](l3-implementation-status.md) for the audited storage path, local
+security/cache/runtime components, provider-access blocker and outstanding end-to-end verification.
+The L1/L2 builders above remain the active game kit. No downloaded model or live-provider success
+is claimed by this checkpoint.
+
+## L3 reviewed catalogue continuation (2026-11-02)
+
+The optional, default-off layer now includes four real reviewed models: KayKit Knight, sedan, building,
+and the Khronos Fox sample with complete attribution. [Admission and acceptance evidence](l3-reviewed-assets.md)
+records exact limitations. L1/L2 remain unchanged. The historical “not built” paragraphs above describe
+Phase 2; the provider/manifest/cache layer is now implemented but broad activation has not occurred.
+
+### Additional admission (2026-11-02)
+
+The reviewed catalogue has seven entries after adding Kenney diesel locomotive, Quaternius cruise ship
+and a pinned offline CC0 Eagle conversion. The train-station fixture uses a procedural platform/canopy
+and rails, not an externally sourced station. All six local interactive scenarios pass build/reload,
+movement and animation where applicable. These fixtures do not establish physical mobile or live game
+publication. Exact license, conversion and network limitations are in [the admission report](l3-reviewed-assets.md).
+
+### Demand-driven admission
+
+The catalogue is optional metadata, not a preloaded library. The new [on-demand path](l3-on-demand.md)
+checks cache first, then exact curated models, then bounded live Poly Haven discovery for six supported
+static object types. Models download during a requested build and persist with the game; gameplay uses
+local assets. No additional third-party models were downloaded for this continuation. L3 remains OFF.

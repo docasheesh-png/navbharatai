@@ -2521,7 +2521,17 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     // Two unconditional restore writers moved to the shared applied-outcome restore door (Q-1891).
     // It reconciles captured writes only after a sandbox operation succeeds; no new survey writer.
     expect(code).toContain('reconcileCapturedWrites(writtenFiles, { ...applied, unchanged: 0 })');
-    expect(count).toBe(33);
+    // 1× L3 manifest/runtime seed (2026-11-01): inside the existing new-build, non-import,
+    // non-module, untouched-starter guard, and only after a successful 3D recipe. Its helper is
+    // default-off and returns files only after durable acknowledgement; seed accounting below
+    // attributes every file to the platform. This writer cannot run on a survey/import/edit.
+    const seed = SRC.slice(SRC.indexOf('// ── GAME KIT SEED'), SRC.indexOf('// ── GAME KIT SEED') + 14000);
+    expect(seed).toContain("if (intent === 'new_build' && !projectModuleRef && !isImportTurn)");
+    expect(seed).toContain('await srcHoldsOnlyOurStarter(');
+    expect(seed).toContain('if (gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted)');
+    expect(seed).toContain('for (const [path, content] of Object.entries(assets.files)) writtenFiles.set(path, content)');
+    expect(seed).toContain('preseededGolden.set(kp, kc)');
+    expect(count).toBe(34);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

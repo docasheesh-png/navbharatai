@@ -100087,3 +100087,266 @@ Completed the requested aggregate coverage on 14feb7a580110cc08c29c52c934c990a2f
 The fourth failure correctly identified new unbounded module-level uncertainKeys state. Replaced it with the repository BoundedCache, hard limit64 credential hashes. Holds are never evicted to enable spending: saturation blocks this worker's Router One dispatch until restart; durable attempt deadlines remain intact. Only uncertain persistence populates this local fence, not normal requests. Added capacity/overflow regression coverage and documentation; the census guard remains unchanged.
 
 Follow-up, unchanged timeouts with supported --maxWorkers=1: all four failed files plus Router One persistence/accounting/positive billing passed, 7files/76tests (44.63s), non-coverage. Server typecheck passed. The aggregate above remains FAILED and full coverage has not been rerun after this small correction. Required remote CI and full-tree green evidence remain outstanding. No publication retry/push, emulator or public-site network retry, paid call, merge or deployment. Publication approval is still pending in the parent conversation. Logs: /workspace/routerone-25-verification/final-14feb7a-coverage.log, final-bounded-targeted.log, final-bounded-typecheck.log.
+
+## 2026-11-01 — L3 external asset engine audit and local foundation (NOT COMPLETE)
+
+Branch `feat/universal-3d-assets`, based on main `504b79298` (billing preserved). Audited
+Game3DGenerator/gameKitSeed/buildAssets/WorkspaceAssetStore/publishing and existing SSRF guard.
+Added local GLB policy, exact subject/license filtering, bounded guarded downloader, cache-first
+acquisition core with mandatory parse/storage acknowledgements, and optional Three.js loader source.
+GLB now participates in the central binary classifier; publishing knows GLB/glTF MIME types.
+The acquisition core and loader are not wired into the game seed; no provider catalogue is deployed.
+
+Provider access BLOCKED — requests to api.polyhaven.com/assets?t=models and api.github.com's official
+KayKit repository tree failed with proxy 403; environment status confirms both hosts absent from its
+enforced restricted allowlist. No alternate-host download retry/bypass. Parent/environment owner
+must authorize needed provider API/download hosts or supply reviewed offline assets/provenance.
+No actual external models downloaded; all current test assets are synthetic. No paid calls.
+
+Dependency install succeeded after moving npm's cache to writable /tmp. Environment Node24.19.0 /
+npm11.9.0 differs from CI22.23.4 / npm11.18.0. Targeted verification checkpoint: 4 files / 45 tests,
+server typecheck and unused-import check passed; subsequent geometry-work bound is under final
+recheck. Full coverage/emulator/CI/browser/mobile/restart/publish verification not completed.
+No commit, push, PR, merge or deployment attempted. Do not claim this as the completed engine.
+Detailed work/evidence/gaps: docs/game-engine/l3-implementation-status.md. Logs: /tmp/navbharat-asset-*.
+
+L3 final local checkpoint: re-ran after geometry-work bounding; 4 files / 45 tests PASS,
+frontend and server typechecks PASS, unused imports/locals PASS, git diff --check PASS.
+No background test processes remain. All full-CI/live-model limitations above still apply.
+Poly Haven's current official API terms were read: commercial use needs no key/payment;
+identifying User-Agent and visible credit when surfacing live API content are required. Preserve
+those service obligations separately from the CC0 asset licence when wiring the provider.
+
+### 2026-11-01 — L3 independent implementation and verification follow-up
+
+- Extended the initial foundation into the guarded 3D kit seed: default-off flag, reviewed provider
+  registry, private content-addressed cache, bounded single-flight download, reviewed glTF resource
+  bundling, sandbox render proof, acknowledged binary/text persistence, generated local loader,
+  attribution, and restore/publish format support. Production catalogue remains empty.
+- Added explicit real Chromium harness and local-only Firestore persistence harness. Chromium rendered
+  and animated the synthetic textured fixture and verified runtime normalization, credit cleanup,
+  missing-file fallback and reload. Firestore saved model+manifest and a fresh process restored
+  identical bytes/provenance. No real provider assets, cloud bucket spill or published game claim.
+- Affected 37 files / 657 tests passed; later 4 asset files / 35 tests passed (overlapping).
+  Full coverage remains running separately; initial interrupted attempt exposed a seed-writer census
+  assertion, which was extended with explicit guard assertions before restarting the full run.
+- CI Node 22.23.4/npm 11.18.0: audit, license, SBOM, frontend/server/benchmark types, unused/native
+  guards, OAuth check, build, bundle, boot and dependency gate passed. Four existing Firestore emulator
+  drills passed on Java 21 and verified Firestore emulator 1.22.0.
+- Required npm signature gate failed HTTP 403 (Sigstore TUF host); not waived. Provider API hosts
+  api.polyhaven.com and api.github.com were already denied. No retries via alternate hosts, security
+  changes, paid inference, production activation, PR or merge. Exact download origins need verified
+  metadata before an environment-access request can name them.
+- Updated docs/game-engine/l3-implementation-status.md with current implementation and limitations.
+  Remaining acceptance includes real licensed catalogue assets, six complete games, mobile and live
+  publication, optimizer/LOD scope and required CI completion. This is not a completed universal engine.
+- Added and passed a production Vite-build browser harness: synthetic GLB and manifest survive the
+  real build byte-for-byte; nested `/published/` base renders/animates after reload without provider
+  URLs. This is local artifact acceptance, not a cloud deployment. Browser checks also passed under
+  CI-matching Node 22.23.4.
+- The single-worker full-coverage attempt was interrupted without a reported test failure because
+  3,186 files were progressing too slowly. Restarted the unchanged complete suite with four workers
+  after confirming four CPUs and a 16 GiB container limit; no test/coverage gate was removed.
+- Final security review found repeated mesh nodes could multiply rendered triangles beyond the
+  geometry-only budget. Policy now sums mesh instances before any browser decoding/rendering;
+  added synthetic under/over-budget cases. The in-progress full run was interrupted for this real
+  source correction; targeted checks and the complete suite are being rerun on the corrected source.
+
+### 2026-11-01 — complete coverage diagnosis and lossless asset compaction
+
+- Local checkpoint 3610b09b3 preserved the default-off pipeline; no push or activation.
+- Full coverage reached terminal: 3,185 files passed, one file failed; 48,200 tests passed, one failed,
+  85 existing skips. The genuine failure was a test fixture in production source. Moved it into
+  tests/fixtures; the dead-code guard remains unchanged. No skip or allowlist was added.
+- Added bounded lossless compact-v1 packing, with reviewed source/output hash pinning, attribution
+  change metadata, and an offline no-overwrite admission CLI. Supports both reviewed GLB and bundled
+  glTF. It does not change triangles, texture pixels or animation tracks.
+- Optimized synthetic fixture saved 65,672 bytes. Real Chromium, actual Vite production artifact and
+  fresh-process emulator restore passed on the derived bytes. Provenance includes both hashes and
+  processing version. This does not establish actual-provider savings or live publication.
+- Investigated existing Three.js simplification: unsupported morph/skin attributes are discarded, so
+  universal automatic LOD remains disabled rather than risking character animation. No new dependency.
+- Required TUF signature gate and provider requests remain blocked; no denied request was retried.
+  Full final verification is pending on the corrected/optimized tree.
+- Corrected/optimized targeted suite: seven files / 49 tests passed, including unchanged dead-code
+  guard, source/output pinning, glTF resource hashes, CLI no-overwrite and optimized manifest/cache reuse.
+- All available CI-equivalent gates passed again on optimized production code. The driver retains
+  the prior signature failure; it intentionally makes no new request to the denied TUF service.
+  All four required emulator drills passed again using the locally verified Firestore jar.
+- Added and passed local private Storage-emulator spill/cache/fresh-process restore. Kept CRC and byte
+  caps intact. Independently reproduced an immediate post-abort keepalive reset in the unmodified SDK
+  + local emulator; the harness waits 10 ms for deliberate abort cleanup, without retrying requests or
+  weakening assertions. Production-cloud same-tick recovery remains unverified.
+- Final full coverage will run on this local checkpoint; no PR/push, merge or feature activation.
+
+- Second complete full run: 3,186 files passed, one failed; 48,206 tests passed, one failed, 85 existing
+  skips. The failure was the new local harness's direct boolean env read. Changed both that reader and
+  L3's opt-in reader to the existing shared parser; no guard exemption or assertion weakening.
+- Removed the provider-backoff truncation and extended bounded per-origin spacing/backoff to binary
+  downloads. Added long numeric/date Retry-After, concurrent cooldown, cancellation and no-second-fetch
+  checks. No denied network request was retried; these provider checks use mocked responses.
+- Targeted guards/assets: ten files / 93 tests passed. Final CI-equivalent gates and complete coverage
+  are being repeated on the corrected tree. Signature access remains blocked.
+- Shared-parser/backoff checkpoint: 93 targeted tests, all available CI-equivalent gates, all four
+  required emulator drills and the local private-storage drill passed. The signature gate remains
+  explicitly failed/blocked from the prior 403 and was not retried. Starting complete coverage on the
+  corrected checkpoint; prior complete failures are retained in the evidence directory.
+
+### 2026-11-01 — terminal full coverage checkpoint
+
+- Code commit 2e97244d61e7520f5d22ab8b629665dfa3ef288b completed full coverage with exit 0.
+  3,188 files passed; 48,211 tests passed, 85 existing skips; duration 956.14 seconds.
+  Statements 75.53%, branches 71.45%, functions 78.15%, lines 77.50%; thresholds passed.
+  Evidence: /workspace/navbharat-asset-verification/coverage-verified-tree.log. Session 97491 ended.
+- No owned verification process remains running. This documentation-only checkpoint follows the
+  verified source; no further implementation change was made after that coverage run.
+- Required signature verification remains failed/blocked by the prior TUF HTTP 403; no retry or
+  bypass. Provider API access to api.polyhaven.com and api.github.com remains denied. Minimal third
+  evidenced host needed for the signature gate is tuf-repo-cdn.sigstore.dev. Download hosts remain
+  unknown until authorized official metadata can be inspected.
+- Zero actual external models admitted/downloaded; production catalogue empty and feature off.
+  Synthetic rendering/animation/artifact/reload/storage evidence does not establish six complete
+  real-asset games, physical mobile performance or live publication. No push, PR, merge or deployment.
+
+### 2026-11-02 — real reviewed asset continuation, feature remains OFF
+
+- Resumed exact remote checkpoint abf2d97; main remains billing merge 504b79298. No rewrite or billing change.
+- Published managed policy contains all four requested domains. API/TUF read-only requests return 200;
+  npm signatures now passes (1,375 signatures / 197 attestations). No security settings changed.
+- Four exact free model licences reviewed and source bytes downloaded: KayKit Knight, sedan and building
+  (CC0), Khronos Fox (model CC0; animation/conversion CC BY 4.0, full credit retained).
+- Added hash-pinned animation-selection-v1: removes unselected clips/data without changing retained skin,
+  geometry or animation samples. Knight shrinks 3,659,532 -> 490,608 bytes; unchanged policy validates it.
+- All four models actually rendered in Chromium; Knight and Fox walking clips moved. Local Vite artifact
+  with four models passed keyboard/button movement, animation, same-origin asset loading, 390x844 layout,
+  reload and fresh-process disk cache restore: 9,578 triangles / 22 draw calls. This is one local fixture.
+- OPEN: direct DNS in production guarded transport fails EAI_AGAIN for raw.githubusercontent.com here.
+  Ordinary permitted HTTPS client obtained the sources; successful artifact harness explicitly uses
+  offline-reviewed input. No guard/proxy bypass. Actual production downloader acceptance is not claimed.
+- OPEN: Poly Haven metadata identifies dl.polyhaven.org; not allowed, not requested. Owner permission
+  needed before download. Other providers, six complete game cases, physical mobile, generated LODs,
+  cloud publication and broad semantic discovery remain incomplete. Feature OFF; no publish/activation.
+- Current final CI-equivalent suite and database drills are being run; prior-run evidence is not reused
+  as a current pass. See docs/game-engine/l3-reviewed-assets.md for exact admission and commands.
+
+### 2026-11-02 — terminal verification for reviewed asset source commit 80c1e4e0c
+
+- Full coverage passed: 3,189 files, 48,216 tests, 85 existing skips; 980.82 s. Thresholds passed:
+  statements 75.54%, branches 71.47%, functions 78.16%, lines 77.51%. No assertions/skips weakened.
+- All CI-equivalent non-coverage gates, all four database drills, synthetic persistence/private-storage
+  drills and real Knight inline project/private-cache/fresh-process restore passed. Node/npm match CI;
+  Java is Debian OpenJDK 21 rather than Temurin 21. No local verification process remains owned/running.
+- Separate controlled human/car/animals fixtures passed actual Vite CLI artifact build, movement,
+  animation where applicable, mobile viewport and reload. Animals mix downloaded Fox with existing
+  procedural dog/cow/horse/tree. They do not complete train/station, bird or ship acceptance.
+- System DNS fails independently for all checked allowed hosts while managed HTTPS succeeds. Kept
+  connection-level SSRF protection intact; production downloader remains unverified, not diagnosed as
+  a production code defect. Poly Haven dl.polyhaven.org remains not allowed/not attempted.
+- Feature stays OFF. No production game publication, activation, deployment or merge. The preceding
+  source commit is the full-suite-tested code; this following change only records evidence.
+
+### 2026-11-02 — seven assets and six local fixtures, source 66d021504
+
+- Added Kenney diesel, Quaternius cruise ship and pinned CC0 Eagle derivative. Seven total reviewed
+  GLBs occupy 3,061,304 bytes. Exact license/source/output hashes retained. Offline Eagle conversion
+  is reproducible but not lossless: four skin influences and adjusted materials are disclosed.
+- Added bounded reviewed GLB/PNG embedding and conservative subject/clause matching; 61 asset tests pass.
+- Six local interactive fixtures pass render/movement/animation where applicable, mobile viewport,
+  Vite build and reload. Railway station and some animals are procedural. Not six generated games,
+  physical devices, a full sandbox restart, or a cloud publication.
+- Non-coverage CI-equivalent gates, signatures (1,375 signatures/197 attestations), four database drills,
+  synthetic persistence/storage and real Eagle spill/private-cache/fresh-process restore pass.
+- Final coverage remains running in original executor; its owner will record terminal result.
+- Owner published dl.polyhaven.org addition, catalog version ends 6ae8177f7f9881a283d07ad40c0e7574.
+  Current executor remains on 6ae80b27205c81a2917a4210d73f511a without CDN allowance. No CDN attempt.
+  Fresh executor needed; recheck actual policy and direct DNS separately. Do not bypass SSRF.
+- Source pushed, main/billing untouched. PR creation remains paused after automatic approval denial;
+  no new permission was granted by environment publication. Feature OFF; no merge/deploy/activation.
+
+### 2026-11-02 — terminal verification for seven-asset source 66d021504
+
+- Full coverage terminal PASS: 3,191 files, 48,227 tests, 85 existing skips, 1,085.11 seconds.
+  Thresholds: statements 75.55%, branches 71.49%, functions 78.17%, lines 77.53%.
+  All owned verification processes are terminal; no pending old-runtime coverage run remains.
+- Parent's fresh executor confirms five allowed hosts, but actual secure downloader returns EAI_AGAIN
+  and zero bytes for both Poly Haven and Fox at the same source/Node version. No bypass. Do not request
+  more domains to solve this DNS failure. Platform direct-DNS/HTTPS support or reviewed transport design
+  is needed. Poly Haven table additionally needs safely validated JPEG support, currently unimplemented.
+- Source checkpoint is verified locally, not by remote PR CI. PR still paused after approval denial;
+  main/billing unchanged, L3 OFF, no merge/deployment/activation. See l3-reviewed-assets.md for exact
+  real-vs-procedural fixture limits, license evidence, formats, cache bytes and remaining acceptance work.
+
+### 2026-11-02 — demand-driven source d580c7fa3 (full coverage pending)
+
+- No startup, bulk or gameplay provider downloads. The existing new-game build hook checks verified
+  cache, exact curated candidates, then bounded official Poly Haven discovery for requested table,
+  chair, bench, rock, tree or plant. Empty curated catalogue is supported; no raw prompt leaves the app.
+- Added first-admission provider-policy checks, source/final SHA-256 provenance, 1k self-contained glTF
+  packaging, visible service credit and six bounded private discovery cache pointers. Model bytes stay
+  private/content-addressed. Actual production guarded network transport is still blocked by EAI_AGAIN.
+- Added bounded baseline/progressive JPEG inspection plus actual decode of every texture, Hindi/Spanish
+  canonical vocabulary, conservative negation and static Three.js LOD (rigs/morphs/instances excluded).
+  Real train switches 1,742->1,388 triangles; ship 858->472. No physical-device performance claim.
+- 90 targeted tests pass. Synthetic demand pipeline passes actual browser admission, durable project
+  acknowledgement, fresh-process cache hit, Vite build/reload and visible credit with no vendor requests
+  during play. Real private Storage emulator verifies discovery pointers/model bytes and zero provider
+  calls on fresh-process reuse. No additional third-party models downloaded in this continuation.
+- Corrected an invalid synthetic PNG and the history-command fixture's missing new helper dependencies;
+  no checks weakened. Incomplete coverage runs were stopped and restarted against corrected source.
+- Non-coverage gates pass at a1f704378; required checks are rerunning for d580c7fa3. One unchanged Phase 2
+  race drill initially returned an unconfirmed-store result; separate unchanged rerun passes 21/21.
+  Initial failure retained, no queue/billing code changed. See docs/game-engine/l3-on-demand.md.
+- Branch checkpoints only. L3 OFF; previously denied PR creation paused, no merge/deploy/activation.
+
+
+### 2026-11-02 — demand-driven final local verification, source d580c7fa3
+
+- Full coverage terminal PASS: 3,195 files, 48,253 tests, 85 existing skips, 1,051.29 seconds.
+  Coverage: statements 75.60%, branches 71.54%, functions 78.21%, lines 77.58%; thresholds passed.
+- Final required local gates and all six emulator/drill groups pass on this source. Signatures:
+  1,375 packages / 197 attestations verified. 90 targeted tests and all recorded browser/cache/runtime
+  checks pass. All owned runs are terminal; prior incomplete runs/failures remain documented.
+- No new model downloads in this continuation. Demand-only Poly Haven discovery covers six canonical
+  static subjects; other providers remain exact curated candidates. JPEG and bounded static LOD added.
+- Production secure downloader remains zero-byte EAI_AGAIN per the parent's fresh-worker verification.
+  No DNS/proxy bypass. Full generated games, physical devices and cloud publication remain unverified.
+- Source checkpoint d580c7fa355086af746de3cd5e5915da3499ed4b; documentation-only commits follow it.
+  L3 OFF. PR creation remains paused after automatic approval-review denial. No merge/deploy/activation.
+  See docs/game-engine/l3-on-demand.md for exact gate evidence, scope, limits and failure disclosure.
+
+
+### 2026-11-02 — PR 4064 live acceptance and conditional merge
+
+- User explicitly authorized draft PR creation, then merge after all local and hosted required CI.
+  PR https://github.com/docasheesh-png/navbharatai/pull/4064 is open. No approval review or check bypass.
+- Production source 05b8b939d: ten bounded canonical Poly Haven subjects; official category mappings;
+  exact object names/components guarded. Six real curated assets securely downloaded/rendered in CI;
+  Eagle now ships privately as a reviewed CC0 derivative instead of a private-repository hotlink.
+- Hosted live acceptance job 125144700590 / run 41404930510 PASS: real side_table_01 discovery,
+  actual guarded transfer/browser admission, persistence, fresh-process cache hit, production artifact
+  reload/service credit; all seven reviewed models and six local scenario fixtures pass.
+- Fixed real failures: 1k packs can share bounded geometry under gltf/8k; only that BIN path class was
+  added, not 8k textures. Browser job pinned to supported Ubuntu 24.04. Assertions/SSRF unchanged.
+- Local required non-coverage gates/drills pass on corrected source; full local and hosted suites
+  remain owned until terminal. Final exact-head validation is recorded in PR #4064's report/checks.
+- L3 OFF. Remaining: deployed-network, physical-device, full generated-game and cloud-publication
+  acceptance. Main merge triggers existing Cloud Build deployment; do not start a duplicate deploy.
+
+
+### 2026-11-02 — final local verification and hosted job allowance
+
+- Source 05b8b939d full local coverage PASS: 3,195 files / 48,263 tests, 85 existing skips;
+  1,236.10s; statements 75.60%, branches 71.54%, functions 78.21%, lines 77.59%. All local gates and
+  database/storage drills pass. Fresh 1,375 signatures / 197 attestations verified.
+- Runtime image build, non-root packaged Eagle hash/size/license and HTTP 200 health pass with no
+  network. Managed verification used CA secret mounts and matching image Node headers; canonical Git
+  file modes were restored after this executor's restrictive umask caused fixture-only EACCES.
+- Extra scheduled Trivy check blocked at database host mirror.gcr.io (Forbidden); no alternate mirror
+  or policy bypass. This is unverified and separate from configured PR CI.
+- Hosted final-head live asset acceptance and database drills pass. Prior run 41403264320's check
+  annotation explicitly says maximum 45m exceeded, while tests were still advancing. Main also had a
+  44m13s successful run and a cancelled 45m run. Raised only overall build-and-test allowance to 60m;
+  every test, coverage threshold and 20s test/hook timeout is unchanged. Require terminal green CI.
+- User conditionally authorizes deployment/activation after readiness. No GCP connector/CLI or cloud
+  identity is configured here; physical devices and production game acceptance are still unavailable.
+  No flag activation or new credentials/security configuration. PR report/checks carry final status.

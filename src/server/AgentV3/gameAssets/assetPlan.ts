@@ -19,6 +19,8 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   fox: ['fox', 'foxes', 'लोमड़ी', 'zorro'], tree: ['tree', 'trees', 'पेड़', 'árbol'],
   table: ['table', 'tables', 'मेज', 'मेज़', 'mesa'], chair: ['chair', 'chairs', 'कुर्सी', 'silla'],
   bench: ['bench', 'benches', 'बेंच'], rock: ['rock', 'rocks', 'चट्टान', 'roca'], plant: ['plant', 'plants', 'पौधा', 'planta'],
+  stool: ['stool', 'stools', 'स्टूल', 'taburete'], sofa: ['sofa', 'sofas', 'सोफा', 'sofá'],
+  cabinet: ['cabinet', 'cabinets', 'अलमारी', 'armario'], lamp: ['lamp', 'lamps', 'लैंप', 'lámpara'],
   building: ['building', 'buildings', 'इमारत', 'edificio'], aircraft: ['aircraft', 'airplane', 'विमान', 'avión'],
 };
 const MOTIONS: Readonly<Record<string, readonly string[]>> = {
@@ -44,6 +46,8 @@ export function gameAssetRequirements(prompt: string, catalogue: readonly Review
       table: ['table tennis', 'pool table', 'ping pong table', 'coffee table', 'dining table'],
       chair: ['wheel chair', 'rocking chair', 'office chair'],
       rock: ['rock music', 'rock band'], tree: ['tree diagram', 'decision tree'],
+      stool: ['stool sample', 'stool test'], cabinet: ['cabinet minister', 'cabinet meeting'],
+      lamp: ['street lamp', 'traffic lamp'],
       car: ['formula one car', 'formula 1 car', 'f1 car'], building: ['building a', 'building the'],
     };
     if ((excludedPhrases[subject] ?? []).some(p => mentioned(clause, p))) return false;

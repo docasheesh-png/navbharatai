@@ -1,3 +1,4 @@
+import { DISCOVERY_POLICY } from './discoveryPolicy';
 import { createHash } from 'node:crypto';
 import { BoundedCache } from '../../lib/boundedCache';
 import { ASSET_LIMITS, candidateMatches, validateGlb } from './assetPolicy';
@@ -8,7 +9,7 @@ import { bundleGltf, safeGltfResourcePath } from './gltfBundle';
 import { compactGlb } from './assetOptimize';
 import { validateCatalogue, type ReviewedAsset, type ProviderJsonTransport } from './providers';
 
-export const DISCOVERY_SUBJECTS: Readonly<Record<string, number>> = Object.freeze({ table: 0.8, chair: 1, bench: 0.9, rock: 1, tree: 4, plant: 0.5 });
+export const DISCOVERY_SUBJECTS: Readonly<Record<string, number>> = Object.freeze(Object.fromEntries(Object.entries(DISCOVERY_POLICY).map(([key, policy]) => [key, policy.height])));
 const POLICY = 'polyhaven-cc0-v1';
 const CREDIT = 'Powered by Poly Haven';
 const digest = (b: Uint8Array, algorithm = 'sha256') => createHash(algorithm).update(b).digest('hex');
@@ -64,8 +65,9 @@ export function createPolyHavenDiscovery(json: ProviderJsonTransport, download: 
           if (typeof id !== 'string' || !/^[a-z0-9_]{1,80}$/.test(id)) continue;
           const info = object(await json.get(`https://api.polyhaven.com/info/${id}`,deadline));
           // Similarity rank is not semantic evidence: require exact category and named-object token.
-          if (info?.type !== 2 || !Array.isArray(info.categories) || !info.categories.includes(subject)
+          if (info?.type !== 2 || !Array.isArray(info.categories) || !DISCOVERY_POLICY[subject as keyof typeof DISCOVERY_POLICY].categories.some(category => info.categories.includes(category))
             || typeof info.name !== 'string' || !(` ${info.name.toLowerCase().replace(/[^a-z0-9]+/g,' ')} `).includes(` ${subject} `)
+            || /\b(arm|base|parts?|stump|trunk|branches?)\b/i.test(info.name)
             || !Number.isFinite(info.date_published) || info.date_published <= 0 || info.date_published*1000 > Date.now()
             || info.staging || (info.license !== undefined && !['CC0','CC0-1.0'].includes(info.license)) || !/^[a-f0-9]{40}$/.test(info.files_hash) || !Number.isSafeInteger(info.polycount) || info.polycount <= 0 || info.polycount > ASSET_LIMITS.triangles) continue;
           const authors = object(info.authors); if (!authors || !Object.keys(authors).length) continue;
@@ -115,7 +117,7 @@ export function createPolyHavenDiscovery(json: ProviderJsonTransport, download: 
 }
 /** Small private server index per supported canonical subject; no listing or user-data cache keys. */
 export function withDiscoveredAssetCache(base: AssetCache, store: AssetObjectStore): AssetCache {
-  const known = new BoundedCache<string,DiscoveredAsset>({ maxEntries: 6 });
+  const known = new BoundedCache<string,DiscoveredAsset>({ maxEntries: Object.keys(DISCOVERY_POLICY).length });
   return {
     async find(r) {
       const entries = [...await base.find(r)];

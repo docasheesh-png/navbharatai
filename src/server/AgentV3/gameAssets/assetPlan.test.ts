@@ -43,3 +43,8 @@ it('falls back for unsupported specialized objects and non-object senses rather 
 it('does not download objects negated by common contractions or Hindi न', () => {
   for (const prompt of ["don't add a table", 'don’t add a chair', 'never add a tree', 'मेज न बनाओ', 'कार नहीं चाहिए']) expect(gameAssetRequirements(prompt, [])).toEqual([]);
 });
+
+it('recognizes additional requested furniture without medical or political substitutions', () => {
+  expect(gameAssetRequirements('सोफा और स्टूल; lámpara; cabinet', []).map(r => r.subject)).toEqual(['stool', 'sofa', 'cabinet', 'lamp']);
+  expect(gameAssetRequirements('stool sample and cabinet minister and street lamp', [])).toEqual([]);
+});

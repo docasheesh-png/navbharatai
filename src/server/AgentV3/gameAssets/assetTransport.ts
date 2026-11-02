@@ -1,3 +1,4 @@
+import { isDiscoverySubject } from './discoveryPolicy';
 import { assetProviderPermit, recordAssetProviderResponse } from './assetProviderBudget';
 import { createHash } from 'node:crypto';
 import { bundleGltf } from './gltfBundle';
@@ -54,7 +55,7 @@ export const polyHavenTransport: ProviderJsonTransport = {
   async get(url, signal) {
     const parsed = new URL(url);
     const infoPath = /^\/(info|files)\/[a-z0-9_]+$/.test(parsed.pathname) && !parsed.search;
-    const searchPath = parsed.pathname === '/search' && /^\?q=(table|chair|bench|rock|tree|plant)&t=models$/.test(parsed.search);
+    const searchPath = parsed.pathname === '/search' && isDiscoverySubject(parsed.searchParams.get('q') ?? '') && parsed.search === `?q=${parsed.searchParams.get('q')}&t=models`;
     if (parsed.origin !== 'https://api.polyhaven.com' || !(infoPath || searchPath) || parsed.username || parsed.password || parsed.hash) throw new Error('Unapproved metadata endpoint');
     const permit = assetProviderPermit(parsed.origin, signal);
     if (permit) await permit;

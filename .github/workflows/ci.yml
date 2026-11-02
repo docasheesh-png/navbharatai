@@ -201,3 +201,47 @@ jobs:
       - name: Server production-dependency gate (every runtime import must survive `npm prune --omit=dev`)
         run: npm run deps:server-gate
 
+
+  # Explicit acceptance for this asset-engine PR only; never a runtime preload or scheduled crawl.
+  # Uses ordinary hosted-runner egress and the unchanged connection-level SSRF dispatcher.
+  asset-live-acceptance:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feat/universal-3d-assets' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: 'npm'
+      - run: npm ci
+      - name: Install isolated browser verification tooling
+        run: |
+          npm install --prefix "$RUNNER_TEMP/asset-browser" --no-save --ignore-scripts playwright@1.57.0
+          "$RUNNER_TEMP/asset-browser/node_modules/.bin/playwright" install --with-deps chromium
+          echo "ASSET_PLAYWRIGHT=$RUNNER_TEMP/asset-browser/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
+          node --input-type=module -e "import {createRequire} from 'node:module';const r=createRequire(process.cwd()+'/package.json');const p=r(process.env.RUNNER_TEMP+'/asset-browser/node_modules/playwright');console.log('ASSET_CHROMIUM='+p.chromium.executablePath())" >> "$GITHUB_ENV"
+      - name: Live requested table discovery, secure transfer, browser admission and durable reload
+        run: |
+          mkdir -p "$RUNNER_TEMP/asset-acceptance"
+          node --import ./node_modules/tsx/dist/loader.mjs scripts/checks/gameAssetDemand.check.ts "$RUNNER_TEMP/asset-acceptance/demand" "$ASSET_PLAYWRIGHT" "$ASSET_CHROMIUM" live 2>&1 | tee "$RUNNER_TEMP/asset-acceptance/demand.log"
+      - name: Reviewed real models through production downloader, browser and fresh-process cache
+        if: success() || failure()
+        run: |
+          node --import ./node_modules/tsx/dist/loader.mjs scripts/checks/gameAssetReal.check.ts "$RUNNER_TEMP/asset-acceptance/reviewed" "$ASSET_PLAYWRIGHT" "$ASSET_CHROMIUM" 2>&1 | tee "$RUNNER_TEMP/asset-acceptance/reviewed.log"
+      - name: Six local game scenarios from admitted bytes and production artifacts
+        run: |
+          node --import ./node_modules/tsx/dist/loader.mjs scripts/checks/gameAssetScenarios.check.ts "$RUNNER_TEMP/asset-acceptance/scenarios" "$RUNNER_TEMP/asset-acceptance/reviewed/cache/game-assets-public-cc/v1" "$ASSET_PLAYWRIGHT" "$ASSET_CHROMIUM" 2>&1 | tee "$RUNNER_TEMP/asset-acceptance/scenarios.log"
+      - name: Upload test evidence only (no model library or public game publication)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: asset-acceptance-evidence
+          path: |
+            ${{ runner.temp }}/asset-acceptance/*.log
+            ${{ runner.temp }}/asset-acceptance/demand/*.png
+            ${{ runner.temp }}/asset-acceptance/scenarios/*.png
+            ${{ runner.temp }}/asset-acceptance/scenarios/results.json
+          if-no-files-found: error

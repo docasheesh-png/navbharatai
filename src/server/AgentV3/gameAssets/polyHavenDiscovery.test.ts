@@ -81,3 +81,17 @@ it('allows only canonical metadata search endpoints and retains the socket-level
     expect(fetch).not.toHaveBeenCalled();
   }finally{vi.unstubAllGlobals();}
 });
+
+it.each([['chair','Green Chair','seating'],['stool','Wooden Stool','seating'],['sofa','Sofa 03','seating'],['cabinet','Wooden Cabinet','furniture'],['lamp','Desk Lamp','lighting']])('admits requested %s using reviewed official category vocabulary, never category alone',async(subject,name,category)=>{
+  const f=fixture();f.info.name=name;f.info.categories=[category];
+  const result=await f.deps().discover({subject},new AbortController().signal);
+  expect(result?.candidate.subjects).toEqual([subject]);expect(isDiscoveredAsset(result?.candidate,subject)).toBe(true);
+  f.info.name='Unrelated Object';f.download.mockClear();
+  expect(await f.deps().discover({subject},new AbortController().signal)).toBeNull();expect(f.download).not.toHaveBeenCalled();
+});
+
+it('rejects a lamp component even with matching lighting category and lamp token', async () => {
+  const f=fixture();f.info.name='Desk Lamp Arm 01';f.info.categories=['lighting'];
+  expect(await f.deps().discover({subject:'lamp'},new AbortController().signal)).toBeNull();
+  expect(f.download).not.toHaveBeenCalled();
+});

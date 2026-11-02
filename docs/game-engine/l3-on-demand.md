@@ -1,7 +1,7 @@
 # Demand-driven 3D asset admission — 2026-11-02
 
 Source checkpoint: `d580c7fa355086af746de3cd5e5915da3499ed4b` (final local verification complete).
-L3 remains OFF by default. No PR, merge, deployment or activation is authorized in this continuation.
+L3 remains OFF by default. Draft PR #4064 is explicitly authorized and open; no merge, deployment or activation is authorized in this phase.
 
 ## When downloads occur
 
@@ -30,10 +30,10 @@ model downloads. The build handoff must still be integrated and playtested by th
 ## Actual discovery scope and trust
 
 **Poly Haven has genuine on-demand search; other providers remain curated exact-asset adapters.**
-The supported canonical discovery subjects are `table`, `chair`, `bench`, `rock`, `tree`, and `plant`.
+The supported canonical discovery subjects are `table`, `chair`, `bench`, `rock`, `tree`, `plant`, `stool`, `sofa`, `cabinet`, and `lamp`.
 The adapter uses the official `/search?q=<canonical>&t=models`, then `/info/<id>` and `/files/<id>`.
 It sends no raw prompt, project name, user identity or private context. Search similarity alone is not
-accepted: the selected metadata must contain the exact category and named-object token. Unsupported
+accepted: the selected metadata must contain a reviewed official category and the exact named-object token. Unsupported
 specialized senses (for example coffee table, table tennis, office chair or decision tree) retain the
 procedural path instead of silently broadening to a generic asset. This is intentionally limited
 semantic matching, not arbitrary multilingual understanding or unrestricted web discovery.
@@ -60,7 +60,7 @@ These are newly pinned observed bytes, distinct from curated entries whose expec
 before download. No claim of a signed provider provenance attestation is made.
 
 The discovered cache is a **private, server-written trust boundary**, not an index supplied by users.
-It has six fixed canonical JSON pointer keys, each capped at 64 KiB, with `private, no-store` metadata.
+It has ten fixed canonical JSON pointer keys, each capped at 64 KiB, with `private, no-store` metadata.
 Content-addressed model objects remain private/immutable. Restored records must satisfy the exact
 provider-policy schema, approved origins, supported subject, license, resource and hash constraints;
 all bytes and rendering are revalidated. Arbitrary project uploads never enter this shared public-model
@@ -179,3 +179,21 @@ four-host custom allowlist, confirmed through the environment skill; it was not 
 No additional domain request or proxy bypass is proposed. Broader provider discovery and animated LOD
 are not implemented. PR creation remains paused after the earlier automatic approval-review denial;
 only branch checkpoint pushes were performed.
+
+
+## PR continuation — 2026-11-02
+
+The user's explicit draft-PR authorization resolved the earlier creation denial. Draft
+[PR #4064](https://github.com/docasheesh-png/navbharatai/pull/4064) is open. No merge/deploy/activation.
+Official API metadata confirms category vocabulary differs from object names: chair/stool/sofa use
+`seating`, rocks use `rocks`, trees use `trees`, plants use `plants`, lamps use `lighting`, cabinets use
+`furniture`. A shared fixed policy now admits these categories only alongside the exact requested name
+token, rejecting component names such as lamp arms. Added four canonical furniture/lighting requests;
+no arbitrary provider query or prompt leakage. Category-only/unrelated matches still fail.
+
+A PR-scoped hosted CI job exercises the unchanged secure downloader with one on-demand table and seven
+reviewed model fixtures, browser admission, fresh-process restoration and local production artifacts.
+It has read-only repository permissions, no secrets or deployment credentials, and uploads only test
+logs/screenshots/results (not a model library). This is verification on ordinary hosted-runner egress,
+not a proxy workaround for this executor. The worker's known DNS limitation is not retried locally.
+New-source full local coverage and hosted acceptance results are pending until recorded below.

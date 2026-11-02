@@ -100262,3 +100262,16 @@ those service obligations separately from the CC0 asset licence when wiring the 
   Fresh executor needed; recheck actual policy and direct DNS separately. Do not bypass SSRF.
 - Source pushed, main/billing untouched. PR creation remains paused after automatic approval denial;
   no new permission was granted by environment publication. Feature OFF; no merge/deploy/activation.
+
+### 2026-11-02 — terminal verification for seven-asset source 66d021504
+
+- Full coverage terminal PASS: 3,191 files, 48,227 tests, 85 existing skips, 1,085.11 seconds.
+  Thresholds: statements 75.55%, branches 71.49%, functions 78.17%, lines 77.53%.
+  All owned verification processes are terminal; no pending old-runtime coverage run remains.
+- Parent's fresh executor confirms five allowed hosts, but actual secure downloader returns EAI_AGAIN
+  and zero bytes for both Poly Haven and Fox at the same source/Node version. No bypass. Do not request
+  more domains to solve this DNS failure. Platform direct-DNS/HTTPS support or reviewed transport design
+  is needed. Poly Haven table additionally needs safely validated JPEG support, currently unimplemented.
+- Source checkpoint is verified locally, not by remote PR CI. PR still paused after approval denial;
+  main/billing unchanged, L3 OFF, no merge/deployment/activation. See l3-reviewed-assets.md for exact
+  real-vs-procedural fixture limits, license evidence, formats, cache bytes and remaining acceptance work.

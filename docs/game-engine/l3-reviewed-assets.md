@@ -184,3 +184,34 @@ four database drills, synthetic asset persistence/storage and real Eagle storage
 The final full coverage run is still owned by the original executor and pending; do not claim it passed
 or launch a duplicate until the final outcome is recorded. Earlier full coverage belongs to source
 `80c1e4e0c`, not this source checkpoint.
+
+### Terminal verification and fresh-runtime findings (2026-11-02)
+
+The full suite against source **66d0215041bdbb24ab19e7d775b5ddfd0dd52e91** completed successfully:
+3,191 test files; 48,227 passing tests; 85 existing skips; 1,085.11 seconds. Coverage thresholds passed:
+statements 75.55%, branches 71.49%, functions 78.17%, lines 77.53%. No skips/assertions or thresholds
+were weakened. All owned verification processes reached terminal success. Local CI-equivalent gates
+and emulator drills pass; remote PR CI has not run because no PR exists. Node 22.23.4 and npm 11.18.0
+match the configured versions; Java is Debian OpenJDK 21.0.12.1 rather than CI's Temurin 21.
+
+The parent's fresh executor independently verified **all five hosts effectively allowed**, including
+`dl.polyhaven.org`. At the same source checkpoint with Node 22.23.4, the **actual guarded downloader**
+still failed with `EAI_AGAIN` for both the official Poly Haven selection and reviewed Fox URL. It
+returned **zero bytes**: no successful content/hash validation or production acquisition is claimed.
+No bypass or transport change occurred. Additional hostname allowances are not a remedy for this
+observed DNS failure. The precise remaining action is platform/runtime support for direct DNS and
+HTTPS compatible with connection-level SSRF validation, or a separately reviewed safe transport design.
+The former need for a fresh executor to observe the fifth host is now resolved; the downloader blocker
+is not. Existing managed-client and offline-fixture success must remain distinguished from this result.
+
+The selected Poly Haven table also references JPEG textures. Current admission deliberately accepts
+PNG only. Review found that changing the MIME whitelist alone is insufficient: JPEG needs bounded
+format/dimension validation and explicit decode failure checks before acceptance. A model render alone
+does not prove every referenced texture decoded. JPEG support and this specific Poly Haven model remain
+unimplemented/unadmitted; none of the seven admitted assets depends on JPEG support. Generated LODs,
+broad live discovery/multilingual semantics and device/cloud acceptance likewise remain outstanding.
+
+Final status: source branch checkpoint preserved, billing base intact, feature OFF. Draft PR creation
+is still paused after automatic approval review denied it for lack of explicit user authorization for
+that external action. Publishing environment settings did not grant PR permission. No PR, merge,
+deployment, cloud game publication or activation has occurred.

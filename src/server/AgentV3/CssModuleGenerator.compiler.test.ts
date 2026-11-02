@@ -30,7 +30,7 @@ describe('generated missing CSS modules through the default Vite CSS compiler', 
           write: false,
           emptyOutDir: false,
           minify: false,
-          lib: { entry: join(root, 'entry.js'), formats: ['es'], fileName: 'entry', cssFileName: 'styles' },
+          lib: { entry: join(root, 'entry.js'), formats: ['iife'], name: 'cssModuleProbe', fileName: 'entry', cssFileName: 'styles' },
         },
       });
       if ('on' in bundle) throw new Error('The synthetic compiler probe must not start a watcher');

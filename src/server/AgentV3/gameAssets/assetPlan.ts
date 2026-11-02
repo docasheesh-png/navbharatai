@@ -1,9 +1,24 @@
 import { parseEnvFlag } from '../../lib/envFlag';
+import { isZTestAccount } from '../../lib/zTestAccount';
 import type { AssetRequirement } from './assetPolicy';
 import type { ReviewedAsset } from './providers';
 
-/** Default OFF; enabling does not approve any unreviewed catalogue entry or paid service. */
-export function externalGameAssetsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+/**
+ * Default OFF; enabling does not approve any unreviewed catalogue entry or paid service.
+ *   AGENTV3_EXTERNAL_GAME_ASSETS=on     ⇒ every user
+ *   AGENTV3_EXTERNAL_GAME_ASSETS=admin  ⇒ limited rollout: only the owner test uid (z@gmail.com) plus
+ *                                         verified uids listed in AGENTV3_EXTERNAL_GAME_ASSETS_UIDS (comma list)
+ *   unset / off / anything else         ⇒ nobody
+ * Uid must be the server-verified owner uid; no uid ⇒ not admitted in `admin` mode.
+ */
+export function externalGameAssetsEnabled(env: NodeJS.ProcessEnv = process.env, verifiedUid?: string | null): boolean {
+  const raw = String(env.AGENTV3_EXTERNAL_GAME_ASSETS ?? '').trim().toLowerCase();
+  if (raw === 'admin') {
+    if (typeof verifiedUid !== 'string' || !verifiedUid) return false;
+    if (isZTestAccount(null, verifiedUid)) return true;
+    const list = String(env.AGENTV3_EXTERNAL_GAME_ASSETS_UIDS ?? '').split(',').map(v => v.trim()).filter(Boolean);
+    return list.includes(verifiedUid);
+  }
   return parseEnvFlag(env.AGENTV3_EXTERNAL_GAME_ASSETS) ?? false;
 }
 const ALIASES: Readonly<Record<string, readonly string[]>> = {

@@ -36,7 +36,7 @@ export interface GameAssetSeedOptions {
 /** Called only inside the existing new-game seed guard, after the 3D recipe has installed Three.js. */
 export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<GameAssetSeedResult> {
   const out: GameAssetSeedResult = { files: {}, handoff: '', outcomes: [], status: 'off' };
-  if (!externalGameAssetsEnabled(options.env)) return out;
+  if (!externalGameAssetsEnabled(options.env, options.verifiedOwnerUid)) return out;
   const catalogue = options.catalogue ?? REVIEWED_GAME_ASSETS;
   const requirements = gameAssetRequirements(options.prompt, catalogue);
   if (!requirements.length) return { ...out, status: 'procedural' };

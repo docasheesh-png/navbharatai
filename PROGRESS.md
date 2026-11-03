@@ -9,6 +9,19 @@ Admin: *"jab navbharatai par koi app ya game banaya jata hai, to woh, dark mode 
 - **Lock:** `tests/appsAreLightUnlessTheUserAsks.test.ts` (kit output, game tokens + contrast in both themes, every lane, scaffold defaults, and a CENSUS: every server file mentioning `prefers-color-scheme` is listed with its reason — a new one fails). The real-browser test in `theDarkModeButtonSwitchesTheKit.test.ts` now asserts a DARK device with no switch renders LIGHT. Reversion-proved: kit follows the phone (6 fail), `color-scheme: light dark` (1), restore re-adds device block (1), fast lane drops the rule (1), settings default `system` (1).
 - **What to watch:** the next game and app built on a phone set to dark should open light; a request saying "dark mode" should open dark.
 - **Not changed:** NavBharatAI's own pages (legal, marketing, checkout hand-off, preview loading screen) still follow the device — they are not built apps. 3D presets night/horror/neon remain available when the user asks for them.
+## 2026-11-02 — failedbr: every build report, permanent numbers, filter and sort
+
+Admin: *"usme bas failed build report ati hai, aur numbering bhi stable nahi hai … 1. sabhi build report failedbr me aye. sort/filter option bana do. 2. numbering rocksolid karo"*.
+
+- **Root cause 1 (numbers moved):** the number shown was a RANK — `buildReportNumbering.ts` scanned up to 5,000 documents per read and sorted retained failures by start time. A report expiring off the 180-day clock, or a late arrival, shifted every number after it.
+- **Root cause 2 (no permanent number ever):** the permanent allocator (`reportNumber`, failures only) read `admin_failed_report_numbers/counter`, which nothing ever created, so every report was saved with `counter_uninitialized`. Confirmed live: no row carried `permanentReportId`.
+- **Root cause 3 (failures only):** every reader filtered with `settledFailure()`; there was no list of all reports.
+- **Fix (class, not instance):** `buildReportRegistry.ts` — one row per report in `build_report_numbers` (id `${workspaceId}~${startedAt}`), its number taken once from `admin_build_report_counter/counter` inside the same transaction as the report's FIRST history write, for EVERY outcome (failed / succeeded / stopped / unfinished). Re-saves keep the number and only update the outcome. Readers look the number up (`numberBuildReports`, no scan, no cache); every screen and tool shows the same number. A leased, resumable, oldest-first backfill (`build-report-numbering` job, every 15 min, `exclusive`; one read once done) numbers older reports and then sweeps the ones saved while it ran. Numbers are never reused: expiry and erasure leave gaps.
+- **Plugin:** new MCP tools `list_build_reports` (outcome: all|failed|succeeded|stopped|unfinished, order: newest|oldest, cursor bound to its filter/order) and `get_build_report` (any outcome, with number and digest). No REST twin: nothing in the app would call it, and an uncalled route is dead code (`everyRouteHasACaller`). `list_failed_builds` stays, with permanent numbers. Server version 1.3.0.
+- **Retention/erase:** registry on the report's own 180-day clock (`lastSavedAt`), erased with the workspace (doc-id range); counter RETAINED_INDEFINITELY.
+- **Locks:** `tests/buildReportRegistry.test.ts`, `tests/buildReportNumbering.test.ts` (expiry and late-arrival lock + class source guard), `tests/diagnosticsHistoryWriterIntegrity.test.ts`. Reversion-proved: renumber-on-save (5 fail), allocate-while-backfilling (3), no oldest-first order (4), failures-only numbering (6), rank on read (2).
+- **What to watch after deploy:** the first `[build-report-numbering] numbered N` log line; until then lists say "numbering pending". The legacy `admin_failed_report_numbers` counter is retired (still classified, nothing writes it).
+- **Not built:** an "all reports" view with these filters on the admin `/failedbr` web page — the page still lists failures (now with permanent numbers). The plugin has the full feature.
 
 ## 2026-10-30 — Game Engine Ultra Phases 1–3 (PRs #4036 → #4037 → Phase 3, stacked, none merged)
 
@@ -100362,3 +100375,36 @@ those service obligations separately from the CC0 asset licence when wiring the 
 - User conditionally authorizes deployment/activation after readiness. No GCP connector/CLI or cloud
   identity is configured here; physical devices and production game acceptance are still unavailable.
   No flag activation or new credentials/security configuration. PR report/checks carry final status.
+
+### 2026-11-02 — Autopsy cf1706d2 / 8701aaa1 / 7aa2fe7c / c71e56de: a driven vehicle always moves
+
+Admin: *"jab bhi koi vehicle game banaya jaye, to vehicle chalni chahiye. 50% vehicles chalti hi nahi hai."*
+Four builds of one 3D racing game (car, train, birds): one stopped by the user, three RED, the car never moved
+(playtest Controls 0, 1,419 runtime errors).
+
+**Root cause (one class, two halves):**
+1. `Game.context` (GameShellGenerator.ts) was a getter that built a NEW object on every access, so anything a
+   game kept on `ctx` in setup() was undefined in update(). driveVehicle(car, undefined) threw "reading
+   'speed'"; after the builder's `|| { speed: 0, heading: 0 }` "fix", driveVehicle(undefined) threw "reading
+   'rotation'". Fixed: ONE context for the game's life, members as live getters.
+2. `driveVehicle` was pure: the car only gained speed if the game wrote the result back into a variable that
+   outlived the frame. Discarded return, a fresh literal every frame, or no state at all each froze the car.
+   Fixed: the kit holds each vehicle's state; the passed state is updated in place and returned; a missing
+   state uses the vehicle's own; a literal re-made with the same values every frame is replaced by the
+   vehicle's own; a state the game sets ONCE (crash stop, respawn) is still obeyed. No vehicle → a clear error
+   naming the fix instead of "reading 'rotation'".
+
+**Prevention upstream:** the kit type contract now carries `MaterialKind`, `PaletteName` (spelled out from
+PALETTES) and `RailTrackOptions` — build cf1706d2 guessed 'plastic' / 'rubber' / 'steel' / 'coal' and
+`createRailTrack({ path })` (11 type errors, ~10 fix-up rounds). Repair hints for VEHICLE_STALLED and
+RUNTIME_ERROR now name the correct pattern and forbid try/catch silencing.
+
+**Locked by** `tests/aDrivenVehicleAlwaysMoves.test.ts`: the real generated kit and shell, driven through
+every way a game keeps its car (kit example, on ctx, discarded return, fresh literal per frame, no state,
+spread copy) — each must move > 25 m in 3 s with Up held. Proven by reversion: old code fails 5 of 10;
+old driveVehicle with the new ctx still fails 4.
+
+**Not finished (queue rows):** Q-2301 stack/file:line for runtime errors · Q-2302 write-time guard against
+silencing catch · Q-2303 a single clean console read taken as proof · Q-2304 final text vs RED gate ·
+Q-2305 post-green unverified writes (admin) · Q-2306 ladder text vs SURPLUS route (admin) · Q-2307 gate
+counts TODO tests as proof. Watch on the next real vehicle build: GAME_DEFECT_VEHICLE_STALLED should not fire.

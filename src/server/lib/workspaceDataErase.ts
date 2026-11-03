@@ -43,6 +43,9 @@ export const WORKSPACE_SCOPED_COLLECTIONS: readonly WorkspaceScopedCollection[] 
   // 🔴 Q-134 (2026-10-05): listed with NO sub, so an account erase deleted each workspace's latest report
   // and left its whole `history` subcollection behind — every past build report, unreachable and kept.
   { collection: 'workspace_diagnostics_v3', sub: 'history' },
+  // Each report's permanent number. Doc id is `${workspaceId}~${startedAt}`, so the workspace range
+  // reaches it; erasing it leaves a gap in the numbers and never lets one be reissued.
+  { collection: 'build_report_numbers' },
   // Q-134 sibling: the user-actions store (UserActionStore.ts) was in no erase path at all.
   { collection: 'workspace_user_actions_v1', sub: 'items' },
   // Q-134 sibling: review comments on the user's app (CodeReviewStore.ts), keyed by a workspace id the

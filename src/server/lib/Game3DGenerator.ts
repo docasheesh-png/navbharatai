@@ -3106,11 +3106,70 @@ export function settleOnGround(
  * start screen where the game has not begun driving it yet.
  */
 export function createVehicleState(vehicle: THREE.Object3D, tuning: VehicleTuning = {}): VehicleState {
+  assertVehicle(vehicle, 'createVehicleState');
   noteVehicle(vehicle, null);
   const heading = vehicle.rotation.y;
   // Start ON the ground, wherever the game put it (a car born at y = 0.03 on a 4 m hill is inside it).
   const slope = settleOnGround(vehicle, heading, 1, tuning);
-  return { speed: tuning.startSpeed ?? 5, heading, ...(slope ?? {}) };
+  const state: VehicleState = { speed: tuning.startSpeed ?? 5, heading, ...(slope ?? {}) };
+  issuedStates.add(state);
+  heldState.set(vehicle, { state, lastForeign: null });
+  return state;
+}
+
+/**
+ * 🔴 THE CAR KEEPS ITS OWN STATE (autopsy 8701aaa1 / 7aa2fe7c / c71e56de, 2026-11-02; admin: "jab bhi koi
+ * vehicle game banaya jaye, to vehicle chalni chahiye — 50% vehicles chalti hi nahi hai").
+ *
+ * driveVehicle used to be a pure function: speed only grew if the game wrote the result back into a
+ * variable that outlived the frame. Every way of getting that wrong froze the car, silently:
+ *   • the return value discarded — driveVehicle(car, drive, axis, dt) with no "drive =";
+ *   • a fresh state every frame — "const s = (ctx as any).vehicleState || { speed: 0, heading: 0 }" (the
+ *     reported build: speed went 0 → 0.15 → back to 0, so the car crept a few millimetres and stopped);
+ *   • no state at all — driveVehicle(car, undefined, …) threw "reading 'speed'" every frame.
+ * Now the kit holds each vehicle's state. The state object the game passes is UPDATED IN PLACE and
+ * returned, so a discarded return still accumulates; a missing state uses the vehicle's own; and a
+ * literal re-made with the same values frame after frame (which can only be a lost state) is replaced
+ * by the vehicle's own. A state the game sets ONCE (a respawn, a crash stop) is still obeyed.
+ */
+const issuedStates = new WeakSet<object>();
+const heldState = new WeakMap<THREE.Object3D, { state: VehicleState; lastForeign: { speed: number; heading: number } | null }>();
+const warnedNoState = new WeakSet<THREE.Object3D>();
+
+function assertVehicle(vehicle: unknown, fn: string): asserts vehicle is THREE.Object3D {
+  const v = vehicle as THREE.Object3D | null | undefined;
+  if (!v || !v.position || !v.rotation) {
+    // A clear, actionable error instead of "Cannot read properties of undefined (reading 'rotation')".
+    throw new Error(fn + '() was given no vehicle (got ' + String(vehicle) + '). Keep the car in a variable '
+      + 'declared OUTSIDE setup() — "let car; let drive;" next to the game — set it in setup() and use it in update().');
+  }
+}
+
+/** The state to drive from this frame — see the block above. */
+function resolveState(vehicle: THREE.Object3D, state: VehicleState | null | undefined, tuning: VehicleTuning): VehicleState {
+  const held = heldState.get(vehicle);
+  if (state && typeof state === 'object' && issuedStates.has(state)) {
+    if (held) { held.state = state; held.lastForeign = null; } else heldState.set(vehicle, { state, lastForeign: null });
+    return state;
+  }
+  if (!state || typeof state !== 'object' || typeof state.speed !== 'number' || typeof state.heading !== 'number') {
+    if (!warnedNoState.has(vehicle)) {
+      warnedNoState.add(vehicle);
+      console.warn('driveVehicle() was given no vehicle state — driving from the state the car already has. Write "drive = driveVehicle(car, drive, ctx.input.axis(), dt)" with "let drive = createVehicleState(car)" outside update().');
+    }
+    if (held) return held.state;
+    return createVehicleState(vehicle, tuning);
+  }
+  // A state the kit never handed out. The same values as the last one, frame after frame, is a state
+  // re-made from scratch every frame (it never remembers what the kit returned): drive from the car's own.
+  const prev = held?.lastForeign;
+  const remade = !!held && !!prev && prev.speed === state.speed && prev.heading === state.heading;
+  const snapshot = { speed: state.speed, heading: state.heading };
+  if (remade && held) { held.lastForeign = snapshot; return held.state; }
+  // Otherwise the game set it on purpose (a respawn, a crash stop): obey it, and keep it from now on.
+  issuedStates.add(state);
+  heldState.set(vehicle, { state, lastForeign: snapshot });
+  return state;
 }
 
 /**
@@ -3133,6 +3192,8 @@ export function driveVehicle(
   dt: number,
   tuning: VehicleTuning = {},
 ): VehicleState {
+  assertVehicle(vehicle, 'driveVehicle');
+  state = resolveState(vehicle, state, tuning);
   const maxSpeed = tuning.maxSpeed ?? 25;
   const reverseSpeed = tuning.reverseSpeed ?? 6;
   const accel = tuning.accel ?? 9;
@@ -3164,7 +3225,11 @@ export function driveVehicle(
   const slope = settleOnGround(vehicle, heading, dt, tuning, state);
   rollWheels(vehicle, speed, dt);   // every wheel of a car, a bike or a cycle — a no-op for a horse
   noteVehicle(vehicle, axis);
-  return slope ? { speed, heading, pitch: slope.pitch, roll: slope.roll } : { speed, heading };
+  // IN PLACE: the game's own state object now holds the new values, whether or not it keeps the return.
+  state.speed = speed;
+  state.heading = heading;
+  if (slope) { state.pitch = slope.pitch; state.roll = slope.roll; }
+  return state;
 }
 
 // ── TREE ─────────────────────────────────────────────────────────────────────────────────────────

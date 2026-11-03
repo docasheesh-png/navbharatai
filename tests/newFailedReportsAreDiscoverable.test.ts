@@ -81,10 +81,12 @@ describe('new retained failed-report discovery', () => {
     expect(docs.get('workspace_diagnostics_v3/workspace-a')).toEqual({ historyAvailable: true });
     const page = await readFailedBuildPage();
     expect(page.reports.map(r => [r.workspaceId, r.historyId])).toEqual([['workspace-a', '2000']]);
-    expect(page.reports[0].numbering).toMatchObject({ ordinal: 1, total: 1 });
+    // No counter yet (the one-time backfill has not run): the report is saved and listed, and its number
+    // is honestly pending — never a page position or a guessed rank.
+    expect(page.reports[0].numbering).toEqual({ ordinal: null, total: null, asOf: null, reason: 'numbering_pending' });
     expect(page.reports[0].permanentReportId).toBeUndefined();
-    expect(docs.get('workspace_diagnostics_v3/workspace-a/history/2000').numberingIssue).toBe('counter_uninitialized');
-    expect(docs.has('admin_failed_report_numbers/counter')).toBe(false);
+    expect(docs.has('admin_build_report_counter/counter')).toBe(false);
+    expect([...docs.keys()].some(k => k.startsWith('build_report_numbers/'))).toBe(false);
     const detail = await readFailedBuildWithDigest('workspace-a', '2000');
     expect(detail?.reportDigest).toBe(page.reports[0].reportDigest);
     expect(detail?.report).toMatchObject({ startedAt: 2000, api_key: '[REDACTED:credential]' });
@@ -105,12 +107,12 @@ describe('new retained failed-report discovery', () => {
     await expect(commitDiagnosticsHistory(db, 'workspace-a', failure(2000), 3000)).rejects.toThrow('atomic');
     expect(docs.size).toBe(0);
     setFailure(false);
-    docs.set('admin_failed_report_numbers/counter', { nextNumber: 1 });
+    docs.set('admin_build_report_counter/counter', { state: 'ready', nextNumber: 1 });
     await commitDiagnosticsHistory(db, 'workspace-a', failure(2000), 3000);
     await commitDiagnosticsHistory(db, 'workspace-a', failure(2000), 3000);
-    expect(docs.size).toBe(3); // root + history + failed-number counter
-    expect(docs.get('workspace_diagnostics_v3/workspace-a/history/2000').reportNumber).toBe(1);
-    expect(docs.get('admin_failed_report_numbers/counter').nextNumber).toBe(2);
+    expect(docs.size).toBe(4); // root + history + counter + the report's registry row
+    expect(docs.get('build_report_numbers/workspace-a~2000').number).toBe(1);
+    expect(docs.get('admin_build_report_counter/counter').nextNumber).toBe(2);
     expect((await readFailedBuildPage()).reports).toHaveLength(1);
     expect((await readFailedBuildPage()).reports[0].numbering?.ordinal).toBe(1);
   });
@@ -142,30 +144,29 @@ describe('new retained failed-report discovery', () => {
   });
   it('assigns permanent max+1 numbers on new failures and never renumbers on re-save or list', async () => {
     const { db, docs } = fakeFirestore(); state.db = db;
-    docs.set('admin_failed_report_numbers/counter', { nextNumber: 1 });
+    docs.set('admin_build_report_counter/counter', { state: 'ready', nextNumber: 1 });
     await commitDiagnosticsHistory(db, 'workspace-a', failure(1000), 1010);
     await commitDiagnosticsHistory(db, 'workspace-b', failure(2000), 2010);
     await commitDiagnosticsHistory(db, 'workspace-a', failure(1000), 9999); // re-save older failure
-    expect(docs.get('workspace_diagnostics_v3/workspace-a/history/1000').reportNumber).toBe(1);
-    expect(docs.get('workspace_diagnostics_v3/workspace-b/history/2000').reportNumber).toBe(2);
-    expect(docs.get('admin_failed_report_numbers/counter').nextNumber).toBe(3);
+    expect(docs.get('build_report_numbers/workspace-a~1000').number).toBe(1);
+    expect(docs.get('build_report_numbers/workspace-b~2000').number).toBe(2);
+    expect(docs.get('admin_build_report_counter/counter').nextNumber).toBe(3);
     const page = await readFailedBuildPage();
     const byStarted = Object.fromEntries(page.reports.map(r => [r.startedAt, r.numbering?.ordinal]));
     expect(byStarted).toEqual({ 1000: 1, 2000: 2 });
     expect(Object.fromEntries(page.reports.map(r => [r.startedAt, r.permanentReportId]))).toEqual({ 1000: 1, 2000: 2 });
     expect(page.reports.every(r => r.numbering?.total === 2)).toBe(true);
   });
-  it('does not number in-progress or successful builds', async () => {
+  it('numbers in-progress and successful builds too, while the failed list still lists only failures', async () => {
     const { db, docs } = fakeFirestore(); state.db = db;
+    docs.set('admin_build_report_counter/counter', { state: 'ready', nextNumber: 1 });
     await commitDiagnosticsHistory(db, 'workspace-a', { startedAt: 1000 }, 1010, true);
     await commitDiagnosticsHistory(db, 'workspace-a', { ...failure(2000), ok: true }, 2010);
-    expect(docs.get('workspace_diagnostics_v3/workspace-a/history/1000').reportNumber).toBeUndefined();
-    expect(docs.get('workspace_diagnostics_v3/workspace-a/history/2000').reportNumber).toBeUndefined();
-    expect(docs.has('admin_failed_report_numbers/counter')).toBe(false);
-    await commitDiagnosticsHistory(db, 'workspace-a', failure(1000), 1020);
-    expect(docs.get('workspace_diagnostics_v3/workspace-a/history/1000')).toMatchObject({ report: failure(1000), numberingIssue: 'counter_uninitialized' });
-    expect(docs.get('workspace_diagnostics_v3/workspace-a/history/1000').reportNumber).toBeUndefined();
-    expect(docs.has('admin_failed_report_numbers/counter')).toBe(false);
+    await commitDiagnosticsHistory(db, 'workspace-a', failure(3000), 3010);
+    expect(docs.get('build_report_numbers/workspace-a~1000')).toMatchObject({ number: 1, outcome: 'unfinished' });
+    expect(docs.get('build_report_numbers/workspace-a~2000')).toMatchObject({ number: 2, outcome: 'succeeded' });
+    const page = await readFailedBuildPage();
+    expect(page.reports.map(r => [r.startedAt, r.numbering?.ordinal, r.numbering?.total])).toEqual([[3000, 3, 3]]);
   });
     it('both history writers use the atomic helper, with no private independent history write', () => {
     const source = readFileSync('src/server/AgentV3/DiagnosticsStore.ts', 'utf8');

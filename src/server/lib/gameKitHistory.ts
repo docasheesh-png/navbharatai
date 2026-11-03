@@ -50,7 +50,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "1e560fe9eed32f2e1a010d27356ba7ff43b130e90efdeb954a9c3bbb5f167898"
   ],
   "src/game/core/meta.ts": [
-    "6cbb9efee29e113dab1565263ee344ebb7f80bd9609752390708edba001db95a"
+    "6cbb9efee29e113dab1565263ee344ebb7f80bd9609752390708edba001db95a",
+    "47b4f5f0230add245aa485ab93ce1f7921534bb8f02f2b7e1f78eeffb2ee5e1e"
   ],
   "src/game/core/pool.ts": [
     "c0eb7deda0193f62ce37dfee23a5ca5757ab5d8cec5fbd92e9fc79871d688e60"
@@ -167,6 +168,7 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/game/ui/touchControls.ts": [
     "144b2a9ed0824bfabe5d47c2d41bcc031cc294a6c43a14fb9bbdfbc152a2096d",
-    "388a4b48dcd4c89508010c3d4c4d9104efeba0f0a714742fbc313c1d0af86f67"
+    "388a4b48dcd4c89508010c3d4c4d9104efeba0f0a714742fbc313c1d0af86f67",
+    "7d8613f9d3a9409db20d532c5b8d00680ab716b06bdad995266d20af28db88b0"
   ]
 };

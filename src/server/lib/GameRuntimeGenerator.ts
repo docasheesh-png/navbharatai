@@ -1032,7 +1032,7 @@ export function mountMetaToasts(root?: HTMLElement): () => void {
     while (box.childElementCount >= 3) box.removeChild(box.firstChild as Node);
     const t = document.createElement('div');
     t.textContent = text;
-    t.style.cssText = 'padding:10px 18px;border-radius:999px;font-weight:800;font-size:16px;color:#111;box-shadow:0 6px 20px rgba(0,0,0,.35);background:' + color + ';transition:transform .25s,opacity .25s;' + (reduced ? '' : 'transform:scale(.6);opacity:0');
+    t.style.cssText = 'padding:8px 16px;border-radius:999px;font-weight:800;font-size:16px;color:#111;box-shadow:0 6px 20px rgba(0,0,0,.35);background:' + color + ';transition:transform .25s,opacity .25s;' + (reduced ? '' : 'transform:scale(.6);opacity:0');
     box.appendChild(t);
     if (!reduced) requestAnimationFrame(() => { t.style.transform = 'scale(1)'; t.style.opacity = '1'; });
     setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 2400);

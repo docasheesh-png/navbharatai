@@ -1,3 +1,23 @@
+## 2026-11-03 — Autopsy of build report #1836 (958aa1ec, second-newest failure)
+
+3D endless car racing game, weak tier, ENGINE_R1 `deepseek-v4.1-flash`, RED in 170 s, never charged; all 162 issues and 18 model calls read.
+
+**Tally:** ✅ self-healed 1 (SPACING_SNAPPED on our own kit) · 🔀 workaround 1 (PROVIDER_FALLBACK with nothing to fall to) · ⏭️ skipped 0 · ❌ shipped broken 3 (provider exhaustion, starter page left showing, outcome unexplained) · 🥵 struggle 1 (80 s of reading the kit, 0 writes).
+
+| Item | Root cause → class | State |
+|---|---|---|
+| "no login, multiplayer, purchases or backend" made multiplayer a REQUIRED feature and the game a LARGE build | `withoutDeclinedSentences` dropped only the clause that began with "no"; `gameIntent` and the scope's heavy-infra check read raw text → *a refusal's list read as requests* | ✅ this PR: a refusal now covers its bare list items (and do-not clauses); both readers use it |
+| OUTCOME_UNEXPLAINED although BUILD_ERROR named the cause | `terminalOutcomeCode` (2026-10-30 fix) knew two terminal sentences, not the provider chain's → *a terminal message the classifier did not share* | ✅ this PR: prefixes exported from `buildOutcomeSummaries`, the chain builds its message from them |
+| SPACING_SNAPPED rewrote `touchControls.ts` and `meta.ts` — our kit — on every game build, and moved the knob 2 px off centre | the kit shipped 10/14/18/26 px → *a heal that fires on our own output* | ✅ this PR: kit on the grid (knob 48 px, centred); census over every recipe file |
+| Fast empty reply labelled OUTPUT_BUDGET_STARVED | label from flags, not from time | 🔲 Q-2308 |
+| Router One alone in the chain; the build ended on its one empty reply, starter page left | weak routing order (RED test on `main` since #4065) | 🔲 Q-2309 (another session's area) |
+| Fast-lane gate and floor budget disagree on whether the engine reasons | two capability sources, ladder rung vs model that ran | 🔲 Q-2310 (class of Q-2306) |
+| DESIGN_CONSISTENCY counts the kit's own colours | linter scope includes platform files | 🔲 Q-2311 |
+| 80 s of exploration, nudge silent | — | 🔲 Q-2312 |
+| DISCOUNT_COST_UNCONFIRMED | an honest billing note (unverified supplier cost excluded from the charge) | ✅ not a defect |
+
+**Lock:** `tests/theDeclinedListStaysDeclined.test.ts` (8, the report's request verbatim). Reversion-proved: refusal covers only its clause (3 fail), game contract on raw text (1), provider exhaustion unnamed (1), kit back off-grid (1).
+
 ## 2026-11-02 — Built apps and games are LIGHT unless the user asks for dark
 
 Admin: *"jab navbharatai par koi app ya game banaya jata hai, to woh, dark mode banta hai. mai chahta hu, jab tak user saf saf na bol de, tab tak light mode me hi game banne chahiye!!"*

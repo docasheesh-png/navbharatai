@@ -72,6 +72,9 @@ function ProviderRow({ row }: { row: ApiProviderRowView }) {
     <li className="flex flex-wrap items-center justify-between gap-2 p-3" data-testid={`api-provider-${row.id}`}>
       <div className="min-w-0">
         <p className="text-sm font-medium text-ink">{row.name}{row.group === 'registered' && <span className="ml-2 text-xs text-muted">registered only</span>}</p>
+        {row.usedFor.length > 0 && (
+          <p className="text-xs text-ink" data-testid={`api-provider-used-${row.id}`}>Used for: {row.usedFor.join(' · ')}</p>
+        )}
         <p className="text-xs text-muted">{row.configured ? `Key: ${row.configuredKeys.join(', ')}` : 'No key set'} · {row.billingHint}</p>
         <p className="text-sm">{status}</p>
       </div>

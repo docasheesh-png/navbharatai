@@ -47,6 +47,7 @@ describe('🔒 the audit: every API key the routing code reads has a billing lin
     for (const p of API_PROVIDERS) {
       expect(p.name.length).toBeGreaterThan(1);
       expect(p.envKeys.length).toBeGreaterThan(0);
+      expect(p.usedFor.length, `${p.id} must say where it is used`).toBeGreaterThan(0);
       if (p.billingUrl !== null) expect(new URL(p.billingUrl).protocol).toBe('https:');
       else expect(p.billingHint.length).toBeGreaterThan(10);
     }
@@ -150,7 +151,7 @@ describe('the screen: a checked body, and attention first', () => {
     expect(isApiProviderDirectory(bad)).toBe(false);
   });
   it('empty, low, failed and manual rows come before healthy and unset ones', () => {
-    const row = (id: string, balance: any) => ({ id, name: id, group: 'ai' as const, configured: true, configuredKeys: [], billingUrl: null, billingHint: 'x', balance });
+    const row = (id: string, balance: any) => ({ id, name: id, group: 'ai' as const, configured: true, configuredKeys: [], usedFor: [], billingUrl: null, billingHint: 'x', balance });
     const sorted = sortProvidersForAttention([
       row('unset', { kind: 'not_configured' }), row('ok', { kind: 'live', amount: 50, currency: 'USD', level: 'ok', checkedAt: 1 }),
       row('manual', { kind: 'manual', reason: 'x' }), row('failed', { kind: 'failed', reason: 'x', checkedAt: 1 }),

@@ -14,6 +14,7 @@ export interface ApiProviderRowView {
   group: 'ai' | 'service' | 'registered';
   configured: boolean;
   configuredKeys: string[];
+  usedFor: string[];
   billingUrl: string | null;
   billingHint: string;
   balance: ApiProviderBalanceView;
@@ -56,6 +57,7 @@ export function isApiProviderDirectory(v: unknown): v is ApiProviderDirectoryVie
     const x = r as Record<string, unknown>;
     return str(x.id) && str(x.name) && (x.group === 'ai' || x.group === 'service' || x.group === 'registered')
       && typeof x.configured === 'boolean' && Array.isArray(x.configuredKeys) && x.configuredKeys.every(str)
+      && Array.isArray(x.usedFor) && x.usedFor.every(str)
       && isLink(x.billingUrl) && str(x.billingHint) && isBalance(x.balance);
   });
 }

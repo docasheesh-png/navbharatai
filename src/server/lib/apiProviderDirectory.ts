@@ -31,6 +31,11 @@ export interface ApiProviderEntry {
   group: ApiProviderGroup;
   /** Any one of these set ⇒ configured. Names only. */
   envKeys: readonly string[];
+  /**
+   * Where NavBharatAI uses this account — the features that stop or degrade when its balance runs out. Taken from
+   * the code that reads the key (admin 2026-11-03: "yeh api keys kaha use hoti hai, woh bhi likho"). Plain words.
+   */
+  usedFor: readonly string[];
   /** Where the admin checks balance / billing. null = not known (said so on screen). */
   billingUrl: string | null;
   /** What to look at on that page, in one line. */
@@ -42,38 +47,38 @@ export interface ApiProviderEntry {
 
 export const API_PROVIDERS: readonly ApiProviderEntry[] = [
   // ── AI providers ──
-  { id: 'router-one', name: 'Router One', group: 'ai', envKeys: ['ROUTER_ONE_API_KEY'], billingUrl: 'https://router.one/dashboard', billingHint: 'Dashboard → balance' },
-  { id: 'surplus', name: 'Surplus', group: 'ai', envKeys: ['SURPLUS_API_KEY'], billingUrl: 'https://www.surplusintelligence.ai/app/buy/funding', billingHint: 'Funding → credits' },
-  { id: 'cheaperinference', name: 'CheaperInference', group: 'ai', envKeys: ['CHEAPERINFERENCE_API_KEY'], billingUrl: 'https://www.cheaperinference.com/dashboard/billing', billingHint: 'Billing' },
-  { id: 'glm', name: 'Z.ai / GLM', group: 'ai', envKeys: ['GLM_API_KEY', 'FREE_CHAIN_GLM_API_KEY', 'FREE_CHAIN_GLMX_API_KEY'], billingUrl: 'https://z.ai/manage-apikey/billing', billingHint: 'Billing → balance and resource packs' },
-  { id: 'kimi', name: 'Kimi / Moonshot', group: 'ai', envKeys: ['KIMI_API_KEY'], billingUrl: 'https://platform.kimi.ai', billingHint: 'Platform → balance', balance: 'moonshot' },
-  { id: 'openrouter', name: 'OpenRouter (Nemotron default)', group: 'ai', envKeys: ['OPENROUTER_API_KEY', 'NEMOTRON_API_KEY'], billingUrl: 'https://openrouter.ai/settings/credits', billingHint: 'Settings → credits', balance: 'openrouter' },
-  { id: 'deepinfra', name: 'DeepInfra', group: 'ai', envKeys: ['DEEPINFRA_API_KEY', 'DEEPINFRA_TOKEN', 'FREE_CHAIN_DEEPINFRA_API_KEY'], billingUrl: 'https://deepinfra.com/dash/account', billingHint: 'Account → billing' },
-  { id: 'openai', name: 'OpenAI', group: 'ai', envKeys: ['OPENAI_API_KEY', 'FREE_CHAIN_OPENAI_API_KEY'], billingUrl: 'https://platform.openai.com/account/billing', billingHint: 'API billing (separate from a ChatGPT subscription)' },
-  { id: 'anthropic', name: 'Anthropic / Claude', group: 'ai', envKeys: ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY'], billingUrl: 'https://platform.claude.com/settings/billing', billingHint: 'API billing (separate from a Claude subscription)' },
-  { id: 'gemini', name: 'Google Gemini API', group: 'ai', envKeys: ['GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'FREE_CHAIN_GEMINIPAID_API_KEY'], billingUrl: 'https://aistudio.google.com/billing', billingHint: 'AI Studio → billing' },
-  { id: 'vertex', name: 'Google Vertex AI', group: 'ai', envKeys: ['GOOGLE_CLOUD_PROJECT', 'GCLOUD_PROJECT'], billingUrl: 'https://console.cloud.google.com/billing', billingHint: 'Cloud Billing → the project’s billing account', serverIdentity: true },
-  { id: 'groq', name: 'Groq', group: 'ai', envKeys: ['GROQ_API_KEY', 'FREE_CHAIN_GROQ_API_KEY'], billingUrl: 'https://console.groq.com', billingHint: 'Console → Settings → Billing' },
-  { id: 'xai', name: 'xAI / Grok', group: 'ai', envKeys: ['XAI_API_KEY', 'GROK_API_KEY'], billingUrl: 'https://console.x.ai/team/default/billing', billingHint: 'Billing → credits' },
-  { id: 'cloudflare', name: 'Cloudflare Workers AI', group: 'ai', envKeys: ['CLOUDFLARE_AI_TOKEN', 'CLOUDFLARE_API_TOKEN'], billingUrl: 'https://dash.cloudflare.com/?to=/:account/ai/workers-ai', billingHint: 'Workers AI → usage' },
-  { id: 'pollinations', name: 'Pollinations', group: 'ai', envKeys: ['POLLINATIONS_API_KEY'], billingUrl: 'https://enter.pollinations.ai', billingHint: 'Dashboard → pollen' },
-  { id: 'bedrock', name: 'AWS Bedrock / Nova Sonic', group: 'ai', envKeys: ['BEDROCK_API_KEY', 'AWS_ACCESS_KEY_ID'], billingUrl: 'https://console.aws.amazon.com/billing/home', billingHint: 'AWS Billing → bills and credits' },
-  { id: 'deepseek', name: 'DeepSeek Direct', group: 'ai', envKeys: ['DEEPSEEK_API_KEY', 'FREE_CHAIN_DEEPSEEK_API_KEY'], billingUrl: 'https://platform.deepseek.com', billingHint: 'Platform → balance', balance: 'deepseek' },
-  { id: 'custom-image', name: 'Custom image provider', group: 'ai', envKeys: ['IMAGE_API_KEY'], billingUrl: null, billingHint: 'The provider is named by IMAGE_PROVIDER; its billing page depends on which one it is' },
+  { id: 'router-one', name: 'Router One', group: 'ai', envKeys: ['ROUTER_ONE_API_KEY'], usedFor: ['Pro builds on Weak power (the builder after Surplus)'], billingUrl: 'https://router.one/dashboard', billingHint: 'Dashboard → balance' },
+  { id: 'surplus', name: 'Surplus', group: 'ai', envKeys: ['SURPLUS_API_KEY'], usedFor: ['Pro builds on Weak power (first choice)'], billingUrl: 'https://www.surplusintelligence.ai/app/buy/funding', billingHint: 'Funding → credits' },
+  { id: 'cheaperinference', name: 'CheaperInference', group: 'ai', envKeys: ['CHEAPERINFERENCE_API_KEY'], usedFor: ['Free Chat (free-chat chain)', 'Admin \u2192 Provider testing bots'], billingUrl: 'https://www.cheaperinference.com/dashboard/billing', billingHint: 'Billing' },
+  { id: 'glm', name: 'Z.ai / GLM', group: 'ai', envKeys: ['GLM_API_KEY', 'FREE_CHAIN_GLM_API_KEY', 'FREE_CHAIN_GLMX_API_KEY'], usedFor: ['Pro builds on every power level (main engine)', 'Chat replies (AI router)', 'Free Chat (free-chat chain)', 'Reading photos and PDFs in chat', 'Phone app (APK) build auto-repair', 'Build checks before a build starts (is the request clear, is it a build)'], billingUrl: 'https://z.ai/manage-apikey/billing', billingHint: 'Billing → balance and resource packs' },
+  { id: 'kimi', name: 'Kimi / Moonshot', group: 'ai', envKeys: ['KIMI_API_KEY'], usedFor: ['Pro builds on every power level', 'Phone app (APK) build auto-repair'], billingUrl: 'https://platform.kimi.ai', billingHint: 'Platform → balance', balance: 'moonshot' },
+  { id: 'openrouter', name: 'OpenRouter (Nemotron default)', group: 'ai', envKeys: ['OPENROUTER_API_KEY', 'NEMOTRON_API_KEY'], usedFor: ['Pro builds: Nemotron for planning on higher power levels', 'Free Chat (free-chat chain)', 'Admin \u2192 Live Model Registry'], billingUrl: 'https://openrouter.ai/settings/credits', billingHint: 'Settings → credits', balance: 'openrouter' },
+  { id: 'deepinfra', name: 'DeepInfra', group: 'ai', envKeys: ['DEEPINFRA_API_KEY', 'DEEPINFRA_TOKEN', 'FREE_CHAIN_DEEPINFRA_API_KEY'], usedFor: ['Free Chat (free-chat chain)', 'Admin \u2192 DeepInfra comparison'], billingUrl: 'https://deepinfra.com/dash/account', billingHint: 'Account → billing' },
+  { id: 'openai', name: 'OpenAI', group: 'ai', envKeys: ['OPENAI_API_KEY', 'FREE_CHAIN_OPENAI_API_KEY'], usedFor: ['Chat replies (AI router)', 'Free Chat (free-chat chain)', 'Searching a project’s code by meaning (only when this key is set)'], billingUrl: 'https://platform.openai.com/account/billing', billingHint: 'API billing (separate from a ChatGPT subscription)' },
+  { id: 'anthropic', name: 'Anthropic / Claude', group: 'ai', envKeys: ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY'], usedFor: ['Pro builds on Normal and Strong power (Claude)', 'Chat replies (AI router)', 'Doctor AI (Senior Doctor Assistant)', 'Reading photos and PDFs in chat', 'Phone app (APK) build auto-repair'], billingUrl: 'https://platform.claude.com/settings/billing', billingHint: 'API billing (separate from a Claude subscription)' },
+  { id: 'gemini', name: 'Google Gemini API', group: 'ai', envKeys: ['GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'FREE_CHAIN_GEMINIPAID_API_KEY'], usedFor: ['Chat replies (AI router)', 'Image generation and photo editing', 'Reading photos and PDFs in chat', 'Doctor AI (Senior Doctor Assistant)', 'Free Chat (free-chat chain)', 'Memory search (fallback when Vertex is not used)'], billingUrl: 'https://aistudio.google.com/billing', billingHint: 'AI Studio → billing' },
+  { id: 'vertex', name: 'Google Vertex AI', group: 'ai', envKeys: ['GOOGLE_CLOUD_PROJECT', 'GCLOUD_PROJECT'], usedFor: ['Memory search (embeddings), paid from Google Cloud credit', 'Gemini calls through Google Cloud'], billingUrl: 'https://console.cloud.google.com/billing', billingHint: 'Cloud Billing → the project’s billing account', serverIdentity: true },
+  { id: 'groq', name: 'Groq', group: 'ai', envKeys: ['GROQ_API_KEY', 'FREE_CHAIN_GROQ_API_KEY'], usedFor: ['Free Chat (free-chat chain)'], billingUrl: 'https://console.groq.com', billingHint: 'Console → Settings → Billing' },
+  { id: 'xai', name: 'xAI / Grok', group: 'ai', envKeys: ['XAI_API_KEY', 'GROK_API_KEY'], usedFor: ['Chat replies (AI router)', 'Image generation', 'Reading photos in chat'], billingUrl: 'https://console.x.ai/team/default/billing', billingHint: 'Billing → credits' },
+  { id: 'cloudflare', name: 'Cloudflare Workers AI', group: 'ai', envKeys: ['CLOUDFLARE_AI_TOKEN', 'CLOUDFLARE_API_TOKEN'], usedFor: ['Free Chat (free-chat chain, Workers AI)', 'Image generation', 'Custom domains for published apps (DNS)'], billingUrl: 'https://dash.cloudflare.com/?to=/:account/ai/workers-ai', billingHint: 'Workers AI → usage' },
+  { id: 'pollinations', name: 'Pollinations', group: 'ai', envKeys: ['POLLINATIONS_API_KEY'], usedFor: ['Image generation'], billingUrl: 'https://enter.pollinations.ai', billingHint: 'Dashboard → pollen' },
+  { id: 'bedrock', name: 'AWS Bedrock / Nova Sonic', group: 'ai', envKeys: ['BEDROCK_API_KEY', 'AWS_ACCESS_KEY_ID'], usedFor: ['Pro builds: a GLM model through AWS Bedrock (only when BEDROCK_API_KEY is set). Nova Sonic voice is not used anywhere in the code'], billingUrl: 'https://console.aws.amazon.com/billing/home', billingHint: 'AWS Billing → bills and credits' },
+  { id: 'deepseek', name: 'DeepSeek Direct', group: 'ai', envKeys: ['DEEPSEEK_API_KEY', 'FREE_CHAIN_DEEPSEEK_API_KEY'], usedFor: ['Free Chat (free-chat chain)'], billingUrl: 'https://platform.deepseek.com', billingHint: 'Platform → balance', balance: 'deepseek' },
+  { id: 'custom-image', name: 'Custom image provider', group: 'ai', envKeys: ['IMAGE_API_KEY'], usedFor: ['Image generation through the provider named by IMAGE_PROVIDER'], billingUrl: null, billingHint: 'The provider is named by IMAGE_PROVIDER; its billing page depends on which one it is' },
   // ── Other API services ──
-  { id: 'e2b', name: 'E2B (build sandboxes)', group: 'service', envKeys: ['E2B_API_KEY'], billingUrl: 'https://console.e2b.dev/?tab=billing', billingHint: 'Billing → credits and usage' },
-  { id: 'gcp', name: 'Google Cloud / Firebase', group: 'service', envKeys: ['GOOGLE_CLOUD_PROJECT', 'GCLOUD_PROJECT'], billingUrl: 'https://console.cloud.google.com/billing', billingHint: 'Cloud Billing → Cloud Run, Firestore, Storage', serverIdentity: true },
-  { id: 'brave', name: 'Brave Search', group: 'service', envKeys: ['BRAVE_API_KEY'], billingUrl: 'https://api-dashboard.search.brave.com', billingHint: 'API dashboard → usage and plan' },
-  { id: 'render', name: 'Render', group: 'service', envKeys: ['RENDER_API_KEY'], billingUrl: 'https://dashboard.render.com', billingHint: 'Dashboard → billing' },
-  { id: 'resend', name: 'Resend (email)', group: 'service', envKeys: ['RESEND_API_KEY'], billingUrl: 'https://resend.com/login', billingHint: 'Log in → billing / usage' },
-  { id: 'rapidapi', name: 'RapidAPI', group: 'service', envKeys: ['RAPIDAPI_KEY'], billingUrl: 'https://rapidapi.com/developer/dashboard', billingHint: 'Dashboard → subscriptions / usage' },
-  { id: 'cashfree', name: 'Cashfree (payments)', group: 'service', envKeys: ['CASHFREE_APP_ID', 'CASHFREE_SECRET_KEY', 'CASHFREE_CLIENT_SECRET'], billingUrl: 'https://merchant.cashfree.com/auth/', billingHint: 'Merchant dashboard → settlements and account status' },
+  { id: 'e2b', name: 'E2B (build sandboxes)', group: 'service', envKeys: ['E2B_API_KEY'], usedFor: ['Every Pro build: the cloud machine where the app is built, run and previewed'], billingUrl: 'https://console.e2b.dev/?tab=billing', billingHint: 'Billing → credits and usage' },
+  { id: 'gcp', name: 'Google Cloud / Firebase', group: 'service', envKeys: ['GOOGLE_CLOUD_PROJECT', 'GCLOUD_PROJECT'], usedFor: ['The NavBharatAI servers (Cloud Run)', 'The database (Firestore) and file storage', 'Hosting for published apps (Firebase Hosting)'], billingUrl: 'https://console.cloud.google.com/billing', billingHint: 'Cloud Billing → Cloud Run, Firestore, Storage', serverIdentity: true },
+  { id: 'brave', name: 'Brave Search', group: 'service', envKeys: ['BRAVE_API_KEY'], usedFor: ['Web search in chat and builds', 'Live facts in chat (news, air quality, transit)'], billingUrl: 'https://api-dashboard.search.brave.com', billingHint: 'API dashboard → usage and plan' },
+  { id: 'render', name: 'Render', group: 'service', envKeys: ['RENDER_API_KEY'], usedFor: ['Deploying the backend of a user’s app'], billingUrl: 'https://dashboard.render.com', billingHint: 'Dashboard → billing' },
+  { id: 'resend', name: 'Resend (email)', group: 'service', envKeys: ['RESEND_API_KEY'], usedFor: ['Alert emails to the admin'], billingUrl: 'https://resend.com/login', billingHint: 'Log in → billing / usage' },
+  { id: 'rapidapi', name: 'RapidAPI', group: 'service', envKeys: ['RAPIDAPI_KEY'], usedFor: ['Live train status in chat', 'Government data sources'], billingUrl: 'https://rapidapi.com/developer/dashboard', billingHint: 'Dashboard → subscriptions / usage' },
+  { id: 'cashfree', name: 'Cashfree (payments)', group: 'service', envKeys: ['CASHFREE_APP_ID', 'CASHFREE_SECRET_KEY', 'CASHFREE_CLIENT_SECRET'], usedFor: ['Users adding money to their wallet (payments)'], billingUrl: 'https://merchant.cashfree.com/auth/', billingHint: 'Merchant dashboard → settlements and account status' },
   // ── Registered only; not confirmed active ──
-  { id: 'nvidia', name: 'NVIDIA Direct', group: 'registered', envKeys: ['FREE_CHAIN_NVIDIA_API_KEY'], billingUrl: 'https://build.nvidia.com/', billingHint: 'Developer platform → credits' },
-  { id: 'modelscope', name: 'ModelScope', group: 'registered', envKeys: ['FREE_CHAIN_MODELSCOPE_API_KEY'], billingUrl: 'https://modelscope.cn/', billingHint: 'Platform → account' },
-  { id: 'llm7', name: 'LLM7', group: 'registered', envKeys: ['FREE_CHAIN_LLM7_API_KEY'], billingUrl: 'https://llm7.io/', billingHint: 'Official website' },
-  { id: 'bluesminds', name: 'BluesMinds', group: 'registered', envKeys: ['FREE_CHAIN_BLUESMINDS_API_KEY'], billingUrl: 'https://api.bluesminds.com/', billingHint: 'API platform' },
-  { id: 'requesty', name: 'Requesty', group: 'registered', envKeys: ['FREE_CHAIN_REQUESTY_API_KEY'], billingUrl: 'https://app.requesty.ai/', billingHint: 'Dashboard → credits' },
+  { id: 'nvidia', name: 'NVIDIA Direct', group: 'registered', envKeys: ['FREE_CHAIN_NVIDIA_API_KEY'], usedFor: ['Free Chat (free-chat chain), when enabled'], billingUrl: 'https://build.nvidia.com/', billingHint: 'Developer platform → credits' },
+  { id: 'modelscope', name: 'ModelScope', group: 'registered', envKeys: ['FREE_CHAIN_MODELSCOPE_API_KEY'], usedFor: ['Free Chat (free-chat chain), when enabled'], billingUrl: 'https://modelscope.cn/', billingHint: 'Platform → account' },
+  { id: 'llm7', name: 'LLM7', group: 'registered', envKeys: ['FREE_CHAIN_LLM7_API_KEY'], usedFor: ['Free Chat (free-chat chain), when enabled'], billingUrl: 'https://llm7.io/', billingHint: 'Official website' },
+  { id: 'bluesminds', name: 'BluesMinds', group: 'registered', envKeys: ['FREE_CHAIN_BLUESMINDS_API_KEY'], usedFor: ['Free Chat (free-chat chain), when enabled'], billingUrl: 'https://api.bluesminds.com/', billingHint: 'API platform' },
+  { id: 'requesty', name: 'Requesty', group: 'registered', envKeys: ['FREE_CHAIN_REQUESTY_API_KEY'], usedFor: ['Free Chat (free-chat chain), when enabled'], billingUrl: 'https://app.requesty.ai/', billingHint: 'Dashboard → credits' },
 ];
 
 /** Billing pages for the image providers IMAGE_PROVIDER can name (its value is a provider name, not a secret). */
@@ -109,6 +114,7 @@ export interface ApiProviderRow {
   configured: boolean;
   /** Names of the keys that are set (never values). */
   configuredKeys: string[];
+  usedFor: string[];
   billingUrl: string | null;
   billingHint: string;
   balance: BalanceState;
@@ -215,7 +221,7 @@ export async function readApiProviderDirectory(opts: { env?: NodeJS.ProcessEnv; 
         balance = { kind: 'live', amount: r.amount, currency: r.currency, level: levelOf(usd, lowUsd), checkedAt };
       }
     }
-    return { id: p.id, name: p.name, group: p.group, configured, configuredKeys, billingUrl, billingHint, balance };
+    return { id: p.id, name: p.name, group: p.group, configured, configuredKeys, usedFor: [...p.usedFor], billingUrl, billingHint, balance };
   }));
   const live = rows.filter((r) => r.balance.kind === 'live');
   return {

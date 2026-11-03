@@ -298,18 +298,33 @@ export class Game {
     );
   }
 
+  /**
+   * ONE context for the game's whole life — the SAME object in setup() and in every update().
+   *
+   * 🔴 WHY (autopsy 8701aaa1 / 7aa2fe7c / c71e56de, 2026-11-02, admin: "50% vehicles chalti hi nahi hai").
+   * This used to be a getter that built a NEW object on every access, so a game that kept its car on the
+   * context — "ctx.car = car" or "(ctx as any).vehicleState = drive" in setup(), the most natural thing
+   * a builder writes — read undefined in update(). driveVehicle(undefined, …) then threw every frame
+   * ("Cannot read properties of undefined (reading 'rotation')" / "(reading 'speed')", 1,419 errors in
+   * one playtest) and the car never moved. Whatever a game stores here now survives, and the members are
+   * live getters, so nothing on it can go stale either.
+   */
+  private ctxObject: GameContext | null = null;
   get context(): GameContext {
-    return {
-      scene: this.scene,
-      camera: this.rig.camera,
-      renderer: this.renderer,
-      player: this.player,
-      particles: this.particles,
-      feel: this.feel,
-      input: this.input,
-      lights: this.lights,
+    if (this.ctxObject) return this.ctxObject;
+    const game = this;
+    this.ctxObject = {
+      get scene() { return game.scene; },
+      get camera() { return game.rig.camera; },
+      get renderer() { return game.renderer; },
+      get player() { return game.player; },
+      get particles() { return game.particles; },
+      get feel() { return game.feel; },
+      get input() { return game.input; },
+      get lights() { return game.lights; },
       follow: (object) => { this.followTarget = object; this.followChosen = true; this.syncTouchLayout(); },
     };
+    return this.ctxObject;
   }
 
   /** Run the game's own code, listening for the vehicles it drives and the buttons it reads. */

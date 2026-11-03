@@ -100364,3 +100364,36 @@ those service obligations separately from the CC0 asset licence when wiring the 
 - User conditionally authorizes deployment/activation after readiness. No GCP connector/CLI or cloud
   identity is configured here; physical devices and production game acceptance are still unavailable.
   No flag activation or new credentials/security configuration. PR report/checks carry final status.
+
+### 2026-11-02 — Autopsy cf1706d2 / 8701aaa1 / 7aa2fe7c / c71e56de: a driven vehicle always moves
+
+Admin: *"jab bhi koi vehicle game banaya jaye, to vehicle chalni chahiye. 50% vehicles chalti hi nahi hai."*
+Four builds of one 3D racing game (car, train, birds): one stopped by the user, three RED, the car never moved
+(playtest Controls 0, 1,419 runtime errors).
+
+**Root cause (one class, two halves):**
+1. `Game.context` (GameShellGenerator.ts) was a getter that built a NEW object on every access, so anything a
+   game kept on `ctx` in setup() was undefined in update(). driveVehicle(car, undefined) threw "reading
+   'speed'"; after the builder's `|| { speed: 0, heading: 0 }` "fix", driveVehicle(undefined) threw "reading
+   'rotation'". Fixed: ONE context for the game's life, members as live getters.
+2. `driveVehicle` was pure: the car only gained speed if the game wrote the result back into a variable that
+   outlived the frame. Discarded return, a fresh literal every frame, or no state at all each froze the car.
+   Fixed: the kit holds each vehicle's state; the passed state is updated in place and returned; a missing
+   state uses the vehicle's own; a literal re-made with the same values every frame is replaced by the
+   vehicle's own; a state the game sets ONCE (crash stop, respawn) is still obeyed. No vehicle → a clear error
+   naming the fix instead of "reading 'rotation'".
+
+**Prevention upstream:** the kit type contract now carries `MaterialKind`, `PaletteName` (spelled out from
+PALETTES) and `RailTrackOptions` — build cf1706d2 guessed 'plastic' / 'rubber' / 'steel' / 'coal' and
+`createRailTrack({ path })` (11 type errors, ~10 fix-up rounds). Repair hints for VEHICLE_STALLED and
+RUNTIME_ERROR now name the correct pattern and forbid try/catch silencing.
+
+**Locked by** `tests/aDrivenVehicleAlwaysMoves.test.ts`: the real generated kit and shell, driven through
+every way a game keeps its car (kit example, on ctx, discarded return, fresh literal per frame, no state,
+spread copy) — each must move > 25 m in 3 s with Up held. Proven by reversion: old code fails 5 of 10;
+old driveVehicle with the new ctx still fails 4.
+
+**Not finished (queue rows):** Q-2301 stack/file:line for runtime errors · Q-2302 write-time guard against
+silencing catch · Q-2303 a single clean console read taken as proof · Q-2304 final text vs RED gate ·
+Q-2305 post-green unverified writes (admin) · Q-2306 ladder text vs SURPLUS route (admin) · Q-2307 gate
+counts TODO tests as proof. Watch on the next real vehicle build: GAME_DEFECT_VEHICLE_STALLED should not fire.

@@ -36,9 +36,9 @@ const FIX_HINT: Readonly<Record<GameDefectCode, string>> = {
   GAME_DEFECT_BLANK: 'The game surface is blank or one colour — draw the world and the player.',
   GAME_DEFECT_INPUT_IGNORED: 'Arrow keys/WASD/Space/drag change nothing — wire input from src/game/core into the update loop.',
   GAME_DEFECT_NO_TOUCH: 'On a phone a drag or tap does nothing and there are no on-screen controls — add touch controls.',
-  GAME_DEFECT_RUNTIME_ERROR: 'An uncaught error is thrown while playing — fix it at its root.',
+  GAME_DEFECT_RUNTIME_ERROR: 'An uncaught error is thrown while playing — fix it at its root: find the value that is undefined and why. Never wrap the line in try/catch or add a `|| {}` default — that hides the error and the game stays broken (autopsy 7aa2fe7c / c71e56de).',
   GAME_DEFECT_CAMERA_WRONG: 'The camera faces the vehicle or steering is mirrored — use ctx.follow / CameraRig.follow and driveVehicle from the kit.',
-  GAME_DEFECT_VEHICLE_STALLED: 'The vehicle never moves with the accelerator held — use createVehicleState/driveVehicle from src/game/three/objects.ts.',
+  GAME_DEFECT_VEHICLE_STALLED: 'The vehicle never moves with the accelerator held — call driveVehicle(car, drive, ctx.input.axis(), dt) in EVERY update() for the car the player drives (from src/game/three/objects.ts), with "let car; let drive;" declared outside setup() and set there (drive = createVehicleState(car)). Never move the car by hand.',
   GAME_DEFECT_MISSING_LAYER: 'Code imports game-kit files that are not on disk — run the owning run_recipe (generate_game_3d / generate_game_shell) instead of hand-writing them.',
 };
 

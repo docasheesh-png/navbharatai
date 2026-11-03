@@ -35,7 +35,10 @@ export function registerApiProvidersAdminRoutes(app: Express, verifyAdminToken: 
   app.post('/api/admin/api-providers/:id/account', verifyAdminToken, writes, async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const body: unknown = req.body;
-    if (!body || typeof body !== 'object' || Array.isArray(body)) { res.status(400).json({ error: 'Send { "accountEmail": "…" }.' }); return; }
+    // Strict one-key allowlist: the body is { accountEmail } and nothing else (≤ 254 characters, checked below).
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((k) => k !== 'accountEmail')) {
+      res.status(400).json({ error: 'Send { "accountEmail": "…" } and nothing else.' }); return;
+    }
     try {
       const saved = await writeApiProviderAccount(req.params.id, (body as Record<string, unknown>).accountEmail);
       // The provider is audited, not the email: the audit log is wider than this page.

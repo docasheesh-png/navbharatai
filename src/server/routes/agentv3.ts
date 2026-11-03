@@ -245,7 +245,7 @@ import { visibleAppError, appShowsErrorNote, APP_SHOWS_ERROR_CODE } from '../Age
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths, greenRepairPrompt, readRepairVerdicts, type RepairVerdicts } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, inPlatformPass, setGreenFreezeObserver, setWriteObserver, GreenFreezeError } from '../AgentV3/greenFreeze';
-import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
+import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, inBuildWroteThisTurn, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
 import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict, starterLabelFor } from '../AgentV3/stillTheStarterApp';
 import { postGreenWritesNote, endVerdictFrom, writerPhrase, type PostGreenWrite } from '../AgentV3/postGreenWrites';
 import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
@@ -16414,10 +16414,13 @@ async function noteBuildOutcome(
               const st = await saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files, { mode: 'replace' });
               if (st === 'saved') {
                 inBuildGreenAt = Date.now();
-                etaAppRenderedAt = inBuildGreenAt; // the ETA stops counting down to an app already on screen (9c612cdb)
                 billingCtx.appFirstRenderedAt = earliestRenderProof(billingCtx.appFirstRenderedAt, inBuildGreenAt); // billing reads the earliest proof (a75153ab)
-                events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
-                emitEtaPhaseNow();
+                // An untouched app rendering is not THIS turn's app (5413e6f1) — see inBuildWroteThisTurn.
+                if (inBuildWroteThisTurn(inBuildWriteTick)) {
+                  etaAppRenderedAt = inBuildGreenAt; // the ETA stops counting down to an app already on screen (9c612cdb)
+                  events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
+                  emitEtaPhaseNow();
+                }
               } else {
                 try {
                   buildDiag.record({

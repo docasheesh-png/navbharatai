@@ -100408,3 +100408,18 @@ old driveVehicle with the new ctx still fails 4.
 silencing catch · Q-2303 a single clean console read taken as proof · Q-2304 final text vs RED gate ·
 Q-2305 post-green unverified writes (admin) · Q-2306 ladder text vs SURPLUS route (admin) · Q-2307 gate
 counts TODO tests as proof. Watch on the next real vehicle build: GAME_DEFECT_VEHICLE_STALLED should not fire.
+
+## 2026-11-03 — Autopsy 5413e6f1 (build report #1823, AI health coach with camera, weak tier)
+
+Ledger: 0 files written, RED gate, "All providers failed".
+- ✅ Q-2313 crawl floor killed a healthy Kimi call 1 s after first byte (bytes ÷ time since request) — class: a
+  rate measured over time the stream was not producing. Fix: `streamIsCrawling` takes `producingMs` from the
+  first byte, after a 5 s window; callers that do not know it keep the old rule. Locked by
+  `tests/aStreamIsJudgedOnWhatItProduced.test.ts` (reverted → failed).
+- ✅ Q-2314 the previous version rendering was told to the user as this turn's app — class: a render claim not
+  tied to this turn's writes. Fix: `inBuildWroteThisTurn` gates the narration and the ETA; restore point and
+  billing proof unchanged. Same test (reverted → failed).
+- OUTCOME_UNEXPLAINED for "All providers failed": already fixed by #4073; this report is second evidence.
+- OPEN: Q-2315 GLM single 429 ends chain · Q-2316 orphan `nb-autostyle.css` · Q-2317 TODO-only first turn ·
+  Q-2318 stale SURPLUS snapshot · Q-2319 "engine slow" note when we abandoned the call.
+Watch on the next weak build: no "crawling after ~15 s" abandonment of a stream that has started producing.

@@ -13,6 +13,7 @@
 //
 // Kill switch: AGENTV3_GAME_SCOPE_CONTRACT=off restores the pre-contract behaviour exactly.
 
+import { withoutDeclinedSentences } from '../lib/RequirementGapAnalyzer';
 export type GameGenre =
   | 'racing' | 'shooter' | 'platformer' | 'puzzle' | 'quiz' | 'card' | 'board' | 'runner'
   | 'arcade' | 'sports' | 'fighting' | 'rpg' | 'strategy' | 'snake' | 'unknown';
@@ -78,7 +79,9 @@ const CONTROLS: ReadonlyArray<[GameControl, RegExp]> = [
 
 /** The request's own words → the contract. PURE; never throws. */
 export function buildGameContract(prompt: string | null | undefined): GameScopeContract {
-  const text = String(prompt ?? '');
+  // What the user DECLINED is not what they named (autopsy 958aa1ec: "no login, multiplayer, purchases" made
+  // multiplayer a required feature). The same reader the domain and the complexity signals use.
+  const text = withoutDeclinedSentences(String(prompt ?? ''));
   const genre = GENRES.find(([, re]) => re.test(text))?.[0] ?? 'unknown';
   const dimension: GameDimension = /\b3\s?-?d\b|three\.?js|open world/i.test(text) ? '3d' : /\b2\s?-?d\b/i.test(text) ? '2d' : 'unspecified';
   return {

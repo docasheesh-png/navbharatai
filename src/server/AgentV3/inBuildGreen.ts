@@ -259,6 +259,16 @@ export function inBuildGreenNote(outcome: AttemptOutcome, facts: { elapsedMs: nu
   }
 }
 
+/**
+ * Did THIS turn change the app? Only then may a render be told to the user as theirs (autopsy 5413e6f1, build
+ * report #1823: a turn that wrote nothing and failed told the user "Your app rendered — this working version is
+ * now protected" and "your app is built" — the browser had rendered the previous version). PURE. Every captured
+ * write counts, the platform's own seeds included: they too are this turn's change to the app.
+ */
+export function inBuildWroteThisTurn(writeTick: number): boolean {
+  return Number.isFinite(writeTick) && writeTick > 0;
+}
+
 /** What the USER is told the moment their app is first protected. One line, once. */
 export function inBuildGreenNarration(): string {
   return '🛡️ Your app rendered — this working version is now protected. If anything later breaks it, this is what comes back.';

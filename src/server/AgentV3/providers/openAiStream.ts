@@ -372,13 +372,25 @@ export function firstByteGraceFor(
 }
 
 /**
+ * 🔴 A RATE IS MEASURED OVER THE TIME THE PROVIDER WAS PRODUCING (autopsy 5413e6f1, build report #1823,
+ * 2026-11-03). The rate divided what had arrived by the time since the REQUEST began — prompt ingestion
+ * included. kimi-k2.7-code took ~14 s to its first byte on a 37k-token prompt (both calls of that build), and
+ * the second call was abandoned "for crawling" at 15.05 s: one second after it started to answer, its bytes
+ * were divided by fifteen. The first call, the same shape, had completed in 60 s. The ingestion wait is what
+ * the first-byte grace exists for (2f46a4d8); once the first byte is in, the floor judges only the producing
+ * time, and only after a short window of it — below 5 s a rate is a race, not a reading.
+ */
+export const STREAM_PRODUCING_WINDOW_MS = 5_000;
+
+/**
  * Is this stream crawling — past its grace period and below the floor? PURE.
  *
  * 🔒 `producedChars` counts REASONING as well as answer text (see `OpenAiStreamAccumulator`), so a
  * forced-reasoning model thinking hard before it writes is never mistaken for a dead one.
+ * `producingMs` — the time since the first produced byte — when the caller knows it (see above).
  */
 export function streamIsCrawling(
-  sample: { producedChars?: number; producedBytes?: number; elapsedMs: number; firstByteGraceMs?: number },
+  sample: { producedChars?: number; producedBytes?: number; elapsedMs: number; firstByteGraceMs?: number; producingMs?: number },
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const floor = streamMinCharsPerSec(env);
@@ -390,6 +402,11 @@ export function streamIsCrawling(
   const produced = Number.isFinite(raw) ? Math.max(0, raw as number) : 0;
   const firstByteGrace = Number.isFinite(sample?.firstByteGraceMs) ? (sample.firstByteGraceMs as number) : streamFirstByteGraceMs(env);
   if (produced === 0 && elapsedMs < firstByteGrace) return false; // queued, not crawling
+  if (produced > 0 && Number.isFinite(sample?.producingMs)) {
+    const producingMs = Math.max(0, sample.producingMs as number);
+    if (producingMs < STREAM_PRODUCING_WINDOW_MS) return false; // just started answering — not measurable yet
+    return produced / (producingMs / 1000) < floor;
+  }
   return produced / (elapsedMs / 1000) < floor;
 }
 

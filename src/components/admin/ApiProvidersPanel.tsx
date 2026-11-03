@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { adminFailed, adminGet } from '../../lib/adminFetch';
+import { adminFailed, adminGet, adminHeaders } from '../../lib/adminFetch';
 import { isApiProviderDirectory, sortProvidersForAttention, type ApiProviderDirectoryView, type ApiProviderRowView } from '../../lib/apiProvidersView';
 
 /**
@@ -49,16 +49,44 @@ export function ApiProvidersPanel({ adminToken }: { adminToken: string }) {
         </p>
       )}
 
+      {data && !data.accountsAvailable && (
+        <p role="alert" className="text-sm text-warn">The saved logins could not be loaded just now — balances are shown, logins are not. Reload to try again.</p>
+      )}
+
       {data && (
         <ul className="divide-y divide-line rounded-md border border-line bg-surface">
-          {rows.map((row) => <ProviderRow key={row.id} row={row} />)}
+          {rows.map((row) => <ProviderRow key={row.id} row={row} adminToken={adminToken} accountsAvailable={data.accountsAvailable}
+            onSaved={(email) => setData((d) => d && { ...d, rows: d.rows.map((r) => r.id === row.id ? { ...r, accountEmail: email } : r) })} />)}
         </ul>
       )}
     </section>
   );
 }
 
-function ProviderRow({ row }: { row: ApiProviderRowView }) {
+function ProviderRow({ row, adminToken, accountsAvailable, onSaved }: {
+  row: ApiProviderRowView; adminToken: string; accountsAvailable: boolean; onSaved: (email: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(row.accountEmail ?? '');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const save = async () => {
+    setSaving(true); setSaveError(null);
+    try {
+      const res = await fetch(`/api/admin/api-providers/${encodeURIComponent(row.id)}/account`, {
+        method: 'POST', headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountEmail: draft }),
+      });
+      const body: unknown = await res.json().catch(() => null);
+      const b = body as { accountEmail?: unknown; error?: unknown } | null;
+      if (!res.ok) { setSaveError(typeof b?.error === 'string' ? b.error : `Could not save (HTTP ${res.status}).`); return; }
+      if (!b || !(b.accountEmail === null || typeof b.accountEmail === 'string')) { setSaveError('The server answered in a shape this screen does not know. Reload to see what was saved.'); return; }
+      onSaved(b.accountEmail as string | null);
+      setEditing(false);
+    } catch {
+      setSaveError('Could not reach the server. Nothing was changed.');
+    } finally { setSaving(false); }
+  };
   const b = row.balance;
   let status: React.ReactNode;
   if (b.kind === 'live') {
@@ -77,6 +105,24 @@ function ProviderRow({ row }: { row: ApiProviderRowView }) {
         )}
         <p className="text-xs text-muted">{row.configured ? `Key: ${row.configuredKeys.join(', ')}` : 'No key set'} · {row.billingHint}</p>
         <p className="text-sm">{status}</p>
+        {accountsAvailable && !editing && (
+          <p className="text-xs text-ink" data-testid={`api-provider-login-${row.id}`}>
+            Login: {row.accountEmail ?? <span className="text-muted">not recorded</span>}{' '}
+            <button type="button" className="text-accent-text underline" onClick={() => { setDraft(row.accountEmail ?? ''); setEditing(true); }}>
+              {row.accountEmail ? 'Edit' : 'Add'}
+            </button>
+          </p>
+        )}
+        {editing && (
+          <form className="mt-1 flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); void save(); }}>
+            <label className="sr-only" htmlFor={`login-${row.id}`}>Login email for {row.name}</label>
+            <input id={`login-${row.id}`} type="email" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="name@example.com"
+              className="rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink" />
+            <button type="submit" disabled={saving} className="rounded-md bg-accent px-2 py-1 text-xs font-medium text-on-accent disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
+            <button type="button" onClick={() => { setEditing(false); setSaveError(null); }} className="text-xs text-muted underline">Cancel</button>
+            {saveError && <span role="alert" className="text-xs text-danger">{saveError}</span>}
+          </form>
+        )}
       </div>
       {row.billingUrl
         ? <a href={row.billingUrl} target="_blank" rel="noopener noreferrer"

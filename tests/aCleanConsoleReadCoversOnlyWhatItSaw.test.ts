@@ -10,9 +10,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { makeTempDir } from './helpers/tempDir';
 import {
   E2BActuator, SCREENSHOT_SCRIPT, SCREENSHOT_CDP_SCRIPT, BROWSER_ACTION_SCRIPT, BROWSER_DAEMON_SCRIPT, browsePageScript,
 } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
@@ -65,7 +65,7 @@ describe('🔴 a clean read older than the last change is called what it is', ()
 });
 
 describe('🔒 every browser lane LISTENS and STAMPS its look, and every script is valid JavaScript', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'nbai-console-lanes-'));
+  const dir = makeTempDir('nbai-console-lanes-');
   const scripts: Record<string, string> = {
     'screenshot (fallback browser)': SCREENSHOT_SCRIPT,
     'screenshot (shared CDP browser)': SCREENSHOT_CDP_SCRIPT,

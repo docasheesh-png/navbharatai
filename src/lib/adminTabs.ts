@@ -33,7 +33,7 @@ export type AdminPageId =
   | 'apps' | 'publishing' | 'review' | 'bots'
   | 'reports' | 'apkreports' | 'health'
   | 'engines' | 'livemodels' | 'free-chat-chain' | 'provider-diagnostics'
-  | 'revenue' | 'ads'
+  | 'revenue' | 'ads' | 'api-providers'
   | 'security'
   | 'messages'
   | 'settings';
@@ -73,6 +73,8 @@ export const ADMIN_TABS: readonly AdminTabDef[] = [
   { id: 'money', label: 'Money', pages: [
     { id: 'revenue', label: 'Revenue' },
     { id: 'ads', label: 'Ads' },
+    // API Providers (admin 2026-11-03): every outside API, its billing link and its live balance where readable.
+    { id: 'api-providers', label: 'API Providers' },
   ] },
   { id: 'safety', label: 'Safety', pages: [{ id: 'security', label: 'Safety' }] },
   { id: 'messages', label: 'Messages', pages: [{ id: 'messages', label: 'Messages' }] },

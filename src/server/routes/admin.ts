@@ -9,6 +9,7 @@ import { registerProviderDiagnosticRoutes } from './providerDiagnostics';
 import { registerDeepinfraComparisonRoutes } from './deepinfraComparison';
 import { registerLiveModelRegistryRoutes } from './liveModelRegistry';
 import { registerSurplusRegistryAdminRoutes } from './surplusRegistryAdmin';
+import { registerApiProvidersAdminRoutes } from './apiProvidersAdmin';
 import { sendAdminOwnerApps } from './adminOwnerApps';
 import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
 import { registerAiMaintenanceRoutes } from './aiMaintenance';
@@ -448,6 +449,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
   registerLiveModelRegistryRoutes(app, verifyAdminToken);
   registerSurplusRegistryAdminRoutes(app, verifyAdminToken);
+  registerApiProvidersAdminRoutes(app, verifyAdminToken);
   registerFreeChatChainRoutes(app, verifyAdminToken);
   registerDeepinfraComparisonRoutes(app, verifyAdminToken);
   registerProviderDiagnosticRoutes(app);

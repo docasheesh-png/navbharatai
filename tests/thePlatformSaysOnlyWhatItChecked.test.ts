@@ -62,9 +62,10 @@ describe('Q-1024 — "your app is built" needs a built app', () => {
   it('BOTH route callers pass the fact — a rule enforced at one of two sites is not enforced', () => {
     const route = read('src/server/routes/agentv3.ts');
     // The transition emitter: the builder's own file count, handed in (it runs before `builderWroteCount` exists).
-    expect(route).toContain('appExists: (only?.wrote?.() ?? 0) > 0 });');
+    // PIN UPDATED 2026-11-03 (autopsy 8cdb4817): both sites also pass the loop's outcome — files from a failed loop are not an app.
+    expect(route).toContain('appExists: etaAppExists(only?.wrote?.() ?? 0, etaLoopFailed) });');
     // The two-minute heartbeat: the one that had NO guard at all, which is this row's defect.
-    expect(route).toContain('appExists: etaFilesDone > 0,');
+    expect(route).toContain('appExists: etaAppExists(etaFilesDone, etaLoopFailed),');
     // And the announcement's own guard is still there — this fix adds a net, it does not replace one.
     expect(route).toContain('if (only && (only.unlessStopped.aborted || only.wrote() <= 0)) return;');
   });

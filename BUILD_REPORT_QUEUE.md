@@ -841,6 +841,10 @@ from the kit contract. The rows below are what that PR did NOT finish.
 | Q-2317 | #1823 (5413e6f1) | TODO_ONLY_TURNS: the first model turn spent ~60 s calling only `update_todo` | OPEN | — | Needs: why the prompt lets a turn end on planning alone; prevent upstream. |
 | Q-2318 | #1823 (5413e6f1) | SURPLUS_FALLBACK finding was read from a stale snapshot | OPEN | — | Needs: locate the snapshot reader and make it read the build's own state. |
 | Q-2319 | #1823 (5413e6f1) | AGENT_NOTE told the user the "engine was slow" when the platform itself abandoned the call | OPEN | — | Needs: the note must distinguish our abandonment from a provider failure (honesty, rule 4 step 5). |
+| Q-2320 | #1817 (8cdb4817), #1814 (cb9757a5), #1813 (1c74b3fc) | After a mid-build engine failure the user read "⏱️ Almost done… your app is built — running the final checks" with only planning documents on disk and the starter page showing | FIX IN PR (awaiting merge) | this PR | `etaAppExists(files, loopFailed)` on both line writers; `tests/aFailedLoopBuiltNoApp.test.ts`, reverted-and-failed. |
+| Q-2321 | #1817 (8cdb4817) | The SURPLUS_FALLBACK report line says "before any user file" even when it fired after writes (`mid_build_after_write`, added by #4050) | FIX IN PR (awaiting merge) | this PR | `surplusFallbackMessage(reason)`; same test file. |
+| Q-2322 | #1817, #1814 | LLM_CALL_FAILED names a Claude label (`claude-sonnet-4-6`, `claude-haiku-4-5`) on a weak, no-Claude build that ran on SURPLUS — the planned label, not what ran (admin-only text) | OPEN | — | Needs: the failed-call row to name the provider that actually served the turn; related to Q-2306 (admin decision on SURPLUS ladder text). |
+| Q-2323 | #1817 (8cdb4817) | The user asked for a concept, feature list and database structure; after writing the four documents the builder went on to "implement the actual application" | OPEN | — | Needs: read `buildConfirmation.ts` / triage — a document request should end at the documents (PRODUCT_POLICY: read the mood first). |
 
 ## Build report #1836 autopsy 958aa1ec (3D endless car racing game, weak, ENGINE_R1, RED in 170 s) — 2026-11-03
 

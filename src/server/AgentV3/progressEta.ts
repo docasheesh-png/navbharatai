@@ -200,6 +200,16 @@ export function stepEtaText(elapsedMs: number, remainingMs: number, stepsDone: n
  * a few minutes at most, and a countdown there has promised "about 7 min more" 34 seconds before the end
  * (autopsy de3bb2bb). PURE.
  */
+/**
+ * May the live line say "your app is built"? Only when the builder wrote its OWN files AND its loop did not end
+ * in failure. PURE. Autopsy 8cdb4817 (build report #1817): the engine died mid-build with four planning documents
+ * on disk and the starter page still showing, and the user read "your app is built — running the final checks"
+ * — files had been written, so the Q-1024 guard was satisfied. Files written are not an app built.
+ */
+export function etaAppExists(builderFiles: number, loopFailed: boolean): boolean {
+  return !loopFailed && Number.isFinite(builderFiles) && builderFiles > 0;
+}
+
 export function finalChecksEtaLine(elapsedMs: number, appExists = false): string {
   const inTxt = formatEta(Math.max(0, elapsedMs)).replace('~', '');
   // 🔴 "YOUR APP IS BUILT" IS A CLAIM, AND IT IS MADE ONLY WHEN SOMETHING WAS BUILT (Q-1024).

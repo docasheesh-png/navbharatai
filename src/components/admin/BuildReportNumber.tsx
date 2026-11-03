@@ -9,12 +9,12 @@ const failureText: Record<ReportNumberFailure, string> = {
   invalid_timestamp: 'A retained report has an invalid start time. Its number cannot be confirmed.',
   snapshot_miss: 'This report is not in the current numbering snapshot. Refresh the list to retry.',
   request_failed: 'The number request failed. Check the admin session or connection, then refresh the report list.',
+  numbering_pending: 'Older reports are still being numbered for the first time. This report gets its permanent number when that finishes.',
+  not_numbered: 'This report has no permanent number yet. It is given one by the next numbering pass.',
 };
 
-const chronologicalMiss = 'This chronological rank is not in the current numbering snapshot. Refresh the list to retry.';
-
-/** Report number badge. Never substitutes a page index. kind identifies the complete cohort or the separate permanent reference. */
-export function BuildReportNumber({ numbering, kind = 'permanent' }: { numbering?: BuildReportNumbering; kind?: BuildReportNumberKind }) {
+/** Report number badge. Never substitutes a page index. `kind` is kept for existing callers; every kind is the permanent number. */
+export function BuildReportNumber({ numbering }: { numbering?: BuildReportNumbering; kind?: BuildReportNumberKind }) {
   if (numbering === undefined) {
     return <span className="shrink-0 text-xs font-semibold tabular-nums text-muted" title="Loading report number">…</span>;
   }
@@ -22,14 +22,11 @@ export function BuildReportNumber({ numbering, kind = 'permanent' }: { numbering
   const known = valid && numbering.ordinal !== null;
   const reason = valid ? numbering.reason : undefined;
   if (known) {
-    const title = kind !== 'permanent'
-      ? `Chronological rank #${numbering.ordinal} of ${numbering.total} retained ${kind === 'failed-chronological' ? 'failed' : 'latest-per-workspace'} reports as of ${new Date(numbering.asOf!).toLocaleString()}. Oldest is 1. Retention or late-arriving reports can change these ranks.`
-      : `Permanent failed-report number #${numbering.ordinal} (of ${numbering.total} assigned). Assigned once when the failure was retained; never renumbered. Allocation order is not build chronology.`;
+    // Every kind now shows the same permanent number: one per build report, of every outcome.
+    const title = `Permanent build report number #${numbering.ordinal} (highest assigned: #${numbering.total}). Given once, when the build started, and never changed. Older numbers come from older builds.`;
     return <span className="shrink-0 text-xs font-semibold tabular-nums text-ink" title={title}>#{numbering.ordinal}</span>;
   }
-  const detail = reason
-    ? (kind !== 'permanent' && reason === 'snapshot_miss' ? chronologicalMiss : failureText[reason])
-    : (kind !== 'permanent' ? 'Chronological rank unavailable for this row.' : 'Permanent report number unavailable for this row.');
+  const detail = reason ? failureText[reason] : 'Permanent report number unavailable for this row.';
   // Never substitute a page-local index or infer why stored metadata was absent.
   return <span className="shrink-0 text-xs font-semibold tabular-nums text-muted" title={detail}>
     — <span className="font-normal">n/a</span>

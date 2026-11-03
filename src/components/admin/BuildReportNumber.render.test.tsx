@@ -5,21 +5,21 @@ import { BuildReportNumber } from './BuildReportNumber';
 import { isFailedBuildPage } from '../../lib/failedBuildReports';
 
 describe('report numbers on both private lists', () => {
-  it('renders the server rank, total and as-of explanation, not an array position', () => {
-    const html = renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: 604, total: 604, asOf: 1792540800000 }} kind="permanent" />);
-    expect(html).toContain('#604'); expect(html).toContain('of 604 assigned');
-    expect(html).toContain('Permanent failed-report number'); expect(html).toContain('never renumbered');
+  it('renders the permanent number and the highest assigned, not an array position', () => {
+    const html = renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: 604, total: 650, asOf: 1792540800000 }} kind="permanent" />);
+    expect(html).toContain('#604'); expect(html).toContain('highest assigned: #650');
+    expect(html).toContain('Permanent build report number'); expect(html).toContain('never changed');
   });
-  it('labels chronological All-builds ranks without calling them permanent', () => {
-    const html = renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: 12, total: 40, asOf: 1792540800000 }} kind="chronological" />);
-    expect(html).toContain('#12'); expect(html).toContain('Chronological rank'); expect(html).not.toContain('Permanent failed-report');
+  it('🔒 every kind is the SAME permanent number — no screen calls it a rank that can change', () => {
+    for (const kind of ['permanent', 'chronological', 'failed-chronological'] as const) {
+      const html = renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: 12, total: 40, asOf: 100 }} kind={kind} />);
+      expect(html).toContain('#12'); expect(html).toContain('Permanent build report number');
+      expect(html).not.toMatch(/rank|can change/i);
+    }
   });
-  it('describes failed chronological ranks without confusing the latest-workspace cohort', () => {
-    const html = renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: 1, total: 10, asOf: 100 }} kind="failed-chronological" />);
-    expect(html).toContain('retained failed reports');
-    expect(html).toContain('late-arriving reports');
-    expect(html).not.toContain('latest-per-workspace');
-    expect(html).not.toContain('never renumbered');
+  it('explains a number that is still pending instead of showing a position', () => {
+    const html = renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: null, total: null, asOf: null, reason: 'numbering_pending' }} />);
+    expect(html).toContain('n/a'); expect(html).toContain('still being numbered');
   });
   it('shows loading without blocking the report row', () => {
     expect(renderToStaticMarkup(<BuildReportNumber />)).toContain('…');
@@ -32,7 +32,7 @@ describe('report numbers on both private lists', () => {
   });
   it('does not misdiagnose every missing number as a legacy record', () => {
     const html = renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: null, total: null, asOf: null, reason: 'snapshot_miss' }} kind="permanent" />);
-    expect(html).toContain('—'); expect(html).toContain('n/a'); expect(html).not.toContain('written before numbering'); expect(html).toContain('current numbering snapshot');
+    expect(html).toContain('—'); expect(html).toContain('n/a'); expect(html).not.toContain('written before numbering');
     expect(html).not.toContain('#1');
     expect(isFailedBuildPage({ reports: [{ workspaceId: 'a', historyId: '1', startedAt: 1, endedAt: 2, appLabel: 'Synthetic', numbering: { ordinal: null, total: null, asOf: null, reason: 'private-server-error' } }], nextCursor: null, scanned: 1 })).toBe(false);
     expect(() => renderToStaticMarkup(<BuildReportNumber numbering={{ ordinal: null, total: null, asOf: null, reason: '__proto__' } as any} />)).not.toThrow();
@@ -47,9 +47,9 @@ describe('report numbers on both private lists', () => {
     const failed = readFileSync('src/components/admin/FailedBuildReportsPage.tsx', 'utf8');
     expect(admin).toContain('<BuildReportNumber numbering={b.numbering} kind="chronological" />');
     expect(failed).toContain('<BuildReportNumber numbering={r.numbering} kind="failed-chronological" />');
-    expect(admin).toContain('before filters'); expect(failed).toContain('not just this batch');
-    expect(failed).toContain('Numbering is chronological'); expect(admin).toContain('retained-failure chronological ranks on /failedbr');
-    expect(failed).toContain('r.permanentReportId');
+    expect(admin).toContain('before filters'); expect(failed).toContain('not a position in this batch');
+    expect(failed).toContain('permanent build report number'); expect(admin).toContain('the same number /failedbr shows');
+    expect(`${failed}\n${admin}`).not.toMatch(/Retention (?:and late-arriving reports )?can change/);
     const routes = readFileSync('src/server/routes/admin.ts', 'utf8');
     const section = routes.slice(routes.indexOf("app.get('/api/admin/all-builds',"), routes.indexOf("app.get('/api/admin/all-builds/:workspaceId',"));
     expect(section).toContain('verifyAdminToken');

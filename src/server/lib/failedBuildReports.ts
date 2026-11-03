@@ -53,15 +53,11 @@ function scrubbedReportDigest(value: unknown): string {
 export function failedReportDigest(value: unknown): string {
   return scrubbedReportDigest(redactFailedReport(value));
 }
-function validReportNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
-}
-function row(workspaceId: string, historyId: string, r: Record<string, unknown> & { startedAt: number; endedAt: number }, data?: Record<string, unknown>): FailedBuildRow {
+function row(workspaceId: string, historyId: string, r: Record<string, unknown> & { startedAt: number; endedAt: number }): FailedBuildRow {
   return redactFailedReport({ workspaceId, historyId, reportDigest: failedReportDigest(r), buildId: typeof r.buildId === 'string' ? r.buildId : null,
     startedAt: r.startedAt, endedAt: r.endedAt,
     appLabel: typeof r.prompt === 'string' ? r.prompt.split('\n')[0].slice(0, 180) : 'Untitled build',
-    rootCause: typeof r.rootCause === 'string' ? r.rootCause.slice(0, 1000) : null,
-    permanentReportId: validReportNumber(data?.reportNumber) ? data.reportNumber : undefined }) as FailedBuildRow;
+    rootCause: typeof r.rootCause === 'string' ? r.rootCause.slice(0, 1000) : null }) as FailedBuildRow;
 }
 /** Only an opaque deployment fingerprint crosses this private read boundary. */
 export function failedBuildReadObservation(): FailedBuildReadObservation {
@@ -86,8 +82,12 @@ export async function readFailedBuildPage(rawCursor?: unknown, rawLimit?: unknow
   if (!db) throw new Error('Report storage unavailable.');
   const reports: FailedBuildRow[] = [];
   let scanned = 0;
+  // `numbering.ordinal` IS the permanent number (buildReportRegistry.ts); `permanentReportId` carries the
+  // same value for callers that read that field. One report, one number, on every screen and tool.
   const page = async (nextCursor: string | null): Promise<FailedBuildPage> => ({
-    reports: await numberBuildReports('failed', reports, r => r.historyId), nextCursor, scanned, observation: failedBuildReadObservation(),
+    reports: (await numberBuildReports('failed', reports, r => r.historyId)).map((r) =>
+      r.numbering.ordinal !== null ? { ...r, permanentReportId: r.numbering.ordinal } : r),
+    nextCursor, scanned, observation: failedBuildReadObservation(),
   });
   for (let workspace = 0; workspace < MAX_WORKSPACES && scanned < MAX_SCANNED; workspace++) {
     let query = db.collection(COLLECTION).orderBy(FieldPath.documentId());
@@ -103,7 +103,7 @@ export async function readFailedBuildPage(rawCursor?: unknown, rawLimit?: unknow
       const latest = parent.data().report;
       // Legacy latest-only reports remain readable, without duplicating their normal history row.
       if (settledFailure(latest) && !(await history.doc(String(latest.startedAt)).get()).exists) {
-        reports.push(row(parent.id, 'latest', latest, parent.data()));
+        reports.push(row(parent.id, 'latest', latest));
       }
       c.b = '0'; scanned++;
       if (reports.length >= limit) return page(encodeCursor(c));
@@ -114,7 +114,7 @@ export async function readFailedBuildPage(rawCursor?: unknown, rawLimit?: unknow
     for (const doc of entries.docs) {
       c.b = doc.id; scanned++;
       const r = doc.data().report;
-      if (settledFailure(r)) reports.push(row(parent.id, doc.id, r, doc.data()));
+      if (settledFailure(r)) reports.push(row(parent.id, doc.id, r));
       if (reports.length >= limit) return page(encodeCursor(c));
     }
     if (entries.size < want) { c.after = true; c.b = ''; }

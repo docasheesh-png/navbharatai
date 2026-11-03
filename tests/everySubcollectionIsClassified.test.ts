@@ -71,7 +71,10 @@ const CLASSIFICATION: Record<string, Kind & { clock?: true; erasedBy?: string; f
   // Atomic writer extracted from DiagnosticsStore; same history, workspace erasure and retention clock.
   'src/server/AgentV3/diagnosticsHistoryPersistence.ts › history': { kind: 'workspace', parent: 'workspace_diagnostics_v3', clock: true },
   // Read-only failed-report traversal of that SAME existing history; its erasure and clock are unchanged.
-  'src/server/lib/buildReportNumbering.ts › history': { kind: 'workspace', parent: 'workspace_diagnostics_v3', clock: true },
+  // The retired rank scan read history from buildReportNumbering.ts; the registry's backfill and the
+  // all-reports list read the same subcollection now (2026-11-02).
+  'src/server/lib/buildReportRegistry.ts › history': { kind: 'workspace', parent: 'workspace_diagnostics_v3', clock: true },
+  'src/server/lib/buildReportList.ts › history': { kind: 'workspace', parent: 'workspace_diagnostics_v3', clock: true },
   'src/server/lib/failedBuildReports.ts › history': { kind: 'workspace', parent: 'workspace_diagnostics_v3', clock: true },
   // Reads existing diagnostics; the two metadata children below belong to a DIFFERENT parent.
   'src/server/lib/failedReportAutopsy.ts › history': { kind: 'workspace', parent: 'workspace_diagnostics_v3', clock: true },

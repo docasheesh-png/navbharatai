@@ -65,7 +65,8 @@ describe('🔴 the browser daemon creates its console log when the browser reall
     // helper's existence is a fact about the shared module; what this suite is about is the daemon
     // invoking it.
     expect(daemon).toMatch(/^\s*recSessionExisted\(\);/m);
-    expect(daemon).toContain("appendFileSync(__nbaiLog,'')");
+    // Since Q-2303 the touch is a STAMPED session line (when a browser was there), not an empty append.
+    expect(daemon).toContain("appendFileSync(__nbaiLog, JSON.stringify({t:Date.now(),kind:'session'})");
   });
 
   it('🔒 AFTER the browser launches, never before — the file must mean "a session existed"', () => {
@@ -85,10 +86,10 @@ describe('🔴 the browser daemon creates its console log when the browser reall
   });
 
   it('🔒 and it cannot take the daemon down — the browser matters more than the bookkeeping', () => {
-    const at = daemon.indexOf("appendFileSync(__nbaiLog,'')");
+    const at = daemon.indexOf("appendFileSync(__nbaiLog, JSON.stringify({t:Date.now(),kind:'session'})");
     expect(at).toBeGreaterThan(-1);
     expect(daemon.slice(at - 20, at + 40)).toContain('try{');
-    expect(daemon.slice(at, at + 60)).toContain('catch');
+    expect(daemon.slice(at, at + 110)).toContain('catch');
   });
 });
 
@@ -116,7 +117,8 @@ const anError = { t: Date.now(), kind: 'pageerror', text: 'TypeError: x is not a
 describe('🔴 what the model is told about the console', () => {
   it('read, and genuinely empty ⇒ clean, and it says WHY it can say so', async () => {
     const out = await ask({ errors: [], captured: true });
-    expect(out).toContain('the console was read');
+    // It says WHY it may call it clean: a browser looked at the app in the window (Q-2303 wording).
+    expect(out).toContain('a browser looked at the app');
     expect(out).toContain('clean');
   });
 
@@ -174,7 +176,7 @@ describe('the port contract both halves depend on', () => {
   );
 
   it('the tool reads `captured`, not just `errors`', () => {
-    expect(DISPATCHER).toContain('const { errors, captured } = await this.actuator.getConsoleErrors(');
+    expect(DISPATCHER).toMatch(/const \{ errors, captured(, lastSessionAt)? \} = await this\.actuator\.getConsoleErrors\(/);
   });
 
   it('and it branches on an explicit `false`, so `undefined` cannot be mistaken for a denial', () => {

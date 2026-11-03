@@ -4,7 +4,7 @@ vi.mock('../src/server/lib/serverDb', () => ({ getServerDb: () => state.db }));
 import { buildReportOutcome, planRegistryWrite, runBuildReportNumbering, backfillOrder } from '../src/server/lib/buildReportRegistry';
 import { commitDiagnosticsHistory } from '../src/server/AgentV3/diagnosticsHistoryPersistence';
 import { readBuildReportList, readBuildReportWithDigest } from '../src/server/lib/buildReportList';
-import { failedReportDigest } from '../src/server/lib/failedBuildReports';
+import { failedReportDigest, readFailedBuildPage } from '../src/server/lib/failedBuildReports';
 
 /**
  * The build report registry (admin 2026-11-02: "sabhi build report failedbr me aye … numbering rocksolid
@@ -226,5 +226,55 @@ describe('list_build_reports: every outcome, filter and sort by permanent number
     expect(ok).toMatchObject({ number: 2, outcome: 'succeeded', reportDigest: failedReportDigest(succeeded(200)) });
     expect(await readBuildReportWithDigest('ws-b', '999')).toBeNull();
     await expect(readBuildReportWithDigest('../x', '1')).rejects.toThrow('Invalid report reference');
+  });
+});
+
+describe('🔢 the failed list is NEWEST FIRST: row 1 of page 1 is the newest failed build (admin 2026-11-02)', () => {
+  async function seeded() {
+    const f = fakeFirestore(); state.db = f.db;
+    f.docs.set(COUNTER, { state: 'ready', nextNumber: 1 });
+    await commitDiagnosticsHistory(f.db, 'ws-z', failed(100), 105);      // #1 failed
+    await commitDiagnosticsHistory(f.db, 'ws-a', succeeded(200), 205);   // #2 not a failure
+    await commitDiagnosticsHistory(f.db, 'ws-m', stopped(300), 305);     // #3 user-stopped (ok=false: listed)
+    await commitDiagnosticsHistory(f.db, 'ws-b', { startedAt: 400 }, 405, true); // #4 unfinished: not listed
+    await commitDiagnosticsHistory(f.db, 'ws-a', failed(500), 505);      // #5 failed — the newest failure
+    return f;
+  }
+  it('🔒 the first row is the newest failure, by permanent number, whatever workspace it is in', async () => {
+    await seeded();
+    const page = await readFailedBuildPage();
+    expect(page.reports.map((r) => r.permanentReportId)).toEqual([5, 3, 1]);
+    expect(page.reports[0]).toMatchObject({ workspaceId: 'ws-a', historyId: '500', numbering: { ordinal: 5, total: 5 } });
+    expect(page.observation?.ordering).toBe('newest-first');
+    expect(page.nextCursor).toBeNull();
+  });
+  it('pages without repeating or skipping, and refuses a cursor from the old workspace order', async () => {
+    await seeded();
+    const seen: number[] = [];
+    let page = await readFailedBuildPage(undefined, 1);
+    for (;;) {
+      seen.push(...page.reports.map((r) => r.permanentReportId!));
+      if (!page.nextCursor) break;
+      page = await readFailedBuildPage(page.nextCursor, 1);
+    }
+    expect(seen).toEqual([5, 3, 1]);
+    const oldCursor = Buffer.from(JSON.stringify({ v: 1, w: 'ws-a', b: '', after: false })).toString('base64url');
+    await expect(readFailedBuildPage(oldCursor)).rejects.toThrow('older workspace order');
+  });
+  it('a numbered report that has expired is a gap, never a broken row', async () => {
+    const { docs } = await seeded();
+    docs.delete('workspace_diagnostics_v3/ws-a/history/500');
+    expect((await readFailedBuildPage()).reports.map((r) => r.permanentReportId)).toEqual([3, 1]);
+  });
+  it('a report the history write never numbered is numbered by the daily re-sweep, then listed in its place', async () => {
+    const f = fakeFirestore(); state.db = f.db;
+    history(f.docs, 'ws-old', failed(100));
+    await runBuildReportNumbering(f.db, 'runner-1');
+    // A stray: its history exists but its registry row does not (a write that failed half-way).
+    history(f.docs, 'ws-stray', failed(900));
+    expect(await runBuildReportNumbering(f.db, 'runner-1')).toEqual({ status: 'ready', numbered: 0, swept: 0 }); // swept today
+    f.docs.set(COUNTER, { ...f.docs.get(COUNTER), sweptAt: 1 }); // a day later
+    expect(await runBuildReportNumbering(f.db, 'runner-1')).toMatchObject({ status: 'numbered', swept: 1 });
+    expect((await readFailedBuildPage()).reports.map((r) => r.workspaceId)).toEqual(['ws-stray', 'ws-old']);
   });
 });

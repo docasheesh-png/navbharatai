@@ -299,49 +299,7 @@ const paintWaitJs = (page: string): string => `
   }
 `;
 
-const SCREENSHOT_SCRIPT = `
-const {chromium}=require('playwright');
-(async()=>{
-  const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
-  const p=await b.newPage();
-  const vw=parseInt(process.argv[3],10)||1280;
-  const vh=parseInt(process.argv[4],10)||720;
-  await p.setViewportSize({width:vw,height:vh});
-  const url=process.argv[2]||'about:blank';
-  await p.goto(url,{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
-${paintWaitJs('p')}
-  const buf=await p.screenshot({type:'png',fullPage:false});
-  require('fs').writeFileSync('${TOOLS_DIR}/last-shot.png', buf);
-  process.stdout.write('OK');
-  await b.close();
-})().catch(e=>{process.stderr.write(String(e));process.exit(1)});
-`.trim();
 
-// Screenshot via the SAME persistent CDP browser the agent drives (Phase 3),
-// so a screenshot taken after a browser_action flow (login, navigation) reflects
-// the real session/cookies/current-page — not a clean fresh browser. If a target
-// URL is given and differs from the current page, navigate there first; otherwise
-// just capture the live page. Exits WITHOUT closing the browser (state persists).
-const SCREENSHOT_CDP_SCRIPT = `
-const {chromium}=require('playwright');
-(async()=>{
-  const target=process.argv[2]||'';
-  const vw=parseInt(process.argv[3],10)||1280;
-  const vh=parseInt(process.argv[4],10)||720;
-  const browser=await chromium.connectOverCDP('http://localhost:${CDP_PORT}');
-  const ctx=browser.contexts()[0]||await browser.newContext({viewport:{width:vw,height:vh}});
-  let page=ctx.pages()[0]||await ctx.newPage();
-  await page.setViewportSize({width:vw,height:vh}).catch(()=>{});
-  if(target && page.url()!==target){
-    await page.goto(target,{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
-  }
-${paintWaitJs('page')}
-  const buf=await page.screenshot({type:'png',fullPage:false});
-  require('fs').writeFileSync('${TOOLS_DIR}/last-shot.png', buf);
-  process.stdout.write('OK');
-  process.exit(0);
-})().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1);});
-`.trim();
 
 // Long-lived browser the agent drives across multiple interaction steps.
 // Launched once in the background; exposes a CDP port that action scripts
@@ -418,7 +376,9 @@ function rec(kind,text,stack){ try{ __nbaiFs.appendFileSync(__nbaiLog, JSON.stri
 // \`rec\` only fires ON AN ERROR, so without this the log is absent for a perfectly clean app too and
 // getConsoleErrors reads that absence as \`captured:false\` — "we never looked". Append, never
 // truncate: a second lane must not erase what the first one recorded.
-function recSessionExisted(){ try{ __nbaiFs.appendFileSync(__nbaiLog,''); }catch(e){} }
+// 🕒 IT IS STAMPED (Q-2303). An empty append proved only that SOME session once existed, so a log left by an
+// earlier turn made a window in which no browser looked read as "read and clean". The stamp says WHEN.
+function recSessionExisted(){ try{ __nbaiFs.appendFileSync(__nbaiLog, JSON.stringify({t:Date.now(),kind:'session'})+'\\n'); }catch(e){} }
 `.trim();
 
 /** The four listeners, applied to one page. Shared so the daemon and `browseUrl` can never drift. */
@@ -428,6 +388,57 @@ const attachConsoleJs = (page: string): string => `
   ${page}.on('requestfailed',r=>{ const f=r.failure(); const why=(f&&f.errorText)||'failed'; if(/${CANCELLED_REQUEST_RE.source}/.test(why)) return; rec('requestfailed',r.url()+' — '+why); });
   ${page}.on('response',res=>{ try{ const s=res.status(); if(s>=500) rec('httperror','HTTP '+s+' from '+res.url()); }catch(e){} });
 `;
+
+// 🎧 The fallback lane LISTENS too (Q-2303): it opened the app with no listener, so whatever the page threw while
+// the builder looked at it was lost, and a later console read could only say "clean". Shared recorder.
+export const SCREENSHOT_SCRIPT = `
+const {chromium}=require('playwright');
+${CONSOLE_RECORDER_JS}
+(async()=>{
+  const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
+  const p=await b.newPage();
+${attachConsoleJs('p').trimEnd()}
+  const vw=parseInt(process.argv[3],10)||1280;
+  const vh=parseInt(process.argv[4],10)||720;
+  await p.setViewportSize({width:vw,height:vh});
+  const url=process.argv[2]||'about:blank';
+  await p.goto(url,{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
+${paintWaitJs('p')}
+  if(painted) recSessionExisted();
+  const buf=await p.screenshot({type:'png',fullPage:false});
+  require('fs').writeFileSync('${TOOLS_DIR}/last-shot.png', buf);
+  process.stdout.write('OK');
+  await b.close();
+})().catch(e=>{process.stderr.write(String(e));process.exit(1)});
+`.trim();
+
+// Screenshot via the SAME persistent CDP browser the agent drives (Phase 3),
+// so a screenshot taken after a browser_action flow (login, navigation) reflects
+// the real session/cookies/current-page — not a clean fresh browser. If a target
+// URL is given and differs from the current page, navigate there first; otherwise
+// just capture the live page. Exits WITHOUT closing the browser (state persists).
+export const SCREENSHOT_CDP_SCRIPT = `
+const {chromium}=require('playwright');
+(async()=>{
+  const target=process.argv[2]||'';
+  const vw=parseInt(process.argv[3],10)||1280;
+  const vh=parseInt(process.argv[4],10)||720;
+  const browser=await chromium.connectOverCDP('http://localhost:${CDP_PORT}');
+  const ctx=browser.contexts()[0]||await browser.newContext({viewport:{width:vw,height:vh}});
+  let page=ctx.pages()[0]||await ctx.newPage();
+  await page.setViewportSize({width:vw,height:vh}).catch(()=>{});
+  if(target && page.url()!==target){
+    await page.goto(target,{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
+  }
+${paintWaitJs('page')}
+  // The daemon's listeners record this page's errors; this stamps that a browser LOOKED at it now (Q-2303).
+  if(painted){ try{ require('fs').appendFileSync(${JSON.stringify(CONSOLE_LOG)}, JSON.stringify({t:Date.now(),kind:'session'})+'\\n'); }catch(e){} }
+  const buf=await page.screenshot({type:'png',fullPage:false});
+  require('fs').writeFileSync('${TOOLS_DIR}/last-shot.png', buf);
+  process.stdout.write('OK');
+  process.exit(0);
+})().catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(1);});
+`.trim();
 
 /**
  * The script `browseUrl` runs in the sandbox: open the app in a real browser, wait for it to PAINT,
@@ -513,7 +524,10 @@ ${CONSOLE_RECORDER_JS}
     if(seen.has(page))return; seen.add(page);
 ${attachConsoleJs('page').trimEnd()}
   }
-  setInterval(()=>{ try{ for(const ctx of browser.contexts()){ for(const p of ctx.pages()){ attach(p); } } }catch(e){} }, 1000);
+  // A new page is listened to the moment it opens (Q-2303): the 1-second poll alone missed what a page threw
+  // while it loaded — the errors that break an app. The poll stays as the net for a context it has not seen.
+  const seenCtx=new WeakSet();
+  setInterval(()=>{ try{ for(const ctx of browser.contexts()){ if(!seenCtx.has(ctx)){ seenCtx.add(ctx); ctx.on('page',attach); } for(const p of ctx.pages()){ attach(p); } } }catch(e){} }, 1000);
   setInterval(()=>{}, 1<<30);
 })().catch(e=>{ process.stderr.write(String(e)); process.exit(1); });
 `.trim();
@@ -523,7 +537,7 @@ ${attachConsoleJs('page').trimEnd()}
 // Also emits cursorX/cursorY: the pixel coordinates of the element interacted with
 // (bounding-box center for click/type; sensible defaults for other actions).
 // The frontend uses these to render an animated cursor overlay on the screenshot.
-const BROWSER_ACTION_SCRIPT = `
+export const BROWSER_ACTION_SCRIPT = `
 const {chromium}=require('playwright');
 (async()=>{
   const a=JSON.parse(process.argv[2]||'{}');
@@ -566,6 +580,9 @@ const {chromium}=require('playwright');
   // means a future channel with its own limit cannot resurrect the same bug.
   var meta=JSON.stringify({result:String(result).slice(0,4000),url,cursorX,cursorY});
   try{require('fs').writeFileSync('${TOOLS_DIR}/last-action.json', meta);}catch(_e){}
+  // The daemon's listeners heard whatever this action made the page throw; this stamps that a browser was on
+  // the app now (Q-2303), so a console read after the action counts it as a look.
+  try{require('fs').appendFileSync(${JSON.stringify(CONSOLE_LOG)}, JSON.stringify({t:Date.now(),kind:'session'})+'\\n');}catch(_e){}
   // stdout is KEPT as a fallback: a sandbox that is already warm still holds the OLD script on disk,
   // and the TS side prefers the file only when it can read one. Small now, because of the cap.
   process.stdout.write(meta);
@@ -3130,7 +3147,7 @@ ${paintWaitJs('p')}
   async getConsoleErrors(
     workspaceId: string,
     sinceMs: number,
-  ): Promise<{ errors: { t: number; kind: string; text: string; stack?: string }[]; captured: boolean }> {
+  ): Promise<{ errors: { t: number; kind: string; text: string; stack?: string }[]; captured: boolean; lastSessionAt?: number }> {
     const sandbox = await this.getSandbox(workspaceId);
     let raw = '';
     try {
@@ -3141,12 +3158,16 @@ ${paintWaitJs('p')}
       return { errors: [], captured: false };
     }
     const errors: { t: number; kind: string; text: string; stack?: string }[] = [];
+    let lastSessionAt: number | undefined;
     for (const line of raw.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       try {
         const e = JSON.parse(trimmed);
-        if (typeof e.t === 'number' && e.t > sinceMs) {
+        if (typeof e.t !== 'number') continue;
+        // A stamped session marker (Q-2303): a browser looked at the app at `t`. Not an error.
+        if (e.kind === 'session') { if (lastSessionAt === undefined || e.t > lastSessionAt) lastSessionAt = e.t; continue; }
+        if (e.t > sinceMs) {
           errors.push({
             t: e.t,
             kind: String(e.kind || 'console'),
@@ -3158,9 +3179,14 @@ ${paintWaitJs('p')}
         }
       } catch { /* skip malformed line */ }
     }
-    // The log file existed and was read → the console WAS captured (empty errors here = genuinely clean).
+    // 🔴 CAPTURED MEANS A BROWSER LOOKED IN THIS WINDOW (Q-2303, autopsy 8701aaa1 / c71e56de). It used to mean
+    // "the log file exists" — and the file outlives the turn that wrote it (the sandbox resumes, the log is
+    // append-only), so a window in which NO browser opened the app read as "the console was read and it was
+    // clean". The builder believed it three times in one build and declared the game fixed while it threw 1,298
+    // errors. An error in the window is first-hand evidence on its own; otherwise a stamped session must be in it.
+    const captured = errors.length > 0 || (lastSessionAt !== undefined && lastSessionAt > sinceMs);
     // Cap to the most recent 20 to keep the AI prompt bounded.
-    return { errors: errors.slice(-20), captured: true };
+    return { errors: errors.slice(-20), captured, ...(lastSessionAt !== undefined ? { lastSessionAt } : {}) };
   }
 
   /**

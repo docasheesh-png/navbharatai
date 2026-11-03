@@ -42,6 +42,7 @@ import { browserScriptRunLine, parseScriptDiagnostic, playwrightImport } from '.
 import { newPageOptionsExpr } from './signInExplore';
 import { CONSOLE_NOISE, NEVER_PRESS } from './clickExplorer';
 import { GAME_SIGNAL } from './touchPlayableGame';
+import { locatedErrorText } from './runtimeErrorSite';
 
 export const PLAYTEST_RESULT_MARKER = 'NBAI_PLAYTEST:';
 export const PLAYTEST_BUDGET_MS = 60_000;
@@ -580,9 +581,12 @@ async function startUntilSurface(page, already) {
 }
 
 const errors = [];
+// The stack beside each error (Q-2301): the server reads the app's own frame out of it, so the repair is told
+// WHERE the throw is. '' when there is none (a console line carries no stack).
+const errorStacks = [];
 function watch(page) {
-  page.on('pageerror', (e) => errors.push(String(e && e.message || e).slice(0, 160)));
-  page.on('console', (m) => { if (m.type() === 'error' && !noise.test(m.text())) errors.push(m.text().slice(0, 160)); });
+  page.on('pageerror', (e) => { errors.push(String(e && e.message || e).slice(0, 160)); errorStacks.push(String(e && e.stack || '').slice(0, 1200)); });
+  page.on('console', (m) => { if (m.type() === 'error' && !noise.test(m.text())) { errors.push(m.text().slice(0, 160)); errorStacks.push(''); } });
 }
 
 async function hold(page, keys, ms) {
@@ -873,6 +877,7 @@ try {
   }
   await m.close();
   out.errors = errors.slice(0, 5);
+  out.errorStacks = errorStacks.slice(0, 5);
   out.errorCount = errors.length;
   say(out);
 } catch (e) {
@@ -1047,6 +1052,8 @@ export interface PlaytestRun {
   /** Read from a three.js game's own scene (Q-869): see SceneRead. */
   scene?: SceneRead;
   errors?: string[];
+  /** The stack captured with each of `errors`, same order ('' when none). Absent from an older script's output. */
+  errorStacks?: string[];
   errorCount?: number;
 }
 
@@ -1396,7 +1403,7 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
   const played = score.respondedTo.length ? `it responded to ${score.respondedTo.join(', ')}` : 'it did not respond to the arrows/WASD, Space or a drag';
   const fpsNote = typeof run.fps === 'number' ? `; ${run.fps} fps in the build sandbox's software renderer (a phone's GPU is faster)` : '';
   const pictureNote = typeof run.brightness === 'number' ? `; picture brightness ${run.brightness}/255, contrast ${run.spread ?? 0}` : '';
-  const errNote = run.errorCount ? `; ${run.errorCount} error(s) while playing: ${(run.errors ?? [])[0] ?? ''}` : '';
+  const errNote = run.errorCount ? `; ${run.errorCount} error(s) while playing: ${firstPlayError(run)}` : '';
   const anyZero = (Object.keys(score.dimensions) as Dimension[]).some((d) => score.dimensions[d] === 0 && d !== 'replay');
   const ok = score.overall >= PLAYABLE_SCORE && !anyZero && !score.stalledVehicle && !score.cameraFacesVehicle && !score.steeringMirrored;
   /**
@@ -1555,7 +1562,8 @@ export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | 
     if (score.stalledVehicle) out.push({ code: 'GAME_DEFECT_VEHICLE_STALLED', evidence: 'picture still at idle and with the accelerator held' });
   }
   const errs = run ? (run.errorCount ?? run.errors?.length ?? 0) : 0;
-  if (run && errs > 0) out.push({ code: 'GAME_DEFECT_RUNTIME_ERROR', evidence: String(run.errors?.[0] ?? `${errs} error(s)`).slice(0, 160) });
+  // The site is appended AFTER the message's own cap, so a long message can never cut the file off (Q-2301).
+  if (run && errs > 0) out.push({ code: 'GAME_DEFECT_RUNTIME_ERROR', evidence: run.errors?.[0] ? firstPlayError(run) : `${errs} error(s)` });
   if (missingLayerPaths.length > 0) out.push({ code: 'GAME_DEFECT_MISSING_LAYER', evidence: `imports kit files not on disk: ${missingLayerPaths.slice(0, 5).join(', ')}` });
   return out;
 }
@@ -1569,4 +1577,10 @@ export function gameDefectsMessage(defects: readonly GameDefect[]): string {
 /** The kit layer files the project imports but does not have (gameRecipeLayers.ts). PURE. */
 export function missingKitLayerPaths(files: Record<string, string>): string[] {
   try { return [...missingLayerFiles(files, new Set(Object.keys(files || {}))).keys()]; } catch { return []; }
+}
+
+/** The first error a playthrough hit, with where it was thrown when its stack names an app file (Q-2301). */
+export function firstPlayError(run: { errors?: string[]; errorStacks?: string[] }): string {
+  const text = String(run.errors?.[0] ?? '').slice(0, 160);
+  return text ? locatedErrorText({ text, stack: run.errorStacks?.[0] }) : '';
 }

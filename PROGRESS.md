@@ -100408,3 +100408,18 @@ old driveVehicle with the new ctx still fails 4.
 silencing catch · Q-2303 a single clean console read taken as proof · Q-2304 final text vs RED gate ·
 Q-2305 post-green unverified writes (admin) · Q-2306 ladder text vs SURPLUS route (admin) · Q-2307 gate
 counts TODO tests as proof. Watch on the next real vehicle build: GAME_DEFECT_VEHICLE_STALLED should not fire.
+
+## 2026-11-03 — Autopsy 8cdb4817 / cb9757a5 / 1c74b3fc (build reports #1817, #1814, #1813 — ENGINE_UNAVAILABLE on SURPLUS)
+
+Ledger (all three: weak tier on SURPLUS qwen3-coder, files on disk, then one call folded to "The build engine is
+temporarily unavailable" and the build ended with the starter page showing):
+- ✅ (already fixed) the build ending on one SURPLUS death with files written — #4050 (merged 2026-10-31 12:21 UTC)
+  continues the same turn on the Weak ladder after writes too. #1813/#1814 started before it; #1817 started 5 min
+  after the merge, inside the deploy window. No ENGINE_UNAVAILABLE report since. Watch: the next SURPLUS death
+  must show SURPLUS_FALLBACK and continue.
+- Q-2320 "your app is built" after a failed loop — class: a success claim gated on "files were written" instead of
+  "the loop succeeded" (sibling of Q-1024 and Q-2314). `etaAppExists(files, loopFailed)` now gates both writers
+  (immediate line + heartbeat tick); class lock in `tests/aFailedLoopBuiltNoApp.test.ts`, reverted → failed.
+- Q-2321 SURPLUS_FALLBACK said "before any user file" after #4050 widened it — `surplusFallbackMessage(reason)`.
+- OPEN: Q-2322 failed-call row names a Claude label on a SURPLUS build · Q-2323 a document request went on to build an app.
+- TODO_ONLY_TURNS (7.7 s) — second evidence for Q-2317 (#4074).

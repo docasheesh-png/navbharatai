@@ -67,8 +67,9 @@ describe('new retained failed-report discovery', () => {
     expect(isFailedBuildPage(page)).toBe(true);
     const observation = { observedAt: 100, deployment: null, scope: 'retained-settled-failures', ordering: 'workspace-history' };
     expect(isFailedBuildPage({ ...page, observation })).toBe(true);
+    expect(isFailedBuildPage({ ...page, observation: { ...observation, ordering: 'newest-first' } })).toBe(true);
     for (const invalid of [{ ...observation, observedAt: NaN }, { ...observation, deployment: 'private-service-name' },
-      { ...observation, scope: 'all-user-data' }, { ...observation, ordering: 'newest-first' }]) {
+      { ...observation, scope: 'all-user-data' }, { ...observation, ordering: 'date-order' }]) {
       expect(isFailedBuildPage({ ...page, observation: invalid })).toBe(false);
     }
   });

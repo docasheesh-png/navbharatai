@@ -12,7 +12,7 @@ import { type SurplusBuildSession, surplusBuilderEnabled } from '../AI/SurplusRe
 import { surplusFallbackDisabledFor, surplusFallbackDisabledForTier, surplusRawErrorReporter } from '../AI/SurplusRegistry/surplusNoFallback';
 import { rawErrorText } from '../AgentV3/rawErrorDetail';
 import { runWeakSurplusAdmissionForChat, recordSurplusAdmissionDiag, type SurplusAdmissionDiag } from '../AI/SurplusRegistry/surplusChatAdmission';
-import { wrapSurplusRunnerPreWriteFailOpen, tryConsumeSurplusPreWriteFailOpen, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
+import { wrapSurplusRunnerPreWriteFailOpen, tryConsumeSurplusPreWriteFailOpen, type SurplusPreWriteFailOpenHooks, asSafeSurplusAdmissionReason, surplusFallbackMessage } from '../AI/SurplusRegistry/surplusPreWriteFailOpen';
 import { enforceFreeProgramPause } from '../lib/freeProgramGate';
 import { weakAdmissionReply, WEAK_SCOPE_MODEL } from '../AgentV3/weakBuildAdmission';
 import { weakScopeChatTerminal, weakScopeCatchResult } from '../AgentV3/weakScopeTerminal';
@@ -72,7 +72,7 @@ import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAutho
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, foldPlanToBudget, fileBudgetReport } from '../AgentV3/fileBudget';
-import { firstEtaLine, formatEtaRange, fleetEtaLine, etaTickLine, etaPhaseLine } from '../AgentV3/progressEta';
+import { firstEtaLine, formatEtaRange, fleetEtaLine, etaTickLine, etaPhaseLine, etaAppExists } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity } from '../AgentV3/complexityRouting';
 import { isPortTurn, collectPortSources, portDigest, foreignSourcePaths } from '../AgentV3/portDigest';
@@ -245,7 +245,7 @@ import { visibleAppError, appShowsErrorNote, APP_SHOWS_ERROR_CODE } from '../Age
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths, greenRepairPrompt, readRepairVerdicts, type RepairVerdicts } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, inPlatformPass, setGreenFreezeObserver, setWriteObserver, GreenFreezeError } from '../AgentV3/greenFreeze';
-import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
+import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, inBuildWroteThisTurn, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
 import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict, starterLabelFor } from '../AgentV3/stillTheStarterApp';
 import { postGreenWritesNote, endVerdictFrom, writerPhrase, type PostGreenWrite } from '../AgentV3/postGreenWrites';
 import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
@@ -548,6 +548,7 @@ import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextB
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince, splitAuthRefusals, splitAssetMisses } from '../AgentV3/renderCheckConsole';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
+import { locatedErrorText } from '../AgentV3/runtimeErrorSite';
 import { fillGateFromLedger, renderProvenInLedger } from '../AgentV3/evidenceLedger';
 import { appRenderedRecord, renderSeenThisBuild } from '../AgentV3/renderProof';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
@@ -5921,7 +5922,7 @@ async function noteBuildOutcome(
           await raceTimeout(actuator.browseUrl(workspaceId, `http://127.0.0.1:${port}`, { recordConsole: true }), 75_000, 'autoRepairBrowse');
           const captured = await raceTimeout(actuator.getConsoleErrors(workspaceId, since), 20_000, 'autoRepairConsole');
           if (captured.captured) {
-            seen = filterActionableErrors(captured.errors).map((e) => e.text);
+            seen = filterActionableErrors(captured.errors).map(locatedErrorText);
             reproduced = seen.length > 0;
           }
         }
@@ -13825,6 +13826,8 @@ async function noteBuildOutcome(
      * 350.0 s; the 361.4 s tick still said "about 3 min more to go").
      */
     let etaAppRenderedAt = 0;
+    /** The builder's loop ended in failure (8cdb4817): from then on no line may say "your app is built". */
+    let etaLoopFailed = false;
     /**
      * Say the build's PHASE the moment it changes, not at the next even minute (autopsy 9c612cdb): the
      * heartbeat ticks every two minutes, so a phase line left to it can arrive two minutes late. Only when
@@ -13841,7 +13844,7 @@ async function noteBuildOutcome(
         // file count when the caller has it (it is passed in, not closed over, because this helper runs
         // before `builderWroteCount` exists); without it the rendered fact still answers, and when
         // neither can the line reports the phase and claims nothing.
-        const line = etaPhaseLine({ elapsedMs: now - etaStartMs, finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt, appExists: (only?.wrote?.() ?? 0) > 0 });
+        const line = etaPhaseLine({ elapsedMs: now - etaStartMs, finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt, appExists: etaAppExists(only?.wrote?.() ?? 0, etaLoopFailed) });
         if (line && line !== lastEtaShown) events.emit({ type: 'narration', agent: 'architect', text: line, ts: now, id: 'eta-live' });
       } catch { /* the live line is best-effort — it must never affect a build */ }
     };
@@ -13983,7 +13986,7 @@ async function noteBuildOutcome(
             finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt,
             // Q-1024: the heartbeat tick had no "is there an app?" guard, so it told a stopped or empty
             // build "your app is built". `etaFilesDone` is the builder's OWN files (our seed subtracted).
-            appExists: etaFilesDone > 0,
+            appExists: etaAppExists(etaFilesDone, etaLoopFailed),
             plannedFiles: etaPlannedFiles, filesDone: etaFilesDone, firstFileAt: etaFirstFileAt,
             plannedSteps: etaPlannedSteps, stepsDone: etaStepPaths.size, firstStepAt: etaFirstStepAt,
             evidenced: etaEvidenced, budgetMs: effectiveBuildSeconds * 1000,
@@ -14712,7 +14715,7 @@ async function noteBuildOutcome(
        * turn "slow for this build" into "blacklisted for everybody".
        */
       recordSurplusAdmissionDiag(buildDiag, surplusAdmissionDiag);
-      // Mid-build Surplus → Weak fail-open when Surplus dies BEFORE any user code is written.
+      // Mid-build Surplus → Weak fail-open when Surplus dies — before OR after the model wrote files (#4050).
       // Covers ANY folded public failure after SURPLUS_ADMITTED — sub-second LLM_CALL_FAILED
       // scrub (bench A) as well as ~60s turn_timeout / transport (bench B/C) — not timeout-only.
       // Admission already fail-opens; this is the post-admit sibling. Shared state so every
@@ -14733,7 +14736,8 @@ async function noteBuildOutcome(
             console.warn(`[AGENT_STEP] Surplus mid-build unavailable (${safe}); continuing on Weak/CHEAP_FLOOR ladder.`);
             buildDiag.record({
               phase: 'provider', severity: 'warning', code: 'SURPLUS_FALLBACK', autoResolved: true,
-              message: `Surplus unavailable mid-build before any user file — continuing on Weak ladder (reason: ${safe}).`,
+              // #4050 made this fire AFTER writes too; the line said "before any user file" either way (8cdb4817).
+              message: surplusFallbackMessage(reason),
               detail: String(safe),
             });
           } catch { /* audit/diagnostics must never block fail-open */ }
@@ -16414,10 +16418,13 @@ async function noteBuildOutcome(
               const st = await saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files, { mode: 'replace' });
               if (st === 'saved') {
                 inBuildGreenAt = Date.now();
-                etaAppRenderedAt = inBuildGreenAt; // the ETA stops counting down to an app already on screen (9c612cdb)
                 billingCtx.appFirstRenderedAt = earliestRenderProof(billingCtx.appFirstRenderedAt, inBuildGreenAt); // billing reads the earliest proof (a75153ab)
-                events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
-                emitEtaPhaseNow();
+                // An untouched app rendering is not THIS turn's app (5413e6f1) — see inBuildWroteThisTurn.
+                if (inBuildWroteThisTurn(inBuildWriteTick)) {
+                  etaAppRenderedAt = inBuildGreenAt; // the ETA stops counting down to an app already on screen (9c612cdb)
+                  events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
+                  emitEtaPhaseNow();
+                }
               } else {
                 try {
                   buildDiag.record({
@@ -20151,6 +20158,7 @@ async function noteBuildOutcome(
       // where this used to be set first, starts later (9c612cdb: a tick fell in between). The line is
       // announced at once only over an app that exists: a stopped or empty build is never told "your app is built".
       etaFinalChecks = true;
+      etaLoopFailed = !result.ok;
       emitEtaPhaseNow({ unlessStopped: abort.signal, wrote: builderWroteCount });
       try {
         buildDiag.record({
@@ -22968,7 +22976,7 @@ async function noteBuildOutcome(
             hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined,
           }), shot.html);
           let consoleErrs: string[] = [];
-          try { if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: rescueCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text)); } catch { /* console capture best-effort */ }
+          try { if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: rescueCheckStartedAt, buildStartedAt }))).errors).map(locatedErrorText)); } catch { /* console capture best-effort */ }
           // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the
           // first paint and crashes on a later re-render — a one-shot snapshot can't see it, so it must
           // veto the rescue (real report 8a6e4585: useMemo@useChartData.ts:86 crashed the preview the
@@ -23051,7 +23059,7 @@ async function noteBuildOutcome(
           const verdict = await starterChecked(analyzePreviewHtml(html, { painted: shot.painted, source: shot.source }), html);
           let consoleErrs: string[] = [];
           try {
-            if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: verifyCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text));
+            if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: verifyCheckStartedAt, buildStartedAt }))).errors).map(locatedErrorText));
           } catch { /* console capture is best-effort */ }
           if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
           // THE APP RENDERED AND ONLY ITS CONSOLE SPEAKS AGAINST IT: look once more on a fresh load before
@@ -24510,7 +24518,7 @@ async function noteBuildOutcome(
             const verdict = await starterChecked(analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source }), shot.html);
             let consoleErrs: string[] = [];
             try {
-              if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: proofStartedAt, buildStartedAt }))).errors).map((e) => e.text));
+              if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: proofStartedAt, buildStartedAt }))).errors).map(locatedErrorText));
             } catch { /* console capture is best-effort — its absence must not invent a verdict */ }
             // The SAME two bars the main verify loop uses, deliberately not a looser pair.
             const starterOnly = verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter();

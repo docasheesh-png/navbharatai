@@ -1,4 +1,5 @@
 import { assertAiAvailable, AiMaintenanceError } from '../../lib/aiMaintenance';
+import { ALL_PROVIDERS_FAILED_PREFIX, ALL_PROVIDERS_UNAVAILABLE_PREFIX } from '../buildOutcomeSummaries';
 // AgentV3 — multi-provider cost-routing orchestrator (phase 3).
 //
 // Wraps an ORDERED chain of TurnRunners so v5.0 runs each turn on the cheapest provider
@@ -1219,7 +1220,8 @@ export function makeMultiProviderTurnRunner(
       // Every provider failed (or was known-dead) — surface the final error honestly, and when the
       // cause is a FATAL account problem, say so in plain words (it is the platform, not the app).
       const reason = lastError instanceof Error ? lastError.message : String(lastError);
-      const prefix = alive === 0 ? 'All NavBharatAI Pro providers are unavailable (known-fatal from earlier in this build)' : `All NavBharatAI Pro providers failed (${compactFallbackPath(fellBackFrom)})`;
+      // Built from the constants the outcome classifier reads, so a terminal provider death is always named (958aa1ec).
+      const prefix = alive === 0 ? `${ALL_PROVIDERS_UNAVAILABLE_PREFIX} (known-fatal from earlier in this build)` : `${ALL_PROVIDERS_FAILED_PREFIX} (${compactFallbackPath(fellBackFrom)})`;
       throw new Error(`${prefix}. Last error: ${reason}${fatalProviderHint(reason)}`);
     },
   };

@@ -467,6 +467,8 @@ import { withoutPreviewBridge, bridgeShellNote } from './previewBridge';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../lib/generatedDirs';
 import { turnAskedTheUser } from './nudgeToBuild';
 import { withAppEnvFile } from './appEnvFileForCommand';
+import { locatedErrorText } from './runtimeErrorSite';
+import { consoleCleanVerdict } from './renderCheckConsole';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -565,7 +567,7 @@ export interface ActuatorPort {
   getConsoleErrors?(
     workspaceId: string,
     sinceMs: number,
-  ): Promise<{ errors: { t: number; kind: string; text: string }[]; captured?: boolean }>;
+  ): Promise<{ errors: { t: number; kind: string; text: string; stack?: string }[]; captured?: boolean; lastSessionAt?: number }>;
   /** The built static site (dist/) as path→bytes, for a real persistent deploy. */
   downloadDistFiles?(workspaceId: string): Promise<Map<string, Buffer>>;
   /** Hold the idle sweep off a workspace while its build runs — see markBuildActive. */
@@ -946,7 +948,9 @@ export class ToolDispatcher {
     this.onFileWriteRaw?.(path, withoutPreviewBridge(path, content));
     this._unrecorded.delete(path); // recorded here — see `flushUnrecordedWrites`
     this._writtenPaths.add(path); // what THIS agent really wrote — see `writtenPaths`
+    this._lastWriteAt = Date.now(); // a console read older than this says nothing about the current code (Q-2303)
   };
+  private _lastWriteAt: number | undefined;
 
   /**
    * Every path THIS dispatcher wrote — never shared with a child or a parent.
@@ -11913,9 +11917,10 @@ export class ToolDispatcher {
         }
         const sinceSec = typeof input.since_seconds === 'number' ? input.since_seconds : 120;
         const since = Date.now() - Math.max(1, sinceSec) * 1000;
-        const { errors, captured } = await this.actuator.getConsoleErrors(this.workspaceId, since);
+        const { errors, captured, lastSessionAt } = await this.actuator.getConsoleErrors(this.workspaceId, since);
         if (errors.length > 0) {
-          return `Runtime browser errors (${errors.length}):\n` + errors.slice(0, 30).map((e) => `- [${e.kind}] ${e.text}`).join('\n');
+          // Each line carries where it was thrown (Q-2301): without the file the builder edits the wrong one.
+          return `Runtime browser errors (${errors.length}):\n` + errors.slice(0, 30).map((e) => `- [${e.kind}] ${locatedErrorText(e)}`).join('\n');
         }
         // 🔴 AN UNREAD CONSOLE IS NOT A CLEAN ONE (autopsy 9cca1fd5, 2026-09-17).
         //
@@ -11935,7 +11940,7 @@ export class ToolDispatcher {
           ? 'The browser console could NOT be read for this window — no browser session left a console log. '
             + 'NOTHING about runtime errors was checked, so this is not evidence either way. Open the app '
             + '(screenshot / browser_action) and ask again if you need a real answer.'
-          : 'No runtime browser errors in the window — the console was read and it was clean.';
+          : consoleCleanVerdict({ lastSessionAt, lastWriteAt: this._lastWriteAt, now: Date.now() });
       }
 
       // Level 7: structural codemods (AST-safe cross-file refactoring via ts-morph).

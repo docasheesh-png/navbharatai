@@ -4841,3 +4841,13 @@ The initial empty catalogue now has four hash-pinned, asset-licensed models, rev
 `docs/game-engine/l3-reviewed-assets.md`. `AGENTV3_EXTERNAL_GAME_ASSETS` remains default OFF and no
 Cloud Run variable changed. Local artifacts and emulator checks do not authorize broad activation;
 secure live-download and full six-scenario/mobile/publication acceptance remain incomplete.
+
+### 2026-11-03 — Admin → Money → API Providers (balances and billing links)
+
+- **`ADMIN_PROVIDER_LOW_BALANCE_USD`** (optional, default `5`) — a live balance under this many USD is shown LOW on
+  the API Providers page (`src/server/lib/apiProviderDirectory.ts`). CNY balances are compared at a fixed 7.3 CNY/USD
+  as a level hint only. NOT set in Cloud Run.
+- The page reads only key PRESENCE (names, never values) and, with the existing `OPENROUTER_API_KEY`,
+  `DEEPSEEK_API_KEY` / `FREE_CHAIN_DEEPSEEK_API_KEY` and `KIMI_API_KEY` (only when `KIMI_BASE_URL` is unset or on
+  `api.moonshot.ai` / `api.moonshot.cn`), each provider's own balance endpoint. Every other provider is "check
+  manually" with its billing link. No new key is required.

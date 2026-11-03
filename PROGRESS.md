@@ -100444,6 +100444,19 @@ silencing catch · Q-2303 a single clean console read taken as proof · Q-2304 f
 Q-2305 post-green unverified writes (admin) · Q-2306 ladder text vs SURPLUS route (admin) · Q-2307 gate
 counts TODO tests as proof. Watch on the next real vehicle build: GAME_DEFECT_VEHICLE_STALLED should not fire.
 
+## 2026-11-03 — Admin → Money → API Providers (admin: "one click par dekh len kon se api provider ka balance low/khatam hai")
+
+- Audit: the AI routing code reads 30+ provider keys. All of them, plus the services the admin listed (E2B, Google Cloud,
+  Brave, Render, Resend, RapidAPI, Cashfree) and the five registered-only free-chain providers, are now ONE directory:
+  `src/server/lib/apiProviderDirectory.ts` (31 rows: key names set, billing link, what to look at).
+- Live balance only where the provider has a documented balance API: OpenRouter (`/api/v1/credits`), DeepSeek
+  (`/user/balance`), Moonshot/Kimi (`/v1/users/me/balance`). Graded OK / LOW / EMPTY. Everything else is
+  "check manually" with its 🔗 billing link — never shown as OK. A refused or unknown-shape answer is "could not check".
+- Route `GET /api/admin/api-providers` (verified admin, rate-limited, no-store); panel `ApiProvidersPanel.tsx`, attention
+  first. Census `tests/everyApiProviderHasABalanceLink.test.ts`: a new `*_API_KEY` in the routing code without a
+  directory row fails CI (reverted → failed). No key value ever leaves the server (test-locked).
+- Not possible from code: live balances for providers with no balance API (Surplus, Router One, GLM, Groq, xAI, E2B, …).
+  If any of them adds one, it becomes one more `BalanceProbe`.
 ## 2026-11-03 — Autopsy 8cdb4817 / cb9757a5 / 1c74b3fc (build reports #1817, #1814, #1813 — ENGINE_UNAVAILABLE on SURPLUS)
 
 Ledger (all three: weak tier on SURPLUS qwen3-coder, files on disk, then one call folded to "The build engine is

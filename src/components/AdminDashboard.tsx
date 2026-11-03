@@ -28,6 +28,7 @@ import { confirmCopy, ownerConfirmCopy, MODERATION_ROUTE, type ModerationAction 
 import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
 import { BotsLedgerPanel } from './admin/BotsLedgerPanel';
 import { AdsPanel } from './admin/AdsPanel';
+import { ApiProvidersPanel } from './admin/ApiProvidersPanel';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
 import {
   ADMIN_TABS, ENGINE_REPORTS_ON, tabOfPage, tabDef, firstPageOf, pageTitle, pageBadge, pageHint,
@@ -5192,6 +5193,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               crop, the live preview and the list are `admin/AdsPanel.tsx`; the data is /api/admin/ads. */}
           {activeTab === 'ads' && (
             <AdsPanel headers={headers} />
+          )}
+
+          {/* API PROVIDERS (admin 2026-11-03): every outside API, its billing link, and the live balance where the
+              provider has a balance API. `admin/ApiProvidersPanel.tsx`; the data is /api/admin/api-providers. */}
+          {activeTab === 'api-providers' && (
+            <ApiProvidersPanel adminToken={adminToken} />
           )}
 
           {/* ── APPS · BOTS (admin 2026-10-05) — who built which hosted chat bot, and whether a WhatsApp bot is signed ── */}

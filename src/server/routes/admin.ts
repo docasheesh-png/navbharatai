@@ -219,6 +219,8 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'admin_failed_report_numbers',
   // The build report registry (one row per report, 180 days) and its counter (RETAINED_INDEFINITELY).
   'build_report_numbers', 'admin_build_report_counter',
+  // The admin's note of which login each outside API account uses (RETAINED_INDEFINITELY; one doc per provider).
+  'admin_api_provider_accounts',
   'hosting_billing', 'hosting_period_usage',
   // Already on clocks, and absent from this inventory for the same reason the eleven above were.
   'takedown_records', 'safety_flags', 'admin_audit_log', 'build_jobs', 'build_failures',

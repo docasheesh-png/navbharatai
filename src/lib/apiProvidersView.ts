@@ -14,6 +14,9 @@ export interface ApiProviderRowView {
   group: 'ai' | 'service' | 'registered';
   configured: boolean;
   configuredKeys: string[];
+  usedFor: string[];
+  /** The login the admin recorded for this account, or null. */
+  accountEmail: string | null;
   billingUrl: string | null;
   billingHint: string;
   balance: ApiProviderBalanceView;
@@ -23,6 +26,8 @@ export interface ApiProviderDirectoryView {
   rows: ApiProviderRowView[];
   lowBalanceUsd: number;
   checkedAt: number;
+  /** False when the saved logins could not be read (the balances still are). */
+  accountsAvailable: boolean;
   counts: { total: number; configured: number; live: number; low: number; empty: number; failed: number; manual: number };
 }
 
@@ -49,13 +54,14 @@ export function isApiProviderDirectory(v: unknown): v is ApiProviderDirectoryVie
   if (!v || typeof v !== 'object') return false;
   const d = v as Record<string, unknown>;
   const c = d.counts as Record<string, unknown> | undefined;
-  if (!Array.isArray(d.rows) || !fin(d.lowBalanceUsd) || !fin(d.checkedAt) || !c) return false;
+  if (!Array.isArray(d.rows) || !fin(d.lowBalanceUsd) || !fin(d.checkedAt) || typeof d.accountsAvailable !== 'boolean' || !c) return false;
   if (!['total', 'configured', 'live', 'low', 'empty', 'failed', 'manual'].every((k) => fin(c[k]))) return false;
   return d.rows.every((r) => {
     if (!r || typeof r !== 'object') return false;
     const x = r as Record<string, unknown>;
     return str(x.id) && str(x.name) && (x.group === 'ai' || x.group === 'service' || x.group === 'registered')
       && typeof x.configured === 'boolean' && Array.isArray(x.configuredKeys) && x.configuredKeys.every(str)
+      && Array.isArray(x.usedFor) && x.usedFor.every(str) && (x.accountEmail === null || str(x.accountEmail))
       && isLink(x.billingUrl) && str(x.billingHint) && isBalance(x.balance);
   });
 }

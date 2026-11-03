@@ -47,6 +47,7 @@ describe('🔒 the audit: every API key the routing code reads has a billing lin
     for (const p of API_PROVIDERS) {
       expect(p.name.length).toBeGreaterThan(1);
       expect(p.envKeys.length).toBeGreaterThan(0);
+      expect(p.usedFor.length, `${p.id} must say where it is used`).toBeGreaterThan(0);
       if (p.billingUrl !== null) expect(new URL(p.billingUrl).protocol).toBe('https:');
       else expect(p.billingHint.length).toBeGreaterThan(10);
     }
@@ -143,14 +144,17 @@ describe('🔴 nothing is faked: live, failed, manual and not-set are four diffe
 
 describe('the screen: a checked body, and attention first', () => {
   it('the real server answer passes the shape check; a broken one does not', async () => {
-    const d = await readApiProviderDirectory({ env: {} });
+    // What the route sends: the directory plus the admin's recorded logins (apiProvidersAdmin.ts).
+    const dir = await readApiProviderDirectory({ env: {} });
+    const d = { ...dir, rows: dir.rows.map((r) => ({ ...r, accountEmail: r.id === 'glm' ? 'owner@example.com' : null })), accountsAvailable: true };
     expect(isApiProviderDirectory(JSON.parse(JSON.stringify(d)))).toBe(true);
+    expect(isApiProviderDirectory(JSON.parse(JSON.stringify(dir)))).toBe(false); // the raw directory lacks the login fields
     expect(isApiProviderDirectory({ rows: 'x' })).toBe(false);
     const bad = JSON.parse(JSON.stringify(d)); bad.rows[0].billingUrl = 'javascript:alert(1)';
     expect(isApiProviderDirectory(bad)).toBe(false);
   });
   it('empty, low, failed and manual rows come before healthy and unset ones', () => {
-    const row = (id: string, balance: any) => ({ id, name: id, group: 'ai' as const, configured: true, configuredKeys: [], billingUrl: null, billingHint: 'x', balance });
+    const row = (id: string, balance: any) => ({ id, name: id, group: 'ai' as const, configured: true, configuredKeys: [], usedFor: [], accountEmail: null, billingUrl: null, billingHint: 'x', balance });
     const sorted = sortProvidersForAttention([
       row('unset', { kind: 'not_configured' }), row('ok', { kind: 'live', amount: 50, currency: 'USD', level: 'ok', checkedAt: 1 }),
       row('manual', { kind: 'manual', reason: 'x' }), row('failed', { kind: 'failed', reason: 'x', checkedAt: 1 }),

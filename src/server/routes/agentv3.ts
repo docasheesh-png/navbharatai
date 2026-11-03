@@ -548,6 +548,7 @@ import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextB
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince, splitAuthRefusals, splitAssetMisses } from '../AgentV3/renderCheckConsole';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
+import { locatedErrorText } from '../AgentV3/runtimeErrorSite';
 import { fillGateFromLedger, renderProvenInLedger } from '../AgentV3/evidenceLedger';
 import { appRenderedRecord, renderSeenThisBuild } from '../AgentV3/renderProof';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
@@ -5921,7 +5922,7 @@ async function noteBuildOutcome(
           await raceTimeout(actuator.browseUrl(workspaceId, `http://127.0.0.1:${port}`, { recordConsole: true }), 75_000, 'autoRepairBrowse');
           const captured = await raceTimeout(actuator.getConsoleErrors(workspaceId, since), 20_000, 'autoRepairConsole');
           if (captured.captured) {
-            seen = filterActionableErrors(captured.errors).map((e) => e.text);
+            seen = filterActionableErrors(captured.errors).map(locatedErrorText);
             reproduced = seen.length > 0;
           }
         }
@@ -22971,7 +22972,7 @@ async function noteBuildOutcome(
             hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined,
           }), shot.html);
           let consoleErrs: string[] = [];
-          try { if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: rescueCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text)); } catch { /* console capture best-effort */ }
+          try { if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: rescueCheckStartedAt, buildStartedAt }))).errors).map(locatedErrorText)); } catch { /* console capture best-effort */ }
           // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the
           // first paint and crashes on a later re-render — a one-shot snapshot can't see it, so it must
           // veto the rescue (real report 8a6e4585: useMemo@useChartData.ts:86 crashed the preview the
@@ -23054,7 +23055,7 @@ async function noteBuildOutcome(
           const verdict = await starterChecked(analyzePreviewHtml(html, { painted: shot.painted, source: shot.source }), html);
           let consoleErrs: string[] = [];
           try {
-            if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: verifyCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text));
+            if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: verifyCheckStartedAt, buildStartedAt }))).errors).map(locatedErrorText));
           } catch { /* console capture is best-effort */ }
           if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
           // THE APP RENDERED AND ONLY ITS CONSOLE SPEAKS AGAINST IT: look once more on a fresh load before
@@ -24513,7 +24514,7 @@ async function noteBuildOutcome(
             const verdict = await starterChecked(analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source }), shot.html);
             let consoleErrs: string[] = [];
             try {
-              if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: proofStartedAt, buildStartedAt }))).errors).map((e) => e.text));
+              if (actuator.getConsoleErrors) consoleErrs = renderJudgingConsole(filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: proofStartedAt, buildStartedAt }))).errors).map(locatedErrorText));
             } catch { /* console capture is best-effort — its absence must not invent a verdict */ }
             // The SAME two bars the main verify loop uses, deliberately not a looser pair.
             const starterOnly = verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter();

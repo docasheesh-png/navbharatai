@@ -24,20 +24,24 @@ function database(workspaces: Record<string, { report?: unknown; history: Record
     const i = key.lastIndexOf('~'); const n = numbers[`${key.slice(0, i)}/${key.slice(i + 1)}`];
     return snap(key, n === undefined ? undefined : { number: n });
   } }) };
-  const counter = { doc: () => ({ get: async () => snap('counter', { state: 'ready', nextNumber: Math.max(0, ...Object.values(numbers)) + 1 }) }) };
+  // No counter: these tests exercise the pre-numbering workspace walk (tests/buildReportRegistry.test.ts covers newest-first).
+  const counter = { doc: () => ({ get: async () => snap('counter', undefined) }) };
   return { runTransaction: async (fn: (tx: any) => unknown) => fn({ get: (q: any) => q.get() }), collection: (name: string) => name === 'build_report_numbers' ? registry : name === 'admin_build_report_counter' ? counter : ({ ...query(Object.keys(workspaces).sort().map((id) => snap(id, { report: workspaces[id].report }, parent(id)))), doc: parent }) };
 }
 beforeEach(() => { state.db = null; });
 describe('private retained failed history', () => {
-  it('every page carries the permanent registry number, whatever the page order; an unnumbered report says so', async () => {
-    state.db = database({ a: { history: { '200': fail(200) } }, z: { history: { '100': fail(100) } }, x: { history: { '150': fail(150) } } }, { 'z/100': 7, 'a/200': 9 });
-    const first = await readFailedBuildPage(undefined, 1);
-    expect(first.reports[0]).toMatchObject({ workspaceId: 'a', permanentReportId: 9, numbering: { ordinal: 9, total: 9 } });
-    const next = await readFailedBuildPage(first.nextCursor, 1);
-    expect(next.reports[0]).toMatchObject({ workspaceId: 'x', numbering: { ordinal: null, reason: 'not_numbered' } });
-    expect(next.reports[0].permanentReportId).toBeUndefined();
-    const last = await readFailedBuildPage(next.nextCursor, 1);
-    expect(last.reports[0]).toMatchObject({ workspaceId: 'z', permanentReportId: 7, numbering: { ordinal: 7, total: 9 } });
+  it('while numbering is pending, the workspace walk serves every failure, says it is not date order, and invents no number', async () => {
+    state.db = database({ a: { history: { '200': fail(200) } }, z: { history: { '100': fail(100) } }, x: { history: { '150': fail(150) } } });
+    const seen: string[] = [];
+    let page = await readFailedBuildPage(undefined, 1);
+    for (;;) {
+      seen.push(...page.reports.map((r) => r.workspaceId));
+      expect(page.observation?.ordering).toBe('workspace-history');
+      expect(page.reports.every((r) => r.numbering?.ordinal === null && r.numbering?.reason === 'numbering_pending' && r.permanentReportId === undefined)).toBe(true);
+      if (!page.nextCursor) break;
+      page = await readFailedBuildPage(page.nextCursor, 1);
+    }
+    expect(seen).toEqual(['a', 'x', 'z']);
   });
   it('reads a failure even after the same workspace succeeds, and never duplicates latest', async () => {
     state.db = database({ app: { report: { ...fail(200), ok: true }, history: { '100': fail(100), '200': { ...fail(200), ok: true } } } });

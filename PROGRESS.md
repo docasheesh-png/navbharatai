@@ -1,3 +1,38 @@
+## 2026-11-03 — Autopsy of build report #1836 (958aa1ec, second-newest failure)
+
+3D endless car racing game, weak tier, ENGINE_R1 `deepseek-v4.1-flash`, RED in 170 s, never charged; all 162 issues and 18 model calls read.
+
+**Tally:** ✅ self-healed 1 (SPACING_SNAPPED on our own kit) · 🔀 workaround 1 (PROVIDER_FALLBACK with nothing to fall to) · ⏭️ skipped 0 · ❌ shipped broken 3 (provider exhaustion, starter page left showing, outcome unexplained) · 🥵 struggle 1 (80 s of reading the kit, 0 writes).
+
+| Item | Root cause → class | State |
+|---|---|---|
+| "no login, multiplayer, purchases or backend" made multiplayer a REQUIRED feature and the game a LARGE build | `withoutDeclinedSentences` dropped only the clause that began with "no"; `gameIntent` and the scope's heavy-infra check read raw text → *a refusal's list read as requests* | ✅ this PR: a refusal now covers its bare list items (and do-not clauses); both readers use it |
+| OUTCOME_UNEXPLAINED although BUILD_ERROR named the cause | `terminalOutcomeCode` (2026-10-30 fix) knew two terminal sentences, not the provider chain's → *a terminal message the classifier did not share* | ✅ this PR: prefixes exported from `buildOutcomeSummaries`, the chain builds its message from them |
+| SPACING_SNAPPED rewrote `touchControls.ts` and `meta.ts` — our kit — on every game build, and moved the knob 2 px off centre | the kit shipped 10/14/18/26 px → *a heal that fires on our own output* | ✅ this PR: kit on the grid (knob 48 px, centred); census over every recipe file |
+| Fast empty reply labelled OUTPUT_BUDGET_STARVED | label from flags, not from time | 🔲 Q-2308 |
+| Router One alone in the chain; the build ended on its one empty reply, starter page left | weak routing order (RED test on `main` since #4065) | 🔲 Q-2309 (another session's area) |
+| Fast-lane gate and floor budget disagree on whether the engine reasons | two capability sources, ladder rung vs model that ran | 🔲 Q-2310 (class of Q-2306) |
+| DESIGN_CONSISTENCY counts the kit's own colours | linter scope includes platform files | 🔲 Q-2311 |
+| 80 s of exploration, nudge silent | — | 🔲 Q-2312 |
+| DISCOUNT_COST_UNCONFIRMED | an honest billing note (unverified supplier cost excluded from the charge) | ✅ not a defect |
+
+**Lock:** `tests/theDeclinedListStaysDeclined.test.ts` (8, the report's request verbatim). Reversion-proved: refusal covers only its clause (3 fail), game contract on raw text (1), provider exhaustion unnamed (1), kit back off-grid (1).
+## 2026-11-03 — Autopsy of build report #1846 (c71e56de, newest failure): Q-2301 + Q-2303
+
+Admin: *"/failedbr me new to old one by one autopsy karo"*. #1846 ("car age nahi bad rahi hai!!", 3D racing game, weak tier, SURPLUS qwen3-coder, 431 s, RED) is the newest failed report. With #1844 (8701aaa1) and #1845 (7aa2fe7c) it was already autopsied by #4069 (merged): the per-call `ctx` and driveVehicle's lost state were fixed there; Q-2301…Q-2307 were left OPEN. This change resolves two of them from evidence in #1846 itself (all 212 issues and 41 model calls read).
+
+- **Q-2301 — the error reached the builder with no file.** Evidence: the repair prompt carried only "Cannot read properties of undefined (reading 'rotation')"; the builder edited `Bird.ts`, whose rotations were already inside a try/catch. Root: every browser lane records `error.stack`, every reader kept `e.text` (`formatRuntimeErrors` had learned the stack in autopsy 95598899 — only its own lane used it). Class: an error's site captured, then dropped before the model sees it. Fix: `locatedErrorText` (runtimeErrorSite.ts), used by the three render checks that feed the preview repair prompt, the auto-repair reproduce check, the `console_errors` tool and AutoFix; the game playtest keeps `errorStacks` beside its errors and reports through `firstPlayError`; ToolDispatcher's actuator port now types `stack`. Census in `tests/aRuntimeErrorNamesItsFile.test.ts` (the red-team fuzz classifier is the one listed exception). Watch: a repair prompt or GAME_DEFECT_RUNTIME_ERROR line ending in `[at src/…:line:col]`.
+- **Q-2303 — "the console was read and it was clean", three times, while the game threw 1,298 errors.** Evidence: +61 s, +119 s and +328 s; the last read came 32 s after the builder's last edit and after no browser look. Root: `captured` meant "the log file exists", and the log outlives the turn (resumed sandbox, append-only), so a window no browser looked in read as clean. Siblings: the fallback screenshot browser had no listener at all; the daemon attached to a new page only on its next 1-second poll; the empty session marker carried no time. Fix: stamped `{kind:'session'}` markers from every lane (browseUrl when painted, both screenshot lanes, each browser action, daemon launch); `captured` = an error in the window or a stamped look in it; `lastSessionAt` returned; `console_errors` says "BEFORE your last file change … NOT evidence" when the newest look predates the last write (`consoleCleanVerdict`), and that a game in PLAY is measured by the playtest. Also closes a quieter hole: a stale log could let a dead preview earn RUNTIME_VERIFIED.
+- **Proof:** `tests/aRuntimeErrorNamesItsFile.test.ts` (8), `tests/aCleanConsoleReadCoversOnlyWhatItSaw.test.ts` (13, every browser script `node --check`ed). Reversion-proved: helper drops the site (3 fail), one render check back to bare text (2), captured = file exists (1), stale read not called stale (1), fallback screenshot without listeners (1). 189 related test files, 4,110 tests green.
+- **Still OPEN from this report family:** Q-2302 (silencing try/catch accepted), Q-2304 (final text vs RED gate), Q-2307 (TODO tests counted as proof); Q-2305/Q-2306 are the admin's decisions.
+## 2026-11-03 — failedbr: the newest failed build is row 1, at a glance
+
+Admin: *"koi aisa system banao, jisse ek nazar me hi sabse new br pata lag jaye … sabse pahle show hone wali br sabse new ho"*.
+
+- **Root cause:** `list_failed_builds` (and `/api/failedbr/reports`) walked workspaces by document id, so the newest failure could be anywhere among ~640 rows; finding it meant reading them all. Clients holding the pre-1.3.0 tool list could not reach the new sorted tool either.
+- **Fix:** the failed list now reads the build report registry from the HIGHEST permanent number down (`scanRegistry`, one shared walk for this list and `list_build_reports`), keeping `failed` + `stopped` (exactly `settledFailure`). Row 1 of page 1 is the newest failed build, for every client, with no reconnect. `observation.ordering` says `newest-first`; while numbering is pending the old walk serves the page, marked `workspace-history`, so nothing disappears. A v1 cursor is refused with a clear message; a malformed cursor is judged before storage. The numbering job re-sweeps daily, so a report whose history write failed half-way still gets a number within a day. Admin `/failedbr` sorts by the same number. MCP server 1.4.0; tool text and server instructions say newest-first.
+- **Lock:** `tests/buildReportRegistry.test.ts` "the failed list is NEWEST FIRST" (first row = highest failed number, paging without repeats, old cursor refused, expired = gap, daily re-sweep). Reversion-proved: oldest-first (4 fail), no re-sweep (1).
+
 ## 2026-11-02 — Built apps and games are LIGHT unless the user asks for dark
 
 Admin: *"jab navbharatai par koi app ya game banaya jata hai, to woh, dark mode banta hai. mai chahta hu, jab tak user saf saf na bol de, tab tak light mode me hi game banne chahiye!!"*

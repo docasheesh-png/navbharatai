@@ -8,7 +8,7 @@
 // the impure orchestration (capture → repair runner → re-capture) lives in the build route.
 
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
-import { appSourceFrame, siteTag } from './runtimeErrorSite';
+import { appSourceFrame, locatedErrorText, siteTag } from './runtimeErrorSite';
 import { renderRepairGuidance } from './RuntimeErrorClassify';
 import { envFlag } from '../lib/envFlag';
 import { CANCELLED_REQUEST_RE } from './renderCheckConsole';
@@ -255,7 +255,7 @@ export function formatRuntimeErrors(errors: RuntimeError[], max = 20): string {
   // repair pass and the report with no file at all. Text wins when it has one, so every error that
   // already read well is byte-identical.
   return errors.slice(0, max)
-    .map((e) => `- [${e.kind}] ${e.text}${locationTag(e.text) || siteTag(appSourceFrame(e.stack))}`)
+    .map((e) => `- [${e.kind}] ${locatedErrorText(e)}`)
     .join('\n');
 }
 

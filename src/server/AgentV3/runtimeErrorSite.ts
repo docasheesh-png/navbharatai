@@ -34,7 +34,7 @@
  *
  * PURE. No I/O, no clock, never throws.
  */
-import { parseLocation } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
+import { locationTag, parseLocation } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 
 /** A location in the user's own source, as the report and the repair prompt will name it. */
 export interface RuntimeErrorSite {
@@ -124,4 +124,21 @@ export function siteTag(site: RuntimeErrorSite | null | undefined): string {
 /** Convenience for a caller holding a raw stack: the tag, or '' when no app frame is in it. */
 export function siteTagFromStack(stack: string | null | undefined): string {
   return siteTag(appSourceFrame(stack));
+}
+
+/**
+ * 📍 ONE LINE PER CAPTURED ERROR, WITH WHERE IT HAPPENED (Q-2301, autopsy c71e56de / 7aa2fe7c / 8701aaa1).
+ *
+ * Every browser lane records `error.stack`, and every reader used to keep only `e.text` — so the repair pass, the
+ * builder's own `console_errors` tool and the game playtest all handed the model "Cannot read properties of
+ * undefined (reading 'rotation')" and nothing else. With no file to go to, the builder guessed: about 15 edits
+ * across three builds of one racing game landed in `Bird.ts`, whose rotations were already inside a try/catch,
+ * while the throw was elsewhere. `formatRuntimeErrors` (autopsy 95598899) had learned to read the stack; only
+ * its own lane used it. This is that rule, shared, so no reader can format an error without its site again.
+ *
+ * The text's own location wins when it has one, so every error that already read well is byte-identical.
+ */
+export function locatedErrorText(e: { text: string; stack?: string | null }): string {
+  const text = String(e?.text ?? '');
+  return `${text}${locationTag(text) || siteTag(appSourceFrame(e?.stack))}`;
 }

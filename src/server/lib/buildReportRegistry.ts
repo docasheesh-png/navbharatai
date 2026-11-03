@@ -135,11 +135,47 @@ export function applyRegistryPlan(tx: Transaction, db: Firestore, workspaceId: s
   if (plan.counter) tx.set(counterRef(db), plan.counter, { merge: true });
 }
 
+const LIST_PAGE = 100;
+
+/**
+ * Walk the registry by permanent number — the ONE ordered read every report list uses (the all-outcomes list in
+ * buildReportList.ts and the failed list in failedBuildReports.ts), so their paging can never drift.
+ * Keeps the rows `keep` accepts, stops at `limit` matches or `maxScanned` rows, and says whether the
+ * registry ran out (`exhausted`) and the last number it read (`last`, the next cursor).
+ */
+export async function scanRegistry(db: FirebaseFirestore.Firestore, opts: {
+  order: 'newest' | 'oldest'; after: number | null; limit: number; maxScanned: number; keep: (entry: BuildReportRegistryRow) => boolean;
+}): Promise<{ matches: BuildReportRegistryRow[]; last: number | null; exhausted: boolean; scanned: number }> {
+  const base = db.collection(BUILD_REPORT_NUMBERS_COLLECTION).orderBy('number', opts.order === 'newest' ? 'desc' : 'asc');
+  const matches: BuildReportRegistryRow[] = [];
+  let scanned = 0;
+  let last = opts.after;
+  let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+  let exhausted = false;
+  while (matches.length < opts.limit && scanned < opts.maxScanned) {
+    const want = Math.min(LIST_PAGE, opts.maxScanned - scanned);
+    const from: FirebaseFirestore.Query = lastDoc ? base.startAfter(lastDoc) : last === null ? base : base.startAfter(last);
+    const page: FirebaseFirestore.QuerySnapshot = await from.limit(want).get();
+    for (const doc of page.docs) {
+      lastDoc = doc;
+      scanned++;
+      const entry = doc.data() as BuildReportRegistryRow;
+      if (!validBuildReportNumber(entry?.number)) continue;
+      last = entry.number;
+      if (opts.keep(entry)) matches.push(entry);
+      if (matches.length >= opts.limit) break;
+    }
+    if (page.size < want && matches.length < opts.limit) { exhausted = true; break; }
+  }
+  return { matches, last, exhausted, scanned };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // The one-time numbering of reports saved before the registry existed.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 const LEASE_MS = 10 * 60_000;
+const RESWEEP_EVERY_MS = 24 * 60 * 60_000;
 const CHUNK = 200;
 const PAGE = 300;
 const MAX_INVENTORY_DOCS = 200_000;
@@ -238,7 +274,9 @@ export async function runBuildReportNumbering(db: Firestore, owner: string, now:
     }
     if (c?.state === 'ready') {
       if (!validBuildReportNumber(c.nextNumber)) return 'counter_invalid' as const;
-      return validTime(c.sweptAt) ? 'done' as const : 'sweep' as const;
+      // A daily re-sweep: a report whose history write failed while its latest write succeeded has no row (the
+      // registry is written by the history transaction). Rare and logged at the source; this numbers it within a day.
+      return validTime(c.sweptAt) && t - c.sweptAt < RESWEEP_EVERY_MS ? 'done' as const : 'sweep' as const;
     }
     if (c?.state !== 'backfilling' || !validBuildReportNumber(c.nextNumber)) return 'counter_invalid' as const;
     if (validTime(c.leaseUntil) && c.leaseUntil > t && c.leaseOwner !== owner) return 'busy' as const;

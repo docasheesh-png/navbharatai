@@ -1,3 +1,11 @@
+## 2026-11-03 — failedbr: the newest failed build is row 1, at a glance
+
+Admin: *"koi aisa system banao, jisse ek nazar me hi sabse new br pata lag jaye … sabse pahle show hone wali br sabse new ho"*.
+
+- **Root cause:** `list_failed_builds` (and `/api/failedbr/reports`) walked workspaces by document id, so the newest failure could be anywhere among ~640 rows; finding it meant reading them all. Clients holding the pre-1.3.0 tool list could not reach the new sorted tool either.
+- **Fix:** the failed list now reads the build report registry from the HIGHEST permanent number down (`scanRegistry`, one shared walk for this list and `list_build_reports`), keeping `failed` + `stopped` (exactly `settledFailure`). Row 1 of page 1 is the newest failed build, for every client, with no reconnect. `observation.ordering` says `newest-first`; while numbering is pending the old walk serves the page, marked `workspace-history`, so nothing disappears. A v1 cursor is refused with a clear message; a malformed cursor is judged before storage. The numbering job re-sweeps daily, so a report whose history write failed half-way still gets a number within a day. Admin `/failedbr` sorts by the same number. MCP server 1.4.0; tool text and server instructions say newest-first.
+- **Lock:** `tests/buildReportRegistry.test.ts` "the failed list is NEWEST FIRST" (first row = highest failed number, paging without repeats, old cursor refused, expired = gap, daily re-sweep). Reversion-proved: oldest-first (4 fail), no re-sweep (1).
+
 ## 2026-11-02 — Built apps and games are LIGHT unless the user asks for dark
 
 Admin: *"jab navbharatai par koi app ya game banaya jata hai, to woh, dark mode banta hai. mai chahta hu, jab tak user saf saf na bol de, tab tak light mode me hi game banne chahiye!!"*

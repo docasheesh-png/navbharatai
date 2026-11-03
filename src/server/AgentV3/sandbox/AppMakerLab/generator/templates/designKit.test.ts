@@ -60,8 +60,11 @@ describe('the kit is a single source of truth', () => {
     }
   });
 
-  it('is dark-mode aware and honours reduced motion', () => {
-    expect(DESIGN_KIT_CSS).toContain('prefers-color-scheme');
+  it('is light whatever the device says, dark only behind the switch, and honours reduced motion', () => {
+    // ☀️ 2026-11-02 (admin: light unless the user asks for dark). Following the phone made most apps dark.
+    expect(DESIGN_KIT_CSS).not.toContain('prefers-color-scheme');
+    expect(DESIGN_KIT_CSS).toMatch(/^:root \{\n {2}color-scheme: light;/);
+    expect(DESIGN_KIT_CSS).toContain(':root.dark, :root[data-theme="dark"]');
     expect(DESIGN_KIT_CSS).toContain('prefers-reduced-motion');
   });
 });

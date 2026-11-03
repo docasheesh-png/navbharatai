@@ -557,7 +557,7 @@ export function GameCanvas({ options, onReady, className = '', fullscreen = true
 
   if (failed) {
     return (
-      <div style={{ ...fill, display: 'grid', placeItems: 'center', background: '#111', color: '#eee', padding: 24, textAlign: 'center' }}>
+      <div style={{ ...fill, display: 'grid', placeItems: 'center', background: 'var(--bg, #f6f7fb)', color: 'var(--fg, #17171c)', padding: 24, textAlign: 'center' }}>
         <div>
           <p style={{ fontWeight: 600, marginBottom: 8 }}>This game needs 3D graphics (WebGL).</p>
           <p style={{ opacity: 0.7, fontSize: 14 }}>{failed}</p>
@@ -567,7 +567,7 @@ export function GameCanvas({ options, onReady, className = '', fullscreen = true
   }
 
   return (
-    <div className={className} style={{ ...fill, overflow: 'hidden', background: '#000' }}>
+    <div className={className} style={{ ...fill, overflow: 'hidden', background: 'var(--game-bg, #eef1ff)' }}>
       <div ref={hostRef} style={{ width: '100%', height: '100%' }} />
       {game ? <Hud game={game} /> : null}
     </div>

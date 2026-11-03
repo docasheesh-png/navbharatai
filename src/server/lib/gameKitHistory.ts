@@ -26,7 +26,8 @@ export const GAME_KIT_HISTORY: Readonly<Record<string, readonly string[]>> = {
     "b359b27179b906887d64ebc73cbf50c6dc072f4c84b17472163dd205eafb822e"
   ],
   "src/game/GameCanvas.tsx": [
-    "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb"
+    "d707c9c039ba390af4e059e718d92d331a91b63b77ac6c05b051184892c9c0bb",
+    "6d19d3faa0b46f00871a82026740716b96dd3ad44aae87185b94ecc852bf36ff"
   ],
   "src/game/controls.test.ts": [
     "2df3798b667fc3fe66d971a938e25286bdf3066b668eed9527c6200d4c26f03c",

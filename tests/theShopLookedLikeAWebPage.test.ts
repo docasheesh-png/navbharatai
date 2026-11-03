@@ -136,7 +136,7 @@ describe('3 · the kit has a shop layout', () => {
   it('the discount pill reads (WCAG AA) in both themes', () => {
     const decl = (body: string) => Object.fromEntries([...body.matchAll(/(--[\w-]+)\s*:\s*(#[0-9a-f]{6})\s*;/gi)].map((m) => [m[1], m[2]]));
     const light = decl(blocks.find((b) => b.prelude === ':root')!.body);
-    const dark = { ...light, ...decl(blocks.find((b) => /prefers-color-scheme:\s*dark/.test(b.prelude))!.body) };
+    const dark = { ...light, ...decl(blocks.find((b) => b.prelude.startsWith(':root.dark'))!.body) };
     const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
     const lum = (c: number[]) => { const l = c.map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]; };
     for (const t of [light, dark]) {

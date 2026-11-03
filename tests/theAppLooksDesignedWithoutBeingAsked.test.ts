@@ -49,7 +49,8 @@ function tokens(): { light: Record<string, string>; dark: Record<string, string>
   const blocks = parseCssBlocks(DESIGN_KIT_CSS);
   const decl = (body: string) => Object.fromEntries([...body.matchAll(/(--[\w-]+)\s*:\s*(#[0-9a-f]{3,8})\s*;/gi)].map((m) => [m[1], m[2]]));
   const light = decl(blocks.find((b) => b.prelude === ':root')!.body);
-  const darkBlock = blocks.find((b) => /prefers-color-scheme:\s*dark/.test(b.prelude))!;
+  // The dark palette lives behind the switch since 2026-11-02 (light unless the app chooses dark).
+  const darkBlock = blocks.find((b) => b.prelude.startsWith(':root.dark'))!;
   const dark = { ...light, ...decl(darkBlock.body) };
   return { light, dark };
 }

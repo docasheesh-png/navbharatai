@@ -12,7 +12,7 @@
  * empty page with a cursor is NOT the end of the list.
  */
 import { getServerDb } from './serverDb';
-import { BUILD_REPORT_NUMBERS_COLLECTION, BUILD_REPORT_OUTCOMES, counterRef, readyCounter, buildReportOutcome, registryRef,
+import { BUILD_REPORT_OUTCOMES, counterRef, readyCounter, buildReportOutcome, registryRef, scanRegistry,
   validBuildReportNumber, type BuildReportOutcome, type BuildReportRegistryRow } from './buildReportRegistry';
 import { FailedReportsInputError, failedReportDigest, redactFailedReport, validReportId } from './failedBuildReports';
 
@@ -21,7 +21,6 @@ export type BuildReportFilter = typeof BUILD_REPORT_FILTERS[number];
 export const BUILD_REPORT_ORDERS = ['newest', 'oldest'] as const;
 export type BuildReportOrder = typeof BUILD_REPORT_ORDERS[number];
 
-const PAGE = 100;
 const MAX_SCANNED = 1000;
 
 export interface BuildReportListRow {
@@ -95,27 +94,9 @@ export async function readBuildReportList(args: { cursor?: unknown; limit?: unkn
   const db = getServerDb();
   if (!db) throw new Error('Report storage unavailable.');
 
-  const base = db.collection(BUILD_REPORT_NUMBERS_COLLECTION).orderBy('number', order === 'newest' ? 'desc' : 'asc');
-  const matches: BuildReportRegistryRow[] = [];
-  let scanned = 0;
-  let last = after;
-  let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
-  let exhausted = false;
-  while (matches.length < limit && scanned < MAX_SCANNED) {
-    const want = Math.min(PAGE, MAX_SCANNED - scanned);
-    const from: FirebaseFirestore.Query = lastDoc ? base.startAfter(lastDoc) : last === null ? base : base.startAfter(last);
-    const page: FirebaseFirestore.QuerySnapshot = await from.limit(want).get();
-    for (const doc of page.docs) {
-      lastDoc = doc;
-      scanned++;
-      const entry = doc.data() as BuildReportRegistryRow;
-      if (!validBuildReportNumber(entry?.number)) continue;
-      last = entry.number;
-      if (outcome === 'all' || entry.outcome === outcome) matches.push(entry);
-      if (matches.length >= limit) break;
-    }
-    if (page.size < want && matches.length < limit) { exhausted = true; break; }
-  }
+  const { matches, last, exhausted, scanned } = await scanRegistry(db, {
+    order, after, limit, maxScanned: MAX_SCANNED, keep: (entry) => outcome === 'all' || entry.outcome === outcome,
+  });
 
   const reports = await Promise.all(matches.map(async (entry) => {
     const root = db.collection('workspace_diagnostics_v3').doc(entry.workspaceId);

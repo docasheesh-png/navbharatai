@@ -176,6 +176,9 @@ export interface IEngineerActuator {
       stack?: string;
     }[];
     captured?: boolean;
+    /** When a browser last looked at the app (the newest stamped session), on the SANDBOX clock. Lets a caller
+     *  tell a read that covers the current code from one taken before the last change (Q-2303). */
+    lastSessionAt?: number;
   }>;
   /**
    * Return the persistent sandbox ID backing this workspace, or null when there

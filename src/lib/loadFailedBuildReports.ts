@@ -12,7 +12,9 @@ export function newestFailedReports(rows: Iterable<FailedBuildRow>): FailedBuild
     const previous = unique.get(key);
     if (!previous || row.historyId !== 'latest') unique.set(key, row);
   }
-  return [...unique.values()].sort((a, b) => b.startedAt - a.startedAt ||
+  // The permanent report number first (the highest is the newest build — the same order the plugin lists), then the
+  // start time, which decides alone while numbering is still pending.
+  return [...unique.values()].sort((a, b) => (b.permanentReportId ?? 0) - (a.permanentReportId ?? 0) || b.startedAt - a.startedAt ||
     (a.workspaceId < b.workspaceId ? -1 : a.workspaceId > b.workspaceId ? 1 : 0) ||
     (a.historyId < b.historyId ? -1 : a.historyId > b.historyId ? 1 : 0));
 }

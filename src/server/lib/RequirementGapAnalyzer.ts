@@ -620,13 +620,35 @@ export function stripNonDomainUses(input: string): string {
 const DECLINING_SENTENCE_START = /^\s*(?:please\s+)?(?:do\s+not|don'?t|never|no|without|avoid)\b(?!\s+(?:forget|miss|skip\s+adding)\b)/i;
 const DECLINING_SENTENCE_END = /\b(?:mat|nahi|nahin|na)\s+(?:karo|karna|kare|karein|chahiye|chahie|dalo|daalo|lagao|banao|jodo|add\s+karo)\s*$/i;
 /** A comma/semicolon clause inside an ordinary sentence that declines one thing ("…, no multiplayer"). */
-const DECLINING_CLAUSE_START = /^\s*(?:and\s+|but\s+)?(?:no|without|not|never|except|minus|bina)\b(?!\s+(?:forget|miss)\b)/i;
+const DECLINING_CLAUSE_START = /^\s*(?:and\s+|but\s+)?(?:no|without|not|never|except|minus|bina|do\s+not|don'?t)\b(?!\s+(?:forget|miss)\b)/i;
+/**
+ * 🔴 A REFUSAL COVERS ITS WHOLE LIST (autopsy 958aa1ec, build report #1836, 2026-11-03). *"no login, multiplayer,
+ * purchases or backend."* dropped only "no login": "multiplayer" and "purchases or backend" are clauses of their
+ * own and did not start with a refusal, so the game contract told the builder that MULTIPLAYER was a feature the
+ * user had named — "each must really work in the game" — and APP_SCOPE read the same word as a LARGE app.
+ *
+ * The clauses that FOLLOW a declining one are its list while they are bare items: three words at most, and no word
+ * that turns them back into a request (add, include, show, with, should, is…). Precision first, as above: a clause
+ * that asks for something ends the list, and removal only deletes evidence, so it can never invent a feature.
+ */
+const LIST_ITEM_MAX_WORDS = 3;
+const RESUMES_ASKING = /\b(?:add|adds|include|includes|use|uses|show|shows|shown|make|build|give|keep|let|allow|support|need|needs|want|with|should|must|can|will|is|are|has|have|please|plus|also|but)\b/i;
+function isBareListItem(clause: string): boolean {
+  const words = clause.replace(/[,;.!?]+\s*$/, '').trim().split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.length <= LIST_ITEM_MAX_WORDS && !RESUMES_ASKING.test(clause);
+}
 export function withoutDeclinedSentences(text: string): string {
   return String(text || '')
     .split(/(?<=[.!?\n])/)
     .map((sentence) => {
       if (DECLINING_SENTENCE_START.test(sentence) || DECLINING_SENTENCE_END.test(sentence.replace(/[.!?\s]+$/, ''))) return ' ';
-      return sentence.split(/(?<=[,;])/).map((clause) => (DECLINING_CLAUSE_START.test(clause) ? ' ' : clause)).join('');
+      let declining = false;
+      return sentence.split(/(?<=[,;])/).map((clause) => {
+        if (DECLINING_CLAUSE_START.test(clause)) { declining = true; return ' '; }
+        if (declining && isBareListItem(clause)) return ' ';
+        declining = false;
+        return clause;
+      }).join('');
     })
     .join('');
 }

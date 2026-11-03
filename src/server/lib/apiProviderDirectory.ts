@@ -18,6 +18,8 @@
  * A new paid provider cannot be wired in without its billing link appearing here.
  */
 
+import { parseEnvNumber } from './envNumber';
+
 export type ApiProviderGroup = 'ai' | 'service' | 'registered';
 
 /** How the live balance is read. Only providers with a documented, key-authenticated balance endpoint. */
@@ -89,8 +91,9 @@ const IMAGE_PROVIDER_BILLING: Readonly<Record<string, string>> = {
 /** A balance below this (USD-equivalent) is shown as LOW. Env-overridable; a bad value falls back. */
 export const DEFAULT_LOW_BALANCE_USD = 5;
 export function lowBalanceThresholdUsd(env: NodeJS.ProcessEnv = process.env): number {
-  const n = Number(env.ADMIN_PROVIDER_LOW_BALANCE_USD);
-  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_LOW_BALANCE_USD;
+  // A cleared field is "not set", never a zero threshold (parseEnvNumber: blank ⇒ null).
+  const n = parseEnvNumber(env.ADMIN_PROVIDER_LOW_BALANCE_USD);
+  return n !== null && n >= 0 ? n : DEFAULT_LOW_BALANCE_USD;
 }
 
 export type BalanceState =

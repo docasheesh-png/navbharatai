@@ -132,6 +132,8 @@ describe('🔴 nothing is faked: live, failed, manual and not-set are four diffe
     expect(lowBalanceThresholdUsd({})).toBe(5);
     expect(lowBalanceThresholdUsd({ ADMIN_PROVIDER_LOW_BALANCE_USD: '20' })).toBe(20);
     expect(lowBalanceThresholdUsd({ ADMIN_PROVIDER_LOW_BALANCE_USD: 'abc' })).toBe(5);
+    expect(lowBalanceThresholdUsd({ ADMIN_PROVIDER_LOW_BALANCE_USD: '  ' })).toBe(5); // a cleared field is not a $0 threshold
+    expect(lowBalanceThresholdUsd({ ADMIN_PROVIDER_LOW_BALANCE_USD: '0' })).toBe(0);
     expect(levelOf(0, 5)).toBe('empty');
     expect(levelOf(-1, 5)).toBe('empty');
     expect(levelOf(4.99, 5)).toBe('low');

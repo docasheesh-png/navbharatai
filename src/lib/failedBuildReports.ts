@@ -20,14 +20,16 @@ export interface FailedBuildReadObservation {
   observedAt: number;
   deployment: string | null;
   scope: 'retained-settled-failures';
-  ordering: 'workspace-history';
+  /** `newest-first`: by permanent report number, highest first (the normal order). `workspace-history`: the
+   *  pre-numbering walk, served only while numbering is pending. */
+  ordering: 'newest-first' | 'workspace-history';
 }
 function isReadObservation(value: unknown): value is FailedBuildReadObservation {
   if (!value || typeof value !== 'object') return false;
   const v = value as FailedBuildReadObservation;
   return typeof v.observedAt === 'number' && Number.isFinite(v.observedAt) && v.observedAt > 0 &&
     (v.deployment === null || (typeof v.deployment === 'string' && /^[a-f0-9]{16}$/.test(v.deployment))) &&
-    v.scope === 'retained-settled-failures' && v.ordering === 'workspace-history';
+    v.scope === 'retained-settled-failures' && (v.ordering === 'newest-first' || v.ordering === 'workspace-history');
 }
 export interface FailedBuildPage {
   observation?: FailedBuildReadObservation;

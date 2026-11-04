@@ -67,7 +67,7 @@ import { buildDiscountStore, BUILD_DISCOUNT_MAX_PCT, BUILD_DISCOUNT_CACHE_MS } f
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mergeWallets } from '../lib/accountMerge';
 import { serverStats } from '../lib/serverStats';
-import { getProviderStats, getRouterOutcomeStats } from '../AI/Router/AIRouter';
+import { getProviderStats, getRouterOutcomeStats, visibleProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { metricsTimeline } from '../lib/metricsTimeline';
@@ -120,7 +120,7 @@ import { saveNotification, normalizeTarget } from '../lib/AdminNotificationStore
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore, platformHealthInputs } from '../lib/HealthScore';
-import { summariseUsage, marginInr } from '../lib/usageLedger';
+import { summariseUsage, marginInr, NOT_A_PROVIDER } from '../lib/usageLedger';
 import { platformMarginWindow } from '../lib/platformMargin';
 import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
 import { usdToInr } from '../lib/UsdInrRate';
@@ -843,7 +843,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     // ONE reading of this instance's load per response, so the health score and the load panel beside it can
     // never disagree (audit 2026-10-11, F15).
     const load = serverLoad.snapshot();
-    const providerStats = guard(() => getProviderStats());
+    const providerStats = guard(() => visibleProviderStats(getProviderStats()));
 
     // The same composite health inputs the dedicated /health-score endpoint reports, from the same
     // real signals. Kept identical on purpose — two health numbers would be worse than none.
@@ -1882,7 +1882,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // Provider ranking by request count — from the SAME rollup as the burn map (see above).
       // `avgLatencyMs` is null when no latency was recorded, never 0: "unmeasured" and "instant" are
       // different facts, and the old tally printed the legacy rows as "0 ms avg".
+      // Turns NO provider answered are not engines — listed apart, never ranked (NOT_A_PROVIDER, usageLedger.ts).
+      const unansweredTurns = Object.entries(usage.byProvider)
+        .filter(([name]) => name in NOT_A_PROVIDER)
+        .map(([name, r]) => ({ key: name, label: NOT_A_PROVIDER[name], requests: r.requests }))
+        .sort((a, b) => b.requests - a.requests);
       const providerRanking = Object.entries(usage.byProvider)
+        .filter(([name]) => !(name in NOT_A_PROVIDER))
         .map(([name, r]) => ({
           name,
           requests: r.requests,
@@ -1920,7 +1926,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         }));
 
       // Live provider stats from AIRouter
-      const liveProviderStats = getProviderStats();
+      const liveProviderStats = visibleProviderStats(getProviderStats());
 
       return res.json({
         // WHAT THIS ROUTE MEASURES, stated so the screen can say it (admin Monitor capture, 2026-09-14).
@@ -1955,7 +1961,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         hitsSinceBoot: true,
         hitsSinceBootSeconds: Math.round(process.uptime()),
         newUsersToday, activeUsers24h,
-        providerRanking, tokenPurchaseCount, recentPurchases,
+        providerRanking, unansweredTurns, tokenPurchaseCount, recentPurchases,
         liveProviderStats,
         failedLoginAttempts: serverStats.failedLoginIPs.slice(-20),
       });

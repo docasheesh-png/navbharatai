@@ -768,7 +768,15 @@ export function recordProviderLatency(name: string, latencyMs: number, failed: b
   tracer.recordChildSpan(`ai.provider.${name}`, latencyMs, failed ? 'error' : 'ok', { provider: name, success: !failed });
 }
 
-export function getProviderStats(): Record<string, { cooldownUntil: number; circuitState: string; consecutiveFailures: number; inFlight: number; inFlightByUniverse: Record<string, number>; avgLatencyMs: number; errorCount: number; requestCount: number }> {
+/**
+ * What an admin panel lists as providers: every row except an idle concurrency pool (capacityOnly with nothing in
+ * flight). A pool with calls in flight is kept, flagged, so the panel can say what it is. PURE over the stats.
+ */
+export function visibleProviderStats<T extends { capacityOnly?: boolean; inFlight?: number }>(stats: Record<string, T>): Record<string, T> {
+  return Object.fromEntries(Object.entries(stats).filter(([, s]) => !(s.capacityOnly && !(Number(s.inFlight) > 0))));
+}
+
+export function getProviderStats(): Record<string, { cooldownUntil: number; circuitState: string; consecutiveFailures: number; inFlight: number; inFlightByUniverse: Record<string, number>; avgLatencyMs: number; errorCount: number; requestCount: number; capacityOnly: boolean }> {
   const result: Record<string, any> = {};
   // P2.3 — in-flight is now keyed `${universe}:${provider}`. Aggregate it back per
   // provider name (total + per-universe breakdown) so the Admin dashboard shape is kept
@@ -784,10 +792,18 @@ export function getProviderStats(): Record<string, { cooldownUntil: number; circ
     byU[universe] = (byU[universe] || 0) + count;
     inFlightByUniverse.set(name, byU);
   }
-  const allNames = new Set([...allBreakerNames(), ...inFlightTotal.keys(), ...latencyAccum.keys()]);
+  // A name known ONLY from the in-flight pool (no breaker, no recorded call) is a concurrency pool, not a
+  // provider — e.g. the Free Chain claims `free-chat-chain:<account>` slots, whose calls are recorded under
+  // `free-chat-chain:<rung>`. It is flagged so a panel never presents it as an engine that was "not used yet"
+  // (admin 2026-11-04: `glm`, `groq`, `dsv4flash`, `cloudflare` twins of the real Free Chain rows).
+  const breakerNames = new Set(allBreakerNames());
+  const allNames = new Set([...breakerNames, ...inFlightTotal.keys(), ...latencyAccum.keys()]);
   for (const name of allNames) {
+    const capacityOnly = !breakerNames.has(name) && !latencyAccum.has(name);
     const acc = latencyAccum.get(name) || { total: 0, count: 0, errors: 0 };
-    const breaker = getBreaker(name).snapshot();
+    // getBreaker CREATES a breaker for an unknown name — for a pool that would invent a provider (and make it
+    // stop being capacity-only on the next read). A pool has no circuit: report it closed, untouched.
+    const breaker = capacityOnly ? { openedUntil: 0, state: 'closed', consecutiveFailures: 0 } : getBreaker(name).snapshot();
     result[name] = {
       cooldownUntil: breaker.openedUntil,
       circuitState: breaker.state,
@@ -797,6 +813,7 @@ export function getProviderStats(): Record<string, { cooldownUntil: number; circ
       avgLatencyMs: acc.count > 0 ? Math.round(acc.total / Math.max(1, acc.count - acc.errors)) : 0,
       errorCount: acc.errors,
       requestCount: acc.count,
+      capacityOnly,
     };
   }
   return result;

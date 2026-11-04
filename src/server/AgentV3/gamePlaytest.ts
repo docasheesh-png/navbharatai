@@ -219,6 +219,9 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
     seed: playtestSeed(env),
     marker: PLAYTEST_RESULT_MARKER,
     loadMs: LOAD_MS,
+    // The script's OWN deadline (autopsy 61279465): it reports what it measured, and where it got to,
+    // before the route's outer timeout (budget + 20 s) kills it with nothing to show.
+    budgetMs: PLAYTEST_BUDGET_MS,
     // The "same picture" floor, so the script can tell when the accelerator probe saw nothing move (Q-865).
     stillBelow: STILL_BELOW,
     // How many one-second looks the second accelerator hold may take (Q-869: a 9 s countdown is a working game).
@@ -636,7 +639,17 @@ function framesBetween(before, after, ms) {
 }
 
 const browser = await chromium.launch();
-const out = { ok: true };
+const out = { ok: true, stage: 'loading the game' };
+// THE SCRIPT ENDS ITSELF IN TIME (autopsy 61279465: a heavy 3D train scene ran past the route's 80 s
+// timeout, which killed the browser and left only "timed out" — no stage, no frame rate, nothing to fix).
+// At its own budget it says which stage it reached and how fast the page was drawing, then exits.
+const watchdog = setTimeout(async () => {
+  let fps = null;
+  try { fps = out.fps ?? null; } catch (e) { /* nothing measured yet */ }
+  say({ ok: false, partial: true, stage: out.stage, fps, started: out.started ?? null,
+    error: 'the playtest ran out of time while ' + out.stage + (fps != null ? ' (the page drew ' + fps + ' frames per second)' : '') });
+  process.exit(0);
+}, Math.max(10000, Number(cfg.budgetMs) || 60000));
 try {
   // ── DESKTOP: keyboard + mouse ─────────────────────────────────────────────────────────────────────
   const ctx = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 1280, height: 720 } });
@@ -647,6 +660,7 @@ try {
   watch(page);
   await page.goto(cfg.base, { waitUntil: 'load', timeout: cfg.loadMs });
   await page.waitForTimeout(1500);
+  out.stage = 'starting the game';
   out.started = await pressStart(page);
   let box = await surface(page);
   if (!box) {
@@ -675,6 +689,7 @@ try {
   out.fps = Math.round(((f1.frames - f0.frames) * 1000) / Math.max(1, f1.t - f0.t));
   out.longFrames = f1.long - f0.long;
 
+  out.stage = 'driving it with the keyboard';
   const moves = [];
   let prev = b;
   const step = async (label, act) => {
@@ -833,6 +848,7 @@ try {
   await ctx.close();
 
   // ── PHONE: touch only ─────────────────────────────────────────────────────────────────────────────
+  out.stage = 'playing it with touch controls on a phone';
   const m = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const mp = await m.newPage();
   watch(mp);
@@ -883,6 +899,7 @@ try {
 } catch (e) {
   if (e !== null) say({ ok: false, error: String(e && e.message || e).slice(0, 200) });
 } finally {
+  clearTimeout(watchdog);
   await browser.close();
 }
 `;
@@ -1022,6 +1039,9 @@ export function probeStarvedNote(r: SceneRead | null | undefined, min = PROBE_MI
 export interface PlaytestRun {
   ok: boolean;
   error?: string;
+  /** The script hit its own deadline (autopsy 61279465): `stage` says how far it got, `fps` how fast the page drew. */
+  partial?: boolean;
+  stage?: string;
   diagnostic?: string | null;
   started?: string | null;
   spread?: number;

@@ -23602,7 +23602,7 @@ async function noteBuildOutcome(
       // recorded and discarded; the card could not read a verdict nothing held.
       let phoneProof: PhoneOutcome = 'not-run';
       // The game playtest's answer for the same card (gamePlaytest.ts). 'not-run' unless a game was played.
-      let gameProof: { outcome: PhoneOutcome; score?: number | null } = { outcome: 'not-run' };
+      let gameProof: { outcome: PhoneOutcome; score?: number | null; unplayed?: boolean } = { outcome: 'not-run' };
       if (
         process.env.AGENTV3_JOURNEY_CHECK !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
         && !isImportTurn && !abort.signal.aborted
@@ -23765,6 +23765,9 @@ async function noteBuildOutcome(
             const verdict = playtestVerdict(playRun, replayFromCode(playtestFiles));
             buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
             gameProof = { outcome: playtestOutcome(verdict.code), score: verdict.score?.overall ?? null };
+            if (gameProof.outcome === 'not-run') gameProof.unplayed = true; // the runner's own "never played" answer
+            // 🎮 The release gate reads the SAME answer: a canvas game is GREEN only when it was played (autopsy 61279465).
+            gateEvidence.game = gameProof.outcome;
             // Game Engine Ultra Phase 2: structured defect codes for Phase 3 — evidence only.
             try {
               const measured = playtestDefects(playRun, verdict.score, missingKitLayerPaths(playtestFiles));
@@ -23783,6 +23786,9 @@ async function noteBuildOutcome(
             try {
               const notRun = playtestNotRunVerdict(`the playtest browser stopped: ${String((err as { message?: string })?.message ?? err).slice(0, 160)}`);
               buildDiag.record({ phase: 'preview', severity: notRun.severity, code: notRun.code, message: notRun.message, autoResolved: notRun.autoResolved });
+              // 🔴 A playtest that could not finish is NOT a pass (autopsy 61279465: it timed out and the gate said GREEN).
+              gameProof = { outcome: 'not-run', score: null, unplayed: true };
+              gateEvidence.game = 'not-run';
             } catch { /* best-effort */ }
           }
         } else {
@@ -23808,7 +23814,8 @@ async function noteBuildOutcome(
             if (why) {
               const notRun = playtestNotRunVerdict(why);
               buildDiag.record({ phase: 'preview', severity: notRun.severity, code: notRun.code, message: notRun.message, autoResolved: notRun.autoResolved });
-              gameProof = { outcome: playtestOutcome(notRun.code), score: null };
+              gameProof = { outcome: playtestOutcome(notRun.code), score: null, unplayed: true };
+              gateEvidence.game = 'not-run'; // a canvas game we could not play is not verified (playtestSkipReason is silent otherwise)
             }
           } catch { /* an honest line is best-effort and must never touch a build */ }
           // Game Engine Ultra Phase 2: a quiz/card/board/puzzle game drawn in the page is SAID, never silent or scored.
@@ -24007,6 +24014,8 @@ async function noteBuildOutcome(
             buildDiag.record({ phase: 'preview', ...gameRepairRecord(outcome) });
             if (outcome.kept && outcome.after) {
               gamePlayed = { defects: gamePlayed.defects.filter((d) => outcome.after!.includes(d.code)), scopeMissing: outcome.scopeAfter ?? gamePlayed.scopeMissing };
+              // The repaired game was PLAYED again and nothing hard remains: that replay is the gate's game proof.
+              if (gamePlayed.defects.length === 0) gateEvidence.game = 'passed';
               if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
             }
           } catch (e) {

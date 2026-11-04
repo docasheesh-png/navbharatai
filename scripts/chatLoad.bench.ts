@@ -49,7 +49,7 @@ import { freeChainAdmissionQueue } from '../src/server/AI/FreeChain/admissionQue
 const reports: any[] = [];
 const pct = (xs: number[], n: number) => xs.length ? [...xs].sort((a,b)=>a-b)[Math.max(0,Math.ceil(xs.length*n/100)-1)] : null;
 const bump = (o: Record<string,number>, k: string) => { o[k]=(o[k]??0)+1; };
-const cases: Array<{name:string;vus:number;n:number;users?:number;turnsPerUser?:number;overlap?:boolean;legacy?:boolean;largePayload?:boolean;delayMs?:number;failGlm?:boolean;quotaRefusal?:boolean;localPressure?:boolean;singleSlot?:boolean;sameUser?:boolean;googleOnly?:boolean}> = [
+const cases: Array<{name:string;vus:number;n:number;users?:number;turnsPerUser?:number;overlap?:boolean;legacy?:boolean;largePayload?:boolean;delayMs?:number;failGlm?:boolean;quotaRefusal?:boolean;localPressure?:boolean;singleSlot?:boolean;truncated?:boolean;sameUser?:boolean;googleOnly?:boolean}> = [
  {name:'users-1000-four-turns',vus:1000,n:4000,users:1000,turnsPerUser:4},
  {name:'users-1000-four-overlap',vus:4000,n:4000,users:1000,turnsPerUser:4,overlap:true},
  {name:'users-1000-four-turns-slow',vus:1000,n:4000,users:1000,turnsPerUser:4,delayMs:1000},
@@ -60,6 +60,7 @@ const cases: Array<{name:string;vus:number;n:number;users?:number;turnsPerUser?:
  {name:'glm-failure-1024',vus:1024,n:1024,failGlm:true},
  {name:'slow-provider-1024',vus:1024,n:1024,delayMs:1000},
  {name:'large-payload-1024',vus:1024,n:1024,largePayload:true},
+ {name:'truncated-1024',vus:1024,n:1024,truncated:true},
  {name:'single-slot-recovery-128',vus:128,n:128,singleSlot:true},
  {name:'local-quota-recovery-1024',vus:1024,n:1024,localPressure:true},
  {name:'quota-refusal-1024',vus:1024,n:1024,quotaRefusal:true},
@@ -91,13 +92,13 @@ describe('bounded offline real FreeChain runtime load experiment', () => {
     if(scenario.failGlm && adapter.provider==='GLM') throw new FreeChainProviderError('SERVER',{status:503});
     const marker=[...String(arg.prompt).matchAll(/LOAD_REQUEST_\d+/g)].at(-1)?.[0]??'missing-id';
     const content=`Synthetic response ${marker}`;arg.onChunk?.(content);
-    return {content,provider:adapter.provider,model,latencyMs:25,completeUsage:true,usage:{inputTokens:10,outputTokens:5},rateLimitHeaders:{}};
+    return {content,provider:adapter.provider,model,latencyMs:25,completeUsage:true,usage:{inputTokens:10,outputTokens:5},rateLimitHeaders:{},finishReason:scenario.truncated?'length':'stop'};
    } finally {physical--;current[model]--;}
   });
   const router=buildFreeChainRouter(db,cfg);
   const latency:number[]=[], successfulLatency:number[]=[], ttft:number[]=[], wait:number[]=[];
   const reasons:Record<string,number>={}, skipReasons:Record<string,number>={}, models:Record<string,number>={};
-  let ok=0, thrown=0, cacheHits=0, fallbackTurns=0, capacitySkipTurns=0, orderViolations=0, googleEntries=0, maxEntered=0;
+  let ok=0, partialResponses=0, thrown=0, cacheHits=0, fallbackTurns=0, capacitySkipTurns=0, orderViolations=0, googleEntries=0, maxEntered=0;
   const userOutcomes=new Map<string,{ok:number;failed:number;started:number;ended:number}>();let logicalActive=0,peakLogical=0;
   const initialMemory=process.memoryUsage();let peakRss=initialMemory.rss,peakHeap=initialMemory.heapUsed;
   const sampleMemory=()=>{const v=process.memoryUsage();peakRss=Math.max(peakRss,v.rss);peakHeap=Math.max(peakHeap,v.heapUsed);};
@@ -116,7 +117,8 @@ describe('bounded offline real FreeChain runtime load experiment', () => {
       context:{...input().context,uid,conversationKey:uid},
       onChunk:(_text:string,kind?:string)=>{if(first&&kind!=='notice'){ttft.push(performance.now()-t);first=false;}}});
      const elapsed=performance.now()-t;latency.push(elapsed);
-     if(result.ok){expect(result.content).toBe(`Synthetic response LOAD_REQUEST_${index}`);ok++;user.ok++;successfulLatency.push(elapsed);bump(models,result.model);history.push({role:'user',content:message},{role:'assistant',content:result.content});}else {user.failed++;bump(reasons,result.freeChain?.admissionReason??result.reason??'unknown');}
+     if(result.reason==='stalled')partialResponses++;
+     if(result.ok && result.reason!=='stalled'){expect(result.content).toBe(`Synthetic response LOAD_REQUEST_${index}`);ok++;user.ok++;successfulLatency.push(elapsed);bump(models,result.model);history.push({role:'user',content:message},{role:'assistant',content:result.content});}else {user.failed++;bump(reasons,result.freeChain?.admissionReason??result.reason??'unknown');}
      const trace=result.freeChain;if(trace?.cacheHit)cacheHits++;
      wait.push(trace?.queueWaitMs??0);
      if((trace?.fallbacks??0)>0)fallbackTurns++;
@@ -132,7 +134,7 @@ describe('bounded offline real FreeChain runtime load experiment', () => {
   const perUserDistribution:Record<string,number>={};for(const user of userOutcomes.values())bump(perUserDistribution,`ok=${user.ok},failed=${user.failed}`);
   const userDurations=[...userOutcomes.values()].map(u=>u.ended-u.started);
   const usersAllQuestionsAnswered=[...userOutcomes.values()].filter(u=>u.ok===(scenario.turnsPerUser??1)&&u.failed===0).length;
-  const report={distinctUsers:userOutcomes.size,usersAllQuestionsAnswered,perUserDistribution,perUserDurationMs:{p95:pct(userDurations,95),p99:pct(userDurations,99)},peakLogical,logicalActiveAfter:logicalActive,cacheEnabled:cfg.cacheEnabled,cacheEligible:false,cacheHits,cacheLookupCalls:m.cacheGet.mock.calls.length,cacheMisses:m.cacheGet.mock.calls.length-cacheHits,providerDispatches:Object.values(dispatch).reduce((a,b)=>a+b,0),resource:{initialMemory,peakRss,peakHeap,cpuUserMs:cpu.user/1000,cpuSystemMs:cpu.system/1000,eventLoopP99Ms:eventLoop.count ? eventLoop.percentile(99)/1e6 : null},name:scenario.name,providerDelayMs:scenario.delayMs??25,workers:scenario.vus,requests:scenario.n,durationMs,ok,notOk:scenario.n-ok,thrown,completedRps:scenario.n*1000/durationMs,successfulRps:ok*1000/durationMs,
+  const report={distinctUsers:userOutcomes.size,usersAllQuestionsAnswered,perUserDistribution,perUserDurationMs:{p95:pct(userDurations,95),p99:pct(userDurations,99)},peakLogical,logicalActiveAfter:logicalActive,cacheEnabled:cfg.cacheEnabled,cacheEligible:false,cacheHits,cacheLookupCalls:m.cacheGet.mock.calls.length,cacheMisses:m.cacheGet.mock.calls.length-cacheHits,providerDispatches:Object.values(dispatch).reduce((a,b)=>a+b,0),resource:{initialMemory,peakRss,peakHeap,cpuUserMs:cpu.user/1000,cpuSystemMs:cpu.system/1000,eventLoopP99Ms:eventLoop.count ? eventLoop.percentile(99)/1e6 : null},name:scenario.name,providerDelayMs:scenario.delayMs??25,workers:scenario.vus,requests:scenario.n,durationMs,ok,partialResponses,notOk:scenario.n-ok,thrown,completedRps:scenario.n*1000/durationMs,successfulRps:ok*1000/durationMs,
    allLatencyMs:{p50:pct(latency,50),p95:pct(latency,95),p99:pct(latency,99),max:Math.max(...latency)},successP95Ms:pct(successfulLatency,95),successP99Ms:pct(successfulLatency,99),ttftP95Ms:pct(ttft,95),queueP95Ms:pct(wait,95),
    peakPhysical:peak,peakByModel,dispatch,models,reasons,skipReasons,fallbackTurns,capacitySkipTurns,orderViolations,googleEntries,maxEntered,queueAfter:freeChainAdmissionQueue.snapshot()};
   reports.push(report);writeFileSync(process.env.CHAT_LOAD_REPORT ?? '/tmp/navbharatai-chat-burst.json',JSON.stringify({codeCommit:process.env.CHAT_LOAD_COMMIT??'working-tree',providerDelayMs:25,scope:'real router and admission/concurrency/breakers; mocked provider, quota/spend store, controls/cache/telemetry; no HTTP/auth/real DB',reports},null,2));
@@ -146,6 +148,7 @@ describe('bounded offline real FreeChain runtime load experiment', () => {
   if(scenario.quotaRefusal||scenario.googleOnly){expect(ok).toBe(0);expect(m.execute).not.toHaveBeenCalled();}
   if(scenario.failGlm){expect(ok).toBe(scenario.n);expect(dispatch['openai/gpt-oss-120b']).toBeGreaterThan(0);}
   if(scenario.name==='burst-1024')expect(ok).toBe(scenario.n);
+  if(scenario.truncated){expect(ok).toBe(0);expect(partialResponses).toBe(scenario.n);expect(m.cachePut).not.toHaveBeenCalled();}
   if(scenario.singleSlot){expect(ok).toBe(scenario.n);expect(peak).toBe(1);}
   if(scenario.localPressure){expect(ok).toBe(scenario.n-8);expect(m.reserve).toHaveBeenCalledTimes(scenario.n);expect(m.cooldown).not.toHaveBeenCalled();}
   if(scenario.name==='users-1000-four-turns'){expect(ok).toBe(4000);expect(usersAllQuestionsAnswered).toBe(1000);}

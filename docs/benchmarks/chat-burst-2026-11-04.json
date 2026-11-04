@@ -1,0 +1,598 @@
+{
+  "codeCommit": "working-tree",
+  "providerDelayMs": 25,
+  "scope": "real router and admission/concurrency/breakers; mocked provider, quota/spend store, controls/cache/telemetry; no HTTP/auth/real DB",
+  "reports": [
+    {
+      "resource": {
+        "initialMemory": {
+          "rss": 120066048,
+          "heapTotal": 66990080,
+          "heapUsed": 38041104,
+          "external": 3914123,
+          "arrayBuffers": 93461
+        },
+        "peakRss": 131883008,
+        "peakHeap": 47791760,
+        "cpuUserMs": 63.187,
+        "cpuSystemMs": 0.168,
+        "eventLoopP99Ms": 10.895359
+      },
+      "name": "baseline-1024",
+      "providerDelayMs": 25,
+      "virtualUsers": 1024,
+      "requests": 1024,
+      "durationMs": 269.2960149999999,
+      "ok": 72,
+      "notOk": 952,
+      "thrown": 0,
+      "completedRps": 3802.5070664339405,
+      "successfulRps": 267.36377810863644,
+      "allLatencyMs": {
+        "p50": 24.384543000000008,
+        "p95": 112.25252,
+        "p99": 241.3660420000001,
+        "max": 267.9400740000001
+      },
+      "successP95Ms": 266.7478379999999,
+      "successP99Ms": 267.9400740000001,
+      "ttftP95Ms": 266.71537,
+      "queueP95Ms": 86,
+      "peakPhysical": 8,
+      "peakByModel": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 5
+      },
+      "dispatch": {
+        "glm-4.5-flash": 18,
+        "glm-4.7-flash": 9,
+        "openai/gpt-oss-120b": 45
+      },
+      "models": {
+        "glm-4.5-flash": 18,
+        "glm-4.7-flash": 9,
+        "openai/gpt-oss-120b": 45
+      },
+      "reasons": {
+        "queue-full": 952
+      },
+      "skipReasons": {
+        "concurrency": 99
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 54,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 1,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "resource": {
+        "initialMemory": {
+          "rss": 131883008,
+          "heapTotal": 71184384,
+          "heapUsed": 41111416,
+          "external": 3900642,
+          "arrayBuffers": 85184
+        },
+        "peakRss": 144740352,
+        "peakHeap": 56056712,
+        "cpuUserMs": 289.998,
+        "cpuSystemMs": 24.565,
+        "eventLoopP99Ms": 10.928127
+      },
+      "name": "burst-1024",
+      "providerDelayMs": 25,
+      "virtualUsers": 1024,
+      "requests": 1024,
+      "durationMs": 3278.608896,
+      "ok": 1024,
+      "notOk": 0,
+      "thrown": 0,
+      "completedRps": 312.3275854126152,
+      "successfulRps": 312.3275854126152,
+      "allLatencyMs": {
+        "p50": 1640.207945,
+        "p95": 3118.3994669999993,
+        "p99": 3245.577281,
+        "max": 3274.3642499999996
+      },
+      "successP95Ms": 3118.3994669999993,
+      "successP99Ms": 3245.577281,
+      "ttftP95Ms": 3118.3543899999995,
+      "queueP95Ms": 3093,
+      "peakPhysical": 8,
+      "peakByModel": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 5
+      },
+      "dispatch": {
+        "glm-4.5-flash": 256,
+        "glm-4.7-flash": 128,
+        "openai/gpt-oss-120b": 640
+      },
+      "models": {
+        "glm-4.5-flash": 256,
+        "glm-4.7-flash": 128,
+        "openai/gpt-oss-120b": 640
+      },
+      "reasons": {},
+      "skipReasons": {
+        "concurrency": 1408
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 768,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 1,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "resource": {
+        "initialMemory": {
+          "rss": 144740352,
+          "heapTotal": 79835136,
+          "heapUsed": 47372344,
+          "external": 3900186,
+          "arrayBuffers": 85139
+        },
+        "peakRss": 159850496,
+        "peakHeap": 60334936,
+        "cpuUserMs": 385.012,
+        "cpuSystemMs": 17.661,
+        "eventLoopP99Ms": 10.928127
+      },
+      "name": "overload-2048",
+      "providerDelayMs": 25,
+      "virtualUsers": 2048,
+      "requests": 2048,
+      "durationMs": 3299.3176220000005,
+      "ok": 1032,
+      "notOk": 1016,
+      "thrown": 0,
+      "completedRps": 620.7344168211762,
+      "successfulRps": 312.7919522262958,
+      "allLatencyMs": {
+        "p50": 42.72510599999987,
+        "p95": 2977.933607,
+        "p99": 3233.318687,
+        "max": 3295.7655129999994
+      },
+      "successP95Ms": 3142.1642729999994,
+      "successP99Ms": 3269.3746659999997,
+      "ttftP95Ms": 3142.094599,
+      "queueP95Ms": 2952,
+      "peakPhysical": 8,
+      "peakByModel": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 5
+      },
+      "dispatch": {
+        "glm-4.5-flash": 258,
+        "glm-4.7-flash": 129,
+        "openai/gpt-oss-120b": 645
+      },
+      "models": {
+        "glm-4.5-flash": 258,
+        "glm-4.7-flash": 129,
+        "openai/gpt-oss-120b": 645
+      },
+      "reasons": {
+        "queue-full": 1016
+      },
+      "skipReasons": {
+        "concurrency": 1419
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 774,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 1,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "resource": {
+        "initialMemory": {
+          "rss": 150278144,
+          "heapTotal": 84029440,
+          "heapUsed": 49340096,
+          "external": 3900210,
+          "arrayBuffers": 84790
+        },
+        "peakRss": 152756224,
+        "peakHeap": 63093872,
+        "cpuUserMs": 276.357,
+        "cpuSystemMs": 16.449,
+        "eventLoopP99Ms": 10.919935
+      },
+      "name": "glm-failure-1024",
+      "providerDelayMs": 25,
+      "virtualUsers": 1024,
+      "requests": 1024,
+      "durationMs": 3291.11212,
+      "ok": 1024,
+      "notOk": 0,
+      "thrown": 0,
+      "completedRps": 311.1410254841151,
+      "successfulRps": 311.1410254841151,
+      "allLatencyMs": {
+        "p50": 1663.4601049999992,
+        "p95": 3120.725827000001,
+        "p99": 3258.2830129999993,
+        "max": 3288.2691030000005
+      },
+      "successP95Ms": 3120.725827000001,
+      "successP99Ms": 3258.2830129999993,
+      "ttftP95Ms": 3120.6925870000005,
+      "queueP95Ms": 3096,
+      "peakPhysical": 8,
+      "peakByModel": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 8
+      },
+      "dispatch": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 1024
+      },
+      "models": {
+        "openai/gpt-oss-120b": 1024
+      },
+      "reasons": {},
+      "skipReasons": {
+        "concurrency": 13,
+        "circuit:last=server:http=503:remain=10s": 628,
+        "circuit:last=server:http=503:remain=9s": 628,
+        "circuit:last=server:http=503:remain=8s": 626,
+        "circuit:last=server:http=503:remain=7s": 150
+      },
+      "fallbackTurns": 3,
+      "capacitySkipTurns": 8,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 2,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "resource": {
+        "initialMemory": {
+          "rss": 152444928,
+          "heapTotal": 86913024,
+          "heapUsed": 56749872,
+          "external": 3900430,
+          "arrayBuffers": 84880
+        },
+        "peakRss": 158736384,
+        "peakHeap": 61797176,
+        "cpuUserMs": 60.786,
+        "cpuSystemMs": 3.184,
+        "eventLoopP99Ms": 10.264575
+      },
+      "name": "slow-provider-1024",
+      "providerDelayMs": 1000,
+      "virtualUsers": 1024,
+      "requests": 1024,
+      "durationMs": 5013.397637,
+      "ok": 40,
+      "notOk": 984,
+      "thrown": 0,
+      "completedRps": 204.25269929571317,
+      "successfulRps": 7.978621066238796,
+      "allLatencyMs": {
+        "p50": 5003.904302999999,
+        "p95": 5007.033248,
+        "p99": 5007.438764999999,
+        "max": 5013.268554
+      },
+      "successP95Ms": 5013.220993000001,
+      "successP99Ms": 5013.268554,
+      "ttftP95Ms": 5013.200873,
+      "queueP95Ms": 5007,
+      "peakPhysical": 8,
+      "peakByModel": {
+        "glm-4.5-flash": 2,
+        "glm-4.7-flash": 1,
+        "openai/gpt-oss-120b": 5
+      },
+      "dispatch": {
+        "glm-4.5-flash": 10,
+        "glm-4.7-flash": 5,
+        "openai/gpt-oss-120b": 25
+      },
+      "models": {
+        "glm-4.5-flash": 10,
+        "glm-4.7-flash": 5,
+        "openai/gpt-oss-120b": 25
+      },
+      "reasons": {
+        "timeout": 984
+      },
+      "skipReasons": {
+        "concurrency": 55
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 30,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 1,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "resource": {
+        "initialMemory": {
+          "rss": 156758016,
+          "heapTotal": 89272320,
+          "heapUsed": 55765776,
+          "external": 3908210,
+          "arrayBuffers": 93162
+        },
+        "peakRss": 330903552,
+        "peakHeap": 202219328,
+        "cpuUserMs": 735.422,
+        "cpuSystemMs": 170.108,
+        "eventLoopP99Ms": null
+      },
+      "name": "large-payload-1024",
+      "providerDelayMs": 25,
+      "virtualUsers": 1024,
+      "requests": 1024,
+      "durationMs": 770.962931,
+      "ok": 0,
+      "notOk": 1024,
+      "thrown": 0,
+      "completedRps": 1328.2091250117446,
+      "successfulRps": 0,
+      "allLatencyMs": {
+        "p50": 286.71727400000236,
+        "p95": 640.7432440000011,
+        "p99": 699.9848709999987,
+        "max": 711.4225469999983
+      },
+      "successP95Ms": null,
+      "successP99Ms": null,
+      "ttftP95Ms": null,
+      "queueP95Ms": 626,
+      "peakPhysical": 0,
+      "peakByModel": {},
+      "dispatch": {},
+      "models": {},
+      "reasons": {
+        "capacity": 903,
+        "all-failed": 121
+      },
+      "skipReasons": {
+        "context-capacity": 484,
+        "unconfigured": 726,
+        "disabled": 121
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 0,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 0,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "resource": {
+        "initialMemory": {
+          "rss": 330903552,
+          "heapTotal": 245747712,
+          "heapUsed": 202717096,
+          "external": 3908215,
+          "arrayBuffers": 92982
+        },
+        "peakRss": 330903552,
+        "peakHeap": 202717096,
+        "cpuUserMs": 196.752,
+        "cpuSystemMs": 9.315,
+        "eventLoopP99Ms": null
+      },
+      "name": "quota-refusal-1024",
+      "providerDelayMs": 25,
+      "virtualUsers": 1024,
+      "requests": 1024,
+      "durationMs": 106.57550300000003,
+      "ok": 0,
+      "notOk": 1024,
+      "thrown": 0,
+      "completedRps": 9608.211748247622,
+      "successfulRps": 0,
+      "allLatencyMs": {
+        "p50": 55.992401000003156,
+        "p95": 100.21537999999782,
+        "p99": 102.8279419999999,
+        "max": 103.22236200000043
+      },
+      "successP95Ms": null,
+      "successP99Ms": null,
+      "ttftP95Ms": null,
+      "queueP95Ms": 100,
+      "peakPhysical": 0,
+      "peakByModel": {},
+      "dispatch": {},
+      "models": {},
+      "reasons": {
+        "all-failed": 1024
+      },
+      "skipReasons": {
+        "concurrency": 1410,
+        "rpm": 2686,
+        "unconfigured": 6144,
+        "disabled": 1024
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 896,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 0,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "resource": {
+        "initialMemory": {
+          "rss": 321458176,
+          "heapTotal": 234024960,
+          "heapUsed": 201274784,
+          "external": 3908221,
+          "arrayBuffers": 92982
+        },
+        "peakRss": 321589248,
+        "peakHeap": 201274784,
+        "cpuUserMs": 20.1,
+        "cpuSystemMs": 0.686,
+        "eventLoopP99Ms": 10.239999
+      },
+      "name": "same-user-1024",
+      "providerDelayMs": 25,
+      "virtualUsers": 1024,
+      "requests": 1024,
+      "durationMs": 64.26823399999921,
+      "ok": 2,
+      "notOk": 1022,
+      "thrown": 0,
+      "completedRps": 15933.221379632318,
+      "successfulRps": 31.11957300709437,
+      "allLatencyMs": {
+        "p50": 10.597488999999769,
+        "p95": 11.506358999999065,
+        "p99": 11.591497000001254,
+        "max": 64.22784400000091
+      },
+      "successP95Ms": 64.22784400000091,
+      "successP99Ms": 64.22784400000091,
+      "ttftP95Ms": 64.14466900000116,
+      "queueP95Ms": 0,
+      "peakPhysical": 1,
+      "peakByModel": {
+        "glm-4.5-flash": 1
+      },
+      "dispatch": {
+        "glm-4.5-flash": 2
+      },
+      "models": {
+        "glm-4.5-flash": 2
+      },
+      "reasons": {
+        "user-limit": 1022
+      },
+      "skipReasons": {},
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 0,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 1,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    },
+    {
+      "resource": {
+        "initialMemory": {
+          "rss": 321589248,
+          "heapTotal": 235597824,
+          "heapUsed": 196825632,
+          "external": 3907933,
+          "arrayBuffers": 93252
+        },
+        "peakRss": 322129920,
+        "peakHeap": 205095480,
+        "cpuUserMs": 137.793,
+        "cpuSystemMs": 3.858,
+        "eventLoopP99Ms": null
+      },
+      "name": "disabled-google-1024",
+      "providerDelayMs": 25,
+      "virtualUsers": 1024,
+      "requests": 1024,
+      "durationMs": 86.71819000000323,
+      "ok": 0,
+      "notOk": 1024,
+      "thrown": 0,
+      "completedRps": 11808.364542663561,
+      "successfulRps": 0,
+      "allLatencyMs": {
+        "p50": 47.11759299999903,
+        "p95": 80.78777899999841,
+        "p99": 83.33852900000056,
+        "max": 83.7412519999998
+      },
+      "successP95Ms": null,
+      "successP99Ms": null,
+      "ttftP95Ms": null,
+      "queueP95Ms": 80,
+      "peakPhysical": 0,
+      "peakByModel": {},
+      "dispatch": {},
+      "models": {},
+      "reasons": {
+        "all-failed": 1024
+      },
+      "skipReasons": {
+        "disabled": 6144,
+        "unconfigured": 5120
+      },
+      "fallbackTurns": 0,
+      "capacitySkipTurns": 0,
+      "orderViolations": 0,
+      "googleEntries": 0,
+      "maxEntered": 0,
+      "queueAfter": {
+        "active": 0,
+        "queued": 0,
+        "activeUsers": 0,
+        "queuedUsers": 0
+      }
+    }
+  ],
+  "baseCommit": "6b22fd45183ef3e0761836a1d780d508e670588a",
+  "sourceFileSha256": {
+    "src/server/AI/FreeChain/admissionQueue.ts": "ed3286e2e55cfadf10d350b394e8b177b6e4db740dd0baeee9e8b2f7d68d519d",
+    "src/server/AI/FreeChain/config.ts": "b6841cf668569e03b7cf5d8642034c1584b0117d7536b686dcde56e61c478052",
+    "src/server/AI/FreeChain/entryAdmission.ts": "85e9a29d14c60bfc12318fb76d2a312d721ec7fcdbe088e0a5358fa08762563f",
+    "src/server/AI/FreeChain/runtime.ts": "d146b3458872a3cc5dec5cbc9372a371965a5580d3782a2856cd4a90655f1d4a",
+    "scripts/chatLoad.bench.ts": "ce6b7cbcfa73ac933132fe5d1c8f5f4d3e8b903383fbefa3696b6037fbc0a5ec",
+    "scripts/chatLoad.config.ts": "0355ea9873efb6b5682d29d48e6375767ce5de69e6a419a53d77900faaea26ea"
+  }
+}

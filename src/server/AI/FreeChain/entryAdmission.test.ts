@@ -123,3 +123,9 @@ it('queues authenticated chat by default when the deployment flag is absent', as
  expect(m.acquire).toHaveBeenCalledOnce();
  expect(m.release).toHaveBeenCalledOnce();
 });
+
+it('accounts for the entire retained request body including history before queueing',async()=>{
+ const body={message:'hello',history:[{role:'user',content:'नमस्ते'.repeat(1000)}],extra:'x'.repeat(4096)};
+ await withFreeChainEntryAdmission(req(body),response(),async()=>42);
+ expect(m.acquire).toHaveBeenCalledWith(expect.objectContaining({payloadBytes:Buffer.byteLength(JSON.stringify(body))}));
+});

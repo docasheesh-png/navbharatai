@@ -51,6 +51,6 @@ it('reports local admission pressure separately from a database outage',async()=
  const hold=deferred();const db={doc:(path:string)=>({path}),runTransaction:async()=>{await hold.promise;return {allowed:true,reason:'allowed',resetAt:Date.now()+60000};}};
  const store=new FreeChainStore(db as any);const input={provider:'local-pressure',model:'synthetic',timeZone:'rolling24h',inputTokens:1,outputTokens:1,limits:{rpm:30}};
  const first=store.reserveQuota(input);const queued=store.reserveQuota(input);
- await vi.advanceTimersByTimeAsync(10000);expect(await queued).toMatchObject({allowed:false,reason:'local_capacity'});
+ await vi.advanceTimersByTimeAsync(10000);expect(await queued).toMatchObject({allowed:false,reason:'local_capacity',resetAt:Date.now()});
  hold.resolve();await first;expect(vi.getTimerCount()).toBe(0);
 });

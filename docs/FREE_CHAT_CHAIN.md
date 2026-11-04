@@ -594,3 +594,56 @@ retention and reservation ownership; it must not silently reinterpret current
 synchronous requests or their quota. This change does not introduce that API,
 raise provider limits or alter live scaling. Cache-disabled measurements should
 remain separate from ordinary production cache benefits.
+
+### Local pressure, incomplete output and gateway queue accounting
+
+A `local_capacity` quota decision describes this process's transaction admission,
+not provider health or an account quota window. It must not open the provider's
+circuit for a synthetic minute. The store now returns the observation time as its
+reset marker, and dispatch explicitly excludes this reason from remote cooldown
+handling. Genuine RPM/TPM/day limits and provider cooldowns still apply. This
+removes an avoidable post-pressure blackout without granting additional quota.
+
+A nonempty OpenAI-compatible reply ending with `finishReason=length` is incomplete.
+The router retains delivered text and the existing `reason=stalled` caller contract,
+records `truncated` rather than `served`, and does not cache that answer or dispatch
+a second provider after text commitment. Reported paid usage is still settled;
+unreported usage retains its hold. Complete replies remain cacheable under the
+unchanged eligibility and TTL rules. This is completeness metadata, not a factual
+accuracy judgment. Previously cached entries do not retain finish metadata, so
+this change cannot retrospectively identify them; normal TTL remains unchanged.
+
+InferenceGateway's early ingress lease accounts for the serialized UTF-8 request
+body captured with the verified ingress identity. Its direct invocation path
+accounts for the actual input, including system prompts and attachment payloads.
+Both use the same aggregate 16 MiB waiting-payload budget as FreeChain. Reusing a
+live entry lease does not create another queue entry. The bound remains serialized
+queued input, not total process memory or active-request memory. Oversized queued
+requests fail before prompt assembly/provider work and aggregate reservations are
+released on cancellation or grant.
+
+### Bounded capacity waiting and explicit browser sequencing
+
+When every usable rung is busy and this turn has not attempted any quota
+reservation, FreeChain may wait for a physical slot release and re-scan the
+configured order. The original admission wait budget bounds this too (queue time
+already spent is deducted); at most 32 re-scans and 64 process-local waiters are
+allowed. Provider controls are checked again before dispatch. Cancellation ends
+the wait. A reservation attempt or physical dispatch disables this re-scan path:
+it cannot reserve twice, retry a paid response, ignore quota or mix answers.
+Physical SDK settlement, not watchdog expiry, emits availability. This improves
+short bursts on a small available pool; it does not raise any concurrency limit.
+
+Free Chat's composer has an explicit Queue action while an answer is running.
+It accepts up to three additional text questions of at most 16,000 characters
+each, kept only in browser memory. Each is sent after its predecessor completes,
+with current conversation history; the server independently verifies identity,
+quota, budgets and OFF controls for every turn. Ordinary duplicate Send remains
+blocked. No attachments are queued. The pending sequence expires after 90 seconds
+(or clears on Stop, failure/incomplete response, unmount, or session/account/mode
+change); an expired sequence is not silently resumed. Starting a queued question
+does not erase a new draft. Navigation/context checks run before each dispatch.
+This is browser-local ordering, not a distributed job service: separate tabs,
+devices and raw concurrent API requests still obey shared per-user admission.
+It cannot guarantee all four answers when providers fail, quotas expire or the
+waiting deadline passes. The direct-router overlap stress case remains reported.

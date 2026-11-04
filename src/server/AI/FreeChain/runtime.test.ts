@@ -637,3 +637,57 @@ it.each(['0.000005', undefined])('uses the same supplier evidence for monthly se
  expect(record.heldNanoUsd).toBe(0);
  if(amount===undefined)expect(m.settle).not.toHaveBeenCalled();else expect(m.settle).toHaveBeenCalledExactlyOnceWith(expect.anything(),5000);
 });
+
+it('does not bench a healthy provider after local quota-lane saturation', async () => {
+ const router=buildFreeChainRouter(db,config('groq'));
+ m.reserve.mockResolvedValueOnce({allowed:false,reason:'local_capacity',resetAt:Date.now()+60000});
+ expect((await router.route(input())).ok).toBe(false);
+ expect(m.execute).not.toHaveBeenCalled();expect(m.cooldown).not.toHaveBeenCalled();
+ expect(await router.route(input())).toMatchObject({ok:true,provider:'GROQ'});
+ expect(m.reserve).toHaveBeenCalledTimes(2);expect(m.execute).toHaveBeenCalledOnce();
+});
+it('still honors an authoritative RPM reset across subsequent turns', async () => {
+ const router=buildFreeChainRouter(db,config('groq'));
+ m.reserve.mockResolvedValueOnce({allowed:false,reason:'rpm',resetAt:Date.now()+60000});
+ await router.route(input());await router.route(input());
+ expect(m.reserve).toHaveBeenCalledOnce();expect(m.execute).not.toHaveBeenCalled();
+});
+it.each([false,true])('marks token-truncated answers incomplete and never caches or provider-hops (stream=%s)',async streaming=>{
+ const cfg=config();cfg.cacheEnabled=true;
+ m.execute.mockImplementationOnce(async(arg,adapter)=>({...await successful('partial')(arg,adapter),finishReason:'length'}));
+ const chunks:string[]=[];
+ const result=await buildFreeChainRouter(db,cfg).route({...input(),message:'what is photosynthesis',context:{...input().context,cacheEligible:true},...(streaming?{onChunk:(s:string)=>chunks.push(s)}:{})});
+ expect(result.reason).toBe('stalled');expect(result.freeChain?.attempts[0].reason).toBe('truncated');
+ expect(result.content).toContain('partial');if(!streaming)expect(result.content).toContain('interrupted');
+ expect(m.execute).toHaveBeenCalledOnce();expect(m.cacheGet).toHaveBeenCalledOnce();expect(m.cachePut).not.toHaveBeenCalled();expect(m.cooldown).not.toHaveBeenCalled();
+ if(streaming)expect(chunks).toEqual(['partial']);
+});
+it('continues caching complete stop-finished responses',async()=>{
+ const cfg=config('groq');cfg.cacheEnabled=true;
+ m.execute.mockImplementationOnce(async(arg,adapter)=>({...await successful('complete')(arg,adapter),finishReason:'stop'}));
+ const result=await buildFreeChainRouter(db,cfg).route({...input(),message:'what is photosynthesis',context:{...input().context,cacheEligible:true}});
+ expect(result.reason).not.toBe('stalled');expect(result.freeChain?.attempts[0].reason).toBe('served');expect(m.cachePut).toHaveBeenCalledOnce();
+});
+it.each([true,false])('retains paid accounting for length-finished responses (reported usage=%s)',async reported=>{
+ const cfg=config('deepseek');cfg.deepseekPrices={input:0.3,output:1.2};
+ const reservation={id:'length-paid',day:'d',uidHash:'u',maxCostNanoUsd:100000,createdAt:0,mayDispatch:true};m.paid.mockResolvedValue(reservation);
+ m.execute.mockImplementationOnce(async(arg,adapter)=>({...await successful('partial')(arg,adapter),finishReason:'length',completeUsage:reported,...(!reported?{usage:undefined}:{})}));
+ const result=await buildFreeChainRouter(db,cfg).route(input());expect(result.reason).toBe('stalled');expect(m.execute).toHaveBeenCalledOnce();
+ if(reported)expect(m.settle).toHaveBeenCalledExactlyOnceWith(reservation,5400);else expect(m.settle).not.toHaveBeenCalled();
+ expect(m.cachePut).not.toHaveBeenCalled();expect(m.cooldown).not.toHaveBeenCalled();
+});
+it.each(['released','cancelled','disabled'] as const)('waits only for pre-reservation provider capacity: %s',async mode=>{
+ const cfg=config('glm45');cfg.concurrency.glm45=1;
+ let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});
+ m.execute.mockImplementationOnce(async(arg,adapter)=>{await hold;return successful('first')(arg,adapter);});
+ const router=buildFreeChainRouter(db,cfg);
+ const first=router.route({...input(),context:{...input().context,uid:'first'}});
+ await vi.waitFor(()=>expect(m.execute).toHaveBeenCalledOnce());
+ const abort=new AbortController();let settled=false;
+ const second=router.route({...input(),signal:abort.signal,context:{...input().context,uid:'second'}}).then(r=>{settled=true;return r;});
+ await new Promise(r=>setTimeout(r,10));expect(settled).toBe(false);expect(m.reserve).toHaveBeenCalledOnce();
+ if(mode==='cancelled')abort.abort();if(mode==='disabled')applySwitchedOff(['glm']);
+ release();await first;const result=await second;
+ if(mode==='released'){expect(result.ok).toBe(true);expect(m.reserve).toHaveBeenCalledTimes(2);expect(m.execute).toHaveBeenCalledTimes(2);}
+ else{expect(result.ok).toBe(false);expect(m.reserve).toHaveBeenCalledOnce();expect(m.execute).toHaveBeenCalledOnce();}
+});

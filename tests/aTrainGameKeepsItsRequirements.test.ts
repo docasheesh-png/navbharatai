@@ -119,3 +119,25 @@ describe('🔒 the route feeds the playtest into the gate on EVERY way the playt
     expect(route).toMatch(/if \(gamePlayed\.defects\.length === 0\) gateEvidence\.game = 'passed';/);
   });
 });
+
+import { auditSummaryClaims, claimCorrection } from '../src/server/AgentV3/claimAudit';
+describe('the model may not call an unplayed game "complete and working" (Q-2336)', () => {
+  // The reported build's own first line, verbatim.
+  const SUMMARY = "The 3D train simulator game is complete and working properly. Here's what I've built:\n\n## 3D Train Simulator Game";
+  const base = { consoleCaptured: true, screenshotTaken: true, previewVerified: true };
+  it('THE REPORTED SUMMARY: the playtest never finished → contradicted, and the user is told so', () => {
+    const c = auditSummaryClaims(SUMMARY, { ...base, gamePlayed: 'not-run' });
+    expect(c.map((x) => x.kind)).toContain('game-claimed-playable');
+    expect(claimCorrection(c)).toMatch(/whether it is playable is NOT VERIFIED/);
+  });
+  it('played and passed → the claim stands; not a canvas game → not judged', () => {
+    expect(auditSummaryClaims(SUMMARY, { ...base, gamePlayed: 'passed' }).map((x) => x.kind)).not.toContain('game-claimed-playable');
+    expect(auditSummaryClaims(SUMMARY, base).map((x) => x.kind)).not.toContain('game-claimed-playable');
+  });
+  it('a description is not a verdict', () => {
+    expect(auditSummaryClaims('The game has a start screen with the controls explained.', { ...base, gamePlayed: 'not-run' })).toEqual([]);
+  });
+  it('🔒 the route hands the gate\'s game answer to the audit', () => {
+    expect(readFileSync('src/server/routes/agentv3.ts', 'utf8')).toContain('gamePlayed: gateEvidence.game,');
+  });
+});

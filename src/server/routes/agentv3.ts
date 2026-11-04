@@ -18764,6 +18764,11 @@ async function noteBuildOutcome(
               const kitStartedAt = Date.now();
               const kitResults: GameKitSeedResult[] = [];
               let localGameAssetHandoff = '';
+              // The two halves of the seed's wait, said apart (autopsy 61279465: "72.7 s" with no split, so the
+              // 45 s after the last recipe could not be attributed to the 3D-asset step or to anything else).
+              let kitRecipesMs = 0;
+              let kitAssetsMs: number | null = null;
+              let kitAssetsStatus = '';
               platformSeedInFlight = true;
               try {
                 for (const recipe of kitPlan) {
@@ -18773,11 +18778,15 @@ async function noteBuildOutcome(
                   const r = await dispatcher.dispatch({ id: `game-kit-${recipe}`, name: 'run_recipe', input: { name: recipe, ...(recipeInput ? { input: recipeInput } : {}) } }, 'architect', { signal: abort.signal });
                   kitResults.push({ recipe, ok: !r.is_error, content: String(r.content ?? '') });
                 }
+                kitRecipesMs = Date.now() - kitStartedAt;
                 if (gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted) {
                   // Default-off L3; all bytes and manifests are acknowledged durably before handoff.
                   // Source/provider failures leave the successful L1/L2 kit intact.
+                  const assetsStartedAt = Date.now();
                   try {
                     const assets = await prepareGameAssets({ prompt, workspaceId, workspace: actuator, signal: abort.signal, verifiedOwnerUid: verified?.uid });
+                    kitAssetsMs = Date.now() - assetsStartedAt;
+                    kitAssetsStatus = String(assets.status);
                     for (const [path, content] of Object.entries(assets.files)) writtenFiles.set(path, content);
                     localGameAssetHandoff = assets.handoff;
                   } catch { /* The procedural kit remains the floor. */ }
@@ -18800,7 +18809,8 @@ async function noteBuildOutcome(
               etaPlatformSeededFiles += kitFiles;
               for (const r of kitResults) if (r.ok) gameKitSeeded.push(r.recipe);
               if (gameKitSeeded.length > 0) {
-                buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_KIT_SEEDED', autoResolved: true, message: gameKitSeededMessage(kitResults, kitFiles, Date.now() - kitStartedAt) });
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_KIT_SEEDED', autoResolved: true, message: gameKitSeededMessage(kitResults, kitFiles, Date.now() - kitStartedAt),
+                  detail: `recipes ${(kitRecipesMs / 1000).toFixed(1)} s` + (kitAssetsMs != null ? ` · 3D assets ${(kitAssetsMs / 1000).toFixed(1)} s (${kitAssetsStatus || 'unknown'})` : ' · 3D assets not prepared') });
                 // Game Engine Ultra Phase 1 (gameIntent.ts): the request's scope contract rides in the handoff.
                 // Kill switch AGENTV3_GAME_SCOPE_CONTRACT=off. Pure, best-effort — never touches the build.
                 let contractText = '';
@@ -25052,6 +25062,8 @@ async function noteBuildOutcome(
           consoleErrorsFound: runtimeErrorsRemaining,
           // "44×44 buttons" / "fits any phone" stand only when the phone-size check measured and passed (Q-248).
           phoneLayout: phoneProof,
+          // "complete and working properly" stands for a canvas game only when the playtest PASSED (autopsy 61279465).
+          gamePlayed: gateEvidence.game,
           screenshotTaken: buildDiag.toolWasUsed('screenshot'),
           // "✅ Login with Google" about a login whose password is written into the app (fakeFeatureScan.ts).
           fakeFeatures: fakeFeatures.map((f) => f.kind),

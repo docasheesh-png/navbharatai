@@ -29,6 +29,7 @@ import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
 import { BotsLedgerPanel } from './admin/BotsLedgerPanel';
 import { AdsPanel } from './admin/AdsPanel';
 import { ApiProvidersPanel } from './admin/ApiProvidersPanel';
+import { chatProviderHealth, chatProviderLatencyText } from '../lib/chatProviderHealth';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
 import {
   ADMIN_TABS, ENGINE_REPORTS_ON, tabOfPage, tabDef, firstPageOf, pageTitle, pageBadge, pageHint,
@@ -2772,23 +2773,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {Object.entries(analytics?.liveProviderStats || {}).map(([name, stat]: any) => {
-                  const isOnCooldown = stat.cooldownUntil > Date.now();
-                  const secondsLeft = isOnCooldown ? Math.ceil((stat.cooldownUntil - Date.now()) / 1000) : 0;
-                  // 🔒 A PROVIDER THAT HAS NEVER RUN IS NOT "HEALTHY". The old card printed a green
-                  // Healthy badge on zero requests, which is the most misleading state a status light
-                  // can have — it reads as "checked and fine" when nothing was ever checked.
-                  const everRan = Number(stat.requestCount) > 0;
+                  // 🔒 The badge reads EVERY fact the server sends — circuit, cooldown, errors, in-flight
+                  // (chatProviderHealth.ts). It used to read two, and painted a provider failing 3 of 3 calls green.
+                  const health = chatProviderHealth(stat, Date.now());
+                  const dot = { danger: 'bg-danger animate-pulse', warn: 'bg-warn', neutral: 'bg-faint', ok: 'bg-success', busy: 'bg-warn animate-pulse' }[health.tone];
+                  const badge = { danger: 'bg-danger/10 border-danger/40 text-danger', warn: 'bg-warn/10 border-warn/40 text-warn', neutral: 'bg-raised border-line text-muted', ok: 'bg-success/10 border-success/40 text-success', busy: 'bg-warn/10 border-warn/40 text-warn' }[health.tone];
                   return (
-                    <div key={name} className={`bg-card border rounded-[1.5rem] p-5 space-y-3 ${isOnCooldown ? 'border-red-500/30' : 'border-line'}`}>
+                    <div key={name} data-testid={`chat-provider-${name}`} className={`bg-card border rounded-[1.5rem] p-5 space-y-3 ${health.tone === 'danger' ? 'border-danger/40' : 'border-line'}`}>
                       <div className="flex justify-between items-center">
                         <div className="flex items-center gap-3">
-                          <div className={`w-3 h-3 rounded-full ${isOnCooldown ? 'bg-red-500 animate-pulse text-on-accent' : !everRan ? 'bg-faint' : stat.inFlight > 0 ? 'bg-amber-500 animate-pulse text-on-accent' : 'bg-emerald-500 text-on-accent'}`} />
+                          <div className={`w-3 h-3 rounded-full ${dot}`} />
                           <span className="font-black text-ink uppercase font-mono">{name}</span>
                         </div>
-                        <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${isOnCooldown ? 'bg-red-500/10 border-red-500/30 text-danger' : !everRan ? 'bg-raised border-line text-muted' : 'bg-emerald-500/10 border-emerald-500/30 text-success'}`}>
-                          {isOnCooldown ? `Cooldown ${secondsLeft}s` : !everRan ? 'Not used yet' : 'Healthy'}
-                        </span>
+                        <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${badge}`}>{stat.capacityOnly ? 'Capacity pool' : health.label}</span>
                       </div>
+                      {stat.capacityOnly
+                        ? <p className="text-[10px] text-muted">A Free Chat concurrency pool for one account — calls in flight, not a separate engine.</p>
+                        : health.detail && <p className="text-[10px] text-muted">{health.detail}</p>}
                       <div className="grid grid-cols-3 gap-2 text-center">
                         <div className="bg-well rounded-lg p-2">
                           <div className="text-[9px] text-muted uppercase font-bold">In-Flight</div>
@@ -2796,7 +2797,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         </div>
                         <div className="bg-well rounded-lg p-2">
                           <div className="text-[9px] text-muted uppercase font-bold">Avg Latency</div>
-                          <div className="text-sm font-black text-warn font-mono">{everRan ? `${stat.avgLatencyMs}ms` : '—'}</div>
+                          <div className="text-sm font-black text-warn font-mono">{chatProviderLatencyText(stat)}</div>
                         </div>
                         <div className="bg-well rounded-lg p-2">
                           <div className="text-[9px] text-muted uppercase font-bold">Errors</div>
@@ -2931,6 +2932,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     );
                   })}
                 </div>
+                {/* Turns NO engine answered — not ranked as providers (they are users who got no answer). */}
+                {(analytics?.unansweredTurns || []).length > 0 && (
+                  <div className="border-t border-line pt-3 space-y-1" data-testid="unanswered-turns">
+                    <p className="text-[10px] text-danger font-bold uppercase tracking-widest">Not answered by any provider</p>
+                    {(analytics?.unansweredTurns || []).map((u: any) => (
+                      <p key={u.key} className="text-xs text-ink"><span className="font-mono font-bold">{u.requests}</span> — {u.label}</p>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Rate-limited providers */}

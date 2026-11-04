@@ -18882,6 +18882,9 @@ async function noteBuildOutcome(
               complex: buildIsComplex,
               isKeyed: (r) => { const v = process.env[keyEnvFor(r.provider)]; return !!(v && String(v).trim()); },
               enabled: fastLaneReasoningGateEnabled(),
+              // Q-2310: judge the engine that RUNS — the admitted Surplus model, or the pinned Router One model.
+              opensOn: surplusSession?.model ? { provider: 'SURPLUS', model: surplusSession.model }
+                : routerOnePinned && routerOneModels()[0] ? { provider: 'ENGINE_R1', model: routerOneModels()[0] } : null,
             });
           } catch { return { rung: null, skip: false, reason: '' }; }
         })()

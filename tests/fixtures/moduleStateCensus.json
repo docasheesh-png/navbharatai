@@ -52,5 +52,6 @@
   "src/server/AI/FreeChain/runtime.ts::warned": "closed deployment-defined key set: fixed provider credential-environment authentication warnings and the deterministic configuration-error message; no request ids, users, prompts or mutable admin control values enter this set",
   "src/server/routes/providerDiagnostics.ts::throughputRunning": "closed key set: at most one entry per diagnostic provider (surplus | cheaperinference), deleted in finally",
   "src/server/lib/providerSwitches.ts::off": "closed key set: the ids of AI provider families switched off — at most PROVIDER_FAMILIES.length (22), unknown ids are dropped",
-  "src/server/lib/providerSwitches.ts::withdrawn": "closed key set: one entry per switched-off provider family (≤ 22), each holding only that family's own env key names; cleared when switched on"
+  "src/server/lib/providerSwitches.ts::withdrawn": "closed key set: one entry per switched-off provider family (≤ 22), each holding only that family's own env key names; cleared when switched on",
+  "src/server/AI/FreeChain/capacityWait.ts::waiters": "Hard cap64 pending wakeups; rejects additional waiters, removes each on physical-slot release, abort or bounded admission deadline. Runtime deducts queue time and caps32 re-scans. capacityWait.test.ts verifies saturation, expiry and cleanup; no provider quota or paid hold is synthesized."
 }

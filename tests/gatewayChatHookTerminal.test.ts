@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mock = vi.hoisted(() => ({ post: vi.fn(), isCancel: vi.fn(() => false), authHeader: vi.fn(async () => ({})) }));
-vi.mock('react', () => ({ useRef: vi.fn((current: unknown) => ({ current })) }));
+vi.mock('react', () => ({ useRef: vi.fn((current: unknown) => ({ current })), useEffect: vi.fn() }));
 vi.mock('axios', () => ({ default: mock }));
 vi.mock('../src/lib/firebase', () => ({ auth: { currentUser: null } }));
 vi.mock('../src/lib/authHeaders', () => ({ authHeader: mock.authHeader }));
 vi.mock('../src/lib/analytics', () => ({ trackEvent: vi.fn() }));
 vi.mock('../src/lib/platformHeader', () => ({ platformHeader: () => ({}) }));
 vi.mock('../src/lib/vialMemory', () => ({ loadVials: () => ({}), saveVial: vi.fn() }));
-import { useRef } from 'react';
+import { useRef, useEffect } from 'react';
 import { useChatEngine, type ChatEngineDeps } from '../src/hooks/useChatEngine';
 import type { Message } from '../src/types';
 import { chatAvailabilityMessage } from '../src/server/lib/chatAvailabilityMessage';
@@ -423,4 +423,42 @@ describe('real Free chat hook terminal request handling', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+});
+
+describe('bounded pending question integration',()=>{
+ beforeEach(()=>{vi.clearAllMocks();mock.isCancel.mockReturnValue(false);mock.authHeader.mockResolvedValue({});vi.stubGlobal('fetch',vi.fn());vi.spyOn(console,'error').mockImplementation(()=>{});});
+ afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();});
+it('explicitly queues three questions behind an active turn, preserving ordered fresh history',async()=>{
+ vi.stubGlobal('fetch',vi.fn());let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});let active=0,peak=0;
+ mock.post.mockImplementation(async(_url,body)=>{peak=Math.max(peak,++active);if(body.message==='First')await hold;active--;return {data:{reply:`Answer to ${body.message}`}};});
+ const f=fixture();const engine=f.engine();const first=engine.handleSend('First');await vi.waitFor(()=>expect(mock.post).toHaveBeenCalledOnce());
+ for(const text of ['Second','Third','Fourth'])expect(engine.queueQuestion(text)).toBe(true);expect(engine.queueQuestion('Fifth')).toBe(false);
+ release();await first;await vi.waitFor(()=>expect(mock.post).toHaveBeenCalledTimes(4));await vi.waitFor(()=>expect(f.messages().filter(m=>m.sender==='ai')).toHaveLength(4));
+ expect(mock.post.mock.calls.map(c=>c[1].message)).toEqual(['First','Second','Third','Fourth']);expect(peak).toBe(1);
+ expect(mock.post.mock.calls[3][1].history.map((m:Message)=>m.text)).toContain('Answer to Third');
+ expect(f.messages().filter(m=>m.sender==='user').map(m=>m.text)).toEqual(['First','Second','Third','Fourth']);
+});
+it.each(['stop','session','account'] as const)('does not dispatch queued questions after %s changes',async change=>{
+ let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});mock.post.mockImplementation(async()=>{await hold;return {data:{reply:'First answer'}};});
+ const f=fixture();const engine=f.engine();const first=engine.handleSend('First');await vi.waitFor(()=>expect(mock.post).toHaveBeenCalledOnce());expect(engine.queueQuestion('Second')).toBe(true);
+ if(change==='stop')engine.stop();if(change==='session')f.deps.currentSessionId='new-session';if(change==='account')f.deps.user={uid:'new-user'} as any;
+ f.engine();release();await first;await new Promise(r=>setTimeout(r,10));expect(mock.post).toHaveBeenCalledOnce();
+});
+it.each(['failure','incomplete'] as const)('clears pending questions after an %s answer',async outcome=>{
+ let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});mock.post.mockImplementation(async()=>{await hold;if(outcome==='failure')throw {response:{status:503}};return {data:{reply:'Partial answer',stalled:true}};});
+ const f=fixture();const engine=f.engine();const first=engine.handleSend('First');await vi.waitFor(()=>expect(mock.post).toHaveBeenCalledOnce());expect(engine.queueQuestion('Second')).toBe(true);
+ release();await first;await new Promise(r=>setTimeout(r,10));expect(mock.post).toHaveBeenCalledOnce();
+});
+it('does not erase a new draft when the queued question starts',async()=>{
+ let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});mock.post.mockImplementation(async(_url,body)=>{if(body.message==='First')await hold;return {data:{reply:'Answer'}};});
+ const f=fixture();const engine=f.engine();const first=engine.handleSend('First');await vi.waitFor(()=>expect(mock.post).toHaveBeenCalledOnce());engine.queueQuestion('Second');f.deps.input='Unsent draft';
+ release();await first;await vi.waitFor(()=>expect(mock.post).toHaveBeenCalledTimes(2));expect(f.deps.input).toBe('Unsent draft');
+});
+
+it('cancels queued work when the hook unmounts',async()=>{
+ let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});mock.post.mockImplementation(async()=>{await hold;return {data:{reply:'Late answer'}};});
+ const f=fixture();const engine=f.engine();const cleanup=vi.mocked(useEffect).mock.calls.at(-1)![0]();
+ const first=engine.handleSend('First');await vi.waitFor(()=>expect(mock.post).toHaveBeenCalledOnce());engine.queueQuestion('Second');
+ if(typeof cleanup==='function')cleanup();release();await first;await new Promise(r=>setTimeout(r,10));expect(mock.post).toHaveBeenCalledOnce();expect(engine.queueQuestion('Third')).toBe(false);
+});
 });

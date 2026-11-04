@@ -49,7 +49,7 @@ import { freeChainAdmissionQueue } from '../src/server/AI/FreeChain/admissionQue
 const reports: any[] = [];
 const pct = (xs: number[], n: number) => xs.length ? [...xs].sort((a,b)=>a-b)[Math.max(0,Math.ceil(xs.length*n/100)-1)] : null;
 const bump = (o: Record<string,number>, k: string) => { o[k]=(o[k]??0)+1; };
-const cases: Array<{name:string;vus:number;n:number;users?:number;turnsPerUser?:number;overlap?:boolean;legacy?:boolean;largePayload?:boolean;delayMs?:number;failGlm?:boolean;quotaRefusal?:boolean;sameUser?:boolean;googleOnly?:boolean}> = [
+const cases: Array<{name:string;vus:number;n:number;users?:number;turnsPerUser?:number;overlap?:boolean;legacy?:boolean;largePayload?:boolean;delayMs?:number;failGlm?:boolean;quotaRefusal?:boolean;localPressure?:boolean;singleSlot?:boolean;sameUser?:boolean;googleOnly?:boolean}> = [
  {name:'users-1000-four-turns',vus:1000,n:4000,users:1000,turnsPerUser:4},
  {name:'users-1000-four-overlap',vus:4000,n:4000,users:1000,turnsPerUser:4,overlap:true},
  {name:'users-1000-four-turns-slow',vus:1000,n:4000,users:1000,turnsPerUser:4,delayMs:1000},
@@ -60,6 +60,8 @@ const cases: Array<{name:string;vus:number;n:number;users?:number;turnsPerUser?:
  {name:'glm-failure-1024',vus:1024,n:1024,failGlm:true},
  {name:'slow-provider-1024',vus:1024,n:1024,delayMs:1000},
  {name:'large-payload-1024',vus:1024,n:1024,largePayload:true},
+ {name:'single-slot-recovery-128',vus:128,n:128,singleSlot:true},
+ {name:'local-quota-recovery-1024',vus:1024,n:1024,localPressure:true},
  {name:'quota-refusal-1024',vus:1024,n:1024,quotaRefusal:true},
  {name:'same-user-1024',vus:1024,n:1024,sameUser:true},
  {name:'disabled-google-1024',vus:1024,n:1024,googleOnly:true},
@@ -77,6 +79,8 @@ describe('bounded offline real FreeChain runtime load experiment', () => {
   expect(cfg.errors).toEqual([]);
   m.paid.mockResolvedValue({mayDispatch:false});
   if(scenario.quotaRefusal) m.reserve.mockResolvedValue({allowed:false,reason:'rpm'});
+  if(scenario.singleSlot) {cfg.order=['glm45'];cfg.concurrency.glm45=1;}
+  if(scenario.localPressure) { cfg.order=['groq']; let reservations=0; m.reserve.mockImplementation(async()=>++reservations<=8?{allowed:false,reason:'local_capacity',resetAt:Date.now()+60000}:{allowed:true}); }
   let physical=0, peak=0, sequence=0;
   const current:Record<string,number>={}, peakByModel:Record<string,number>={}, dispatch:Record<string,number>={};
   m.execute.mockImplementation(async (arg:any, adapter:any) => {
@@ -142,6 +146,8 @@ describe('bounded offline real FreeChain runtime load experiment', () => {
   if(scenario.quotaRefusal||scenario.googleOnly){expect(ok).toBe(0);expect(m.execute).not.toHaveBeenCalled();}
   if(scenario.failGlm){expect(ok).toBe(scenario.n);expect(dispatch['openai/gpt-oss-120b']).toBeGreaterThan(0);}
   if(scenario.name==='burst-1024')expect(ok).toBe(scenario.n);
+  if(scenario.singleSlot){expect(ok).toBe(scenario.n);expect(peak).toBe(1);}
+  if(scenario.localPressure){expect(ok).toBe(scenario.n-8);expect(m.reserve).toHaveBeenCalledTimes(scenario.n);expect(m.cooldown).not.toHaveBeenCalled();}
   if(scenario.name==='users-1000-four-turns'){expect(ok).toBe(4000);expect(usersAllQuestionsAnswered).toBe(1000);}
   if(scenario.largePayload)expect(reasons.capacity).toBeGreaterThan(0);
   __resetProviderSwitchesForTests({});

@@ -125,7 +125,7 @@ export class FreeChainStore {
         return { allowed: true, reason: 'allowed' as const, resetAt: ledgerResetAt(ledger, 'day', now) };
       }));
     } catch (error) {
-      return { allowed: false, reason: error instanceof QuotaLaneBusyError ? 'local_capacity' : error instanceof FreeChainDataError ? 'store_corrupt' : 'store_unavailable', resetAt: startedAt + 60_000 };
+      return { allowed: false, reason: error instanceof QuotaLaneBusyError ? 'local_capacity' : error instanceof FreeChainDataError ? 'store_corrupt' : 'store_unavailable', resetAt: error instanceof QuotaLaneBusyError ? Date.now() : startedAt + 60_000 };
     }
   }
   /** Cooldowns only extend. A late, shorter Retry-After cannot unbench an account early. */

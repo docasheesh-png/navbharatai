@@ -17,6 +17,7 @@ export interface NBIChatPanelProps {
   input: string;
   setInput: (v: string) => void;
   onSend: (files?: File[]) => void;
+  onQueueQuestion?: () => boolean;
   /** Stop the reply that is streaming now (admin 2026-08-13). */
   onStop?: () => void;
   /** Take back the last message (stop + remove the last exchange). */
@@ -63,6 +64,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
   input,
   setInput,
   onSend,
+  onQueueQuestion,
   onStop,
   onUnsend,
   isLoading,
@@ -139,6 +141,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
           input={input}
           onInputChange={setInput}
           onSend={onSend}
+          onQueueQuestion={onQueueQuestion}
           onStop={onStop}
           onUnsend={onUnsend}
           // Lets the chat's Clear and its per-message delete/edit act for real (admin 2026-08-10).

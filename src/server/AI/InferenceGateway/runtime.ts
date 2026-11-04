@@ -17,7 +17,7 @@ import { FreeChainStore } from '../FreeChain/store';
 import { freeChainConfig } from '../FreeChain/config';
 import { readData, readPaidPolicy } from '../FreeChain/paidLedger';
 import { publishDeploymentPaidLimit } from '../FreeChain/deploymentBudget';
-import { freeChainAdmissionQueue } from '../FreeChain/admissionQueue';
+import { admissionPayloadBytes, freeChainAdmissionQueue } from '../FreeChain/admissionQueue';
 import type { AIProviderResponse } from '../Router/ProviderTypes';
 import type { InferenceGatewayContext } from './context';
 import type { Surface } from './types';
@@ -47,7 +47,7 @@ export { InferenceGatewayTerminalError } from './dispatchBoundary';
 export function isGatewayTerminalError(error: unknown): error is InferenceGatewayTerminalError {
   return error instanceof InferenceGatewayTerminalError;
 }
-interface GatewayIngressIdentity { readonly uid: string | null; readonly cohortSelected: boolean; readonly surfaces: readonly Surface[]; readonly guest?: GuestInferenceAdmission; readonly selectedGuest?: boolean; }
+interface GatewayIngressIdentity { readonly payloadBytes: number; readonly uid: string | null; readonly cohortSelected: boolean; readonly surfaces: readonly Surface[]; readonly guest?: GuestInferenceAdmission; readonly selectedGuest?: boolean; }
 export type GatewayGuestContext = Pick<GuestInferenceAdmission, 'kind' | 'principalId' | 'expiresAtMs'>;
 const identities = new AsyncLocalStorage<Readonly<GatewayIngressIdentity>>();
 interface ContextState {
@@ -78,7 +78,7 @@ export async function runWithAuthenticatedInferenceGatewayRequest<T>(req: Reques
   const uid = await verifyFirebaseToken(req);
   const guest = uid ? null : takeGuestInferenceAdmission(req);
   const view = guest ? Object.freeze({ kind: guest.kind, principalId: guest.principalId, expiresAtMs: guest.expiresAtMs }) : undefined;
-  return await identities.run(Object.freeze({ uid, selectedGuest, surfaces, cohortSelected: gatewayRolloutAllowsUid(cohort, uid), ...(guest ? { guest } : {}) }), () => fn(uid, view));
+  return await identities.run(Object.freeze({ uid, payloadBytes: admissionPayloadBytes(req.body), selectedGuest, surfaces, cohortSelected: gatewayRolloutAllowsUid(cohort, uid), ...(guest ? { guest } : {}) }), () => fn(uid, view));
 }
 export function runWithInferenceGatewayContext<T>(context: InferenceGatewayContext, fn: () => T): T {
   const parent = contexts.getStore();
@@ -146,7 +146,7 @@ export async function runWithInferenceGatewayEntryAdmission<T>(fn: () => Promise
     return await fn();
   }
   const { context } = state;
-  const admission = await freeChainAdmissionQueue.acquire({ uid: context.principalId, signal: context.signal,
+  const admission = await freeChainAdmissionQueue.acquire({ uid: context.principalId, signal: context.signal, payloadBytes: state.identity?.payloadBytes ?? 0,
     maxWaitMs: Math.min(5000, Math.max(0, context.deadlineAtMs - Date.now())) });
   if (!admission.admitted) throw new InferenceGatewayTerminalError(`admission-${admission.reason}`);
   const lease = { active: true, uid: context.principalId, identity: state.identity, waitedMs: admission.waitedMs, signal: context.signal };
@@ -223,7 +223,7 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
     const lease = entryLeases.getStore();
     const admission = lease?.active && lease.uid === context.principalId && lease.identity === state.identity
       ? { admitted: true as const, waitedMs: lease.waitedMs, release: () => {} }
-      : await freeChainAdmissionQueue.acquire({ uid: context.principalId, signal, maxWaitMs: Math.min(5000, Math.max(0, context.deadlineAtMs - Date.now())) });
+      : await freeChainAdmissionQueue.acquire({ uid: context.principalId, signal, payloadBytes: admissionPayloadBytes(input), maxWaitMs: Math.min(5000, Math.max(0, context.deadlineAtMs - Date.now())) });
     if (!admission.admitted) throw new InferenceGatewayTerminalError(`admission-${admission.reason}`);
     releaseAdmission = admission.release;
     const db = getServerDb();

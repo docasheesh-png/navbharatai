@@ -303,6 +303,7 @@ interface AIChatProps {
    */
   onMessagesChange?: (next: Message[]) => void;
   onStop?: () => void;
+  onQueueQuestion?: () => boolean;
   /** Take back the last message: stops any in-flight reply and removes the last exchange (admin 2026-08-13). */
   onUnsend?: () => void;
   // Guider (Hybrid) confirmation card: a proposed design awaiting Approve / Edit / Answer.
@@ -344,6 +345,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   onSendSuggestion,
   onMessagesChange,
   onStop,
+  onQueueQuestion,
   onUnsend,
   guiderPlan,
   guiderReplanning,
@@ -1296,6 +1298,11 @@ export const AIChat: React.FC<AIChatProps> = ({
                     {/* UNSEND moved out of the composer (admin 2026-08-14): it now lives ON the last sent
                         message bubble and appears only while the reply is still coming — see the message
                         footer above. The composer keeps just Stop (while loading) and Send. */}
+                    {isLoading && onQueueQuestion && (
+                      <button type="button" onClick={() => onQueueQuestion()} disabled={!input.trim() || attachments.length>0}
+                        title="Queue this text question after the current answer" aria-label="Queue question"
+                        className="px-2 py-1 rounded text-xs border border-line disabled:opacity-40">Queue</button>
+                    )}
                     {isLoading && onStop ? (
                       // ONE-CLICK STOP (admin 2026-08-13: "galat search rukti nahi") — a running reply must
                       // end the instant this is tapped, not after a confirm dialog the user has to dismiss.

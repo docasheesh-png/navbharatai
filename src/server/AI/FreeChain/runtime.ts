@@ -1,3 +1,4 @@
+import { capacityRevision, notifyCapacityReleased, waitForCapacity } from './capacityWait';
 import { switchedOffProviderFor } from '../../lib/providerSwitches';
 import { chatAvailabilityMessage } from '../../lib/chatAvailabilityMessage';
 import { freeChainAdmissionFailure } from './admissionFailure';
@@ -21,7 +22,7 @@ import { maximumCostNanoUsd, usdToNanoUsd, type PaidReservation } from './spendC
 import { trimForRung } from './trim';
 import { tryAcquireRungSlot, releaseRungSlot, routeTurn, orderForRoute, effectiveMaxOutput, trimHistory, preparedSystemPrompt, faqCacheable, reserveMonthly, settleMonthly, type TurnRoute } from './masterPlan';
 import { logFreeChain, type FreeChainTelemetry } from './telemetry';
-import { OpenAiCompatProvider, FreeChainProviderError } from './providers/openAiCompatProvider';
+import { OpenAiCompatProvider, FreeChainProviderError, type FreeChainProviderResponse } from './providers/openAiCompatProvider';
 import { FreeRoutingError } from '../LiveRegistry/dispatcher';
 import { runRegistryRung } from './providers/openRouterRegistryRung';
 import { getServerDb, type Firestore } from '../../lib/serverDb';
@@ -185,6 +186,12 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     // A routed order with no usable rung (keys not configured yet, privacy) falls back to the plain order.
     if (!exclusiveAdmin && order !== baseOrder && !order.some(oid => { const r = cfg.rungs.find(x => x.id === oid); return !!r && !rungReason(r, cfg, input); })) { order = baseOrder; route = 'normal'; }
     trace.route = route; trace.routeReason = routed.reason;
+    // Re-scan only pre-reservation capacity refusals. The original queue-wait budget bounds
+    // this wait too; no extra provider attempt, quota charge or unbounded timer is introduced.
+    const capacityDeadline = Date.now() + Math.max(0, cfg.queue.maxWaitMs - queueWaitMs);
+    let capacityRounds = 0, triedQuota = false;
+    for (;;) {
+    const observedCapacity = capacityRevision(); let capacityBusy = false;
     for (const id of order) {
       if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
       const baseRung = cfg.rungs.find(r => r.id === id)!;
@@ -216,13 +223,13 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         }
       }
       // Real per-rung concurrency (GLM-4.5 Flash 2, GLM-4.7 Flash 1): busy → next rung, no wait.
-      if (!tryAcquireRungSlot(cfg, id)) { attempt.reason = 'concurrency'; continue; }
-      if (!acquireSlot(capacityName)) { releaseRungSlot(cfg, id); attempt.reason = 'capacity'; continue; }
+      if (!tryAcquireRungSlot(cfg, id)) { capacityBusy = true; attempt.reason = 'concurrency'; continue; }
+      if (!acquireSlot(capacityName)) { capacityBusy = true; releaseRungSlot(cfg, id); attempt.reason = 'capacity'; continue; }
       let reservation: PaidReservation | null = null;
       let monthHold: { month: string; amount: number } | null = null; let monthSettled = false;
       const controller = new AbortController(); const abort = () => controller.abort(); input.signal?.addEventListener('abort', abort, { once: true });
       if (input.signal?.aborted) abort();
-      let content = ''; let response: AIProviderResponse | undefined; let completeUsage = false; let partial = false;
+      let content = ''; let response: (AIProviderResponse & Pick<FreeChainProviderResponse, 'finishReason'>) | undefined; let completeUsage = false; let partial = false;
       // The watchdog bounds observation, not provider lifetime. Transfer BOTH acquired slots to
       // the original attempt promise, so an uncooperative SDK cannot free capacity by timing out.
       let physical: Promise<void> | undefined;
@@ -230,7 +237,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       const releaseAcquiredSlots = () => {
         if (slotsReleased) return;
         slotsReleased = true;
-        releaseSlot(capacityName); releaseRungSlot(cfg, id);
+        releaseSlot(capacityName); releaseRungSlot(cfg, id); notifyCapacityReleased();
       };
       // Trusted watchdog metadata belongs to this attempt, not to the frozen provider error.
       let watchdogDetail: string | undefined;
@@ -245,6 +252,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       }
         const target = new URL(rung.baseURL);
         if (switchedOffProviderFor(target.hostname, target.pathname)) { attempt.reason = 'disabled'; continue; }
+        triedQuota = true;
         let admission = await store.reserveQuota(quotaInput(rung, cfg, prepared.inputTokens));
         // Owner exclusive: a prior AUTH/402 wrote a 1h/1d Firestore cooldown; clear once so the
         // probe can reach CheaperInference and surface the real HTTP status.
@@ -259,7 +267,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           attempt.reason = admission.reason === 'cooldown' && breaker.snapshot().lastOpenReason
             ? `cooldown:last=${breaker.snapshot().lastOpenReason}`
             : admission.reason;
-          if (typeof admission.resetAt === 'number' && admission.resetAt > Date.now()) {
+          if (admission.reason !== 'local_capacity' && typeof admission.resetAt === 'number' && admission.resetAt > Date.now()) {
             breaker.honorRemoteOpenUntil(admission.resetAt, admission.reason === 'cooldown' ? 'store-cooldown' : admission.reason);
           }
           continue;
@@ -331,7 +339,15 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         if (reservation && actual !== null) await store.settlePaid(reservation, actual);
         if (monthHold) { monthSettled = true; await settleMonthly(db, monthHold.month, monthHold.amount, actual); }
         breaker.recordSuccess(); recordProviderLatency(breakerName, Date.now() - attemptStarted, false);
-        attempt.reason = 'served'; trace.rung = id; trace.costUsdEstimate = isPaidRung(id) ? (completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) / 1e9 : null) : 0;
+        trace.rung = id; trace.costUsdEstimate = isPaidRung(id) ? (completeUsage && response.usage ? quote(cfg, response.usage.inputTokens, response.usage.outputTokens, rung) / 1e9 : null) : 0;
+        // Token exhaustion is a completed transport, not a complete answer. Preserve reported
+        // charges above, never cache it or mix another provider into already committed text.
+        if (response.finishReason === 'length') {
+          attempt.reason = 'truncated';
+          if (!input.onChunk) content += '\n\nThe response was interrupted. Please try again.';
+          return done({ ...response, content, ok: true, reason: 'stalled' });
+        }
+        attempt.reason = 'served';
         if (cacheKey && id !== 'openrouter') await new FreeChainCache(db).put(cacheKey, { content, provider: response.provider, model: response.model }, cfg.cacheTtlS).catch(() => {});
         return done({ ...response, content, ok: true });
       } catch (error) {
@@ -369,6 +385,13 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         // Never-dispatched holds are released; a dispatched call with unknown cost stays fully booked.
         if (monthHold && !monthSettled) await settleMonthly(db, monthHold.month, monthHold.amount, attempt.entered ? null : 0);
       }
+    }
+    if (!triedQuota && capacityBusy && ++capacityRounds <= 32) {
+      const released = await waitForCapacity(observedCapacity, capacityDeadline, input.signal);
+      if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
+      if (released) continue;
+    }
+    break;
     }
     const lastTtft = [...trace.attempts].reverse().find(a => a.provider === 'cheapinf' && /timeout:/.test(a.reason));
     const ttftCapMs = lastTtft ? Number((/timeout:(?:first-token|idle|hard-cap|stream):(\d+)ms/.exec(lastTtft.reason) ?? [])[1]) : undefined;

@@ -1,3 +1,18 @@
+## 2026-11-04 — Ordinary Chat default provider order (local implementation; validation pending)
+
+Owner requested GLM 4.5 Flash → GLM 4.7 Flash → Groq → Cloudflare → verified-free
+OpenRouter → CheaperInference → DeepInfra 8B → DeepInfra DeepSeek V4 Flash → GPT-5
+Nano → GLM FlashX → paid Gemini Flash-Lite, with Gemini/Vertex remaining OFF.
+The constant already matched; default selection and quality promotion did not.
+Default selection now uses the shared ON policy at context/entry/config and 100%
+rollout when no override exists. Classification retains output sizing, while
+promotion requires explicit route-reorder opt-in. Family OFF is checked before
+quota reservations even if credentials were captured before the switch.
+Gateway/Strict Free, saved controls, private/health exclusions, account evidence,
+quotas, budgets, four-attempt limit and exclusive admin diagnostics remain intact.
+See docs/FREE_CHAT_CHAIN.md for scope and exceptions. No live settings changed.
+Validation evidence is recorded with the eventual PR; not yet deployed.
+
 ## 2026-11-03 — Autopsy of build report #1836 (958aa1ec, second-newest failure)
 
 3D endless car racing game, weak tier, ENGINE_R1 `deepseek-v4.1-flash`, RED in 170 s, never charged; all 162 issues and 18 model calls read.

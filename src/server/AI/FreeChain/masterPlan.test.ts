@@ -15,7 +15,7 @@ describe('master plan config', () => {
     const off = freeChainConfig({ FREE_CHAIN_CONCURRENCY_ENABLED: 'off', FREE_CHAIN_ROUTER_ENABLED: 'off', FREE_CHAIN_STABLE_PREFIX_ENABLED: 'off', FREE_CHAIN_COMPACT_PROMPT_ENABLED: 'off', FREE_CHAIN_OUTPUT_CAP_ENABLED: 'off', FREE_CHAIN_HISTORY_TRIM_ENABLED: 'off', FREE_CHAIN_FAQ_CACHE_ENABLED: 'off', FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off', FREE_CHAIN_THROTTLE_ENABLED: 'off', FREE_CHAIN_CACHE_ENABLED: 'off' });
     expect(Object.values(off.features).filter(v => v === true)).toEqual([]); expect(off.cacheEnabled).toBe(false); expect(off.errors).toEqual([]);
   });
-  it('master switch stays OFF by default so production is unchanged until the owner enables it', () => { expect(on().enabled).toBe(false); });
+  it('ordinary chat defaults to the chain while explicit OFF remains authoritative', () => { expect(on().enabled).toBe(true); expect(freeChainConfig({ FREE_CHAIN_ENABLED: 'off' }).enabled).toBe(false); });
   it('monthly cap cannot exceed $520 and daily cap accepts the owner $17', () => {
     expect(freeChainConfig({ FREE_CHAIN_MONTHLY_CAP_USD: '600' }).errors).toContain('FREE_CHAIN_MONTHLY_CAP_USD');
     const c = freeChainConfig({ FREE_CHAIN_PAID_DAILY_CAP_USD: '17' }); expect(c.errors).toEqual([]); expect(c.paidCapNanoUsd).toBe(17e9);
@@ -78,10 +78,14 @@ describe('rule-based router', () => {
     expect(routeTurn(c, { message: 'exam tips', history: [], throttled: true }).route).toBe('quality');
   });
   it('router off → normal', () => { expect(routeTurn(freeChainConfig({ FREE_CHAIN_ROUTER_ENABLED: 'off' }), { message: 'hi', history: [] }).route).toBe('normal'); });
-  it('route orders', () => {
+  it.each(['normal', 'fast', 'quality'] as const)('preserves every default rung for %s', route => {
+    expect(on().features.routeReorder).toBe(false);
+    expect(orderForRoute(on().order, route)).toEqual(on().order);
+  });
+  it('route orders with explicit reorder opt-in', () => {
     const o = on().order;
-    expect(orderForRoute(o, 'quality')).toEqual(['dsv4flash', 'cheapinf', 'gpt5nano', 'glmflashx', 'geminipaid']);
-    expect(orderForRoute(o, 'fast')).not.toContain('dsv4flash');
+    expect(orderForRoute(o, 'quality', true)).toEqual(['dsv4flash', 'cheapinf', 'gpt5nano', 'glmflashx', 'geminipaid']);
+    expect(orderForRoute(o, 'fast', true)).not.toContain('dsv4flash');
     expect(orderForRoute(o, 'normal')).toBe(o);
   });
 });

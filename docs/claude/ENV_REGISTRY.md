@@ -4509,7 +4509,7 @@ or protect against upgrades/external account traffic.
 
 | Name | Code default / interpretation |
 | --- | --- |
-| `FREE_CHAIN_ENABLED` | OFF. Deployment gate; saved admin controls cannot override OFF. |
+| `FREE_CHAIN_ENABLED` | ON when absent (owner default, 2026-11-04). Deployment gate; saved admin controls cannot override OFF. |
 | `CHEAPERINFERENCE` (alias `CheaperInference`) | `off` (default) \| `admin` \| `all`. `admin` = ONLY verified admin Free Chat replies, from Beam with `reasoning_effort=low` and a 2048-token cap (Beam's card allows low\|medium\|high\|xhigh\|max; `none` is not valid and can 400). `all` does not dispatch unless `CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION=on` (Keak terms §6: no shared access to the key without written permission). |
 | `CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION` | OFF. Set `on` only after Keak AI, Inc. has permitted this product to serve the key to end users (terms §6). Without it, `CHEAPERINFERENCE=all` stays closed. Admin-only mode does not need this flag. |
 | `CHEAPERINFERENCE_API_KEY` | Secret, unset. One server-side key (`ci_live_…`). Comma lists rejected. Never put in the frontend. Required for `admin` and `all`. **OWNER:** CheaperInference dashboard login is `aashishcpmt093@gmail.com` (platform.cheaperinference.com). Do not invent another account. |
@@ -4525,7 +4525,7 @@ or protect against upgrades/external account traffic.
 | `FREE_CHAIN_BLUESMINDS_API_KEY` / `FREE_CHAIN_REQUESTY_API_KEY` | Secret, unset. Terms/free tier unverified; blocked unless `FREE_CHAIN_<P>_WRITTEN_APPROVAL=on`. |
 | `FREE_CHAIN_<NVIDIA\|MODELSCOPE\|LLM7\|BLUESMINDS\|REQUESTY>_WRITTEN_APPROVAL` | OFF. Set only when the owner holds written commercial permission from that provider. |
 | `FREE_CHAIN_LLM7_FREE_VERIFIED_UNTIL` | Unset. Free-plan attestation for LLM7 (also requires written approval). |
-| `FREE_CHAIN_ROLLOUT_PERCENT` | 0; whole integer 0–100. Used when no saved admin override exists. |
+| `FREE_CHAIN_ROLLOUT_PERCENT` | 100; whole integer 0–100. Used when no saved admin override exists. |
 | `FREE_CHAIN_ALLOW_UIDS` | Empty comma-separated verified UID allowlist. Allowlisted users can be selected even at 0%. Never include secrets. |
 | `FREE_CHAIN_ORDER` | Default includes `cheapinf` first among paid (`glm45,glm47,groq,cloudflare,openrouter,cheapinf,llama8b,…`). Unique known IDs, omitted rungs allowed; no paid rung may precede a free rung. Empty/unset uses default, not an empty chain. |
 | `FREE_CHAIN_SKIP_GEMINI` | ON. Leave on pending current account/privacy/audience/geography review. |
@@ -4851,3 +4851,12 @@ secure live-download and full six-scenario/mobile/publication acceptance remain 
   `DEEPSEEK_API_KEY` / `FREE_CHAIN_DEEPSEEK_API_KEY` and `KIMI_API_KEY` (only when `KIMI_BASE_URL` is unset or on
   `api.moonshot.ai` / `api.moonshot.cn`), each provider's own balance endpoint. Every other provider is "check
   manually" with its billing link. No new key is required.
+
+### Ordinary Chat provider order (2026-11-04)
+
+`FREE_CHAIN_ROUTE_REORDER_ENABLED` defaults OFF. Classification still controls
+output caps; only explicit ON permits quality/fast routing to reorder or omit
+rungs. `FREE_CHAIN_ORDER`, sticky spread opt-in, Gateway/Strict Free precedence,
+saved controls and provider OFF switches remain authoritative. See
+[Free Chat runbook](../FREE_CHAT_CHAIN.md) for the full default order and exceptions.
+No live deployment or provider switch is changed by the code default.

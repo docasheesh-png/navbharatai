@@ -1,7 +1,7 @@
 import { entryAdmissionFor } from './entryAdmission';
 import type { Request } from 'express';
 import { verifyFirebaseIdentity, verifyFirebaseToken } from '../../lib/authMiddleware';
-import { parseEnvFlag } from '../../lib/envFlag';
+import { freeChainEnabled } from './config';
 import { conversationHash } from './control';
 import type { FreeChainContext } from './rollout';
 import { identityGrantEmail } from '../../AgentV3/featureFlag';
@@ -15,7 +15,7 @@ import { isAdminEmail } from '../../lib/adminEmails';
 export async function freeChainRequestContext(req: Request, input: { tier: string; message: string; history: unknown[]; replyLanguage?: FreeChainContext['replyLanguage']; attachments: number; hasProfile: boolean; hasMemory: boolean; grounded: boolean }): Promise<FreeChainContext | undefined> {
   const entryAdmission = entryAdmissionFor(req);
   const mode = cheaperInferenceMode();
-  const freeChainOn = parseEnvFlag(process.env.FREE_CHAIN_ENABLED) === true;
+  const freeChainOn = freeChainEnabled();
   if (input.tier !== 'navbharat' || input.attachments) return undefined;
   if (!entryAdmission && !freeChainOn && mode !== 'admin' && mode !== 'all') return undefined;
 

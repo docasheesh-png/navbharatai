@@ -1043,6 +1043,8 @@ export class BuildDiagnostics {
   private requestAnalysis?: { taskType: string; complexityScore: number; startTier: string; startBand?: string; signalsCouldNotRead?: boolean };
   /** See the transient-status note in the narration handler. */
   private transientStatusRecorded = false;
+  /** Type errors the LAST typecheck row recorded (SANDBOX_CMD "typecheck … → N type errors" / "clean"). */
+  private openTypeErrors = 0;
   /** Readiness warnings already recorded this build — each is recorded once (Q-068). */
   private readonly readinessWarningsSeen = new Set<string>();
   private readonly meta: BuildDiagnosticsMeta;
@@ -1125,6 +1127,10 @@ export class BuildDiagnostics {
    * repeat into the PREVIOUS entry's `repeatCount` instead of pushing a new one.
    */
   record(issue: Omit<BuildIssue, 'ts'> & { ts?: number }): void {
+    if (issue.code === 'SANDBOX_CMD' && typeof issue.message === 'string' && /\btypecheck\b/i.test(issue.message)) {
+      const n = /→\s*(\d+)\s+type errors?/.exec(issue.message);
+      this.openTypeErrors = n ? Number(n[1]) : /→\s*clean\b/.test(issue.message) ? 0 : this.openTypeErrors;
+    }
     // The render proof, readable by the tools too (renderProof.ts) — same rule as renderProvenByAnyActor.
     if (this.meta.workspaceId && issue.severity === 'info' && typeof issue.code === 'string' && RENDER_PROVEN_CODES.has(issue.code)) {
       noteRenderSeen(this.meta.workspaceId);
@@ -2154,7 +2160,12 @@ export class BuildDiagnostics {
         // SUCCESSFUL build, inflating the count to "1 error" under an "All Errors Fixed!" summary). When a
         // note is the agent fixing/removing/resolving something and carries NO real failure verb, it is a
         // build STEP, not a problem.
-        const remediationIntent = /\b(fix(?:ing|ed|es)?|remov(?:e|es|ing|ed)|resolv(?:e|es|ing|ed)|correct(?:s|ing|ed)?|clean(?:s|ing|ed)?\s+up|delet(?:e|es|ing|ed))\b/i.test(tForMatch);
+        const remediationIntent = /\b(fix(?:ing|ed|es)?|remov(?:e|es|ing|ed)|resolv(?:e|es|ing|ed)|correct(?:s|ing|ed)?|clean(?:s|ing|ed)?\s+up|delet(?:e|es|ing|ed))\b/i.test(tForMatch)
+          // ...and its sibling, INVESTIGATION intent (autopsy 61279465): "I see that 'glass' is a valid MaterialKind.
+          // Let me check the specific error in the TrainModel:" was the report's one WARNING — the model starting to
+          // look at an error the platform had ALREADY filed as an open typecheck row. Only then: an error the model
+          // names that nothing filed (narrationEchoesPrompt's "identify the network error") stays a finding.
+          || (this.openTypeErrors > 0 && /\b(let me|let's|i'?ll|now i'?ll|i will)\s+(check|look at|inspect|investigate|read|examine|see)\b/i.test(tForMatch));
         // ECHOING THE USER'S OWN REPORTED SYMPTOM IS NOT THE ENGINE STRUGGLING (build e4ebcb5f).
         // Gated on `!failureVerb` exactly as `remediationIntent` is, so a genuine failure ("The dev
         // server FAILED to start — port 5173 error.") stays an error even when the prompt says "error".

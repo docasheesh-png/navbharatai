@@ -15,7 +15,11 @@ native raycast test oracle. The oracle now partitions the same index buffer into
 bounded batches; every probe/assertion remains. A separate equivalence test compares
 native raycasts across transforms, misses, vertex edits, draw ranges and groups.
 Terrain coverage tests: all 21 pass in 16.71s (previous baseline 3 timeouts/156.52s).
-Full final CI-equivalent validation is being rerun; no push or deployment yet.
+Final local validation passed: 3,213 files, 48,434 tests, 85 skipped; coverage
+statements 75.66%, branches 71.60%, functions 78.28%, lines 77.66%. All CI-equivalent
+checks passed, including the locked emulator drills. No gate/timeout was weakened.
+Code verified at 7747f84d8; this entry records its results. PR/hosted CI follow;
+no live setting or deployment is claimed.
 
 ## 2026-11-04 — Ordinary Chat default provider order (local implementation; publication blocked)
 

@@ -1,4 +1,5 @@
 import { assertCanaryLegacyAllowed } from './reliability/canarySpendGuard';
+import { ASSET_MODELS_PATH, localModelSubjects, readyModelFor, localModelLead } from './gameAssets/localModelNote';
 import { randomUUID } from 'node:crypto';
 import { entryShadowNote } from './entryShadow';
 import { bannedInstallRefusal, bannedPackageGuardEnabled, stripBannedDeps, strippedDepsNote } from './reliability/bannedPackages';
@@ -9592,7 +9593,14 @@ export class ToolDispatcher {
           },
         });
         const placement = known ? PLACEMENT[known.category] : undefined;
+        // 🔴 A REVIEWED MODEL L3 ALREADY PREPARED OUTRANKS "HAND-MODEL IT" (autopsy 61279465, localModelNote.ts).
+        let readyModel: string | null = null;
+        try {
+          const src = await this.actuator.readFile(this.workspaceId, ASSET_MODELS_PATH).catch(() => '');
+          readyModel = readyModelFor(wanted, localModelSubjects(typeof src === 'string' ? src : ''));
+        } catch { /* no local models: the spec stands as it is */ }
         const body = [
+          readyModel ? localModelLead(readyModel) : '',
           renderSpec(spec, { builder: known?.builder }),
           placement
             ? '\n  HOW TO PLACE IT — ' + placement.headline + '\n'

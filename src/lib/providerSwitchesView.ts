@@ -37,3 +37,14 @@ export function thisInstanceEnforces(v: ProviderSwitchesView): boolean {
   const have = [...v.thisInstance.enforcingOff].sort();
   return want.length === have.length && want.every((id, i) => id === have[i]);
 }
+
+/**
+ * What is missing before a switch can be saved, in words, or null. PURE. The server requires 3–300 characters;
+ * the button used to sit disabled until then with nothing saying why (admin 2026-11-04: "off ho hi nahi raha").
+ */
+export function switchReasonProblem(reason: string): string | null {
+  const n = reason.trim().length;
+  if (n < 3) return 'Type a reason first (at least 3 characters) — for example "balance finished". It is kept in the change history.';
+  if (n > 300) return 'The reason is too long — keep it under 300 characters.';
+  return null;
+}

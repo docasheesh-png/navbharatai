@@ -40,7 +40,17 @@ export interface LadderDepth {
   /** Slices that matched a rung, and slices that named a model no rung claims. */
   matched: number;
   unmatched: number;
+  /**
+   * Of the unmatched, slices from an engine that runs OUTSIDE the tier's ladder by design — the Surplus engine a
+   * Weak build is admitted to, Router One when pinned — by provider (autopsy 61279465: "Ladder depth unknown — 40
+   * delivered slice(s) named a model no rung of this tier claims" about a build that ran entirely on Surplus, which
+   * is a fact about routing, not an unknown).
+   */
+  offLadder?: Record<string, number>;
 }
+
+/** Engines that serve a build instead of the ladder, by design. Their slices are named, never "unknown". */
+export const OFF_LADDER_PROVIDERS: readonly string[] = ['SURPLUS', 'ENGINE_R1'];
 
 /**
  * The Claude rungs name a FAMILY ('haiku' / 'sonnet' / 'opus'), while the ledger records the real
@@ -110,6 +120,7 @@ export function ladderDepthUsed(
   let depth: number | null = null;
   let matched = 0;
   let unmatched = 0;
+  const offLadder: Record<string, number> = {};
 
   for (const slice of slices) {
     const out = Number(slice?.usage?.outputTokens);
@@ -119,6 +130,8 @@ export function ladderDepthUsed(
     const idx = rungIndexFor(slice, rungs);
     if (idx == null) {
       unmatched++;
+      const p = String(slice.provider ?? '').trim().toUpperCase();
+      if (OFF_LADDER_PROVIDERS.includes(p)) offLadder[p] = (offLadder[p] ?? 0) + 1;
       continue;
     }
     matched++;
@@ -126,7 +139,7 @@ export function ladderDepthUsed(
     if (depth == null || oneBased > depth) depth = oneBased;
   }
 
-  return { depth, rungCount: rungs.length, matched, unmatched };
+  return Object.keys(offLadder).length ? { depth, rungCount: rungs.length, matched, unmatched, offLadder } : { depth, rungCount: rungs.length, matched, unmatched };
 }
 
 /**
@@ -146,6 +159,12 @@ export function ladderDepthUsed(
  * reads exactly as it did before.
  */
 export function describeLadderDepth(d: LadderDepth, openedAt?: number): string {
+  const off = Object.entries(d.offLadder ?? {});
+  const offCount = off.reduce((n, [, c]) => n + c, 0);
+  const offNames = off.map(([p, c]) => `${p} (${c})`).join(', ');
+  if (d.depth == null && offCount > 0 && offCount === d.unmatched) {
+    return `The ladder was not used — every delivered slice came from an engine outside it by design: ${offNames}.`;
+  }
   if (d.depth == null) {
     return d.unmatched > 0
       ? `Ladder depth unknown — ${d.unmatched} delivered slice(s) named a model no rung of this tier claims.`
@@ -154,7 +173,8 @@ export function describeLadderDepth(d: LadderDepth, openedAt?: number): string {
   const opened = Number.isFinite(Number(openedAt)) && Number(openedAt) >= 1
     ? Math.floor(Number(openedAt))
     : 1;
-  const tail = d.unmatched > 0 ? ` (${d.unmatched} slice(s) unattributed)` : '';
+  const rest = d.unmatched - offCount;
+  const tail = (offCount > 0 ? ` (${offNames} outside the ladder)` : '') + (rest > 0 ? ` (${rest} slice(s) unattributed)` : '');
   const openedNote = opened > 1 ? ` — it opened there, past the cheap lead rung` : '';
   if (d.depth <= opened) {
     return opened === 1

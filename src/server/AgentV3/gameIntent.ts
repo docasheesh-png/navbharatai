@@ -139,7 +139,9 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
   const vehicle = VEHICLES.find(([, re]) => re.test(text))?.[0] ?? null;
   // A vehicle the player DRIVES is driven: it speeds up and it stops. A train, bus or car simulator that
   // cannot brake is not the game that was asked for, whether or not the request spelt the word out.
-  if (vehicle && (genre === 'simulator' || genre === 'racing')) {
+  // Only for a SIMULATOR: an endless lane-change racer drives itself and never brakes, and the contract's own rule
+  // is that a feature is required only when named (theDeclinedListStaysDeclined) — a simulator is where driving IS the game.
+  if (vehicle && genre === 'simulator') {
     // A plane or a boat is throttled, not braked.
     const implied = vehicle === 'aircraft' || vehicle === 'boat' ? (['throttle'] as const) : (['throttle', 'braking'] as const);
     for (const f of implied) if (!requiredFeatures.includes(f)) requiredFeatures.push(f);
@@ -156,7 +158,7 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
     vehicle,
     camera,
     subjects: SUBJECTS.filter(([, re]) => re.test(text)).map(([n]) => n),
-    externalAssets: /\b(external|free|real|realistic|cc0|downloaded?|glb|gltf)\b[^.]{0,40}\b(3d )?(assets?|models?)\b|\bnot (primitive|placeholder)|\bno (primitive|placeholder)s?\b/i.test(text),
+    externalAssets: !/\b(procedural (geometry )?only|no (external|downloaded|3d) (image\/)?(models?|assets?))\b/i.test(text) && /\b(external|free|real|realistic|cc0|downloaded?|glb|gltf)\b[^.]{0,40}\b(3d )?(assets?|models?)\b|\bnot (primitive|placeholder)|\bno (primitive|placeholder)s?\b/i.test(text),
   };
 }
 

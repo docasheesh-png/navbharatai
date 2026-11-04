@@ -29,6 +29,7 @@ import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
 import { BotsLedgerPanel } from './admin/BotsLedgerPanel';
 import { AdsPanel } from './admin/AdsPanel';
 import { ApiProvidersPanel } from './admin/ApiProvidersPanel';
+import { ProviderSwitchesPanel } from './admin/ProviderSwitchesPanel';
 import { chatProviderHealth, chatProviderLatencyText } from '../lib/chatProviderHealth';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
 import {
@@ -2676,6 +2677,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── AI ENGINES TAB ── */}
           {activeTab === 'engines' && (
             <div className="space-y-6">
+              {/* AI PROVIDER SWITCHES (admin 2026-11-04): real, enforced on/off per provider — providerSwitches.ts. */}
+              <ProviderSwitchesPanel adminToken={adminToken} />
               {/* ── THE REAL BUILD ENGINES ───────────────────────────────────────────────────
                   Admin, 2026-09-17: *"ai engine wale page ko bhi update karo, woh fake hai abhi."*
                   They were right. What used to sit here were the CHAT router's in-memory counters,

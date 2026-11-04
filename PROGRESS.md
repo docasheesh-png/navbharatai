@@ -100485,3 +100485,22 @@ Ledger: 0 files written, RED gate, "All providers failed".
 - OPEN: Q-2315 GLM single 429 ends chain · Q-2316 orphan `nb-autostyle.css` · Q-2317 TODO-only first turn ·
   Q-2318 stale SURPLUS snapshot · Q-2319 "engine slow" note when we abandoned the call.
 Watch on the next weak build: no "crawling after ~15 s" abandonment of a stream that has started producing.
+
+## 2026-11-04 — Admin → AI Engines → AI provider switches (enforced on/off per AI provider)
+
+Admin: "sabhi ai provider (google vertex ai, gemini ai etc) ko on off karne ka switch banao … 100% real and working".
+The old `providerEnabled` switches were removed on 2026-10-11 (audit F16) because nothing read them; this one is its
+own enforced system (`src/server/lib/providerSwitches.ts`), as that audit required:
+- **Layer 1, keys withdrawn:** while a provider is off its AI keys are removed from the server env (restored exactly
+  when on), so every existing "no key" path — ladder rung skipped, Surplus fallback, chat router, features — degrades
+  on its own. Shared infra keys are never withdrawn (Cloudflare DNS token, AWS creds, GOOGLE_API_KEY).
+- **Layer 2, network refused:** `fetch`, `https.request/get` and `http2.connect` refuse the provider's hosts before a
+  socket opens — this catches cached SDK clients, Vertex (no key: server identity) and Nova Sonic (Bedrock, http2).
+  Installed by the FIRST import of server.ts; verified in a CJS esbuild bundle for default/named/require/fetch.
+- **State:** `admin_provider_switches/state`, revision-checked transaction, reason required, last 50 changes kept;
+  every instance re-reads every 10 s; a failed read keeps the last known state (never switches a provider back on).
+  Before the first successful read after boot nothing is off (a boot window of one Firestore read).
+- **Proof:** `tests/anAiProviderSwitchIsEnforced.test.ts` (18 tests, incl. a cached OpenAI and Anthropic SDK client
+  refused after the switch and working again when on); reversion of the guard → 4 tests fail.
+- **Correction:** the API Providers page said Nova Sonic voice was not used — wrong (`src/server/sonic/SonicBridge.ts`
+  uses Bedrock). The Bedrock row now says "Voice chat (Nova Sonic)". My earlier search missed the word "sonic".

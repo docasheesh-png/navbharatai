@@ -29,6 +29,7 @@ const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
  * is on neither list.
  */
 const REVIEWED_SMALL: Record<string, string> = {
+  '/api/admin/provider-switches': 'strict four-key JSON allowlist: provider id from a fixed list, boolean on, 3–300 character reason, integer revision; every other field rejected; standard 1 MB parser cap unchanged',
   '/api/admin/api-providers/:id/account': 'strict one-key JSON allowlist: accountEmail, an email of at most 254 characters or empty; every other field rejected; provider id must be one of the directory ids; standard 1 MB parser cap unchanged',
   '/api/admin/free-chat-chain/deepinfra-comparison': 'strict four-key allowlist: UUID run id, 64-character tariff digest, literal true consent and 10–500 character audit reason; no prompts/files/credentials, centrally enforced 4 KB parser cap',
   '/api/auth/sessions/revoke': 'strict one-key JSON allowlist: confirm must be true; every other field rejected, no UID/files/credentials/prompts; standard 1 MB parser cap unchanged',

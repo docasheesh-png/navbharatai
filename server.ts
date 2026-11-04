@@ -1,4 +1,6 @@
 import 'dotenv/config';
+// FIRST, before any import can create an SDK client: the AI provider switches' network layer (providerSwitches.ts).
+import './src/server/lib/providerSwitchInstall';
 import express from 'express';
 import { normalizeMissingBody } from './src/server/lib/expressCompat';
 import helmet from 'helmet';
@@ -885,6 +887,10 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
       console.log(`🚀 Server running on http://localhost:${PORT}`);
       // P2.4 — the server is initialized and listening → readiness probe goes green.
       markServerReady();
+      // The AI provider on/off switches: read the shared state now and every 10 s on this instance.
+      import('./src/server/lib/providerSwitches')
+        .then(({ startProviderSwitchSync }) => startProviderSwitchSync())
+        .catch(() => { /* nothing is switched off until a sync succeeds; boot is never blocked */ });
       // P-BRE.6 — recover build jobs orphaned by a previous instance's restart/crash: any job left
       // in a non-terminal status with a stale heartbeat is honestly marked FAILED (never silently
       // stuck). Fire-and-forget + self-guarded so it can never delay or crash startup.

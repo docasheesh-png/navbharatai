@@ -3096,6 +3096,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['vercel deploy', 'netlify deploy', 'github pages', 'deploy', 'hosting', 'custom domain', 'publish app', 'live url', 'deploy karo', 'production'],
   },
   {
+    id: 'admin-provider-switches',
+    name: 'AI provider switches (on/off)',
+    path: 'Admin Dashboard → AI Engines → AI provider switches (verified admin only)',
+    description: 'One on/off switch per AI service the platform uses. Turning one OFF really stops it everywhere — builds, chat, images, voice and Free Chat: its keys are withdrawn on every server and its network calls are refused, so work moves to the next service in line or the feature says it is unavailable. Turning it back ON restores it exactly. Every change needs a reason and is kept in a change history (who, when, why). The page shows whether this server has applied the latest change; every other server applies it within 10 seconds.',
+    howToUse: 'Verified admins open AI Engines, press the switch next to a service, type a reason (for example "balance finished") and confirm. To undo, press the switch again. The change history lists the last changes.',
+    relatedFeatures: ['admin-api-providers', 'admin-provider-diagnostics'],
+    keywords: ['provider switch', 'turn off provider', 'disable ai provider', 'kill switch', 'ai on off', 'provider band karo', 'provider off', 'engine off'],
+  },
+  {
     id: 'admin-api-providers',
     name: 'API Providers (balances and billing links)',
     path: 'Admin Dashboard → Money → API Providers (verified admin only)',

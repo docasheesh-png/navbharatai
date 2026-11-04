@@ -100555,6 +100555,12 @@ own enforced system (`src/server/lib/providerSwitches.ts`), as that audit requir
 - **Correction:** the API Providers page said Nova Sonic voice was not used — wrong (`src/server/sonic/SonicBridge.ts`
   uses Bedrock). The Bedrock row now says "Voice chat (Nova Sonic)". My earlier search missed the word "sonic".
 
+## 2026-11-04 — L3 step 1: Admin → AI Engines → Game asset download check (L3 OFF)
+
+The L3 asset layer had never downloaded from Cloud Run. New admin check runs the real guarded transports (Poly Haven
+search + reviewed `fox` download + hash + validator) from the live server, writes nothing, never reads the L3 flag.
+`tests/theGameAssetLiveCheckIsReal.test.ts` (9); reverted timing bug → failed. Sandbox: GitHub ✓, Poly Haven ✗ ENOTFOUND
+(container egress). Next: the admin runs it on production; steps 2–4 follow in order (catalogue, acceptance, rollout).
 ### 2026-11-04 — Bounded 1,024-turn Chat bursts (validation in progress)
 - User requested 1,000+ simultaneous requests after the isolated load test. Root cause of burst rejections: per-instance 64-waiter limit, distinct from 8 active turns, per-account slots and durable shared quota/spend reservations. Cloud Build already declares HTTP concurrency 100 and max instances 100; no live infrastructure/settings changed.
 - Increased default waiting capacity to 1,024; centralized config default/max at the queue's existing 1,024 ceiling. Active calls, five-second queue deadline, per-user fairness and provider budgets/OFF switches unchanged. Saturated drain avoids useless scans. Explicit overrides remain effective.

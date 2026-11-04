@@ -187,3 +187,14 @@ Final demand-driven source d580c7fa3 verification: 3,195 files / 48,253 tests pa
 coverage thresholds and all required local gates/drills pass. All owned runs are terminal. See
 [l3-on-demand.md](./l3-on-demand.md#terminal-verification--source-d580c7fa3) for precise evidence and
 remaining network/production acceptance blockers. L3 OFF; no PR, merge, deployment or activation.
+
+# 2026-11-04 — Step 1: production download check (L3 still OFF)
+
+Admin-approved order: (1) verify live downloads from Cloud Run, (2) grow the catalogue per game type, (3) full
+generated-game acceptance, (4) testers-first rollout. Step 1 adds **Admin → AI Engines → Game asset download check**
+(`gameAssets/liveCheck.ts`, `routes/gameAssetsAdmin.ts`): from the live server it runs the unchanged guarded Poly
+Haven metadata transport (`/search?q=table&t=models`) and the reviewed downloader (`fox`, raw.githubusercontent.com),
+then the pinned sha256 and `validateGlb`. It writes nothing and never reads `AGENTV3_EXTERNAL_GAME_ASSETS`.
+Sandbox result (this session's container): GitHub raw download ✓ 162,852 bytes in 56 ms, hash ✓, validator ✓
+(576 triangles, 3 animations); Poly Haven ✗ `ENOTFOUND` (this container's egress). **The Cloud Run result is the
+evidence step 1 exists for; it is recorded here once the admin runs the check after deploy.**

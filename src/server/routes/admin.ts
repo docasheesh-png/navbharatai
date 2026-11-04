@@ -11,6 +11,7 @@ import { registerLiveModelRegistryRoutes } from './liveModelRegistry';
 import { registerSurplusRegistryAdminRoutes } from './surplusRegistryAdmin';
 import { registerApiProvidersAdminRoutes } from './apiProvidersAdmin';
 import { registerProviderSwitchesAdminRoutes } from './providerSwitchesAdmin';
+import { registerGameAssetsAdminRoutes } from './gameAssetsAdmin';
 import { sendAdminOwnerApps } from './adminOwnerApps';
 import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
 import { registerAiMaintenanceRoutes } from './aiMaintenance';
@@ -456,6 +457,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   registerSurplusRegistryAdminRoutes(app, verifyAdminToken);
   registerApiProvidersAdminRoutes(app, verifyAdminToken);
   registerProviderSwitchesAdminRoutes(app, verifyAdminToken);
+  registerGameAssetsAdminRoutes(app, verifyAdminToken);
   registerFreeChatChainRoutes(app, verifyAdminToken);
   registerDeepinfraComparisonRoutes(app, verifyAdminToken);
   registerProviderDiagnosticRoutes(app);

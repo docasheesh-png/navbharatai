@@ -3096,6 +3096,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['vercel deploy', 'netlify deploy', 'github pages', 'deploy', 'hosting', 'custom domain', 'publish app', 'live url', 'deploy karo', 'production'],
   },
   {
+    id: 'admin-game-asset-live-check',
+    name: 'Game asset download check',
+    path: 'Admin Dashboard → AI Engines → Game asset download check (verified admin only)',
+    description: 'One button that tests, from the live server, whether the game engine can really download free 3D models for games: the model search, a reviewed model download, its integrity hash and the model validator. Each stage shows passed or failed with the time it took and the reason when it fails. It saves nothing and does not turn external game models on for users.',
+    howToUse: 'Verified admins open AI Engines and press "Run the check". Every stage should show ✓; a ✗ names the stage and the reason (for example a network block).',
+    relatedFeatures: ['admin-provider-switches'],
+    keywords: ['game asset check', '3d model download', 'game models', 'asset download test', 'game assets'],
+  },
+  {
     id: 'admin-provider-switches',
     name: 'AI provider switches (on/off)',
     path: 'Admin Dashboard → AI Engines → AI provider switches (verified admin only)',

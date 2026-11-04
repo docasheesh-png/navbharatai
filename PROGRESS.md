@@ -1,4 +1,4 @@
-## 2026-11-04 — Ordinary Chat default provider order (local implementation; validation pending)
+## 2026-11-04 — Ordinary Chat default provider order (local implementation; publication blocked)
 
 Owner requested GLM 4.5 Flash → GLM 4.7 Flash → Groq → Cloudflare → verified-free
 OpenRouter → CheaperInference → DeepInfra 8B → DeepInfra DeepSeek V4 Flash → GPT-5
@@ -13,7 +13,16 @@ snapshot revisions prevent delayed reads from undoing newer OFF settings.
 Gateway/Strict Free, saved controls, private/health exclusions, account evidence,
 quotas, budgets, four-attempt limit and exclusive admin diagnostics remain intact.
 See docs/FREE_CHAT_CHAIN.md for scope and exceptions. No live settings changed.
-Validation evidence is recorded with the eventual PR; not yet deployed.
+Validation: 518 targeted tests passed. CI-equivalent typechecks, unused imports,
+native/OAuth guards, security audit, signatures, license/SBOM, build, bundle, boot
+and production-dependency gates passed. Locked emulator: 21 queue/retry, 13 autopsy,
+8 DeepInfra and 78 session-rule assertions passed. Full coverage run completed:
+48,422 passed, 8 failed, 85 skipped (3,206 passing files, 6 failing files).
+The five assertion failures reproduce on untouched main 9dac8a71a (admin engine
+status, admin display naming, Weak Router pinning and two test-account checks).
+Three terrain tests timed out at the unchanged 20-second limit; baseline check
+recorded separately. Coverage gate is NOT green. Per the mandatory pre-push gate,
+branch remains local: no push, PR, hosted CI, merge or deployment yet.
 
 ## 2026-11-03 — Autopsy of build report #1836 (958aa1ec, second-newest failure)
 

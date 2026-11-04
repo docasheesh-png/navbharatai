@@ -236,3 +236,14 @@ models now share a subject; the engine correctly downloads only the first match)
 New prompt vocabulary (English/Hindi/Spanish): bush, streetlight, traffic light, water tower, taxi, police car, hill,
 mountain, house, well, windmill, target, barrel, wall. Bare English "well" and "home" are deliberately NOT aliases.
 Not in these packs: a boxing ring (stays procedural) and animated boxers (Knight punch clips to be reviewed next).
+
+## 2026-11-04 — The boxer (L3 still OFF)
+
+`adventurers-knight-boxer`: the same reviewed KayKit Knight source (revision `672074b7`, source `60428e3a…`, CC0) with
+`animation-selection-v1` retaining Unarmed_Idle, Unarmed_Melee_Attack_Punch_A/B, Block, Hit_A, Death_A, Walking_A,
+Dodge_Backward → 699,116 B (from 3,659,532), derived `6ff3a06f…`; the production downloader reproduces it exactly.
+New reviewed field `hiddenNodes` (≤32 validated names): the runtime REMOVES the swords, shields, cape and helmet on load,
+before measuring, so the bytes and hash are unchanged. New runtime API `handle.play(role, fade)` cross-fades between
+the entry's `animationRoles` (idle, walk, punch, punch2, block, hit, death, dodge); a missing role returns false.
+Browser proof (`gameWorldDressing.check.ts` boxer scene): model loaded, no weapon nodes left, `play('punch')` changes
+the pose (41 bones), unknown role false. A boxing RING is not in any reviewed pack — it stays procedural.

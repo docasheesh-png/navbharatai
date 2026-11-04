@@ -55,7 +55,11 @@ Default logical order: GLM 4.5 Flash → GLM 4.7 Flash → Groq GPT-OSS 120B →
 Cloudflare Llama 3.3 70B → verified-free OpenRouter models → CheaperInference →
 DeepInfra Llama 3.1 8B → DeepInfra DeepSeek V4 Flash → GPT-5 Nano → GLM 4.7 FlashX →
 Gemini 2.5 Flash-Lite (paid profile). Gemini stays last in configuration and is
-skipped while its provider-family switch is OFF; Vertex is not a rung.
+skipped while its provider-family switch is OFF; Vertex is not a rung. Gemini is
+also withheld until this instance has successfully read switch state at least once.
+Switch snapshots apply monotonically by revision, so a delayed older read cannot
+undo a newer OFF write. Cross-instance propagation still uses the existing polling
+interval; this is not proof of live state or cancellation of calls already in flight.
 
 Classification still selects response limits, but does not reorder or remove
 rungs by default. `FREE_CHAIN_ROUTE_REORDER_ENABLED=on` explicitly restores the

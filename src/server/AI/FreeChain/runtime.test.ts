@@ -66,6 +66,13 @@ describe('free chat chain central dispatch', () => {
    expect(result).toMatchObject({ ok: true, provider: 'GROQ' });
    expect(m.execute).toHaveBeenCalledOnce();
  });
+ it('cannot call Gemini from the empty boot switch cache before a successful read', async () => {
+   const cfg = freeChainConfig({ FREE_CHAIN_ORDER: 'geminipaid', FREE_CHAIN_GEMINIPAID_API_KEY: 'fake-key', FREE_CHAIN_GEMINIPAID_RATE_VERIFIED_UNTIL: '2099-01-01' });
+   const result = await buildFreeChainRouter(db, cfg).route(input());
+   expect(result.freeChain?.attempts).toEqual([expect.objectContaining({ reason: 'provider-switch-state-unavailable', entered: false })]);
+   expect(m.execute).not.toHaveBeenCalled();
+   expect(m.paid).not.toHaveBeenCalled();
+ });
  it('retains last Gemini rung but never dispatches it while globally OFF', async () => {
    const cfg = freeChainConfig({ FREE_CHAIN_ORDER: 'geminipaid', FREE_CHAIN_GEMINIPAID_API_KEY: 'fake-key', FREE_CHAIN_GEMINIPAID_RATE_VERIFIED_UNTIL: '2099-01-01' });
    applySwitchedOff(['gemini', 'vertex']);

@@ -272,20 +272,26 @@ export async function writeSwitch(args: { id: unknown; on: unknown; reason: unkn
     tx.set(ref, state);
     return state;
   });
-  applySwitchedOff(next.off); // this instance at once; the others within SYNC_MS
-  lastSync = { at: now, ok: true };
+  applySwitchSnapshot(next, now); // this instance at once; the others within SYNC_MS
   return next;
 }
 
 // ─── the sync loop (each instance) ───────────────────────────────────────────────────────────────────────────
 let lastSync: { at: number | null; ok: boolean } = { at: null, ok: false };
+let appliedRevision = -1;
+function applySwitchSnapshot(state: SwitchState, at: number): void {
+  // A poll started before an admin write must never restore the old ON state.
+  if (state.revision < appliedRevision) return;
+  applySwitchedOff(state.off);
+  appliedRevision = state.revision;
+  lastSync = { at, ok: true };
+}
 export function lastSwitchSync(): { at: number | null; ok: boolean } { return { ...lastSync }; }
 
 export async function syncSwitchesOnce(now: () => number = Date.now): Promise<void> {
   try {
     const s = await readSwitchState();
-    applySwitchedOff(s.off);
-    lastSync = { at: now(), ok: true };
+    applySwitchSnapshot(s, now());
   } catch {
     // Keep the last known state: a storage blip must never switch a provider back on.
     lastSync = { at: lastSync.at, ok: false };
@@ -305,5 +311,6 @@ export function __resetProviderSwitchesForTests(env: NodeJS.ProcessEnv = process
   applySwitchedOff([], env);
   off = new Set();
   withdrawn.clear();
+  appliedRevision = -1;
   lastSync = { at: null, ok: false };
 }

@@ -139,6 +139,29 @@ function fakeDb(opts: { failRead?: boolean } = {}) {
 }
 
 describe('the shared state: audited, conflict-safe, and never switched back on by a storage blip', () => {
+  it('a delayed old read cannot undo a newer local Gemini OFF write', async () => {
+    const db = fakeDb();
+    let finish!: (snapshot: unknown) => void;
+    state.db = { ...db, collection: () => ({ doc: () => ({ get: () => new Promise(resolve => { finish = resolve; }) }) }) };
+    const delayed = syncSwitchesOnce(() => 1);
+    await writeSwitch({ id: 'gemini', on: false, reason: 'owner disabled', expectedRevision: 0, by: 'admin', now: () => 2 });
+    finish({ exists: false, data: () => ({}) });
+    await delayed;
+    expect(isProviderSwitchedOff('gemini')).toBe(true);
+    expect(lastSwitchSync()).toEqual({ at: 2, ok: true });
+  });
+  it('out-of-order poll completion cannot restore older Gemini or Vertex ON state', async () => {
+    let finish!: (snapshot: unknown) => void;
+    state.db = { collection: () => ({ doc: () => ({ get: () => new Promise(resolve => { finish = resolve; }) }) }) };
+    const delayed = syncSwitchesOnce(() => 1);
+    state.db = { collection: () => ({ doc: () => ({ get: async () => ({ exists: true, data: () => ({ off: ['gemini', 'vertex'], revision: 5 }) }) }) }) };
+    await syncSwitchesOnce(() => 2);
+    finish({ exists: true, data: () => ({ off: [], revision: 4 }) });
+    await delayed;
+    expect(isProviderSwitchedOff('gemini')).toBe(true);
+    expect(isProviderSwitchedOff('vertex')).toBe(true);
+  });
+
   it('a change needs a known provider, a boolean, a reason and the revision the admin saw', async () => {
     state.db = fakeDb();
     await expect(writeSwitch({ id: 'nope', on: false, reason: 'test', expectedRevision: 0, by: 'admin' })).rejects.toThrow(ProviderSwitchInputError);

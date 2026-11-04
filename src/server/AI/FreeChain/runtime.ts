@@ -1,4 +1,4 @@
-import { switchedOffProviderFor } from '../../lib/providerSwitches';
+import { lastSwitchSync, switchedOffProviderFor } from '../../lib/providerSwitches';
 import { chatAvailabilityMessage } from '../../lib/chatAvailabilityMessage';
 import { freeChainAdmissionFailure } from './admissionFailure';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../../lib/chatReplyLanguage';
@@ -117,6 +117,8 @@ function rungReason(rung: RungConfig, cfg: FreeChainConfig, input?: FreeChainInp
     // Exclusive CHEAPERINFERENCE=admin must answer every admin Free Chat turn, including profile/memory.
     if (!(rung.id === 'cheapinf' && input.context.isAdmin === true && cheaperInferenceMode() === 'admin')) return 'privacy';
   }
+  // Gemini was explicitly switched OFF by the owner. An empty boot cache is not ON evidence.
+  if ((rung.id === 'gemini' || rung.id === 'geminipaid') && lastSwitchSync().at === null) return 'provider-switch-state-unavailable';
   return undefined;
 }
 function replyLanguageFor(input: FreeChainInput) {

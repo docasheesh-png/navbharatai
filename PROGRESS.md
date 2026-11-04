@@ -7,7 +7,9 @@ The constant already matched; default selection and quality promotion did not.
 Default selection now uses the shared ON policy at context/entry/config and 100%
 rollout when no override exists. Classification retains output sizing, while
 promotion requires explicit route-reorder opt-in. Family OFF is checked before
-quota reservations even if credentials were captured before the switch.
+quota reservations even if credentials were captured before the switch. Gemini is
+withheld before the first successful switch-state read; monotonically applied
+snapshot revisions prevent delayed reads from undoing newer OFF settings.
 Gateway/Strict Free, saved controls, private/health exclusions, account evidence,
 quotas, budgets, four-attempt limit and exclusive admin diagnostics remain intact.
 See docs/FREE_CHAT_CHAIN.md for scope and exceptions. No live settings changed.

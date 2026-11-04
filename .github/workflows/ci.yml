@@ -74,6 +74,7 @@ jobs:
           node scripts/phase2-firestore-drills.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/firestore-drills.log"
           node --import ./node_modules/tsx/dist/loader.mjs scripts/failedReportAutopsy.check.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/autopsy-drills.log"
           node --import ./node_modules/tsx/dist/loader.mjs scripts/deepinfraComparison.check.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/deepinfra-comparison.log"
+          node --import ./node_modules/tsx/dist/loader.mjs scripts/freeChainQuotaLane.check.mjs --emulator 127.0.0.1:18781 | tee "$RUNNER_TEMP/phase2-safety/free-chain-quota-lane.log"
           node scripts/session-revocation-rules.check.mjs --emulator 127.0.0.1:18781 --project demo-navbharatai-phase2 | tee "$RUNNER_TEMP/phase2-safety/session-rules.log"
       - name: Upload build safety evidence
         if: always()
@@ -165,6 +166,9 @@ jobs:
 
       - name: Failed-report OAuth protocol and security checks
         run: node --experimental-strip-types scripts/failedReportOAuth.check.mjs
+
+      - name: Offline answer-quality evaluator self-check (no model calls)
+        run: node scripts/chatAnswerQuality.check.mjs
 
       # ONE test run, not two (2026-08-06). This job ran `npm test` (`vitest run`) and then
       # `npm run test:coverage` (`vitest run --coverage`) — the SAME 12,400 tests twice, the second time

@@ -15,10 +15,12 @@ import { REVIEWED_GAME_ASSETS } from '../../src/server/AgentV3/gameAssets/provid
 import { generateGameAssetRuntime } from '../../src/server/lib/Game3DGenerator';
 import { generateWorldDressingModule, sceneryFor, type DressingLayout } from '../../src/server/AgentV3/gameAssets/worldDressing';
 
-const SCENES: Array<{ name: string; prompt: string }> = [
+const SCENES: Array<{ name: string; prompt: string; boxer?: true }> = [
   { name: 'racing', prompt: 'make a car racing game' },
   { name: 'village', prompt: 'गाँव वाला खेल बनाओ' },
   { name: 'shooting', prompt: 'a 3D shooting game' },
+  // The boxer: hidden weapons really gone, play('punch') really changes the pose.
+  { name: 'boxer', prompt: '3D boxing game', boxer: true },
 ];
 
 async function main() {
@@ -27,14 +29,15 @@ async function main() {
   const root = resolve(out); await mkdir(root, { recursive: true });
   const results: unknown[] = [];
   for (const s of SCENES) {
-    const plan = sceneryFor(s.prompt); assert.ok(plan, `${s.name}: no scenery plan`);
+    const plan = s.boxer ? { layout: 'village' as const, subjects: ['boxer'] } : sceneryFor(s.prompt); assert.ok(plan, `${s.name}: no scenery plan`);
     const fixture = join(root, s.name); await mkdir(join(fixture, 'src/game/three'), { recursive: true }); await mkdir(join(fixture, 'public/game-assets'), { recursive: true });
     try { await symlink(resolve('node_modules'), join(fixture, 'node_modules')); } catch (e: any) { if (e.code !== 'EEXIST') throw e; }
     const local: Record<string, { sha256: string; height: number; yaw: number; lod: boolean }> = {};
     for (const subject of plan.subjects) {
       const c = REVIEWED_GAME_ASSETS.find((a) => a.subjects.includes(subject)); assert.ok(c, `${s.name}: no reviewed model for ${subject}`);
       await copyFile(join(resolve(admitted), c.sha256 + '.glb'), join(fixture, 'public/game-assets', c.sha256 + '.glb'));
-      local[subject] = { sha256: c.sha256, height: c.height, yaw: c.yaw, lod: false };
+      local[subject] = { sha256: c.sha256, height: c.height, yaw: c.yaw, lod: false,
+        ...(c.hiddenNodes ? { hidden: [...c.hiddenNodes] } : {}), ...(c.animationRoles ? { roles: { ...c.animationRoles } } : {}) } as any;
     }
     await writeFile(join(fixture, 'src/game/three/externalAssets.ts'), generateGameAssetRuntime());
     await writeFile(join(fixture, 'src/game/three/assetModels.ts'), `import { loadGameAsset, type GameAssetHandle, type LocalGameAsset } from './externalAssets';\nconst assets: Record<string, LocalGameAsset> = ${JSON.stringify(local)};\nexport function loadRequestedAsset(subject: string, fallback: () => GameAssetHandle, signal?: AbortSignal): Promise<GameAssetHandle> {\n  return assets[subject] ? loadGameAsset(assets[subject], fallback, signal) : Promise.resolve(fallback());\n}\n`);
@@ -53,9 +56,22 @@ if (layout === 'roadside') { const road = new THREE.Mesh(new THREE.PlaneGeometry
 const accept = (x: number, z: number) => layout === 'roadside' ? Math.abs(x) > 7 : layout === 'village' ? Math.hypot(x, z) > 12 : Math.abs(x) > 2 || z < -15;
 const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 600);
 camera.position.set(0, layout === 'range' ? 3 : 18, layout === 'range' ? 6 : 40); camera.lookAt(0, 0, layout === 'range' ? -25 : 0);
-const placed = await dressWorld(scene, { heightAt, accept, roadHalfWidth: 5, count: 48 });
+const BOXER = ${JSON.stringify(!!s.boxer)};
+let boxer: any = null;
+if (BOXER) {
+  const { loadRequestedAsset } = await import('./src/game/three/assetModels');
+  boxer = await loadRequestedAsset('boxer', () => { throw new Error('boxer did not load'); });
+  scene.add(boxer.root); camera.position.set(0, 1.5, 4); camera.lookAt(0, 1, 0);
+  const names: string[] = []; boxer.root.traverse((o: any) => names.push(o.name));
+  const pose = () => { const v: number[] = []; boxer.root.traverse((o: any) => { if (o.isBone) v.push(o.quaternion.x, o.quaternion.y, o.quaternion.z); }); return v; };
+  const idle = boxer.play('idle'); boxer.update(0.3); const a = pose();
+  const punch = boxer.play('punch', 0); boxer.update(0.25); const b = pose();
+  (window as any).__boxer = { source: boxer.source, idle, punch, unknown: boxer.play('nope'),
+    weaponsLeft: names.filter((n) => /Sword|Shield|Cape|Helmet/.test(n)), poseChanged: a.some((x, i) => Math.abs(x - b[i]) > 1e-4), bones: a.length / 3 };
+}
+const placed = BOXER ? 0 : await dressWorld(scene, { heightAt, accept, roadHalfWidth: 5, count: 48 });
 renderer.render(scene, camera);
-const world = scene.getObjectByName('world-dressing')!;
+const world = scene.getObjectByName('world-dressing') ?? new THREE.Group();
 const onRoad = layout === 'roadside' ? world.children.filter((c) => Math.abs(c.position.x) < 5).length : 0;
 const offGround = world.children.filter((c) => Math.abs(c.position.y - heightAt(c.position.x, c.position.z)) > 1e-6).length;
 (window as any).__dress = { layout, placed, onRoad, offGround, triangles: renderer.info.render.triangles, calls: renderer.info.render.calls };
@@ -85,6 +101,12 @@ const offGround = world.children.filter((c) => Math.abs(c.position.y - heightAt(
       const r = await page.evaluate(() => (window as any).__dress);
       await page.screenshot({ path: join(root, `${s.name}.png`) });
       assert.deepEqual(errors, [], `${s.name}: page errors`); assert.deepEqual(external, [], `${s.name}: external requests`);
+      if (s.boxer) {
+        const b = await page.evaluate(() => (window as any).__boxer);
+        assert.equal(b.source, 'model'); assert.equal(b.idle, true); assert.equal(b.punch, true); assert.equal(b.unknown, false);
+        assert.deepEqual(b.weaponsLeft, [], 'boxer still holds weapons'); assert.equal(b.poseChanged, true, 'punch did not change the pose');
+        results.push({ scene: s.name, ...b }); console.log('PASS', s.name, JSON.stringify(b)); continue;
+      }
       assert.ok(r.placed >= 30, `${s.name}: only ${r.placed} placed`);
       assert.equal(r.onRoad, 0, `${s.name}: ${r.onRoad} on the road`); assert.equal(r.offGround, 0, `${s.name}: ${r.offGround} off the ground`);
       assert.ok(r.triangles > 1000, `${s.name}: ${r.triangles} triangles drawn`);

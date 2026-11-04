@@ -20,6 +20,8 @@ export interface ReviewedAsset extends AssetCandidate {
   /** Reviewed source AND derived output hashes are pinned; no automatic unreviewed rewrite. */
   optimization?: 'compact-v1' | 'animation-selection-v1';
   retainedAnimations?: readonly string[];
+  /** Node names the runtime removes on load (weapons a boxer does not hold). Reviewed per entry; bytes unchanged. */
+  hiddenNodes?: readonly string[];
   sourceSha256?: string;
   resources?: readonly { path: string; url: string; sha256: string }[];
 }
@@ -52,6 +54,7 @@ export function validateCatalogue(assets: readonly ReviewedAsset[]): void {
       const u = new URL(raw);
       if (u.username || u.password || u.search || u.hash || u.protocol !== 'https:') throw new Error('Private or expiring URL in public provenance');
     }
+    if (c.hiddenNodes !== undefined && (c.hiddenNodes.length > 32 || !c.hiddenNodes.every(n => /^[A-Za-z0-9_.-]{1,64}$/.test(n)))) throw new Error('Unreviewed hidden nodes');
     if (c.provider === 'sketchfab') throw new Error('Sketchfab requires a separately authorized download adapter; signed URLs cannot be a catalogue source');
     const key = `${c.provider}:${c.id}:${c.revision}`;
     if (ids.has(key)) throw new Error('Duplicate asset revision'); ids.add(key);

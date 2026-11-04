@@ -85,6 +85,9 @@ export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<
     return [r.subject, { sha256: c.sha256, height: c.height, yaw: c.yaw,
       ...(role ? { animation: c.animationRoles?.[role] ?? role } : {}),
       ...(reviewed?.serviceCredit ? { serviceCredit: reviewed.serviceCredit } : {}),
+      ...(!isDiscoveredAsset(c) && reviewed && 'hiddenNodes' in reviewed && reviewed.hiddenNodes?.length ? { hidden: [...reviewed.hiddenNodes] } : {}),
+      // Roles from the REVIEWED entry (the same authority as hidden nodes), the candidate's only as a fallback.
+      ...((reviewed?.animationRoles ?? c.animationRoles) && Object.keys(reviewed?.animationRoles ?? c.animationRoles ?? {}).length ? { roles: { ...(reviewed?.animationRoles ?? c.animationRoles) } } : {}),
       ...(c.license.spdx === 'CC-BY-4.0' ? { attributionCredit: `${c.license.author} — CC BY 4.0` } : {}) }];
   }));
   const credits = ready.map(r => {

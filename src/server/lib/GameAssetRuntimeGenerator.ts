@@ -17,12 +17,18 @@ export interface LocalGameAsset {
   lod?: boolean;
   serviceCredit?: string;
   attributionCredit?: string;
+  /** Node names removed on load (e.g. a character pack's swords and shields on a boxer). Reviewed per entry. */
+  hidden?: string[];
+  /** Role → clip name (idle, walk, punch, block, hit…). With roles, handle.play(role) switches clips. */
+  roles?: Record<string, string>;
 }
 export interface GameAssetHandle {
   root: THREE.Group;
   source: 'model' | 'procedural';
   update(dt: number): void;
   dispose(): void;
+  /** Cross-fade to the clip for a role (e.g. 'punch'); false when this model has no such clip. Models only. */
+  play?(role: string, fadeSeconds?: number): boolean;
 }
 
 /** Own one instance per call: skinned meshes and animation mixers are never shared across actors. */
@@ -82,6 +88,12 @@ export async function loadGameAsset(
     const clip = asset.animation ? gltf.animations.find(a => a.name === asset.animation) : undefined;
     if (asset.animation && !clip) throw Error('Required animation unavailable');
     const root = new THREE.Group(); const visual = gltf.scene;
+    // Remove reviewed hidden nodes BEFORE measuring, so a sword the boxer is not holding does not set its scale.
+    if (asset.hidden?.length) {
+      const doomed: THREE.Object3D[] = [];
+      visual.traverse(o => { if (asset.hidden!.includes(o.name)) doomed.push(o); });
+      for (const o of doomed) { o.removeFromParent(); disposeRoot(o); }
+    }
     visual.rotation.y += asset.yaw;
     visual.updateMatrixWorld(true);
     const bounds = new THREE.Box3().setFromObject(visual);
@@ -93,8 +105,14 @@ export async function loadGameAsset(
     root.add(pivot);
     visual.traverse(o => { if (o instanceof THREE.Mesh) { o.castShadow = true; o.receiveShadow = true; } });
     if (asset.lod !== false) addStaticGameAssetLods(visual, asset.height, gltf.animations.length > 0);
-    const mixer = clip ? new THREE.AnimationMixer(visual) : undefined;
-    if (mixer && clip) mixer.clipAction(clip).play();
+    const roleClips = new Map<string, THREE.AnimationClip>();
+    for (const [role, name] of Object.entries(asset.roles ?? {})) {
+      const c = gltf.animations.find(a => a.name === name);
+      if (c) roleClips.set(role, c);
+    }
+    const mixer = clip || roleClips.size ? new THREE.AnimationMixer(visual) : undefined;
+    let current = mixer && clip ? mixer.clipAction(clip) : undefined;
+    current?.play();
     const creditText = [asset.serviceCredit, asset.attributionCredit].filter(Boolean).join(' · ');
     const credit = creditText ? document.createElement('a') : undefined;
     if (credit) {
@@ -108,6 +126,16 @@ export async function loadGameAsset(
     return {
       root, source: 'model',
       update(dt) { if (!disposed && Number.isFinite(dt) && dt > 0) mixer?.update(Math.min(dt, 0.1)); },
+      play(role, fadeSeconds = 0.15) {
+        const c = roleClips.get(role);
+        if (disposed || !mixer || !c) return false;
+        const next = mixer.clipAction(c);
+        if (next === current) return true;
+        next.reset().setEffectiveWeight(1).play();
+        if (current) current.crossFadeTo(next, Math.max(0, Math.min(fadeSeconds, 1)), false);
+        current = next;
+        return true;
+      },
       dispose() { if (disposed) return; disposed = true; credit?.remove(); mixer?.stopAllAction(); mixer?.uncacheRoot(visual); root.removeFromParent(); disposeRoot(root); },
     };
   } catch {

@@ -1618,5 +1618,80 @@ export const reviewedCatalogue: readonly ReviewedAsset[] = [
         "sha256": "dec912e8cc8f8d09c29be48dda0daad90e653939c4e6fc799309ec1ae7a4cbcd"
       }
     ]
+  },
+  // ── 2026-11-04 L3: the same reviewed Knight as an unarmed boxer — 8 retained clips, weapons/shields/cape/helmet hidden on load.
+  {
+    "provider": "kaykit",
+    "id": "adventurers-knight-boxer",
+    "revision": "672074b73ba276876a19e8816ecdc5241817ab47",
+    "sourceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/blob/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Knight.glb",
+    "downloadUrl": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/672074b73ba276876a19e8816ecdc5241817ab47/addons/kaykit_character_pack_adventures/Characters/gltf/Knight.glb",
+    "sha256": "6ff3a06ff489023e09246cf9cf21c97592943a63b34c5cec39ed8d7a6b7a6ac8",
+    "subjects": [
+      "boxer"
+    ],
+    "animations": [
+      "Unarmed_Idle",
+      "Unarmed_Melee_Attack_Punch_A",
+      "Unarmed_Melee_Attack_Punch_B",
+      "Block",
+      "Hit_A",
+      "Death_A",
+      "Walking_A",
+      "Dodge_Backward"
+    ],
+    "height": 1.8,
+    "yaw": 0,
+    "downloadOrigins": [
+      "https://raw.githubusercontent.com"
+    ],
+    "review": {
+      "reviewer": "NavBharatAI asset admission",
+      "evidenceRevision": "672074b73ba276876a19e8816ecdc5241817ab47",
+      "freeDownload": true
+    },
+    "license": {
+      "spdx": "CC0-1.0",
+      "evidenceUrl": "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/blob/672074b73ba276876a19e8816ecdc5241817ab47/LICENSE.txt",
+      "reviewedAt": "2026-11-04",
+      "author": "Kay Lousberg",
+      "attribution": "KayKit by Kay Lousberg. CC0 1.0 Universal.",
+      "commercial": true,
+      "redistributeInGame": true,
+      "redistributeSource": true
+    },
+    "animationRoles": {
+      "idle": "Unarmed_Idle",
+      "walk": "Walking_A",
+      "punch": "Unarmed_Melee_Attack_Punch_A",
+      "punch2": "Unarmed_Melee_Attack_Punch_B",
+      "block": "Block",
+      "hit": "Hit_A",
+      "death": "Death_A",
+      "dodge": "Dodge_Backward"
+    },
+    "optimization": "animation-selection-v1",
+    "retainedAnimations": [
+      "Unarmed_Idle",
+      "Unarmed_Melee_Attack_Punch_A",
+      "Unarmed_Melee_Attack_Punch_B",
+      "Block",
+      "Hit_A",
+      "Death_A",
+      "Walking_A",
+      "Dodge_Backward"
+    ],
+    "sourceSha256": "60428e3abc09ba83e595d256e3af8c5c976b46cdae599f0802fc82b4a3445168",
+    "hiddenNodes": [
+      "1H_Sword",
+      "1H_Sword_Offhand",
+      "2H_Sword",
+      "Badge_Shield",
+      "Rectangle_Shield",
+      "Round_Shield",
+      "Spike_Shield",
+      "Knight_Cape",
+      "Knight_Helmet"
+    ]
   }
 ];

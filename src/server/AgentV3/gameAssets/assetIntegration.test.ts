@@ -80,6 +80,14 @@ describe('L3 acquisition, durable restore and bundle contract (synthetic)', () =
     expect(human.r.texts.has('src/game/three/worldDressing.ts')).toBe(false);
     expect(human.result.handoff).not.toContain('dressWorld');
   });
+  it('the seed hands a model its reviewed hidden nodes and animation roles', async () => {
+    const r = rig();
+    const c = { ...r.candidate, animationRoles: { punch: r.candidate.animations[0] ?? 'Move' }, hiddenNodes: ['Sword'] } as any;
+    await prepareGameAssets({ prompt:'3D racing car game', workspaceId:'fixture-workspace', workspace:r.workspace, signal:new AbortController().signal, dependencies:r.deps, persistence:r.persistence, catalogue:[c], env:{ AGENTV3_EXTERNAL_GAME_ASSETS:'on' } });
+    const models = r.texts.get('src/game/three/assetModels.ts') ?? '';
+    expect(models).toContain('"hidden":["Sword"]');
+    expect(models).toContain('"roles":{"punch"');
+  });
   it('does not hand off a manifest when its durable text write fails', async () => {
     const r = rig();
     const result = await prepareGameAssets({ prompt:'3D car game',workspaceId:'fixture-workspace',workspace:r.workspace,signal:new AbortController().signal,catalogue:[r.candidate],dependencies:r.deps,persistence:{...r.persistence,saveText:async()=>{throw Error('offline');}},env:{AGENTV3_EXTERNAL_GAME_ASSETS:'on'} });

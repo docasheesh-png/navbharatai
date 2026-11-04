@@ -28,7 +28,7 @@ export interface QuotaReservationInput extends QuotaScope {
   safetyMargin?: number;
 }
 export type QuotaReason = 'allowed' | 'cooldown' | 'rpm' | 'rpd' | 'tpm' | 'tpd' | 'neuronsPerDay'
-  | 'invalid_quota' | 'store_unavailable' | 'store_corrupt';
+  | 'invalid_quota' | 'store_unavailable' | 'store_corrupt' | 'local_capacity';
 export interface QuotaDecision { allowed: boolean; reason: QuotaReason; resetAt: number }
 export interface QuotaUsage { rpm: number; rpd: number; tpm: number; tpd: number; neuronsPerDay: number }
 export interface DayWindow { key: string; startAt: number; resetAt: number }

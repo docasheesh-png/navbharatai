@@ -545,3 +545,52 @@ With 8 active calls and 1-second replies, a 1,024-turn burst exceeds the unchang
 5-second queue deadline and correctly yields busy responses. Provider account
 capacity and shared quota/spend transactions must be measured before claiming
 1,000 simultaneous real inference responses. No paid load test is included.
+
+### Local quota-transaction backpressure
+
+Quota reservation and quota-status reads share a bounded per-database/per-provider
+lane in each process. Different accounts may progress together; overlapping local
+store handles for one account cannot stampede the same quota documents. At most
+32 account lanes and 1,024 total waiting operations are retained; waiters expire
+at 10 seconds and return `local_capacity`. A running SDK transaction retains its
+lane until it actually settles, even if other waiters time out. No quota grants
+are cached or synthesized: every accepted reservation still commits through the
+existing Firestore transaction and current quota/spend protections remain intact.
+This does not serialize independent replicas or prove global database capacity.
+The CI emulator drill exercises 1,024 requests through 32 local store handles,
+checks the unchanged allowance, durable accounting and physical transaction count.
+
+The load harness explicitly disables answer caching in its own config, records
+cache reads/hits/misses and physical mock dispatches, and tests 1,000 users with
+four sequential turns plus a 4,000-overlapping-request stress case. Production
+answer caching is unchanged. Tests that verify controlled refusals are not claims
+that every stress request received an answer.
+
+#### Four overlapping questions and slow replies
+
+Four requests for one user are not four independent free reservations. The HTTP
+route acquires the shared FreeAnswer reservation before local Chat admission;
+`freeAnswerQuotaStore` refuses overlapping live ownership. The local router also
+retains one active and one queued turn per user. Consequently the direct-router
+4,000-request overlap benchmark is deliberately a guardrail test, not proof that
+all four HTTP requests are admitted. Sequential turns preserve conversation order
+and release the reservation between answers. Increasing a local per-user limit
+would neither change that shared contract nor establish more provider capacity.
+
+At eight active turns per process and one-second responses, the ideal service
+rate is only eight replies/second before transaction and network overhead. A
+1,000-request initial burst needs roughly 125 seconds to drain; 4,000 requests
+need roughly 500 seconds. The unchanged five-second admission wait and 90-second
+client/free-answer deadline cannot promise all such replies. More queue memory
+does not change this arithmetic. Increasing active admission also exhausts the
+separate per-provider pools, so extra turns can fail faster. Provider quotas,
+privacy eligibility, token limits and paid budgets remain independent constraints.
+
+A larger successful real workload needs measured account quotas and latency,
+adequate replicas/shared-store capacity, and an agreed response deadline. If the
+work cannot fit that deadline, a durable asynchronous job/result API is a separate
+product contract, requiring per-user ordering, idempotency, cancellation, bounded
+retention and reservation ownership; it must not silently reinterpret current
+synchronous requests or their quota. This change does not introduce that API,
+raise provider limits or alter live scaling. Cache-disabled measurements should
+remain separate from ordinary production cache benefits.

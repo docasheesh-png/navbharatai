@@ -1,3 +1,4 @@
+import { inQuotaLane, QuotaLaneBusyError } from './quotaLane';
 import { createHash } from 'node:crypto';
 import { sanitizeText } from '../../../lib/observability/sanitize';
 import type { Firestore } from 'firebase-admin/firestore';
@@ -95,7 +96,7 @@ export class FreeChainStore {
     if (!this.db) return { allowed: false, reason: 'store_unavailable', resetAt: startedAt + 60_000 };
     try {
       const refs = this.quotaRefs(input);
-      return await this.db.runTransaction(async tx => {
+      return await inQuotaLane(this.db, input.provider, () => this.db!.runTransaction(async tx => {
         const [quotaSnap, neuronSnap, cooldownSnap] = await Promise.all([tx.get(refs.quota), tx.get(refs.neurons), tx.get(refs.cooldown)]);
         // Reads can wait or retry behind a newer valid commit. Validate against trusted time
         // AFTER those reads, never the older request-start time or a ledger-controlled timestamp.
@@ -122,9 +123,9 @@ export class FreeChainStore {
             { requests: 0, tokens: 0, neurons: input.limits.neuronsPerRequest! }, now), 'neurons'));
         }
         return { allowed: true, reason: 'allowed' as const, resetAt: ledgerResetAt(ledger, 'day', now) };
-      });
+      }));
     } catch (error) {
-      return { allowed: false, reason: error instanceof FreeChainDataError ? 'store_corrupt' : 'store_unavailable', resetAt: startedAt + 60_000 };
+      return { allowed: false, reason: error instanceof QuotaLaneBusyError ? 'local_capacity' : error instanceof FreeChainDataError ? 'store_corrupt' : 'store_unavailable', resetAt: startedAt + 60_000 };
     }
   }
   /** Cooldowns only extend. A late, shorter Retry-After cannot unbench an account early. */
@@ -161,7 +162,7 @@ export class FreeChainStore {
     validTime(startedAt);
     if (!this.db) throw new Error('Free chat safety store unavailable');
     const refs = this.quotaRefs(input);
-    return this.db.runTransaction(async tx => {
+    return inQuotaLane(this.db, input.provider, () => this.db!.runTransaction(async tx => {
       const [quotaSnap, neuronSnap, cooldownSnap] = await Promise.all([tx.get(refs.quota), tx.get(refs.neurons), tx.get(refs.cooldown)]);
       const now = fixedNow === undefined ? Date.now() : fixedNow;
       validTime(now);
@@ -171,7 +172,7 @@ export class FreeChainStore {
       return { available: true, usage: { ...quotaUsage(ledger), neuronsPerDay: quotaUsage(neurons).neuronsPerDay },
         minuteResetAt: ledgerResetAt(ledger, 'minute', now), dailyResetAt: ledgerResetAt(ledger, 'day', now),
         cooldownUntil: readCooldown(readData(cooldownSnap)) };
-    });
+    }));
   }
   /** Pure read: missing authority is not an implied budget and GET must never change policy. */
   async readPaidBudgetPolicy(): Promise<PaidBudgetPolicy | null> {

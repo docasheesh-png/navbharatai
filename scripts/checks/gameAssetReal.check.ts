@@ -39,7 +39,11 @@ async function main() {
     const requirement = { subject: c.subjects[0], ...(role ? { animation: role } : {}) };
     let downloads = 0;
     const dependencies = {
-      cache, providers: createAssetProviders(REVIEWED_GAME_ASSETS),
+      // Each iteration proves ONE reviewed model, so the engine sees only that model — in the providers AND the
+      // cache. With one model per subject this was implicit; with several (eight buildings, 2026-11-04) the
+      // engine rightly picks the first match, and a harness returning another model's bytes failed its hash.
+      cache: { ...cache, find: async (r: Parameters<typeof cache.find>[0]) => (await cache.find(r)).filter((e) => e.sha256 === c.sha256) },
+      providers: createAssetProviders([c]),
       async download() {
         downloads++;
         // Explicit offline mode uses already-reviewed final bytes. It does not claim live transport proof.

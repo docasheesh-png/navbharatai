@@ -1529,9 +1529,15 @@ export function surfaceMaps(kind: SurfaceKind, opts: { seed?: number; size?: num
  * call \`enableAO(geometry)\` on anything you want occlusion on.
  */
 export function surfaceMaterial(
-  kind: SurfaceKind,
+  kind: SurfaceKind | 'glass',
   opts: { color?: number; repeat?: number; seed?: number; size?: number } = {},
 ): THREE.MeshStandardMaterial {
+  // 🔴 ONE WORD, TWO VOCABULARIES (autopsy 61279465). MaterialKind has 'glass' and SurfaceKind did not, so a
+  // train's windows written as surfaceMaterial('glass') failed the typecheck twice and cost two repair turns.
+  // Glass has no grain to texture, so it is answered here, plainly — the word works in both places.
+  if (kind === 'glass') {
+    return new THREE.MeshStandardMaterial({ color: opts.color ?? 0x9ec9e8, roughness: 0.06, metalness: 0, transparent: true, opacity: 0.38, envMapIntensity: 1.2 });
+  }
   const repeat = opts.repeat ?? 4;
   const maps = repeatedMaps(kind, repeat, opts);
   const look = SURFACE_LOOK[kind] ?? SURFACE_LOOK.stone;
@@ -4243,7 +4249,8 @@ export interface HouseOptions extends BaseOpts {
   /** Wall colour. Defaults to one of the washes Indian houses are actually painted in. */
   wallColor?: number;
   /** 'flat' — RCC roof with a parapet and a water tank (towns, most villages). 'tiled' — sloped clay tiles. */
-  roof?: 'flat' | 'tiled';
+  /** 'tile' is accepted as 'tiled' — the SurfaceKind spelling a builder reaches for (autopsy 61279465: TS2820). */
+  roof?: 'flat' | 'tiled' | 'tile';
 }
 
 /** The colours houses in an Indian village or town are really washed in — not white boxes. */
@@ -4266,7 +4273,7 @@ export function createHouse(options: HouseOptions = {}): THREE.Group {
   const storeys = Math.max(1, Math.min(2, Math.round(options.storeys ?? 1)));
   const H = storeys * 3;
   const wash = options.wallColor ?? HOUSE_WASHES[Math.floor(r() * HOUSE_WASHES.length)];
-  const roofKind = options.roof ?? (r() < 0.7 ? 'flat' : 'tiled');
+  const roofKind = options.roof === 'tile' ? 'tiled' : options.roof ?? (r() < 0.7 ? 'flat' : 'tiled');
   const group = new THREE.Group();
 
   const wall = shared('plaster', d, wash, 2);

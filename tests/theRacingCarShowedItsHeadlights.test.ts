@@ -465,7 +465,10 @@ describe('3b · P-1: the CAMERA half of the +Z rule, in plain three.js', () => {
 
   it('the camera goes opposite the nose, as code any builder can copy — with or without the kit', () => {
     expect(rule).toContain('new THREE.Vector3(0, 0, 1).applyQuaternion(car.quaternion)');
-    expect(rule).toContain('camera.position.copy(car.position).addScaledVector(forward, -6)');
+    // Autopsy 61279465: the distance is the MODEL's, not a fixed 6 m that sits inside a train.
+    expect(rule).toContain('camera.position.copy(car.position).addScaledVector(forward, -back)');
+    expect(rule).toContain('const back = Math.max(6, size.z / 2 + 4), up = Math.max(2.5, size.y * 1.6);');
+    expect(rule).not.toContain('addScaledVector(forward, -6)');
     expect(rule).toContain('camera.lookAt(car.position)');
     expect(rule).toContain('camera = car.position − forward·d + up·h: at −Z LOCAL of a +Z model');
   });

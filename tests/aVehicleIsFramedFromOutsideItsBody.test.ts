@@ -335,3 +335,14 @@ describe('🚗🚌🏍️✈️ every vehicle size is framed from outside, the v
     expect(back).toBeLessThan(7.6);
   });
 });
+
+describe("the kit's two material vocabularies agree (autopsy 61279465: two TS2345 / one TS2820 heals)", () => {
+  it("surfaceMaterial('glass') is real glass, and createHouse takes roof 'tile' as 'tiled'", async () => {
+    const S = await import(join(DIR, 'src/game/three/surfaces.ts'));
+    const glass = S.surfaceMaterial('glass');
+    expect(glass.transparent).toBe(true);
+    expect(glass.opacity).toBeLessThan(0.6);
+    expect(glass.roughness).toBeLessThan(0.2);
+    expect(() => O.createHouse({ roof: 'tile', detail: 'lite' })).not.toThrow();
+  });
+});

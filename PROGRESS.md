@@ -100554,3 +100554,11 @@ own enforced system (`src/server/lib/providerSwitches.ts`), as that audit requir
   refused after the switch and working again when on); reversion of the guard → 4 tests fail.
 - **Correction:** the API Providers page said Nova Sonic voice was not used — wrong (`src/server/sonic/SonicBridge.ts`
   uses Bedrock). The Bedrock row now says "Voice chat (Nova Sonic)". My earlier search missed the word "sonic".
+
+## 2026-11-04 — L3 steps 2 + 4 (L3 OFF): 35-model catalogue and genre world dressing
+
+Step 2: 28 CC0 KayKit models (City / Medieval Hexagon / Prototype Bits), admitted with `scripts/gameAssetAdmitGltf.mjs`
+(production bundler/compactor/validator; reproduces building_A exactly); all 35 render through the live guarded
+downloader (`gameAssetReal.check.ts` PASS). Step 4: `worldDressing.ts` — genre scenery + `dressWorld()`; browser proof
+for racing/village/shooting; two layout defects found from screenshots and fixed. Tests: theCatalogueServesEveryGameType,
+aGameGetsAWorldNotOneObject, assetIntegration (seed writes worldDressing only when scenery arrived).

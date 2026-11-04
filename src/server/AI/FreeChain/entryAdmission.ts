@@ -11,7 +11,7 @@ import { freeChainConfig, freeChainEnabled } from './config';
 import { readControlsForSelection } from './control';
 import { logFreeChain } from './telemetry';
 import { rolloutBucket, selectedForFreeChain } from './rollout';
-import { freeChainAdmissionQueue } from './admissionQueue';
+import { admissionPayloadBytes, freeChainAdmissionQueue } from './admissionQueue';
 
 export interface EntryAdmissionGrant { readonly uid: string; readonly waitedMs: number; readonly signal: AbortSignal }
 const heldByRequest = new WeakMap<Request, EntryAdmissionGrant>();
@@ -86,7 +86,7 @@ export async function withFreeChainEntryAdmission<T>(req: Request, res: Response
     if (controller.signal.aborted) return;
     if (!control) { decline('capacity'); return; }
     if (!selectedForFreeChain(cfg, control, uid)) return handler();
-    const admission = await freeChainAdmissionQueue.acquire({ uid, signal: controller.signal, ...cfg.queue });
+    const admission = await freeChainAdmissionQueue.acquire({ uid, signal: controller.signal, payloadBytes: admissionPayloadBytes(body), ...cfg.queue });
     if (!admission.admitted) { decline(admission.reason, admission.waitedMs); return; }
     try {
       // An admitted turn must not slip into a paid legacy path after waiting through a policy change.

@@ -4706,7 +4706,7 @@ allowances and there is no key-pool rotation. Unknown quota limits are zero unti
 | Name | Code default / bounds |
 | --- | --- |
 | `FREE_CHAIN_MAX_ACTIVE` | 8 active chain turns per process; integer 1–64. Separate from provider/account bulkheads. |
-| `FREE_CHAIN_MAX_QUEUED` | 64 waiting turns per process; integer 0–1000. 0 disables waiting, not active dispatch. |
+| `FREE_CHAIN_MAX_QUEUED` | 1024 waiting turns per process; integer 0–1024; also bounded by a fixed 16 MiB serialized queued-payload budget. 0 disables waiting, not active dispatch. |
 | `FREE_CHAIN_MAX_WAIT_MS` | 5000 ms maximum local wait; integer 100–10000. Expiry returns busy, not an ETA. |
 | `FREE_CHAIN_PER_USER_ACTIVE` | 1 active turn per verified UID per process; integer 1–8. |
 | `FREE_CHAIN_PER_USER_QUEUED` | 1 waiting turn per verified UID per process; integer 0–16. |

@@ -28,6 +28,7 @@
     "native:guard": "node scripts/nativeShellGuard.mjs",
     "test:bundle": "node scripts/bundleBudget.mjs && node scripts/noLookbehindInBundle.mjs",
     "test:load": "node scripts/loadTest.mjs",
+    "test:load:chat": "vitest run --config scripts/chatLoad.config.ts",
     "audit:gate": "node scripts/auditGate.mjs",
     "license:gate": "node scripts/licenseGate.mjs",
     "sbom": "node scripts/genSbom.mjs",

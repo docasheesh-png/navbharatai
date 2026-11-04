@@ -216,7 +216,7 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
     allowUids: list(env.FREE_CHAIN_ALLOW_UIDS), order: order as ProviderId[], skipGemini, privacyApproved,
     ttftMs: num('FREE_CHAIN_TTFT_MS', 6000, 1000, 90000), cacheEnabled: flag('FREE_CHAIN_CACHE_ENABLED', true), cacheTtlS: num('FREE_CHAIN_CACHE_TTL_S', 86400, 60, 86400),
     paidCapNanoUsd: money('FREE_CHAIN_PAID_DAILY_CAP_USD', DEFAULT_PAID_CAP_NANO_USD / NANO_USD, 0, OWNER_PAID_DAILY_CEILING_NANO_USD / NANO_USD),
-    queue: { maxActive: num('FREE_CHAIN_MAX_ACTIVE', 8, 1, 64), maxQueued: num('FREE_CHAIN_MAX_QUEUED', 64, 0, 1000), maxWaitMs: num('FREE_CHAIN_MAX_WAIT_MS', DEFAULT_ADMISSION_QUEUE_LIMITS.maxWaitMs, 100, 10000), perUserActive: num('FREE_CHAIN_PER_USER_ACTIVE', 1, 1, 8), perUserQueued: num('FREE_CHAIN_PER_USER_QUEUED', 1, 0, 16) },
+    queue: { maxActive: num('FREE_CHAIN_MAX_ACTIVE', 8, 1, 64), maxQueued: num('FREE_CHAIN_MAX_QUEUED', DEFAULT_ADMISSION_QUEUE_LIMITS.maxQueued, 0, 1024), maxWaitMs: num('FREE_CHAIN_MAX_WAIT_MS', DEFAULT_ADMISSION_QUEUE_LIMITS.maxWaitMs, 100, 10000), perUserActive: num('FREE_CHAIN_PER_USER_ACTIVE', 1, 1, 8), perUserQueued: num('FREE_CHAIN_PER_USER_QUEUED', 1, 0, 16) },
     paidPerUserDaily: num('FREE_CHAIN_PAID_PER_USER_DAILY', 20, 0, 1000), safetyMargin: num('FREE_CHAIN_QUOTA_MARGIN', .9, .1, .95, false),
     deepseekPrices: { input: num('FREE_CHAIN_DEEPSEEK_PRICE_IN_PER_MTOK', .30, .30, 1000, false), output: num('FREE_CHAIN_DEEPSEEK_PRICE_OUT_PER_MTOK', 1.20, 1.20, 1000, false), cached: num('FREE_CHAIN_DEEPSEEK_PRICE_CACHED_IN_PER_MTOK', .006, .006, 1000, false) },
     openRouterModels: list(env.FREE_CHAIN_OPENROUTER_MODELS), rungs, errors,

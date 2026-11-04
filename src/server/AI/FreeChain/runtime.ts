@@ -10,7 +10,7 @@ import { persistFreeChainSample } from './eventSample';
 export { shouldPersistFreeChainEvent } from './eventSample';
 import { sanitizeText } from '../../../lib/observability/sanitize';
 import { isEntryAdmission } from './entryAdmission';
-import { freeChainAdmissionQueue } from './admissionQueue';
+import { admissionPayloadBytes, freeChainAdmissionQueue } from './admissionQueue';
 import { randomUUID } from 'node:crypto';
 import { freeChainConfig, isPaidRung, type FreeChainConfig, type ProviderId, type RungConfig } from './config';
 import { selectedForFreeChain, rolloutBucket, type FreeChainContext } from './rollout';
@@ -383,7 +383,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     if (input.signal?.aborted) return { ...empty('aborted'), content: '' };
     const admission = isEntryAdmission(entry, input.context.uid)
       ? { admitted: true as const, waitedMs: entry!.waitedMs, release: () => {} }
-      : await freeChainAdmissionQueue.acquire({ uid: input.context.uid, signal: input.signal, ...cfg.queue });
+      : await freeChainAdmissionQueue.acquire({ uid: input.context.uid, signal: input.signal, payloadBytes: admissionPayloadBytes({ message: input.message, history: input.history, systemPrompt: input.systemPrompt }), ...cfg.queue });
     if (!admission.admitted) {
       const admReason = admission.reason === 'aborted' ? 'aborted' : 'no-provider';
       const notice = freeChainAdmissionFailure(admission.reason, { message: input.message, history: input.history, replyLanguage: input.context.replyLanguage }).body.reply;

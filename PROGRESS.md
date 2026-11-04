@@ -100554,3 +100554,10 @@ own enforced system (`src/server/lib/providerSwitches.ts`), as that audit requir
   refused after the switch and working again when on); reversion of the guard → 4 tests fail.
 - **Correction:** the API Providers page said Nova Sonic voice was not used — wrong (`src/server/sonic/SonicBridge.ts`
   uses Bedrock). The Bedrock row now says "Voice chat (Nova Sonic)". My earlier search missed the word "sonic".
+
+## 2026-11-04 — L3 step 1: Admin → AI Engines → Game asset download check (L3 OFF)
+
+The L3 asset layer had never downloaded from Cloud Run. New admin check runs the real guarded transports (Poly Haven
+search + reviewed `fox` download + hash + validator) from the live server, writes nothing, never reads the L3 flag.
+`tests/theGameAssetLiveCheckIsReal.test.ts` (9); reverted timing bug → failed. Sandbox: GitHub ✓, Poly Haven ✗ ENOTFOUND
+(container egress). Next: the admin runs it on production; steps 2–4 follow in order (catalogue, acceptance, rollout).

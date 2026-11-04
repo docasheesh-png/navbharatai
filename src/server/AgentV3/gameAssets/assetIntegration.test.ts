@@ -41,9 +41,11 @@ describe('L3 acquisition, durable restore and bundle contract (synthetic)', () =
     expect(REVIEWED_GAME_ASSETS.filter(c => c.subjects.includes('dog'))).toEqual([]);
   });
   it.each([
-    ['3D train and railway station game', ['train','railway station']],
+    // UPDATED 2026-11-04 (L3 step 4): named subjects first, then the scenery this kind of game needs
+    // (worldDressing.sceneryFor) — only subjects this fixture catalogue serves, within the bound of six.
+    ['3D train and railway station game', ['train','railway station','tree']],
     ['3D flying bird game', ['bird']], ['3D moving ship game', ['ship']],
-    ['3D human walking game', ['human']], ['3D racing car game', ['car']],
+    ['3D human walking game', ['human']], ['3D racing car game', ['car','tree','building']],
     ['3D dog cow tree building game', ['dog','cow','tree','building']],
   ])('prepares requested exact subjects for %s, survives a fresh cache and sandbox', async (prompt, expected) => {
     const r = rig();
@@ -66,6 +68,17 @@ describe('L3 acquisition, durable restore and bundle contract (synthetic)', () =
     const r = rig();
     const result = await acquireGameAsset({ subject:'car' }, { ...r.deps, persist: persistProjectAsset(r.workspace, 'fixture-workspace', { ...r.persistence, readBinary: async () => null }) }, new AbortController().signal);
     expect(result.kind).toBe('procedural'); expect(r.disk.size).toBe(0);
+  });
+  it('🔴 L3 step 4: a racing game gets a world-dressing module and the instruction to use it; a non-world game does not', async () => {
+    const run = async (prompt: string) => { const r = rig(); const result = await prepareGameAssets({ prompt, workspaceId:'fixture-workspace', workspace:r.workspace, signal:new AbortController().signal, dependencies:r.deps, persistence:r.persistence, catalogue:[r.candidate], env:{ AGENTV3_EXTERNAL_GAME_ASSETS:'on' } }); return { r, result }; };
+    const racing = await run('3D racing car game');
+    const dressing = racing.r.texts.get('src/game/three/worldDressing.ts');
+    expect(dressing).toContain('export const SCENERY_SUBJECTS: readonly string[] = ["tree","building"]');
+    expect(dressing).toContain('"roadside"');
+    expect(racing.result.handoff).toContain('dressWorld(scene, { heightAt, accept })');
+    const human = await run('3D human walking game');
+    expect(human.r.texts.has('src/game/three/worldDressing.ts')).toBe(false);
+    expect(human.result.handoff).not.toContain('dressWorld');
   });
   it('does not hand off a manifest when its durable text write fails', async () => {
     const r = rig();

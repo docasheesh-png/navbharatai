@@ -198,3 +198,19 @@ then the pinned sha256 and `validateGlb`. It writes nothing and never reads `AGE
 Sandbox result (this session's container): GitHub raw download ✓ 162,852 bytes in 56 ms, hash ✓, validator ✓
 (576 triangles, 3 animations); Poly Haven ✗ `ENOTFOUND` (this container's egress). **The Cloud Run result is the
 evidence step 1 exists for; it is recorded here once the admin runs the check after deploy.**
+# 2026-11-04 — Step 4: a game gets a WORLD, not one object (L3 still OFF)
+
+`gameAssets/worldDressing.ts`: `sceneryFor(prompt)` adds the scenery a KIND of game needs (genre from
+`buildGameContract` + village/train/city words) after the subjects the prompt named, within the existing bound of six,
+and only subjects the reviewed catalogue serves. The seed then writes `src/game/three/worldDressing.ts` (only when a
+scenery model actually arrived) and tells the builder to call `dressWorld(scene, { heightAt, accept })` once: each
+model is loaded ONCE and cloned into a seeded layout — roadside (both sides of the road along Z, facing it), village
+(a ring facing the centre) or range (targets in an open 10 m firing lane at 25–45 m, cover only beside it). A missing
+model is skipped, never substituted. ≤120 clones.
+
+**Browser proof** (`scripts/checks/gameWorldDressing.check.ts`, real admitted GLBs, production runtime, Vite build at
+/published/, Chromium 390×844): racing 48 placed / 0 on the road / 0 off the ground / 4,604 triangles; village 48 /
+14,995; shooting 48 / 4,514. Two layout defects were caught ONLY by looking at the screenshots and fixed: walls first
+hid the targets, then a full-width wall line hid them again — cover now stands beside the firing lane.
+Limits: the fixture world is a flat ground + road, not a generated user game (that is step 5); the builder must call
+dressWorld (the handoff says so; the step-5 builds verify it does).

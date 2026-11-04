@@ -37,6 +37,15 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   stool: ['stool', 'stools', 'स्टूल', 'taburete'], sofa: ['sofa', 'sofas', 'सोफा', 'sofá'],
   cabinet: ['cabinet', 'cabinets', 'अलमारी', 'armario'], lamp: ['lamp', 'lamps', 'लैंप', 'lámpara'],
   building: ['building', 'buildings', 'इमारत', 'edificio'], aircraft: ['aircraft', 'airplane', 'विमान', 'avión'],
+  // 2026-11-04 (L3 step 2): the subjects the expanded KayKit catalogue can serve.
+  bush: ['bush', 'bushes', 'झाड़ी', 'झाड़ियाँ', 'arbusto'], streetlight: ['streetlight', 'street light', 'street lights', 'lamp post', 'स्ट्रीट लाइट', 'farola'],
+  'traffic light': ['traffic light', 'traffic lights', 'traffic signal', 'ट्रैफिक लाइट', 'semáforo'], 'water tower': ['water tower', 'पानी की टंकी', 'torre de agua'],
+  taxi: ['taxi', 'taxis', 'cab', 'टैक्सी'], 'police car': ['police car', 'police cars', 'पुलिस कार', 'coche de policía'],
+  hill: ['hill', 'hills', 'पहाड़ी', 'colina'], mountain: ['mountain', 'mountains', 'पहाड़', 'पर्वत', 'montaña', 'montañas'],
+  // Never the bare English 'well' or 'home': "runs well" / "home screen" would add a model nobody asked for.
+  house: ['house', 'houses', 'hut', 'घर', 'मकान', 'झोपड़ी', 'casa'], well: ['water well', 'village well', 'कुआँ', 'कुआं', 'pozo'],
+  windmill: ['windmill', 'windmills', 'पवनचक्की', 'molino'], target: ['target', 'targets', 'निशाना', 'लक्ष्य', 'diana'],
+  barrel: ['barrel', 'barrels', 'ड्रम', 'बैरल', 'barril'], wall: ['wall', 'walls', 'दीवार', 'muro'],
 };
 const MOTIONS: Readonly<Record<string, readonly string[]>> = {
   fly: ['fly', 'flying', 'flight', 'flap', 'उड़ता', 'उड़ती', 'उड़ते', 'उड़ना', 'उड़ने', 'volando'],

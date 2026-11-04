@@ -215,3 +215,24 @@ Final status: source branch checkpoint preserved, billing base intact, feature O
 is still paused after automatic approval review denied it for lack of explicit user authorization for
 that external action. Publishing environment settings did not grant PR permission. No PR, merge,
 deployment, cloud game publication or activation has occurred.
+
+## 2026-11-04 — Step 2: catalogue 7 → 35 (L3 still OFF)
+
+28 CC0 models from three official KayKit packs, each pack's `LICENSE.txt` read at the pinned revision ("License:
+(Creative Commons Zero, CC0) … free to use in personal, educational and commercial projects"):
+KayKit City Builder Bits `63976910` (buildings B–H, bush, streetlight, traffic light A, water tower, taxi, police car),
+Medieval Hexagon Pack `84fa4e91` (two trees, two rocks, hills with trees, mountain, two houses, well, windmill) and
+Prototype Bits `bb159596` (target, target stand, barrel, wall, wall with target). Admitted with
+`scripts/gameAssetAdmitGltf.mjs`, which uses the production `bundleGltf` → `compactGlb` → `validateGlb` and
+reproduced the existing `city-building_A` entry exactly (source `d9d21afb…`, derived `364ebc76…`, 70,720 B, 828 tris).
+Derived sizes 18–161 KB, 18–2,653 triangles. Building heights are proportional to building_A (8 m) from the
+POSITION accessor extents.
+
+**Real check, this container, live guarded downloader:** `scripts/checks/gameAssetReal.check.ts` — all 35 models
+`rendered:true` in Chromium, cache reuse with zero downloads, fresh-process restore, production build, keyboard/touch
+movement, animation and reload: PASS. The harness now scopes providers and cache to the model under test (several
+models now share a subject; the engine correctly downloads only the first match).
+
+New prompt vocabulary (English/Hindi/Spanish): bush, streetlight, traffic light, water tower, taxi, police car, hill,
+mountain, house, well, windmill, target, barrel, wall. Bare English "well" and "home" are deliberately NOT aliases.
+Not in these packs: a boxing ring (stays procedural) and animated boxers (Knight punch clips to be reviewed next).

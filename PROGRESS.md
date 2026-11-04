@@ -20,8 +20,9 @@ and production-dependency gates passed. Locked emulator: 21 queue/retry, 13 auto
 48,422 passed, 8 failed, 85 skipped (3,206 passing files, 6 failing files).
 The five assertion failures reproduce on untouched main 9dac8a71a (admin engine
 status, admin display naming, Weak Router pinning and two test-account checks).
-Three terrain tests timed out at the unchanged 20-second limit; baseline check
-recorded separately. Coverage gate is NOT green. Per the mandatory pre-push gate,
+All three terrain timeouts also reproduce under coverage on untouched main
+(18 passed, 3 timed out at the unchanged 20-second limit). All eight failures
+therefore reproduce on the baseline. Coverage gate is NOT green. Per the mandatory pre-push gate,
 branch remains local: no push, PR, hosted CI, merge or deployment yet.
 
 ## 2026-11-03 — Autopsy of build report #1836 (958aa1ec, second-newest failure)

@@ -154,6 +154,10 @@ describe('the shared state: audited, conflict-safe, and never switched back on b
     await syncSwitchesOnce(); // only a successful durable snapshot can establish ON
     await fetch('https://generativelanguage.googleapis.com/v1beta/models/test');
     expect(fetchCalls).toHaveLength(2);
+    state.db = fakeDb({ failRead: true }); await syncSwitchesOnce();
+    await expect(fetch('https://generativelanguage.googleapis.com/v1beta/models/test')).rejects.toThrow();
+    await expect(fetch('https://aiplatform.googleapis.com/v1/projects/test')).rejects.toThrow();
+    expect(fetchCalls).toHaveLength(2); // cached ON cannot authorize during a read outage
   });
   it('admin Gemini and Vertex OFF survive a restart, read failure, then resync', async () => {
     const durable = fakeDb(); state.db = durable;

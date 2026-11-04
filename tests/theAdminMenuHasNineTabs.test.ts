@@ -123,6 +123,8 @@ const FEATURE_HOME: Record<string, string | string[]> = {
   '<AdsPanel': 'ads',
   // Money · API Providers (2026-11-03): billing links and live balances.
   '<ApiProvidersPanel': 'api-providers',
+  // AI Engines (2026-11-04): the enforced provider on/off switches.
+  '<ProviderSwitchesPanel': 'engines',
   "detail: { view: 'gallery' }": 'review', // PR 3: the gallery review queue, opened from Apps → Review
   // Builds
   'onClick={clearAllReports}': 'reports',

@@ -10,6 +10,7 @@ import { registerDeepinfraComparisonRoutes } from './deepinfraComparison';
 import { registerLiveModelRegistryRoutes } from './liveModelRegistry';
 import { registerSurplusRegistryAdminRoutes } from './surplusRegistryAdmin';
 import { registerApiProvidersAdminRoutes } from './apiProvidersAdmin';
+import { registerProviderSwitchesAdminRoutes } from './providerSwitchesAdmin';
 import { sendAdminOwnerApps } from './adminOwnerApps';
 import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
 import { registerAiMaintenanceRoutes } from './aiMaintenance';
@@ -221,6 +222,8 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'build_report_numbers', 'admin_build_report_counter',
   // The admin's note of which login each outside API account uses (RETAINED_INDEFINITELY; one doc per provider).
   'admin_api_provider_accounts',
+  // The AI provider on/off switches: one state doc with a bounded change history (RETAINED_INDEFINITELY).
+  'admin_provider_switches',
   'hosting_billing', 'hosting_period_usage',
   // Already on clocks, and absent from this inventory for the same reason the eleven above were.
   'takedown_records', 'safety_flags', 'admin_audit_log', 'build_jobs', 'build_failures',
@@ -452,6 +455,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   registerLiveModelRegistryRoutes(app, verifyAdminToken);
   registerSurplusRegistryAdminRoutes(app, verifyAdminToken);
   registerApiProvidersAdminRoutes(app, verifyAdminToken);
+  registerProviderSwitchesAdminRoutes(app, verifyAdminToken);
   registerFreeChatChainRoutes(app, verifyAdminToken);
   registerDeepinfraComparisonRoutes(app, verifyAdminToken);
   registerProviderDiagnosticRoutes(app);

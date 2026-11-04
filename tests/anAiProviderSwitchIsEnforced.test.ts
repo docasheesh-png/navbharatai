@@ -70,7 +70,8 @@ describe('layer 2 — which requests are refused', () => {
     expect(switchedOffProviderFor('api.moonshot.ai', '/v1', {})).toBe('kimi');
     expect(switchedOffProviderFor('coding.example.dev', '/v1', { KIMI_BASE_URL: 'https://coding.example.dev/v1' })).toBe('kimi');
   });
-  it('🔒 never touches what is not that provider: Firestore, Gemini when only Vertex is off, Cloudflare DNS, S3', () => {
+  it('🔒 never touches what is not that provider: Firestore, Gemini when only Vertex is off, Cloudflare DNS, S3', async () => {
+    state.db = fakeDb(); await syncSwitchesOnce(); // known durable ON, not the unknown boot state
     applySwitchedOff(['vertex', 'cloudflare', 'bedrock'], {});
     expect(switchedOffProviderFor('firestore.googleapis.com', '/', {})).toBeNull();
     expect(switchedOffProviderFor('www.googleapis.com', '/', {})).toBeNull();
@@ -139,6 +140,38 @@ function fakeDb(opts: { failRead?: boolean } = {}) {
 }
 
 describe('the shared state: audited, conflict-safe, and never switched back on by a storage blip', () => {
+  it('Gemini and Vertex cannot dispatch at boot or after a failed first read', async () => {
+    state.db = fakeDb({ failRead: true });
+    for (const phase of ['boot', 'failed-read']) {
+      if (phase === 'failed-read') await syncSwitchesOnce();
+      await expect(fetch('https://generativelanguage.googleapis.com/v1beta/models/test:generateContent')).rejects.toThrow();
+      await expect(fetch('https://us-central1-aiplatform.googleapis.com/v1/projects/test')).rejects.toThrow();
+    }
+    expect(fetchCalls).toEqual([]);
+    await fetch('https://firestore.googleapis.com/v1/projects/test');
+    expect(fetchCalls).toHaveLength(1); // storage remains reachable so state can be read
+    state.db = fakeDb();
+    await syncSwitchesOnce(); // only a successful durable snapshot can establish ON
+    await fetch('https://generativelanguage.googleapis.com/v1beta/models/test');
+    expect(fetchCalls).toHaveLength(2);
+  });
+  it('admin Gemini and Vertex OFF survive a restart, read failure, then resync', async () => {
+    const durable = fakeDb(); state.db = durable;
+    await writeSwitch({ id: 'gemini', on: false, reason: 'owner disabled', expectedRevision: 0, by: 'admin' });
+    await writeSwitch({ id: 'vertex', on: false, reason: 'owner disabled', expectedRevision: 1, by: 'admin' });
+    __resetProviderSwitchesForTests();
+    state.db = fakeDb({ failRead: true }); await syncSwitchesOnce();
+    expect(switchedOffProviderFor('generativelanguage.googleapis.com', '/')).toBe('gemini');
+    expect(switchedOffProviderFor('aiplatform.googleapis.com', '/')).toBe('vertex');
+    state.db = durable; await syncSwitchesOnce();
+    expect(isProviderSwitchedOff('gemini')).toBe(true);
+    expect(isProviderSwitchedOff('vertex')).toBe(true);
+    state.db = fakeDb({ failRead: true }); await syncSwitchesOnce();
+    await expect(fetch('https://generativelanguage.googleapis.com/v1beta/models/test')).rejects.toThrow();
+    await expect(fetch('https://aiplatform.googleapis.com/v1/projects/test')).rejects.toThrow();
+    expect(fetchCalls).toEqual([]);
+  });
+
   it('a delayed old read cannot undo a newer local Gemini OFF write', async () => {
     const db = fakeDb();
     let finish!: (snapshot: unknown) => void;

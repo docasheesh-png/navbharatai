@@ -1,3 +1,22 @@
+## 2026-11-04 — Follow-up: fix the eight baseline failures and Google startup guard
+
+Owner: find the root cause of all eight failed checks; Gemini and Vertex were
+switched OFF with the Admin → AI Engines buttons. Global HTTP/fetch/HTTP2 now
+holds these two families before the first successful durable switch read; restart,
+first-read failure, later read failure and stale snapshot ordering have regressions.
+No admin switch is turned on by this change.
+
+Four stale assertions covered deliberately retired test-account routing or an
+extracted health helper; tests now enforce the documented 2026-11-02 retirement
+and the actual helper's never-used/failed/successful states. Hosting waivers remain
+independent and tested. The Admin capacity description uses the current AI Chat
+name. Three terrain timeouts came from repeatedly scanning every triangle in the
+native raycast test oracle. The oracle now partitions the same index buffer into
+bounded batches; every probe/assertion remains. A separate equivalence test compares
+native raycasts across transforms, misses, vertex edits, draw ranges and groups.
+Terrain coverage tests: all 21 pass in 16.71s (previous baseline 3 timeouts/156.52s).
+Full final CI-equivalent validation is being rerun; no push or deployment yet.
+
 ## 2026-11-04 — Ordinary Chat default provider order (local implementation; publication blocked)
 
 Owner requested GLM 4.5 Flash → GLM 4.7 Flash → Groq → Cloudflare → verified-free

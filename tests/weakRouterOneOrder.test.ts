@@ -45,11 +45,11 @@ describe('Weak Surplus → Router One → GLM → existing tail', () => {
     vi.stubEnv('ROUTER_ONE_ENABLED', 'off');
     expect(chain()[0]).toBe('GLM');
   });
-  it('Weak supersedes profile pins without changing other bands', () => {
+  it('retired profile pins stay retired in every band', () => {
     expect(routerOnePinnedForTier('weak', 'z@gmail.com')).toBe(false);
     expect(surplusFallbackDisabledForTier('weak', 'z@gmail.com')).toBe(false);
-    expect(routerOnePinnedForTier('off', 'z@gmail.com')).toBe(true);
-    expect(surplusFallbackDisabledForTier('off', 'z@gmail.com')).toBe(true);
+    expect(routerOnePinnedForTier('off', 'z@gmail.com')).toBe(false);
+    expect(surplusFallbackDisabledForTier('off', 'z@gmail.com')).toBe(false);
     expect(chain({ surplusPreWriteFailOpen: { state: { dropped: false }, userFilesWritten: () => 0, routerOneOnly: true } })).toEqual(['ENGINE_R1', 'GLM', 'KIMI', 'GLM']);
   });
   it('admitted Surplus stays first and constructs no fallback on success', async () => {

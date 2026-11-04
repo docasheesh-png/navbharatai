@@ -57,6 +57,9 @@ DeepInfra Llama 3.1 8B → DeepInfra DeepSeek V4 Flash → GPT-5 Nano → GLM 4.
 Gemini 2.5 Flash-Lite (paid profile). Gemini stays last in configuration and is
 skipped while its provider-family switch is OFF; Vertex is not a rung. Gemini is
 also withheld until this instance has successfully read switch state at least once.
+The global HTTP/fetch/HTTP2 guard holds both Gemini and Vertex during that startup
+window, including grounding, vision and legacy callers outside FreeChain. A failed
+read preserves the last known OFF state; Firestore remains reachable for recovery.
 Switch snapshots apply monotonically by revision, so a delayed older read cannot
 undo a newer OFF write. Cross-instance propagation still uses the existing polling
 interval; this is not proof of live state or cancellation of calls already in flight.

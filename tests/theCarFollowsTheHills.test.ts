@@ -1,3 +1,4 @@
+import { indexedRaycast } from './helpers/indexedRaycast';
 // THE CAR FOLLOWS THE HILLS (admin 2026-11-02, build be6aae96: "car aage chal kar jameen me dhasne lagti
 // hai … sabhi racing game me yahi hota hai"). createTerrain() displaced its vertices into hills, but the
 // height lived only in the mesh, and driveVehicle() moved x/z and never y — so every car drove at the y it
@@ -125,7 +126,7 @@ describe('NOTHING sinks: groundScene keeps every dynamic object on the terrain',
 const surfY = (m: THREE.Object3D, x: number, z: number) => {
   let top = m; while (top.parent) top = top.parent;
   top.updateMatrixWorld(true);
-  const hit = new THREE.Raycaster(new THREE.Vector3(x, 500, z), new THREE.Vector3(0, -1, 0)).intersectObject(m, true)[0];
+  const hit = indexedRaycast(new THREE.Raycaster(new THREE.Vector3(x, 500, z), new THREE.Vector3(0, -1, 0)), m)[0];
   return hit ? hit.point.y : NaN;
 };
 

@@ -1,3 +1,5 @@
+// Isolate prompt placement from the separately tested Free Chain admission queue.
+vi.mock('../src/server/AI/FreeChain/entryAdmission', () => ({ withFreeChainEntryAdmission: (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(), entryAdmissionFor: () => undefined }));
 // This suite isolates routing/identity; shared quota admission is tested separately.
 vi.mock('../src/server/lib/freeAnswerQuota', () => ({ withFreeAnswerQuota: (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(), assertFreeAnswerActive: () => {}, markFreeAnswer: () => {}, freeAnswerSignal: () => undefined }));
 /**

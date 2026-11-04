@@ -1,3 +1,53 @@
+## 2026-11-04 — Follow-up: fix the eight baseline failures and Google startup guard
+
+Owner: find the root cause of all eight failed checks; Gemini and Vertex were
+switched OFF with the Admin → AI Engines buttons. Global HTTP/fetch/HTTP2 now
+holds these two families before the first successful durable switch read; restart,
+first-read failure, later read failure and stale snapshot ordering have regressions.
+No admin switch is turned on by this change.
+
+Four stale assertions covered deliberately retired test-account routing or an
+extracted health helper; tests now enforce the documented 2026-11-02 retirement
+and the actual helper's never-used/failed/successful states. Hosting waivers remain
+independent and tested. The Admin capacity description uses the current AI Chat
+name. Three terrain timeouts came from repeatedly scanning every triangle in the
+native raycast test oracle. The oracle now partitions the same index buffer into
+bounded batches; every probe/assertion remains. A separate equivalence test compares
+native raycasts across transforms, misses, vertex edits, draw ranges and groups.
+Terrain coverage tests: all 21 pass in 16.71s (previous baseline 3 timeouts/156.52s).
+Final local validation passed: 3,213 files, 48,434 tests, 85 skipped; coverage
+statements 75.66%, branches 71.60%, functions 78.28%, lines 77.66%. All CI-equivalent
+checks passed, including the locked emulator drills. No gate/timeout was weakened.
+Code verified at 7747f84d8; this entry records its results. PR/hosted CI follow;
+no live setting or deployment is claimed.
+
+## 2026-11-04 — Ordinary Chat default provider order (local implementation; publication blocked)
+
+Owner requested GLM 4.5 Flash → GLM 4.7 Flash → Groq → Cloudflare → verified-free
+OpenRouter → CheaperInference → DeepInfra 8B → DeepInfra DeepSeek V4 Flash → GPT-5
+Nano → GLM FlashX → paid Gemini Flash-Lite, with Gemini/Vertex remaining OFF.
+The constant already matched; default selection and quality promotion did not.
+Default selection now uses the shared ON policy at context/entry/config and 100%
+rollout when no override exists. Classification retains output sizing, while
+promotion requires explicit route-reorder opt-in. Family OFF is checked before
+quota reservations even if credentials were captured before the switch. Gemini is
+withheld before the first successful switch-state read; monotonically applied
+snapshot revisions prevent delayed reads from undoing newer OFF settings.
+Gateway/Strict Free, saved controls, private/health exclusions, account evidence,
+quotas, budgets, four-attempt limit and exclusive admin diagnostics remain intact.
+See docs/FREE_CHAT_CHAIN.md for scope and exceptions. No live settings changed.
+Validation: 518 targeted tests passed. CI-equivalent typechecks, unused imports,
+native/OAuth guards, security audit, signatures, license/SBOM, build, bundle, boot
+and production-dependency gates passed. Locked emulator: 21 queue/retry, 13 autopsy,
+8 DeepInfra and 78 session-rule assertions passed. Full coverage run completed:
+48,422 passed, 8 failed, 85 skipped (3,206 passing files, 6 failing files).
+The five assertion failures reproduce on untouched main 9dac8a71a (admin engine
+status, admin display naming, Weak Router pinning and two test-account checks).
+All three terrain timeouts also reproduce under coverage on untouched main
+(18 passed, 3 timed out at the unchanged 20-second limit). All eight failures
+therefore reproduce on the baseline. Coverage gate is NOT green. Per the mandatory pre-push gate,
+branch remains local: no push, PR, hosted CI, merge or deployment yet.
+
 ## 2026-11-03 — Autopsy of build report #1836 (958aa1ec, second-newest failure)
 
 3D endless car racing game, weak tier, ENGINE_R1 `deepseek-v4.1-flash`, RED in 170 s, never charged; all 162 issues and 18 model calls read.

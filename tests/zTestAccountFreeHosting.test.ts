@@ -17,7 +17,7 @@ describe('isZTestAccount', () => {
     expect(isZTestAccount(null, Z_UID)).toBe(true);
     expect(isZTestAccount('a@gmail.com', 'someone')).toBe(false);
     expect(isZTestAccount(null, null)).toBe(false);
-    expect(surplusFallbackDisabledFor('z@gmail.com')).toBe(true);
+    expect(surplusFallbackDisabledFor('z@gmail.com')).toBe(false);
     expect(surplusFallbackDisabledFor('x@gmail.com', 'u1')).toBe(false);
   });
 });
@@ -52,7 +52,7 @@ describe('free hosting plan / add-on for z only', () => {
 });
 
 describe('Z_TEST_ACCOUNT_FREE kill switch', () => {
-  it('on/unset ⇒ free; off ⇒ z billed like anyone; Surplus debug unaffected', async () => {
+  it('on/unset ⇒ free; off ⇒ z billed like anyone; retired Surplus routing override stays off', async () => {
     const { zTestFreeBilling } = await import('../src/server/lib/zTestAccount');
     const { _clearPlanCacheForTests } = await import('../src/server/lib/hostingPlan');
     delete process.env.Z_TEST_ACCOUNT_FREE;
@@ -64,7 +64,7 @@ describe('Z_TEST_ACCOUNT_FREE kill switch', () => {
       expect((await probeHostingPlan(Z_UID)).active).toBe(false);
       const plan = { id: STARTER.id, purchasedAt: NOW, expiresAt: '2026-10-01T00:00:00.000Z', autoRenew: true };
       expect(decidePlanSweepStep({ ...empty(Z_UID), hostingPlan: plan }, NOW).action).not.toEqual({ kind: 'renewed' });
-      expect(surplusFallbackDisabledFor('z@gmail.com')).toBe(true);
+      expect(surplusFallbackDisabledFor('z@gmail.com')).toBe(false);
       expect(isZTestAccount(null, Z_UID)).toBe(true);
     } finally { delete process.env.Z_TEST_ACCOUNT_FREE; }
   });

@@ -15,7 +15,8 @@ vi.mock('../Router/AIRouter', () => ({ acquireSlot: () => true, releaseSlot: vi.
 vi.mock('./telemetry', () => ({ logFreeChain: vi.fn() }));
 import { buildFreeChainRouter, maybeFreeChain, freeChainAdminView, freeChainAdminMetrics, controlFreeChainBudget, durationMs, shouldPersistFreeChainEvent, type FreeChainInput } from './runtime';
 import { FreeRoutingError } from '../LiveRegistry/dispatcher';
-import { freeChainConfig } from './config';
+import { DEFAULT_ORDER, freeChainConfig } from './config';
+import { applySwitchedOff, __resetProviderSwitchesForTests } from '../../lib/providerSwitches';
 import { getBreaker, resetAllBreakers } from '../Router/CircuitBreaker';
 import { FreeChainProviderError } from './providers/openAiCompatProvider';
 import { isFreeChainAdminView, isFreeChainAdminMetrics } from '../../../lib/freeChatChainView';
@@ -39,8 +40,49 @@ beforeEach(() => {
  m.quota.mockResolvedValue({ available: true, usage: { rpm: 1, rpd: 2, tpm: 3, tpd: 4, neuronsPerDay: 5 }, dailyResetAt: Date.now()+1000, minuteResetAt: Date.now()+1000, cooldownUntil: 0 });
  m.spend.mockResolvedValue({ available: true, capNanoUsd: 2e9, policyRevision: 3, heldNanoUsd: 0, spentNanoUsd: 0 });
 });
-afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
+afterEach(() => { __resetProviderSwitchesForTests(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 describe('free chat chain central dispatch', () => {
+ it.each(['hello', 'solve 2 + 2', 'exam notes', 'fever symptoms'])('keeps GLM first for default routing: %s', async message => {
+   const cfg = config(DEFAULT_ORDER.join(','));
+   const result = await buildFreeChainRouter(db, cfg).route({ ...input(), message });
+   expect(result).toMatchObject({ ok: true, model: 'glm-4.5-flash' });
+   expect(m.execute).toHaveBeenCalledOnce();
+   expect(m.paid).not.toHaveBeenCalled();
+ });
+ it('falls through in owner order and retains the four-physical-attempt bound', async () => {
+   m.execute.mockRejectedValue(new FreeChainProviderError('MODEL_UNAVAILABLE'));
+   const result = await buildFreeChainRouter(db, config(DEFAULT_ORDER.join(','))).route(input());
+   expect(m.execute.mock.calls.map(call => call[1].model)).toEqual([
+     'glm-4.5-flash', 'glm-4.7-flash', 'openai/gpt-oss-120b', '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+   ]);
+   expect(result.ok).toBe(false);
+   expect(m.registry).not.toHaveBeenCalled();
+   expect(m.paid).not.toHaveBeenCalled();
+ });
+ it('skips a switched-off family even with credentials captured before OFF', async () => {
+   const cfg = config(DEFAULT_ORDER.join(','));
+   applySwitchedOff(['glm']);
+   const result = await buildFreeChainRouter(db, cfg).route(input());
+   expect(result).toMatchObject({ ok: true, provider: 'GROQ' });
+   expect(m.execute).toHaveBeenCalledOnce();
+ });
+ it('cannot call Gemini from the empty boot switch cache before a successful read', async () => {
+   const cfg = freeChainConfig({ FREE_CHAIN_ORDER: 'geminipaid', FREE_CHAIN_GEMINIPAID_API_KEY: 'fake-key', FREE_CHAIN_GEMINIPAID_RATE_VERIFIED_UNTIL: '2099-01-01' });
+   const result = await buildFreeChainRouter(db, cfg).route(input());
+   expect(result.freeChain?.attempts).toEqual([expect.objectContaining({ reason: 'disabled', entered: false })]);
+   expect(m.execute).not.toHaveBeenCalled();
+   expect(m.paid).not.toHaveBeenCalled();
+ });
+ it('retains last Gemini rung but never dispatches it while globally OFF', async () => {
+   const cfg = freeChainConfig({ FREE_CHAIN_ORDER: 'geminipaid', FREE_CHAIN_GEMINIPAID_API_KEY: 'fake-key', FREE_CHAIN_GEMINIPAID_RATE_VERIFIED_UNTIL: '2099-01-01' });
+   applySwitchedOff(['gemini', 'vertex']);
+   const result = await buildFreeChainRouter(db, cfg).route(input());
+   expect(DEFAULT_ORDER.at(-1)).toBe('geminipaid');
+   expect(result.freeChain?.attempts).toEqual([expect.objectContaining({ provider: 'geminipaid', reason: 'disabled', entered: false })]);
+   expect(m.execute).not.toHaveBeenCalled();
+   expect(m.paid).not.toHaveBeenCalled();
+ });
+
  it('serves first healthy rung and exposes no secret in telemetry', async () => {
  const result = await buildFreeChainRouter(db, config()).route(input());
  expect(result.provider).toBe('GROQ'); expect(result.ok).toBe(true); expect(m.execute).toHaveBeenCalledTimes(1);

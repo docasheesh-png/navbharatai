@@ -132,12 +132,12 @@ describe('owner tiered free chat module (Tier 1 → Tier 2 → Tier 3)', () => {
 
 describe('master plan routing through the live chain', () => {
  beforeEach(() => { m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true }); m.settle.mockResolvedValue(undefined); });
- it('a teaching question goes straight to DeepInfra DeepSeek', async () => {
-  const result = await buildFreeChainRouter(db, tiered('groq,llama8b,dsv4flash')).route({ ...input(), message: 'NEET exam ka syllabus samjhao' });
+ it('explicit route-reorder opt-in sends a teaching question to DeepInfra DeepSeek', async () => {
+  const result = await buildFreeChainRouter(db, tiered('groq,llama8b,dsv4flash', { FREE_CHAIN_ROUTE_REORDER_ENABLED: 'on' })).route({ ...input(), message: 'NEET exam ka syllabus samjhao' });
   expect(result.freeChain?.route).toBe('quality'); expect(result.freeChain?.rung).toBe('dsv4flash'); expect(m.paid).toHaveBeenCalledOnce();
  });
  it('without the DeepInfra key the quality route falls back to the normal free order (no breakage)', async () => {
-  const result = await buildFreeChainRouter(db, tiered('groq,llama8b,dsv4flash', { FREE_CHAIN_DEEPINFRA_API_KEY: '' })).route({ ...input(), message: 'NEET exam ka syllabus samjhao' });
+  const result = await buildFreeChainRouter(db, tiered('groq,llama8b,dsv4flash', { FREE_CHAIN_DEEPINFRA_API_KEY: '', FREE_CHAIN_ROUTE_REORDER_ENABLED: 'on' })).route({ ...input(), message: 'NEET exam ka syllabus samjhao' });
   expect(result).toMatchObject({ ok: true }); expect(result.freeChain?.rung).toBe('groq'); expect(result.freeChain?.route).toBe('normal');
  });
  it('monthly cap reached skips paid rungs without dispatch', async () => {

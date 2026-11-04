@@ -149,9 +149,12 @@ const hostMatches = (host: string, pattern: string): boolean =>
 
 /** The switched-off provider this request would reach, or null. PURE given state + env. */
 export function switchedOffProviderFor(hostname: string, path: string, env: NodeJS.ProcessEnv = process.env): string | null {
-  if (off.size === 0) return null;
+  // Until a successful durable read (and again after any read failure), never
+  // infer Google providers are ON. A cached ON must not outlive an unread admin OFF.
+  const blocked = !lastSync.ok ? new Set([...off, 'gemini', 'vertex']) : off;
+  if (blocked.size === 0) return null;
   const host = hostname.toLowerCase().replace(/\.$/, '').replace(/:\d+$/, '');
-  for (const id of off) {
+  for (const id of blocked) {
     const f = FAMILY_BY_ID.get(id)!;
     if (!f.hosts(env).some((p) => hostMatches(host, p))) continue;
     if (f.pathPrefix && !f.pathPrefix.test(path || '/')) continue;
@@ -184,7 +187,7 @@ export function installProviderSwitchGuard(): void {
   const origGet = https.get;
   const wrap = (orig: typeof HttpsT.request) => function (this: unknown, ...args: unknown[]) {
     const req = (orig as (...a: unknown[]) => ReturnType<typeof HttpsT.request>).apply(this, args);
-    if (off.size > 0) {
+    if (off.size > 0 || !lastSync.ok) {
       const t = targetOf(args);
       const id = t && switchedOffProviderFor(t.host, t.path);
       // Destroyed before the socket connects: the caller gets an ordinary request 'error', nothing is sent.
@@ -200,7 +203,7 @@ export function installProviderSwitchGuard(): void {
   const origConnect = http2.connect;
   (http2 as { connect: unknown }).connect = function (this: unknown, ...args: unknown[]) {
     const session = (origConnect as (...a: unknown[]) => Http2T.ClientHttp2Session).apply(this, args);
-    if (off.size > 0) {
+    if (off.size > 0 || !lastSync.ok) {
       const t = targetOf(args);
       const id = t && switchedOffProviderFor(t.host, '/');
       if (id) session.destroy(new ProviderSwitchedOffError(id));
@@ -211,7 +214,7 @@ export function installProviderSwitchGuard(): void {
   const origFetch = globalThis.fetch;
   if (typeof origFetch === 'function') {
     globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-      if (off.size > 0) {
+      if (off.size > 0 || !lastSync.ok) {
         let url: URL | null = null;
         try { url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url); } catch { url = null; }
         const id = url && switchedOffProviderFor(url.hostname, url.pathname);
@@ -272,20 +275,26 @@ export async function writeSwitch(args: { id: unknown; on: unknown; reason: unkn
     tx.set(ref, state);
     return state;
   });
-  applySwitchedOff(next.off); // this instance at once; the others within SYNC_MS
-  lastSync = { at: now, ok: true };
+  applySwitchSnapshot(next, now); // this instance at once; the others within SYNC_MS
   return next;
 }
 
 // ─── the sync loop (each instance) ───────────────────────────────────────────────────────────────────────────
 let lastSync: { at: number | null; ok: boolean } = { at: null, ok: false };
+let appliedRevision = -1;
+function applySwitchSnapshot(state: SwitchState, at: number): void {
+  // A poll started before an admin write must never restore the old ON state.
+  if (state.revision < appliedRevision) return;
+  applySwitchedOff(state.off);
+  appliedRevision = state.revision;
+  lastSync = { at, ok: true };
+}
 export function lastSwitchSync(): { at: number | null; ok: boolean } { return { ...lastSync }; }
 
 export async function syncSwitchesOnce(now: () => number = Date.now): Promise<void> {
   try {
     const s = await readSwitchState();
-    applySwitchedOff(s.off);
-    lastSync = { at: now(), ok: true };
+    applySwitchSnapshot(s, now());
   } catch {
     // Keep the last known state: a storage blip must never switch a provider back on.
     lastSync = { at: lastSync.at, ok: false };
@@ -305,5 +314,6 @@ export function __resetProviderSwitchesForTests(env: NodeJS.ProcessEnv = process
   applySwitchedOff([], env);
   off = new Set();
   withdrawn.clear();
+  appliedRevision = -1;
   lastSync = { at: null, ok: false };
 }

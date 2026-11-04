@@ -2791,7 +2791,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${badge}`}>{stat.capacityOnly ? 'Capacity pool' : health.label}</span>
                       </div>
                       {stat.capacityOnly
-                        ? <p className="text-[10px] text-muted">A Free Chat concurrency pool for one account — calls in flight, not a separate engine.</p>
+                        ? <p className="text-[10px] text-muted">An AI Chat concurrency pool for one account — calls in flight, not a separate engine.</p>
                         : health.detail && <p className="text-[10px] text-muted">{health.detail}</p>}
                       <div className="grid grid-cols-3 gap-2 text-center">
                         <div className="bg-well rounded-lg p-2">

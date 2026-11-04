@@ -39,6 +39,11 @@ export const TERMS_UNVERIFIED_IDS = ['bluesminds', 'requesty'] as const;
  * Free-tier Gemini is no longer in the default order (privacy); Nemotron Nano was removed.
  */
 export const DEFAULT_ORDER = ['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid'] as const;
+/** Default chat routing; explicit OFF remains authoritative at every ingress. */
+export function freeChainEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const value = env.FREE_CHAIN_ENABLED;
+  return value === undefined || value === '' || parseEnvFlag(value) === true;
+}
 export function isPaidRung(id: string): boolean { return (PAID_PROVIDER_IDS as readonly string[]).includes(id); }
 export type ProviderId = typeof PROVIDER_IDS[number];
 export type ReplyLanguage = 'hi' | 'hinglish' | 'en' | 'other';
@@ -67,11 +72,12 @@ export interface FreeChainConfig {
   features: FreeChainFeatures;
 }
 /**
- * Master-plan features. Default ON (owner 2026-10-24); each has an env kill switch (`=off`).
+ * Master-plan features default ON, except routeReorder (owner fixed order, 2026-11-04).
+ * Each has an explicit environment override.
  * A rung without its key is skipped by rungReason, so ON features never break production.
  */
 export interface FreeChainFeatures {
-  concurrency: boolean; router: boolean; stablePrefix: boolean; compactPrompt: boolean;
+  concurrency: boolean; router: boolean; routeReorder: boolean; stablePrefix: boolean; compactPrompt: boolean;
   outputCap: boolean; replyMaxTokens: number; fastMaxTokens: number; historyTrim: boolean; historyTurns: number;
   faqCache: boolean; monthlyCap: boolean; monthlyCapNanoUsd: number; throttle: boolean; throttlePercent: number;
 }
@@ -206,7 +212,7 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
       timeZone,
       verifiedUntil: Number.isFinite(verifiedUntil) ? verifiedUntil : 0, streamUsage: id === 'gemini' || isPaidRung(id), priceIn, priceOut };
   });
-  const config: FreeChainConfig = { enabled: flag('FREE_CHAIN_ENABLED'), rolloutPercent: num('FREE_CHAIN_ROLLOUT_PERCENT', 0, 0, 100),
+  const config: FreeChainConfig = { enabled: flag('FREE_CHAIN_ENABLED', true) && freeChainEnabled(env), rolloutPercent: num('FREE_CHAIN_ROLLOUT_PERCENT', 100, 0, 100),
     allowUids: list(env.FREE_CHAIN_ALLOW_UIDS), order: order as ProviderId[], skipGemini, privacyApproved,
     ttftMs: num('FREE_CHAIN_TTFT_MS', 6000, 1000, 90000), cacheEnabled: flag('FREE_CHAIN_CACHE_ENABLED', true), cacheTtlS: num('FREE_CHAIN_CACHE_TTL_S', 86400, 60, 86400),
     paidCapNanoUsd: money('FREE_CHAIN_PAID_DAILY_CAP_USD', DEFAULT_PAID_CAP_NANO_USD / NANO_USD, 0, OWNER_PAID_DAILY_CEILING_NANO_USD / NANO_USD),
@@ -216,7 +222,7 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
     openRouterModels: list(env.FREE_CHAIN_OPENROUTER_MODELS), rungs, errors,
     maxAttempts: num('FREE_CHAIN_MAX_ATTEMPTS', 4, 1, 6), stickySpread: flag('FREE_CHAIN_STICKY_SPREAD'),
     concurrency: { glm45: num('FREE_CHAIN_GLM45_MAX_CONCURRENT', 2, 0, 64), glm47: num('FREE_CHAIN_GLM47_MAX_CONCURRENT', 1, 0, 64) },
-    features: { concurrency: flag('FREE_CHAIN_CONCURRENCY_ENABLED', true), router: flag('FREE_CHAIN_ROUTER_ENABLED', true),
+    features: { concurrency: flag('FREE_CHAIN_CONCURRENCY_ENABLED', true), router: flag('FREE_CHAIN_ROUTER_ENABLED', true), routeReorder: flag('FREE_CHAIN_ROUTE_REORDER_ENABLED'),
       stablePrefix: flag('FREE_CHAIN_STABLE_PREFIX_ENABLED', true), compactPrompt: flag('FREE_CHAIN_COMPACT_PROMPT_ENABLED', true),
       outputCap: flag('FREE_CHAIN_OUTPUT_CAP_ENABLED', true), replyMaxTokens: num('FREE_CHAIN_REPLY_MAX_TOKENS', 250, 64, 4096), fastMaxTokens: num('FREE_CHAIN_FAST_MAX_TOKENS', 80, 32, 1024),
       historyTrim: flag('FREE_CHAIN_HISTORY_TRIM_ENABLED', true), historyTurns: num('FREE_CHAIN_HISTORY_TURNS', 6, 0, 50),

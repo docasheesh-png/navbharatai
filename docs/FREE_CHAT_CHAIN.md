@@ -1,10 +1,10 @@
 # Free Chat Chain: implementation and operator runbook
 
-Status, 2026-10-22: additive implementation for review. The feature defaults OFF,
-rollout defaults to 0%, and Gemini defaults to skipped. No production activation,
-credential creation, provider inference, live multilingual evaluation, purchase,
-or deployment was performed for this change. Offline tests are not evidence that
-an existing account is free, a model is available, or the launch acceptance bar is met.
+Status, 2026-11-04: authenticated ordinary text chat defaults to this chain with
+100% rollout when deployment flags and saved controls are absent. Explicit OFF,
+saved rollout/disabled lists and provider-family switches remain authoritative.
+This code change does not modify live settings, credentials or attestations.
+Offline tests do not prove live provider availability or free-account eligibility.
 
 > **2026-10-23:** the owner's Tier 1 → Tier 2 → Tier 3 module (new providers, paid Tier 3,
 > max attempts, sticky spread, localized busy line, cost estimate) is documented in
@@ -51,9 +51,36 @@ management; the detailed guide could not be independently opened during this run
 The owner must verify the correct key type and actual account quotas in the console
 before configuring this feature. No credential changes were performed.
 
-Default logical order: GLM 4.7 Flash → GLM 4.5 Flash → Groq → existing
-OpenRouter live registry → Cloudflare Workers AI → optional Gemini → separately
-gated DeepSeek. Both GLM rungs share one key, account quota, bulkhead and auth/rate/quota
+Default logical order: GLM 4.5 Flash → GLM 4.7 Flash → Groq GPT-OSS 120B →
+Cloudflare Llama 3.3 70B → verified-free OpenRouter models → CheaperInference →
+DeepInfra Llama 3.1 8B → DeepInfra DeepSeek V4 Flash → GPT-5 Nano → GLM 4.7 FlashX →
+Gemini 2.5 Flash-Lite (paid profile). Gemini stays last in configuration and is
+skipped while its provider-family switch is OFF; Vertex is not a rung. Gemini is
+also withheld until this instance has successfully read switch state at least once.
+The global HTTP/fetch/HTTP2 guard holds both Gemini and Vertex during that startup
+window, including grounding, vision and legacy callers outside FreeChain. A failed
+read also holds both families even if the last snapshot said ON, until a successful
+read recovers; it preserves every last known OFF state; Firestore remains reachable for recovery.
+Switch snapshots apply monotonically by revision, so a delayed older read cannot
+undo a newer OFF write. Cross-instance propagation still uses the existing polling
+interval; this is not proof of live state or cancellation of calls already in flight.
+
+Classification still selects response limits, but does not reorder or remove
+rungs by default. `FREE_CHAIN_ROUTE_REORDER_ENABLED=on` explicitly restores the
+older quality/fast promotion policy; `FREE_CHAIN_STICKY_SPREAD=on` explicitly
+rotates leading free rungs. `FREE_CHAIN_ORDER` remains an operator override.
+Selected Inference Gateway and Strict Free requests retain their own policies;
+this change does not override them. CHEAPERINFERENCE=admin remains the existing
+exclusive verified-admin diagnostic route. Attachments, anonymous callers and
+professional/build surfaces retain their existing routing.
+
+Only eligible rungs run: privacy, dated rate/free-plan evidence, provider OFF,
+shared quotas, circuits, concurrency, OpenRouter registry verification and budget
+reservations still apply. The four-physical-attempt default is unchanged; skipped
+rungs do not spend an attempt, and successful earlier replies stop the chain.
+Paid or privacy-blocked fallbacks are never forced just to visit all eleven entries.
+
+Both GLM rungs share one key, account quota, bulkhead and auth/rate/quota
 cooldowns. Model circuits remain separate so a model-unavailable response from
 4.7 can try 4.5; switching models never creates a fresh account allowance. Unknown GLM
 quota limits default to zero and its local reset defaults to conservative rolling24h. `FREE_CHAIN_ORDER` may
@@ -325,7 +352,8 @@ not a reassuring zero. Legacy unmarked pricing and wallet charging are unchanged
 
 ## Owner-only setup checklist, no commands executed
 
-1. Leave `FREE_CHAIN_ENABLED` OFF, rollout 0 and Gemini skipped while reviewing.
+1. For a staged review, explicitly set `FREE_CHAIN_ENABLED=off` and rollout 0;
+   absent settings now default ON/100%. Preserve existing provider OFF switches.
 2. Verify each provider's current exact model, account/project tier, active quotas,
    free allocation, privacy/retention settings, license and intended-use terms.
    Record a short-lived review expiry; do not represent it as an automated check.

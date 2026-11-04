@@ -1,8 +1,8 @@
 # Free Chat — tiered provider module (owner spec 2026-10-23)
 
 Extends the existing Free Chat Chain (`src/server/AI/FreeChain/**`, see `FREE_CHAT_CHAIN.md`).
-Everything stays **OFF by default** (`FREE_CHAIN_ENABLED` off, rollout 0%). Turning it off
-restores today's `buildFree()` ladder instantly. No billing code, app builds, professionals
+As of 2026-11-04, ordinary authenticated chat defaults **ON with 100% rollout**
+when flags and saved controls are absent. Explicit OFF restores the legacy ladder. No billing code, app builds, professionals
 or strict-free (#3902) semantics are changed.
 
 ## 1. Architecture (text diagram)
@@ -151,7 +151,7 @@ Key conclusions:
 ## Final Master Plan (owner, 2026-10-24)
 
 Default order: `glm45` (max 2 in flight) → `glm47` (max 1) → `groq` → `cloudflare` → `openrouter` (:free) →
-paid `llama8b` (DeepInfra Llama-3.1-8B Turbo) → `dsv4flash` (DeepInfra DeepSeek-V4-Flash-0731) →
+paid `cheapinf` (permission/mode gated) → `llama8b` (DeepInfra Llama-3.1-8B Turbo) → `dsv4flash` (DeepInfra DeepSeek-V4-Flash-0731) →
 backups `gpt5nano` → `glmflashx` → `geminipaid` (Gemini 2.5 Flash-Lite, paid tier). Nemotron Nano removed;
 free-tier Gemini is out of the default order. Both DeepInfra rungs use ONE key: `FREE_CHAIN_DEEPINFRA_API_KEY`.
 
@@ -161,7 +161,7 @@ All features below are **default ON** and individually killable with `=off`. The
 | Feature | Kill switch | Knobs |
 |---|---|---|
 | Per-rung concurrency (in-process, per instance) | `FREE_CHAIN_CONCURRENCY_ENABLED` | `FREE_CHAIN_GLM45_MAX_CONCURRENT=2`, `FREE_CHAIN_GLM47_MAX_CONCURRENT=1` |
-| Rule router (teaching/exam/medical/long/code/repeat → DeepSeek; short → fast path) | `FREE_CHAIN_ROUTER_ENABLED` | — |
+| Rule classifier (quality/fast response limits; default provider order preserved) | `FREE_CHAIN_ROUTER_ENABLED` | Provider promotion requires `FREE_CHAIN_ROUTE_REORDER_ENABLED=on` (default OFF) |
 | Stable prompt prefix (profile, greeting state, date moved last) | `FREE_CHAIN_STABLE_PREFIX_ENABLED` | cached tokens logged as `cachedInputTokens` |
 | Compact ~1k core prompt (safety rules kept) | `FREE_CHAIN_COMPACT_PROMPT_ENABLED` | — |
 | Reply cap (not on reasoning rungs groq/gpt5nano/openrouter; GLM thinking disabled) | `FREE_CHAIN_OUTPUT_CAP_ENABLED` | `FREE_CHAIN_REPLY_MAX_TOKENS=250`, `FREE_CHAIN_FAST_MAX_TOKENS=80` |

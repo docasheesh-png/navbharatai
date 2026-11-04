@@ -1,3 +1,4 @@
+import { switchedOffProviderFor } from '../../lib/providerSwitches';
 import { chatAvailabilityMessage } from '../../lib/chatAvailabilityMessage';
 import { freeChainAdmissionFailure } from './admissionFailure';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../../lib/chatReplyLanguage';
@@ -114,6 +115,8 @@ function rungReason(rung: RungConfig, cfg: FreeChainConfig, input?: FreeChainInp
     // Exclusive CHEAPERINFERENCE=admin must answer every admin Free Chat turn, including profile/memory.
     if (!(rung.id === 'cheapinf' && input.context.isAdmin === true && cheaperInferenceMode() === 'admin')) return 'privacy';
   }
+  const target = new URL(rung.baseURL);
+  if (switchedOffProviderFor(target.hostname, target.pathname)) return 'disabled';
   return undefined;
 }
 function replyLanguageFor(input: FreeChainInput) {
@@ -178,7 +181,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     const exclusiveAdmin = input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
     const baseOrder = exclusiveAdmin ? (['cheapinf'] as ProviderId[]) : orderForUser(cfg, input.context.uid);
     let route: TurnRoute = exclusiveAdmin ? 'normal' : routed.route;
-    let order = exclusiveAdmin ? baseOrder : orderForRoute(baseOrder, route);
+    let order = exclusiveAdmin ? baseOrder : orderForRoute(baseOrder, route, cfg.features.routeReorder);
     // A routed order with no usable rung (keys not configured yet, privacy) falls back to the plain order.
     if (!exclusiveAdmin && order !== baseOrder && !order.some(oid => { const r = cfg.rungs.find(x => x.id === oid); return !!r && !rungReason(r, cfg, input); })) { order = baseOrder; route = 'normal'; }
     trace.route = route; trace.routeReason = routed.reason;
@@ -240,6 +243,8 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         if (!control || control.enabled === false) { attempt.reason = 'disabled'; break; }
         if (control.disabledProviders.includes(id)) { attempt.reason = 'disabled'; continue; }
       }
+        const target = new URL(rung.baseURL);
+        if (switchedOffProviderFor(target.hostname, target.pathname)) { attempt.reason = 'disabled'; continue; }
         let admission = await store.reserveQuota(quotaInput(rung, cfg, prepared.inputTokens));
         // Owner exclusive: a prior AUTH/402 wrote a 1h/1d Firestore cooldown; clear once so the
         // probe can reach CheaperInference and surface the real HTTP status.

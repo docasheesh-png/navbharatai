@@ -115,3 +115,11 @@ it('samples early rejections into the shared ring but never samples per-turn usa
  expect(m.eventSet).toHaveBeenCalledOnce();expect(m.eventSet).toHaveBeenCalledWith(expect.objectContaining({admissionReason:'queue-full',samplingProbability:1/64,ok:false}));
  expect(m.write).toHaveBeenCalledTimes(2);
 });
+
+it('queues authenticated chat by default when the deployment flag is absent', async () => {
+ vi.stubEnv('FREE_CHAIN_ENABLED', undefined);
+ const handler=vi.fn(async()=>42);
+ expect(await withFreeChainEntryAdmission(req(),response(),handler)).toBe(42);
+ expect(m.acquire).toHaveBeenCalledOnce();
+ expect(m.release).toHaveBeenCalledOnce();
+});

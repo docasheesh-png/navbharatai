@@ -86,3 +86,8 @@ it('CHEAPERINFERENCE=admin does not admit non-admin when FreeChain OFF', async (
   identity.mockResolvedValue({ uid: 'user-uid', email: 'user@example.com', emailVerified: true });
   expect(await freeChainRequestContext(request(), data())).toBeUndefined();
 });
+
+it('uses the default chain for authenticated ordinary chat when the flag is absent', async () => {
+  vi.stubEnv('FREE_CHAIN_ENABLED', undefined);
+  expect(await freeChainRequestContext(request(), data())).toMatchObject({ uid: 'verified-owner' });
+});

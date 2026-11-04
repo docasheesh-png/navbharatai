@@ -1,3 +1,4 @@
+import { indexedRaycast } from './helpers/indexedRaycast';
 // THE TRACK IS WHAT THE USER DESCRIBED (admin 2026-11-02, t315u): curved and closed roads drape on the land,
 // a road crossing a rail is a LEVEL crossing, and a streamed track plan loops A..I for ever — or ends where
 // the user said (a barrier, a lake) — with seamless joins, bounded memory and a car that never sinks.
@@ -27,7 +28,7 @@ beforeEach(() => { S.setGround(null); S.clearWater(); });
 const surfY = (m: THREE.Object3D, x: number, z: number) => {
   let top = m; while (top.parent) top = top.parent;
   top.updateMatrixWorld(true);
-  const hit = new THREE.Raycaster(new THREE.Vector3(x, 500, z), new THREE.Vector3(0, -1, 0)).intersectObject(m, true)[0];
+  const hit = indexedRaycast(new THREE.Raycaster(new THREE.Vector3(x, 500, z), new THREE.Vector3(0, -1, 0)), m)[0];
   return hit ? hit.point.y : NaN;
 };
 

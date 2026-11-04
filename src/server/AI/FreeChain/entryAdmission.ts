@@ -3,12 +3,11 @@ import type { AdmissionDenial } from './admissionQueue';
 import { persistFreeChainSample } from './eventSample';
 import { randomUUID } from 'node:crypto';
 import type { Request, Response } from 'express';
-import { parseEnvFlag } from '../../lib/envFlag';
 import { verifyFirebaseToken } from '../../lib/authMiddleware';
 import { CHAT_MAX_MESSAGE_CHARS } from '../../lib/chatInputLimits';
 import { getServerDb, type Firestore } from '../../lib/serverDb';
 import { strictFreeRequired } from '../inferencePolicy';
-import { freeChainConfig } from './config';
+import { freeChainConfig, freeChainEnabled } from './config';
 import { readControlsForSelection } from './control';
 import { logFreeChain } from './telemetry';
 import { rolloutBucket, selectedForFreeChain } from './rollout';
@@ -46,7 +45,7 @@ function declineResponse(req: Request, res: Response, reason: AdmissionDenial): 
  * This is local load admission only. Runtime still verifies policy and distributed quota at dispatch.
  */
 export async function withFreeChainEntryAdmission<T>(req: Request, res: Response, handler: () => Promise<T>): Promise<T | void> {
-  if (parseEnvFlag(process.env.FREE_CHAIN_ENABLED) !== true || strictFreeRequired()) return handler();
+  if (!freeChainEnabled() || strictFreeRequired()) return handler();
   const body = req.body;
   // Leave validation errors and every attachment/vision path to their existing handler. Do not
   // perform history cleaning or prompt assembly before the bounded local admission gate.

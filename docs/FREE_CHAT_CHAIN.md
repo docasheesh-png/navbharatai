@@ -145,7 +145,7 @@ JSON fields cannot forge it. The runtime reuses that active lease, rather than
 queueing twice, and the handler releases it in `finally`.
 
 The chain has a process-local total-turn queue, separate from each provider/account
-bulkhead. Defaults admit at most 8 active chain turns and 64 waiting turns, with a
+bulkhead. Defaults admit at most 8 active chain turns and 1,024 waiting turns, with a
 5,000 ms maximum wait. Per verified UID, defaults are one active and one queued
 turn in this process. Queue-full, per-user-limit or wait-expiry outcomes return
 the bounded busy response, not an invented queue position or ETA. Aborted work
@@ -521,3 +521,27 @@ in the bounded `free_chat_chain/deepinfra_comparison` document with no generated
 text, credentials or customer prompts. GET and POST are admin-only at
 `/api/v1/admin/free-chat-chain/deepinfra-comparison`.
 Its approval body is capped at 4 KB by the shared parser, including versioned URLs.
+
+### Bounded 1,000-request bursts (2026-11-04)
+
+The waiting queue now holds up to 1,024 turns; active turns stay at 8. Both entry
+admission (the whole parsed body) and direct runtime admission (message, history,
+system prompt) charge a shared 16 MiB serialized UTF-8 payload budget while queued.
+This bounds retained payload volume, not total V8 heap; count, deadline and per-user
+limits also remain enforced. Abort, expiry and grant return that payload budget.
+Existing explicit queue overrides still win. No provider quotas or paid limits change.
+
+`npm run test:load:chat` runs an offline real-router experiment, with 1,024 and
+2,048 simultaneous synthetic turns, mocked SDKs/store/cache and 25 ms replies
+(or 1,000 ms in the slow scenario). JSON metrics default to
+`/tmp/navbharatai-chat-burst.json` (`CHAT_LOAD_REPORT` can choose another file).
+Metrics include p95/p99, failures, provider fallback, queue cleanup, CPU, sampled
+RSS/heap peaks and event-loop delay. This is not production capacity evidence.
+
+Cloud Build declares 100 HTTP requests per instance and up to 100 instances;
+those settings and live configuration are unchanged. Local queue capacity does
+not increase those HTTP limits, global provider quotas or database throughput.
+With 8 active calls and 1-second replies, a 1,024-turn burst exceeds the unchanged
+5-second queue deadline and correctly yields busy responses. Provider account
+capacity and shared quota/spend transactions must be measured before claiming
+1,000 simultaneous real inference responses. No paid load test is included.

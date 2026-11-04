@@ -17487,6 +17487,8 @@ async function noteBuildOutcome(
             : {}),
         });
       } catch { /* hooks are optional — a dispatcher without them just refuses the meta tools */ }
+      /** The game contract, once the kit seed has read it — the done signal's request half (requestGaps). */
+      const requestContractRef: { contract: GameScopeContract | null } = { contract: null };
       const baseRunnerOpts = {
         dispatcher,
         state,
@@ -17526,6 +17528,12 @@ async function noteBuildOutcome(
         // A GETTER for the same reason `hasExistingFiles` is one: the module is chosen after these opts
         // are built. The done signal must not tell a module turn it may stop (autopsy 50378049).
         projectModule: () => projectModuleRef?.name ?? null,
+        // A game is not "complete" while a feature its contract names is missing from its own code (autopsy 61279465).
+        requestGaps: () => {
+          const c = requestContractRef.contract;
+          if (!c || c.requiredFeatures.length === 0) return [];
+          return scopeMatch(c, { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) }).missing;
+        },
         onNote: (note: { code: string; message: string; detail?: string }) => {
           // OUR style pass starts here (cancelledBuildBilling `stoppedDuringOurStylePass`).
           if (note.code === 'STYLE_RULES_RESUMED' && stylePassWindow.startedAt === null) stylePassWindow.startedAt = Date.now();
@@ -18817,6 +18825,7 @@ async function noteBuildOutcome(
                 try {
                   if (gameScopeContractEnabled()) {
                     gameContract = buildGameContract(prompt);
+                    requestContractRef.contract = gameContract;
                     contractText = gameContractBlock(gameContract);
                     if (contractText) buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_CONTRACT', autoResolved: true, message: `Game scope contract: ${JSON.stringify(gameContract)}` });
                   }

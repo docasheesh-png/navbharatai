@@ -1533,7 +1533,7 @@ export function surfaceMaterial(
   opts: { color?: number; repeat?: number; seed?: number; size?: number } = {},
 ): THREE.MeshStandardMaterial {
   // 🔴 ONE WORD, TWO VOCABULARIES (autopsy 61279465). MaterialKind has 'glass' and SurfaceKind did not, so a
-  // train's windows written as surfaceMaterial('glass') failed the typecheck twice and cost two repair turns.
+  // train's windows asked for as glass failed the typecheck twice and cost two repair turns.
   // Glass has no grain to texture, so it is answered here, plainly — the word works in both places.
   if (kind === 'glass') {
     return new THREE.MeshStandardMaterial({ color: opts.color ?? 0x9ec9e8, roughness: 0.06, metalness: 0, transparent: true, opacity: 0.38, envMapIntensity: 1.2 });

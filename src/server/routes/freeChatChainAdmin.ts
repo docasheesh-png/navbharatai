@@ -1,6 +1,6 @@
 import type { Express, RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
-import { readFreeChainControlAction, readFreeChainBudgetAction } from '../../lib/freeChatChainView';
+import { FreeChainConfigurationError, freeChainConfigurationErrorResponse, readFreeChainControlAction, readFreeChainBudgetAction } from '../../lib/freeChatChainView';
 import { freeChainAdminView, freeChainAdminMetrics, controlFreeChain, controlFreeChainBudget } from '../AI/FreeChain/runtime';
 import { audit } from '../lib/audit';
 import { adminUsername } from '../lib/adminAuth';
@@ -14,7 +14,10 @@ export function registerFreeChatChainRoutes(app: Express, verifyAdminToken: Requ
   app.get('/api/admin/free-chat-chain', verifyAdminToken, reads, async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     try { res.json(await freeChainAdminView()); }
-    catch { res.status(503).json({ error: 'Free Chat Chain status is unavailable. No quota, budget or routing health has been confirmed.' }); }
+    catch (error) {
+      res.status(503).json(error instanceof FreeChainConfigurationError ? freeChainConfigurationErrorResponse()
+        : { error: 'Free Chat Chain status is unavailable. No quota, budget or routing health has been confirmed.' });
+    }
   });
   app.get('/api/admin/free-chat-chain/metrics', verifyAdminToken, historyReads, async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');

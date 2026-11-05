@@ -39,8 +39,9 @@ describe('what L3 prepared is read back from the game itself', () => {
 describe('🔒 both places that tell the builder how to make an object carry it', () => {
   it('object_spec reads the game\'s assetModels.ts and leads with the ready model', () => {
     const src = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
-    const at = src.indexOf("case 'object_spec': {");
-    const body = src.slice(at, src.indexOf("case 'generate_game_3d': {", at));
+    // The per-object body lives in dispatchObjectSpec since Q-2335 (one call answers a list).
+    const at = src.indexOf('private async dispatchObjectSpec(wanted: string)');
+    const body = src.slice(at, src.indexOf('private scheduleCheckpoint(', at));
     expect(body).toContain('this.actuator.readFile(this.workspaceId, ASSET_MODELS_PATH)');
     expect(body).toMatch(/readyModel \? localModelLead\(readyModel\) : ''/);
     expect(ASSET_MODELS_PATH).toBe('src/game/three/assetModels.ts');

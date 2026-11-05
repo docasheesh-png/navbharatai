@@ -324,3 +324,46 @@ export function recipeDependenciesNeeded(
     .sort()
     .map((n) => ({ name: n, ...known.get(n)! }));
 }
+
+export interface KitRefreshPlan {
+  /** Path → the current kit content to write. Empty when nothing is due or the refresh is blocked. */
+  write: Record<string, string>;
+  refreshed: string[];
+  added: string[];
+  /** Why nothing was written although an older kit file was found — an edited file the new code would need names from. */
+  blocked: string | null;
+}
+
+/**
+ * 🧬 AN EXISTING GAME GETS THE KIT'S FIXES ON ITS NEXT TURN, NOT ONLY WHEN A RECIPE HAPPENS TO RUN (Q-2337 — autopsy
+ * 61279465, 2026-11-04). The train game kept a camera that sat INSIDE its locomotive after the kit's camera was fixed,
+ * because Q-863's refresh only ran as a side effect of a recipe call on an edit turn — and "fix the camera" does not
+ * call a recipe. This plans the same refresh for the whole project at the start of a turn: every kit path whose bytes
+ * are EXACTLY an older version a recipe wrote (so nobody edited it) and whose current version keeps every name it
+ * exported is brought up to date, with any kit file the new versions import. ALL OR NOTHING: if an edited file would
+ * have to supply a name the new code imports, nothing is written and `blocked` says which. PURE.
+ */
+export function planKitRefresh(
+  files: Readonly<Record<string, string>>,
+  pool: ReadonlyMap<string, LayerFile> = recipeFilePool(),
+  reasonOf: (path: string, current: string, next: string) => 'edited' | 'drops-names' | null = staleKitReason,
+): KitRefreshPlan {
+  const none: KitRefreshPlan = { write: {}, refreshed: [], added: [], blocked: null };
+  const stale: Record<string, string> = {};
+  for (const [path, kit] of pool) {
+    const cur = files[path];
+    if (typeof cur === 'string' && cur !== kit.content && reasonOf(path, cur, kit.content) === null) stale[path] = kit.content;
+  }
+  if (Object.keys(stale).length === 0) return none;
+  const has = new Set(Object.keys(files));
+  const existing = new Map<string, string | null>(Object.entries(files));
+  const plan = planKitLayers(stale, has, existing, pool, reasonOf);
+  if (plan.kept.length > 0) {
+    const k = plan.kept[0];
+    return { ...none, blocked: `${k.importer} would need ${k.missing.join(', ')} from ${k.path}, which was edited` };
+  }
+  const write: Record<string, string> = { ...stale };
+  for (const [p, l] of plan.refresh) write[p] = l.content;
+  for (const [p, l] of plan.add) write[p] = l.content;
+  return { write, refreshed: Object.keys(write).filter((p) => p in files).sort(), added: [...plan.add.keys()].sort(), blocked: null };
+}

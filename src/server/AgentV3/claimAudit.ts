@@ -71,6 +71,12 @@ export interface MeasuredFacts {
    * claim — "44×44 buttons", "fits a phone" — is kept only on 'passed' (Q-248). Omitted ⇒ not judged.
    */
   phoneLayout?: 'passed' | 'failed' | 'not-run';
+  /**
+   * What the game playtest found, for a canvas game (the release gate's `game`). A "complete / working /
+   * playable" claim about the game stands only on 'passed' (autopsy 61279465: "The 3D train simulator game is
+   * complete and working properly" about a game the playtest timed out on). Omitted ⇒ not a canvas game, not judged.
+   */
+  gamePlayed?: 'passed' | 'failed' | 'not-run';
   /** Did a screenshot tool call complete during this build? */
   screenshotTaken: boolean;
   /** Did a real browser open the preview and see it render? */
@@ -145,7 +151,7 @@ export interface MeasuredFacts {
 /** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
 const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
 
-export type ClaimKind = 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed';
+export type ClaimKind = 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -425,6 +431,9 @@ const DESIGN_CLAIMED = new RegExp([
   /(?<![\w\u0900-\u097F])(sundar|khubsurat|खूबसूरत|सुंदर)(?![\w\u0900-\u097F])/,
 ].map((r) => r.source).join('|'), 'i');
 
+const GAME_NAMED = /\b(game|simulator|simulation|playable|gameplay)\b/i;
+const GAME_WORKS_CLAIMED = /\b(complete and working|working (properly|perfectly|well|great|correctly)|works (properly|perfectly|well|great|correctly)|is (fully )?playable|fully playable|ready to play|fully functional|is working)\b/i;
+
 export function auditSummaryClaims(summary: string, facts: MeasuredFacts): ClaimContradiction[] {
   const text = String(summary ?? '');
   if (!text.trim()) return [];
@@ -503,6 +512,20 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
           claimed: 'a size for the app on a phone (tap targets, or that it fits the screen)',
           measured: 'the phone-size check did not measure the app on this build, so no size was measured',
         });
+    }
+  }
+  // A GAME CALLED WORKING THAT NOBODY PLAYED (autopsy 61279465). Narrow: the same line must name the game and
+  // claim it works or is playable — "the game has a start screen" is a description, not a verdict.
+  if (facts.gamePlayed && facts.gamePlayed !== 'passed') {
+    const line = text.split(/\n+/).find((l) => GAME_NAMED.test(l) && GAME_WORKS_CLAIMED.test(l));
+    if (line) {
+      out.push({
+        kind: 'game-claimed-playable',
+        claimed: 'that the game is complete, working or playable',
+        measured: facts.gamePlayed === 'failed'
+          ? 'NavBharatAI played it in a real browser and found problems with it'
+          : 'NavBharatAI could not finish playing it in a real browser, so whether it is playable is NOT VERIFIED',
+      });
     }
   }
   if (!facts.screenshotTaken && SCREENSHOT_SEEN.test(text)) {

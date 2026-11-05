@@ -17487,6 +17487,8 @@ async function noteBuildOutcome(
             : {}),
         });
       } catch { /* hooks are optional — a dispatcher without them just refuses the meta tools */ }
+      /** The game contract, once the kit seed has read it — the done signal's request half (requestGaps). */
+      const requestContractRef: { contract: GameScopeContract | null } = { contract: null };
       const baseRunnerOpts = {
         dispatcher,
         state,
@@ -17526,6 +17528,12 @@ async function noteBuildOutcome(
         // A GETTER for the same reason `hasExistingFiles` is one: the module is chosen after these opts
         // are built. The done signal must not tell a module turn it may stop (autopsy 50378049).
         projectModule: () => projectModuleRef?.name ?? null,
+        // A game is not "complete" while a feature its contract names is missing from its own code (autopsy 61279465).
+        requestGaps: () => {
+          const c = requestContractRef.contract;
+          if (!c || c.requiredFeatures.length === 0) return [];
+          return scopeMatch(c, { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) }).missing;
+        },
         onNote: (note: { code: string; message: string; detail?: string }) => {
           // OUR style pass starts here (cancelledBuildBilling `stoppedDuringOurStylePass`).
           if (note.code === 'STYLE_RULES_RESUMED' && stylePassWindow.startedAt === null) stylePassWindow.startedAt = Date.now();
@@ -18764,6 +18772,11 @@ async function noteBuildOutcome(
               const kitStartedAt = Date.now();
               const kitResults: GameKitSeedResult[] = [];
               let localGameAssetHandoff = '';
+              // The two halves of the seed's wait, said apart (autopsy 61279465: "72.7 s" with no split, so the
+              // 45 s after the last recipe could not be attributed to the 3D-asset step or to anything else).
+              let kitRecipesMs = 0;
+              let kitAssetsMs: number | null = null;
+              let kitAssetsStatus = '';
               platformSeedInFlight = true;
               try {
                 for (const recipe of kitPlan) {
@@ -18773,11 +18786,15 @@ async function noteBuildOutcome(
                   const r = await dispatcher.dispatch({ id: `game-kit-${recipe}`, name: 'run_recipe', input: { name: recipe, ...(recipeInput ? { input: recipeInput } : {}) } }, 'architect', { signal: abort.signal });
                   kitResults.push({ recipe, ok: !r.is_error, content: String(r.content ?? '') });
                 }
+                kitRecipesMs = Date.now() - kitStartedAt;
                 if (gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted) {
                   // Default-off L3; all bytes and manifests are acknowledged durably before handoff.
                   // Source/provider failures leave the successful L1/L2 kit intact.
+                  const assetsStartedAt = Date.now();
                   try {
                     const assets = await prepareGameAssets({ prompt, workspaceId, workspace: actuator, signal: abort.signal, verifiedOwnerUid: verified?.uid });
+                    kitAssetsMs = Date.now() - assetsStartedAt;
+                    kitAssetsStatus = String(assets.status);
                     for (const [path, content] of Object.entries(assets.files)) writtenFiles.set(path, content);
                     localGameAssetHandoff = assets.handoff;
                   } catch { /* The procedural kit remains the floor. */ }
@@ -18800,13 +18817,15 @@ async function noteBuildOutcome(
               etaPlatformSeededFiles += kitFiles;
               for (const r of kitResults) if (r.ok) gameKitSeeded.push(r.recipe);
               if (gameKitSeeded.length > 0) {
-                buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_KIT_SEEDED', autoResolved: true, message: gameKitSeededMessage(kitResults, kitFiles, Date.now() - kitStartedAt) });
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_KIT_SEEDED', autoResolved: true, message: gameKitSeededMessage(kitResults, kitFiles, Date.now() - kitStartedAt),
+                  detail: `recipes ${(kitRecipesMs / 1000).toFixed(1)} s` + (kitAssetsMs != null ? ` · 3D assets ${(kitAssetsMs / 1000).toFixed(1)} s (${kitAssetsStatus || 'unknown'})` : ' · 3D assets not prepared') });
                 // Game Engine Ultra Phase 1 (gameIntent.ts): the request's scope contract rides in the handoff.
                 // Kill switch AGENTV3_GAME_SCOPE_CONTRACT=off. Pure, best-effort — never touches the build.
                 let contractText = '';
                 try {
                   if (gameScopeContractEnabled()) {
                     gameContract = buildGameContract(prompt);
+                    requestContractRef.contract = gameContract;
                     contractText = gameContractBlock(gameContract);
                     if (contractText) buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_CONTRACT', autoResolved: true, message: `Game scope contract: ${JSON.stringify(gameContract)}` });
                   }
@@ -18882,6 +18901,9 @@ async function noteBuildOutcome(
               complex: buildIsComplex,
               isKeyed: (r) => { const v = process.env[keyEnvFor(r.provider)]; return !!(v && String(v).trim()); },
               enabled: fastLaneReasoningGateEnabled(),
+              // Q-2310: judge the engine that RUNS — the admitted Surplus model, or the pinned Router One model.
+              opensOn: surplusSession?.model ? { provider: 'SURPLUS', model: surplusSession.model }
+                : routerOnePinned && routerOneModels()[0] ? { provider: 'ENGINE_R1', model: routerOneModels()[0] } : null,
             });
           } catch { return { rung: null, skip: false, reason: '' }; }
         })()
@@ -23602,7 +23624,7 @@ async function noteBuildOutcome(
       // recorded and discarded; the card could not read a verdict nothing held.
       let phoneProof: PhoneOutcome = 'not-run';
       // The game playtest's answer for the same card (gamePlaytest.ts). 'not-run' unless a game was played.
-      let gameProof: { outcome: PhoneOutcome; score?: number | null } = { outcome: 'not-run' };
+      let gameProof: { outcome: PhoneOutcome; score?: number | null; unplayed?: boolean } = { outcome: 'not-run' };
       if (
         process.env.AGENTV3_JOURNEY_CHECK !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
         && !isImportTurn && !abort.signal.aborted
@@ -23765,6 +23787,9 @@ async function noteBuildOutcome(
             const verdict = playtestVerdict(playRun, replayFromCode(playtestFiles));
             buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
             gameProof = { outcome: playtestOutcome(verdict.code), score: verdict.score?.overall ?? null };
+            if (gameProof.outcome === 'not-run') gameProof.unplayed = true; // the runner's own "never played" answer
+            // 🎮 The release gate reads the SAME answer: a canvas game is GREEN only when it was played (autopsy 61279465).
+            gateEvidence.game = gameProof.outcome;
             // Game Engine Ultra Phase 2: structured defect codes for Phase 3 — evidence only.
             try {
               const measured = playtestDefects(playRun, verdict.score, missingKitLayerPaths(playtestFiles));
@@ -23783,6 +23808,9 @@ async function noteBuildOutcome(
             try {
               const notRun = playtestNotRunVerdict(`the playtest browser stopped: ${String((err as { message?: string })?.message ?? err).slice(0, 160)}`);
               buildDiag.record({ phase: 'preview', severity: notRun.severity, code: notRun.code, message: notRun.message, autoResolved: notRun.autoResolved });
+              // 🔴 A playtest that could not finish is NOT a pass (autopsy 61279465: it timed out and the gate said GREEN).
+              gameProof = { outcome: 'not-run', score: null, unplayed: true };
+              gateEvidence.game = 'not-run';
             } catch { /* best-effort */ }
           }
         } else {
@@ -23808,7 +23836,8 @@ async function noteBuildOutcome(
             if (why) {
               const notRun = playtestNotRunVerdict(why);
               buildDiag.record({ phase: 'preview', severity: notRun.severity, code: notRun.code, message: notRun.message, autoResolved: notRun.autoResolved });
-              gameProof = { outcome: playtestOutcome(notRun.code), score: null };
+              gameProof = { outcome: playtestOutcome(notRun.code), score: null, unplayed: true };
+              gateEvidence.game = 'not-run'; // a canvas game we could not play is not verified (playtestSkipReason is silent otherwise)
             }
           } catch { /* an honest line is best-effort and must never touch a build */ }
           // Game Engine Ultra Phase 2: a quiz/card/board/puzzle game drawn in the page is SAID, never silent or scored.
@@ -24007,6 +24036,8 @@ async function noteBuildOutcome(
             buildDiag.record({ phase: 'preview', ...gameRepairRecord(outcome) });
             if (outcome.kept && outcome.after) {
               gamePlayed = { defects: gamePlayed.defects.filter((d) => outcome.after!.includes(d.code)), scopeMissing: outcome.scopeAfter ?? gamePlayed.scopeMissing };
+              // The repaired game was PLAYED again and nothing hard remains: that replay is the gate's game proof.
+              if (gamePlayed.defects.length === 0) gateEvidence.game = 'passed';
               if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
             }
           } catch (e) {
@@ -25040,6 +25071,8 @@ async function noteBuildOutcome(
           consoleErrorsFound: runtimeErrorsRemaining,
           // "44×44 buttons" / "fits any phone" stand only when the phone-size check measured and passed (Q-248).
           phoneLayout: phoneProof,
+          // "complete and working properly" stands for a canvas game only when the playtest PASSED (autopsy 61279465).
+          gamePlayed: gateEvidence.game,
           screenshotTaken: buildDiag.toolWasUsed('screenshot'),
           // "✅ Login with Google" about a login whose password is written into the app (fakeFeatureScan.ts).
           fakeFeatures: fakeFeatures.map((f) => f.kind),

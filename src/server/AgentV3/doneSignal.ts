@@ -252,10 +252,13 @@ export function endOfTurnReadyMark(p: {
    * module turn the end-of-turn gate judged. The guard and the explanation have to agree.
    */
   projectModule?: string | null;
+  /** What the request still lacks (AgentRunner `requestGaps`, autopsy 61279465) — non-empty ⇒ not finished. */
+  requestGaps?: readonly string[];
   /** Epoch ms of the judgement — see `ReadyMark.at`. */
   at?: number;
 }): ReadyMark | null {
   if (p.existing) return p.existing;
+  if ((p.requestGaps ?? []).length > 0) return null;
   if (p.editingExistingApp || !p.wroteThisRun) return null;
   if (typeof p.projectModule === 'string' && p.projectModule.trim() !== '') return null;
   if (p.typeErrors !== null && p.typeErrors > 0) return null;

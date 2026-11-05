@@ -316,6 +316,7 @@ export function disposeMaterials(): void {
 const CAMERA = `import * as THREE from 'three';
 import { damp } from '../core/feel';
 import { vehicleAt, isVehicle } from './objects';
+import { groundHeightAt } from './surfaces';
 
 /**
  * Camera rigs.
@@ -332,7 +333,16 @@ import { vehicleAt, isVehicle } from './objects';
  * face +Z (objects.ts, MODEL_FORWARD). For a character that does not matter (it turns to face where it
  * walks); for a vehicle it is the whole bug — see update().
  */
-export type CameraKind = 'third-person' | 'first-person' | 'top-down' | 'side-scroller' | 'orbit' | 'fixed' | 'chase';
+export type CameraKind = 'third-person' | 'first-person' | 'top-down' | 'side-scroller' | 'orbit' | 'fixed' | 'chase' | 'cinematic';
+
+/**
+ * How much of a LONG vehicle the chase view frames, in metres behind its pivot (a train, a bus convoy).
+ * Past this the camera rides ABOVE the trailing units instead of behind the last one, so the lead unit
+ * stays big enough to read while the first coaches and the track ahead stay in view.
+ */
+export const CHASE_FRAME_MAX = 40;
+/** How far ahead of a vehicle's nose the ground first shows over its roof in the chase view, in metres. */
+export const CHASE_SIGHT_M = 30;
 
 /** What a rig frames: a point, or the object itself — which also tells it which way the object faces. */
 export type CameraTarget = THREE.Vector3 | THREE.Object3D;
@@ -352,7 +362,7 @@ export interface CameraRigOptions {
 
 export class CameraRig {
   readonly camera: THREE.PerspectiveCamera;
-  private readonly kind: CameraKind;
+  private kind: CameraKind;
   private readonly distance: number;
   private readonly height: number;
   private readonly stiffness: number;
@@ -370,6 +380,9 @@ export class CameraRig {
   private readonly travelLast = new THREE.Vector3();
   private travelSeen = false;
   private travelKnown = false;
+  /** Each framed object's extent in its own heading frame (+Z forward, metres), refreshed as it changes. */
+  private readonly extents = new WeakMap<THREE.Object3D, { box: THREE.Box3 | null; parts: number; age: number }>();
+  private cinematicAngle = 0.6;
 
   constructor(options: CameraRigOptions = {}) {
     this.kind = options.kind ?? 'third-person';
@@ -404,6 +417,10 @@ export class CameraRig {
     for (const c of list) c.updateMatrixWorld(true);
   }
 
+  /** Switch view at run time (a "camera" button: 'chase' ↔ 'first-person' ↔ 'cinematic'). */
+  setKind(kind: CameraKind): void { this.kind = kind; }
+  get currentKind(): CameraKind { return this.kind; }
+
   /** Feed the frame's look delta (Input.lookX/lookY). */
   look(dx: number, dy: number, sensitivity = 0.0025): void {
     this.yawAngle -= dx * sensitivity;
@@ -429,7 +446,8 @@ export class CameraRig {
    */
   update(target: CameraTarget, delta: number): void {
     const object = isObject3D(target) ? target : vehicleAt(target);
-    if (this.kind === 'chase') {
+    if (this.kind === 'cinematic' && object) { this.cinematic(object, delta); return; }
+    if (this.kind === 'chase' || this.kind === 'cinematic') {
       if (object) this.follow(object, delta);
       else this.chasePoint(target as THREE.Vector3, delta);
       return;
@@ -497,7 +515,101 @@ export class CameraRig {
    */
   follow(object: THREE.Object3D, delta: number, lookAhead = 4): void {
     object.getWorldPosition(this.followPos);
-    this.chaseFrom(this.followPos, this.headingOf(object), delta, lookAhead);
+    this.chaseFrom(this.followPos, this.headingOf(object), delta, lookAhead, object);
+  }
+
+  /**
+   * 📐 THE OBJECT'S REAL SIZE, in its own heading frame: +Z forward, +Y up, metres (world scale kept, its
+   * rotation removed). min.z < 0 is how far it reaches BEHIND its pivot, max.y how tall it stands.
+   *
+   * 🔴 WHY (admin 2026-11-04, train build 61279465: "the third-person camera is positioned inside the
+   * train"). The chase view sat a FIXED 7 m behind and 2.2 m above the pivot — right for a 4.5 m car,
+   * and INSIDE a 20 m locomotive, whose own body then filled the screen. The offset now comes from this
+   * box, so a car, a bus, a plane and a 90 m train are each framed from outside their own geometry.
+   * Refreshed when its part count changes (a coach coupled on) and every 30 frames otherwise.
+   */
+  extentOf(object: THREE.Object3D): THREE.Box3 | null {
+    let parts = 0;
+    object.traverse(() => { parts++; });
+    const seen = this.extents.get(object);
+    if (seen && seen.parts === parts && seen.age++ < 30) return seen.box;
+    object.updateMatrixWorld(true);
+    object.getWorldPosition(this.targetPos);
+    object.getWorldQuaternion(this.followQuat);
+    const frame = new THREE.Matrix4().compose(this.targetPos, this.followQuat, new THREE.Vector3(1, 1, 1)).invert();
+    const box = new THREE.Box3();
+    const part = new THREE.Box3();
+    const m = new THREE.Matrix4();
+    object.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.visible || !mesh.geometry || (o as THREE.InstancedMesh).isInstancedMesh) return;
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      const b = mesh.geometry.boundingBox;
+      if (!b || b.isEmpty()) return;
+      box.union(part.copy(b).applyMatrix4(m.multiplyMatrices(frame, mesh.matrixWorld)));
+    });
+    const out = box.isEmpty() || ![box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z].every(Number.isFinite) ? null : box;
+    this.extents.set(object, { box: out, parts, age: 0 });
+    return out;
+  }
+
+  /** Is a world point inside the object's own box (grown by \`margin\`)? The penetration test every view uses. */
+  insideOf(object: THREE.Object3D, point: THREE.Vector3, margin = 0.25): boolean {
+    const box = this.extentOf(object);
+    if (!box) return false;
+    object.getWorldPosition(this.targetPos);
+    object.getWorldQuaternion(this.followQuat);
+    const local = point.clone().sub(this.targetPos).applyQuaternion(this.followQuat.clone().invert());
+    return box.clone().expandByScalar(margin).containsPoint(local);
+  }
+
+  /** CINEMATIC — a slow drifting three-quarter view from outside the vehicle, for menus and replays. */
+  private cinematic(object: THREE.Object3D, delta: number): void {
+    const fwd = this.headingOf(object).clone();
+    object.getWorldPosition(this.followPos);
+    const box = this.extentOf(object);
+    const len = box ? box.max.z - box.min.z : 4;
+    const top = box ? Math.max(0, box.max.y) : this.height;
+    this.cinematicAngle += delta * 0.15;
+    const a = 0.6 + Math.sin(this.cinematicAngle) * 0.5;
+    const dir = fwd.clone().negate().applyAxisAngle(new THREE.Vector3(0, 1, 0), a);
+    const r = Math.max(this.distance * 1.3, Math.min(len, CHASE_FRAME_MAX) * 0.9 + 6);
+    const wanted = this.followPos.clone().addScaledVector(dir, r);
+    wanted.y += Math.max(this.height * 1.4, top * 1.5);
+    this.keepClear(object, wanted);
+    if (!this.cameraUsable(object, wanted, r)) this.camera.position.copy(wanted);
+    else this.camera.position.set(
+      damp(this.camera.position.x, wanted.x, 2, delta),
+      damp(this.camera.position.y, wanted.y, 2, delta),
+      damp(this.camera.position.z, wanted.z, 2, delta),
+    );
+    this.camera.lookAt(this.followPos.x, this.followPos.y + top * 0.5, this.followPos.z);
+  }
+
+  /**
+   * The camera may not end up inside the vehicle it frames, nor under the ground. Pushes \`wanted\` up
+   * over the object's roof, and above the terrain, in place.
+   */
+  private keepClear(object: THREE.Object3D | null, wanted: THREE.Vector3): void {
+    if (object && this.insideOf(object, wanted, 0.3)) {
+      const box = this.extentOf(object);
+      object.getWorldPosition(this.targetPos);
+      if (box) wanted.y = this.targetPos.y + box.max.y + 0.8;
+    }
+    const ground = groundHeightAt(wanted.x, wanted.z);
+    if (Number.isFinite(ground) && wanted.y < ground + 0.5) wanted.y = ground + 0.5;
+  }
+
+  /**
+   * Can the camera be damped from where it is, or must it be put straight at \`wanted\`? Not when its
+   * position is not a number, when it sits inside the object (a fresh rig at the origin, a respawn
+   * onto it), or when it is far further away than any chase would leave it (a teleport).
+   */
+  private cameraUsable(object: THREE.Object3D | null, wanted: THREE.Vector3, reach: number): boolean {
+    const p = this.camera.position;
+    if (![p.x, p.y, p.z].every(Number.isFinite)) return false;
+    if (object && this.insideOf(object, p, 0.05)) return false;
+    return p.distanceTo(wanted) < Math.max(12, reach * 3);
   }
 
   /** The object's forward (its local +Z) in the world, flattened onto the ground. */
@@ -524,44 +636,87 @@ export class CameraRig {
     }
     this.travelLast.copy(point);
     this.travelSeen = true;
-    this.chaseFrom(this.targetPos.copy(point), this.travelFwd, delta, 4);
+    this.chaseFrom(this.travelLast.clone(), this.travelFwd, delta, 4, null);
   }
 
   /** Inside a vehicle ('first-person'): eye height, looking where the vehicle points, pitch still the player's. */
   private cockpit(vehicle: THREE.Object3D): void {
-    const fwd = this.headingOf(vehicle);
+    const fwd = this.headingOf(vehicle).clone();
+    const box = this.extentOf(vehicle);
     vehicle.getWorldPosition(this.followPos);
     this.camera.position.copy(this.followPos).add(new THREE.Vector3(0, this.height * 0.8, 0));
+    // A LONG vehicle (a train, a bus) is driven from its front cab, not from its middle: at the pivot the
+    // driver's eye would sit 10 m back inside a locomotive, looking at the inside of its own body.
+    if (box && box.max.z - box.min.z > 8) {
+      this.camera.position.copy(this.followPos).addScaledVector(fwd, Math.max(0, box.max.z - 1.2));
+      this.camera.position.y = this.followPos.y + Math.max(1.2, box.max.y * 0.72);
+    }
     this.yawAngle = Math.atan2(-fwd.x, -fwd.z);
     this.camera.rotation.set(this.pitch, this.yawAngle, 0, 'YXZ');
   }
 
-  /** The one chase view: \`distance\` behind \`pos\` along \`fwd\`, \`height\` up, looking past it. */
-  private chaseFrom(pos: THREE.Vector3, fwd: THREE.Vector3, delta: number, lookAhead: number): void {
+  /**
+   * The one chase view: behind \`pos\` along \`fwd\`, above it, looking past its FRONT.
+   *
+   * 📐 SIZED BY THE OBJECT (see extentOf). \`distance\` and \`height\` are the MINIMUM for a car-sized
+   * target; a bigger one pushes them out to clear its own rear and roof, so the camera never starts in,
+   * or damps through, the thing it is following. A target longer than CHASE_FRAME_MAX behind its pivot is
+   * framed over its trailing units. A portrait phone sees less sideways, so the view backs off a little.
+   */
+  private chaseFrom(pos: THREE.Vector3, fwd: THREE.Vector3, delta: number, lookAhead: number, object: THREE.Object3D | null): void {
+    fwd = fwd.clone();
+    const box = object ? this.extentOf(object) : null;
+    const behindExt = box ? Math.max(0, -box.min.z) : 0;
+    const frontExt = box ? Math.max(0, box.max.z) : 0;
+    const top = box ? Math.max(0, box.max.y) : 0;
+    const framed = Math.min(behindExt, CHASE_FRAME_MAX);
+    const portrait = this.camera.aspect > 0 && this.camera.aspect < 1 ? 1 + (1 - this.camera.aspect) * 0.35 : 1;
+    let dist = this.distance;
+    let height = this.height;
+    if (box) {
+      dist = Math.max(this.distance, framed + Math.max(3, Math.min(behindExt + frontExt, CHASE_FRAME_MAX) * 0.25)) * portrait;
+      // The sightline over the roof's FRONT edge must reach the ground CHASE_SIGHT_M ahead of the nose, so
+      // the track or road in front is in view instead of hidden behind the vehicle's own body.
+      height = Math.max(this.height, top * 1.2 + Math.min(behindExt + frontExt, CHASE_FRAME_MAX) * 0.08,
+        top + (top / CHASE_SIGHT_M) * (dist + frontExt));
+      if (behindExt > framed) height = Math.max(height, top + 2.5);
+    }
+
     const focus = pos.clone();
-    focus.y += this.height * 0.5;
-    let wanted = pos.clone().addScaledVector(fwd, -this.distance);
-    wanted.y += this.height;
+    focus.y += box ? Math.max(this.height * 0.5, top * 0.6) : this.height * 0.5;
+    let wanted = pos.clone().addScaledVector(fwd, -dist);
+    wanted.y += height;
 
     if (this.collidables.length > 0) {
       const dir = wanted.clone().sub(focus);
-      const dist = dir.length();
+      const span = dir.length();
       this.ray.set(focus, dir.normalize());
-      this.ray.far = dist;
-      const hit = this.ray.intersectObjects(this.collidables, true)[0];
+      this.ray.far = span;
+      // 🔴 ITS OWN BODY IS NOT AN OBSTACLE. A game that lists the train among its colliders made the ray
+      // hit the inside of the locomotive at once — and pulled the camera INTO it, the reported defect.
+      const hit = this.ray.intersectObjects(this.collidables, true).find((h) => !object || !this.isPartOf(h.object, object));
       if (hit) wanted = focus.clone().add(dir.multiplyScalar(Math.max(0.6, hit.distance - 0.3)));
     }
+    this.keepClear(object, wanted);
 
     // A new target, respawn or sharp turn can leave the old camera IN FRONT. Damping from there
-    // would show headlights and mirror steering until it caught up. Never render that hemisphere.
+    // would show headlights and mirror steering until it caught up. Never render that hemisphere —
+    // nor from inside the vehicle, nor from a position that is not a number.
     const behind = this.camera.position.clone().sub(pos).dot(fwd) < -0.001;
-    if (behind) this.dampTo(wanted, delta);
+    if (behind && this.cameraUsable(object, wanted, dist)) this.dampTo(wanted, delta);
     else this.camera.position.copy(wanted);
-    const look = pos.clone().addScaledVector(fwd, lookAhead);
-    look.y += this.height * 0.35;
+    // A damped step may still pass through the body on a sharp turn: never render a frame from inside it.
+    if (object && this.insideOf(object, this.camera.position, 0.05)) this.camera.position.copy(wanted);
+    const look = pos.clone().addScaledVector(fwd, frontExt + lookAhead);
+    look.y += box ? Math.max(this.height * 0.35, top * 0.5) : this.height * 0.35;
     this.camera.lookAt(look);
     // The yaw whose third-person offset (sin yaw, cos yaw) points BEHIND the object: offset = -fwd.
     this.yawAngle = Math.atan2(-fwd.x, -fwd.z);
+  }
+
+  private isPartOf(o: THREE.Object3D, root: THREE.Object3D): boolean {
+    for (let p: THREE.Object3D | null = o; p; p = p.parent) if (p === root) return true;
+    return false;
   }
 
   private dampTo(wanted: THREE.Vector3, delta: number): void {
@@ -1374,9 +1529,15 @@ export function surfaceMaps(kind: SurfaceKind, opts: { seed?: number; size?: num
  * call \`enableAO(geometry)\` on anything you want occlusion on.
  */
 export function surfaceMaterial(
-  kind: SurfaceKind,
+  kind: SurfaceKind | 'glass',
   opts: { color?: number; repeat?: number; seed?: number; size?: number } = {},
 ): THREE.MeshStandardMaterial {
+  // 🔴 ONE WORD, TWO VOCABULARIES (autopsy 61279465). MaterialKind has 'glass' and SurfaceKind did not, so a
+  // train's windows asked for as glass failed the typecheck twice and cost two repair turns.
+  // Glass has no grain to texture, so it is answered here, plainly — the word works in both places.
+  if (kind === 'glass') {
+    return new THREE.MeshStandardMaterial({ color: opts.color ?? 0x9ec9e8, roughness: 0.06, metalness: 0, transparent: true, opacity: 0.38, envMapIntensity: 1.2 });
+  }
   const repeat = opts.repeat ?? 4;
   const maps = repeatedMaps(kind, repeat, opts);
   const look = SURFACE_LOOK[kind] ?? SURFACE_LOOK.stone;
@@ -4088,7 +4249,8 @@ export interface HouseOptions extends BaseOpts {
   /** Wall colour. Defaults to one of the washes Indian houses are actually painted in. */
   wallColor?: number;
   /** 'flat' — RCC roof with a parapet and a water tank (towns, most villages). 'tiled' — sloped clay tiles. */
-  roof?: 'flat' | 'tiled';
+  /** 'tile' is accepted as 'tiled' — the SurfaceKind spelling a builder reaches for (autopsy 61279465: TS2820). */
+  roof?: 'flat' | 'tiled' | 'tile';
 }
 
 /** The colours houses in an Indian village or town are really washed in — not white boxes. */
@@ -4111,7 +4273,7 @@ export function createHouse(options: HouseOptions = {}): THREE.Group {
   const storeys = Math.max(1, Math.min(2, Math.round(options.storeys ?? 1)));
   const H = storeys * 3;
   const wash = options.wallColor ?? HOUSE_WASHES[Math.floor(r() * HOUSE_WASHES.length)];
-  const roofKind = options.roof ?? (r() < 0.7 ? 'flat' : 'tiled');
+  const roofKind = options.roof === 'tile' ? 'tiled' : options.roof ?? (r() < 0.7 ? 'flat' : 'tiled');
   const group = new THREE.Group();
 
   const wall = shared('plaster', d, wash, 2);

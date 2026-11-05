@@ -46,6 +46,7 @@ describe('the dispatcher remembers the latest compile, whoever ran it', () => {
 describe('the done check asks it', () => {
   it('the runner withholds "complete" while the latest compile has errors', () => {
     const runner = readFileSync(join(__dirname, '../src/server/AgentV3/AgentRunner.ts'), 'utf8');
-    expect(runner).toContain('if (appIsDone(readiness) && !(typeErrors !== null && typeErrors > 0)) {');
+    // Autopsy 61279465 extended the same condition with the request's own gaps; the compile half is unchanged.
+    expect(runner).toContain('if (appIsDone(readiness) && !(typeErrors !== null && typeErrors > 0) && requestGaps.length === 0) {');
   });
 });

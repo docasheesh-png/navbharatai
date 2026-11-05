@@ -105,7 +105,10 @@ export function replayFromCode(files: Record<string, string>): GameCodeFacts {
     if (/\bstartMeta\s*\(/.test(content) || /localStorage\.setItem\([^)]*(best|high|score|level|progress)/i.test(content)) progress = true;
     if (/\b(play again|restart|try again|retry|replay)\b/i.test(content) || /\.restart\s*\(/.test(content)) restart = true;
   }
-  return isDrivingGame(files) ? { progress, restart, driving: true } : { progress, restart };
+  if (!isDrivingGame(files)) return { progress, restart };
+  const cockpit = Object.entries(files || {}).some(([p, c]) => typeof c === 'string' && CODE_FILE.test(p) && !/(^|\/)node_modules\//.test(p)
+    && !/(^|\/)src\/game\/three\/camera\.ts$/.test(p) && /\b(first-person|cockpit|cab ?view|driver view)\b/i.test(c));
+  return cockpit ? { progress, restart, driving: true, cockpit: true } : { progress, restart, driving: true };
 }
 
 /**
@@ -200,6 +203,8 @@ export interface GameCodeFacts {
   restart: boolean;
   /** Present (true) only for a driving game — see `isDrivingGame`. */
   driving?: boolean;
+  /** The game offers a cockpit / first-person view, where a camera inside the vehicle is the design. */
+  cockpit?: boolean;
 }
 
 /** The in-sandbox shell command. PURE. */
@@ -219,6 +224,9 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
     seed: playtestSeed(env),
     marker: PLAYTEST_RESULT_MARKER,
     loadMs: LOAD_MS,
+    // The script's OWN deadline (autopsy 61279465): it reports what it measured, and where it got to,
+    // before the route's outer timeout (budget + 20 s) kills it with nothing to show.
+    budgetMs: PLAYTEST_BUDGET_MS,
     // The "same picture" floor, so the script can tell when the accelerator probe saw nothing move (Q-865).
     stillBelow: STILL_BELOW,
     // How many one-second looks the second accelerator hold may take (Q-869: a 9 s countdown is a working game).
@@ -302,6 +310,30 @@ const sceneHook = () => {
     walk(sc, 0, false);
     const c = cam.matrixWorld.elements;
     return { t: performance.now(), cam: [c[12], c[14]], camDir: [-c[8], -c[10]], objs };
+  };
+  // IS THE CAMERA INSIDE THE VEHICLE IT FOLLOWS (autopsy 61279465: a chase camera sat inside a 20 m train)?
+  // Tested per mesh in that mesh's OWN space, with the game's own three.js objects, so a rotated train is not
+  // mistaken for its world-aligned box. Returns the enclosing mesh's size in metres, or null.
+  window.__nbCamInside = (id) => {
+    const sc = seen.scene, cam = seen.camera;
+    if (!sc || !cam || !id || typeof sc.getObjectByProperty !== 'function') return null;
+    const v = sc.getObjectByProperty('uuid', id);
+    if (!v) return null;
+    for (let p = cam; p; p = p.parent) if (p === v) return null; // a camera mounted ON the vehicle is a cockpit view
+    const eye = cam.getWorldPosition(cam.position.clone());
+    let found = null;
+    v.traverse((o) => {
+      if (found || !o.isMesh || o.isInstancedMesh || !o.visible || !o.geometry) return;
+      if (!o.geometry.boundingBox && o.geometry.computeBoundingBox) o.geometry.computeBoundingBox();
+      const b = o.geometry.boundingBox;
+      if (!b || !o.matrixWorld) return;
+      const local = eye.clone().applyMatrix4(o.matrixWorld.clone().invert());
+      if (b.containsPoint(local)) {
+        const s = o.getWorldScale(o.position.clone());
+        found = [(b.max.x - b.min.x) * s.x, (b.max.y - b.min.y) * s.y, (b.max.z - b.min.z) * s.z].map((n) => Math.round(n * 10) / 10);
+      }
+    });
+    return found;
   };
 };
 
@@ -636,7 +668,17 @@ function framesBetween(before, after, ms) {
 }
 
 const browser = await chromium.launch();
-const out = { ok: true };
+const out = { ok: true, stage: 'loading the game' };
+// THE SCRIPT ENDS ITSELF IN TIME (autopsy 61279465: a heavy 3D train scene ran past the route's 80 s
+// timeout, which killed the browser and left only "timed out" — no stage, no frame rate, nothing to fix).
+// At its own budget it says which stage it reached and how fast the page was drawing, then exits.
+const watchdog = setTimeout(async () => {
+  let fps = null;
+  try { fps = out.fps ?? null; } catch (e) { /* nothing measured yet */ }
+  say({ ok: false, partial: true, stage: out.stage, fps, started: out.started ?? null,
+    error: 'the playtest ran out of time while ' + out.stage + (fps != null ? ' (the page drew ' + fps + ' frames per second)' : '') });
+  process.exit(0);
+}, Math.max(10000, Number(cfg.budgetMs) || 60000));
 try {
   // ── DESKTOP: keyboard + mouse ─────────────────────────────────────────────────────────────────────
   const ctx = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 1280, height: 720 } });
@@ -647,6 +689,7 @@ try {
   watch(page);
   await page.goto(cfg.base, { waitUntil: 'load', timeout: cfg.loadMs });
   await page.waitForTimeout(1500);
+  out.stage = 'starting the game';
   out.started = await pressStart(page);
   let box = await surface(page);
   if (!box) {
@@ -675,6 +718,7 @@ try {
   out.fps = Math.round(((f1.frames - f0.frames) * 1000) / Math.max(1, f1.t - f0.t));
   out.longFrames = f1.long - f0.long;
 
+  out.stage = 'driving it with the keyboard';
   const moves = [];
   let prev = b;
   const step = async (label, act) => {
@@ -712,6 +756,10 @@ try {
     const gasMoves = sceneMoves(sg0, sg1);
     const car = pickVehicle(idleMoves, gasMoves);
     vehicleId = car;
+    if (car) {
+      const inside = await page.evaluate((id) => (window.__nbCamInside ? window.__nbCamInside(id) : null), car).catch(() => null);
+      if (inside) out.cameraInside = inside;
+    }
     if (car && sg0 && sg1) {
       // Q-869: where the camera is, relative to where the vehicle is going — read from the scene, not from pixels.
       const m = gasMoves.get(car);
@@ -833,6 +881,7 @@ try {
   await ctx.close();
 
   // ── PHONE: touch only ─────────────────────────────────────────────────────────────────────────────
+  out.stage = 'playing it with touch controls on a phone';
   const m = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const mp = await m.newPage();
   watch(mp);
@@ -883,6 +932,7 @@ try {
 } catch (e) {
   if (e !== null) say({ ok: false, error: String(e && e.message || e).slice(0, 200) });
 } finally {
+  clearTimeout(watchdog);
   await browser.close();
 }
 `;
@@ -1022,6 +1072,11 @@ export function probeStarvedNote(r: SceneRead | null | undefined, min = PROBE_MI
 export interface PlaytestRun {
   ok: boolean;
   error?: string;
+  /** The size (m) of the vehicle mesh the chase camera sat INSIDE while driving (autopsy 61279465), when it did. */
+  cameraInside?: number[];
+  /** The script hit its own deadline (autopsy 61279465): `stage` says how far it got, `fps` how fast the page drew. */
+  partial?: boolean;
+  stage?: string;
   diagnostic?: string | null;
   started?: string | null;
   spread?: number;
@@ -1107,6 +1162,8 @@ export interface PlaytestScore {
   cameraFacesVehicle?: boolean;
   /** A driving game seen from a forward camera whose view panned LEFT when LEFT was held (Q-861). */
   steeringMirrored?: boolean;
+  /** The chase camera sat INSIDE the vehicle's own geometry (autopsy 61279465). */
+  cameraInsideVehicle?: boolean;
 }
 
 /**
@@ -1177,6 +1234,7 @@ export function flowStarvedNote(f: FlowRead | null | undefined): string | null {
   return `the page drew only ${frames} frame(s) to measure, fewer than the ${FLOW_MIN_FRAMES} this reading needs`;
 }
 export const CAMERA_FACES_VEHICLE_FIX = 'Driving forward moves the road UP the screen — the camera sits in front of the vehicle looking back at it, so the player sees its headlights and LEFT looks like RIGHT. Put the camera BEHIND the vehicle (offset along its backward direction, looking along its heading); in the kit, ctx.follow(car) does this.';
+export const CAMERA_INSIDE_VEHICLE_FIX = 'The camera sits INSIDE the vehicle it follows — the player sees the inside of its body instead of the vehicle and the way ahead. Place the camera behind and above the vehicle by its real size (a 20 m train needs far more than a car\'s 6 m); in the kit, CameraRig({ kind: \'chase\' }) with rig.follow(vehicle, dt) sizes itself to the model.';
 export const STEERING_MIRRORED_FIX = 'Holding LEFT turned the view to the RIGHT — the steering is mirrored. LEFT must turn the vehicle to the driver\'s left and RIGHT to the right; in the kit, driveVehicle already does this.';
 
 /**
@@ -1282,7 +1340,9 @@ export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): Playtest
   const cameraFacesVehicle = scene.faces ?? road === -1;
   const forwardCamera = scene.faces === false || (scene.faces === null && road === 1);
   const steeringMirrored = scene.mirrored ?? (forwardCamera && firmFlow(run.steerFlow) === -1);
-  const backwards = cameraFacesVehicle || steeringMirrored;
+  // A chase camera inside the vehicle's own body shows the player the inside of the train (autopsy 61279465).
+  const cameraInsideVehicle = replay.driving === true && replay.cockpit !== true && Array.isArray(run.cameraInside) && run.cameraInside.length === 3;
+  const backwards = cameraFacesVehicle || steeringMirrored || cameraInsideVehicle;
   // A driving game whose accelerator moves nothing cannot score as controllable, whatever else answered — nor one
   // whose controls read backwards to the player.
   const responds = Math.min(stalledVehicle || backwards ? 40 : 100,
@@ -1313,6 +1373,7 @@ export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): Playtest
     ...(stalledVehicle ? { stalledVehicle: true } : {}),
     ...(cameraFacesVehicle ? { cameraFacesVehicle: true } : {}),
     ...(steeringMirrored ? { steeringMirrored: true } : {}),
+    ...(cameraInsideVehicle ? { cameraInsideVehicle: true } : {}),
   };
 }
 
@@ -1405,7 +1466,7 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
   const pictureNote = typeof run.brightness === 'number' ? `; picture brightness ${run.brightness}/255, contrast ${run.spread ?? 0}` : '';
   const errNote = run.errorCount ? `; ${run.errorCount} error(s) while playing: ${firstPlayError(run)}` : '';
   const anyZero = (Object.keys(score.dimensions) as Dimension[]).some((d) => score.dimensions[d] === 0 && d !== 'replay');
-  const ok = score.overall >= PLAYABLE_SCORE && !anyZero && !score.stalledVehicle && !score.cameraFacesVehicle && !score.steeringMirrored;
+  const ok = score.overall >= PLAYABLE_SCORE && !anyZero && !score.stalledVehicle && !score.cameraFacesVehicle && !score.steeringMirrored && !score.cameraInsideVehicle;
   /**
    * 🔴 A PROBE THAT COULD NOT LOOK DOES NOT READ AS A PASS (Q-1038) — `playtestNotRunVerdict`'s own
    * principle, one level down. When the page was starved of frames the steering verdict is null, and a
@@ -1468,6 +1529,7 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
   const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${pictureNote}${errNote}.${starvedNote}`;
   if (ok) return { code: 'GAME_PLAYTEST_OK', severity: 'info', autoResolved: true, score, message: head };
   const fix = score.stalledVehicle ? STALLED_VEHICLE_FIX
+    : score.cameraInsideVehicle ? `${CAMERA_INSIDE_VEHICLE_FIX} (measured: inside a ${(run.cameraInside ?? []).join(' × ')} m part of it)`
     : score.cameraFacesVehicle ? CAMERA_FACES_VEHICLE_FIX
       : score.steeringMirrored ? STEERING_MIRRORED_FIX
         : DIMENSION_FIX[score.weakest];
@@ -1558,7 +1620,7 @@ export function playtestDefects(run: PlaytestRun | null, score: PlaytestScore | 
     if (d.runs === 0) out.push({ code: 'GAME_DEFECT_BLANK', evidence: 'game surface blank or a single colour' });
     else if (d.responds === 0) out.push({ code: 'GAME_DEFECT_INPUT_IGNORED', evidence: 'picture did not change more with controls than without' });
     if (d.mobile === 0) out.push({ code: 'GAME_DEFECT_NO_TOUCH', evidence: 'phone drag/tap changed nothing and no on-screen controls' });
-    if (score.cameraFacesVehicle || score.steeringMirrored) out.push({ code: 'GAME_DEFECT_CAMERA_WRONG', evidence: score.cameraFacesVehicle ? 'road moved up the screen while driving' : 'view panned left when LEFT was held' });
+    if (score.cameraFacesVehicle || score.steeringMirrored || score.cameraInsideVehicle) out.push({ code: 'GAME_DEFECT_CAMERA_WRONG', evidence: score.cameraInsideVehicle ? 'the camera sat inside the vehicle\'s own geometry while driving' : score.cameraFacesVehicle ? 'road moved up the screen while driving' : 'view panned left when LEFT was held' });
     if (score.stalledVehicle) out.push({ code: 'GAME_DEFECT_VEHICLE_STALLED', evidence: 'picture still at idle and with the accelerator held' });
   }
   const errs = run ? (run.errorCount ?? run.errors?.length ?? 0) : 0;

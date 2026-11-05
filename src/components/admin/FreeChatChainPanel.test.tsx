@@ -2,7 +2,7 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { freeChainMetricsFixture, freeChainViewFixture } from '../../../tests/freeChatChainFixtures';
-import { freeChainControls } from '../../lib/freeChatChainView';
+import { freeChainConfigurationErrorResponse, freeChainControls } from '../../lib/freeChatChainView';
 const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0, refs: [] as { current: unknown }[], refCursor: 0, effects: [] as (() => (() => void) | void)[] }));
 vi.mock('react', async original => ({
   ...await original<typeof import('react')>(),
@@ -334,5 +334,30 @@ describe('explicit first-use budget initialization', () => {
   const f = vi.fn().mockResolvedValueOnce(response(absent())).mockResolvedValue(response(freeChainViewFixture())); await mount(f);
   zero(); button('Review budget initialization').props.onClick(); fillReason(); button('Refresh status').props.onClick(); await settle();
   expect(button('Confirm control').props.disabled).toBe(true); expect(renderToStaticMarkup(root())).toContain('Settings changed after this review opened');
+ });
+});
+
+describe('configuration diagnosis never grants controls', () => {
+ it('shows fixed configuration diagnosis on initial 503 without exposing provider values', async () => {
+  const f=vi.fn().mockResolvedValue(response(freeChainConfigurationErrorResponse(),false,503));await mount(f);
+  expect(renderToStaticMarkup(root())).toContain('Invalid FREE_CHAIN_ORDER configuration');
+  expect(button('Stop chain')).toBeUndefined();expect(button('Confirm control')).toBeUndefined();
+  expect(f).toHaveBeenCalledOnce();expect(f.mock.calls[0][1].method).toBeUndefined();
+ });
+ it('blocks controls on a diagnostic refresh after a good snapshot', async () => {
+  const f=vi.fn().mockResolvedValueOnce(response(freeChainViewFixture())).mockResolvedValue(response(freeChainConfigurationErrorResponse(),false,503));await mount(f);
+  button('Stop chain').props.onClick();fillReason();
+  expect(button('Confirm control').props.disabled).toBe(false);
+  button('Refresh status').props.onClick();await settle();
+  expect(button('Confirm control').props.disabled).toBe(true);submit();await settle();
+  expect(renderToStaticMarkup(root())).toContain('Invalid FREE_CHAIN_ORDER configuration');
+  expect(button('Stop chain').props.disabled).toBe(true);
+  expect(f.mock.calls.every(call=>!call[1].method)).toBe(true);
+ });
+ it('keeps malformed or stale successful JSON untrusted', async () => {
+  const stale:any=freeChainViewFixture();delete stale.paid.policyState;
+  const f=vi.fn().mockResolvedValue(response(stale));await mount(f);
+  expect(renderToStaticMarkup(root())).toContain('Chain status is incomplete or unreadable');
+  expect(button('Stop chain')).toBeUndefined();expect(f).toHaveBeenCalledOnce();
  });
 });

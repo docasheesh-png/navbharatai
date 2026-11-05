@@ -1,3 +1,4 @@
+import { FreeChainConfigurationError, isFreeChainConfigurationErrorResponse } from '../../lib/freeChatChainView';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ view: vi.fn(), metrics: vi.fn(), limiter: vi.fn(), control: vi.fn(), budget: vi.fn(), audit: vi.fn() }));
 vi.mock('../AI/FreeChain/runtime', () => ({ freeChainAdminView: mocks.view, freeChainAdminMetrics: mocks.metrics, controlFreeChain: mocks.control, controlFreeChainBudget: mocks.budget }));
@@ -115,4 +116,14 @@ describe('audited shared paid-budget endpoint', () => {
     expect(JSON.stringify([mocks.budget.mock.calls, mocks.audit.mock.calls])).not.toContain(secret);
     expect(mocks.budget.mock.calls[0][0].reason).toContain('[REDACTED]');
   });
+});
+
+it('configuration errors cross the API as fixed no-store 503 diagnostics without mutation', async () => {
+ const {handler,response}=setup();mocks.view.mockRejectedValue(new FreeChainConfigurationError());
+ await handler('GET','')({},response);
+ expect(response.status).toHaveBeenCalledWith(503);expect(response.setHeader).toHaveBeenCalledWith('Cache-Control','no-store');
+ const wire=JSON.parse(JSON.stringify(response.json.mock.calls[0][0]));
+ expect(isFreeChainConfigurationErrorResponse(wire)).toBe(true);
+ expect(wire).toEqual({code:'FREE_CHAIN_CONFIGURATION_INVALID',fields:['FREE_CHAIN_ORDER']});
+ expect(mocks.control).not.toHaveBeenCalled();expect(mocks.budget).not.toHaveBeenCalled();expect(mocks.metrics).not.toHaveBeenCalled();
 });

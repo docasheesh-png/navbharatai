@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { freeChainMetricsFixture, freeChainViewFixture } from '../../tests/freeChatChainFixtures';
 import { adminAuditRow, isAdminAuditEvent } from './adminAuditEvents';
-import { readFreeChainBudgetAction, isFreeChainBudgetResponse, freeChainBudgetFingerprint, freeChainControls, freeChainControlFingerprint, freeChainPercent, freeChainUsd, freeChainTimestamp, isFreeChainAdminMetrics, isFreeChainAdminView, readFreeChainControlAction, validFreeChainReason } from './freeChatChainView';
+import { freeChainConfigurationErrorResponse, isFreeChainConfigurationErrorResponse, readFreeChainBudgetAction, isFreeChainBudgetResponse, freeChainBudgetFingerprint, freeChainControls, freeChainControlFingerprint, freeChainPercent, freeChainUsd, freeChainTimestamp, isFreeChainAdminMetrics, isFreeChainAdminView, readFreeChainControlAction, validFreeChainReason } from './freeChatChainView';
 
 const expectedControls = { enabled: true, rolloutPercent: 0, disabledProviders: [] };
 const action = { enabled: false, reason: 'Investigating provider errors', expectedControls };
@@ -96,4 +96,15 @@ describe('durable paid budget action and response schema', () => {
       expect(adminAuditRow({ event, admin: 'owner', controlTarget: 'free-chat-chain-paid-budget', reason: budget.reason, result: 'ok' })).toMatchObject({ actor: 'owner', target: 'free-chat-chain-paid-budget', reason: budget.reason });
     }
   });
+});
+
+describe('separate sanitized configuration diagnosis', () => {
+ it('accepts only the fixed error contract, never as a healthy snapshot', () => {
+  const error=JSON.parse(JSON.stringify(freeChainConfigurationErrorResponse()));
+  expect(isFreeChainConfigurationErrorResponse(error)).toBe(true);expect(isFreeChainAdminView(error)).toBe(false);
+  for(const bad of [null,{}, {...error,fields:['private-env-value']},{...error,fields:[]},{...error,fields:['FREE_CHAIN_ORDER','FREE_CHAIN_ORDER']},{...error,secret:'hidden'},{...error,code:'other'}]) expect(isFreeChainConfigurationErrorResponse(bad)).toBe(false);
+ });
+ it.each(['runtimeEnabled','allowListConfigured','paid','providers'])('still rejects stale success snapshots missing %s', key => {
+  const wire=JSON.parse(JSON.stringify(freeChainViewFixture()));delete wire[key];expect(isFreeChainAdminView(wire)).toBe(false);
+ });
 });

@@ -19,7 +19,7 @@ import { DEFAULT_ORDER, freeChainConfig } from './config';
 import { applySwitchedOff, __resetProviderSwitchesForTests } from '../../lib/providerSwitches';
 import { getBreaker, resetAllBreakers } from '../Router/CircuitBreaker';
 import { FreeChainProviderError } from './providers/openAiCompatProvider';
-import { isFreeChainAdminView, isFreeChainAdminMetrics } from '../../../lib/freeChatChainView';
+import { FreeChainConfigurationError, freeChainConfigurationErrorResponse, isFreeChainConfigurationErrorResponse, isFreeChainAdminView, isFreeChainAdminMetrics } from '../../../lib/freeChatChainView';
 import type { ChatReplyLanguage } from '../../../lib/chatReplyLanguage';
 m.observeBudget.mockImplementation(async (cap: number) => ({ capNanoUsd: cap, revision: 1 }));
 const db = {} as Parameters<typeof buildFreeChainRouter>[0];
@@ -691,3 +691,24 @@ it.each(['released','cancelled','disabled'] as const)('waits only for pre-reserv
  if(mode==='released'){expect(result.ok).toBe(true);expect(m.reserve).toHaveBeenCalledTimes(2);expect(m.execute).toHaveBeenCalledTimes(2);}
  else{expect(result.ok).toBe(false);expect(m.reserve).toHaveBeenCalledOnce();expect(m.execute).toHaveBeenCalledOnce();}
 });
+
+ describe('admin configuration error contract', () => {
+  it.each(['groq,unknown-secret-value', 'groq,groq', 'llama8b,groq'])('rejects invalid order without normalization or storage/inference %s', async order => {
+   vi.stubEnv('FREE_CHAIN_ORDER', order);
+   await expect(freeChainAdminView()).rejects.toBeInstanceOf(FreeChainConfigurationError);
+   expect(freeChainConfig().order.join(',')).toBe(order);
+   const wire=JSON.parse(JSON.stringify(freeChainConfigurationErrorResponse()));
+   expect(isFreeChainConfigurationErrorResponse(wire)).toBe(true);expect(isFreeChainAdminView(wire)).toBe(false);
+   expect(JSON.stringify(wire)).not.toContain(order);
+   for (const f of [m.db,m.controls,m.quota,m.spend,m.execute,m.registry,m.setBudget,m.observeBudget,m.set]) expect(f).not.toHaveBeenCalled();
+  });
+  it('serializes a valid OFF snapshot without treating OFF or missing policy as corruption', async () => {
+   vi.stubEnv('FREE_CHAIN_ENABLED','off');vi.stubEnv('FREE_CHAIN_ORDER','groq,cloudflare');
+   m.controls.mockResolvedValue({enabled:false,rolloutPercent:0,disabledProviders:['gemini','geminipaid']});
+   m.spend.mockResolvedValue({available:false,capNanoUsd:null,policyRevision:null,heldNanoUsd:0,spentNanoUsd:0});
+   const wire=JSON.parse(JSON.stringify(await freeChainAdminView()));
+   expect(isFreeChainAdminView(wire)).toBe(true);expect(wire.enabled).toBe(false);expect(wire.runtimeEnabled).toBe(false);
+   expect(wire.providers.find((p:any)=>p.id==='gemini').disabled).toBe(true);
+   expect(m.execute).not.toHaveBeenCalled();expect(m.setBudget).not.toHaveBeenCalled();expect(m.observeBudget).not.toHaveBeenCalled();
+  });
+ });

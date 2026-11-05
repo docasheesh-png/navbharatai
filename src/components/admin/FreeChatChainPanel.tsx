@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import {
   freeChainBudgetFingerprint, freeChainControlFingerprint, freeChainControls, freeChainPercent, freeChainProviderLabel, freeChainProviderTier, freeChainTimestamp, freeChainUsd,
-  FREE_CHAIN_METRICS_SCAN_LIMIT, FREE_CHAIN_MAX_PAID_CAP_USD, isFreeChainBudgetResponse, validFreeChainBudgetUsd, isFreeChainAdminMetrics, isFreeChainAdminView, validFreeChainReason, type FreeChainAdminMetrics, type FreeChainAdminView, type FreeChainControlAction,
+  isFreeChainConfigurationErrorResponse, FREE_CHAIN_METRICS_SCAN_LIMIT, FREE_CHAIN_MAX_PAID_CAP_USD, isFreeChainBudgetResponse, validFreeChainBudgetUsd, isFreeChainAdminMetrics, isFreeChainAdminView, validFreeChainReason, type FreeChainAdminMetrics, type FreeChainAdminView, type FreeChainControlAction,
 } from '../../lib/freeChatChainView';
 
 const ROOT = '/api/v1/admin/free-chat-chain';
@@ -48,6 +48,7 @@ export function FreeChatChainPanel({ adminToken }: { adminToken: string }): Reac
       const response = await fetch(ROOT, { headers: adminHeaders(adminToken), signal: controller.signal });
       const body: unknown = await response.json();
       if (!mounted.current || generation !== epoch.current) return;
+      if (response.status === 503 && isFreeChainConfigurationErrorResponse(body)) throw new Error('Invalid FREE_CHAIN_ORDER configuration. The server routing order needs review. No settings were changed; controls remain blocked.');
       if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? 'Admin sign-in or authorization required.' : `Chain status read failed (HTTP ${response.status}).`);
       if (!isFreeChainAdminView(body)) throw new Error('Chain status is incomplete or unreadable. No usage or routing health can be confirmed.');
       setView(body); setError(''); setNow(Date.now());

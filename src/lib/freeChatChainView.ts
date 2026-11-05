@@ -79,6 +79,18 @@ const quantities = (v: unknown): boolean => object(v) && Object.values(v).every(
 export const isFreeChainProviderId = (v: unknown): v is FreeChainProviderId => typeof v === 'string' && (FREE_CHAIN_PROVIDER_IDS as readonly string[]).includes(v);
 const providers = (v: unknown): v is FreeChainProviderId[] => Array.isArray(v) && v.length <= FREE_CHAIN_PROVIDER_IDS.length && v.every(isFreeChainProviderId) && new Set(v).size === v.length;
 
+/** Fixed diagnostic only: never include environment values or a partial healthy snapshot. */
+export class FreeChainConfigurationError extends Error {
+  constructor() { super('FREE_CHAIN_CONFIGURATION_INVALID'); }
+}
+export const freeChainConfigurationErrorResponse = () => ({
+  code: 'FREE_CHAIN_CONFIGURATION_INVALID' as const, fields: ['FREE_CHAIN_ORDER'] as const,
+});
+export function isFreeChainConfigurationErrorResponse(v: unknown): boolean {
+  return object(v) && Object.keys(v).length === 2 && v.code === 'FREE_CHAIN_CONFIGURATION_INVALID'
+    && Array.isArray(v.fields) && v.fields.length === 1 && v.fields[0] === 'FREE_CHAIN_ORDER';
+}
+
 /** Do not store an error or a partially decoded response as a healthy chain snapshot. */
 export function isFreeChainAdminView(v: unknown): v is FreeChainAdminView {
   if (!object(v) || typeof v.enabled !== 'boolean' || typeof v.runtimeEnabled !== 'boolean'

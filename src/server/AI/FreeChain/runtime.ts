@@ -36,7 +36,7 @@ import { acquireSlot, releaseSlot, recordProviderLatency } from '../Router/AIRou
 import { runWatchedStream, watchdogLimits } from '../Router/streamWatchdog';
 import type { RoutedCall } from '../UniversalAIRouter';
 import type { AIProviderResponse } from '../Router/ProviderTypes';
-import { readFreeChainBudgetAction, type FreeChainBudgetAction, type FreeChainBudgetResponse, FREE_CHAIN_METRICS_SCAN_LIMIT, FREE_CHAIN_PROVIDER_IDS, type FreeChainAdminMetrics, type FreeChainAdminView, type FreeChainControlAction } from '../../../lib/freeChatChainView';
+import { FreeChainConfigurationError, readFreeChainBudgetAction, type FreeChainBudgetAction, type FreeChainBudgetResponse, FREE_CHAIN_METRICS_SCAN_LIMIT, FREE_CHAIN_PROVIDER_IDS, type FreeChainAdminMetrics, type FreeChainAdminView, type FreeChainControlAction } from '../../../lib/freeChatChainView';
 export interface FreeChainInput { message: string; history: unknown[]; systemPrompt?: string; signal?: AbortSignal; onChunk?: (text: string, source?: 'notice') => void; context: FreeChainContext }
 export type FreeChainResult = RoutedCall & { reason?: 'aborted' | 'no-provider' | 'all-failed' | 'stalled'; freeChain?: FreeChainTelemetry };
 /** Compatibility export: exhausted fallbacks are neutral, not evidence of traffic overload. */
@@ -493,7 +493,9 @@ export async function controlFreeChainBudget(value: FreeChainBudgetAction, actor
   return { ok: true, capUsd: result.policy.capNanoUsd / 1e9, policyRevision: result.policy.revision };
 }
 export async function freeChainAdminView(): Promise<FreeChainAdminView> {
-  const cfg = freeChainConfig(); const db = getServerDb(); if (!db) throw new Error('FREE_CHAIN_STORE_UNAVAILABLE');
+  const cfg = freeChainConfig();
+  if (cfg.errors.includes('FREE_CHAIN_ORDER')) throw new FreeChainConfigurationError();
+  const db = getServerDb(); if (!db) throw new Error('FREE_CHAIN_STORE_UNAVAILABLE');
   const control = await readControls(db, cfg); const store = new FreeChainStore(db);
   const spend = await store.spendSnapshot(Date.now());
   // Request-local reuse only: both Flash models share one account/reset scope.

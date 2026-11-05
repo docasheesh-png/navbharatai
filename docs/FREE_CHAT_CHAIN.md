@@ -647,3 +647,16 @@ This is browser-local ordering, not a distributed job service: separate tabs,
 devices and raw concurrent API requests still obey shared per-user admission.
 It cannot guarantee all four answers when providers fail, quotas expire or the
 waiting deadline passes. The direct-router overlap stress case remains reported.
+
+### Invalid order status diagnosis
+
+The admin status GET returns HTTP503 with the fixed diagnostic
+`{"code":"FREE_CHAIN_CONFIGURATION_INVALID","fields":["FREE_CHAIN_ORDER"]}`
+when the configured order contains unknown/duplicate rungs or places a paid rung
+before a free rung. This read rejects before store reads; it neither normalizes
+the order nor changes routing, switches, credentials or budgets. Raw configuration
+values are never included. The panel shows a fixed configuration-review message
+and blocks controls, including pending confirmations against an older snapshot.
+Successful snapshots still pass the strict shared validator. Other malformed or
+stale responses remain untrusted; this diagnostic does not prove which field
+caused a historical live page failure without its actual sanitized response.

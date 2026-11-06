@@ -1,3 +1,4 @@
+import { withMitrifyChatPrivacyBoundary } from '../lib/mitrify';
 import { chatAvailabilityMessage } from '../lib/chatAvailabilityMessage';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../lib/chatReplyLanguage';
 import { FREE_CHAT_LANGUAGE_RULE, chatReplyLanguageInstruction } from '../lib/freeChatReplyLanguage';
@@ -985,6 +986,6 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     }
   };
 
-  app.post('/api/chat/navbharat', freeModuleInferenceScope,       chatLimiter, (req, res) => withChatDailyQuota(req, res, () => withChatTextGateway(req, res, () => chatHandler(req, res, 'navbharat'))));
-  app.post('/api/chat/navbharatai', freeModuleInferenceScope,     chatLimiter, (req, res) => withChatDailyQuota(req, res, () => withChatTextGateway(req, res, () => chatHandler(req, res, 'navbharat'))));
+  app.post('/api/chat/navbharat', freeModuleInferenceScope,       chatLimiter, (req, res) => withChatDailyQuota(req, res, () => withChatTextGateway(req, res, () => withMitrifyChatPrivacyBoundary(() => chatHandler(req, res, 'navbharat')))));
+  app.post('/api/chat/navbharatai', freeModuleInferenceScope,     chatLimiter, (req, res) => withChatDailyQuota(req, res, () => withChatTextGateway(req, res, () => withMitrifyChatPrivacyBoundary(() => chatHandler(req, res, 'navbharat')))));
 }

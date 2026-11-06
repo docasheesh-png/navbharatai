@@ -100636,3 +100636,13 @@ search + reviewed `fox` download + hash + validator) from the live server, write
 - Targeted297tests passed initially on environment Node24; final required gates are being rerun with CI Node22.23.4/npm11.18.0. Regressions cover duplicate/unknown/paid-first order, JSON contracts, stale success responses, OFF/uninitialized policy, no reads for malformed order and no writes/inference. No production calls or paid tests.
 
 - Final local validation: all17 CI-equivalent gates passed on Node22.23.4/npm11.18.0; full coverage3,220 files,48,514 passed/85 skipped,851.56s; statements75.69%,branches71.62%,functions78.30%,lines77.68%. Build/bundle/boot/dependency gates passed. Emulator drills21queue/retry+13autopsy+8comparison+78session assertions passed;1,024 quota decisions27grants/997RPM refusals,physical peak1. Local Java is OpenJDK21 rather than CI Temurin21. Artifact uploads/hosted runner execution remain hosted-only; exact-head CI required. Initial npm bootstrap cache-path error resolved using writable /tmp cache; no gate weakened.
+
+## 2026-11-06 — Mitrify transport and explicit general-chat privacy boundary (local work)
+
+Inspection found general chat includes health data, profile, memory and attachments, and is already classified health/clinical. The cache's six public questions do not prove the whole outgoing request public. Added an isolated provider-agnostic transport, server env names, offline HTTP mock checks, an explicit opt-in manual smoke script and documentation. Both general-chat callbacks remain direct even when Mitrify is requested; no privacy classification was downgraded. App Builder and generation logic are untouched.
+
+Production eligibility remains BLOCKED pending trusted full-request public provenance. No credentials configured, no live gateway request, no switch enabled. Verification results will be reported separately; this entry does not claim CI or deployment success.
+
+### 2026-11-06 — Mitrify buffered-stream cancellation correction
+
+Review reproduced cancellation after the first of several already-buffered SSE events: the transport could deliver the remaining events and report success. Added a regression that fails on the original transport, then checked AbortSignal before/after reads, before each event, after the consumer callback and before success. General-chat privacy blocking remains unchanged. Required validation is rerun on this corrected tree before publishing it.

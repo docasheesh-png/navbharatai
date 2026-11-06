@@ -4860,3 +4860,11 @@ rungs. `FREE_CHAIN_ORDER`, sticky spread opt-in, Gateway/Strict Free precedence,
 saved controls and provider OFF switches remain authoritative. See
 [Free Chat runbook](../FREE_CHAT_CHAIN.md) for the full default order and exceptions.
 No live deployment or provider switch is changed by the code default.
+
+### 2026-11-06 — Optional Mitrify transport (privacy blocked; not enabled)
+
+- `AI_PROVIDER`: defaults to `direct`; `mitrify` currently logs the privacy block and retains direct general chat.
+- `MITRIFY_BASE_URL`: optional server-only gateway URL, default documented in `docs/mitrify.md`.
+- `MITRIFY_API_KEY`: server-only secret, no default; never configured by this change.
+- `MITRIFY_MODEL`: single opaque model alias; default lives in `src/server/lib/mitrify.ts`.
+- General chat remains health/clinical. No public-data authority exists for the complete request, so no production traffic reaches the transport. No App Builder or professional routing changes.

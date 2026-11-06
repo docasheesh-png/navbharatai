@@ -4879,3 +4879,9 @@ No live deployment or provider switch is changed by the code default.
 - `AI_BACKEND`: canonical `direct|mitrify` switch, default direct. Explicit values override the legacy `AI_PROVIDER`; the alias is used only when the canonical setting is unset/blank. Invalid selections stay direct. No deployment setting was changed.
 - `MITRIFY_MAX_INFLIGHT`: default 200, valid integers 1–1000. The shared per-process queue also caps waiting calls at 1,000, retained serialized bodies at 64 MiB, and waiting time at 30 seconds. These bounds do not promise fleet-wide concurrency or throughput.
 - General chat remains health/clinical and direct. The isolated public-test route has no live verified cost-admission adapter and remains unavailable without dispatch.
+
+### 2026-11-06 — Separate account-only public-question bot (not activated)
+
+- `MITRIFY_CHAT_ACCOUNT_EMAIL` also selects the only verified account allowed to see or call `/api/chat/mitrify-bot`. No default, client email list or committed account address. Both visibility and send are authorized server-side.
+- `AI_BACKEND=mitrify` plus a configured key permits user-clicked, server-owned public questions only. Direct mode disables sends; removing the account selector hides the entry. No free text, profile/history, files, tools, JSON output or existing-chat routing is added.
+- No environment values or credentials were installed by this change. The bot can spend gateway credits if an operator enables it and the selected user clicks a question; output/retry limits are not a verified INR ceiling. The independent single-use diagnostic still requires its own cost admission. See `docs/mitrify.md`.

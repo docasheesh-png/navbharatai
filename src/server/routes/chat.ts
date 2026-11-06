@@ -1,4 +1,4 @@
-import { MitrifyError, runMitrifyPublicTest, withMitrifyChatPrivacyBoundary } from '../lib/mitrify';
+import { MitrifyError, mitrifyPublicBotStatus, runMitrifyPublicBot, runMitrifyPublicTest, withMitrifyChatPrivacyBoundary } from '../lib/mitrify';
 import { chatAvailabilityMessage } from '../lib/chatAvailabilityMessage';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../lib/chatReplyLanguage';
 import { FREE_CHAT_LANGUAGE_RULE, chatReplyLanguageInstruction } from '../lib/freeChatReplyLanguage';
@@ -130,6 +130,28 @@ async function withChatTextGateway<T>(req: Request, res: Response, handler: () =
  * deprecated/removed. Routing to providers is delegated to the shared aiRouter.
  */
 export function registerChatRoutes(app: Express, chatLimiter: RateLimitRequestHandler): void {
+  // Both visibility and dispatch verify the signed-in account on the server.
+  const publicBot = (send: boolean) => async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const controller = new AbortController();
+    onClientGone(res, () => controller.abort());
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]);
+    try {
+      if (send && req.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+        res.status(415).json({ error: 'Send application/json.' }); return;
+      }
+      const identify = () => verifyFirebaseIdentity(req);
+      const result = send ? await runMitrifyPublicBot({ body: req.body, identify, signal }) : await mitrifyPublicBotStatus(identify, signal);
+      if (!res.destroyed && !res.writableEnded) res.json(result);
+    } catch (error) {
+      if (res.destroyed || res.writableEnded) return;
+      const status = error instanceof MitrifyError && error.status >= 400 && error.status <= 599 ? error.status : 503;
+      res.status(status).json({ code: error instanceof MitrifyError ? error.code : 'MITRIFY_BOT_UNAVAILABLE',
+        error: error instanceof MitrifyError ? error.message : 'This chatbot could not complete the request.' });
+    }
+  };
+  app.get('/api/chat/mitrify-bot', chatLimiter, publicBot(false));
+  app.post('/api/chat/mitrify-bot', chatLimiter, publicBot(true));
   // Separate, authenticated synthetic test. No live cost-admission adapter is wired.
   // Do not pass a client flag or local token estimate as proof of a gateway spending cap.
   app.post('/api/chat/mitrify-public-test', chatLimiter, async (req, res) => {

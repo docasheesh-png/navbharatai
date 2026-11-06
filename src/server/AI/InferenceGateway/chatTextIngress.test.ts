@@ -29,6 +29,25 @@ beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 describe('ordinary chat reaches the real gateway ingress context', () => {
+  it('separate bot visibility and dispatch reject other accounts even with a forged selector', async () => {
+    vi.stubEnv('AI_BACKEND', 'mitrify'); vi.stubEnv('MITRIFY_CHAT_ACCOUNT_EMAIL', 'tester@example.invalid');
+    m.identity.mockResolvedValue({ uid: 'other', email: 'other@example.invalid', emailVerified: true });
+    for (const method of ['GET', 'POST']) {
+      const res = mockRes();
+      await captureRoutes(registerChatRoutes as any, () => {}).get(`${method} /api/chat/mitrify-bot`)!(mockReq({ body: { questionId: 'arithmetic', email: 'tester@example.invalid' }, headers: { 'content-type': 'application/json' } }), res);
+      expect(res.statusCode).toBe(403); expect(res.headers['cache-control']).toBe('no-store');
+    }
+    expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled(); expect(m.live).not.toHaveBeenCalled();
+  });
+  it('separate bot dispatch returns only the reply and has no old-chain fallback', async () => {
+    const bot = vi.spyOn(mitrify, 'runMitrifyPublicBot').mockResolvedValueOnce({ reply: 'public answer' });
+    const handler = captureRoutes(registerChatRoutes as any, () => {}).get('POST /api/chat/mitrify-bot')!;
+    const req = mockReq({ body: { questionId: 'rainbow' }, headers: { 'content-type': 'application/json' } });
+    const res = mockRes(); await handler(req, res); expect(res.body).toEqual({ reply: 'public answer' });
+    bot.mockRejectedValueOnce(new mitrify.MitrifyError('MITRIFY_CONFIGURATION', 401));
+    const failed = mockRes(); await handler(req, failed); expect(failed.statusCode).toBe(401);
+    expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled(); expect(m.legacy).not.toHaveBeenCalled(); expect(m.document).not.toHaveBeenCalled();
+  });
   it('public-test configuration never pauses or switches ordinary chat', async () => {
     vi.stubEnv('AI_BACKEND', 'mitrify'); vi.stubEnv('MITRIFY_CHAT_ACCOUNT_EMAIL', 'tester@example.invalid');
     m.identity.mockResolvedValue({ uid: 'verified-user', email: 'tester@example.invalid', emailVerified: true });

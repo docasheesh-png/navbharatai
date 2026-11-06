@@ -4,11 +4,60 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
-import { createMitrifyClient, mitrifyConfig, withMitrifyChatPrivacyBoundary, runMitrifyPublicTest, MitrifyError } from '../../src/server/lib/mitrify.ts';
+import { createMitrifyClient, mitrifyConfig, withMitrifyChatPrivacyBoundary, runMitrifyPublicTest, mitrifyPublicBotStatus, runMitrifyPublicBot, MitrifyError } from '../../src/server/lib/mitrify.ts';
 
 const input = { model: 'ignored', messages: [{ role: 'system', content: 'Be brief.' }, { role: 'user', content: 'Hello.' }], temperature: 0.2, max_tokens: 12 };
 const chunk = text => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
 const reply = res => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: 'Hello' } }] })); };
+
+test('separate bot verifies account on visibility and send; caller identity cannot grant access', async t => {
+  const f = await fixture(t, (_req, res) => reply(res));
+  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' };
+  for (const identity of [null, { uid: 'outsider', email: 'other@example.invalid', emailVerified: true }, { uid: 'tester', email: env.MITRIFY_CHAT_ACCOUNT_EMAIL, emailVerified: false }]) {
+    const identify = async () => identity;
+    await assert.rejects(mitrifyPublicBotStatus(identify, f.signal, env), { code: 'MITRIFY_BOT_FORBIDDEN' });
+    await assert.rejects(runMitrifyPublicBot({ identify, signal: f.signal, body: { questionId: 'arithmetic', uid: 'tester' } }, env), { code: 'MITRIFY_BOT_FORBIDDEN' });
+  }
+  assert.equal(f.requests.length, 0);
+});
+
+test('separate bot sends only server public text and rejects any private fields', async t => {
+  const f = await fixture(t, (_req, res) => reply(res));
+  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' };
+  const identify = async () => ({ uid: 'private-local-uid', email: 'TESTER@example.invalid', emailVerified: true });
+  const status = await mitrifyPublicBotStatus(identify, f.signal, env);
+  assert.equal(status.available, true); assert.equal(status.questions.length, 3);
+  for (const body of [null, [], {}, { questionId: 'unknown' }, ...['messages', 'history', 'profile', 'attachments', 'email', 'temperature'].map(field => ({ questionId: 'arithmetic', [field]: 'not allowed' }))]) {
+    await assert.rejects(runMitrifyPublicBot({ body, identify, signal: f.signal }, env), { code: 'MITRIFY_BOT_PUBLIC_QUESTION_REQUIRED' });
+  }
+  assert.equal(f.requests.length, 0);
+  assert.deepEqual(await runMitrifyPublicBot({ body: { questionId: 'arithmetic' }, identify, signal: f.signal }, env, metadata => f.logs.push(metadata)), { reply: 'Hello' });
+  assert.deepEqual(f.requests[0].body, { messages: [{ role: 'user', content: 'What is 2 + 2? Reply with only the number.' }], max_tokens: 256, stream: false, model: 'mitrify/auto-cheap' });
+  assert.equal(JSON.stringify(f.requests[0].body).includes('private-local-uid'), false);
+  assert.equal(JSON.stringify(f.logs).includes(env.MITRIFY_CHAT_ACCOUNT_EMAIL), false);
+});
+
+test('separate bot default direct disables sends and missing key reports unavailable', async t => {
+  const f = await fixture(t, (_req, res) => reply(res));
+  const env = { ...f.env, MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' };
+  const identify = async () => ({ uid: 'tester', email: env.MITRIFY_CHAT_ACCOUNT_EMAIL, emailVerified: true });
+  assert.equal((await mitrifyPublicBotStatus(identify, f.signal, env)).available, false);
+  assert.equal((await mitrifyPublicBotStatus(identify, f.signal, { ...env, AI_BACKEND: 'mitrify', MITRIFY_API_KEY: '' })).available, false);
+  await assert.rejects(runMitrifyPublicBot({ body: { questionId: 'arithmetic' }, identify, signal: f.signal }, env), { code: 'MITRIFY_BOT_DISABLED' });
+  assert.equal(f.requests.length, 0);
+});
+
+test('separate bot failure has no direct fallback and cancellation bounds identity lookup', async t => {
+  const f = await fixture(t, (_req, res) => { res.writeHead(401); res.end('{}'); });
+  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' };
+  const identify = async () => ({ uid: 'tester', email: env.MITRIFY_CHAT_ACCOUNT_EMAIL, emailVerified: true });
+  await assert.rejects(runMitrifyPublicBot({ body: { questionId: 'rainbow' }, identify, signal: f.signal }, env, () => {}), { status: 401 });
+  assert.equal(f.requests.length, 1);
+  const controller = new AbortController();
+  const pending = mitrifyPublicBotStatus(() => new Promise(() => {}), controller.signal, env);
+  controller.abort();
+  await assert.rejects(pending, { code: 'MITRIFY_CANCELLED' });
+});
 async function fixture(t, handle, keyPrefix = 'mock-') {
   const key = `${keyPrefix}${randomUUID()}`; // Ephemeral mock credential, never a fixture or environment secret.
   const logs = []; const requests = [];

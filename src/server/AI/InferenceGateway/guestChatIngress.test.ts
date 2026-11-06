@@ -19,7 +19,7 @@ import { wasGatewayGuestSelected, takeGuestInferenceAdmission } from '../../lib/
 /** The real registered Free scope + quota middleware + route, without HTTP or provider traffic. */
 function handlers(path = '/api/chat/navbharat') {
   let found: any[] = [];
-  registerChatRoutes({ post: (name: string, ...h: any[]) => { if (name === path) found = h; } } as never, ((_req: any, _res: any, next: any) => next()) as never);
+  registerChatRoutes({ get: () => {}, post: (name: string, ...h: any[]) => { if (name === path) found = h; } } as never, ((_req: any, _res: any, next: any) => next()) as never);
   return found;
 }
 async function request(body: Record<string, unknown> = {}, options: { path?: string; afterQuota?: () => void } = {}) {

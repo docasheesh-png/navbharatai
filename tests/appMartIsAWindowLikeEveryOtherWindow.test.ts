@@ -43,7 +43,9 @@ const stripComments = (src: string) =>
 function menuEntries(): Array<{ id: string; label: string; icon: string }> {
   const start = app.indexOf('const menuItems = useMemo');
   expect(start, 'menuItems must still exist in App.tsx').toBeGreaterThan(-1);
-  const block = app.slice(start, app.indexOf('], []);', start));
+  const end = /\], \[[^\]]*\]\);/.exec(app.slice(start));
+  expect(end, 'menuItems must end with a memo dependency array').not.toBeNull();
+  const block = app.slice(start, start + end!.index);
   return [...block.matchAll(/\{\s*id:\s*'([a-z_0-9]+)',\s*label:\s*('[^']+'|COPY\.branding\.aiChatName),\s*icon:\s*([A-Za-z0-9_]+)/g)]
     .map((m) => ({ id: m[1]!, label: m[2] === 'COPY.branding.aiChatName' ? COPY.branding.aiChatName : m[2]!.slice(1, -1), icon: m[3]! }));
 }

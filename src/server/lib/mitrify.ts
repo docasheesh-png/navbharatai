@@ -48,6 +48,49 @@ export function withMitrifyChatPrivacyBoundary<T>(direct: () => Promise<T>, env:
   return direct();
 }
 
+// This separate bot accepts only IDs for reviewed public text. It never receives
+// free text, profile, history, files or client-authored model parameters.
+const publicQuestions = [
+  { id: 'arithmetic', label: 'What is 2 + 2?', prompt: 'What is 2 + 2? Reply with only the number.' },
+  { id: 'rainbow', label: 'Why does a rainbow appear?', prompt: 'Explain why a rainbow appears in three short sentences.' },
+  { id: 'solar-system', label: 'Explain the solar system', prompt: 'Explain the solar system in three short sentences for a beginner.' },
+] as const;
+type Identify = () => Promise<{ uid: string; email: string | null; emailVerified: boolean } | null>;
+
+async function authorizePublicBot(identify: Identify, signal: AbortSignal, env: Env) {
+  const target = env.MITRIFY_CHAT_ACCOUNT_EMAIL?.trim().toLowerCase();
+  const identity = await untilCancelled(identify, signal);
+  if (!target || !identity?.uid || !identity.emailVerified || identity.email?.trim().toLowerCase() !== target) {
+    throw new MitrifyError('MITRIFY_BOT_FORBIDDEN', 403);
+  }
+  signal.throwIfAborted();
+}
+
+/** Visibility is server-authorized even when the bot is disabled or unconfigured. */
+export async function mitrifyPublicBotStatus(identify: Identify, signal: AbortSignal, env: Env = process.env) {
+  await authorizePublicBot(identify, signal, env);
+  const config = mitrifyConfig(env);
+  return { available: config.enabled && Boolean(config.apiKey), questions: publicQuestions.map(({ id, label }) => ({ id, label })) };
+}
+
+/** Separate user-facing public-question bot; never invokes direct providers. */
+export async function runMitrifyPublicBot(options: { body: unknown; identify: Identify; signal: AbortSignal }, env: Env = process.env, log: Log = defaultLog) {
+  await authorizePublicBot(options.identify, options.signal, env);
+  if (backend(env) !== 'mitrify') throw new MitrifyError('MITRIFY_BOT_DISABLED', 503);
+  const body = options.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'questionId')) {
+    throw new MitrifyError('MITRIFY_BOT_PUBLIC_QUESTION_REQUIRED', 400);
+  }
+  const question = publicQuestions.find(item => item.id === (body as { questionId: unknown }).questionId);
+  if (!question) throw new MitrifyError('MITRIFY_BOT_PUBLIC_QUESTION_REQUIRED', 400);
+  const result = await createMitrifyClient(env, log).chat({ messages: [{ role: 'user', content: question.prompt }], max_tokens: 256, stream: false }, { signal: options.signal });
+  // Do not expose provider metadata or arbitrary response properties to the UI.
+  const data = result.data as { choices?: Array<{ message?: { content?: unknown } }> };
+  const reply = data.choices?.[0]?.message?.content;
+  if (typeof reply !== 'string' || !reply.trim()) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', 502);
+  return { reply };
+}
+
 // One FIFO for every client in this process: never one pool per key/model/client.
 // Limits retained serialized request bytes, not total heap or Cloud Run fleet concurrency.
 const activeCalls = new Set<{ limit: number }>();
@@ -157,6 +200,9 @@ export class MitrifyError extends Error {
   readonly partial: boolean;
   constructor(code: string, status = 0, partial = false) {
     const messages: Record<string, string> = {
+      MITRIFY_BOT_FORBIDDEN: 'This chatbot is not available for this account.',
+      MITRIFY_BOT_DISABLED: 'This chatbot is not enabled on the server.',
+      MITRIFY_BOT_PUBLIC_QUESTION_REQUIRED: 'Choose one of the public questions. Free text and additional fields are not accepted.',
       MITRIFY_TEST_DISABLED: 'The public test is disabled.',
       MITRIFY_TEST_FORBIDDEN: 'This test requires the configured verified account.',
       MITRIFY_TEST_EMPTY_BODY_REQUIRED: 'The public test accepts only an empty JSON object, without chat content.',

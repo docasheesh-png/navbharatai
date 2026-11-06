@@ -234,6 +234,7 @@ declare module 'lucide-react' {
   export const Maximize2: Icon;
   export const Menu: Icon;
   export const MessageSquare: Icon;
+  export const MessagesSquare: Icon;
   export const Mic: Icon;
   export const MicOff: Icon;
   export const Minimize2: Icon;

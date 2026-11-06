@@ -97,9 +97,11 @@ Only HTTP 429/503 are retried, up to three retries after the first attempt, usin
 exponential delay, jitter and Retry-After. Network/body/stream failures are not
 retried. SSE data events are forwarded in order as complete events arrive; the full
 answer is never buffered. Comments and SSE control fields are not forwarded.
-A bounded lookahead (at most 1 MiB) withholds events only while text deltas could
-complete the server credential; safe text is released unchanged when disambiguated
-or at stream completion. Credential matches fail closed before disclosure. `[DONE]` is required, and early EOF/error events throw an
+A bounded lookahead (at most 1 MiB) withholds events only while any forwarded JSON string field could
+complete the server credential, including refusal, reasoning, metadata and nested
+array strings. Prefixes are bounded to 1,024 channels. Earlier safe events are
+released unchanged as soon as possible matches move past them; repeated metadata
+does not hold all earlier events until completion. Credential matches fail closed before disclosure. `[DONE]` is required, and early EOF/error events throw an
 explicit incomplete-answer error. Callers must render that error rather than mark a
 partial reply complete. AbortSignal cancels network reads and retry waits. Future
 route wiring must supply the existing response-disconnect signal and await writes

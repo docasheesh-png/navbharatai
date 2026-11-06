@@ -129,6 +129,42 @@ test('abort while downstream callback hangs rejects promptly and releases the gl
   assert.equal(f.requests.length, 2);
 });
 
+for (const field of ['refusal', 'reasoning_content', 'metadata']) test(`split credential in forwarded ${field} never reaches the consumer`, async t => {
+  const f = await fixture(t, (_req, res, _n, key) => {
+    const event = text => `data: ${JSON.stringify(field === 'metadata' ? { id: text, choices: [] }
+      : { choices: [{ index: 0, delta: { [field]: text } }] })}\n\n`;
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.end(event(key.slice(0, 10)) + event(key.slice(10)) + 'data: [DONE]\n\n');
+  });
+  let output = '';
+  await assert.rejects(f.client.chat({ ...input, stream: true }, { signal: f.signal,
+    onChunk: bytes => { output += Buffer.from(bytes).toString(); } }));
+  assert.equal(output, ''); assert.equal(f.requests.length, 1); assert.ok(!JSON.stringify(f.logs).includes(f.key));
+});
+
+test('nested array string fields cannot expose credential fragments', async t => {
+  const f = await fixture(t, (_req, res, _n, key) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    const body = { choices: [{ index: 0, delta: { content: 'safe' }, logprobs: { content: [{ token: key.slice(0, 10) }, { token: key.slice(10) }] } }] };
+    res.end(`data: ${JSON.stringify(body)}\n\ndata: [DONE]\n\n`);
+  });
+  let output = '';
+  await assert.rejects(f.client.chat({ ...input, stream: true }, { signal: f.signal, onChunk: bytes => { output += Buffer.from(bytes).toString(); } }));
+  assert.equal(output, ''); assert.equal(f.requests.length, 1);
+});
+
+test('repeated metadata prefixes release earlier safe events before stream completion', async t => {
+  let consumed; const seen = new Promise(resolve => { consumed = resolve; });
+  const event = text => `data: ${JSON.stringify({ id: 'm', choices: [{ index: 0, delta: { content: text } }] })}\n\n`;
+  const f = await fixture(t, async (_req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream'); res.write(event('one') + event('two'));
+    await seen; res.end('data: [DONE]\n\n');
+  });
+  let output = '';
+  await f.client.chat({ ...input, stream: true }, { signal: f.signal, onChunk: bytes => { output += Buffer.from(bytes).toString(); consumed(); } });
+  assert.equal(output, event('one') + event('two') + 'data: [DONE]\n\n');
+});
+
 test('queue count is bounded and cancellation releases every waiting entry', async t => {
   let start; const started = new Promise(resolve => { start = resolve; });
   const f = await fixture(t, (_req, res) => { res.setHeader('Content-Type', 'application/json'); start(); });

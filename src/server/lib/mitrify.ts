@@ -285,8 +285,31 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let pending = ''; let done = false;
-        let withheld = ''; // Bounded lookahead only while a delta could complete the credential.
-        const prefixes = new Map<number, string>();
+        let sequence = 0;
+        let retainedEventBytes = 0;
+        const withheld: { sequence: number; wire: string; bytes: number }[] = [];
+        const prefixes = new Map<string, { text: string; since: number }>();
+        // Track every forwarded string, including extension fields and field names.
+        // Keep only a possible credential prefix, never accumulated answer content.
+        const inspectStrings = (value: unknown, path: string[]): void => {
+          if (typeof value === 'string') {
+            const channel = JSON.stringify(path); const previous = prefixes.get(channel);
+            const text = (previous?.text ?? '') + value;
+            if (text.includes(config.apiKey)) throw new MitrifyError('MITRIFY_STREAM_ERROR', response.status, partial);
+            let length = Math.min(text.length, config.apiKey.length - 1);
+            while (length && !text.endsWith(config.apiKey.slice(0, length))) length--;
+            if (length) prefixes.set(channel, { text: text.slice(-length), since: length > value.length ? previous!.since : sequence });
+            else prefixes.delete(channel);
+          } else if (Array.isArray(value)) {
+            value.forEach((item, index) => inspectStrings(item, [...path,
+              path.at(-1) === 'field:choices' ? `choice:${item?.index ?? index}` : 'array']));
+          } else if (value && typeof value === 'object') {
+            for (const [key, item] of Object.entries(value)) {
+              inspectStrings(key, [...path, 'keys']); inspectStrings(item, [...path, `field:${key}`]);
+            }
+          }
+          if (prefixes.size > 1024) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status, partial);
+        };
         try {
           for (;;) {
             signal.throwIfAborted();
@@ -309,25 +332,25 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
               if (payload && payload !== '[DONE]') {
                 const data = JSON.parse(payload);
                 if (JSON.stringify(data).includes(config.apiKey) || data.error) throw new MitrifyError('MITRIFY_STREAM_ERROR', response.status, partial);
-                for (const [position, choice] of (data.choices ?? []).entries()) {
-                  if (typeof choice?.delta?.content !== 'string') continue;
-                  const index = choice.index ?? position;
-                  const text = (prefixes.get(index) ?? '') + choice.delta.content;
-                  if (text.includes(config.apiKey)) throw new MitrifyError('MITRIFY_STREAM_ERROR', response.status, partial);
-                  let length = Math.min(text.length, config.apiKey.length - 1);
-                  while (length && !text.endsWith(config.apiKey.slice(0, length))) length--;
-                  if (length) prefixes.set(index, text.slice(-length)); else prefixes.delete(index);
-                }
+                inspectStrings(data, []);
               }
-              if (payload === '[DONE]') done = true;
-              if (dataLines.length) withheld += `${dataLines.join('\n')}\n\n`;
-              if (Buffer.byteLength(withheld) > 1024 * 1024 || prefixes.size > 1024) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status, partial);
-              if (!withheld || (!done && prefixes.size)) continue;
-              // Mark before invoking the consumer: it may write and then throw.
-              partial = true;
-              const bytes = new TextEncoder().encode(withheld); withheld = '';
-              await untilCancelled(() => options.onChunk!(bytes), signal);
-              signal.throwIfAborted();
+              if (payload === '[DONE]') { done = true; prefixes.clear(); }
+              if (dataLines.length) {
+                const wire = `${dataLines.join('\n')}\n\n`; const bytes = Buffer.byteLength(wire);
+                withheld.push({ sequence, wire, bytes }); retainedEventBytes += bytes;
+              }
+              if (retainedEventBytes > 1024 * 1024) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status, partial);
+              let firstUncertain = Infinity;
+              for (const prefix of prefixes.values()) firstUncertain = Math.min(firstUncertain, prefix.since);
+              // A repeated metadata prefix can delay one event, never the whole answer.
+              // Release earlier events as soon as every possible match has moved on.
+              while (withheld.length && withheld[0].sequence < firstUncertain) {
+                const safeEvent = withheld.shift()!; retainedEventBytes -= safeEvent.bytes;
+                partial = true; // The consumer may write before throwing or stalling.
+                await untilCancelled(() => options.onChunk!(new TextEncoder().encode(safeEvent.wire)), signal);
+                signal.throwIfAborted();
+              }
+              sequence++;
               if (done) break;
             }
             if (done) break;

@@ -100680,3 +100680,10 @@ Review reproduced cancellation after the first of several already-buffered SSE e
 - Added bounded per-choice credential-prefix lookahead, omit non-answer SSE comments/control fields, and cancellation-aware waits for downstream consumers, identity and admission. Safe data text remains unchanged; caller-owned delayed writes still must honor AbortSignal. Complete local/hosted validation and independent re-review are required for the corrected head. No live inference or production action occurred.
 
 - Corrected review-fix validation: 49 offline gateway tests pass; all 3,235 full coverage suites pass (48,643 passed, 89 skipped), with all applicable local CI-equivalent gates and all five emulator drills green. Missing-key smoke exits 1 as intended. Earlier failed reproductions are retained as evidence; no failing check was weakened. A new exact-head hosted CI and independent review remain required before merge.
+
+### 2026-11-06 — Extend streaming credential inspection to every forwarded string
+
+- Independent re-review confirmed the previous cancellation/comment/content fixes but reproduced split credentials in refusal/reasoning fields. Added failing reproductions for those fields and metadata against 4016c877; that head must not merge.
+- The bounded rolling inspector now traverses all JSON string values, field names and nested arrays, rather than content alone. A bounded event queue releases earlier safe events once possible matches move on; repeated metadata prefixes cannot retain the entire preceding stream. Added nested-token and incremental metadata regressions. Local gates, fresh exact-head CI and independent review are required again; no live inference or production changes.
+
+- Broader-inspector validation: all 54 loopback gateway tests pass; 3,235 full coverage suites pass (48,643 passed, 89 skipped); all applicable local CI-equivalent checks and all five emulator drills pass. Missing-key smoke exits 1 as intended. New hosted exact-head CI and independent re-review remain required. No live gateway call or production change occurred.

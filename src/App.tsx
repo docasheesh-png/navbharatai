@@ -42,7 +42,7 @@ import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
 // AgentV3Launcher removed — v5.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
 import { fetchBuildSession } from './services/buildService';
-import { Bot, Zap, MessageSquare, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Briefcase, LayoutGrid, Layers, Store, Info, Package, Wand2, FileDiff } from 'lucide-react';
+import { Bot, Zap, MessageSquare, MessagesSquare, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Briefcase, LayoutGrid, Layers, Store, Info, Package, Wand2, FileDiff } from 'lucide-react';
 import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
 // Play compliance (admin 2026-08-04): medical-class assistants are hidden inside the Play-distributed
@@ -1401,6 +1401,13 @@ export default function App() {
     if (isAuthGatedView(activeView)) setShowAuth(true);
   }, [loadingUser, user, activeView]);
 
+  // Losing account capability closes the private view instead of leaving a blank tab.
+  useEffect(() => {
+    if (mitrifyBot) return;
+    setActiveView(view => view === 'mitrify_chat' ? 'home' : view);
+    setOpenTabs(tabs => tabs.includes('mitrify_chat') ? tabs.filter(tab => tab !== 'mitrify_chat') : tabs);
+  }, [mitrifyBot]);
+
   // Admin login = full app access. When the admin is signed in (separate server
   // password auth), treat them as a logged-in user so the app never forces the
   // Firebase login modal. A real Firebase sign-in always takes precedence; the
@@ -2543,7 +2550,7 @@ export default function App() {
   const menuItems = useMemo(() => [
     { id: 'home',         label: 'Home',              icon: Bot },
     { id: 'nbi_chat',     label: COPY.branding.aiChatName,  icon: MessageSquare },
-    ...(mitrifyBot ? [{ id: 'mitrify_chat', label: 'Mitrify chat', icon: MessageSquare }] : []),
+    ...(mitrifyBot ? [{ id: 'mitrify_chat', label: 'Mitrify chat', icon: MessagesSquare }] : []),
     { id: 'nbi_pro_chat', label: 'NavBharatAI Pro', icon: Bot },
     { id: 'professionals', label: 'Professionals',    icon: Briefcase, status: 'New' },
     // Other AI opens its OWN header tab like Free/Pro/Professionals (admin 2026-07-23): without a menuItems

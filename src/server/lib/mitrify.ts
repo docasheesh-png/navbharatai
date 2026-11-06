@@ -73,7 +73,7 @@ export async function mitrifyPublicBotStatus(identify: Identify, signal: AbortSi
   return { available: config.enabled && Boolean(config.apiKey), questions: publicQuestions.map(({ id, label }) => ({ id, label })) };
 }
 
-/** A user-initiated public-question bot; no direct-provider fallback or test-admission bypass. */
+/** Separate user-facing public-question bot; never invokes direct providers. */
 export async function runMitrifyPublicBot(options: { body: unknown; identify: Identify; signal: AbortSignal }, env: Env = process.env, log: Log = defaultLog) {
   await authorizePublicBot(options.identify, options.signal, env);
   if (backend(env) !== 'mitrify') throw new MitrifyError('MITRIFY_BOT_DISABLED', 503);

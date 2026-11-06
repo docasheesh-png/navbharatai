@@ -10,6 +10,8 @@ describe('separate public bot browser boundary', () => {
     expect(app).toContain("if (view === 'mitrify_chat' && !mitrifyBot) return false;");
     expect(app).toContain("activeView === 'mitrify_chat' && mitrifyBot && user");
     expect(app).toContain('key={user.uid} uid={user.uid} access={mitrifyBot}');
+    expect(app).toContain("setActiveView(view => view === 'mitrify_chat' ? 'home' : view)");
+    expect(app).toContain("tabs.filter(tab => tab !== 'mitrify_chat')");
     expect(hook).toContain("fetch('/api/v1/chat/mitrify-bot'");
     expect(hook).toContain('result?.uid === uid && auth.currentUser?.uid === uid');
     expect(hook).toContain('return () => controller.abort()');

@@ -49,7 +49,7 @@ function request(body: Record<string, unknown> = {}, headers: Record<string, str
 // Unlike last-handler-only fixtures, execute the registered inference-scope middleware too.
 function route(path = '/api/chat/navbharat') {
   const routes = new Map<string, Array<(req: any, res: any, next: () => unknown) => unknown>>();
-  registerChatRoutes({ post: (name: string, ...handlers: any[]) => routes.set(name, handlers) } as any,
+  registerChatRoutes({ get: () => {}, post: (name: string, ...handlers: any[]) => routes.set(name, handlers) } as any,
     ((_req: unknown, _res: unknown, next: () => unknown) => next()) as any);
   return async (req: any, res: any) => {
     const handlers = routes.get(path)!;

@@ -1,4 +1,5 @@
 import { createPolyHavenDiscovery, withDiscoveredAssetCache, isDiscoveredAsset } from './polyHavenDiscovery';
+import { createHash } from 'node:crypto';
 import { localModelsOverride } from './localModelNote';
 import { downloadGameAsset } from './assetDownload';
 import { acquireGameAsset, type AssetEngineDependencies, type AssetOutcome } from './assetEngine';
@@ -37,6 +38,9 @@ export interface GameAssetSeedOptions {
 }
 
 /** Called only inside the existing new-game seed guard, after the 3D recipe has installed Three.js. */
+/** Models downloaded and proved at once. Bounded: each proof is a browser in a sandbox with ~3.7 GB. */
+export const GAME_ASSET_CONCURRENCY = 3;
+
 export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<GameAssetSeedResult> {
   const out: GameAssetSeedResult = { files: {}, handoff: '', outcomes: [], status: 'off' };
   if (!externalGameAssetsEnabled(options.env, options.verifiedOwnerUid)) return out;
@@ -71,11 +75,58 @@ export async function prepareGameAssets(options: GameAssetSeedOptions): Promise<
     persist: persistProjectAsset(options.workspace, options.workspaceId, persistence),
   };
   const signal = AbortSignal.any([options.signal, AbortSignal.timeout(60_000)]);
-  for (const requirement of requirements) {
-    if (signal.aborted) break;
-    const outcome = await acquireGameAsset(requirement, dependencies, signal);
-    out.outcomes.push({ subject: requirement.subject, outcome });
-  }
+  // 🔴 SIX MODELS, ONE AFTER ANOTHER (autopsy 61279465, Q-2343). The seed waited ~45 s after its last recipe: each
+  // model was downloaded, then proved in a FRESH browser in the sandbox, strictly in turn — measured off-sandbox at
+  // 11.6 s of downloads + 14.0 s of proofs for that build's six. The PROOFS now run up to GAME_ASSET_CONCURRENCY at
+  // once, overlapping the downloads. Downloads stay in turn (see `download` below) and so does the durable SAVE:
+  // saveWorkspaceAssets read-modify-writes the workspace's `paths` list, so two at once would drop a model from it.
+  const persistOne = dependencies.persist;
+  let persistChain: Promise<unknown> = Promise.resolve();
+  // ONE MODEL IS FETCHED AND PROVED ONCE PER REQUEST, however many subjects share it: in turn, the second subject
+  // found the first's bytes in the cache; at once, both would miss it. The in-flight promise is shared instead.
+  const downloading = new Map<string, Promise<Uint8Array>>();
+  let downloadChain: Promise<unknown> = Promise.resolve();
+  const proving = new Map<string, Promise<void>>();
+  const proofKey = (bytes: Uint8Array, requirement: AssetRequirement) => `${createHash('sha256').update(bytes).digest('hex')}:${requirement.animation ?? ''}`;
+  const serialDependencies: AssetEngineDependencies = {
+    ...dependencies,
+    // DOWNLOADS STAY ONE AT A TIME: the guarded transport allows about one request per second per origin and throws
+    // past one queued request (assetProviderBudget.ts — politeness to the providers, kept as designed). Measured: three
+    // at once failed "Provider rate limit". So downloads are chained and only the browser proofs overlap them.
+    download: (candidate, s) => {
+      const key = `${candidate.provider}:${candidate.id}:${candidate.revision}:${candidate.sha256}`;
+      let p = downloading.get(key);
+      if (!p) {
+        p = downloadChain.then(() => dependencies.download(candidate, s));
+        downloadChain = p.catch(() => {});
+        downloading.set(key, p);
+        p.catch(() => downloading.delete(key));
+      }
+      return p;
+    },
+    parse: (bytes, requirement) => {
+      const key = proofKey(bytes, requirement);
+      let p = proving.get(key);
+      if (!p) { p = dependencies.parse(bytes, requirement); proving.set(key, p); p.catch(() => proving.delete(key)); }
+      return p;
+    },
+    persist: (entry, bytes) => {
+      const next = persistChain.then(() => persistOne(entry, bytes));
+      persistChain = next.catch(() => {});
+      return next;
+    },
+  };
+  const results: Array<{ subject: string; outcome: AssetOutcome } | undefined> = new Array(requirements.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < requirements.length && !signal.aborted) {
+      const i = cursor++;
+      const requirement = requirements[i];
+      results[i] = { subject: requirement.subject, outcome: await acquireGameAsset(requirement, serialDependencies, signal) };
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(GAME_ASSET_CONCURRENCY, requirements.length) }, worker));
+  for (const r of results) if (r) out.outcomes.push(r);
   const ready = out.outcomes.filter((r): r is { subject: string; outcome: Extract<AssetOutcome, { kind: 'model' }> } => r.outcome.kind === 'model');
   if (!ready.length || signal.aborted) return { ...out, status: 'procedural' };
   const manifest = { schema: 1, assets: ready.map(r => ({ subject: r.subject, ...r.outcome.entry })) };

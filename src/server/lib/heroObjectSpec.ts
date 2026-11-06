@@ -180,7 +180,10 @@ export function heroObjectContract(prompt: string | null | undefined): HeroObjec
 
   // ── AND FOR ANYTHING NOT IN THE LIST ────────────────────────────────────────────────────────────
   lines.push('');
-  lines.push('ANY OTHER OBJECT THIS GAME NEEDS: call the object_spec tool with its name FIRST. It '
+  // Autopsy 61279465 (Q-2335): the model asked object_spec for TRAIN three times and for every other object one
+  // turn at a time, though the train's spec was already in this block — ~55 k input tokens a turn.
+  lines.push('ANY OTHER OBJECT THIS GAME NEEDS: call the object_spec tool FIRST — ONCE, with ALL their names '
+    + '(object_spec({ objects: ["…", "…"] })), and NOT for the objects above, whose specs are already here. It '
     + 'returns real dimensions, the required parts and the tell — the same contract as above, for '
     + 'anything the list does not carry. If that is unavailable, do this instead:');
   lines.push(genericObjectProtocol());

@@ -96,4 +96,6 @@ export const SURFACES_STUB = {
   enableAO: <T,>(g: T): T => g,
   setDetailLevel: (d: 'real' | 'lite') => { STUB_DETAIL = d; },
   getDetailLevel: () => STUB_DETAIL,
+  // The kit's device clamp (autopsy 61279465): no WebGL here, so a request is the tier it asks for.
+  resolveDetail: (d: 'real' | 'lite') => d,
 };

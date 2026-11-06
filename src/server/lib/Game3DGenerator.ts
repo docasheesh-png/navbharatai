@@ -39,6 +39,7 @@ export interface Game3DResult {
 }
 
 const RENDERER = `import * as THREE from 'three';
+import { softwareRenderer } from './surfaces';
 
 /**
  * The renderer, set up the way a scene actually needs — not the defaults.
@@ -60,15 +61,22 @@ export interface RendererOptions {
   shadows?: boolean;
 }
 
+/** The pixel ratio on a software renderer: half the pixels of 1x in each direction is a quarter of the shading. */
+export const SOFTWARE_PIXEL_RATIO = 0.5;
+
 export function createRenderer(options: RendererOptions = {}): THREE.WebGLRenderer {
+  // No GPU (a software renderer — see surfaces.ts softwareRenderer): every pixel is shaded by the CPU, so draw fewer
+  // of them and skip multisampling. Measured on the 61279465 train scene: this is what turns 2 frames a second into a
+  // playable game in the build sandbox's browser and on a device without a GPU. A real GPU is unaffected.
+  const software = softwareRenderer();
   const renderer = new THREE.WebGLRenderer({
     canvas: options.canvas,
-    antialias: options.antialias ?? true,
+    antialias: software ? false : (options.antialias ?? true),
     powerPreference: 'high-performance',
     // Only ask for alpha when it is really needed: a transparent canvas costs blending every frame.
     alpha: false,
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, options.maxPixelRatio ?? 2));
+  renderer.setPixelRatio(software ? SOFTWARE_PIXEL_RATIO : Math.min(window.devicePixelRatio || 1, options.maxPixelRatio ?? 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
 
   // The four lines that decide whether the scene looks right.
@@ -738,7 +746,7 @@ export class CameraRig {
 
 const WORLD = `import * as THREE from 'three';
 import { sharedMaterial, paletteColor, type PaletteName } from './materials';
-import { surfaceMaterial, enableAO, getDetailLevel, mergeGeometries, registerTerrain, shapedHeight, type Detail, type SurfaceKind } from './surfaces';
+import { surfaceMaterial, enableAO, getDetailLevel, resolveDetail, mergeGeometries, registerTerrain, shapedHeight, type Detail, type SurfaceKind } from './surfaces';
 export { groundHeightAt, syncGround } from './surfaces';
 
 /**
@@ -830,7 +838,7 @@ export function createTerrain(options: TerrainOptions = {}): THREE.Mesh {
   // 🔴 THE REAL TIER IS TEXTURED. This used to be a flat palette colour in every tier, so after
   // setDetailLevel('real') the car, the road and the trees were textured and the ground under all of
   // them — the largest thing on screen — was not. One texel per ~3 m reads as grass, not as a pattern.
-  const detail = options.detail ?? getDetailLevel();
+  const detail = resolveDetail(options.detail ?? getDetailLevel());
   let material: THREE.Material;
   if (detail === 'real') {
     const m = surfaceMaterial(options.surface ?? groundSurface(palette), { repeat: Math.max(8, Math.round(size / 3)) });
@@ -1004,7 +1012,32 @@ export type Detail = 'real' | 'lite';
  */
 let DEFAULT_DETAIL: Detail = 'lite';
 export function setDetailLevel(detail: Detail): void { DEFAULT_DETAIL = detail; }
-export function getDetailLevel(): Detail { return DEFAULT_DETAIL; }
+export function getDetailLevel(): Detail { return resolveDetail(DEFAULT_DETAIL); }
+
+/**
+ * 🖥️ A BROWSER WITH NO GPU DRAWS THE LITE TIER (autopsy 61279465). The train game asked for 'real' — textured,
+ * normal-mapped materials shaded per pixel — and in a software renderer (SwiftShader, llvmpipe: the build sandbox's
+ * browser, and a device with no usable GPU) that drew 2.5 frames a second; the lite tier drew 6.5 and the playtest
+ * then had time to play it. Measured on that scene, not guessed. A phone or laptop WITH a GPU is unaffected.
+ */
+let SOFTWARE_GL: boolean | null = null;
+export function softwareRenderer(): boolean {
+  if (SOFTWARE_GL !== null) return SOFTWARE_GL;
+  SOFTWARE_GL = false;
+  try {
+    const c = document.createElement('canvas');
+    const gl = (c.getContext('webgl2') || c.getContext('webgl')) as WebGLRenderingContext | null;
+    if (gl && typeof gl.getParameter === 'function') {
+      const info = gl.getExtension('WEBGL_debug_renderer_info');
+      const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) ?? '');
+      SOFTWARE_GL = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(name);
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+  } catch { SOFTWARE_GL = false; }
+  return SOFTWARE_GL;
+}
+/** The tier a request for \`d\` really gets on this device. */
+export function resolveDetail(d: Detail): Detail { return d === 'real' && softwareRenderer() ? 'lite' : d; }
 
 // ── THE GROUND (2026-11-02, "car zameen me dhas jaati hai") ──────────────────────────────────────
 // 🔴 createTerrain() pushed its vertices up into hills, but the height lived ONLY in the mesh: nothing
@@ -2131,7 +2164,7 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
 // feature this codebase forbids. Say "real-looking", never "photorealistic".
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 const OBJECTS = `import * as THREE from 'three';
-import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, mergeGeometries, getGround, addWater, declareCorridor, removeCorridor, corridorProfile, crossingLift, corridorPath, pathPose, registerTerrain, shapedHeight, syncGround, groundHeightAt, type Corridor, type CorridorPath, type SurfaceKind, type Detail } from './surfaces';
+import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, resolveDetail, mergeGeometries, getGround, addWater, declareCorridor, removeCorridor, corridorProfile, crossingLift, corridorPath, pathPose, registerTerrain, shapedHeight, syncGround, groundHeightAt, type Corridor, type CorridorPath, type SurfaceKind, type Detail } from './surfaces';
 
 // The detail tier lives in surfaces.ts so the ground reads the same setting as the objects; it is
 // re-exported here so \`import { setDetailLevel } from './objects'\` keeps working everywhere.
@@ -2140,7 +2173,7 @@ export { groundHeightAt, syncGround, pathPose, corridorPath };
 export type { Detail };
 
 interface BaseOpts { detail?: Detail; seed?: number }
-const tier = (o?: BaseOpts): Detail => o?.detail ?? getDetailLevel();
+const tier = (o?: BaseOpts): Detail => resolveDetail(o?.detail ?? getDetailLevel());
 
 function rng(seed: number): () => number {
   let t = (seed >>> 0) || 1;

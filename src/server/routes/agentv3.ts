@@ -1,4 +1,5 @@
 import { routerOneAccountingScope, bindRouterOneAccountingScope, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges } from '../AI/RouterOne/catalogueAccounting';
+import { planKitRefresh } from '../lib/gameRecipeLayers';
 import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
 import { PRO_SANDBOX_FEE_PCT, proSandboxFee, proSandboxFeeFields, proSubtotalNotice } from '../AgentV3/proSandboxFee';
 import { canaryFetch } from '../AgentV3/reliability/canarySpendGuard';
@@ -18744,6 +18745,32 @@ async function noteBuildOutcome(
       /** Why a game build did not get the kit — said in FAST_LANE_SKIPPED_GAME, never left implied. */
       let gameKitSkipReason = '';
       let gameKitSeedFailed = false;
+      // 🧬 AN EXISTING GAME GETS THE KIT'S FIXES ON ITS NEXT TURN (Q-2337, autopsy 61279465 — gameRecipeLayers
+      // `planKitRefresh`). Untouched kit files (bytes exactly an older kit version) are brought up to date before the
+      // model reads anything, all or nothing; a file somebody edited is never written. Each target is re-read from the
+      // sandbox first, so a change the saved copy has not seen yet is never overwritten. AGENTV3_KIT_REFRESH=off.
+      if (intent === 'edit_existing' && !isImportTurn && !projectModuleRef && projectFilesAtTurnStart
+        && String(process.env.AGENTV3_KIT_REFRESH ?? '').trim().toLowerCase() !== 'off') {
+        try {
+          const refresh = planKitRefresh(projectFilesAtTurnStart);
+          if (refresh.blocked) {
+            buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESH_BLOCKED', autoResolved: true, message: `The game kit in this project was not brought up to date: ${refresh.blocked}.` });
+          } else if (Object.keys(refresh.write).length > 0) {
+            const live = await Promise.all(Object.keys(refresh.write).map(async (p) => [p, await actuator.readFile(workspaceId, p).then((c) => (typeof c === 'string' ? c : null)).catch(() => null)] as const));
+            const drifted = live.filter(([p, c]) => (p in projectFilesAtTurnStart! ? c !== projectFilesAtTurnStart![p] : c !== null)).map(([p]) => p);
+            if (drifted.length > 0) {
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESH_BLOCKED', autoResolved: true, message: `The game kit in this project was not brought up to date: ${drifted.join(', ')} changed in the sandbox since it was saved.` });
+            } else {
+              for (const [p, c] of Object.entries(refresh.write)) {
+                await actuator.writeFile(workspaceId, p, c);
+                writtenFiles.set(p, c); preseededGolden.set(p, c); kitSeededFiles.set(p, c);
+              }
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'KIT_REFRESHED', autoResolved: true,
+                message: `Brought this game's untouched kit files up to date before the turn: ${refresh.refreshed.join(', ')}${refresh.added.length ? `; added ${refresh.added.join(', ')}` : ''}. No edited file was changed.` });
+            }
+          }
+        } catch { /* a refresh that cannot run leaves the project exactly as it was */ }
+      }
       if (intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         const kitPlan: GameKitRecipe[] = (() => { try { return gameKitPlan(prompt, framework); } catch { return []; } })();
         if (kitPlan.length === 0) {

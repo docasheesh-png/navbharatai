@@ -2531,7 +2531,14 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     expect(seed).toContain('if (gameKitCanPrepareAssets(kitResults) && !abort.signal.aborted)');
     expect(seed).toContain('for (const [path, content] of Object.entries(assets.files)) writtenFiles.set(path, content)');
     expect(seed).toContain('preseededGolden.set(kp, kc)');
-    expect(count).toBe(34);
+    // 1× the turn-start KIT REFRESH (Q-2337, autopsy 61279465): gated on `intent === 'edit_existing' &&
+    // !isImportTurn && !projectModuleRef`, so it never writes on a survey/import turn; it writes only kit
+    // files whose bytes are exactly an older recorded kit version (nobody edited them), all or nothing,
+    // after re-reading each from the sandbox, and attributes every one to the platform (preseededGolden +
+    // kitSeededFiles), never to the model. Considered ✓.
+    expect(SRC).toContain("if (intent === 'edit_existing' && !isImportTurn && !projectModuleRef && projectFilesAtTurnStart");
+    expect(SRC).toContain('writtenFiles.set(p, c); preseededGolden.set(p, c); kitSeededFiles.set(p, c);');
+    expect(count).toBe(35);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

@@ -167,6 +167,9 @@ jobs:
       - name: Failed-report OAuth protocol and security checks
         run: node --experimental-strip-types scripts/failedReportOAuth.check.mjs
 
+      - name: Mitrify offline transport and privacy checks
+        run: npm run test:mitrify
+
       - name: Offline answer-quality evaluator self-check (no model calls)
         run: node scripts/chatAnswerQuality.check.mjs
 

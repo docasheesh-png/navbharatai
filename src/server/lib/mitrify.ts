@@ -109,6 +109,7 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
           await response.body?.cancel(); throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status);
         }
         const data = await response.json();
+        signal.throwIfAborted();
         if (!data || !Array.isArray(data.data)) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status);
         return { status: response.status, headers: safeHeaders(response, config.apiKey) };
       } catch (error) { throw error instanceof MitrifyError ? error : new MitrifyError(signal.aborted ? 'MITRIFY_CANCELLED' : 'MITRIFY_INVALID_RESPONSE'); }
@@ -136,6 +137,7 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
         if (input.stream !== true) {
           if (!response.headers.get('content-type')?.includes('application/json')) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status);
           const data = await response.json();
+          signal.throwIfAborted();
           if (data?.error || !Array.isArray(data?.choices) || !data.choices.some((c: any) => typeof c?.message?.content === 'string' && c.message.content.trim())) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status);
           return { status: response.status, headers, data };
         }
@@ -145,13 +147,16 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
         let pending = ''; let done = false;
         try {
           for (;;) {
+            signal.throwIfAborted();
             const item = await reader.read();
+            signal.throwIfAborted();
             if (item.done) break;
             // Inspect one bounded SSE event at a time; forward valid events immediately.
             pending += decoder.decode(item.value, { stream: true });
             pending = pending.replace(/\r\n/g, '\n');
             let boundary: number;
             while ((boundary = pending.indexOf('\n\n')) >= 0) {
+              signal.throwIfAborted();
               const event = pending.slice(0, boundary); pending = pending.slice(boundary + 2);
               if (event.length > 1024 * 1024) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status, partial);
               const payload = event.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
@@ -163,6 +168,7 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
               // Mark before invoking the consumer: it may write and then throw.
               partial = true;
               await options.onChunk!(new TextEncoder().encode(`${event}\n\n`));
+              signal.throwIfAborted();
               if (done) break;
             }
             if (done) break;
@@ -170,6 +176,7 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
           }
           if (!done) throw new MitrifyError('MITRIFY_INCOMPLETE_STREAM', response.status, partial);
         } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+        signal.throwIfAborted();
         return { status: response.status, headers, data: undefined };
       } catch (error) {
         const safe = error instanceof MitrifyError ? error : new MitrifyError(signal.aborted ? 'MITRIFY_CANCELLED' : 'MITRIFY_INVALID_RESPONSE', 0, partial);

@@ -92,6 +92,20 @@ test('user cancellation closes upstream connection', async t => {
   assert.equal(f.requests.length, 1);
 });
 
+test('cancellation after first buffered event discards later events and cannot report success', async t => {
+  const f = await fixture(t, (_req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.end(chunk('first') + chunk('must-not-send') + 'data: [DONE]\n\n');
+  });
+  const controller = new AbortController(); const received = [];
+  await assert.rejects(f.client.chat({ ...input, stream: true }, {
+    signal: controller.signal,
+    onChunk: bytes => { received.push(Buffer.from(bytes).toString()); controller.abort(); },
+  }), { code: 'MITRIFY_CANCELLED', partial: true });
+  assert.deepEqual(received, [chunk('first')]);
+  assert.equal(f.requests.length, 1);
+});
+
 for (const status of [400, 401, 403, 500]) test(`${status} does not retry or disclose echoed secrets/content`, async t => {
   const f = await fixture(t, (_req, res, _n, key) => {
     res.writeHead(status, { 'X-Mitrify-Trail': key });

@@ -1,0 +1,23 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+
+describe('separate public bot browser boundary', () => {
+  const app = readFileSync('src/App.tsx', 'utf8');
+  const panel = readFileSync('src/components/panels/MitrifyChatPanel.tsx', 'utf8');
+  const hook = readFileSync('src/hooks/useMitrifyBot.ts', 'utf8');
+  it('server capability gates menu, navigation and render, and identity keys the panel', () => {
+    expect(app).toContain("...(mitrifyBot ? [{ id: 'mitrify_chat'");
+    expect(app).toContain("if (view === 'mitrify_chat' && !mitrifyBot) return false;");
+    expect(app).toContain("activeView === 'mitrify_chat' && mitrifyBot && user");
+    expect(app).toContain('key={user.uid} uid={user.uid} access={mitrifyBot}');
+    expect(hook).toContain("fetch('/api/v1/chat/mitrify-bot'");
+    expect(hook).toContain('result?.uid === uid && auth.currentUser?.uid === uid');
+    expect(hook).toContain('return () => controller.abort()');
+  });
+  it('has no free text, local persistence, provider credentials or history in the outgoing body', () => {
+    expect(panel).toContain('body: JSON.stringify({ questionId: question.id })');
+    expect(panel).not.toMatch(/<textarea|<input|localStorage|sessionStorage|MITRIFY_API_KEY|messages:\s*messages/);
+    expect(panel).toContain("auth.onAuthStateChanged(user => { if (user?.uid !== uid) pending.current?.abort(); })");
+    expect(panel).toContain('if (controller.signal.aborted || auth.currentUser?.uid !== uid) return;');
+  });
+});

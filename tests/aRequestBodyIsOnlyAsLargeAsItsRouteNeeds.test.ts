@@ -30,6 +30,7 @@ const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
  */
 const REVIEWED_SMALL: Record<string, string> = {
   '/api/chat/mitrify-public-test': 'strict empty JSON object only; runMitrifyPublicTest rejects all caller fields and constructs a fixed server-owned public prompt',
+  '/api/chat/mitrify-bot': 'one allowlisted questionId only; server-owned public text, no free text, history, files or parameters',
   '/api/admin/game-assets/live-check': 'strict empty JSON object only; every caller field is rejected; no URL, asset id, prompt or credential is accepted; standard 1 MB parser cap unchanged',
   '/api/admin/provider-switches': 'strict four-key JSON allowlist: provider id from a fixed list, boolean on, 3–300 character reason, integer revision; every other field rejected; standard 1 MB parser cap unchanged',
   '/api/admin/api-providers/:id/account': 'strict one-key JSON allowlist: accountEmail, an email of at most 254 characters or empty; every other field rejected; provider id must be one of the directory ids; standard 1 MB parser cap unchanged',

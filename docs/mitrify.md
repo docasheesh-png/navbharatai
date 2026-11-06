@@ -1,4 +1,4 @@
-# Optional Mitrify transport: privacy-blocked for general chat
+# Optional Mitrify public-question bot; general chat stays direct
 
 This change provides a server-only OpenAI-compatible transport and offline tests.
 It does **not** make arbitrary NavBharatAI chat eligible for Mitrify. Both ordinary
@@ -21,6 +21,41 @@ even with `AI_BACKEND=mitrify`, and logs `MITRIFY_PRIVACY_BLOCKED`. No client fl
 keyword detector, missing profile or empty history bypasses this boundary. A future
 review must establish trusted provenance for the whole request before connecting
 the low-level transport. Do not downgrade the health classification to enable it.
+
+## Separate account-only public-question chatbot
+
+The sidebar's **Mitrify chat** entry appears only after the server authorizes the
+signed-in, email-verified account against `MITRIFY_CHAT_ACCOUNT_EMAIL`. Both GET
+and POST `/api/v1/chat/mitrify-bot` verify identity; hiding the UI is not the access
+control. The selector has no default and is never shipped to the browser. Other
+accounts receive 403. Changing accounts cancels pending work and discards the view.
+
+This is a public-question bot, **not free-form chat**. Three buttons select
+server-owned arithmetic, rainbow and solar-system questions. POST accepts exactly
+one allowlisted `questionId`; text, history, profile, files and extra parameters
+are rejected. Each question is independent. The displayed conversation is
+ephemeral and never sent upstream. Mitrify receives only the fixed public prompt,
+model alias, non-streaming flag and 256-token output limit, with no account email,
+UID or authentication token. Replies are displayed as text, never executed as HTML.
+
+The bot uses only Mitrify; errors never invoke another provider. The shared chat
+rate limiter, transport queue/retry bounds, disconnect cancellation and 60-second
+deadline apply. This small UI uses non-streaming replies; streaming transport
+remains separately tested. The server returns only reply text, not upstream
+provider/model metadata. Existing chat and App Builder are unchanged.
+
+To show the selected account's entry, configure its server-only email selector.
+To allow button clicks to call Mitrify, also set `AI_BACKEND=mitrify` and securely
+supply `MITRIFY_API_KEY`; URL/model defaults remain unchanged. Missing key or
+direct mode produces an unavailable state. Roll back sends with
+`AI_BACKEND=direct`; remove the selector to hide the entry as well. No production
+settings or credentials are changed by this code.
+
+This user-operated bot can spend gateway credits when enabled and clicked. A token
+limit is not an INR cap. It does not implement wallet billing or claim a verified
+gateway spending ceiling. No automated or live paid test is run by this change.
+The separate single-use diagnostic below retains its stricter admission contract;
+do not substitute bot calls for an agent-authorized bounded diagnostic.
 
 ## Isolated fixed public test (live admission unavailable)
 
@@ -57,26 +92,27 @@ admission and does not log the key or its fingerprint.
 Before a live test, an operator must provide a verifiable gateway-side spending
 bound and authenticated account execution access, then wire and review that
 admission adapter. This repository contains no production account address,
-credential, cap configuration or inferred model price. No unlimited financial
-execution is enabled. Ordinary free-form chat remains direct and is not claimed
+credential, cap configuration or inferred model price. Ordinary free-form chat remains direct and is not claimed
 complete through Mitrify. App Builder remains unchanged.
 
 ## Configuration and rollback
 
 Server environment only; never use a `VITE_` prefix or ship a key to a client:
 
-- `AI_BACKEND`: `direct` by default; `mitrify` remains blocked by the privacy boundary.
-  All ordinary chat stays direct; only the separate fixed public test may request admission.
+- `AI_BACKEND`: `direct` by default. `mitrify` enables the separate public-question
+  bot for its configured account; all ordinary chat stays direct. The separate
+  fixed diagnostic still requires cost admission.
 - `AI_PROVIDER`: legacy alias, consulted only when `AI_BACKEND` is unset/blank. An
   explicit `AI_BACKEND` always wins, including rollback to `direct`; conflicting
   aliases produce a metadata-only diagnostic. Invalid switch values stay direct.
 - `MITRIFY_MAX_INFLIGHT`: defaults to 200; accepts integers 1–1000. Invalid explicit
   values fail configuration validation for the transport, never affect the direct path.
 - `MITRIFY_BASE_URL`: defaults to `https://mitrify.com/v1`.
-- `MITRIFY_API_KEY`: required for manual diagnostics; no default.
+- `MITRIFY_API_KEY`: required for bot sends and manual diagnostics; no default.
 - `MITRIFY_MODEL`: defaults to `mitrify/auto-cheap`; the default is defined once in the module.
 - `MITRIFY_CHAT_ACCOUNT_EMAIL`: no default; server-only verified-account selector for
-  the isolated public test. It grants no cost admission and does not switch ordinary chat.
+  the separate bot and isolated public test. It grants no diagnostic cost admission
+  and does not switch ordinary chat.
 
 Rollback: set `AI_BACKEND=direct`. No deployment or key rotation is needed for this
 code switch. This switch does not modify any existing provider settings.

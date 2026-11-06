@@ -53,6 +53,7 @@ import { isComingSoonTool } from './lib/comingSoonTools';
 // SDAChat kept eager — used immediately on tab open
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { useNotificationInbox, NotificationPanel } from './components/NotificationBell';
+import { useMitrifyBot } from './hooks/useMitrifyBot';
 import { RewardsChecklistCard } from './components/RewardsChecklistCard';
 import { walletNeedsTopUp } from './lib/walletNeedsTopUp';
 import { FloatingExitFocusButton } from './components/FloatingExitFocusButton';
@@ -137,6 +138,7 @@ const SettingsPanel = _lz(() => import('./components/panels/SettingsPanel'), 'Se
 const AdminLoginPanel = _lz(() => import('./components/panels/AdminLoginPanel'), 'AdminLoginPanel');
 const BillingPanel = _lz(() => import('./components/panels/BillingPanel'), 'BillingPanel');
 const NBIChatPanel = _lz(() => import('./components/panels/NBIChatPanel'), 'NBIChatPanel');
+const MitrifyChatPanel = _lz(() => import('./components/panels/MitrifyChatPanel'), 'MitrifyChatPanel');
 const SDAChat = _lz(() => import('./components/sda/SDAChat'), 'SDAChat');
 const ProfessionalsView = _lz(() => import('./components/professionals/ProfessionalsView'), 'ProfessionalsView');
 const ProfessionalChat = _lz(() => import('./components/professionals/ProfessionalChat'), 'ProfessionalChat');
@@ -288,6 +290,7 @@ export default function App() {
   }, [deviceMode]);
 
   const [user, setUser] = useState<FirebaseUser | null>(null);
+  const mitrifyBot = useMitrifyBot(user?.uid);
   // 🔔 The notifications inbox lives at App level (admin 2026-09-22): its unread count is drawn on the
   // ☰ button and the sidebar's Notifications row while the panel is CLOSED, so a component that only
   // existed while open could not carry it. One hook, three readers, one number.
@@ -1432,6 +1435,7 @@ export default function App() {
    * to. The old `tabHistories` was written and never read — Back goes Home (androidBack.ts). Q-600 batch five.
    */
   const toggleTab = useCallback((view: ViewType, _pushToHistory = true, conversationId?: string, resumeEndedAt?: number): boolean => {
+    if (view === 'mitrify_chat' && !mitrifyBot) return false;
     // Play compliance choke point: EVERY tab-open path goes through toggleTab, so blocking here (plus
     // the render guards below) means a medical view cannot open in the native shell no matter which
     // button, deep link, or restored state asked for it.
@@ -1528,7 +1532,7 @@ export default function App() {
 
     setActiveView(view);
     return true;
-  }, [user, openTabs, activeView, addLog, setShowAuth, openChats, activeChatId, addToast, viewWindows]);
+  }, [user, openTabs, activeView, addLog, setShowAuth, openChats, activeChatId, addToast, viewWindows, mitrifyBot]);
 
   // Cross-component navigation (billing PR 5): deeply-nested surfaces (e.g. the v5.0 panel inside
   // ProV3Surface, which gets no nav callback) can request a view switch by dispatching
@@ -2535,10 +2539,11 @@ export default function App() {
 
 
 
-  // Task 2.7 — memoized: static array, rebuilt only once
+  // Rebuild the registry when the server-authorized private bot capability changes.
   const menuItems = useMemo(() => [
     { id: 'home',         label: 'Home',              icon: Bot },
     { id: 'nbi_chat',     label: COPY.branding.aiChatName,  icon: MessageSquare },
+    ...(mitrifyBot ? [{ id: 'mitrify_chat', label: 'Mitrify chat', icon: MessageSquare }] : []),
     { id: 'nbi_pro_chat', label: 'NavBharatAI Pro', icon: Bot },
     { id: 'professionals', label: 'Professionals',    icon: Briefcase, status: 'New' },
     // Other AI opens its OWN header tab like Free/Pro/Professionals (admin 2026-07-23): without a menuItems
@@ -2600,7 +2605,7 @@ export default function App() {
     { id: 'apk',          label: 'APK Builder',       icon: Package },
     { id: 'diff',         label: 'Diff',              icon: FileDiff },
     { id: 'imagegen',     label: 'AI Image Gen',      icon: Wand2 },
-  ], []);
+  ], [mitrifyBot]);
   /**
    * Which ids the header can draw a chip for — its registered menu items. `lib/headerTab.ts` asks this
    * rather than restating the list: a view with no chip lights the tab it was entered through.
@@ -3572,6 +3577,8 @@ export default function App() {
               addLog={addLog}
             />
           )}
+
+          {activeView === 'mitrify_chat' && mitrifyBot && user && <MitrifyChatPanel key={user.uid} uid={user.uid} access={mitrifyBot} />}
 
           {(activeView === 'nbi_chat') && (
             <NBIChatPanel

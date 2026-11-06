@@ -97,11 +97,15 @@ Only HTTP 429/503 are retried, up to three retries after the first attempt, usin
 exponential delay, jitter and Retry-After. Network/body/stream failures are not
 retried. SSE data events are forwarded in order as complete events arrive; the full
 answer is never buffered. Comments and SSE control fields are not forwarded.
-A bounded lookahead (at most 1 MiB) withholds events only while any forwarded JSON string field could
-complete the server credential, including refusal, reasoning, metadata and nested
-array strings. Prefixes are bounded to 1,024 channels. Earlier safe events are
-released unchanged as soon as possible matches move past them; repeated metadata
-does not hold all earlier events until completion. Credential matches fail closed before disclosure. `[DONE]` is required, and early EOF/error events throw an
+The guard never retains answer events while waiting for an optional metadata field
+or delta to recur. It inspects every JSON string field, including refusal,
+reasoning, metadata, field names and nested arrays, with at most 1,024 short rolling
+prefixes. It rejects the first `min(8, ceil(key.length / 4))` credential characters
+as soon as that marker appears, even across events. Shorter prefixes may pass;
+substantial credential fragments and the full credential fail before disclosure.
+A benign reply containing that marker also fails closed rather than stalling or
+rewriting the response. This is literal credential-fragment protection, not a
+claim to detect arbitrary encodings of secrets. `[DONE]` is required, and early EOF/error events throw an
 explicit incomplete-answer error. Callers must render that error rather than mark a
 partial reply complete. AbortSignal cancels network reads and retry waits. Future
 route wiring must supply the existing response-disconnect signal and await writes

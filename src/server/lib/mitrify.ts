@@ -285,20 +285,20 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let pending = ''; let done = false;
-        let sequence = 0;
-        let retainedEventBytes = 0;
-        const withheld: { sequence: number; wire: string; bytes: number }[] = [];
-        const prefixes = new Map<string, { text: string; since: number }>();
-        // Track every forwarded string, including extension fields and field names.
-        // Keep only a possible credential prefix, never accumulated answer content.
+        // Never retain answer events while waiting for an optional field to recur.
+        // Reject a substantial credential prefix before disclosure, including when
+        // split over events. At most the short prefix preceding this marker can pass.
+        const protectedPrefix = config.apiKey.slice(0, Math.min(8, Math.ceil(config.apiKey.length / 4)));
+        const prefixes = new Map<string, string>();
+        // Inspect all forwarded strings, including extension fields and field names.
         const inspectStrings = (value: unknown, path: string[]): void => {
           if (typeof value === 'string') {
-            const channel = JSON.stringify(path); const previous = prefixes.get(channel);
-            const text = (previous?.text ?? '') + value;
-            if (text.includes(config.apiKey)) throw new MitrifyError('MITRIFY_STREAM_ERROR', response.status, partial);
-            let length = Math.min(text.length, config.apiKey.length - 1);
-            while (length && !text.endsWith(config.apiKey.slice(0, length))) length--;
-            if (length) prefixes.set(channel, { text: text.slice(-length), since: length > value.length ? previous!.since : sequence });
+            const channel = JSON.stringify(path);
+            const text = (prefixes.get(channel) ?? '') + value;
+            if (text.includes(protectedPrefix)) throw new MitrifyError('MITRIFY_STREAM_ERROR', response.status, partial);
+            let length = Math.min(text.length, protectedPrefix.length - 1);
+            while (length && !text.endsWith(protectedPrefix.slice(0, length))) length--;
+            if (length) prefixes.set(channel, text.slice(-length));
             else prefixes.delete(channel);
           } else if (Array.isArray(value)) {
             value.forEach((item, index) => inspectStrings(item, [...path,
@@ -334,23 +334,13 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
                 if (JSON.stringify(data).includes(config.apiKey) || data.error) throw new MitrifyError('MITRIFY_STREAM_ERROR', response.status, partial);
                 inspectStrings(data, []);
               }
-              if (payload === '[DONE]') { done = true; prefixes.clear(); }
+              if (payload === '[DONE]') done = true;
               if (dataLines.length) {
-                const wire = `${dataLines.join('\n')}\n\n`; const bytes = Buffer.byteLength(wire);
-                withheld.push({ sequence, wire, bytes }); retainedEventBytes += bytes;
-              }
-              if (retainedEventBytes > 1024 * 1024) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status, partial);
-              let firstUncertain = Infinity;
-              for (const prefix of prefixes.values()) firstUncertain = Math.min(firstUncertain, prefix.since);
-              // A repeated metadata prefix can delay one event, never the whole answer.
-              // Release earlier events as soon as every possible match has moved on.
-              while (withheld.length && withheld[0].sequence < firstUncertain) {
-                const safeEvent = withheld.shift()!; retainedEventBytes -= safeEvent.bytes;
                 partial = true; // The consumer may write before throwing or stalling.
-                await untilCancelled(() => options.onChunk!(new TextEncoder().encode(safeEvent.wire)), signal);
+                const wire = `${dataLines.join('\n')}\n\n`;
+                await untilCancelled(() => options.onChunk!(new TextEncoder().encode(wire)), signal);
                 signal.throwIfAborted();
               }
-              sequence++;
               if (done) break;
             }
             if (done) break;

@@ -100687,3 +100687,10 @@ Review reproduced cancellation after the first of several already-buffered SSE e
 - The bounded rolling inspector now traverses all JSON string values, field names and nested arrays, rather than content alone. A bounded event queue releases earlier safe events once possible matches move on; repeated metadata prefixes cannot retain the entire preceding stream. Added nested-token and incremental metadata regressions. Local gates, fresh exact-head CI and independent review are required again; no live inference or production changes.
 
 - Broader-inspector validation: all 54 loopback gateway tests pass; 3,235 full coverage suites pass (48,643 passed, 89 skipped); all applicable local CI-equivalent checks and all five emulator drills pass. Missing-key smoke exits 1 as intended. New hosted exact-head CI and independent re-review remain required. No live gateway call or production change occurred.
+
+### 2026-11-06 — Remove credential-lookahead stream stalls
+
+- Re-review reproduced a permanent prefix from one-time role metadata: a t-prefixed credential and role assistant caused a normal large stream to remain buffered. Added a failing regression against bc387a7 that requires the first role event before the server sends the remaining 1.5+ MiB answer.
+- Removed answer-event buffering entirely. The inspector keeps only bounded short string prefixes and immediately rejects a substantial credential-prefix marker, including across events. Benign marker collisions fail closed; ordinary short prefix collisions cannot stall streaming. Added single-character fragmentation coverage. Full local/hosted validation and re-review remain required; no production/live-call change occurred.
+
+- Non-buffering correction validation: all 56 loopback gateway tests pass; all 3,235 coverage suites pass (48,643 passed, 89 skipped); all applicable local CI-equivalent gates and five emulator drills pass. Missing-key smoke exits 1 as intended. Published replacement still requires exact-head hosted CI and independent review before merge. No live call or production change occurred.

@@ -9,8 +9,8 @@ import { createMitrifyClient, mitrifyConfig, withMitrifyChatPrivacyBoundary, run
 const input = { model: 'ignored', messages: [{ role: 'system', content: 'Be brief.' }, { role: 'user', content: 'Hello.' }], temperature: 0.2, max_tokens: 12 };
 const chunk = text => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
 const reply = res => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: 'Hello' } }] })); };
-async function fixture(t, handle) {
-  const key = `mock-${randomUUID()}`; // Ephemeral mock credential, never a fixture or environment secret.
+async function fixture(t, handle, keyPrefix = 'mock-') {
+  const key = `${keyPrefix}${randomUUID()}`; // Ephemeral mock credential, never a fixture or environment secret.
   const logs = []; const requests = [];
   const server = createServer(async (req, res) => {
     try {
@@ -165,6 +165,36 @@ test('repeated metadata prefixes release earlier safe events before stream compl
   assert.equal(output, event('one') + event('two') + 'data: [DONE]\n\n');
 });
 
+test('one-time role ending with a credential prefix cannot buffer a large ordinary stream', async t => {
+  let consumed; const seen = new Promise(resolve => { consumed = resolve; });
+  const role = `data: ${JSON.stringify({ choices: [{ index: 0, delta: { role: 'assistant' } }] })}\n\n`;
+  const text = 'ordinary answer '.repeat(1024);
+  const f = await fixture(t, async (_req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream'); res.write(role);
+    await seen;
+    for (let n = 0; n < 100; n++) res.write(chunk(text));
+    res.end('data: [DONE]\n\n');
+  }, 't');
+  let bytesSeen = 0; let chunksSeen = 0;
+  await f.client.chat({ ...input, stream: true }, { signal: AbortSignal.timeout(2000), onChunk: bytes => {
+    bytesSeen += bytes.length; chunksSeen++; consumed();
+  } });
+  assert.ok(bytesSeen > 1.5 * 1024 * 1024); assert.equal(chunksSeen, 102); assert.equal(f.requests.length, 1);
+});
+
+test('single-character credential fragments fail before a substantial prefix is disclosed', async t => {
+  const f = await fixture(t, (_req, res, _n, key) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.end([...key].map(chunk).join('') + 'data: [DONE]\n\n');
+  });
+  let disclosed = '';
+  await assert.rejects(f.client.chat({ ...input, stream: true }, { signal: f.signal, onChunk: bytes => {
+    const event = Buffer.from(bytes).toString().trim().slice(6);
+    disclosed += JSON.parse(event).choices[0].delta.content;
+  } }), error => error.partial && error.code === 'MITRIFY_STREAM_ERROR');
+  assert.ok(disclosed.length < 8); assert.equal(f.requests.length, 1); assert.ok(!JSON.stringify(f.logs).includes(f.key));
+});
+
 test('queue count is bounded and cancellation releases every waiting entry', async t => {
   let start; const started = new Promise(resolve => { start = resolve; });
   const f = await fixture(t, (_req, res) => { res.setHeader('Content-Type', 'application/json'); start(); });
@@ -223,7 +253,7 @@ test('public-test cancellation does not wait for unresolved identity verificatio
   assert.equal(f.requests.length, 0);
 });
 
-test('safe delta sharing a credential prefix is forwarded unchanged after disambiguation', async t => {
+test('safe delta sharing a short credential prefix is forwarded unchanged', async t => {
   const f = await fixture(t, (_req, res, _n, key) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.end(chunk(key.slice(0, 5)) + chunk('ordinary answer') + 'data: [DONE]\n\n');

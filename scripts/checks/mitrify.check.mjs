@@ -10,7 +10,7 @@ const input = { model: 'ignored', messages: [{ role: 'system', content: 'Be brie
 const chunk = text => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
 const reply = res => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: 'Hello' } }] })); };
 async function fixture(t, handle) {
-  const key = randomUUID(); // Ephemeral mock credential, never a fixture or environment secret.
+  const key = `mock-${randomUUID()}`; // Ephemeral mock credential, never a fixture or environment secret.
   const logs = []; const requests = [];
   const server = createServer(async (req, res) => {
     try {
@@ -100,6 +100,35 @@ test('a credential echoed in a stream is never forwarded or retried', async t =>
   assert.equal(output, ''); assert.equal(f.requests.length, 1); assert.ok(!JSON.stringify(f.logs).includes(f.key));
 });
 
+for (const mode of ['comment', 'split-delta']) test(`credential protection covers ${mode}`, async t => {
+  const f = await fixture(t, (_req, res, _n, key) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.end(mode === 'comment' ? `: ${key}\n\n${chunk('safe')}data: [DONE]\n\n`
+      : chunk(key.slice(0, 12)) + chunk(key.slice(12)) + 'data: [DONE]\n\n');
+  });
+  let output = '';
+  await assert.rejects(f.client.chat({ ...input, stream: true }, { signal: f.signal,
+    onChunk: bytes => { output += Buffer.from(bytes).toString(); } }));
+  assert.equal(output, ''); assert.equal(f.requests.length, 1); assert.ok(!JSON.stringify(f.logs).includes(f.key));
+});
+
+test('abort while downstream callback hangs rejects promptly and releases the global permit', async t => {
+  let seen; const visible = new Promise(resolve => { seen = resolve; });
+  const f = await fixture(t, (_req, res, n) => {
+    if (n === 1) { res.setHeader('Content-Type', 'text/event-stream'); res.write(chunk('safe')); }
+    else reply(res);
+  });
+  const client = createMitrifyClient({ ...f.env, MITRIFY_MAX_INFLIGHT: '1' }, m => f.logs.push(m));
+  const controller = new AbortController();
+  let release; const held = new Promise(resolve => { release = resolve; }); t.after(release);
+  const first = client.chat({ ...input, stream: true }, { signal: controller.signal, onChunk: () => { seen(); return held; } });
+  const rejected = assert.rejects(first, { code: 'MITRIFY_CANCELLED' });
+  await visible; const second = client.chat(input, { signal: AbortSignal.timeout(1500) });
+  controller.abort();
+  await second; await rejected;
+  assert.equal(f.requests.length, 2);
+});
+
 test('queue count is bounded and cancellation releases every waiting entry', async t => {
   let start; const started = new Promise(resolve => { start = resolve; });
   const f = await fixture(t, (_req, res) => { res.setHeader('Content-Type', 'application/json'); start(); });
@@ -144,6 +173,42 @@ test('normal response preserves standard parameters; overrides only model and cr
 
 const publicIdentity = async () => ({ uid: 'synthetic-account', email: 'tester@example.invalid', emailVerified: true });
 const publicEnv = env => ({ ...env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' });
+test('public-test cancellation does not wait for unresolved identity verification', async t => {
+  const f = await fixture(t, (_req, res) => reply(res));
+  const controller = new AbortController(); let entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const request = runMitrifyPublicTest({ body: {}, signal: controller.signal,
+    identify: () => { entered(); return new Promise(() => {}); } }, publicEnv(f.env));
+  const rejected = assert.rejects(request, { code: 'MITRIFY_CANCELLED' });
+  await started; controller.abort();
+  let timer;
+  try { await Promise.race([rejected, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Identity cancellation did not settle')), 500); })]); }
+  finally { clearTimeout(timer); }
+  assert.equal(f.requests.length, 0);
+});
+
+test('safe delta sharing a credential prefix is forwarded unchanged after disambiguation', async t => {
+  const f = await fixture(t, (_req, res, _n, key) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.end(chunk(key.slice(0, 5)) + chunk('ordinary answer') + 'data: [DONE]\n\n');
+  });
+  let output = '';
+  await f.client.chat({ ...input, stream: true }, { signal: f.signal, onChunk: bytes => { output += Buffer.from(bytes).toString(); } });
+  assert.equal(output, chunk(f.key.slice(0, 5)) + chunk('ordinary answer') + 'data: [DONE]\n\n');
+});
+test('cancelled pending admission settles promptly and a late execute cannot dispatch', async t => {
+  const f = await fixture(t, (_req, res) => reply(res));
+  const controller = new AbortController(); let execute; let entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const request = runMitrifyPublicTest({ body: {}, identify: publicIdentity, signal: controller.signal,
+    admission: { maxTotalInr: 0, runOnce: (_claim, run) => { execute = run; entered(); return new Promise(() => {}); } } }, publicEnv(f.env));
+  const rejected = assert.rejects(request, { code: 'MITRIFY_CANCELLED' });
+  await started; controller.abort();
+  let timer;
+  try { await Promise.race([rejected, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Admission cancellation did not settle')), 500); })]); }
+  finally { clearTimeout(timer); }
+  await assert.rejects(execute()); assert.equal(f.requests.length, 0);
+});
 const publicReply = res => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: '4' } }] })); };
 // Local mock only. Production has no admission adapter and cannot execute the test.
 function mockPublicAdmission() {

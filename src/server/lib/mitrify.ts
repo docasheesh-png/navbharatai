@@ -12,6 +12,18 @@ const standardFields = new Set(['model', 'messages', 'stream', 'stream_options',
 // direct. AI_PROVIDER is a compatibility alias only when AI_BACKEND is unset/blank.
 function backend(env: Env): string { return env.AI_BACKEND?.trim() || env.AI_PROVIDER?.trim() || 'direct'; }
 
+/** Stop waiting on non-cooperative dependencies without retaining a capacity permit. */
+async function untilCancelled<T>(work: () => T | Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  let abort: () => void = () => {};
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(new MitrifyError('MITRIFY_CANCELLED'));
+    signal.addEventListener('abort', abort, { once: true });
+  });
+  try { return await Promise.race([Promise.resolve().then(() => { signal.throwIfAborted(); return work(); }), cancelled]); }
+  finally { signal.removeEventListener('abort', abort); }
+}
+
 export function mitrifyConfig(env: Env = process.env) {
   const maxInflight = env.MITRIFY_MAX_INFLIGHT?.trim() ? Number(env.MITRIFY_MAX_INFLIGHT) : 200;
   if (!Number.isInteger(maxInflight) || maxInflight < 1 || maxInflight > 1000) throw new MitrifyError('MITRIFY_CONFIGURATION');
@@ -109,7 +121,7 @@ export async function runMitrifyPublicTest(options: {
   if (!options.body || typeof options.body !== 'object' || Array.isArray(options.body)
     || Object.keys(options.body).length) throw new MitrifyError('MITRIFY_TEST_EMPTY_BODY_REQUIRED', 400);
   options.signal.throwIfAborted();
-  const identity = await options.identify();
+  const identity = await untilCancelled(options.identify, options.signal);
   options.signal.throwIfAborted();
   if (!identity?.uid || !identity.emailVerified || identity.email?.trim().toLowerCase() !== target) {
     throw new MitrifyError('MITRIFY_TEST_FORBIDDEN', 403);
@@ -125,7 +137,7 @@ export async function runMitrifyPublicTest(options: {
   // Never log the credential or fingerprint. No env read after admission may replace it.
   const requestEnv = { MITRIFY_BASE_URL: config.baseURL, MITRIFY_MODEL: config.model, MITRIFY_API_KEY: config.apiKey, MITRIFY_MAX_INFLIGHT: String(config.maxInflight) };
   let dispatched = false;
-  return admission.runOnce({ uid: identity.uid, testId: 'public-arithmetic-v1', maxTotalInr,
+  return untilCancelled(() => admission.runOnce({ uid: identity.uid, testId: 'public-arithmetic-v1', maxTotalInr,
     includesAllAttempts: true, gateway: { baseURL: config.baseURL, model: config.model,
       credentialFingerprint: createHash('sha256').update(config.apiKey).digest('hex') }, signal: options.signal }, async () => {
     options.signal.throwIfAborted();
@@ -136,7 +148,7 @@ export async function runMitrifyPublicTest(options: {
       max_tokens: 16, temperature: 0, stream: false,
     }, { signal: options.signal });
     return result;
-  });
+  }), options.signal);
 }
 
 export class MitrifyError extends Error {
@@ -273,6 +285,8 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let pending = ''; let done = false;
+        let withheld = ''; // Bounded lookahead only while a delta could complete the credential.
+        const prefixes = new Map<number, string>();
         try {
           for (;;) {
             signal.throwIfAborted();
@@ -287,15 +301,32 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
               signal.throwIfAborted();
               const event = pending.slice(0, boundary); pending = pending.slice(boundary + 2);
               if (event.length > 1024 * 1024) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status, partial);
-              const payload = event.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
+              if (event.includes(config.apiKey)) throw new MitrifyError('MITRIFY_STREAM_ERROR', response.status, partial);
+              // SSE comments/control fields are not answer data and must not expose
+              // arbitrary upstream strings to the client.
+              const dataLines = event.split('\n').filter(line => line.startsWith('data:'));
+              const payload = dataLines.map(line => line.slice(5).trimStart()).join('\n');
               if (payload && payload !== '[DONE]') {
                 const data = JSON.parse(payload);
                 if (JSON.stringify(data).includes(config.apiKey) || data.error) throw new MitrifyError('MITRIFY_STREAM_ERROR', response.status, partial);
+                for (const [position, choice] of (data.choices ?? []).entries()) {
+                  if (typeof choice?.delta?.content !== 'string') continue;
+                  const index = choice.index ?? position;
+                  const text = (prefixes.get(index) ?? '') + choice.delta.content;
+                  if (text.includes(config.apiKey)) throw new MitrifyError('MITRIFY_STREAM_ERROR', response.status, partial);
+                  let length = Math.min(text.length, config.apiKey.length - 1);
+                  while (length && !text.endsWith(config.apiKey.slice(0, length))) length--;
+                  if (length) prefixes.set(index, text.slice(-length)); else prefixes.delete(index);
+                }
               }
               if (payload === '[DONE]') done = true;
+              if (dataLines.length) withheld += `${dataLines.join('\n')}\n\n`;
+              if (Buffer.byteLength(withheld) > 1024 * 1024 || prefixes.size > 1024) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status, partial);
+              if (!withheld || (!done && prefixes.size)) continue;
               // Mark before invoking the consumer: it may write and then throw.
               partial = true;
-              await options.onChunk!(new TextEncoder().encode(`${event}\n\n`));
+              const bytes = new TextEncoder().encode(withheld); withheld = '';
+              await untilCancelled(() => options.onChunk!(bytes), signal);
               signal.throwIfAborted();
               if (done) break;
             }
@@ -307,7 +338,7 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
         signal.throwIfAborted();
         return { status: response.status, headers, data: undefined };
       } catch (error) {
-        const safe = error instanceof MitrifyError ? error : new MitrifyError(signal.aborted ? 'MITRIFY_CANCELLED' : 'MITRIFY_INVALID_RESPONSE', 0, partial);
+        const safe = error instanceof MitrifyError ? new MitrifyError(error.code, error.status, partial || error.partial) : new MitrifyError(signal.aborted ? 'MITRIFY_CANCELLED' : 'MITRIFY_INVALID_RESPONSE', 0, partial);
         log({ code: safe.code, status: safe.status, partial: safe.partial });
         throw safe;
       } finally { controller.abort(); release?.(); log({ code: 'MITRIFY_FINISHED', latencyMs: Date.now() - started, partial }); }

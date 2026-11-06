@@ -35,6 +35,8 @@ Only a verified Firebase account with verified email matching the server-only
 `MITRIFY_CHAT_ACCOUNT_EMAIL` selector may enter. Other accounts receive 403. The
 selector does not pause or switch either ordinary-chat endpoint.
 The isolated endpoint has a 60-second execution deadline and aborts on disconnect.
+Waiting for identity or admission is cancellation-aware; a late admission callback
+cannot dispatch after cancellation. External operations must still honor their signal.
 
 The test uses only Mitrify and has no direct-provider fallback. The OpenAI response body and metadata headers are returned without changing the
 provider wording or assuming a consistent style. A response that echoes the server
@@ -93,12 +95,17 @@ for loopback mock servers, and redirects are refused.
 
 Only HTTP 429/503 are retried, up to three retries after the first attempt, using
 exponential delay, jitter and Retry-After. Network/body/stream failures are not
-retried. SSE events are forwarded in order as complete events arrive; the full
-answer is never buffered. `[DONE]` is required, and early EOF/error events throw an
+retried. SSE data events are forwarded in order as complete events arrive; the full
+answer is never buffered. Comments and SSE control fields are not forwarded.
+A bounded lookahead (at most 1 MiB) withholds events only while text deltas could
+complete the server credential; safe text is released unchanged when disambiguated
+or at stream completion. Credential matches fail closed before disclosure. `[DONE]` is required, and early EOF/error events throw an
 explicit incomplete-answer error. Callers must render that error rather than mark a
 partial reply complete. AbortSignal cancels network reads and retry waits. Future
 route wiring must supply the existing response-disconnect signal and await writes
-for downstream backpressure.
+for downstream backpressure. Cancellation stops waiting for a stalled consumer and
+releases the permit; it cannot undo writes already performed by a consumer.
+Consumers must honor the same AbortSignal before their own delayed writes.
 
 Logs contain status, latency, attempt number, safe error code and the five requested
 X-Mitrify headers (Request-Id, Provider, Model, Attempts and Trail). Credentials are redacted from these headers. **Deliberate safety

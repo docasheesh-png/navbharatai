@@ -2,11 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { chatFailureNotice, CHAT_FAILURE_TEXT } from '../src/lib/chatFailureNotice';
 
 describe('chat failure notice gives a specific, trust-building reason', () => {
-  it('privacy refusal stays explicit instead of blaming load or suggesting a retry', () => {
-    const notice = chatFailureNotice({ status: 503, code: 'CHAT_PRIVACY_BLOCKED', serverText: 'Chat is paused under the current privacy policy.' });
-    expect(notice).toEqual({ reason: 'PRIVACY_POLICY', text: 'Chat is paused under the current privacy policy.' });
-    expect(chatFailureNotice({ code: 'CHAT_PRIVACY_BLOCKED' }).text).toMatch(/privacy policy/);
-  });
   it('daily limit uses the server text, else asks to login', () => {
     expect(chatFailureNotice({ code: 'FREE_ANSWER_DAILY_LIMIT', serverText: 'Aaj ka limit khatam' }).text).toBe('Aaj ka limit khatam');
     expect(chatFailureNotice({ code: 'FREE_ANSWER_DAILY_LIMIT' }).text).toMatch(/login/i);

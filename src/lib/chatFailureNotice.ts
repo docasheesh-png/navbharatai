@@ -9,11 +9,10 @@
  *   - any provider / 5xx / unknown     → high server load, try again shortly
  * PURE: no provider name, key, model or raw error ever reaches the user.
  */
-export type ChatFailureReason = 'DAILY_LIMIT' | 'INSUFFICIENT_BALANCE' | 'RATE_LIMIT' | 'SESSION_EXPIRED' | 'OFFLINE' | 'HIGH_LOAD' | 'PRIVACY_POLICY';
+export type ChatFailureReason = 'DAILY_LIMIT' | 'INSUFFICIENT_BALANCE' | 'RATE_LIMIT' | 'SESSION_EXPIRED' | 'OFFLINE' | 'HIGH_LOAD';
 
 /** Server codes whose own reply text is already user-safe and specific. */
 export const USER_FACING_CHAT_CODES: Record<string, ChatFailureReason> = {
-  CHAT_PRIVACY_BLOCKED: 'PRIVACY_POLICY',
   FREE_ANSWER_DAILY_LIMIT: 'DAILY_LIMIT',
   GUEST_DAILY_LIMIT: 'DAILY_LIMIT',
   WALLET_INSUFFICIENT: 'INSUFFICIENT_BALANCE',
@@ -23,7 +22,6 @@ export const USER_FACING_CHAT_CODES: Record<string, ChatFailureReason> = {
 };
 
 export const CHAT_FAILURE_TEXT: Record<ChatFailureReason, string> = {
-  PRIVACY_POLICY: 'Chat is paused because this conversation is not approved under the current privacy policy.',
   DAILY_LIMIT: "Today's free messages are used up. Please login to continue (or come back after 12:00 AM IST).",
   INSUFFICIENT_BALANCE: 'Insufficient balance. Please recharge your wallet to continue chatting.',
   RATE_LIMIT: 'You are sending messages too quickly. Please wait a minute and try again.',

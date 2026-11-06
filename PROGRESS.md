@@ -100656,3 +100656,20 @@ Review reproduced cancellation after the first of several already-buffered SSE e
 - Validation found four source-census failures because moving quota wiring into a wrapper hid it from existing guards. Restored inline quota calls at both route registrations; guards were not weakened. All 85 targeted route/quota/notice tests pass. Re-running full checks on the corrected source.
 
 - Corrected source validation: all 3,235 coverage suites pass (48,641 tests passed, 89 skipped), 25 offline Mitrify checks pass, 85 targeted route/quota/notice checks pass. All applicable CI-equivalent type/import/security/license/build/bundle/boot/dependency gates and all five emulator drills pass on Node 22.23.4/npm 11.18.0/Java 21 (Debian locally; Temurin in hosted CI). Missing-key smoke exits 1 as intended. No live inference performed; no production configuration changed.
+
+### 2026-11-06 — Replace draft account pause with isolated public-test preparation
+
+- The pause-only draft must not be merged or enabled. Removed its ordinary-chat refusal and shared frontend notice changes. Both existing chat routes retain their direct path for all users.
+- Added a separate authenticated, empty-body public arithmetic test. Its entire provider payload is server-owned and excludes identity, private context and caller parameters; it has no direct fallback. Unexpected output is never echoed.
+- Production admission is deliberately absent. A real server adapter must verify a gateway-side finite total-cost bound covering retries/failover and durably consume one test authorization bound to the endpoint/model/credential snapshot. No client flag, env boolean or token estimate grants admission. The formerly discussed test cap is not hardcoded as a current user preference.
+- No live test, credential access, production switch or financial-control change occurred. Offline verification pending for this replacement.
+
+### 2026-11-06 — Updated backend naming and concurrency requirements
+
+- Read the latest full user task. Added canonical AI_BACKEND with deterministic precedence over the legacy alias, X-Mitrify-Attempts metadata, and a process-wide bounded FIFO with default 200 active calls. The queue holds permits through retries and stream completion, removes cancelled waiters, bounds count/serialized bytes/wait time, and does not claim fleet throughput.
+- Isolated public-test responses now preserve the provider body/wording and expose only sanitized metadata headers; no fixed-answer rewriting. Ordinary chat remains direct and no pause-only code will be enabled.
+- Stopped the obsolete in-progress validation run when the requirements changed; it is not claimed as passing. Final validation must rerun after these changes. No credential, live-call, production or spending-control action occurred.
+
+- Final coverage identified required census entries for the new operator endpoint and bounded semaphore. Registered its real operator-only caller, strict empty-JSON/default-small-parser contract and numeric/lifecycle state bounds; no guard was disabled. Added explicit JSON content-type refusal and regression checks. The cancelled prior run also left a lock owned by a confirmed defunct process; removed only that stale temporary lock and reran coverage. These incomplete/failed runs are not reported as passing.
+
+- Corrected replacement validation: all 3,235 coverage suites pass (48,642 tests passed, 89 skipped), 43 loopback Mitrify tests pass, and 29 focused ingress tests pass, including rejection of an invalid upstream HTTP 200. All applicable local CI-equivalent security/license/type/import/build/bundle/boot/dependency gates and all five emulator drills pass. Node 22.23.4 and npm 11.18.0 match CI; Java 21 is Debian locally rather than hosted Temurin. Missing-key smoke exits 1 as intended. Artifact uploads and hosted-only infrastructure are verified separately by CI. No live inference, credential configuration, account pause or production setting change occurred.

@@ -29,6 +29,7 @@ const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
  * is on neither list.
  */
 const REVIEWED_SMALL: Record<string, string> = {
+  '/api/chat/mitrify-public-test': 'strict empty JSON object only; runMitrifyPublicTest rejects all caller fields and constructs a fixed server-owned public prompt',
   '/api/admin/game-assets/live-check': 'strict empty JSON object only; every caller field is rejected; no URL, asset id, prompt or credential is accepted; standard 1 MB parser cap unchanged',
   '/api/admin/provider-switches': 'strict four-key JSON allowlist: provider id from a fixed list, boolean on, 3–300 character reason, integer revision; every other field rejected; standard 1 MB parser cap unchanged',
   '/api/admin/api-providers/:id/account': 'strict one-key JSON allowlist: accountEmail, an email of at most 254 characters or empty; every other field rejected; provider id must be one of the directory ids; standard 1 MB parser cap unchanged',
@@ -300,6 +301,15 @@ describe('🔒 every route that can receive a big body is on the large-body list
     expect(route!.text).toContain("!req.is('application/json')");
     expect(route!.text).toContain('req.body.confirm !== true');
     expect(route!.text).toContain('Object.keys(req.body).length !== 1');
+  });
+
+  it('the isolated Mitrify public test retains the small parser and rejects caller payloads', () => {
+    const path = '/api/chat/mitrify-public-test';
+    const route = SITES.find(site => site.path === path && site.method === 'post');
+    expect(route).toBeDefined(); expect(REVIEWED_SMALL[path]).toContain('strict empty JSON object only');
+    expect(isLargeBodyRoute(path)).toBe(false); expect(DEFAULT_JSON_LIMIT).toBe('1mb');
+    expect(route!.text).toContain("req.get('content-type')");
+    expect(read('src/server/lib/mitrify.ts')).toContain('Object.keys(options.body).length');
   });
 
   it('the reviewed-small paid candidate control still has only bounded scalar fields', () => {

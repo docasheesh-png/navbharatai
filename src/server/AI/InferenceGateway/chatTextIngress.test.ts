@@ -2,8 +2,8 @@
 vi.mock('../../lib/freeAnswerQuota', () => ({ withFreeAnswerQuota: (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(), assertFreeAnswerActive: () => {}, markFreeAnswer: () => {}, freeAnswerSignal: () => undefined }));
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from '../../../../tests/helpers/routeTestUtils';
-const m = vi.hoisted(() => ({ verify: vi.fn(), legacy: vi.fn(), detailed: vi.fn(), stream: vi.fn(), oldContext: vi.fn(), add: vi.fn(), live: vi.fn(), needsLive: vi.fn(), document: vi.fn(), vision: vi.fn() }));
-vi.mock('../../lib/authMiddleware', async original => ({ ...await original<typeof import('../../lib/authMiddleware')>(), verifyFirebaseToken: m.verify }));
+const m = vi.hoisted(() => ({ identity: vi.fn(), verify: vi.fn(), legacy: vi.fn(), detailed: vi.fn(), stream: vi.fn(), oldContext: vi.fn(), add: vi.fn(), live: vi.fn(), needsLive: vi.fn(), document: vi.fn(), vision: vi.fn() }));
+vi.mock('../../lib/authMiddleware', async original => ({ ...await original<typeof import('../../lib/authMiddleware')>(), verifyFirebaseToken: m.verify, verifyFirebaseIdentity: m.identity }));
 vi.mock('../FreeChain/entryAdmission', () => ({ withFreeChainEntryAdmission: (_req: unknown, _res: unknown, run: () => unknown) => { m.legacy(); return run(); } }));
 vi.mock('../FreeChain/requestContext', () => ({ freeChainRequestContext: m.oldContext }));
 vi.mock('../../lib/aiRouter', () => ({ aiRouter: { routeDetailed: m.detailed, routeStream: m.stream } }));
@@ -12,11 +12,13 @@ vi.mock('../../lib/visionChain', () => ({ runVisionChain: m.vision }));
 vi.mock('../../lib/attachmentText', () => ({ buildDocumentContext: m.document }));
 vi.mock('../../lib/serverDb', async original => ({ ...await original<typeof import('../../lib/serverDb')>(), getServerDb: () => null, collection: () => ({}), addDoc: m.add }));
 import { registerChatRoutes } from '../../routes/chat';
+import * as mitrify from '../../lib/mitrify';
 import { currentInferenceGatewayContext, InferenceGatewayTerminalError } from './runtime';
 import { runWithInferenceScope } from '../inferencePolicy';
 import { freeChainAdmissionQueue } from '../FreeChain/admissionQueue';
 const route = () => captureRoutes(registerChatRoutes as any, () => {}).get('POST /api/chat/navbharat')!;
 beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
+  vi.stubEnv('AI_BACKEND', 'direct'); vi.stubEnv('AI_PROVIDER', ''); vi.stubEnv('MITRIFY_CHAT_ACCOUNT_EMAIL', ''); m.identity.mockResolvedValue(null);
   vi.clearAllMocks(); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'on'); vi.stubEnv('INFERENCE_GATEWAY_SURFACES', 'chat');
   vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'off'); vi.stubEnv('DOSE_DIRECT_ANSWER', 'off');
   m.live.mockResolvedValue(''); m.needsLive.mockReturnValue(false); m.document.mockResolvedValue('document text');
@@ -27,6 +29,42 @@ beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 describe('ordinary chat reaches the real gateway ingress context', () => {
+  it('public-test configuration never pauses or switches ordinary chat', async () => {
+    vi.stubEnv('AI_BACKEND', 'mitrify'); vi.stubEnv('MITRIFY_CHAT_ACCOUNT_EMAIL', 'tester@example.invalid');
+    m.identity.mockResolvedValue({ uid: 'verified-user', email: 'tester@example.invalid', emailVerified: true });
+    const res = mockRes(); await route()(mockReq({ body: { message: 'hello' } }), res);
+    expect(res.body).toEqual({ reply: 'answer' }); expect(m.detailed).toHaveBeenCalledOnce(); expect(m.identity).not.toHaveBeenCalled();
+  });
+  it('separate public test fails closed without real cost admission and never reaches either chat chain', async () => {
+    vi.stubEnv('AI_BACKEND', 'mitrify'); vi.stubEnv('MITRIFY_CHAT_ACCOUNT_EMAIL', 'tester@example.invalid');
+    m.identity.mockResolvedValue({ uid: 'verified-user', email: 'tester@example.invalid', emailVerified: true });
+    const res = mockRes();
+    await captureRoutes(registerChatRoutes as any, () => {}).get('POST /api/chat/mitrify-public-test')!(mockReq({ body: {}, headers: { 'content-type': 'application/json' } }), res);
+    expect(res.statusCode).toBe(503); expect(res.body).toMatchObject({ code: 'MITRIFY_TEST_BUDGET_UNVERIFIED' });
+    expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled(); expect(m.legacy).not.toHaveBeenCalled();
+    expect(m.document).not.toHaveBeenCalled(); expect(m.live).not.toHaveBeenCalled();
+  });
+  it('separate public test refuses body content without touching profile or identity', async () => {
+    vi.stubEnv('AI_BACKEND', 'mitrify'); vi.stubEnv('MITRIFY_CHAT_ACCOUNT_EMAIL', 'tester@example.invalid');
+    const profile = vi.fn(() => ({ name: 'private' })); const body = { history: [] };
+    Object.defineProperty(body, 'userProfile', { enumerable: true, get: profile });
+    const res = mockRes();
+    await captureRoutes(registerChatRoutes as any, () => {}).get('POST /api/chat/mitrify-public-test')!(mockReq({ body, headers: { 'content-type': 'application/json' } }), res);
+    expect(res.statusCode).toBe(400); expect(profile).not.toHaveBeenCalled(); expect(m.identity).not.toHaveBeenCalled();
+    expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled();
+  });
+  it('public test rejects non-JSON before authentication or inference', async () => {
+    const res = mockRes();
+    await captureRoutes(registerChatRoutes as any, () => {}).get('POST /api/chat/mitrify-public-test')!(mockReq({ body: {}, headers: { 'content-type': 'text/plain' } }), res);
+    expect(res.statusCode).toBe(415); expect(m.identity).not.toHaveBeenCalled(); expect(m.detailed).not.toHaveBeenCalled();
+  });
+  it('a rejected upstream HTTP 200 cannot become a successful diagnostic response', async () => {
+    vi.spyOn(mitrify, 'runMitrifyPublicTest').mockRejectedValueOnce(new mitrify.MitrifyError('MITRIFY_INVALID_RESPONSE', 200));
+    const res = mockRes();
+    await captureRoutes(registerChatRoutes as any, () => {}).get('POST /api/chat/mitrify-public-test')!(mockReq({ body: {}, headers: { 'content-type': 'application/json' } }), res);
+    expect(res.statusCode).toBe(503); expect(res.body).toMatchObject({ code: 'MITRIFY_INVALID_RESPONSE' });
+    expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled();
+  });
   it.each([null, 'outsider'])('canary nonowner %s keeps the exact legacy route despite forged UID headers/body', async uid => {
     vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'canary'); vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', 'verified-user'); m.verify.mockResolvedValue(uid);
     m.detailed.mockImplementationOnce(async () => { expect(currentInferenceGatewayContext()).toBeUndefined(); return { ok: true, content: 'legacy answer' }; });

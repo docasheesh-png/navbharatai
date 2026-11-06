@@ -100646,3 +100646,51 @@ Production eligibility remains BLOCKED pending trusted full-request public prove
 ### 2026-11-06 — Mitrify buffered-stream cancellation correction
 
 Review reproduced cancellation after the first of several already-buffered SSE events: the transport could deliver the remaining events and report success. Added a regression that fails on the original transport, then checked AbortSignal before/after reads, before each event, after the consumer callback and before success. General-chat privacy blocking remains unchanged. Required validation is rerun on this corrected tree before publishing it.
+
+### 2026-11-06 — Account-only no-fallback privacy boundary (not enabled)
+
+- Added an optional server-only verified-email selector at both general-chat endpoints. The selected verified account is refused before either chain, quota admission or private context processing; unrelated accounts keep the existing path. No account value, key or production flag is installed.
+- No request has proven whole-request public provenance, so this is explicitly a privacy pause, not operational Mitrify chat. No prompt rewriting, live calls, spending or App Builder changes. Shared client notices display the privacy refusal without mislabeling it as server load.
+- Added offline account selection/default/no-fallback tests and actual route tests for both endpoints, streaming and non-streaming, forged body claims, plus the user-facing refusal. Full validation pending at this entry.
+
+- Validation found four source-census failures because moving quota wiring into a wrapper hid it from existing guards. Restored inline quota calls at both route registrations; guards were not weakened. All 85 targeted route/quota/notice tests pass. Re-running full checks on the corrected source.
+
+- Corrected source validation: all 3,235 coverage suites pass (48,641 tests passed, 89 skipped), 25 offline Mitrify checks pass, 85 targeted route/quota/notice checks pass. All applicable CI-equivalent type/import/security/license/build/bundle/boot/dependency gates and all five emulator drills pass on Node 22.23.4/npm 11.18.0/Java 21 (Debian locally; Temurin in hosted CI). Missing-key smoke exits 1 as intended. No live inference performed; no production configuration changed.
+
+### 2026-11-06 — Replace draft account pause with isolated public-test preparation
+
+- The pause-only draft must not be merged or enabled. Removed its ordinary-chat refusal and shared frontend notice changes. Both existing chat routes retain their direct path for all users.
+- Added a separate authenticated, empty-body public arithmetic test. Its entire provider payload is server-owned and excludes identity, private context and caller parameters; it has no direct fallback. Unexpected output is never echoed.
+- Production admission is deliberately absent. A real server adapter must verify a gateway-side finite total-cost bound covering retries/failover and durably consume one test authorization bound to the endpoint/model/credential snapshot. No client flag, env boolean or token estimate grants admission. The formerly discussed test cap is not hardcoded as a current user preference.
+- No live test, credential access, production switch or financial-control change occurred. Offline verification pending for this replacement.
+
+### 2026-11-06 — Updated backend naming and concurrency requirements
+
+- Read the latest full user task. Added canonical AI_BACKEND with deterministic precedence over the legacy alias, X-Mitrify-Attempts metadata, and a process-wide bounded FIFO with default 200 active calls. The queue holds permits through retries and stream completion, removes cancelled waiters, bounds count/serialized bytes/wait time, and does not claim fleet throughput.
+- Isolated public-test responses now preserve the provider body/wording and expose only sanitized metadata headers; no fixed-answer rewriting. Ordinary chat remains direct and no pause-only code will be enabled.
+- Stopped the obsolete in-progress validation run when the requirements changed; it is not claimed as passing. Final validation must rerun after these changes. No credential, live-call, production or spending-control action occurred.
+
+- Final coverage identified required census entries for the new operator endpoint and bounded semaphore. Registered its real operator-only caller, strict empty-JSON/default-small-parser contract and numeric/lifecycle state bounds; no guard was disabled. Added explicit JSON content-type refusal and regression checks. The cancelled prior run also left a lock owned by a confirmed defunct process; removed only that stale temporary lock and reran coverage. These incomplete/failed runs are not reported as passing.
+
+- Corrected replacement validation: all 3,235 coverage suites pass (48,642 tests passed, 89 skipped), 43 loopback Mitrify tests pass, and 29 focused ingress tests pass, including rejection of an invalid upstream HTTP 200. All applicable local CI-equivalent security/license/type/import/build/bundle/boot/dependency gates and all five emulator drills pass. Node 22.23.4 and npm 11.18.0 match CI; Java 21 is Debian locally rather than hosted Temurin. Missing-key smoke exits 1 as intended. Artifact uploads and hosted-only infrastructure are verified separately by CI. No live inference, credential configuration, account pause or production setting change occurred.
+
+### 2026-11-06 — Independent-review streaming and deadline corrections
+
+- Review reproduced credential leakage through SSE comments and split text deltas, and a permit retained by a stalled downstream callback after cancellation. Added regressions that fail on b753dad; the identity deadline regression also fails against that exact original source. The PR is draft and that head must not merge.
+- Added bounded per-choice credential-prefix lookahead, omit non-answer SSE comments/control fields, and cancellation-aware waits for downstream consumers, identity and admission. Safe data text remains unchanged; caller-owned delayed writes still must honor AbortSignal. Complete local/hosted validation and independent re-review are required for the corrected head. No live inference or production action occurred.
+
+- Corrected review-fix validation: 49 offline gateway tests pass; all 3,235 full coverage suites pass (48,643 passed, 89 skipped), with all applicable local CI-equivalent gates and all five emulator drills green. Missing-key smoke exits 1 as intended. Earlier failed reproductions are retained as evidence; no failing check was weakened. A new exact-head hosted CI and independent review remain required before merge.
+
+### 2026-11-06 — Extend streaming credential inspection to every forwarded string
+
+- Independent re-review confirmed the previous cancellation/comment/content fixes but reproduced split credentials in refusal/reasoning fields. Added failing reproductions for those fields and metadata against 4016c877; that head must not merge.
+- The bounded rolling inspector now traverses all JSON string values, field names and nested arrays, rather than content alone. A bounded event queue releases earlier safe events once possible matches move on; repeated metadata prefixes cannot retain the entire preceding stream. Added nested-token and incremental metadata regressions. Local gates, fresh exact-head CI and independent review are required again; no live inference or production changes.
+
+- Broader-inspector validation: all 54 loopback gateway tests pass; 3,235 full coverage suites pass (48,643 passed, 89 skipped); all applicable local CI-equivalent checks and all five emulator drills pass. Missing-key smoke exits 1 as intended. New hosted exact-head CI and independent re-review remain required. No live gateway call or production change occurred.
+
+### 2026-11-06 — Remove credential-lookahead stream stalls
+
+- Re-review reproduced a permanent prefix from one-time role metadata: a t-prefixed credential and role assistant caused a normal large stream to remain buffered. Added a failing regression against bc387a7 that requires the first role event before the server sends the remaining 1.5+ MiB answer.
+- Removed answer-event buffering entirely. The inspector keeps only bounded short string prefixes and immediately rejects a substantial credential-prefix marker, including across events. Benign marker collisions fail closed; ordinary short prefix collisions cannot stall streaming. Added single-character fragmentation coverage. Full local/hosted validation and re-review remain required; no production/live-call change occurred.
+
+- Non-buffering correction validation: all 56 loopback gateway tests pass; all 3,235 coverage suites pass (48,643 passed, 89 skipped); all applicable local CI-equivalent gates and five emulator drills pass. Missing-key smoke exits 1 as intended. Published replacement still requires exact-head hosted CI and independent review before merge. No live call or production change occurred.

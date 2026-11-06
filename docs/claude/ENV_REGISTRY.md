@@ -4868,3 +4868,14 @@ No live deployment or provider switch is changed by the code default.
 - `MITRIFY_API_KEY`: server-only secret, no default; never configured by this change.
 - `MITRIFY_MODEL`: single opaque model alias; default lives in `src/server/lib/mitrify.ts`.
 - General chat remains health/clinical. No public-data authority exists for the complete request, so no production traffic reaches the transport. No App Builder or professional routing changes.
+
+### 2026-11-06 — Isolated public-test account selector (not enabled)
+
+- `MITRIFY_CHAT_ACCOUNT_EMAIL`: server-only verified-email selector for `/api/chat/mitrify-public-test`; no default or repository value. Requires `AI_PROVIDER=mitrify`, verified identity, and a server-owned single-use cost-admission adapter. No live adapter exists, so the test fails closed without inference.
+- Ordinary chat is neither paused nor switched by this selector. No credentials, account selector, spending cap or production flags were configured. Rollback is `AI_PROVIDER=direct` or removing the selector. See `docs/mitrify.md` for the exact missing admission contract.
+
+### 2026-11-06 — Canonical Mitrify backend switch and bounded queue
+
+- `AI_BACKEND`: canonical `direct|mitrify` switch, default direct. Explicit values override the legacy `AI_PROVIDER`; the alias is used only when the canonical setting is unset/blank. Invalid selections stay direct. No deployment setting was changed.
+- `MITRIFY_MAX_INFLIGHT`: default 200, valid integers 1–1000. The shared per-process queue also caps waiting calls at 1,000, retained serialized bodies at 64 MiB, and waiting time at 30 seconds. These bounds do not promise fleet-wide concurrency or throughput.
+- General chat remains health/clinical and direct. The isolated public-test route has no live verified cost-admission adapter and remains unavailable without dispatch.

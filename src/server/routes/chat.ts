@@ -1,8 +1,8 @@
-import { withMitrifyChatPrivacyBoundary } from '../lib/mitrify';
+import { MitrifyError, runMitrifyPublicTest, withMitrifyChatPrivacyBoundary } from '../lib/mitrify';
 import { chatAvailabilityMessage } from '../lib/chatAvailabilityMessage';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../lib/chatReplyLanguage';
 import { FREE_CHAT_LANGUAGE_RULE, chatReplyLanguageInstruction } from '../lib/freeChatReplyLanguage';
-import { verifyFirebaseToken } from '../lib/authMiddleware';
+import { verifyFirebaseIdentity, verifyFirebaseToken } from '../lib/authMiddleware';
 import { withFreeAnswerQuota, assertFreeAnswerActive, markFreeAnswer, freeAnswerSignal } from '../lib/freeAnswerQuota';
 import { withFreeChainEntryAdmission } from '../AI/FreeChain/entryAdmission';
 import { freeChainRequestContext } from '../AI/FreeChain/requestContext';
@@ -130,6 +130,27 @@ async function withChatTextGateway<T>(req: Request, res: Response, handler: () =
  * deprecated/removed. Routing to providers is delegated to the shared aiRouter.
  */
 export function registerChatRoutes(app: Express, chatLimiter: RateLimitRequestHandler): void {
+  // Separate, authenticated synthetic test. No live cost-admission adapter is wired.
+  // Do not pass a client flag or local token estimate as proof of a gateway spending cap.
+  app.post('/api/chat/mitrify-public-test', chatLimiter, async (req, res) => {
+    if (req.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+      res.status(415).json({ code: 'INVALID_CONTENT_TYPE', error: 'Send application/json with an empty object.' }); return;
+    }
+    const controller = new AbortController();
+    onClientGone(res, () => controller.abort());
+    try {
+      const result = await runMitrifyPublicTest({ body: req.body, identify: () => verifyFirebaseIdentity(req), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]) });
+      if (!res.destroyed && !res.writableEnded) {
+        for (const [name, value] of Object.entries(result.headers)) if (value !== null) res.setHeader(name, value);
+        res.status(result.status).json(result.data);
+      }
+    } catch (error) {
+      if (res.destroyed || res.writableEnded) return;
+      const code = error instanceof MitrifyError ? error.code : 'MITRIFY_TEST_UNAVAILABLE';
+      const status = error instanceof MitrifyError && error.status >= 400 && error.status <= 599 ? error.status : 503;
+      res.status(status).json({ code, error: error instanceof MitrifyError ? error.message : 'The public test could not complete.' });
+    }
+  });
   const LANGUAGE_RULE = FREE_CHAT_LANGUAGE_RULE;
 
   const SYSTEM_PROMPT_EDIT = `You are NavBharatAI — world's best AI App Editor.

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { auth } from '../../lib/firebase';
 import { authHeader } from '../../lib/authHeaders';
+import { mitrifyBotError } from '../../lib/mitrifyBotError';
 import type { MitrifyBotAccess } from '../../hooks/useMitrifyBot';
 
 /** A stateless public-question conversation; displayed replies are never sent back. */
@@ -25,10 +26,10 @@ export function MitrifyChatPanel({ uid, access }: { uid: string; access: Mitrify
       if (auth.currentUser?.uid !== uid) { controller.abort(); return; }
       const response = await fetch('/api/v1/chat/mitrify-bot', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify({ questionId: question.id }), signal: controller.signal, cache: 'no-store' });
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
       if (controller.signal.aborted || auth.currentUser?.uid !== uid) return;
-      if (!response.ok || typeof data.reply !== 'string') {
-        setError('Mitrify could not answer. No other provider was used. Please try again later.'); return;
+      if (!response.ok || typeof data?.reply !== 'string') {
+        setError(mitrifyBotError(response.status, data)); return;
       }
       setMessages(items => [...items, { role: 'Mitrify', text: data.reply }]);
     } catch {

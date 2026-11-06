@@ -16,9 +16,12 @@ describe('separate public bot browser boundary', () => {
     expect(hook).toContain('result?.uid === uid && auth.currentUser?.uid === uid');
     expect(hook).toContain('return () => controller.abort()');
   });
-  it('has no free text, local persistence, provider credentials or history in the outgoing body', () => {
-    expect(panel).toContain('body: JSON.stringify({ questionId: question.id })');
-    expect(panel).not.toMatch(/<textarea|<input|localStorage|sessionStorage|MITRIFY_API_KEY|messages:\s*messages/);
+  it('sends only one explicitly reviewed message, without persistence, credentials or history', () => {
+    expect(panel).toContain('body: JSON.stringify({ message, publicContentConfirmed: true })');
+    expect(panel).toContain('!confirmed');
+    expect(panel).toContain('setInput(event.target.value); setConfirmed(false)');
+    expect(panel).toContain('Automatic checks can miss sensitive content');
+    expect(panel).not.toMatch(/localStorage|sessionStorage|MITRIFY_API_KEY|messages:\s*messages/);
     expect(panel).toContain("auth.onAuthStateChanged(user => { if (user?.uid !== uid) pending.current?.abort(); })");
     expect(panel).toContain('if (controller.signal.aborted || auth.currentUser?.uid !== uid) return;');
   });

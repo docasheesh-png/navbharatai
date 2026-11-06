@@ -26,6 +26,26 @@ export function withMitrifyChatPrivacyBoundary<T>(direct: () => Promise<T>, env:
   return direct();
 }
 
+/** A verified account may opt into no fallback, but identity never proves prompt privacy. */
+export async function withMitrifyAccountChatBoundary<T>(
+  identify: () => Promise<{ email: string | null; emailVerified: boolean } | null>,
+  direct: () => Promise<T>,
+  blocked: (error: { code: string; reply: string; error: string }) => Promise<T>,
+  env: Env = process.env,
+): Promise<T> {
+  const target = env.MITRIFY_CHAT_ACCOUNT_EMAIL?.trim().toLowerCase();
+  if (env.AI_PROVIDER === 'mitrify' && target) {
+    const identity = await identify();
+    if (identity?.emailVerified && identity.email?.trim().toLowerCase() === target) {
+      // No existing chat request has whole-request public provenance. Neither chain
+      // may run here; do not strip history/profile or infer eligibility from keywords.
+      const reply = 'Chat is paused for this account: the conversation is not approved for the selected provider under the current privacy policy.';
+      return blocked({ code: 'CHAT_PRIVACY_BLOCKED', reply, error: reply });
+    }
+  }
+  return direct();
+}
+
 export class MitrifyError extends Error {
   readonly status: number;
   readonly code: string;

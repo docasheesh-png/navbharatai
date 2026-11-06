@@ -1,8 +1,8 @@
-import { withMitrifyChatPrivacyBoundary } from '../lib/mitrify';
+import { withMitrifyAccountChatBoundary, withMitrifyChatPrivacyBoundary } from '../lib/mitrify';
 import { chatAvailabilityMessage } from '../lib/chatAvailabilityMessage';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../lib/chatReplyLanguage';
 import { FREE_CHAT_LANGUAGE_RULE, chatReplyLanguageInstruction } from '../lib/freeChatReplyLanguage';
-import { verifyFirebaseToken } from '../lib/authMiddleware';
+import { verifyFirebaseIdentity, verifyFirebaseToken } from '../lib/authMiddleware';
 import { withFreeAnswerQuota, assertFreeAnswerActive, markFreeAnswer, freeAnswerSignal } from '../lib/freeAnswerQuota';
 import { withFreeChainEntryAdmission } from '../AI/FreeChain/entryAdmission';
 import { freeChainRequestContext } from '../AI/FreeChain/requestContext';
@@ -986,6 +986,11 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     }
   };
 
-  app.post('/api/chat/navbharat', freeModuleInferenceScope,       chatLimiter, (req, res) => withChatDailyQuota(req, res, () => withChatTextGateway(req, res, () => withMitrifyChatPrivacyBoundary(() => chatHandler(req, res, 'navbharat')))));
-  app.post('/api/chat/navbharatai', freeModuleInferenceScope,     chatLimiter, (req, res) => withChatDailyQuota(req, res, () => withChatTextGateway(req, res, () => withMitrifyChatPrivacyBoundary(() => chatHandler(req, res, 'navbharat')))));
+  const accountChat = (req: Request, res: Response, direct: () => Promise<unknown>) => withMitrifyAccountChatBoundary(
+    () => verifyFirebaseIdentity(req),
+    direct,
+    async error => { if (!res.destroyed && !res.writableEnded) res.status(503).json(error); },
+  );
+  app.post('/api/chat/navbharat', freeModuleInferenceScope,       chatLimiter, (req, res) => accountChat(req, res, () => withChatDailyQuota(req, res, () => withChatTextGateway(req, res, () => withMitrifyChatPrivacyBoundary(() => chatHandler(req, res, 'navbharat'))))));
+  app.post('/api/chat/navbharatai', freeModuleInferenceScope,     chatLimiter, (req, res) => accountChat(req, res, () => withChatDailyQuota(req, res, () => withChatTextGateway(req, res, () => withMitrifyChatPrivacyBoundary(() => chatHandler(req, res, 'navbharat'))))));
 }

@@ -100646,3 +100646,13 @@ Production eligibility remains BLOCKED pending trusted full-request public prove
 ### 2026-11-06 — Mitrify buffered-stream cancellation correction
 
 Review reproduced cancellation after the first of several already-buffered SSE events: the transport could deliver the remaining events and report success. Added a regression that fails on the original transport, then checked AbortSignal before/after reads, before each event, after the consumer callback and before success. General-chat privacy blocking remains unchanged. Required validation is rerun on this corrected tree before publishing it.
+
+### 2026-11-06 — Account-only no-fallback privacy boundary (not enabled)
+
+- Added an optional server-only verified-email selector at both general-chat endpoints. The selected verified account is refused before either chain, quota admission or private context processing; unrelated accounts keep the existing path. No account value, key or production flag is installed.
+- No request has proven whole-request public provenance, so this is explicitly a privacy pause, not operational Mitrify chat. No prompt rewriting, live calls, spending or App Builder changes. Shared client notices display the privacy refusal without mislabeling it as server load.
+- Added offline account selection/default/no-fallback tests and actual route tests for both endpoints, streaming and non-streaming, forged body claims, plus the user-facing refusal. Full validation pending at this entry.
+
+- Validation found four source-census failures because moving quota wiring into a wrapper hid it from existing guards. Restored inline quota calls at both route registrations; guards were not weakened. All 85 targeted route/quota/notice tests pass. Re-running full checks on the corrected source.
+
+- Corrected source validation: all 3,235 coverage suites pass (48,641 tests passed, 89 skipped), 25 offline Mitrify checks pass, 85 targeted route/quota/notice checks pass. All applicable CI-equivalent type/import/security/license/build/bundle/boot/dependency gates and all five emulator drills pass on Node 22.23.4/npm 11.18.0/Java 21 (Debian locally; Temurin in hosted CI). Missing-key smoke exits 1 as intended. No live inference performed; no production configuration changed.

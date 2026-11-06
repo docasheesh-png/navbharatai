@@ -1,7 +1,7 @@
 # Optional Mitrify transport: privacy-blocked for general chat
 
 This change provides a server-only OpenAI-compatible transport and offline tests.
-It does **not** make arbitrary NavBharatAI chat eligible for Mitrify. Both ordinary
+It does **not** make arbitrary NavBharatAI chat eligible for Mitrify. By default, both ordinary
 chat entry points retain their existing callback, quota, routing and billing behavior.
 App Builder, Pro, Doctor/SDA, professionals, tools, JSON output, vision and embeddings
 are unchanged. No credential or deployment settings are installed by this change.
@@ -13,21 +13,37 @@ patient data, personal information, profile, memory, attachments and history. Th
 existing six-question public cache corpus proves only the question's content, not
 the full outgoing system prompt. Its broader FAQ eligibility is not privacy proof.
 
-`withMitrifyChatPrivacyBoundary` therefore keeps **all current general chat direct**,
+By default, `withMitrifyChatPrivacyBoundary` therefore keeps **all current general chat direct**,
 even with `AI_PROVIDER=mitrify`, and logs `MITRIFY_PRIVACY_BLOCKED`. No client flag,
 keyword detector, missing profile or empty history bypasses this boundary. A future
 review must establish trusted provenance for the whole request before connecting
 the low-level transport. Do not downgrade the health classification to enable it.
 
+An optional server-only `MITRIFY_CHAT_ACCOUNT_EMAIL` selects a single account for
+**no-fallback** behavior when `AI_PROVIDER=mitrify`. Selection uses only a verified
+Firebase token with a verified email; request-body claims never select an account.
+Both general-chat endpoints then return HTTP 503 `CHAT_PRIVACY_BLOCKED` before
+quota admission, prompt assembly, history/profile access or either provider chain.
+The chat UI displays a privacy-policy pause. This is an explicit refusal, **not a
+working Mitrify connection**. Unselected accounts keep their existing path.
+
+No email value is stored in this repository or installed in production. Configuring
+this selector would pause the selected account's general chat until whole-request
+public provenance is established. A user's identity alone cannot authorize sending
+their data. Removing the selector or setting `AI_PROVIDER=direct` restores the
+existing path. Doctor/App Builder routes are not changed.
+
 ## Configuration and rollback
 
 Server environment only; never use a `VITE_` prefix or ship a key to a client:
 
-- `AI_PROVIDER`: `direct` by default; `mitrify` requests the optional route but currently
-  remains blocked by the privacy boundary.
+- `AI_PROVIDER`: `direct` by default; `mitrify` remains blocked by the privacy boundary.
+  Unselected accounts stay direct; the optional selected verified account is refused.
 - `MITRIFY_BASE_URL`: defaults to `https://mitrify.com/v1`.
 - `MITRIFY_API_KEY`: required for manual diagnostics; no default.
 - `MITRIFY_MODEL`: defaults to `mitrify/auto-cheap`; the default is defined once in the module.
+- `MITRIFY_CHAT_ACCOUNT_EMAIL`: no default; optional verified account selector for the
+  privacy-blocked, no-fallback behavior above. Do not enable expecting live chat.
 
 Rollback: set `AI_PROVIDER=direct`. No deployment or key rotation is needed for this
 code switch. This switch does not modify any existing provider settings.

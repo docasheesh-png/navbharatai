@@ -4868,3 +4868,8 @@ No live deployment or provider switch is changed by the code default.
 - `MITRIFY_API_KEY`: server-only secret, no default; never configured by this change.
 - `MITRIFY_MODEL`: single opaque model alias; default lives in `src/server/lib/mitrify.ts`.
 - General chat remains health/clinical. No public-data authority exists for the complete request, so no production traffic reaches the transport. No App Builder or professional routing changes.
+
+### 2026-11-06 — Optional account-only no-fallback boundary (not enabled)
+
+- `MITRIFY_CHAT_ACCOUNT_EMAIL`: server-only verified-email selector; no default or repository value. With `AI_PROVIDER=mitrify`, that verified account's general chat is refused with `CHAT_PRIVACY_BLOCKED` before either chain runs. Other accounts retain their existing path.
+- This pauses chat; it does not establish privacy eligibility or enable Mitrify inference. No credentials, account selector or production flags were configured by this change. Rollback is `AI_PROVIDER=direct` or removing the selector.

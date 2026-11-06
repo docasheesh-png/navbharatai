@@ -2,8 +2,8 @@
 vi.mock('../../lib/freeAnswerQuota', () => ({ withFreeAnswerQuota: (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(), assertFreeAnswerActive: () => {}, markFreeAnswer: () => {}, freeAnswerSignal: () => undefined }));
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from '../../../../tests/helpers/routeTestUtils';
-const m = vi.hoisted(() => ({ verify: vi.fn(), legacy: vi.fn(), detailed: vi.fn(), stream: vi.fn(), oldContext: vi.fn(), add: vi.fn(), live: vi.fn(), needsLive: vi.fn(), document: vi.fn(), vision: vi.fn() }));
-vi.mock('../../lib/authMiddleware', async original => ({ ...await original<typeof import('../../lib/authMiddleware')>(), verifyFirebaseToken: m.verify }));
+const m = vi.hoisted(() => ({ identity: vi.fn(), verify: vi.fn(), legacy: vi.fn(), detailed: vi.fn(), stream: vi.fn(), oldContext: vi.fn(), add: vi.fn(), live: vi.fn(), needsLive: vi.fn(), document: vi.fn(), vision: vi.fn() }));
+vi.mock('../../lib/authMiddleware', async original => ({ ...await original<typeof import('../../lib/authMiddleware')>(), verifyFirebaseToken: m.verify, verifyFirebaseIdentity: m.identity }));
 vi.mock('../FreeChain/entryAdmission', () => ({ withFreeChainEntryAdmission: (_req: unknown, _res: unknown, run: () => unknown) => { m.legacy(); return run(); } }));
 vi.mock('../FreeChain/requestContext', () => ({ freeChainRequestContext: m.oldContext }));
 vi.mock('../../lib/aiRouter', () => ({ aiRouter: { routeDetailed: m.detailed, routeStream: m.stream } }));
@@ -17,6 +17,7 @@ import { runWithInferenceScope } from '../inferencePolicy';
 import { freeChainAdmissionQueue } from '../FreeChain/admissionQueue';
 const route = () => captureRoutes(registerChatRoutes as any, () => {}).get('POST /api/chat/navbharat')!;
 beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
+  vi.stubEnv('AI_PROVIDER', 'direct'); vi.stubEnv('MITRIFY_CHAT_ACCOUNT_EMAIL', ''); m.identity.mockResolvedValue(null);
   vi.clearAllMocks(); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'on'); vi.stubEnv('INFERENCE_GATEWAY_SURFACES', 'chat');
   vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'off'); vi.stubEnv('DOSE_DIRECT_ANSWER', 'off');
   m.live.mockResolvedValue(''); m.needsLive.mockReturnValue(false); m.document.mockResolvedValue('document text');
@@ -27,6 +28,27 @@ beforeEach(() => { vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'all');
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 describe('ordinary chat reaches the real gateway ingress context', () => {
+  it.each(['/api/chat/navbharat', '/api/chat/navbharatai'])('blocks selected account before either chain or private context at %s', async path => {
+    vi.stubEnv('AI_PROVIDER', 'mitrify'); vi.stubEnv('MITRIFY_CHAT_ACCOUNT_EMAIL', 'tester@example.invalid');
+    m.identity.mockResolvedValue({ uid: 'verified-user', email: 'tester@example.invalid', emailVerified: true });
+    for (const stream of [false, true]) {
+      const profile = vi.fn(() => ({ name: 'private profile' }));
+      const body = { message: 'hello', stream, email: 'forged@example.invalid' };
+      Object.defineProperty(body, 'userProfile', { get: profile });
+      const res = mockRes();
+      await captureRoutes(registerChatRoutes as any, () => {}).get(`POST ${path}`)!(mockReq({ body }), res);
+      expect(res.statusCode).toBe(503); expect(res.body).toMatchObject({ code: 'CHAT_PRIVACY_BLOCKED', reply: expect.stringContaining('paused') });
+      expect(profile).not.toHaveBeenCalled(); expect(m.document).not.toHaveBeenCalled(); expect(m.live).not.toHaveBeenCalled();
+      expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled(); expect(m.legacy).not.toHaveBeenCalled();
+      expect(m.verify).not.toHaveBeenCalled();
+    }
+  });
+  it('unrelated verified account keeps existing chat despite forged target email in body', async () => {
+    vi.stubEnv('AI_PROVIDER', 'mitrify'); vi.stubEnv('MITRIFY_CHAT_ACCOUNT_EMAIL', 'tester@example.invalid');
+    m.identity.mockResolvedValue({ uid: 'verified-user', email: 'other@example.invalid', emailVerified: true });
+    const res = mockRes(); await route()(mockReq({ body: { message: 'hello', email: 'tester@example.invalid' } }), res);
+    expect(res.body).toEqual({ reply: 'answer' }); expect(m.detailed).toHaveBeenCalledOnce();
+  });
   it.each([null, 'outsider'])('canary nonowner %s keeps the exact legacy route despite forged UID headers/body', async uid => {
     vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'canary'); vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', 'verified-user'); m.verify.mockResolvedValue(uid);
     m.detailed.mockImplementationOnce(async () => { expect(currentInferenceGatewayContext()).toBeUndefined(); return { ok: true, content: 'legacy answer' }; });

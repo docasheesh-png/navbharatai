@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
-import { createMitrifyClient, mitrifyConfig, withMitrifyChatPrivacyBoundary } from '../../src/server/lib/mitrify.ts';
+import { createMitrifyClient, mitrifyConfig, withMitrifyChatPrivacyBoundary, withMitrifyAccountChatBoundary } from '../../src/server/lib/mitrify.ts';
 
 const input = { model: 'ignored', messages: [{ role: 'system', content: 'Be brief.' }, { role: 'user', content: 'Hello.' }], temperature: 0.2, max_tokens: 12 };
 const chunk = text => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
@@ -127,6 +127,47 @@ test('direct/default keeps the exact existing callback; mitrify fails closed for
   const source = readFileSync(new URL('../../src/server/routes/chat.ts', import.meta.url), 'utf8');
   assert.equal(source.split("withMitrifyChatPrivacyBoundary(() => chatHandler(req, res, 'navbharat'))").length - 1, 2);
   assert.ok(source.includes("qualityTier: 'clinical', dataClass: 'health'"));
+});
+
+test('verified selected account fails closed with no direct fallback or gateway request', async t => {
+  const f = await fixture(t, (_req, res) => reply(res));
+  let directCalls = 0;
+  const env = { AI_PROVIDER: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: ' tester@example.invalid ' };
+  const result = await withMitrifyAccountChatBoundary(
+    async () => ({ email: 'TESTER@example.invalid', emailVerified: true }),
+    async () => { directCalls++; return 'unexpected'; },
+    async error => error,
+    env,
+  );
+  assert.equal(result.code, 'CHAT_PRIVACY_BLOCKED');
+  assert.match(result.reply, /paused/);
+  assert.equal(directCalls, 0);
+  assert.equal(f.requests.length, 0);
+  assert.ok(!JSON.stringify(result).includes('tester@example.invalid'));
+});
+
+test('account boundary preserves default/direct behavior and unrelated identities', async () => {
+  for (const env of [{}, { AI_PROVIDER: 'direct', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' }, { AI_PROVIDER: 'mitrify' }]) {
+    const original = {};
+    assert.equal(await withMitrifyAccountChatBoundary(
+      async () => { throw new Error('disabled boundary must not resolve identity'); },
+      async () => original, async () => { throw new Error('unexpected block'); }, env), original);
+  }
+  for (const identity of [null, { email: 'someone@example.invalid', emailVerified: true }, { email: 'tester@example.invalid', emailVerified: false }]) {
+    const original = {}; let calls = 0;
+    assert.equal(await withMitrifyAccountChatBoundary(async () => identity,
+      async () => { calls++; return original; }, async () => { throw new Error('unexpected block'); },
+      { AI_PROVIDER: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' }), original);
+    assert.equal(calls, 1);
+  }
+});
+
+test('identity resolution errors never fall back to either provider', async () => {
+  let calls = 0;
+  await assert.rejects(withMitrifyAccountChatBoundary(async () => { throw new Error('identity unavailable'); },
+    async () => { calls++; }, async () => { calls++; },
+    { AI_PROVIDER: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' }));
+  assert.equal(calls, 0);
 });
 
 test('reject unsupported capabilities, provider fields and oversized bodies before dispatch', async t => {

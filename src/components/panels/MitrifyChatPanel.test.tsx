@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 vi.mock('../../lib/firebase', () => ({ auth: {} }));
 vi.mock('../../lib/authHeaders', () => ({ authHeader: vi.fn() }));
-import { MitrifyReply } from './MitrifyChatPanel';
+import { MitrifyChatPanel, MitrifyReply } from './MitrifyChatPanel';
 
 describe('Mitrify reply completion display', () => {
   it('renders a long complete answer in full without a warning or clipping classes', () => {
@@ -56,4 +56,23 @@ it('renders all 100 Hindi lines through the final line without clipping', () => 
   expect(html).toContain(answer);
   expect(html).toContain('100. नीले गगन');
   expect(html).not.toMatch(/line-clamp|truncate|max-height/);
+});
+
+describe('concise message privacy confirmation', () => {
+  it('keeps explicit unchecked confirmation and disclosure without the verbose label', () => {
+    const html = renderToStaticMarkup(<MitrifyChatPanel uid="local-test" access={{ available: true, questions: [] }} />);
+    expect(html).toContain('I confirm this message contains no sensitive or personal information.');
+    expect(html).not.toContain('I reviewed this message:');
+    expect(html).toContain('Your full message goes to Mitrify and its upstream providers');
+    expect(html).toContain('health records, personal identifiers, payment details, passwords');
+    expect(html).toContain('type="checkbox"');
+    expect(html).not.toContain('checked=""');
+    expect(html).toMatch(/<button type="submit" disabled=""/);
+  });
+  it('renders only the supplied reply, without inserting confirmation wording', () => {
+    const html = renderToStaticMarkup(<MitrifyReply text="Public answer." completion="complete" />);
+    expect(html).toContain('Public answer.');
+    expect(html).not.toContain('I reviewed this message:');
+    expect(html).not.toContain('I confirm this message');
+  });
 });

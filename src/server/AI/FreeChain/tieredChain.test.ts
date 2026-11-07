@@ -179,3 +179,38 @@ describe('exhausted FreeChain notices respect explicit language and do not inven
   expect(result.ok).toBe(false);expect(m.execute).not.toHaveBeenCalled();expect(m.settle).not.toHaveBeenCalled();
  });
 });
+
+describe('fixed-order FreeChain opt-in', () => {
+ function fixed(extra: Record<string, string> = {}) { return tiered('gpt5nano,groq', { TEXT_CHAIN_POLICY: 'fixed-v1', FREE_CHAIN_STICKY_SPREAD: 'on', FREE_CHAIN_ROUTE_REORDER: 'on', ...extra }); }
+ it('ignores competing order/sticky/cache selectors but retains an explicit smaller attempt limit', () => {
+  const cfg = fixed(); expect(cfg.order).toEqual(['glm45','glm47','groq','cloudflare','openrouter','cheapinf','llama8b','dsv4flash','gpt5nano','glmflashx','geminipaid']);
+  expect(cfg.stickySpread).toBe(false); expect(cfg.features.routeReorder).toBe(false); expect(cfg.cacheEnabled).toBe(false); expect(cfg.maxAttempts).toBe(12);
+  expect(fixed({ FREE_CHAIN_MAX_ATTEMPTS: '2' }).maxAttempts).toBe(2);
+ });
+ it.each([false, true])('starts GLM45 then GLM47 and stops on success, streaming=%s', streaming => {
+  m.execute.mockRejectedValueOnce(new FreeChainProviderError('SERVER')).mockImplementation(successful('second answer'));
+  const chunks: string[] = [];
+  return buildFreeChainRouter(db, fixed()).route({ ...input(), ...(streaming ? { onChunk: (s: string) => chunks.push(s) } : {}) }).then(result => {
+   expect(m.execute.mock.calls.map(c => c[1].model)).toEqual(['glm-4.5-flash','glm-4.7-flash']); expect(result.ok).toBe(true);
+   if (streaming) expect(chunks).toEqual(['second answer']);
+  });
+ });
+ it('does not let the admin exclusive selector bypass the requested free-first order', async () => {
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  await buildFreeChainRouter(db, fixed()).route({ ...input(), context: { ...input().context, isAdmin: true } });
+  expect(m.execute.mock.calls[0][1].model).toBe('glm-4.5-flash');
+ });
+ it('records a non-dispatched Mitrify slot and preserves privacy and budget denial', async () => {
+  vi.stubEnv('MITRIFY_CHAIN_ENABLED', '1'); m.execute.mockRejectedValue(new FreeChainProviderError('SERVER')); m.paid.mockResolvedValue(null);
+  const result = await buildFreeChainRouter(db, fixed()).route(input());
+  expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'mitrify', entered: false, reason: 'mitrify-privacy-blocked' }));
+  expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'llama8b', entered: false, reason: 'budget' }));
+ });
+ it('does not retry partial output or cancellation', async () => {
+  const chunks: string[] = []; m.execute.mockImplementationOnce(async (arg) => { arg.onChunk('partial'); throw new FreeChainProviderError('SERVER'); });
+  const result = await buildFreeChainRouter(db, fixed()).route({ ...input(), onChunk: s => chunks.push(s) });
+  expect(result.reason).toBe('stalled'); expect(chunks).toEqual(['partial']); expect(m.execute).toHaveBeenCalledOnce();
+  m.execute.mockClear(); const controller = new AbortController(); controller.abort();
+  await buildFreeChainRouter(db, fixed()).route({ ...input(), signal: controller.signal }); expect(m.execute).not.toHaveBeenCalled();
+ });
+});

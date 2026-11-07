@@ -1,6 +1,6 @@
 import type { ProviderId } from './config';
 /** entered means a logical adapter/registry rung was attempted, not proof of an HTTP dispatch. */
-export interface FreeChainAttempt { provider: ProviderId; reason: string; model: string; entered: boolean }
+export interface FreeChainAttempt { provider: ProviderId | 'mitrify'; reason: string; model: string; entered: boolean }
 export interface FreeChainTelemetry {
   requestId: string; rung: ProviderId | null; provider: string; model: string;
   attempts: FreeChainAttempt[]; fallbacks: number; cacheHit: boolean;

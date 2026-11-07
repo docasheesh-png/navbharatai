@@ -1,3 +1,5 @@
+import { FIXED_TEXT_CHAIN, fixedTextChainRank } from '../fixedTextChain';
+import { mitrifyChainStatus } from '../../lib/mitrify';
 import { capacityRevision, notifyCapacityReleased, waitForCapacity } from './capacityWait';
 import { switchedOffProviderFor } from '../../lib/providerSwitches';
 import { chatAvailabilityMessage } from '../../lib/chatAvailabilityMessage';
@@ -98,11 +100,13 @@ function verifiedDeepseekReservationRate(rung: RungConfig, cfg: FreeChainConfig)
 }
 function rungReason(rung: RungConfig, cfg: FreeChainConfig, input?: FreeChainInput): string | undefined {
   if (rung.reason) return rung.reason;
+  if (cfg.fixedOrder && fixedTextChainRank({ providerId: names[rung.id], modelId: rung.model, charging: isPaidRung(rung.id) ? 'metered' : 'verified-free-no-overage' }) === undefined) return 'fixed-chain-model-excluded';
   if (['glm47', 'glm45', 'gemini', 'groq', 'cloudflare'].includes(rung.id) && rung.verifiedUntil <= Date.now()) return 'free-plan-review-required';
   if (rung.id === 'deepseek' && !verifiedDeepseekReservationRate(rung, cfg)) return 'rate-card-unverified';
   // cheapinf skips the Kimi ceiling / rate-card gate under the simple CHEAPERINFERENCE mode.
   if (isPaidRung(rung.id) && rung.id !== 'deepseek' && rung.id !== 'cheapinf' && !verifiedPaidReservationRate(rung)) return 'rate-card-unverified';
   if (rung.id === 'cheapinf') {
+    if (cfg.fixedOrder && (!(Date.parse(process.env.FREE_CHAIN_CHEAPINF_RATE_VERIFIED_UNTIL ?? '') > Date.now()) || !verifiedPaidReservationRate(rung))) return 'rate-card-unverified';
     const mode = cheaperInferenceMode();
     if (mode === 'off') return 'disabled';
     if (mode === 'admin' && !input?.context.isAdmin) return 'disabled';
@@ -114,7 +118,7 @@ function rungReason(rung: RungConfig, cfg: FreeChainConfig, input?: FreeChainInp
   if (input && !rung.languages.includes(replyLanguageFor(input))) return 'language';
   if (input && (rung.id === 'gemini' || isPaidRung(rung.id)) && (input.context.privateTurn || input.context.healthTurn)) {
     // Exclusive CHEAPERINFERENCE=admin must answer every admin Free Chat turn, including profile/memory.
-    if (!(rung.id === 'cheapinf' && input.context.isAdmin === true && cheaperInferenceMode() === 'admin')) return 'privacy';
+    if (!(rung.id === 'cheapinf' && !cfg.fixedOrder && input.context.isAdmin === true && cheaperInferenceMode() === 'admin')) return 'privacy';
   }
   const target = new URL(rung.baseURL);
   if (switchedOffProviderFor(target.hostname, target.pathname)) return 'disabled';
@@ -163,7 +167,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       : `DEFAULT ONLY when this conversation has no explicit reply-language or script request: ${{ hi: 'Reply in Hindi using Devanagari script.', hinglish: 'Reply in Hinglish using Roman script.', en: 'Reply in English.', other: 'Reply in the same language and script as the user.' }[language]}`;
     // Master plan: stable cacheable prefix (dynamic parts last) and the compact core, both kill-switchable.
     const system = `${preparedSystemPrompt(cfg, input.systemPrompt ?? '')}\n\n${languageInstruction}`;
-    const cacheKey = cfg.cacheEnabled ? safeCacheKey({ message: input.message, history: input.history, eligible: input.context.cacheEligible, language, systemPrompt: system, modelFamily: JSON.stringify(cfg.rungs.map(r => [r.id, r.model])), faq: cfg.features.faqCache && faqCacheable(input.message) }) : null;
+    const cacheKey = !cfg.fixedOrder && cfg.cacheEnabled ? safeCacheKey({ message: input.message, history: input.history, eligible: input.context.cacheEligible, language, systemPrompt: system, modelFamily: JSON.stringify(cfg.rungs.map(r => [r.id, r.model])), faq: cfg.features.faqCache && faqCacheable(input.message) }) : null;
     const history = trimHistory(cfg, input.history);
     if (cacheKey) {
       const hit = await new FreeChainCache(db).get(cacheKey).catch(() => null);
@@ -179,12 +183,12 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       if (spend && cap > 0 && spend.committedNanoUsd * 100 >= cap * cfg.features.throttlePercent) routed = routeTurn(cfg, { message: input.message, history: input.history, teachingMode: input.context.teachingTurn, throttled: true });
     }
     // CHEAPERINFERENCE=admin: free-chain ladder OFF for verified admins — only cheapinf answers.
-    const exclusiveAdmin = input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
+    const exclusiveAdmin = !cfg.fixedOrder && input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
     const baseOrder = exclusiveAdmin ? (['cheapinf'] as ProviderId[]) : orderForUser(cfg, input.context.uid);
     let route: TurnRoute = exclusiveAdmin ? 'normal' : routed.route;
-    let order = exclusiveAdmin ? baseOrder : orderForRoute(baseOrder, route, cfg.features.routeReorder);
+    let order: Array<ProviderId | 'mitrify'> = cfg.fixedOrder ? [...FIXED_TEXT_CHAIN] : exclusiveAdmin ? baseOrder : orderForRoute(baseOrder, route, cfg.features.routeReorder);
     // A routed order with no usable rung (keys not configured yet, privacy) falls back to the plain order.
-    if (!exclusiveAdmin && order !== baseOrder && !order.some(oid => { const r = cfg.rungs.find(x => x.id === oid); return !!r && !rungReason(r, cfg, input); })) { order = baseOrder; route = 'normal'; }
+    if (!cfg.fixedOrder && !exclusiveAdmin && order !== baseOrder && !order.some(oid => { const r = cfg.rungs.find(x => x.id === oid); return !!r && !rungReason(r, cfg, input); })) { order = baseOrder; route = 'normal'; }
     trace.route = route; trace.routeReason = routed.reason;
     // Re-scan only pre-reservation capacity refusals. The original queue-wait budget bounds
     // this wait too; no extra provider attempt, quota charge or unbounded timer is introduced.
@@ -194,7 +198,13 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     const observedCapacity = capacityRevision(); let capacityBusy = false;
     for (const id of order) {
       if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
-      const baseRung = cfg.rungs.find(r => r.id === id)!;
+      if (id === 'mitrify') {
+        const status = mitrifyChainStatus('health', 'text'); // Complete chat provenance is unavailable, even for an empty history.
+        trace.attempts.push({ provider: id, model: status.model, reason: status.reason, entered: false });
+        continue;
+      }
+      const baseRung = cfg.rungs.find(r => r.id === id);
+      if (!baseRung) continue;
       const rung: RungConfig = { ...baseRung, maxOutputTokens: effectiveMaxOutput(cfg, id, baseRung.maxOutputTokens, route) };
       const attempt = { provider: id, model: rung.model, reason: 'pending', entered: false }; trace.attempts.push(attempt);
       // Bounded latency: at most cfg.maxAttempts PHYSICAL calls per turn; skipped rungs are free.
@@ -375,6 +385,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         }
         // Never release an uncertain paid hold, and never mix replies after text commitment.
         if (partial || content) { trace.rung = id; if (!input.onChunk) content += '\n\nThe response was interrupted. Please try again.'; return done({ content, provider: names[id], model: response?.model ?? rung.model, latencyMs: 0, ok: true, reason: 'stalled' }); }
+        if (cfg.fixedOrder && reservation?.mayDispatch && attempt.entered && failedCharge === null) break;
         if (safe?.code === 'SAFETY_REFUSAL' || safe?.code === 'INVALID_REQUEST' || safe?.code === 'POLICY_BLOCKED' || safe?.code === 'ABORTED' || input.signal?.aborted) break;
       } finally {
         controller.abort(); input.signal?.removeEventListener('abort', abort);
@@ -422,7 +433,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       const current = refreshConfig?.() ?? cfg;
       // #3933 bug: maybeFreeChain admits CHEAPERINFERENCE=admin when FREE_CHAIN_ENABLED is off,
       // but this gate still returned the busy notice before cheapinf could run.
-      const exclusiveAdmin = input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
+      const exclusiveAdmin = !cfg.fixedOrder && input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
       if (strictFreeRequired() || (!exclusiveAdmin && (!current.enabled || current.errors.length))) {
         const early = strictFreeRequired() ? 'strict-free-required'
           : !current.enabled ? 'free-chain-disabled'
@@ -456,9 +467,9 @@ export async function maybeFreeChain(input: FreeChainInput): Promise<FreeChainRe
   if (cfg.errors.length && (cfg.enabled || held)) { warnOnce(`Invalid configuration: ${cfg.errors.join(', ')}`); return unavailable(`config-errors:${cfg.errors.slice(0, 3).join(',')}`); }
   // CHEAPERINFERENCE=admin + verified admin: exclusive cheapinf path (free ladder off for this reply).
   // Works even when FREE_CHAIN_ENABLED is off, so the owner can test with only CHEAPERINFERENCE=admin.
-  const exclusiveAdmin = input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
+  const exclusiveAdmin = !cfg.fixedOrder && input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
   // OFF restores legacy for new requests (no db touch), never for a turn already admitted — unless exclusive admin.
-  if (!cfg.enabled && !exclusiveAdmin) return held ? unavailable('free-chain-disabled') : null;
+  if (!cfg.enabled && !exclusiveAdmin) return held || cfg.fixedOrder ? unavailable('free-chain-disabled') : null;
   const db = getServerDb(); if (!db) return unavailable('firestore-unavailable');
   if (exclusiveAdmin) {
     const cheap = cfg.rungs.find(r => r.id === 'cheapinf');
@@ -473,7 +484,7 @@ export async function maybeFreeChain(input: FreeChainInput): Promise<FreeChainRe
     return buildFreeChainRouter(db, cfg, freeChainConfig).route(input);
   }
   const control = await readControlsForSelection(db, cfg).catch(() => null); if (!control) return unavailable('controls-unavailable');
-  if (!selectedForFreeChain(cfg, control, input.context.uid)) return held ? unavailable('not-selected-for-rollout') : null;
+  if (!selectedForFreeChain(cfg, control, input.context.uid)) return held || cfg.fixedOrder ? unavailable('not-selected-for-rollout') : null;
   return buildFreeChainRouter(db, cfg, freeChainConfig).route(input);
 }
 export async function controlFreeChain(action: FreeChainControlAction, actor: string): Promise<void> {

@@ -100,6 +100,8 @@ export interface RoutingRequest {
   readonly cancellation: { readonly id: string; readonly cancelled: boolean };
   readonly outputVisible: boolean;
   readonly maxPhysicalAttempts: number;
+  /** Evidence-bound server policy; never accepted from request JSON. */
+  readonly fixedTextChain?: 'v1';
   readonly attempts: readonly AttemptRecord[];
   readonly evidenceRef: string;
 }
@@ -231,7 +233,7 @@ export interface PlanningInput {
 }
 export type RejectionReason = 'malformed' | 'evidence' | 'profile-ineligible' | 'surface'
   | 'capability' | 'quality' | 'privacy' | 'payer' | 'quota' | 'cooldown' | 'deadline'
-  | 'strict-free' | 'price' | 'budget';
+  | 'strict-free' | 'price' | 'budget' | 'fixed-chain';
 export interface CandidateRejection { readonly profileId: string; readonly reason: RejectionReason; }
 export interface SelectionPlan {
   readonly kind: 'plan';

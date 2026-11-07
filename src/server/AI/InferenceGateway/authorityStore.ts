@@ -1,3 +1,4 @@
+import { fixedTextChainEnabled, fixedTextChainScopeAllowed, fixedTextChainScope, FIXED_TEXT_CHAIN_MAX_ATTEMPTS } from '../fixedTextChain';
 import { modelSlotIdentity, modelSlotPath, modelSlotBinding, readModelSlotPolicy, readModelSlotState, readHeldModelSlot, type GatewayModelSlotPolicy } from './modelConcurrency';
 /**
  * Server-only issuer over reviewed, non-client-writable configuration and existing
@@ -244,6 +245,7 @@ export class GatewayAuthorityStore {
         && p.attemptTimeoutMs <= 120_000 && nonnegativeInteger(p.logicalLimitNanoUsd)
         && p.logicalLimitNanoUsd <= OWNER_PAID_DAILY_CEILING_NANO_USD);
       const capability = requestedCapability(p, this.payload);
+      const fixedOrder = fixedTextChainScopeAllowed() && fixedTextChainEnabled() && fixedTextChainScope(this.context.surface, capability.kind);
       const window = civilDayWindow(now, PAID_BUDGET_TIME_ZONE);
       const [paidRaw, dayRaw, existingAuthority] = await Promise.all([
         this.get(tx, 'free_chat_chain/paid_budget_policy'), this.get(tx, `free_chat_chain/paid_day_${window.key}`),
@@ -259,7 +261,8 @@ export class GatewayAuthorityStore {
         deadlineAtMs: Math.min(this.context.deadlineAtMs, now + p.attemptTimeoutMs), maxQueueWaitMs: p.maxQueueWaitMs,
         queueEnteredAtMs: now, queueWaitConsumedMs: this.queueWaitConsumedMs, firstOutputTimeoutMs: p.firstOutputTimeoutMs,
         attemptTimeoutMs: p.attemptTimeoutMs, cancellation: { id: randomUUID(), cancelled: false }, outputVisible: false,
-        maxPhysicalAttempts: 4, attempts: [], evidenceRef: randomUUID() };
+        ...(fixedOrder ? { fixedTextChain: 'v1' as const } : {}),
+        maxPhysicalAttempts: fixedOrder ? FIXED_TEXT_CHAIN_MAX_ATTEMPTS : 4, attempts: [], evidenceRef: randomUUID() };
       const binding = evidenceBinding(withoutEvidence(r));
       const candidates: Candidate[] = []; const entries = new Map<string, GatewayCatalogEntry>();
       const sourceBindings: { path: string; binding: string }[] = [];
@@ -427,7 +430,7 @@ export class GatewayAuthorityStore {
       const candidates: Candidate[] = [];
       for (const old of authority.snapshot.candidates) {
         const entry = this.entries.get(old.profile.id)!;
-        if (rejectedProviders.has(old.profile.providerId)) continue;
+        if (request.fixedTextChain === 'v1' ? history.some(a => a.profileId === old.profile.id) : rejectedProviders.has(old.profile.providerId)) continue;
         const slotIdentity = modelSlotIdentity(old.profile);
         if (slotIdentity) {
           const slotPolicy = readModelSlotPolicy(await this.get(tx, modelSlotPath('policy', slotIdentity)), slotIdentity, now);

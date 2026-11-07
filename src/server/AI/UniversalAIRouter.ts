@@ -1,3 +1,5 @@
+import { fixedTextChainSelected } from './fixedTextChain';
+import { InferenceGatewayTerminalError } from './InferenceGateway/dispatchBoundary';
 import { currentFreeAnswerSignal } from '../lib/freeAnswerQuotaContext';
 import type { FreeChainContext } from './FreeChain/rollout';
 import type { FreeChainTelemetry } from './FreeChain/telemetry';
@@ -79,10 +81,14 @@ export class UniversalAIRouter {
   ): Promise<RoutedCall> {
     const quotaSignal = currentFreeAnswerSignal();
     signal = signal && quotaSignal ? AbortSignal.any([signal, quotaSignal]) : signal ?? quotaSignal;
-    if (!isGatewayRouteSelected() && tier === 'navbharat' && freeChainContext) {
+    if (!isGatewayRouteSelected() && (tier === 'navbharat' || (fixedTextChainSelected() && tier === 'free')) && freeChainContext) {
       const { maybeFreeChain } = await import('./FreeChain/runtime');
       const chain = await maybeFreeChain({ message, history, systemPrompt, signal, context: freeChainContext });
       if (chain) return chain;
+    }
+    if (fixedTextChainSelected() && !isGatewayRouteSelected()) {
+      signal?.throwIfAborted();
+      throw new InferenceGatewayTerminalError('fixed-chain-ingress-authority-unavailable');
     }
     const ns = this.namespaceFor(tier);
     const fullPrompt = this.buildPrompt(message, history);
@@ -149,10 +155,14 @@ export class UniversalAIRouter {
     allowFreeChatHedge = false,
     freeChainContext?: FreeChainContext,
   ): Promise<StreamOutcome> {
-    if (!isGatewayRouteSelected() && tier === 'navbharat' && freeChainContext) {
+    if (!isGatewayRouteSelected() && (tier === 'navbharat' || (fixedTextChainSelected() && tier === 'free')) && freeChainContext) {
       const { maybeFreeChain } = await import('./FreeChain/runtime');
       const chain = await maybeFreeChain({ message, history, systemPrompt, signal, onChunk, context: freeChainContext });
       if (chain) return chain;
+    }
+    if (fixedTextChainSelected() && !isGatewayRouteSelected()) {
+      signal?.throwIfAborted();
+      throw new InferenceGatewayTerminalError('fixed-chain-ingress-authority-unavailable');
     }
     if (!isGatewayRouteSelected() && strictFreeRequired() && allowFreeChatHedge) {
       const result = await strictFreeChat({ prompt: this.buildPrompt(message, history), systemPrompt, onChunk, signal });

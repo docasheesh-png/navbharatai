@@ -2,6 +2,11 @@
 export function mitrifyBotError(status: number, payload: unknown): string {
   const code = payload && typeof payload === 'object' && 'code' in payload ? payload.code : undefined;
   const messages: Record<string, string> = {
+    MITRIFY_CONTINUATION_FUNDING_UNAVAILABLE: 'Continuation is unavailable until its spending limit is verified. Your partial answer is kept.',
+    MITRIFY_CONTINUATION_REVIEW_REQUIRED: 'Review the exact prompt and accumulated answer before continuing.',
+    MITRIFY_CONTINUATION_CONTEXT_LIMIT: 'The accumulated context is too long to continue. Nothing was trimmed or sent.',
+    MITRIFY_CONTINUATION_EXPIRED_OR_USED: 'This continuation expired or was already used. Your partial answer is kept.',
+    MITRIFY_CONTINUATION_ADMISSION_FAILED: 'Continuation could not be authorized. Your partial answer is kept; no automatic retry will run.',
     MITRIFY_CONFIGURATION: 'Mitrify server configuration is missing, invalid, or was rejected. Check the server key binding and gateway URL.',
     MITRIFY_BOT_FORBIDDEN: 'This session is not authorized for Mitrify. Sign in again with an allowed verified account.',
     MITRIFY_BOT_DISABLED: 'Mitrify is disabled on the server.',

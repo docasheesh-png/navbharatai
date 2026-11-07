@@ -49,6 +49,14 @@ describe('ordinary chat reaches the real gateway ingress context', () => {
     const failed = mockRes(); await handler(req, failed); expect(failed.statusCode).toBe(401);
     expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled(); expect(m.legacy).not.toHaveBeenCalled(); expect(m.document).not.toHaveBeenCalled();
   });
+  it('continuation authenticates and fails closed without production funding, regardless of caller flags', async () => {
+    vi.stubEnv('AI_BACKEND', 'mitrify'); vi.stubEnv('MITRIFY_CHAT_ACCOUNT_EMAIL', 'tester@example.invalid');
+    m.identity.mockResolvedValue({ uid: 'verified-user', email: 'tester@example.invalid', emailVerified: true });
+    const res = mockRes();
+    await captureRoutes(registerChatRoutes as any, () => {}).get('POST /api/chat/mitrify-bot/continue')!(mockReq({ body: { publicContentConfirmed: true, fundingApproved: true }, headers: { 'content-type': 'application/json' } }), res);
+    expect(res.statusCode).toBe(503); expect(res.body.code).toBe('MITRIFY_CONTINUATION_FUNDING_UNAVAILABLE');
+    expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled(); expect(m.legacy).not.toHaveBeenCalled();
+  });
   it('public-test configuration never pauses or switches ordinary chat', async () => {
     vi.stubEnv('AI_BACKEND', 'mitrify'); vi.stubEnv('MITRIFY_CHAT_ACCOUNT_EMAIL', 'tester@example.invalid');
     m.identity.mockResolvedValue({ uid: 'verified-user', email: 'tester@example.invalid', emailVerified: true });

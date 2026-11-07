@@ -1,5 +1,5 @@
 import { withFixedTextChainScope } from '../AI/fixedTextChain';
-import { mitrifyGuestTestTokenValid, runMitrifyGuestTest, MitrifyError, mitrifyPublicBotStatus, runMitrifyPublicBot, runMitrifyPublicTest, withMitrifyChatPrivacyBoundary } from '../lib/mitrify';
+import { runMitrifyContinuation, mitrifyGuestTestTokenValid, runMitrifyGuestTest, MitrifyError, mitrifyPublicBotStatus, runMitrifyPublicBot, runMitrifyPublicTest, withMitrifyChatPrivacyBoundary } from '../lib/mitrify';
 import { chatAvailabilityMessage } from '../lib/chatAvailabilityMessage';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../lib/chatReplyLanguage';
 import { FREE_CHAT_LANGUAGE_RULE, chatReplyLanguageInstruction } from '../lib/freeChatReplyLanguage';
@@ -158,7 +158,7 @@ export function registerChatRoutes(app: Express, chatLimiter: RateLimitRequestHa
     }
   });
   // Both visibility and dispatch verify the signed-in account on the server.
-  const publicBot = (send: boolean) => async (req: Request, res: Response) => {
+  const publicBot = (send: boolean, continuation = false) => async (req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'no-store');
     const controller = new AbortController();
     onClientGone(res, () => controller.abort());
@@ -168,7 +168,7 @@ export function registerChatRoutes(app: Express, chatLimiter: RateLimitRequestHa
         res.status(415).json({ error: 'Send application/json.' }); return;
       }
       const identify = () => verifyFirebaseIdentity(req);
-      const result = send ? await runMitrifyPublicBot({ body: req.body, identify, signal }) : await mitrifyPublicBotStatus(identify, signal);
+      const result = send && continuation ? await runMitrifyContinuation({ body: req.body, identify, signal }) : send ? await runMitrifyPublicBot({ body: req.body, identify, signal }) : await mitrifyPublicBotStatus(identify, signal);
       if (!res.destroyed && !res.writableEnded) res.json(result);
     } catch (error) {
       if (res.destroyed || res.writableEnded) return;
@@ -179,6 +179,8 @@ export function registerChatRoutes(app: Express, chatLimiter: RateLimitRequestHa
   };
   app.get('/api/chat/mitrify-bot', chatLimiter, publicBot(false));
   app.post('/api/chat/mitrify-bot', chatLimiter, publicBot(true));
+  // No production funding adapter: continuation fails closed until one is verified.
+  app.post('/api/chat/mitrify-bot/continue', chatLimiter, publicBot(true, true));
   // Separate, authenticated synthetic test. No live cost-admission adapter is wired.
   // Do not pass a client flag or local token estimate as proof of a gateway spending cap.
   app.post('/api/chat/mitrify-public-test', chatLimiter, async (req, res) => {

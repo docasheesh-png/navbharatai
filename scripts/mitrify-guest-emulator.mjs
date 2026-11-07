@@ -4,15 +4,16 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { createHash, randomUUID } from 'node:crypto';
 import { Firestore } from 'firebase-admin/firestore';
-import { runMitrifyGuestTest, mitrifyChainBinding, runApprovedMitrifyChain } from '../src/server/lib/mitrify.ts';
+import { runMitrifyPublicBot, runMitrifyContinuation, runMitrifyGuestTest, mitrifyChainBinding, runApprovedMitrifyChain } from '../src/server/lib/mitrify.ts';
 
 // Never contact real Firestore or a gateway. Must be an explicitly selected loopback emulator.
 if (!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST || '')) {
   console.error('A loopback Firestore emulator is required.'); process.exit(1);
 }
-let upstreamCalls = 0;
+let upstreamCalls = 0; let continuationPhase = false;
+const continuationRefs = [];
 const server = createServer((_req, res) => { upstreamCalls++;
-  res.setHeader('Content-Type', 'application/json'); res.end('{"choices":[{"message":{"content":"4"}}]}'); });
+  res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: '4' }, ...(continuationPhase ? { finish_reason: 'length' } : {}) }] })); });
 server.listen(0, '127.0.0.1'); await once(server, 'listening');
 const dbs = [0, 1].map(() => new Firestore({ projectId: 'demo-navbharatai-phase2' }));
 const campaignId = randomUUID();
@@ -57,6 +58,22 @@ try {
   assert.equal(approved.filter(r => r.kind === 'response').length, 1);
   assert.equal(reservations, 1); assert.equal(upstreamCalls, 3);
   assert.equal((await approvalRef.get()).data().attemptsStarted, 1);
+  continuationPhase = true;
+  let continuationFunding = 0;
+  const botEnv = { ...env, MITRIFY_BOT_ACCESS: 'verified' };
+  const identify = async () => ({ uid: 'emulator-public-user', email: 'public@example.invalid', emailVerified: true });
+  const admission = { runOnce: async (_claim, execute) => { continuationFunding++; return execute(); } }; // Mock funding only.
+  const first = await runMitrifyPublicBot({ identify, signal: AbortSignal.timeout(30000), continuation: { db: dbs[0], admission },
+    body: { message: 'Explain rainbows.', publicContentConfirmed: true } }, botEnv, () => {});
+  continuationRefs.push(dbs[0].doc(`mitrify_bot_continuations/${first.continuation.ticket}`));
+  const continued = await Promise.allSettled(Array.from({ length: 10 }, (_, i) => runMitrifyContinuation({ identify, signal: AbortSignal.timeout(30000),
+    continuation: { db: dbs[i % 2], admission }, body: { ticket: first.continuation.ticket, prompt: 'Explain rainbows.', answer: first.reply,
+      reviewedInstruction: first.continuation.instruction, publicContentConfirmed: true } }, botEnv, () => {})));
+  assert.equal(continued.filter(r => r.status === 'fulfilled').length, 1);
+  const next = continued.find(r => r.status === 'fulfilled').value;
+  continuationRefs.push(dbs[0].doc(`mitrify_bot_continuations/${next.continuation.ticket}`));
+  assert.equal(continuationFunding, 1); assert.equal(upstreamCalls, 5);
+  console.log('PASS: two real Firestore clients claim one continuation; one funding callback and one HTTP attempt.');
   console.log('PASS: two real Firestore clients allow one exact public approval claim and one monetary reservation.');
   console.log('PASS: two Firestore clients share immutable admission; replay/revocation deny dispatch.');
 } catch {
@@ -64,6 +81,7 @@ try {
 } finally {
   await dbs[0].recursiveDelete(ref);
   await approvalRef.delete();
+  await Promise.all(continuationRefs.map(ref => ref.delete()));
   await Promise.all(dbs.map(db => db.terminate()));
   server.closeAllConnections(); server.close();
 }

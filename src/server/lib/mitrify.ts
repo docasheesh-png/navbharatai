@@ -256,7 +256,7 @@ export async function runMitrifyPublicBot(options: { body: unknown; identify: Id
 
 function mitrifyBotOutputTokens(env: Env): number {
   // Output allowance is not monetary authorization or a model capability claim.
-  const n = env.MITRIFY_BOT_MAX_OUTPUT_TOKENS?.trim() ? Number(env.MITRIFY_BOT_MAX_OUTPUT_TOKENS) : 2048;
+  const n = env.MITRIFY_BOT_MAX_OUTPUT_TOKENS?.trim() ? Number(env.MITRIFY_BOT_MAX_OUTPUT_TOKENS) : 8192;
   if (!Number.isSafeInteger(n) || n < 1 || n > 32768) throw new MitrifyError('MITRIFY_CONFIGURATION', 503);
   return n;
 }

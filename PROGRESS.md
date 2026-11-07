@@ -100794,3 +100794,21 @@ Full local coverage exposed three existing professional conversation contract as
   credential, production setting, main chain, guest test or Builder was changed.
 - Offline tests cover races, replay, privacy/account checks, bounds, cancellation,
   funding denial and revalidation. Required gate results are recorded in the PR.
+
+## 2026-11-07 — More room for long public Mitrify answers
+
+The separate bot still defaulted to 2,048 output tokens after the first truncation
+fix. That application allowance can end a long Hindi answer before the requested
+line count. Raise only the unset/blank default to 8,192; preserve explicit operator
+values (including 2,048), the finite 32,768 configuration ceiling, existing supplier
+errors, deadlines, cancellation, privacy gates and monetary controls. This is an
+application allowance, not evidence that every gateway-selected model supports it
+or a promise of unlimited output. No automatic continuation/replay is added.
+
+Mock regressions preserve all 100 Hindi lines and their exact prompt, assert the
+8,192-token request, and retain length/incomplete status and unavailable continuation
+when funding is unverified. A component test preserves the final line. Existing
+broken-body, timeout/cancellation and gateway error tests remain applicable. Actual
+production override/model capability and live behavior are unverified: no permitted
+runtime identity or new gateway evidence is available. No paid requests or production
+configuration changes were made. Required aggregate validation is pending.

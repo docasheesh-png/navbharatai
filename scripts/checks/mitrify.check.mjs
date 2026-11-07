@@ -76,7 +76,7 @@ test('typed public text is sent unchanged, alone, only after explicit confirmati
   assert.equal(f.requests.length, 0);
   assert.deepEqual(await send({ message, publicContentConfirmed: true }), { reply: 'Hello', completion: 'complete' });
   assert.deepEqual(f.requests[0].body.messages, [{ role: 'user', content: message }]);
-  assert.equal(f.requests[0].body.max_tokens, 2048);
+  assert.equal(f.requests[0].body.max_tokens, 8192);
   assert.equal(JSON.stringify(f.logs).includes(message), false);
   assert.equal(JSON.stringify(f.requests[0].body).includes('local-only'), false);
 });
@@ -123,7 +123,7 @@ test('separate bot sends only server public text and rejects any private fields'
   }
   assert.equal(f.requests.length, 0);
   assert.deepEqual(await runMitrifyPublicBot({ body: { questionId: 'arithmetic' }, identify, signal: f.signal }, env, metadata => f.logs.push(metadata)), { reply: 'Hello', completion: 'complete' });
-  assert.deepEqual(f.requests[0].body, { messages: [{ role: 'user', content: 'What is 2 + 2? Reply with only the number.' }], max_tokens: 2048, stream: false, model: 'mitrify/auto-cheap' });
+  assert.deepEqual(f.requests[0].body, { messages: [{ role: 'user', content: 'What is 2 + 2? Reply with only the number.' }], max_tokens: 8192, stream: false, model: 'mitrify/auto-cheap' });
   assert.equal(JSON.stringify(f.requests[0].body).includes('private-local-uid'), false);
   assert.equal(JSON.stringify(f.logs).includes(env.MITRIFY_CHAT_ACCOUNT_EMAIL), false);
 });
@@ -937,7 +937,7 @@ for (const [reason, completion] of [['stop', 'complete'], ['length', 'length'], 
       identify: async () => ({ uid: 'tester', email: env.MITRIFY_CHAT_ACCOUNT_EMAIL, emailVerified: true }), signal: f.signal }, env, () => {});
     assert.deepEqual(result, { reply: answer, completion, ...(completion === 'length' ? { continuation: { available: false, reason: 'funding-unavailable' } } : {}) });
     assert.equal(f.requests.length, 1);
-    assert.equal(f.requests[0].body.max_tokens, 2048);
+    assert.equal(f.requests[0].body.max_tokens, 8192);
     assert.equal(f.requests[0].body.stream, false);
     assert.deepEqual(f.requests[0].body.messages, [{ role: 'user', content: 'Explain the solar system.' }]);
   });
@@ -969,11 +969,11 @@ test('separate bot rejects a broken non-streaming response rather than presentin
 
 test('separate bot output allowance is server configured and finite; browser cannot increase it', async t => {
   const f = await fixture(t, (_req, res) => reply(res));
-  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid', MITRIFY_BOT_MAX_OUTPUT_TOKENS: '8192' };
+  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid', MITRIFY_BOT_MAX_OUTPUT_TOKENS: '2048' };
   const options = { body: { message: 'Explain rainbows.', publicContentConfirmed: true },
     identify: async () => ({ uid: 'tester', email: env.MITRIFY_CHAT_ACCOUNT_EMAIL, emailVerified: true }), signal: f.signal };
   assert.equal((await runMitrifyPublicBot(options, env, () => {})).completion, 'complete');
-  assert.equal(f.requests[0].body.max_tokens, 8192);
+  assert.equal(f.requests[0].body.max_tokens, 2048);
   for (const value of ['Infinity', 'unlimited', '0', '-1', '32769', '2.5', 'NaN']) {
     await assert.rejects(runMitrifyPublicBot(options, { ...env, MITRIFY_BOT_MAX_OUTPUT_TOKENS: value }, () => {}), { code: 'MITRIFY_CONFIGURATION' });
   }
@@ -1110,3 +1110,25 @@ test('even a duplicate execution callback cannot dispatch a second continuation'
   };
   await c.send(c.body(first)); assert.equal(f.requests.length, 2);
 });
+
+
+for (const reason of ['stop', 'length']) {
+  test(`100-line Hindi public reply is preserved exactly with finish reason ${reason}`, async t => {
+    const prompt = 'प्रकृति पर हिंदी में 100 पंक्तियों का गीत लिखें।';
+    const answer = Array.from({ length: 100 }, (_, i) => `${i + 1}. नीले गगन में सूरज चमके, हरी धरा पर जीवन दमके।`).join('\n');
+    const f = await fixture(t, (_req, res) => {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ choices: [{ message: { content: answer }, finish_reason: reason }] }));
+    });
+    const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' };
+    const result = await runMitrifyPublicBot({ body: { message: prompt, publicContentConfirmed: true },
+      identify: async () => ({ uid: 'tester', email: env.MITRIFY_CHAT_ACCOUNT_EMAIL, emailVerified: true }), signal: f.signal }, env, () => {});
+    assert.equal(result.reply, answer);
+    assert.equal(result.reply.split('\n').length, 100);
+    assert.equal(result.completion, reason === 'stop' ? 'complete' : 'length');
+    assert.equal(f.requests.length, 1);
+    assert.equal(f.requests[0].body.max_tokens, 8192);
+    assert.deepEqual(f.requests[0].body.messages, [{ role: 'user', content: prompt }]);
+    if (reason === 'length') assert.deepEqual(result.continuation, { available: false, reason: 'funding-unavailable' });
+  });
+}

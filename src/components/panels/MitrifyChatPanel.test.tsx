@@ -48,3 +48,12 @@ describe('explicit continuation review', () => {
     expect(continuationUnavailable({ reason: 'funding-unavailable' })).toContain('spending limit');
   });
 });
+
+
+it('renders all 100 Hindi lines through the final line without clipping', () => {
+  const answer = Array.from({ length: 100 }, (_, i) => `${i + 1}. नीले गगन में सूरज चमके, हरी धरा पर जीवन दमके।`).join('\n');
+  const html = renderToStaticMarkup(<MitrifyReply text={answer} completion="complete" />);
+  expect(html).toContain(answer);
+  expect(html).toContain('100. नीले गगन');
+  expect(html).not.toMatch(/line-clamp|truncate|max-height/);
+});

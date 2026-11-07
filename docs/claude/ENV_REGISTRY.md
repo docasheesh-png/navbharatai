@@ -4896,3 +4896,12 @@ No live deployment or provider switch is changed by the code default.
 - `MITRIFY_BOT_ACCESS`: server-only, defaults to `selected` when unset/blank. `verified` admits all signed-in accounts with a verified, nonempty email; this is not anonymous access. Unknown values fail closed.
 - Selected mode retains `MITRIFY_CHAT_ACCOUNT_EMAIL` as default/rollback. Verified mode ignores that selector only for bot visibility/dispatch. The existing INR diagnostic remains selected-account-only. Backend-off behavior, rate limits, confirmation/privacy checks and main chat stay unchanged.
 - No production switch or credential change. Public activation/live load tests remain pending authorized runtime access and the applicable total-spend safeguards; see `docs/mitrify.md`.
+
+### 2026-11-07 — Controlled Mitrify guest campaign
+
+Server-only `MITRIFY_GUEST_TEST_ENABLED` (off unless exactly `1`),
+`MITRIFY_GUEST_TEST_CAMPAIGN` (no default), and `MITRIFY_GUEST_TEST_TOKEN` (no default,
+secret control token distinct from the gateway credential) gate an isolated
+synthetic guest endpoint. `MITRIFY_GUEST_TEST_TARGET` is an operator-runner origin,
+not an app setting. No values are configured by this change. See docs/mitrify.md
+for expiring shared admission, inclusive spend prerequisite and rollback.

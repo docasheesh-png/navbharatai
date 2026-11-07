@@ -245,3 +245,77 @@ is 60 seconds. A 1000-request client burst is not proof of 1000 concurrent upstr
 requests. Measure actual concurrency, queueing, status, latency, retries and total
 charges. Loopback mock timings establish no production capacity. Use only fixed
 synthetic public text; never profile/history/health/payment/personal data.
+
+## Controlled synthetic guest campaign (default off)
+
+`POST /api/v1/chat/mitrify-guest-test` tests requests without Firebase login. It is
+not a public chatbot, and it does not change main chat or bot account access. The
+only accepted body is `{ "batch": 10, "slot": 0 }`, with batch 10, 100 or 1000 and
+an integer slot from zero through batch minus one. Every call sends the same
+server-owned arithmetic question, with no profile, history, personal data or
+caller-selected parameters. There is no direct-provider fallback.
+
+Activation requires all of the following, provisioned by an authorized operator;
+this change provisions none of them:
+
+- `AI_BACKEND=mitrify` and the existing securely bound gateway configuration.
+- `MITRIFY_GUEST_TEST_ENABLED=1`; unset/other values deny admission.
+- `MITRIFY_GUEST_TEST_CAMPAIGN`: a unique identifier of 1–64 letters, digits,
+  underscores or hyphens.
+- `MITRIFY_GUEST_TEST_TOKEN`: a separate high-entropy control token, 32–512
+  characters. This is not the gateway key; never put either in a URL, browser
+  bundle, repository, logs or chat. Clients send the control token only in
+  `X-Mitrify-Test-Token`.
+- An Admin-SDK-only Firestore document `mitrify_test_campaigns/<campaign>` with
+  `enabled: true`, integer `createdAtMs`/`expiresAtMs` defining at most one hour,
+  exact `baseURL` and `model`, SHA-256 `credentialFingerprint` and
+  `tokenFingerprint`, `hardCapConfirmed: true`, `includesAllCharges: true`, and
+  finite `maxTotalUsd` greater than zero and at most 10. Existing default-deny
+  Firestore rules protect this collection and its claims from all clients.
+
+The document records operator confirmation of an already enforced inclusive
+spending limit on that exact gateway credential. It does not create, verify at
+Mitrify, or replace a monetary limit. Confirm the key binding and applicable
+remaining allowance through authorized runtime access before provisioning. Do
+not reset/increase the gateway limit or allow other spending outside the total
+approved ceiling during a campaign. No live adapter reads or modifies gateway
+billing settings.
+
+Each `(batch, slot)` is claimed atomically in a shared Firestore transaction
+before dispatch. The 1110 possible slots are the shared request bound across
+instances. There are no refunds after failure, cancellation or ambiguous commit;
+replays return 409. Store errors, expired/disabled campaigns and configuration
+mismatches fail closed. Transport retries remain within the same claim and must
+be covered by the gateway monetary ceiling. Never delete claim documents or
+reuse a campaign to rerun a batch. Expiry bounds admission and aborts active
+requests; already incurred charges remain chargeable.
+
+Invalid control tokens retain the existing guest/IP rate limiter. Authorized
+campaign requests use their shared slot bound instead of the ordinary 20/minute
+chat limit **only on this isolated test endpoint**. All existing chat limits stay
+unchanged. A stolen control token can consume the campaign's remaining slots;
+keep it private and revoke admission by disabling the flag or campaign record.
+Already admitted work may still complete until cancellation/expiry.
+
+`scripts/mitrify-guest-load.mjs` accepts the NavBharatAI origin in
+`MITRIFY_GUEST_TEST_TARGET` and the control token securely from the environment.
+It starts each batch behind a single barrier, waits for that batch, then starts
+the next; it never retries HTTP requests itself. It prints counts/statuses,
+latencies, launch spread and peak pending client requests only. Status `0` means a
+local network, timeout or response-read failure, not an HTTP status. A configuration,
+authorization, replay or 503 admission failure stops larger batches. It sends no
+login cookie or Firebase token. A 65-second client timeout does not refund a
+claim. The script cannot provision or enable the campaign and should run only
+from an authorized environment with permitted destination access.
+
+Client concurrency is not upstream concurrency: the server transport still has
+its 200-active per-process default queue and deadline. Test results include
+admission/storage/transport latency. Actual upstream activity and charges require
+safe operator telemetry. Local mock results do not establish production capacity.
+Rollback: unset `MITRIFY_GUEST_TEST_ENABLED` and disable the campaign record.
+
+Local shared-admission check: with a loopback Firestore emulator running, execute
+`node --experimental-strip-types scripts/mitrify-guest-emulator.mjs`. It uses a
+demo project, ephemeral mock credentials and a loopback gateway, never production.
+It exercises concurrent replay through two independent Firestore clients, unique
+slot admission and revocation.

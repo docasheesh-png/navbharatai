@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 // This suite isolates routing/identity; shared quota admission is tested separately.
 vi.mock('../../lib/freeAnswerQuota', () => ({ withFreeAnswerQuota: (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(), assertFreeAnswerActive: () => {}, markFreeAnswer: () => {}, freeAnswerSignal: () => undefined }));
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -233,4 +234,43 @@ describe('unauthenticated Free traffic cannot escape selected admission', () => 
   expect(m.legacy).not.toHaveBeenCalled(); expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled();
   expect(m.vision).not.toHaveBeenCalled(); expect(m.live).not.toHaveBeenCalled(); expect(m.document).not.toHaveBeenCalled();
  });
+});
+
+
+describe('isolated synthetic guest load route', () => {
+  const guestRoute = () => captureRoutes(registerChatRoutes as any, () => {}).get('POST /api/chat/mitrify-guest-test')!;
+  it('denies guests by default without consulting identity or providers', async () => {
+    vi.stubEnv('MITRIFY_GUEST_TEST_ENABLED', '');
+    const res = mockRes();
+    await guestRoute()(mockReq({ body: { batch: 10, slot: 0 }, headers: { 'content-type': 'application/json' } }), res);
+    expect(res.statusCode).toBe(403); expect(m.identity).not.toHaveBeenCalled(); expect(m.detailed).not.toHaveBeenCalled();
+  });
+  it('a valid control token needs shared runtime admission, not Firebase login', async () => {
+    const token = randomUUID();
+    vi.stubEnv('MITRIFY_GUEST_TEST_ENABLED', '1'); vi.stubEnv('MITRIFY_GUEST_TEST_TOKEN', token);
+    const res = mockRes();
+    await guestRoute()(mockReq({ body: { batch: 10, slot: 0 }, headers: { 'content-type': 'application/json', 'x-mitrify-test-token': token } }), res);
+    expect(res.statusCode).toBe(503); expect(m.identity).not.toHaveBeenCalled(); expect(m.detailed).not.toHaveBeenCalled();
+  });
+  it('sanitizes infrastructure failures and never exposes a control token', async () => {
+    const token = randomUUID();
+    vi.spyOn(mitrify, 'runMitrifyGuestTest').mockRejectedValue(new Error(token));
+    const res = mockRes();
+    await guestRoute()(mockReq({ body: {}, headers: { 'content-type': 'application/json' } }), res);
+    expect(res.statusCode).toBe(503); expect(JSON.stringify(res.body)).not.toContain(token);
+    expect(res.body).toEqual({ code: 'MITRIFY_GUEST_TEST_UNAVAILABLE' });
+  });
+  it('keeps ordinary chat middleware and rate-limits invalid campaign credentials', () => {
+    const routes = new Map<string, any[]>();
+    const app: any = {};
+    for (const method of ['get', 'post', 'put', 'delete', 'patch', 'all', 'options']) app[method] = (path: string, ...handlers: any[]) => routes.set(`${method} ${path}`, handlers);
+    app.use = () => {};
+    const limiter = vi.fn(); registerChatRoutes(app, limiter as any);
+    expect(routes.get('post /api/chat/mitrify-bot')![0]).toBe(limiter);
+    const gate = routes.get('post /api/chat/mitrify-guest-test')![0]; const next = vi.fn();
+    gate(mockReq(), mockRes(), next); expect(limiter).toHaveBeenCalledTimes(1); expect(next).not.toHaveBeenCalled();
+    const token = randomUUID(); vi.stubEnv('MITRIFY_GUEST_TEST_ENABLED', '1'); vi.stubEnv('MITRIFY_GUEST_TEST_TOKEN', token);
+    gate(mockReq({ headers: { 'x-mitrify-test-token': token } }), mockRes(), next);
+    expect(next).toHaveBeenCalledTimes(1); expect(limiter).toHaveBeenCalledTimes(1);
+  });
 });

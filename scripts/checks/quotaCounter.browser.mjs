@@ -101,6 +101,13 @@ try {
     await page.evaluate(() => window.fixture.setVisible(true)); await counter().waitFor();
     assert.equal(await counter().getAttribute('aria-expanded'), 'false');
   }
+  await page.setViewportSize({width:320,height:320}); await page.goto(url); await counter().waitFor();
+  await page.evaluate(() => {const s=document.documentElement.style;s.setProperty('--nb-safe-top','59px');s.setProperty('--nb-safe-bottom','34px');s.setProperty('--nb-bottom-nav','90px');});
+  await counter().click(); await dialog().waitFor();
+  const safeBox=await dialog().boundingBox(); assert(safeBox.y>=59); assert(safeBox.y+safeBox.height<=230, 'dialog clears bottom navigation on short screens');
+  await dialog().evaluate(el=>{el.scrollTop=100;});
+  assert.equal(await dialog().count(),1,'scrolling inside details does not dismiss');
+  await page.screenshot({path:join(output,'mobile-safe-areas.png')});
   assert.deepEqual(errors, []); await writeFile(join(output,'results.json'), JSON.stringify({passed:true,widths:[320,390,768,1280],externalRequestsAllowed:false},null,2));
   console.log('PASS: quota counts, keyboard/focus, toggle/outside dismissal, refresh, navigation/unmount, mobile layout and unchanged chat area.');
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); await rm(scratch,{recursive:true,force:true}); }

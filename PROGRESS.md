@@ -100877,3 +100877,11 @@ and the regression passes. Screenshot Library downloads failed for both supplied
 files, including one bounded retry; their original pixels were not viewed locally.
 Local fixture screenshots were viewed and show the compact header and overlay.
 Full required checks are pending. No paid requests or production settings changed.
+
+The first aggregate run found one genuine integration failure: the new dialog
+omitted the shared sheet safe-area/bottom-navigation geometry contract. Adopt
+nb-sheet-overlay and nb-sheet; retain safe top padding when anchoring below the
+counter, and reserve the bottom bar instead of overriding the contract. The 101
+targeted UI/quota/sheet tests pass; browser coverage now includes a short 320px
+viewport with a 59px notch and 90px bottom-nav reservation. No baseline or test
+threshold was weakened. Re-running the full required checks on this correction.

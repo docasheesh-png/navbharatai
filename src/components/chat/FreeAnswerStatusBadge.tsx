@@ -55,9 +55,9 @@ export function FreeAnswerStatusCounter({ status }: { status: FreeAnswerStatus |
       className="shrink-0 max-w-28 truncate rounded-full border border-line bg-raised px-2.5 py-1 text-xs font-medium tabular-nums text-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
       {status ? `${status.remaining}/${status.limit}` : '—/—'}
     </button>
-    {open && createPortal(<div className="fixed inset-0 z-[100] flex items-start justify-center px-4 pointer-events-none" style={{ paddingTop: top }}>
-      <div ref={details} id={id} role="dialog" aria-label="Free daily quota details" tabIndex={-1} style={{ maxHeight: `calc(100dvh - ${top + 16}px)` }}
-        className="pointer-events-auto w-full max-w-sm overflow-y-auto rounded-xl border border-line bg-surface p-4 text-sm text-ink shadow-xl break-words">
+    {open && createPortal(<div className="nb-sheet-overlay fixed inset-0 z-[100] flex items-start justify-center pointer-events-none" style={{ paddingTop: `max(${top}px, 1rem, var(--nb-safe-top))` }}>
+      <div ref={details} id={id} role="dialog" aria-label="Free daily quota details" tabIndex={-1}
+        className="nb-sheet pointer-events-auto w-full max-w-sm overflow-y-auto rounded-xl border border-line bg-surface p-4 text-sm text-ink shadow-xl break-words">
         <div className="flex items-center justify-between gap-3 mb-2"><strong>Free daily quota</strong>
           <button type="button" onClick={close} aria-label="Close quota details" className="rounded px-2 py-1 hover:bg-raised focus-visible:ring-2 focus-visible:ring-indigo-500">×</button>
         </div>

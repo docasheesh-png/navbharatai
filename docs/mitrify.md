@@ -54,9 +54,9 @@ can miss sensitive text and can reject benign text. Do not claim foolproof detec
 POST accepts exactly `message` and `publicContentConfirmed: true`; extra fields,
 profile, history, files and caller parameters are rejected by this new-message endpoint. The reviewed message
 is sent unchanged as the only message, with the configured model alias,
-non-streaming flag and a 2,048-token default output allowance.
+non-streaming flag and a 8,192-token default output allowance.
 `MITRIFY_BOT_MAX_OUTPUT_TOKENS` can select an integer from 1 to 32,768 on the
-server; blank/unset uses 2,048. This application ceiling does not establish the
+server; blank/unset uses 8,192. This application ceiling does not establish the
 selected model’s supported maximum. Use a value supported by the gateway policy;
 models still have finite context/output limits. Invalid or infinite values fail
 closed. Browser parameters cannot override this setting. No account identity or previous

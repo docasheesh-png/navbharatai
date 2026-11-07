@@ -50,6 +50,14 @@ describe('explicit continuation review', () => {
 });
 
 
+it('renders all 100 Hindi lines through the final line without clipping', () => {
+  const answer = Array.from({ length: 100 }, (_, i) => `${i + 1}. नीले गगन में सूरज चमके, हरी धरा पर जीवन दमके।`).join('\n');
+  const html = renderToStaticMarkup(<MitrifyReply text={answer} completion="complete" />);
+  expect(html).toContain(answer);
+  expect(html).toContain('100. नीले गगन');
+  expect(html).not.toMatch(/line-clamp|truncate|max-height/);
+});
+
 describe('concise message privacy confirmation', () => {
   it('keeps explicit unchecked confirmation and disclosure without the verbose label', () => {
     const html = renderToStaticMarkup(<MitrifyChatPanel uid="local-test" access={{ available: true, questions: [] }} />);

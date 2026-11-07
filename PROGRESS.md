@@ -100795,6 +100795,34 @@ Full local coverage exposed three existing professional conversation contract as
 - Offline tests cover races, replay, privacy/account checks, bounds, cancellation,
   funding denial and revalidation. Required gate results are recorded in the PR.
 
+## 2026-11-07 — More room for long public Mitrify answers
+
+The separate bot still defaulted to 2,048 output tokens after the first truncation
+fix. That application allowance can end a long Hindi answer before the requested
+line count. Raise only the unset/blank default to 8,192; preserve explicit operator
+values (including 2,048), the finite 32,768 configuration ceiling, existing supplier
+errors, deadlines, cancellation, privacy gates and monetary controls. This is an
+application allowance, not evidence that every gateway-selected model supports it
+or a promise of unlimited output. No automatic continuation/replay is added.
+
+Mock regressions preserve all 100 Hindi lines and their exact prompt, assert the
+8,192-token request, and retain length/incomplete status and unavailable continuation
+when funding is unverified. A component test preserves the final line. Existing
+broken-body, timeout/cancellation and gateway error tests remain applicable. Actual
+production override/model capability and live behavior are unverified: no permitted
+runtime identity or new gateway evidence is available. No paid requests or production
+configuration changes were made. Required aggregate validation is pending.
+
+Long-answer validation completed: 3,239 suites / 48,728 tests passed, 89 skipped,
+coverage gate passed; 111 offline transport checks, 12 targeted UI/privacy checks,
+and all six emulator drill groups passed. Security, type, build, bundle, boot and
+production-dependency gates passed. Reverting the default to 2,048 makes the new
+Hindi regression fail; restoring 8,192 passes. Node 22.23.4/npm 11.18.0 match CI;
+Java is Debian OpenJDK 21 versus hosted Temurin 21. Missing-key smoke exits 1 as
+expected. Draft PR creation was denied by automatic approval review for missing
+branch-specific publication approval; GitHub lookup confirmed no PR was created.
+No retry or alternate publication route was used. Live behavior/configuration
+remains unverified; the default does not override an explicit Cloud Run setting.
 ## 2026-11-07 — Concise Mitrify message confirmation
 
 The reported long sentence originated only in the separate bot's checkbox label;
@@ -100817,3 +100845,12 @@ local Java is Debian OpenJDK 21, while CI uses Temurin 21. Missing-key smoke exi
 1 as expected without an inference call. Draft PR creation was rejected by
 automatic approval review for lack of branch-specific publication approval; a
 read-only lookup confirmed no PR was created. No bypass/retry was attempted.
+
+## 2026-11-07 — Resolve #4103 after #4102 merged
+
+Merged main 5f5661d43 into the long-answer branch. The sole conflict was adjacent
+additions in MitrifyChatPanel.test.tsx; retain both the 100-line Hindi rendering
+regression and concise affirmative privacy-confirmation regressions. The concise
+checkbox and 8,192-token default are both preserved, along with both documentation
+entries. Combined targeted tests pass (14); full required validation is running.
+No provider calls or production configuration changes were made.

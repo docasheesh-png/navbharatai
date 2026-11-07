@@ -95,11 +95,12 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
       {/* NBI Chat column */}
       <div className="flex-1 flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0">
         {/* A quiet title bar (admin 2026-10-13, "claude jaisa"): the name in the serif, no caps, no ping. */}
-        <div className="flex items-center justify-between px-4 py-2 border-b border-line text-sm text-muted">
+        <div className="flex shrink-0 items-center justify-between gap-2 px-4 py-2 border-b border-line text-sm text-muted">
           <div className="flex items-center gap-2">
             <span className={SURFACE_TITLE_CLASS}>{COPY.branding.aiChatName}</span>
           </div>
           <div className="flex items-center gap-2">
+            <FreeAnswerStatusBadge compact key={`${user?.uid ?? 'guest'}:${currentSessionId}`} />
             {/* START A NEW CHAT (admin 2026-08-23: "free me new chat kaise start hogi? koi option
                 banaya hai? nahi banaya hai").
 
@@ -133,7 +134,6 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
             </button>
           </div>
         </div>
-        <FreeAnswerStatusBadge />
         <AIChat
           messages={messages}
           // The greeting addresses the account by its first name (chat/greetingText.ts).

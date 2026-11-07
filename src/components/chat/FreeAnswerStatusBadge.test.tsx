@@ -17,3 +17,20 @@ describe('shared Free daily badge', () => {
     expect(state.hook).toHaveBeenLastCalledWith(false);
   });
 });
+
+it.each([[47, 50], [8, 10], [0, 20], [0, 0]])('compact counter shows %s/%s from entitlement without a banner', (remaining, limit) => {
+  state.value = { limit, remaining, used: limit - remaining, reserved: 0, inProgress: false };
+  const html = renderToStaticMarkup(<FreeAnswerStatusBadge compact />);
+  expect(html).toContain(`>${remaining}/${limit}</button>`);
+  expect(html).toContain('aria-expanded="false"');
+  expect(html).toContain('aria-haspopup="dialog"');
+  expect(html).not.toContain('Shared Free daily ceiling:');
+  expect(html).not.toContain('role="dialog"');
+});
+it('compact unavailable state never invents a quota', () => {
+  state.value = null;
+  const html = renderToStaticMarkup(<FreeAnswerStatusBadge compact />);
+  expect(html).toContain('—/—');
+  expect(html).toContain('Status unavailable');
+  expect(html).not.toContain('/50');
+});

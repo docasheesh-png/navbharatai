@@ -100854,3 +100854,34 @@ regression and concise affirmative privacy-confirmation regressions. The concise
 checkbox and 8,192-token default are both preserved, along with both documentation
 entries. Combined targeted tests pass (14); full required validation is running.
 No provider calls or production configuration changes were made.
+
+## 2026-11-07 — Compact ordinary-chat quota details
+
+The shared daily quota banner occupied a separate flex row below AI Chat's title.
+Ordinary AI Chat now renders the same server-derived remaining/limit as a compact
+button between the title and New chat. Details use a non-modal portal overlay,
+with outside-pointer/focus dismissal, toggle, Escape, explicit close, keyboard
+exit and focus restoration. Session/account keys and unmount clean up the overlay.
+Professional and exam screens retain the original badge. Quota accounting, hook,
+reset text, provider routing, auth and paid admission are unchanged. The existing
+status contract is finite counts or null; null remains unavailable (—/—), never
+an invented /50 or unlimited state.
+
+Static regressions cover changing entitlement, zero/exhausted and unavailable
+counts. An offline Chromium test renders the actual panel header and quota control
+with mocked chat/API data at 320, 390, 768 and 1280 pixels: counts, refreshed details,
+repeated taps, keyboard/focus, outside dismissal, session/navigation cleanup and no
+horizontal overflow or lost chat space. First browser run found Tab could leave
+an overlay open toward browser chrome; the boundary now closes and restores focus,
+and the regression passes. Screenshot Library downloads failed for both supplied
+files, including one bounded retry; their original pixels were not viewed locally.
+Local fixture screenshots were viewed and show the compact header and overlay.
+Full required checks are pending. No paid requests or production settings changed.
+
+The first aggregate run found one genuine integration failure: the new dialog
+omitted the shared sheet safe-area/bottom-navigation geometry contract. Adopt
+nb-sheet-overlay and nb-sheet; retain safe top padding when anchoring below the
+counter, and reserve the bottom bar instead of overriding the contract. The 101
+targeted UI/quota/sheet tests pass; browser coverage now includes a short 320px
+viewport with a 59px notch and 90px bottom-nav reservation. No baseline or test
+threshold was weakened. Re-running the full required checks on this correction.

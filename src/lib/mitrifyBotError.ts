@@ -3,7 +3,7 @@ export function mitrifyBotError(status: number, payload: unknown): string {
   const code = payload && typeof payload === 'object' && 'code' in payload ? payload.code : undefined;
   const messages: Record<string, string> = {
     MITRIFY_CONFIGURATION: 'Mitrify server configuration is missing, invalid, or was rejected. Check the server key binding and gateway URL.',
-    MITRIFY_BOT_FORBIDDEN: 'This session is not authorized for Mitrify. Sign in again with the selected verified account.',
+    MITRIFY_BOT_FORBIDDEN: 'This session is not authorized for Mitrify. Sign in again with an allowed verified account.',
     MITRIFY_BOT_DISABLED: 'Mitrify is disabled on the server.',
     MITRIFY_BOT_REVIEW_REQUIRED: 'Review and confirm one public message of up to 2000 characters before sending.',
     MITRIFY_BOT_SENSITIVE_CONTENT: 'This message may contain sensitive information and was not sent. Remove it or use the existing chat instead.',

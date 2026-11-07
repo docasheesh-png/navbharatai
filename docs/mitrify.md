@@ -22,13 +22,25 @@ keyword detector, missing profile or empty history bypasses this boundary. A fut
 review must establish trusted provenance for the whole request before connecting
 the low-level transport. Do not downgrade the health classification to enable it.
 
-## Separate account-only text chatbot
+## Separate authenticated text chatbot
 
 The sidebar's **Mitrify chat** entry appears only after the server authorizes the
-signed-in, email-verified account against `MITRIFY_CHAT_ACCOUNT_EMAIL`. Both GET
-and POST `/api/v1/chat/mitrify-bot` verify identity; hiding the UI is not the access
-control. The selector has no default, accepts one email (not a comma-separated
-list), and is never shipped to the browser. Other accounts receive 403.
+signed-in, email-verified account. Both GET and POST `/api/v1/chat/mitrify-bot`
+verify identity; hiding the UI is not the access control.
+
+`MITRIFY_BOT_ACCESS` defaults to `selected` (including unset/blank). This preserves
+`MITRIFY_CHAT_ACCOUNT_EMAIL`: exactly one verified email, never a comma-separated
+list. Missing selector denies access. `verified` permits all signed-in users with
+a verified, nonempty email; it ignores the selector for this bot only. Unknown
+mode values fail closed. This is not anonymous access: the client still requires
+login and the server still verifies identity. The separate operator diagnostic
+retains its selected-account and admission checks.
+
+Deploying this code does not enable broader access. Changing to `verified` is an
+operator activation step, pending authorized runtime access and the applicable
+spending safeguards. Roll back broader access with `MITRIFY_BOT_ACCESS=selected`
+and the existing selector; `AI_BACKEND=direct` disables bot sends for every account.
+The existing 20 requests/minute/account limiter is unchanged in both modes.
 
 The text box accepts up to 2000 characters. Before each send, the user must review
 and confirm that the message contains no health records, personal identifiers,
@@ -53,11 +65,11 @@ deadline apply. Error explanations are fixed local messages with bounded HTTP
 status, never raw gateway errors. Existing chat and App Builder remain unchanged.
 General health/clinical chat is still routed directly.
 
-To show the selected account's entry, configure its server-only email selector.
+In selected mode, configure the server-only email selector to show that account's entry.
 To allow sends, also set `AI_BACKEND=mitrify` and securely supply `MITRIFY_API_KEY`;
 URL/model defaults remain unchanged. Missing key or direct mode produces an
 unavailable state. Roll back sends with `AI_BACKEND=direct`; remove the selector
-to hide the entry. No production settings or credentials are changed by this code.
+to hide the entry in selected mode. No production settings or credentials are changed by this code.
 
 This user-operated bot can spend gateway credits when enabled and used. A token
 limit is not an INR cap. It does not implement wallet billing or claim a verified
@@ -107,7 +119,7 @@ complete through Mitrify. App Builder remains unchanged.
 Server environment only; never use a `VITE_` prefix or ship a key to a client:
 
 - `AI_BACKEND`: `direct` by default. `mitrify` enables the separate reviewed-text
-  bot for its configured account; all ordinary chat stays direct. The separate
+  bot for accounts authorized by its access mode; all ordinary chat stays direct. The separate
   fixed diagnostic still requires cost admission.
 - `AI_PROVIDER`: legacy alias, consulted only when `AI_BACKEND` is unset/blank. An
   explicit `AI_BACKEND` always wins, including rollback to `direct`; conflicting
@@ -117,8 +129,10 @@ Server environment only; never use a `VITE_` prefix or ship a key to a client:
 - `MITRIFY_BASE_URL`: defaults to `https://mitrify.com/v1`.
 - `MITRIFY_API_KEY`: required for bot sends and manual diagnostics; no default.
 - `MITRIFY_MODEL`: defaults to `mitrify/auto-cheap`; the default is defined once in the module.
+- `MITRIFY_BOT_ACCESS`: `selected` by default; `verified` permits all verified signed-in
+  users of the separate bot. Unknown values fail closed. No browser-controlled override.
 - `MITRIFY_CHAT_ACCOUNT_EMAIL`: no default; server-only verified-account selector for
-  the separate bot and isolated public test. It grants no diagnostic cost admission
+  selected bot mode and the isolated public test. It grants no diagnostic cost admission
   and does not switch ordinary chat.
 
 Rollback: set `AI_BACKEND=direct`. No deployment or key rotation is needed for this
@@ -202,3 +216,32 @@ not establish a production privacy approval. No live endpoint success is claimed
 The manual smoke script is a separate operator diagnostic, not the single-account
 public-test endpoint. It makes two chat calls and has no verified account or hard
 spend-cap admission; do not use it as a substitute for that authorized test.
+
+## Bounded concurrent load-test prerequisites
+
+Use the user's authorized aggregate ceiling across all batches, retries, gateway
+failovers and charges. Inspect the test credential's applicable limit, scope and
+remaining balance through authorized runtime access; never request its value in
+chat. A user's confirmation of an existing limit is configuration evidence, not
+missing spending permission. A documented non-overdraft prepaid balance with auto-topup
+disabled can also bound spend. Alternatively, atomic conservative reservations
+can work if a documented enforceable maximum covers every request/attempt and
+charge. A token estimate, an unverified discount, an unenforced ledger or stopping
+after dispatch is not a charge ceiling. Gateway-specific budget APIs are not the
+only possible proof.
+
+Keep the test's credential/endpoint/model binding fixed and include prior charges
+and concurrent consumers of the same cap. Do not broaden public traffic or start
+live batches before authorized runtime access can establish the applicable bound.
+The legacy single-use INR admission is not a new USD campaign budget.
+
+Start each batch behind one barrier, not a serial request loop. Ordinary bot
+requests still face the 20/minute/account limiter; a 100/1000-request run through
+that route will mostly measure rate rejection. A separately authorized operator
+runner must report its distinct scope and use an atomic bounded campaign, rather
+than disabling the public limiter. Default transport capacity is 200 active per
+process, with 1000 waiting and a 30-second queue timeout; the HTTP route deadline
+is 60 seconds. A 1000-request client burst is not proof of 1000 concurrent upstream
+requests. Measure actual concurrency, queueing, status, latency, retries and total
+charges. Loopback mock timings establish no production capacity. Use only fixed
+synthetic public text; never profile/history/health/payment/personal data.

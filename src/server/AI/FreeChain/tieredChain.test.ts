@@ -206,6 +206,15 @@ describe('fixed-order FreeChain opt-in', () => {
   expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'mitrify', entered: false, reason: 'mitrify-privacy-blocked' }));
   expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'llama8b', entered: false, reason: 'budget' }));
  });
+ it('stops after a paid transport failure with an unresolved charge', async () => {
+  m.execute.mockRejectedValue(new FreeChainProviderError('NETWORK'));
+  m.paid.mockResolvedValue({ id: 'held', day: 'day', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  const result = await buildFreeChainRouter(db, fixed()).route(input());
+  const models = m.execute.mock.calls.map(c => c[1].model);
+  expect(models.at(-1)).toBe('meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo');
+  expect(models).not.toContain('deepseek-ai/DeepSeek-V4-Flash-0731');
+  expect(result.ok).toBe(false); expect(m.paid).toHaveBeenCalledOnce(); expect(m.settle).not.toHaveBeenCalled();
+ });
  it('does not retry partial output or cancellation', async () => {
   const chunks: string[] = []; m.execute.mockImplementationOnce(async (arg) => { arg.onChunk('partial'); throw new FreeChainProviderError('SERVER'); });
   const result = await buildFreeChainRouter(db, fixed()).route({ ...input(), onChunk: s => chunks.push(s) });

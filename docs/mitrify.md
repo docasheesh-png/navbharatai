@@ -301,7 +301,8 @@ Already admitted work may still complete until cancellation/expiry.
 `MITRIFY_GUEST_TEST_TARGET` and the control token securely from the environment.
 It starts each batch behind a single barrier, waits for that batch, then starts
 the next; it never retries HTTP requests itself. It prints counts/statuses,
-latencies, launch spread and peak pending client requests only. A configuration,
+latencies, launch spread and peak pending client requests only. Status `0` means a
+local network, timeout or response-read failure, not an HTTP status. A configuration,
 authorization, replay or 503 admission failure stops larger batches. It sends no
 login cookie or Firebase token. A 65-second client timeout does not refund a
 claim. The script cannot provision or enable the campaign and should run only
@@ -312,3 +313,9 @@ its 200-active per-process default queue and deadline. Test results include
 admission/storage/transport latency. Actual upstream activity and charges require
 safe operator telemetry. Local mock results do not establish production capacity.
 Rollback: unset `MITRIFY_GUEST_TEST_ENABLED` and disable the campaign record.
+
+Local shared-admission check: with a loopback Firestore emulator running, execute
+`node --experimental-strip-types scripts/mitrify-guest-emulator.mjs`. It uses a
+demo project, ephemeral mock credentials and a loopback gateway, never production.
+It exercises concurrent replay through two independent Firestore clients, unique
+slot admission and revocation.

@@ -253,6 +253,8 @@ interface AIChatProps {
   isLoading: boolean;
   /** Opt-in normal-chat pending copy; other surfaces retain their existing indicator. */
   showReplyPendingStatus?: boolean;
+  /** Presentation-only opt-in for the ordinary AI Chat composer. */
+  composerSendPosition?: 'text' | 'bottom-right';
   activeIntent?: string;
   mode?: AgentMode;
   onModeChange?: (mode: AgentMode) => void;
@@ -320,6 +322,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   onSend,
   isLoading,
   showReplyPendingStatus,
+  composerSendPosition,
   activeIntent = 'social',
   mode = 'planning',
   onModeChange,
@@ -1237,6 +1240,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                 none of them can look different from this one again. History and Mode still show only
                 where the phone's bottom bar is absent, and never beside Pro's own mode dropdown. */}
             <ComposerShell
+              sendPosition={composerSendPosition}
               onOpenHistory={showFreeHistoryButton ? onOpenHistory : undefined}
               onOpenMode={showFreeModeButton ? onOpenModePicker : undefined}
               controls={(
@@ -1324,6 +1328,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                           dismissKeyboardOnMobile(textareaRef.current);
                         }}
                         disabled={(!input.trim() && attachments.length === 0) || isLoading}
+                        aria-label={composerSendPosition === 'bottom-right' ? 'Send message' : undefined}
                         className={COMPOSER_SEND_CLASS}
                       >
                         <ArrowUp className="w-4 h-4" strokeWidth={2.5} />

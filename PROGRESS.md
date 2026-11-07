@@ -100885,3 +100885,11 @@ counter, and reserve the bottom bar instead of overriding the contract. The 101
 targeted UI/quota/sheet tests pass; browser coverage now includes a short 320px
 viewport with a 59px notch and 90px bottom-nav reservation. No baseline or test
 threshold was weakened. Re-running the full required checks on this correction.
+
+## 2026-11-07 — Ordinary AI Chat send position
+
+- Root cause: the shared composer vertically centered the send slot in the textarea row. Ordinary AI Chat now opts into a lower toolbar row with 10px right/bottom padding; normal flex layout reserves the actual Send or Queue/Stop width. Shared defaults and the Enter preference pill remain unchanged. No routing, billing, auth or App Builder changes.
+- Added component/source regressions and a loopback browser layout check covering narrow mobile, keyboard-height viewport, long text, auto-grow, disabled/attachment, Queue/Stop, Enter preference and unchanged shared defaults. Focused tests: 8 files / 116 tests pass. Browser checks pass at 320/390/768/1280px widths; generated short and keyboard-height fixtures inspected.
+- Original screenshot Library downloads failed, including one bounded retry; original pixels were not available locally. Fix is source-grounded and independently checked in browser fixtures, not represented as production screenshot verification. Full repository gates and emulator checks are tracked in the PR validation evidence. No paid inference or production settings changed.
+- Final local validation: 3,240 coverage files passed; 48,739 tests passed / 89 skipped. Audit, signatures, license, SBOM, frontend/server/benchmark types, imports, native guard, OAuth, answer quality, Mitrify regressions, build, bundle, boot and dependency gates passed. Missing-key smoke exited 1 as expected without dispatch. Six real Firestore emulator groups passed. Node 22.23.4 / npm 11.18.0 match CI; local Java 21 is Debian OpenJDK, not Temurin. Coverage emitted metadata-lookup 403 warnings but passed.
+- Negative control: removing the NBI layout opt-in failed the new regression; restored bytes passed all four new cases and the final browser run. Hosted CI and deployment remain separately required; no live claim is made here.

@@ -28,9 +28,22 @@ reservation-rate checks. No credential, allowance or price is configured here.
 
 - Current chat/professional payloads remain health/clinical. Nothing is downgraded
   to public based on keywords, empty history or gateway ownership.
-- Mitrify remains **ineligible**. `MITRIFY_CHAIN_ENABLED=1` only exposes the reason
-  for the denied slot; it cannot authorize transmission. Complete-payload public
-  provenance and a payer-bound monetary admission bridge do not exist yet.
+- The legacy FreeChain Mitrify slot now has conditional dispatch. Enabling
+  `MITRIFY_CHAIN_ENABLED=1` alone does not authorize a request. It requires a
+  one-use server-owned `mitrify_chain_approvals` record bound to the exact payload,
+  authenticated UID, endpoint, configured alias and credential. A trusted operator
+  must have reviewed the entire payload as public and independently verified an
+  enforceable per-HTTP-request supplier ceiling including internal failovers,
+  retries and fees. No public approval writer or automatic approval exists.
+  Records expire within one hour; each HTTP retry revalidates the immutable
+  approval and current shared controls. Health/private flags always exclude it.
+  The existing shared daily/monthly FreeChain pool reserves the ceiling times the
+  remaining transport-attempt allowance (at most four). Used reservations remain
+  conservative liabilities until authoritative reconciliation; they are not
+  represented as actual invoices or refunded on ambiguous failures. Only a
+  provably undispatched hold is released. Duplicate claims cannot dispatch.
+  Selected InferenceGateway and paid-professional funding bridges are still
+  unavailable; this adapter does not enroll or fund those routes.
   Existing standalone Mitrify bot/diagnostics retain their no-fallback behavior.
   Model policy continues to come from `MITRIFY_MODEL` in the Mitrify module.
 - Existing authenticated FreeChain enrollment and selected guest Gateway
@@ -48,5 +61,5 @@ reservation-rate checks. No credential, allowance or price is configured here.
 
 Consequently this change does not establish “100% all chats use the same chain.”
 A rollout needs reviewed ingress coverage, paid-professional funding integration,
-and Mitrify public-payload/spend admission. No live model calls, public load test,
+and real reviewed Mitrify public-payload/merchant-ceiling evidence. No live model calls, public load test,
 production environment changes or deployment verification are included.

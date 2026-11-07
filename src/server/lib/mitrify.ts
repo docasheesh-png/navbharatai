@@ -27,11 +27,132 @@ async function untilCancelled<T>(work: () => T | Promise<T>, signal: AbortSignal
 
 const mitrifyModel = (env: Env) => env.MITRIFY_MODEL?.trim() || 'mitrify/auto-cheap';
 
-/** No caller flag/regex can prove the entire ordinary-chat payload public. No live chain adapter yet. */
+/** No caller flag/regex can prove the entire ordinary-chat payload public. An exact server approval and shared monetary hold are additionally required. */
 export function mitrifyChainStatus(dataClass: string, capability: string, env: Env = process.env) {
   return { model: mitrifyModel(env), eligible: false as const, reason: env.MITRIFY_CHAIN_ENABLED !== '1' ? 'mitrify-chain-disabled'
     : capability !== 'text' ? 'mitrify-capability-excluded' : dataClass !== 'public' ? 'mitrify-privacy-blocked'
     : 'mitrify-public-provenance-and-spend-admission-unavailable' };
+}
+
+/** Exact-payload approval, written only by an existing trusted server operator.
+ * It is NOT minted from a caller checkbox, UID, regex or an estimated token price.
+ * No approval writer or new account/data access is exposed by this module.
+ */
+export function mitrifyChainBinding(uid: string, body: Record<string, unknown>, env: Env = process.env) {
+  const cfg = mitrifyConfig(env);
+  const wire = JSON.stringify({ ...body, model: cfg.model,
+    ...(body.stream === true ? { stream_options: { ...(body.stream_options as object ?? {}), include_usage: true } } : {}) });
+  const gateway = { baseURL: cfg.baseURL, model: cfg.model,
+    credentialBinding: createHash('sha256').update('mitrify-chain-credential-v1\0').update(cfg.apiKey).digest('hex') };
+  const payloadDigest = createHash('sha256').update(wire).digest('hex');
+  return { id: createHash('sha256').update(JSON.stringify({ uid, payloadDigest, gateway })).digest('hex'), payloadDigest, gateway };
+}
+
+/** Reads an independently reviewed approval, then owns one durable dispatch claim.
+ * The supplier contract must enforce the stated ceiling PER HTTP REQUEST including
+ * all its internal retries/failovers/fees. Four transport attempts are reserved in
+ * the caller's existing shared daily/monthly pool; no new budget is manufactured.
+ * Used holds remain conservative liabilities, never inferred actual invoice cost.
+ */
+export async function runApprovedMitrifyChain(options: {
+  db: Firestore; uid: string; body: Record<string, unknown>; privateTurn: boolean; healthTurn: boolean;
+  requestId: string; signal: AbortSignal; maxHttpAttempts?: number; onChunk?: (text: string) => void; revalidate?: () => Promise<void>;
+  reserve: (maximumNanoUsd: number) => Promise<null | { releaseUndispatched(): Promise<void> }>;
+}, env: Env = process.env, log: Log = defaultLog): Promise<
+  { kind: 'skipped'; reason: string } |
+  { kind: 'response'; content: string; model: string; usage?: { inputTokens: number; outputTokens: number } }
+> {
+  if (env.MITRIFY_CHAIN_ENABLED !== '1') return { kind: 'skipped', reason: 'mitrify-chain-disabled' };
+  // These exclusions are never downgraded, even by a stale or mistaken approval.
+  if (options.privateTurn || options.healthTurn) return { kind: 'skipped', reason: 'mitrify-privacy-blocked' };
+  const maxHttpAttempts = options.maxHttpAttempts ?? 4;
+  if (!Number.isInteger(maxHttpAttempts) || maxHttpAttempts < 1 || maxHttpAttempts > 4) throw new MitrifyError('MITRIFY_CONFIGURATION');
+  const cfg = mitrifyConfig(env);
+  if (!cfg.apiKey) return { kind: 'skipped', reason: 'mitrify-configuration' };
+  // Snapshot before any async boundary; later mutation cannot alter reviewed content or credentials.
+  const requestEnv = { ...env, MITRIFY_BASE_URL: cfg.baseURL, MITRIFY_MODEL: cfg.model, MITRIFY_API_KEY: cfg.apiKey };
+  const body = JSON.parse(JSON.stringify(options.body)) as Record<string, unknown>;
+  if (Object.keys(body).some(k => !standardFields.has(k)) || !Array.isArray(body.messages) || !body.messages.length
+    || body.messages.some(m => !m || typeof m !== 'object' || !['system', 'developer', 'user', 'assistant'].includes(m.role)
+      || typeof m.content !== 'string' || Object.keys(m).some(k => !['role', 'content'].includes(k)))) {
+    return { kind: 'skipped', reason: 'mitrify-capability-excluded' };
+  }
+  const binding = mitrifyChainBinding(options.uid, body, requestEnv);
+  const ref = options.db.doc(`mitrify_chain_approvals/${binding.id}`);
+  const policyDigest = (a: any) => JSON.stringify([a.uid, a.payloadDigest, a.gateway?.baseURL, a.gateway?.model, a.gateway?.credentialBinding, a.publicReview?.entirePayloadReviewed, a.publicReview?.containsSensitiveData, a.publicReview?.reviewRef, a.supplierContract?.currency, a.supplierContract?.hardCeilingEnforced, a.supplierContract?.includesInternalRetriesFailoversAndFees, a.supplierContract?.evidenceRef, a.supplierContract?.perHttpRequestCeilingNanoUsd, a.reviewedAtMs, a.expiresAtMs]);
+  const now = Date.now();
+  const approval = await untilCancelled(() => options.db.runTransaction(async tx => {
+    const a = (await tx.get(ref)).data();
+    if (!a || a.kind !== 'mitrify-exact-public-approval-v1' || a.uid !== options.uid || a.payloadDigest !== binding.payloadDigest
+      || (a.gateway?.baseURL !== binding.gateway.baseURL || a.gateway?.model !== binding.gateway.model || a.gateway?.credentialBinding !== binding.gateway.credentialBinding) || a.state !== 'approved'
+      || a.publicReview?.entirePayloadReviewed !== true || a.publicReview?.containsSensitiveData !== false
+      || typeof a.publicReview?.reviewRef !== 'string' || !a.publicReview.reviewRef.trim()
+      || !Number.isSafeInteger(a.reviewedAtMs) || a.reviewedAtMs > now || !Number.isSafeInteger(a.expiresAtMs)
+      || a.expiresAtMs <= now || a.expiresAtMs > a.reviewedAtMs + 3600000
+      || a.supplierContract?.currency !== 'USD' || a.supplierContract?.hardCeilingEnforced !== true
+      || a.supplierContract?.includesInternalRetriesFailoversAndFees !== true
+      || typeof a.supplierContract?.evidenceRef !== 'string' || !a.supplierContract.evidenceRef.trim()
+      || !Number.isSafeInteger(a.supplierContract?.perHttpRequestCeilingNanoUsd)
+      || a.supplierContract.perHttpRequestCeilingNanoUsd <= 0
+      || !Number.isSafeInteger(a.supplierContract.perHttpRequestCeilingNanoUsd * 4)) return null;
+    options.signal.throwIfAborted();
+    tx.update(ref, { state: 'claimed', requestId: options.requestId, claimedAtMs: now, attemptsStarted: 0, maxHttpAttempts });
+    return { maximumNanoUsd: a.supplierContract.perHttpRequestCeilingNanoUsd * maxHttpAttempts, expiresAtMs: a.expiresAtMs, policyDigest: policyDigest(a) };
+  }), options.signal).catch(() => { throw new MitrifyError(options.signal.aborted ? 'MITRIFY_CANCELLED' : 'MITRIFY_ADMISSION_FAILED'); });
+  if (!approval) return { kind: 'skipped', reason: 'mitrify-public-approval-or-ceiling-unavailable' };
+  let hold: Awaited<ReturnType<typeof options.reserve>> = null;
+  let released = false;
+  const releaseUnused = async () => { if (hold && !entered && !released) { released = true; try { await hold.releaseUndispatched(); } catch { log({ code: 'MITRIFY_UNUSED_HOLD_RELEASE_FAILED' }); } } };
+  let entered = false; let content = ''; let usage: { inputTokens: number; outputTokens: number } | undefined;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(0, approval.expiresAtMs - Date.now()));
+  const signal = AbortSignal.any([options.signal, controller.signal]);
+  const inspect = (data: any) => {
+    const choice = data?.choices?.[0];
+    if (choice?.delta?.tool_calls || choice?.delta?.function_call || choice?.message?.tool_calls || choice?.message?.function_call
+      || choice?.delta?.refusal || choice?.message?.refusal || ['content_filter', 'safety', 'sensitive'].includes(choice?.finish_reason)) throw new MitrifyError('MITRIFY_POLICY_BLOCKED', 0, !!content);
+    const text = choice?.delta?.content ?? choice?.message?.content;
+    if (typeof text === 'string') { content += text; options.onChunk?.(text); }
+    const u = data?.usage;
+    if (Number.isSafeInteger(u?.prompt_tokens) && u.prompt_tokens >= 0 && Number.isSafeInteger(u?.completion_tokens) && u.completion_tokens >= 0) usage = { inputTokens: u.prompt_tokens, outputTokens: u.completion_tokens };
+    if (choice?.finish_reason === 'length') throw new MitrifyError('MITRIFY_INCOMPLETE_STREAM', 0, !!content);
+  };
+  try {
+    signal.throwIfAborted();
+    // Observe and clean up late reservations without delaying cancellation.
+    const pendingHold = options.reserve(approval.maximumNanoUsd).then(async receipt => { hold = receipt; if (signal.aborted) await releaseUnused(); return receipt; });
+    await untilCancelled(() => pendingHold, signal);
+    signal.throwIfAborted();
+    if (!hold) return { kind: 'skipped', reason: 'mitrify-budget' };
+    const result = await createMitrifyClient(requestEnv, log).chat(body, { signal, maxAttempts: maxHttpAttempts,
+      beforeAttempt: async () => {
+        if (env.MITRIFY_CHAIN_ENABLED !== '1' || mitrifyChainBinding(options.uid, body, env).id !== binding.id) throw new MitrifyError('MITRIFY_APPROVAL_REVOKED');
+        await untilCancelled(async () => { await options.revalidate?.(); }, signal);
+        await untilCancelled(() => options.db.runTransaction(async tx => {
+          const a = (await tx.get(ref)).data();
+          if (!a || a.state !== 'claimed' || a.requestId !== options.requestId || policyDigest(a) !== approval.policyDigest || a.expiresAtMs !== approval.expiresAtMs
+            || a.expiresAtMs <= Date.now() || !Number.isSafeInteger(a.attemptsStarted) || a.attemptsStarted < 0 || a.maxHttpAttempts !== maxHttpAttempts || a.attemptsStarted >= maxHttpAttempts) throw new MitrifyError('MITRIFY_APPROVAL_REVOKED');
+          signal.throwIfAborted(); tx.update(ref, { attemptsStarted: a.attemptsStarted + 1 });
+        }), signal);
+        // Conservatively retain the hold if cancellation/crash races the actual fetch.
+        entered = true;
+      },
+      ...(body.stream === true ? { onChunk: (wire: Uint8Array) => {
+        const payload = new TextDecoder().decode(wire).split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n');
+        if (payload && payload !== '[DONE]') inspect(JSON.parse(payload));
+      } } : {}),
+    });
+    if (body.stream !== true) inspect(result.data);
+    signal.throwIfAborted();
+    if (!content.trim()) throw new MitrifyError('MITRIFY_INVALID_RESPONSE');
+    return { kind: 'response', content, model: cfg.model, ...(usage ? { usage } : {}) };
+  } catch (error) {
+    // Once an HTTP attempt may have begun, liability and failure are terminal to the chain.
+    throw new MitrifyError(error instanceof MitrifyError ? error.code : signal.aborted ? 'MITRIFY_CANCELLED' : 'MITRIFY_ADMISSION_FAILED', error instanceof MitrifyError ? error.status : 0, !!content);
+  } finally {
+    clearTimeout(timer); controller.abort();
+    await releaseUnused();
+  }
 }
 
 export function mitrifyConfig(env: Env = process.env) {
@@ -353,9 +474,11 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
     return `${url.href.replace(/\/$/, '')}/${path}`;
   }
 
-  async function request(path: string, body: string | undefined, signal: AbortSignal): Promise<Response> {
+  async function request(path: string, body: string | undefined, signal: AbortSignal, beforeAttempt?: () => Promise<void>, maxAttempts = 4): Promise<Response> {
     const url = endpoint(path);
     for (let attempt = 0; ; attempt++) {
+      signal.throwIfAborted();
+      await beforeAttempt?.();
       signal.throwIfAborted();
       const started = Date.now();
       let response: Response;
@@ -372,7 +495,7 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
       if (response.ok) return response;
       const retryAfter = response.headers.get('retry-after');
       await response.body?.cancel();
-      if (![429, 503].includes(response.status) || attempt >= 3) {
+      if (![429, 503].includes(response.status) || attempt >= maxAttempts - 1) {
         const code = statusCode(response.status);
         log({ code, status: response.status });
         throw new MitrifyError(code, response.status);
@@ -409,7 +532,7 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
       finally { release?.(); }
     },
     /** Low-level transport only: production general-chat ingress cannot authorize this call. */
-    async chat(input: Record<string, unknown>, options: { signal: AbortSignal; onChunk?: (chunk: Uint8Array) => void | Promise<void> }) {
+    async chat(input: Record<string, unknown>, options: { signal: AbortSignal; onChunk?: (chunk: Uint8Array) => void | Promise<void>; beforeAttempt?: () => Promise<void>; maxAttempts?: number }) {
       let partial = false;
       let release: (() => void) | undefined;
       const controller = new AbortController();
@@ -426,10 +549,11 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
         const body = JSON.stringify({ ...input, model: config.model,
           ...(input.stream === true ? { stream_options: { ...streamOptions as object, include_usage: true } } : {}),
         });
+        if (options.maxAttempts !== undefined && (!Number.isInteger(options.maxAttempts) || options.maxAttempts < 1 || options.maxAttempts > 4)) throw new MitrifyError('MITRIFY_CONFIGURATION');
         const bytes = Buffer.byteLength(body);
         if (bytes > 8 * 1024 * 1024) throw new MitrifyError('MITRIFY_BODY_TOO_LARGE', 413);
         release = await acquireCapacity(config.maxInflight, bytes, signal);
-        const response = await request('chat/completions', body, signal);
+        const response = await request('chat/completions', body, signal, options.beforeAttempt, options.maxAttempts);
         const headers = safeHeaders(response, config.apiKey);
         if (input.stream !== true) {
           if (!response.headers.get('content-type')?.includes('application/json')) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', response.status);

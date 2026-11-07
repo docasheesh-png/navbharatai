@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { createHash, randomUUID } from 'node:crypto';
 import { Firestore } from 'firebase-admin/firestore';
-import { runMitrifyGuestTest } from '../src/server/lib/mitrify.ts';
+import { runMitrifyGuestTest, mitrifyChainBinding, runApprovedMitrifyChain } from '../src/server/lib/mitrify.ts';
 
 // Never contact real Firestore or a gateway. Must be an explicitly selected loopback emulator.
 if (!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST || '')) {
@@ -23,6 +23,10 @@ const digest = value => createHash('sha256').update(value).digest('hex');
 const record = { enabled: true, createdAtMs: Date.now(), expiresAtMs: Date.now() + 60_000,
   baseURL: env.MITRIFY_BASE_URL, model: env.MITRIFY_MODEL, credentialFingerprint: digest(env.MITRIFY_API_KEY),
   tokenFingerprint: digest(env.MITRIFY_GUEST_TEST_TOKEN), maxTotalUsd: 10, includesAllCharges: true, hardCapConfirmed: true };
+const chainBody = { messages: [{ role: 'user', content: 'What is 2 + 2?' }], max_tokens: 16 };
+const chainEnv = { ...env, MITRIFY_CHAIN_ENABLED: '1' };
+const binding = mitrifyChainBinding('emulator-public-user', chainBody, chainEnv);
+const approvalRef = dbs[0].doc(`mitrify_chain_approvals/${binding.id}`);
 const ref = dbs[0].doc(`mitrify_test_campaigns/${campaignId}`);
 const call = (db, slot) => runMitrifyGuestTest({ db, token: env.MITRIFY_GUEST_TEST_TOKEN,
   body: { batch: 10, slot }, signal: AbortSignal.timeout(30_000) }, env, () => {});
@@ -38,11 +42,28 @@ try {
   await ref.update({ enabled: false });
   await assert.rejects(call(dbs[0], 2), { code: 'MITRIFY_GUEST_TEST_UNAVAILABLE' });
   assert.equal(upstreamCalls, 2);
+  await approvalRef.create({ kind: 'mitrify-exact-public-approval-v1', uid: 'emulator-public-user',
+    payloadDigest: binding.payloadDigest, gateway: binding.gateway, state: 'approved',
+    reviewedAtMs: Date.now(), expiresAtMs: Date.now() + 60000,
+    publicReview: { entirePayloadReviewed: true, containsSensitiveData: false, reviewRef: 'synthetic-emulator-review' },
+    supplierContract: { currency: 'USD', hardCeilingEnforced: true, includesInternalRetriesFailoversAndFees: true,
+      evidenceRef: 'synthetic-emulator-contract', perHttpRequestCeilingNanoUsd: 100 } });
+  let reservations = 0;
+  const approved = await Promise.all(Array.from({ length: 10 }, (_, i) => runApprovedMitrifyChain({
+    db: dbs[i % 2], uid: 'emulator-public-user', requestId: randomUUID(), body: chainBody,
+    privateTurn: false, healthTurn: false, signal: AbortSignal.timeout(30000),
+    reserve: async maximum => { assert.equal(maximum, 400); reservations++; return { releaseUndispatched: async () => {} }; },
+  }, chainEnv, () => {})));
+  assert.equal(approved.filter(r => r.kind === 'response').length, 1);
+  assert.equal(reservations, 1); assert.equal(upstreamCalls, 3);
+  assert.equal((await approvalRef.get()).data().attemptsStarted, 1);
+  console.log('PASS: two real Firestore clients allow one exact public approval claim and one monetary reservation.');
   console.log('PASS: two Firestore clients share immutable admission; replay/revocation deny dispatch.');
 } catch {
   console.error('FAIL: controlled guest emulator admission check.'); process.exitCode = 1;
 } finally {
   await dbs[0].recursiveDelete(ref);
+  await approvalRef.delete();
   await Promise.all(dbs.map(db => db.terminate()));
   server.closeAllConnections(); server.close();
 }

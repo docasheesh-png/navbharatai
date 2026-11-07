@@ -16,6 +16,7 @@ vi.mock('./telemetry', () => ({ logFreeChain: vi.fn() }));
 import { chatAvailabilityMessage } from '../../lib/chatAvailabilityMessage';
 import { buildFreeChainRouter, busyMessage, orderForUser, type FreeChainInput } from './runtime';
 import { freeChainConfig } from './config';
+import * as mitrify from '../../lib/mitrify';
 import { resetAllBreakers } from '../Router/CircuitBreaker';
 import { FreeChainProviderError } from './providers/openAiCompatProvider';
 m.observeBudget.mockImplementation(async (cap: number) => ({ capNanoUsd: cap, revision: 1 }));
@@ -37,7 +38,7 @@ beforeEach(() => {
  m.quota.mockResolvedValue({ available: true, usage: { rpm: 1, rpd: 2, tpm: 3, tpd: 4, neuronsPerDay: 5 }, dailyResetAt: Date.now()+1000, minuteResetAt: Date.now()+1000, cooldownUntil: 0 });
  m.spend.mockResolvedValue({ available: true, capNanoUsd: 2e9, policyRevision: 3, heldNanoUsd: 0, spentNanoUsd: 0 });
 });
-afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 const VERIFIED = '2099-01-01';
 function tiered(order: string, extra: Record<string, string> = {}) {
@@ -200,11 +201,43 @@ describe('fixed-order FreeChain opt-in', () => {
   await buildFreeChainRouter(db, fixed()).route({ ...input(), context: { ...input().context, isAdmin: true } });
   expect(m.execute.mock.calls[0][1].model).toBe('glm-4.5-flash');
  });
- it('records a non-dispatched Mitrify slot and preserves privacy and budget denial', async () => {
-  vi.stubEnv('MITRIFY_CHAIN_ENABLED', '1'); m.execute.mockRejectedValue(new FreeChainProviderError('SERVER')); m.paid.mockResolvedValue(null);
+ it('records a disabled Mitrify slot and preserves budget denial', async () => {
+  m.execute.mockRejectedValue(new FreeChainProviderError('SERVER')); m.paid.mockResolvedValue(null);
   const result = await buildFreeChainRouter(db, fixed()).route(input());
-  expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'mitrify', entered: false, reason: 'mitrify-privacy-blocked' }));
+  expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'mitrify', entered: false, reason: 'mitrify-chain-disabled' }));
   expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'llama8b', entered: false, reason: 'budget' }));
+ });
+ it.each([false, true])('admitted Mitrify uses the same shared budget and stops the fixed chain, streaming=%s', async streaming => {
+  m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
+  m.paid.mockResolvedValue({ id: 'mitrify-hold', day: 'd', uidHash: 'u', maxCostNanoUsd: 400, createdAt: 0, mayDispatch: true });
+  const admitted = vi.spyOn(mitrify, 'runApprovedMitrifyChain').mockImplementation(async options => {
+   expect(options.privateTurn).toBe(false); expect(options.healthTurn).toBe(false);
+   expect(options.body).toMatchObject({ stream: true, messages: [{ role: 'system', content: expect.any(String) }, { role: 'user', content: 'hello' }] });
+   expect(await options.reserve(400)).not.toBeNull(); options.onChunk?.('approved reply');
+   return { kind: 'response', content: 'approved reply', model: 'mitrify/auto-cheap', usage: { inputTokens: 10, outputTokens: 2 } };
+  });
+  const chunks: string[] = []; const result = await buildFreeChainRouter(db, fixed()).route({ ...input(), ...(streaming ? { onChunk: (s: string) => chunks.push(s) } : {}) });
+  expect(result).toMatchObject({ provider: 'MITRIFY', content: 'approved reply', ok: true });
+  expect(admitted).toHaveBeenCalledOnce(); expect(m.paid).toHaveBeenCalledOnce();
+  expect(m.paid.mock.calls[0][0]).toMatchObject({ uid: 'owner', maxCostNanoUsd: 400, capNanoUsd: fixed().paidCapNanoUsd });
+  expect(m.execute.mock.calls.map(c => c[1].model)).toEqual(['glm-4.5-flash', 'glm-4.7-flash', 'openai/gpt-oss-120b', '@cf/meta/llama-3.3-70b-instruct-fp8-fast']);
+  expect(m.settle).not.toHaveBeenCalled(); if (streaming) expect(chunks).toEqual(['approved reply']);
+ });
+ it('a Mitrify failure after admission cannot open any subsequent direct rung', async () => {
+  m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
+  m.paid.mockResolvedValue({ id: 'mitrify-hold', day: 'd', uidHash: 'u', maxCostNanoUsd: 400, createdAt: 0, mayDispatch: true });
+  vi.spyOn(mitrify, 'runApprovedMitrifyChain').mockImplementation(async options => {
+   await options.reserve(400); options.onChunk?.('partial'); throw new mitrify.MitrifyError('MITRIFY_INCOMPLETE_STREAM', 0, true);
+  });
+  const chunks: string[] = []; const result = await buildFreeChainRouter(db, fixed()).route({ ...input(), onChunk: s => chunks.push(s) });
+  expect(result).toMatchObject({ provider: 'MITRIFY', reason: 'stalled' }); expect(chunks).toEqual(['partial']);
+  expect(m.execute).toHaveBeenCalledTimes(4); expect(m.paid).toHaveBeenCalledOnce(); expect(m.settle).not.toHaveBeenCalled();
+ });
+ it('an existing health classification blocks Mitrify even when its switch is on', async () => {
+  vi.stubEnv('MITRIFY_CHAIN_ENABLED', '1'); m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
+  const result = await buildFreeChainRouter(db, fixed()).route({ ...input(), context: { ...input().context, healthTurn: true } });
+  expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'mitrify', entered: false, reason: 'mitrify-privacy-blocked' }));
+  expect(m.paid).not.toHaveBeenCalled();
  });
  it('stops after a paid transport failure with an unresolved charge', async () => {
   m.execute.mockRejectedValue(new FreeChainProviderError('NETWORK'));

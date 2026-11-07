@@ -100812,3 +100812,14 @@ broken-body, timeout/cancellation and gateway error tests remain applicable. Act
 production override/model capability and live behavior are unverified: no permitted
 runtime identity or new gateway evidence is available. No paid requests or production
 configuration changes were made. Required aggregate validation is pending.
+
+Long-answer validation completed: 3,239 suites / 48,728 tests passed, 89 skipped,
+coverage gate passed; 111 offline transport checks, 12 targeted UI/privacy checks,
+and all six emulator drill groups passed. Security, type, build, bundle, boot and
+production-dependency gates passed. Reverting the default to 2,048 makes the new
+Hindi regression fail; restoring 8,192 passes. Node 22.23.4/npm 11.18.0 match CI;
+Java is Debian OpenJDK 21 versus hosted Temurin 21. Missing-key smoke exits 1 as
+expected. Draft PR creation was denied by automatic approval review for missing
+branch-specific publication approval; GitHub lookup confirmed no PR was created.
+No retry or alternate publication route was used. Live behavior/configuration
+remains unverified; the default does not override an explicit Cloud Run setting.

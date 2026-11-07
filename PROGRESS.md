@@ -100794,3 +100794,17 @@ Full local coverage exposed three existing professional conversation contract as
   credential, production setting, main chain, guest test or Builder was changed.
 - Offline tests cover races, replay, privacy/account checks, bounds, cancellation,
   funding denial and revalidation. Required gate results are recorded in the PR.
+
+## 2026-11-07 — Concise Mitrify message confirmation
+
+The reported long sentence originated only in the separate bot's checkbox label;
+it was not prepended to provider requests or replies. Replace it with “I confirm
+this message contains no sensitive or personal information.” The existing visible
+provider/privacy disclosure, unchecked default, per-edit reset, confirmation gate,
+server exclusions, and continuation review remain unchanged. Sibling search found
+no other production occurrence of the removed sentence. Component regressions
+cover the concise label, retained disclosure/unchecked disabled-send state, and
+unmodified reply rendering; the existing mock transport test asserts the exact
+single user message and reply, with no confirmation text inserted. Required local
+aggregate checks and hosted CI are pending at this checkpoint; no live calls or
+production settings were changed.

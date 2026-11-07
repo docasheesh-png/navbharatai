@@ -100766,3 +100766,17 @@ Full local coverage exposed three existing professional conversation contract as
   Builder remain intact. This is not universal production activation.
 - Added local HTTP regressions and a real two-client Firestore claim race check;
   CI now executes the admission emulator check alongside existing database drills.
+
+### Separate Mitrify bot response truncation
+
+- Root cause in code: the bot requested 256 output tokens and discarded the
+  provider finish reason; the plain-text UI displayed that cut response as complete.
+- Default output allowance is now 2,048 tokens. Server-only
+  MITRIFY_BOT_MAX_OUTPUT_TOKENS accepts 1–32,768; this application ceiling is not
+  a verified model limit or a monetary authorization. No account cap is changed.
+- Preserve the full returned text and show length/filter/unconfirmed-completion
+  warnings; missing finish reasons and old-server responses cannot imply success.
+  No automatic continuation, additional paid retry, timeout extension or history
+  replay is introduced. Privacy/account gates and main chain/Builder stay intact.
+- Added longer-answer, completion-reason, malformed-response, deadline and UI
+  regressions. Required local checks are recorded in the accompanying PR.

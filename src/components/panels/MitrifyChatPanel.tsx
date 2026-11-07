@@ -4,9 +4,18 @@ import { authHeader } from '../../lib/authHeaders';
 import { mitrifyBotError } from '../../lib/mitrifyBotError';
 import type { MitrifyBotAccess } from '../../hooks/useMitrifyBot';
 
+/** Keep the complete returned text, with a separate accessible completion warning. */
+export function MitrifyReply({ text, completion }: { text: string; completion?: unknown }) {
+  const notice = completion === 'complete' ? null
+    : completion === 'length' ? 'This reply reached its length limit and is incomplete. You can ask a narrower question; no continuation was sent automatically.'
+    : completion === 'filtered' ? 'This reply was stopped by a content filter and may be incomplete.'
+    : 'Mitrify did not confirm that this reply completed. It may be incomplete.';
+  return <><p className="whitespace-pre-wrap break-words">{text}</p>{notice && <p role="status" className="text-sm text-muted">{notice}</p>}</>;
+}
+
 /** One user-reviewed public message at a time; displayed replies are never sent back. */
 export function MitrifyChatPanel({ uid, access }: { uid: string; access: MitrifyBotAccess }) {
-  const [messages, setMessages] = useState<Array<{ role: string; text: string }>>([]);
+  const [messages, setMessages] = useState<Array<{ role: string; text: string; completion?: unknown }>>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [input, setInput] = useState('');
@@ -35,7 +44,7 @@ export function MitrifyChatPanel({ uid, access }: { uid: string; access: Mitrify
       if (!response.ok || typeof data?.reply !== 'string') {
         setError(mitrifyBotError(response.status, data)); return;
       }
-      setMessages(items => [...items, { role: 'Mitrify', text: data.reply }]);
+      setMessages(items => [...items, { role: 'Mitrify', text: data.reply, completion: data.completion }]);
       setInput('');
     } catch {
       if (!controller.signal.aborted) setError('The reply could not complete. No other provider was used.');
@@ -56,7 +65,7 @@ export function MitrifyChatPanel({ uid, access }: { uid: string; access: Mitrify
         onChange={event => setConfirmed(event.target.checked)} />I reviewed this message: it contains no health, personal, payment or other sensitive information, and may be sent to Mitrify and its providers.</label>
       <button type="submit" disabled={busy || !access.available || !confirmed || !input.trim()} className="rounded-lg border border-line px-3 py-2 disabled:opacity-50">Send</button>
     </form>
-    <div role="log" aria-live="polite" className="space-y-3">{messages.map((message, index) => <div key={index}><strong>{message.role}</strong><p className="whitespace-pre-wrap break-words">{message.text}</p></div>)}</div>
+    <div role="log" aria-live="polite" className="space-y-3">{messages.map((message, index) => <div key={index}><strong>{message.role}</strong><MitrifyReply text={message.text} completion={message.role === 'Mitrify' ? message.completion : 'complete'} /></div>)}</div>
     {busy && <button type="button" className="rounded-lg border border-line px-3 py-2" onClick={() => { pending.current?.abort(); pending.current = null; setBusy(false); setError('Reply stopped.'); }}>Stop reply</button>}
     {error && <p role="alert">{error}</p>}
   </section>;

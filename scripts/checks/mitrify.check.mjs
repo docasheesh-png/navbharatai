@@ -8,7 +8,7 @@ import { mitrifyChainBinding, runApprovedMitrifyChain, mitrifyGuestTestTokenVali
 
 const input = { model: 'ignored', messages: [{ role: 'system', content: 'Be brief.' }, { role: 'user', content: 'Hello.' }], temperature: 0.2, max_tokens: 12 };
 const chunk = text => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
-const reply = res => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: 'Hello' } }] })); };
+const reply = res => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: 'Hello' }, finish_reason: 'stop' }] })); };
 
 test('verified access admits different verified accounts without a selected email', async t => {
   const f = await fixture(t, (_req, res) => reply(res));
@@ -16,7 +16,7 @@ test('verified access admits different verified accounts without a selected emai
   for (const email of ['first@example.invalid', 'second@example.invalid']) {
     const identify = async () => ({ uid: email, email, emailVerified: true });
     assert.equal((await mitrifyPublicBotStatus(identify, f.signal, env)).available, true);
-    assert.deepEqual(await runMitrifyPublicBot({ identify, signal: f.signal, body: { message: 'Explain rainbows.', publicContentConfirmed: true } }, env, () => {}), { reply: 'Hello' });
+    assert.deepEqual(await runMitrifyPublicBot({ identify, signal: f.signal, body: { message: 'Explain rainbows.', publicContentConfirmed: true } }, env, () => {}), { reply: 'Hello', completion: 'complete' });
   }
   assert.equal(f.requests.length, 2);
   assert.ok(f.requests.every(r => !JSON.stringify(r.body).includes('@')));
@@ -74,9 +74,9 @@ test('typed public text is sent unchanged, alone, only after explicit confirmati
     await assert.rejects(send(body), { code: 'MITRIFY_BOT_REVIEW_REQUIRED' });
   }
   assert.equal(f.requests.length, 0);
-  assert.deepEqual(await send({ message, publicContentConfirmed: true }), { reply: 'Hello' });
+  assert.deepEqual(await send({ message, publicContentConfirmed: true }), { reply: 'Hello', completion: 'complete' });
   assert.deepEqual(f.requests[0].body.messages, [{ role: 'user', content: message }]);
-  assert.equal(f.requests[0].body.max_tokens, 256);
+  assert.equal(f.requests[0].body.max_tokens, 2048);
   assert.equal(JSON.stringify(f.logs).includes(message), false);
   assert.equal(JSON.stringify(f.requests[0].body).includes('local-only'), false);
 });
@@ -122,8 +122,8 @@ test('separate bot sends only server public text and rejects any private fields'
     await assert.rejects(runMitrifyPublicBot({ body, identify, signal: f.signal }, env), { code: 'MITRIFY_BOT_PUBLIC_QUESTION_REQUIRED' });
   }
   assert.equal(f.requests.length, 0);
-  assert.deepEqual(await runMitrifyPublicBot({ body: { questionId: 'arithmetic' }, identify, signal: f.signal }, env, metadata => f.logs.push(metadata)), { reply: 'Hello' });
-  assert.deepEqual(f.requests[0].body, { messages: [{ role: 'user', content: 'What is 2 + 2? Reply with only the number.' }], max_tokens: 256, stream: false, model: 'mitrify/auto-cheap' });
+  assert.deepEqual(await runMitrifyPublicBot({ body: { questionId: 'arithmetic' }, identify, signal: f.signal }, env, metadata => f.logs.push(metadata)), { reply: 'Hello', completion: 'complete' });
+  assert.deepEqual(f.requests[0].body, { messages: [{ role: 'user', content: 'What is 2 + 2? Reply with only the number.' }], max_tokens: 2048, stream: false, model: 'mitrify/auto-cheap' });
   assert.equal(JSON.stringify(f.requests[0].body).includes('private-local-uid'), false);
   assert.equal(JSON.stringify(f.logs).includes(env.MITRIFY_CHAT_ACCOUNT_EMAIL), false);
 });
@@ -923,4 +923,60 @@ test('admission database errors cannot disclose supplier credentials', async t =
   a.options.db.runTransaction = async () => { throw new Error(f.key); };
   await assert.rejects(a.run(), error => error.code === 'MITRIFY_ADMISSION_FAILED' && !String(error).includes(f.key));
   assert.equal(f.requests.length, 0);
+});
+
+for (const [reason, completion] of [['stop', 'complete'], ['length', 'length'], ['content_filter', 'filtered'], [undefined, 'unconfirmed'], [null, 'unconfirmed'], ['unexpected-provider-reason', 'unconfirmed']]) {
+  test(`separate bot preserves longer reply and classifies finish reason ${String(reason)} without continuation`, async t => {
+    const answer = 'A public explanation about the solar system. '.repeat(100) + 'Final sentence.';
+    const f = await fixture(t, (_req, res) => {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ choices: [{ message: { content: answer }, ...(reason === undefined ? {} : { finish_reason: reason }) }] }));
+    });
+    const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' };
+    const result = await runMitrifyPublicBot({ body: { message: 'Explain the solar system.', publicContentConfirmed: true },
+      identify: async () => ({ uid: 'tester', email: env.MITRIFY_CHAT_ACCOUNT_EMAIL, emailVerified: true }), signal: f.signal }, env, () => {});
+    assert.deepEqual(result, { reply: answer, completion });
+    assert.equal(f.requests.length, 1);
+    assert.equal(f.requests[0].body.max_tokens, 2048);
+    assert.equal(f.requests[0].body.stream, false);
+    assert.deepEqual(f.requests[0].body.messages, [{ role: 'user', content: 'Explain the solar system.' }]);
+  });
+}
+
+test('separate bot deadline aborts an unfinished response body without returning partial JSON or replaying', async t => {
+  let closed; const upstreamClosed = new Promise(resolve => { closed = resolve; });
+  const f = await fixture(t, (_req, res) => {
+    res.on('close', closed);
+    res.setHeader('Content-Type', 'application/json'); res.write('{"choices":[{"message":{"content":"unfinished');
+  });
+  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' };
+  await assert.rejects(runMitrifyPublicBot({ body: { questionId: 'rainbow' },
+    identify: async () => ({ uid: 'tester', email: env.MITRIFY_CHAT_ACCOUNT_EMAIL, emailVerified: true }),
+    signal: AbortSignal.timeout(250) }, env, () => {}), { code: 'MITRIFY_CANCELLED' });
+  await upstreamClosed; assert.equal(f.requests.length, 1);
+});
+
+test('separate bot rejects a broken non-streaming response rather than presenting it as complete', async t => {
+  const f = await fixture(t, (_req, res) => {
+    res.setHeader('Content-Type', 'application/json'); res.end('{"choices":[{"message":{"content":"cut');
+  });
+  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' };
+  await assert.rejects(runMitrifyPublicBot({ body: { questionId: 'rainbow' },
+    identify: async () => ({ uid: 'tester', email: env.MITRIFY_CHAT_ACCOUNT_EMAIL, emailVerified: true }),
+    signal: f.signal }, env, () => {}), { code: 'MITRIFY_INVALID_RESPONSE' });
+  assert.equal(f.requests.length, 1);
+});
+
+test('separate bot output allowance is server configured and finite; browser cannot increase it', async t => {
+  const f = await fixture(t, (_req, res) => reply(res));
+  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid', MITRIFY_BOT_MAX_OUTPUT_TOKENS: '8192' };
+  const options = { body: { message: 'Explain rainbows.', publicContentConfirmed: true },
+    identify: async () => ({ uid: 'tester', email: env.MITRIFY_CHAT_ACCOUNT_EMAIL, emailVerified: true }), signal: f.signal };
+  assert.equal((await runMitrifyPublicBot(options, env, () => {})).completion, 'complete');
+  assert.equal(f.requests[0].body.max_tokens, 8192);
+  for (const value of ['Infinity', 'unlimited', '0', '-1', '32769', '2.5', 'NaN']) {
+    await assert.rejects(runMitrifyPublicBot(options, { ...env, MITRIFY_BOT_MAX_OUTPUT_TOKENS: value }, () => {}), { code: 'MITRIFY_CONFIGURATION' });
+  }
+  await assert.rejects(runMitrifyPublicBot({ ...options, body: { ...options.body, max_tokens: 32768 } }, env, () => {}), { code: 'MITRIFY_BOT_REVIEW_REQUIRED' });
+  assert.equal(f.requests.length, 1);
 });

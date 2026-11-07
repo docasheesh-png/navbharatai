@@ -54,10 +54,23 @@ can miss sensitive text and can reject benign text. Do not claim foolproof detec
 POST accepts exactly `message` and `publicContentConfirmed: true`; extra fields,
 profile, history, files and caller parameters are rejected. The reviewed message
 is sent unchanged as the only message, with the configured model alias,
-non-streaming flag and 256-token output limit. No account identity or previous
+non-streaming flag and a 2,048-token default output allowance.
+`MITRIFY_BOT_MAX_OUTPUT_TOKENS` can select an integer from 1 to 32,768 on the
+server; blank/unset uses 2,048. This application ceiling does not establish the
+selected model’s supported maximum. Use a value supported by the gateway policy;
+models still have finite context/output limits. Invalid or infinite values fail
+closed. Browser parameters cannot override this setting. No account identity or previous
 reply is appended. Older installed clients can still send the three reviewed
 question IDs. Replies are displayed as text, never executed as HTML. The local
 conversation is ephemeral, and account changes discard/cancel the panel.
+
+The response includes a local `completion` label: `complete` only for an explicit
+`stop`, `length` for a token-limit stop, `filtered` for a content-filter stop, or
+`unconfirmed` when the reason is absent, null or unknown. The panel preserves all
+returned text and displays a separate accessible warning for every non-complete
+status (including an older server that omits the status). No continuation or
+extra generation request is sent automatically. A timeout or malformed response
+remains an error; partial JSON is never treated as a complete reply.
 
 The bot uses only Mitrify; errors never invoke another provider. The shared chat
 rate limiter, transport queue/retry bounds, disconnect cancellation and 60-second

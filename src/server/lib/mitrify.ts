@@ -244,12 +244,22 @@ export async function runMitrifyPublicBot(options: { body: unknown; identify: Id
     if (recognizableSensitiveText(fields.message)) throw new MitrifyError('MITRIFY_BOT_SENSITIVE_CONTENT', 400);
     prompt = fields.message; // Preserve the reviewed message exactly; never append profile/history.
   }
-  const result = await createMitrifyClient(env, log).chat({ messages: [{ role: 'user', content: prompt }], max_tokens: 256, stream: false }, { signal: options.signal });
-  // Do not expose provider metadata or arbitrary response properties to the UI.
-  const data = result.data as { choices?: Array<{ message?: { content?: unknown } }> };
-  const reply = data.choices?.[0]?.message?.content;
+  // This is an application safety ceiling, not a claim about the selected model's
+  // capabilities or an increase to the gateway account's monetary authorization.
+  const maxOutputTokens = env.MITRIFY_BOT_MAX_OUTPUT_TOKENS?.trim() ? Number(env.MITRIFY_BOT_MAX_OUTPUT_TOKENS) : 2048;
+  if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 32768) throw new MitrifyError('MITRIFY_CONFIGURATION', 503);
+  const result = await createMitrifyClient(env, log).chat({ messages: [{ role: 'user', content: prompt }], max_tokens: maxOutputTokens, stream: false }, { signal: options.signal });
+  // Bounded output allowance, not a monetary authorization or a continuation loop.
+  // Keep the finish reason: HTTP success alone does not mean the answer completed.
+  const data = result.data as { choices?: Array<{ message?: { content?: unknown }; finish_reason?: unknown }> };
+  const choice = data.choices?.[0];
+  const reply = choice?.message?.content;
   if (typeof reply !== 'string' || !reply.trim()) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', 502);
-  return { reply };
+  const completion = choice?.finish_reason === 'stop' ? 'complete' as const
+    : choice?.finish_reason === 'length' ? 'length' as const
+    : choice?.finish_reason === 'content_filter' ? 'filtered' as const : 'unconfirmed' as const;
+  // Only our own completion labels reach the browser, never arbitrary provider metadata.
+  return { reply, completion };
 }
 
 /** Controlled synthetic traffic without Firebase login; not anonymous free-form chat. */

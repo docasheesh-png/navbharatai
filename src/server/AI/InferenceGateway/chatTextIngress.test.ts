@@ -40,11 +40,11 @@ describe('ordinary chat reaches the real gateway ingress context', () => {
     }
     expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled(); expect(m.live).not.toHaveBeenCalled();
   });
-  it('separate bot dispatch returns only the reply and has no old-chain fallback', async () => {
-    const bot = vi.spyOn(mitrify, 'runMitrifyPublicBot').mockResolvedValueOnce({ reply: 'public answer' });
+  it('separate bot dispatch forwards completion status and has no old-chain fallback', async () => {
+    const bot = vi.spyOn(mitrify, 'runMitrifyPublicBot').mockResolvedValueOnce({ reply: 'public answer', completion: 'length' });
     const handler = captureRoutes(registerChatRoutes as any, () => {}).get('POST /api/chat/mitrify-bot')!;
     const req = mockReq({ body: { questionId: 'rainbow' }, headers: { 'content-type': 'application/json' } });
-    const res = mockRes(); await handler(req, res); expect(res.body).toEqual({ reply: 'public answer' });
+    const res = mockRes(); await handler(req, res); expect(res.body).toEqual({ reply: 'public answer', completion: 'length' });
     bot.mockRejectedValueOnce(new mitrify.MitrifyError('MITRIFY_CONFIGURATION', 401));
     const failed = mockRes(); await handler(req, failed); expect(failed.statusCode).toBe(401);
     expect(m.detailed).not.toHaveBeenCalled(); expect(m.stream).not.toHaveBeenCalled(); expect(m.legacy).not.toHaveBeenCalled(); expect(m.document).not.toHaveBeenCalled();

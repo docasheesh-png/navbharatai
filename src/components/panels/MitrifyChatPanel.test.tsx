@@ -28,3 +28,23 @@ describe('Mitrify reply completion display', () => {
     expect(renderToStaticMarkup(<MitrifyReply text="Partial answer" completion="filtered" />)).toContain('stopped by a content filter');
   });
 });
+
+describe('explicit continuation review', () => {
+  it('shows the exact prompt, accumulated answer and instruction with fresh unchecked confirmation', async () => {
+    const { MitrifyContinuationReview } = await import('./MitrifyChatPanel');
+    const offer = { available: true as const, ticket: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', instruction: 'Continue without repeating.', roundsRemaining: 2 };
+    const html = renderToStaticMarkup(<MitrifyContinuationReview prompt="Original public question" answer={'Part one.\n\nPart two.'} offer={offer} onConfirm={() => { throw new Error('Must not auto-send'); }} onCancel={() => {}} />);
+    expect(html).toContain('Original public question'); expect(html).toContain('Part one.\n\nPart two.'); expect(html).toContain(offer.instruction);
+    expect(html).toContain('Mitrify and its providers'); expect(html).toContain('may use gateway credits');
+    expect(html).toContain('disabled=""'); expect(html).not.toContain('checked=""');
+    expect(html).toContain('including the generated answer'); expect(html).toContain('At most 2');
+  });
+  it('rejects invalid capability data and explains fail-closed bounds', async () => {
+    const { continuationOffer, continuationUnavailable } = await import('./MitrifyChatPanel');
+    for (const v of [undefined, {}, { available: true }, { available: false, ticket: 'x' }]) expect(continuationOffer(v)).toBeNull();
+    expect(continuationUnavailable({ reason: 'context-limit' })).toContain('Nothing was trimmed');
+    expect(continuationUnavailable({ reason: 'round-limit' })).toContain('round limit');
+    expect(continuationUnavailable({ reason: 'used' })).toContain('will not be replayed');
+    expect(continuationUnavailable({ reason: 'funding-unavailable' })).toContain('spending limit');
+  });
+});

@@ -52,7 +52,7 @@ email, long numeric identifier, credential and sensitive-record patterns, but
 can miss sensitive text and can reject benign text. Do not claim foolproof detection.
 
 POST accepts exactly `message` and `publicContentConfirmed: true`; extra fields,
-profile, history, files and caller parameters are rejected. The reviewed message
+profile, history, files and caller parameters are rejected by this new-message endpoint. The reviewed message
 is sent unchanged as the only message, with the configured model alias,
 non-streaming flag and a 2,048-token default output allowance.
 `MITRIFY_BOT_MAX_OUTPUT_TOKENS` can select an integer from 1 to 32,768 on the
@@ -332,3 +332,48 @@ Local shared-admission check: with a loopback Firestore emulator running, execut
 demo project, ephemeral mock credentials and a loopback gateway, never production.
 It exercises concurrent replay through two independent Firestore clients, unique
 slot admission and revocation.
+
+
+## Explicit continuation capability (production unavailable)
+
+Only a `length` reply may offer **Review and continue**. The user must inspect the
+exact original prompt, accumulated answer and continuation instruction, then
+confirm again that all of it—including generated text—is public and nonsensitive.
+The next request resends only those three messages. No profile, files or unrelated
+history is included. New text is appended with a blank-line separator; repetitions
+are retained and no exact or unlimited completion is promised.
+
+`POST /api/v1/chat/mitrify-bot/continue` preserves verified account authorization,
+selected/verified access scope, no-store responses and the existing rate limiter.
+It accepts only a server-issued ticket, prompt, accumulated answer, exact reviewed
+instruction and explicit public-content confirmation. Browser fields cannot grant
+funding or override model, token, round, context or identity bounds.
+
+The server permits at most three continuation rounds in the original ten-minute
+window, at most 32 KiB of serialized request context per round, the original
+configured output allowance and a 60-second per-call deadline. Oversized context
+is rejected in full, never trimmed. Each round uses one HTTP attempt with no
+transport retries. Only a new `length` outcome can offer another reviewed round;
+filtered, unconfirmed, cancelled, failed or uncertain outcomes cannot continue.
+
+Firestore tickets bind the verified UID, exact context digest, configured gateway
+and credential digest, output allowance, instruction and expiry. Transactions
+consume each ticket once across processes before funding/dispatch. Claimed tickets
+are never restored after cancellation or ambiguous failure. Records store digests
+and admission metadata, not prompt/answer content. Existing client-deny rules cover
+the collection. An eventual production integration must arrange bounded retention
+of expired tickets; deleting an expired ticket cannot authorize its replay.
+
+**No production funding adapter is provided or installed.** The actual route
+passes none, initial length replies report `funding-unavailable`, and continuation
+requests return `MITRIFY_CONTINUATION_FUNDING_UNAVAILABLE` without an upstream call.
+The UI disables continuation and explains the missing admission. There is no
+client/environment switch that bypasses this boundary.
+
+The server-only `MitrifyContinuationAdmission.runOnce` contract requires an
+independently verified payer and finite enforced/reserved monetary coverage for
+the exact request/credential/endpoint/model, including supplier failovers and
+fees. It must retain uncertain liabilities and reject exhausted or revoked funds.
+The implementation includes deterministic mock adapters only in offline tests;
+those are not real spending authority. Existing merchant caps and the separate
+$10 synthetic load-test authorization are neither changed nor repurposed.

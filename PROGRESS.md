@@ -100780,3 +100780,17 @@ Full local coverage exposed three existing professional conversation contract as
   replay is introduced. Privacy/account gates and main chain/Builder stay intact.
 - Added longer-answer, completion-reason, malformed-response, deadline and UI
   regressions. Required local checks are recorded in the accompanying PR.
+
+
+### Reviewed Mitrify continuation capability (fail closed)
+
+- Added explicit context review and one-at-a-time continuation controls for length
+  stops only. Old answer text remains intact; appends preserve repetition.
+- Server binds one-use Firestore tickets to account, exact context, gateway,
+  credential, output allowance, instruction and expiry; three rounds, 32 KiB
+  request context, one HTTP attempt and 60 seconds per call are enforced.
+- Production has no verified funding adapter and therefore cannot dispatch a
+  continuation. No environment/browser flag grants funding. No merchant cap,
+  credential, production setting, main chain, guest test or Builder was changed.
+- Offline tests cover races, replay, privacy/account checks, bounds, cancellation,
+  funding denial and revalidation. Required gate results are recorded in the PR.

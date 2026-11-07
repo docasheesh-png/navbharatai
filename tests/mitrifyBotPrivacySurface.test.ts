@@ -16,7 +16,7 @@ describe('separate public bot browser boundary', () => {
     expect(hook).toContain('result?.uid === uid && auth.currentUser?.uid === uid');
     expect(hook).toContain('return () => controller.abort()');
   });
-  it('sends only one explicitly reviewed message, without persistence, credentials or history', () => {
+  it('sends only one explicitly reviewed message, without persistence, credentials or unrelated history', () => {
     expect(panel).toContain('body: JSON.stringify({ message, publicContentConfirmed: true })');
     expect(panel).toContain('!confirmed');
     expect(panel).toContain('setInput(event.target.value); setConfirmed(false)');
@@ -24,5 +24,9 @@ describe('separate public bot browser boundary', () => {
     expect(panel).not.toMatch(/localStorage|sessionStorage|MITRIFY_API_KEY|messages:\s*messages/);
     expect(panel).toContain("auth.onAuthStateChanged(user => { if (user?.uid !== uid) pending.current?.abort(); })");
     expect(panel).toContain('if (controller.signal.aborted || auth.currentUser?.uid !== uid) return;');
+    expect(panel).toContain("message.completion !== 'length'");
+    expect(panel).toContain('item.attemptTicket === offer.ticket && item.text === message.text');
+    expect(panel).toContain('key={reviewOffer.ticket}');
+    expect(panel).toContain("continuation: { available: false, reason: 'used' }");
   });
 });

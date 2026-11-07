@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual, randomUUID } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 
 /** Server-only transport. No upstream provider catalogue, pricing or capability assumptions. */
@@ -202,6 +202,7 @@ async function authorizePublicBot(identify: Identify, signal: AbortSignal, env: 
     if (!target || identity.email.trim().toLowerCase() !== target) throw new MitrifyError('MITRIFY_BOT_FORBIDDEN', 403);
   }
   signal.throwIfAborted();
+  return identity;
 }
 
 /** Visibility is server-authorized even when the bot is disabled or unconfigured. */
@@ -221,8 +222,8 @@ function recognizableSensitiveText(text: string): boolean {
 }
 
 /** Separate, user-reviewed public-text bot; never invokes direct providers. */
-export async function runMitrifyPublicBot(options: { body: unknown; identify: Identify; signal: AbortSignal }, env: Env = process.env, log: Log = defaultLog) {
-  await authorizePublicBot(options.identify, options.signal, env);
+export async function runMitrifyPublicBot(options: { body: unknown; identify: Identify; signal: AbortSignal; continuation?: MitrifyContinuationRuntime }, env: Env = process.env, log: Log = defaultLog) {
+  const identity = await authorizePublicBot(options.identify, options.signal, env);
   if (backend(env) !== 'mitrify') throw new MitrifyError('MITRIFY_BOT_DISABLED', 503);
   const body = options.body;
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -244,22 +245,140 @@ export async function runMitrifyPublicBot(options: { body: unknown; identify: Id
     if (recognizableSensitiveText(fields.message)) throw new MitrifyError('MITRIFY_BOT_SENSITIVE_CONTENT', 400);
     prompt = fields.message; // Preserve the reviewed message exactly; never append profile/history.
   }
-  // This is an application safety ceiling, not a claim about the selected model's
-  // capabilities or an increase to the gateway account's monetary authorization.
-  const maxOutputTokens = env.MITRIFY_BOT_MAX_OUTPUT_TOKENS?.trim() ? Number(env.MITRIFY_BOT_MAX_OUTPUT_TOKENS) : 2048;
-  if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 32768) throw new MitrifyError('MITRIFY_CONFIGURATION', 503);
+  const maxOutputTokens = mitrifyBotOutputTokens(env);
   const result = await createMitrifyClient(env, log).chat({ messages: [{ role: 'user', content: prompt }], max_tokens: maxOutputTokens, stream: false }, { signal: options.signal });
-  // Bounded output allowance, not a monetary authorization or a continuation loop.
-  // Keep the finish reason: HTTP success alone does not mean the answer completed.
-  const data = result.data as { choices?: Array<{ message?: { content?: unknown }; finish_reason?: unknown }> };
-  const choice = data.choices?.[0];
+  const reply = mitrifyBotReply(result.data);
+  if (reply.completion !== 'length') return reply;
+  const continuation = await offerMitrifyContinuation(options.continuation, { uid: identity.uid, prompt, answer: reply.reply, usedRounds: 0,
+    expiresAtMs: Date.now() + 600000, maxOutputTokens }, options.signal, env);
+  return { ...reply, continuation };
+}
+
+function mitrifyBotOutputTokens(env: Env): number {
+  // Output allowance is not monetary authorization or a model capability claim.
+  const n = env.MITRIFY_BOT_MAX_OUTPUT_TOKENS?.trim() ? Number(env.MITRIFY_BOT_MAX_OUTPUT_TOKENS) : 2048;
+  if (!Number.isSafeInteger(n) || n < 1 || n > 32768) throw new MitrifyError('MITRIFY_CONFIGURATION', 503);
+  return n;
+}
+function mitrifyBotReply(data: unknown) {
+  const choice = (data as { choices?: Array<{ message?: { content?: unknown }; finish_reason?: unknown }> })?.choices?.[0];
   const reply = choice?.message?.content;
   if (typeof reply !== 'string' || !reply.trim()) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', 502);
   const completion = choice?.finish_reason === 'stop' ? 'complete' as const
     : choice?.finish_reason === 'length' ? 'length' as const
     : choice?.finish_reason === 'content_filter' ? 'filtered' as const : 'unconfirmed' as const;
-  // Only our own completion labels reach the browser, never arbitrary provider metadata.
   return { reply, completion };
+}
+
+const continuationInstruction = 'Continue the answer from where it stopped. Do not repeat earlier text. If the answer is already complete, say so.';
+const continuationInputBytes = 32768;
+const continuationRounds = 3;
+type ContinuationGateway = { baseURL: string; model: string; credentialFingerprint: string };
+/** Trusted server adapter only. Must atomically authorize the verified payer and
+ * reserve/enforce a finite monetary ceiling for this exact request, credential,
+ * endpoint and model, including all supplier failovers/fees. Reject expired,
+ * exhausted or uncertain funding; never release uncertain liability. No production
+ * implementation is supplied. A token estimate, checkbox or local nonce is NOT funding.
+ * The adapter must invoke execute at most once and must not retry it.
+ */
+export interface MitrifyContinuationAdmission {
+  runOnce<T>(claim: { uid: string; requestId: string; requestDigest: string; gateway: ContinuationGateway;
+    maxHttpAttempts: 1; maxOutputTokens: number; signal: AbortSignal }, execute: () => Promise<T>): Promise<T>;
+}
+export type MitrifyContinuationRuntime = { db: Firestore; admission: MitrifyContinuationAdmission };
+type ContinuationContext = { uid: string; prompt: string; answer: string; usedRounds: number; expiresAtMs: number; maxOutputTokens: number };
+const continuationDigest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+function continuationGateway(env: Env): ContinuationGateway {
+  const cfg = mitrifyConfig(env);
+  return { baseURL: cfg.baseURL, model: cfg.model, credentialFingerprint: continuationDigest(cfg.apiKey) };
+}
+function continuationBody(prompt: string, answer: string, maxOutputTokens: number, env: Env) {
+  return { model: mitrifyModel(env), messages: [{ role: 'user', content: prompt }, { role: 'assistant', content: answer },
+    { role: 'user', content: continuationInstruction }], max_tokens: maxOutputTokens, stream: false };
+}
+async function offerMitrifyContinuation(runtime: MitrifyContinuationRuntime | undefined, context: ContinuationContext, signal: AbortSignal, env: Env) {
+  const unavailable = (reason: string) => ({ available: false as const, reason });
+  if (!runtime?.admission || !runtime.db) return unavailable('funding-unavailable');
+  if (context.usedRounds >= continuationRounds) return unavailable('round-limit');
+  if (context.expiresAtMs <= Date.now()) return unavailable('expired');
+  const body = continuationBody(context.prompt, context.answer, context.maxOutputTokens, env);
+  if (Buffer.byteLength(JSON.stringify(body)) > continuationInputBytes) return unavailable('context-limit');
+  const ticket = randomUUID();
+  try {
+    await untilCancelled(() => runtime.db.doc(`mitrify_bot_continuations/${ticket}`).create({ kind: 'mitrify-continuation-v1',
+      uid: context.uid, contextDigest: continuationDigest([context.prompt, context.answer]), gatewayDigest: continuationDigest(continuationGateway(env)),
+      state: 'offered', usedRounds: context.usedRounds, expiresAtMs: context.expiresAtMs, maxOutputTokens: context.maxOutputTokens,
+      instructionDigest: continuationDigest(continuationInstruction) }), signal);
+    signal.throwIfAborted();
+    return { available: true as const, ticket, instruction: continuationInstruction, roundsRemaining: continuationRounds - context.usedRounds };
+  } catch { if (signal.aborted) throw new MitrifyError('MITRIFY_CANCELLED'); return unavailable('admission-unavailable'); } // Never log/store text.
+}
+
+/** Explicitly reviewed context only. Production route passes no funding adapter and
+ * therefore fails closed. Neither an environment variable nor caller data grants it.
+ */
+export async function runMitrifyContinuation(options: { body: unknown; identify: Identify; signal: AbortSignal;
+  continuation?: MitrifyContinuationRuntime }, env: Env = process.env, log: Log = defaultLog) {
+  const identity = await authorizePublicBot(options.identify, options.signal, env);
+  if (backend(env) !== 'mitrify') throw new MitrifyError('MITRIFY_BOT_DISABLED', 503);
+  const runtime = options.continuation;
+  if (!runtime?.admission || !runtime.db) throw new MitrifyError('MITRIFY_CONTINUATION_FUNDING_UNAVAILABLE', 503);
+  const b = options.body as Record<string, unknown> | null;
+  if (!b || Array.isArray(b) || Object.keys(b).length !== 5
+    || Object.keys(b).some(k => !['ticket', 'prompt', 'answer', 'reviewedInstruction', 'publicContentConfirmed'].includes(k))
+    || typeof b.ticket !== 'string' || !/^[a-f0-9-]{36}$/.test(b.ticket)
+    || typeof b.prompt !== 'string' || !b.prompt.trim() || b.prompt.length > 2000
+    || typeof b.answer !== 'string' || !b.answer.trim() || b.publicContentConfirmed !== true
+    || b.reviewedInstruction !== continuationInstruction) throw new MitrifyError('MITRIFY_CONTINUATION_REVIEW_REQUIRED', 400);
+  if (recognizableSensitiveText(b.prompt) || recognizableSensitiveText(b.answer)) throw new MitrifyError('MITRIFY_BOT_SENSITIVE_CONTENT', 400);
+  const cfg = mitrifyConfig(env);
+  const requestEnv = { ...env, MITRIFY_BASE_URL: cfg.baseURL, MITRIFY_MODEL: cfg.model, MITRIFY_API_KEY: cfg.apiKey };
+  const maxOutputTokens = mitrifyBotOutputTokens(env);
+  const body = continuationBody(b.prompt, b.answer, maxOutputTokens, requestEnv);
+  if (Buffer.byteLength(JSON.stringify(body)) > continuationInputBytes) throw new MitrifyError('MITRIFY_CONTINUATION_CONTEXT_LIMIT', 413);
+  const gateway = continuationGateway(requestEnv);
+  const ticket = b.ticket, prompt = b.prompt, answer = b.answer;
+  const signal = AbortSignal.any([options.signal, AbortSignal.timeout(60000)]);
+  const ref = runtime.db.doc(`mitrify_bot_continuations/${ticket}`);
+  const record = await untilCancelled(() => runtime.db.runTransaction(async tx => {
+    const r = (await tx.get(ref)).data();
+    const now = Date.now();
+    if (!r || r.kind !== 'mitrify-continuation-v1' || r.state !== 'offered' || r.uid !== identity.uid
+      || r.contextDigest !== continuationDigest([prompt, answer]) || r.gatewayDigest !== continuationDigest(gateway)
+      || r.instructionDigest !== continuationDigest(continuationInstruction) || r.maxOutputTokens !== maxOutputTokens
+      || !Number.isSafeInteger(r.usedRounds) || r.usedRounds < 0 || r.usedRounds >= continuationRounds
+      || !Number.isSafeInteger(r.expiresAtMs) || r.expiresAtMs <= now || r.expiresAtMs > now + 600000) throw new MitrifyError('MITRIFY_CONTINUATION_EXPIRED_OR_USED', 409);
+    signal.throwIfAborted();
+    tx.update(ref, { state: 'claimed' }); // Never refund the claim, including cancellation or unknown charging.
+    return { usedRounds: r.usedRounds as number, expiresAtMs: r.expiresAtMs as number, policyDigest: continuationDigest([r.uid, r.contextDigest, r.gatewayDigest, r.usedRounds, r.expiresAtMs, r.maxOutputTokens, r.instructionDigest]) };
+  }), signal).catch(error => { throw error instanceof MitrifyError ? error : new MitrifyError('MITRIFY_CONTINUATION_ADMISSION_FAILED', 503); });
+  const controller = new AbortController();
+  const executionSignal = AbortSignal.any([signal, controller.signal, AbortSignal.timeout(Math.max(0, record.expiresAtMs - Date.now()))]);
+  let entered = false;
+  try {
+    const result = await untilCancelled(() => runtime.admission.runOnce({ uid: identity.uid, requestId: ticket,
+      requestDigest: continuationDigest(body), gateway, maxHttpAttempts: 1, maxOutputTokens, signal: executionSignal }, async () => {
+      executionSignal.throwIfAborted();
+      if (entered || Date.now() >= record.expiresAtMs || backend(env) !== 'mitrify'
+        || continuationDigest(continuationGateway(env)) !== continuationDigest(gateway)) throw new MitrifyError('MITRIFY_CONTINUATION_EXPIRED_OR_USED', 409);
+      entered = true; // Set before any await, including a misbehaving adapter's second callback.
+      const currentIdentity = await authorizePublicBot(options.identify, executionSignal, env);
+      const current = await untilCancelled(() => ref.get(), executionSignal);
+      const r = current.data();
+      if (currentIdentity.uid !== identity.uid || mitrifyBotOutputTokens(env) !== maxOutputTokens || !r || r.state !== 'claimed'
+        || continuationDigest([r.uid, r.contextDigest, r.gatewayDigest, r.usedRounds, r.expiresAtMs, r.maxOutputTokens, r.instructionDigest]) !== record.policyDigest) throw new MitrifyError('MITRIFY_CONTINUATION_EXPIRED_OR_USED', 409);
+      return createMitrifyClient(requestEnv, log).chat(body, { signal: executionSignal, maxAttempts: 1 });
+    }), executionSignal);
+    executionSignal.throwIfAborted();
+    if (!entered) throw new MitrifyError('MITRIFY_CONTINUATION_ADMISSION_FAILED', 503);
+    const reply = mitrifyBotReply(result.data);
+    if (reply.completion !== 'length') return reply;
+    const continuation = await offerMitrifyContinuation(runtime, { uid: identity.uid, prompt, answer: answer + '\n\n' + reply.reply,
+      usedRounds: record.usedRounds + 1, expiresAtMs: record.expiresAtMs, maxOutputTokens }, executionSignal, requestEnv);
+    return { ...reply, continuation };
+  } catch (error) {
+    throw error instanceof MitrifyError ? error : new MitrifyError(executionSignal.aborted ? 'MITRIFY_CANCELLED' : 'MITRIFY_CONTINUATION_ADMISSION_FAILED', 503);
+  } finally { controller.abort(); }
 }
 
 /** Controlled synthetic traffic without Firebase login; not anonymous free-form chat. */

@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
-import { mitrifyChainBinding, runApprovedMitrifyChain, mitrifyGuestTestTokenValid, runMitrifyGuestTest, createMitrifyClient, mitrifyConfig, withMitrifyChatPrivacyBoundary, runMitrifyPublicTest, mitrifyPublicBotStatus, runMitrifyPublicBot, MitrifyError } from '../../src/server/lib/mitrify.ts';
+import { runMitrifyContinuation, mitrifyChainBinding, runApprovedMitrifyChain, mitrifyGuestTestTokenValid, runMitrifyGuestTest, createMitrifyClient, mitrifyConfig, withMitrifyChatPrivacyBoundary, runMitrifyPublicTest, mitrifyPublicBotStatus, runMitrifyPublicBot, MitrifyError } from '../../src/server/lib/mitrify.ts';
 
 const input = { model: 'ignored', messages: [{ role: 'system', content: 'Be brief.' }, { role: 'user', content: 'Hello.' }], temperature: 0.2, max_tokens: 12 };
 const chunk = text => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
@@ -935,7 +935,7 @@ for (const [reason, completion] of [['stop', 'complete'], ['length', 'length'], 
     const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' };
     const result = await runMitrifyPublicBot({ body: { message: 'Explain the solar system.', publicContentConfirmed: true },
       identify: async () => ({ uid: 'tester', email: env.MITRIFY_CHAT_ACCOUNT_EMAIL, emailVerified: true }), signal: f.signal }, env, () => {});
-    assert.deepEqual(result, { reply: answer, completion });
+    assert.deepEqual(result, { reply: answer, completion, ...(completion === 'length' ? { continuation: { available: false, reason: 'funding-unavailable' } } : {}) });
     assert.equal(f.requests.length, 1);
     assert.equal(f.requests[0].body.max_tokens, 2048);
     assert.equal(f.requests[0].body.stream, false);
@@ -979,4 +979,134 @@ test('separate bot output allowance is server configured and finite; browser can
   }
   await assert.rejects(runMitrifyPublicBot({ ...options, body: { ...options.body, max_tokens: 32768 } }, env, () => {}), { code: 'MITRIFY_BOT_REVIEW_REQUIRED' });
   assert.equal(f.requests.length, 1);
+});
+
+function continuationFixture(f) {
+  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_BOT_ACCESS: 'verified' };
+  let identity = { uid: 'public-user', email: 'public@example.invalid', emailVerified: true };
+  const docs = new Map(); let serial = Promise.resolve(); let funded = 0;
+  const db = { doc: path => ({ path, create: async value => { assert.ok(!docs.has(path)); docs.set(path, structuredClone(value)); },
+    get: async () => ({ data: () => structuredClone(docs.get(path)) }) }),
+    runTransaction: callback => { const p = serial.then(() => callback({ get: ref => ref.get(), update: (ref, patch) => docs.set(ref.path, { ...docs.get(ref.path), ...patch }) })); serial = p.catch(() => {}); return p; } };
+  // Synthetic funding adapter only. It represents no real price, payment authority or supplier cap.
+  const admission = { runOnce: async (claim, execute) => { funded++; assert.equal(claim.maxHttpAttempts, 1); return execute(); } };
+  const options = { identify: async () => identity, signal: f.signal, continuation: { db, admission } };
+  const prompt = 'Explain the solar system.';
+  const start = () => runMitrifyPublicBot({ ...options, body: { message: prompt, publicContentConfirmed: true } }, env, () => {});
+  const body = (result, answer = result.reply) => ({ ticket: result.continuation.ticket, prompt, answer,
+    reviewedInstruction: result.continuation.instruction, publicContentConfirmed: true });
+  return { env, docs, admission, options, start, body, get funded() { return funded; }, set identity(value) { identity = value; },
+    send: (body, overrides = {}) => runMitrifyContinuation({ ...options, body, ...overrides }, env, x => f.logs.push(x)) };
+}
+const limitedReply = (res, content = 'Partial public answer.', finish_reason = 'length') => {
+  res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content }, finish_reason }] }));
+};
+
+test('continuation fails closed without a production funding adapter and never dispatches', async t => {
+  const f = await fixture(t, (_req, res) => limitedReply(res)); const c = continuationFixture(f);
+  const result = await runMitrifyPublicBot({ ...c.options, continuation: undefined, body: { message: 'Explain rainbows.', publicContentConfirmed: true } }, c.env, () => {});
+  assert.deepEqual(result.continuation, { available: false, reason: 'funding-unavailable' });
+  await assert.rejects(c.send({ publicContentConfirmed: true }, { continuation: undefined }), { code: 'MITRIFY_CONTINUATION_FUNDING_UNAVAILABLE' });
+  assert.equal(f.requests.length, 1);
+});
+
+test('one explicit continuation sends exactly reviewed context and returns only its new segment', async t => {
+  const f = await fixture(t, (_req, res, n) => limitedReply(res, n === 1 ? 'First part.' : 'Second part.', n === 1 ? 'length' : 'stop'));
+  const c = continuationFixture(f); const first = await c.start(); assert.equal(first.continuation.roundsRemaining, 3);
+  const result = await c.send(c.body(first)); assert.deepEqual(result, { reply: 'Second part.', completion: 'complete' });
+  assert.equal(c.funded, 1); assert.equal(f.requests.length, 2);
+  assert.deepEqual(f.requests[1].body.messages, [{ role: 'user', content: c.body(first).prompt },
+    { role: 'assistant', content: 'First part.' }, { role: 'user', content: first.continuation.instruction }]);
+  assert.ok(!JSON.stringify([...c.docs.values()]).includes('First part.'));
+  assert.ok(!JSON.stringify(f.requests[1].body).includes('public-user'));
+  await assert.rejects(c.send(c.body(first)), { code: 'MITRIFY_CONTINUATION_EXPIRED_OR_USED' });
+  assert.equal(f.requests.length, 2);
+});
+
+test('competing continuation clicks claim one ticket and fund only one request', async t => {
+  const f = await fixture(t, (_req, res) => limitedReply(res)); const c = continuationFixture(f); const first = await c.start();
+  const results = await Promise.allSettled([c.send(c.body(first)), c.send(c.body(first))]);
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1); assert.equal(c.funded, 1); assert.equal(f.requests.length, 2);
+});
+
+test('continuation cannot change reviewed text, instruction, identity, model, credential or request bounds', async t => {
+  const f = await fixture(t, (_req, res) => limitedReply(res)); const c = continuationFixture(f); const first = await c.start(); const original = c.body(first);
+  for (const patch of [{ publicContentConfirmed: false }, { reviewedInstruction: 'Other instruction' }, { max_tokens: 99999 }, { round: 0 }, { history: [] }]) {
+    await assert.rejects(c.send({ ...original, ...patch }), { code: 'MITRIFY_CONTINUATION_REVIEW_REQUIRED' });
+  }
+  for (const patch of [{ prompt: 'Other public prompt' }, { answer: 'Other public answer' }]) await assert.rejects(c.send({ ...original, ...patch }), { code: 'MITRIFY_CONTINUATION_EXPIRED_OR_USED' });
+  c.identity = { uid: 'other', email: 'other@example.invalid', emailVerified: true };
+  await assert.rejects(c.send(original), { code: 'MITRIFY_CONTINUATION_EXPIRED_OR_USED' });
+  c.identity = { uid: 'public-user', email: 'public@example.invalid', emailVerified: true };
+  for (const env of [{ ...c.env, MITRIFY_MODEL: 'other-policy' }, { ...c.env, MITRIFY_API_KEY: randomUUID() }]) {
+    await assert.rejects(runMitrifyContinuation({ ...c.options, body: original }, env, () => {}), { code: 'MITRIFY_CONTINUATION_EXPIRED_OR_USED' });
+  }
+  assert.equal(c.funded, 0); assert.equal(f.requests.length, 1);
+});
+
+test('only length stops produce continuation offers, and all three rounds retain exact accumulated text', async t => {
+  for (const reason of ['stop', 'content_filter', undefined]) {
+    const f = await fixture(t, (_req, res) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: 'Answer.' }, finish_reason: reason }] })); });
+    const c = continuationFixture(f); assert.equal((await c.start()).continuation, undefined); assert.equal(c.docs.size, 0);
+  }
+  const f = await fixture(t, (_req, res, n) => limitedReply(res, `Part ${n}.`)); const c = continuationFixture(f); let result = await c.start(); let answer = result.reply;
+  for (let round = 1; round <= 3; round++) {
+    result = await c.send(c.body(result, answer)); assert.equal(f.requests[round].body.messages[1].content, answer);
+    answer += '\n\n' + result.reply;
+  }
+  assert.deepEqual(result.continuation, { available: false, reason: 'round-limit' }); assert.equal(c.funded, 3); assert.equal(f.requests.length, 4);
+});
+
+test('oversized context is preserved but cannot be silently truncated into a continuation', async t => {
+  const answer = 'x'.repeat(32769); const f = await fixture(t, (_req, res) => limitedReply(res, answer)); const c = continuationFixture(f);
+  const first = await c.start(); assert.equal(first.reply, answer); assert.deepEqual(first.continuation, { available: false, reason: 'context-limit' });
+  assert.equal(c.docs.size, 0); assert.equal(f.requests.length, 1);
+});
+
+test('expired and sensitive continuation contexts never reach funding or HTTP', async t => {
+  const f = await fixture(t, (_req, res) => limitedReply(res)); const c = continuationFixture(f); const first = await c.start();
+  await assert.rejects(c.send({ ...c.body(first), answer: 'Patient lab report' }), { code: 'MITRIFY_BOT_SENSITIVE_CONTENT' });
+  c.docs.get(`mitrify_bot_continuations/${first.continuation.ticket}`).expiresAtMs = 0;
+  await assert.rejects(c.send(c.body(first)), { code: 'MITRIFY_CONTINUATION_EXPIRED_OR_USED' }); assert.equal(c.funded, 0);
+});
+
+test('funding denial and supplier errors consume the ticket without automatic retries or fallback', async t => {
+  const f = await fixture(t, (_req, res, n) => { if (n === 1) limitedReply(res); else { res.statusCode = 503; res.end('{}'); } });
+  const c = continuationFixture(f); const first = await c.start();
+  await assert.rejects(c.send(c.body(first)), { status: 503 }); assert.equal(f.requests.length, 2);
+  await assert.rejects(c.send(c.body(first)), { code: 'MITRIFY_CONTINUATION_EXPIRED_OR_USED' }); assert.equal(f.requests.length, 2);
+  const second = await fixture(t, (_req, res) => limitedReply(res)); const denied = continuationFixture(second); const offered = await denied.start();
+  denied.admission.runOnce = async () => { throw new Error('synthetic funding denial'); };
+  await assert.rejects(denied.send(denied.body(offered)), { code: 'MITRIFY_CONTINUATION_ADMISSION_FAILED' });
+  assert.equal(second.requests.length, 1);
+});
+
+test('cancel while funding waits prevents late dispatch and does not restore the ticket', async t => {
+  const f = await fixture(t, (_req, res) => limitedReply(res)); const c = continuationFixture(f); const first = await c.start();
+  let resolve; let started; const entered = new Promise(r => { started = r; }); const wait = new Promise(r => { resolve = r; });
+  c.admission.runOnce = async (_claim, execute) => { started(); await wait; return execute(); };
+  const controller = new AbortController(); const pending = c.send(c.body(first), { signal: controller.signal });
+  await entered; controller.abort(); await assert.rejects(pending, { code: 'MITRIFY_CANCELLED' }); resolve();
+  await new Promise(r => setImmediate(r)); assert.equal(f.requests.length, 1);
+  await assert.rejects(c.send(c.body(first)), { code: 'MITRIFY_CONTINUATION_EXPIRED_OR_USED' });
+});
+
+test('continuation rechecks revocation and identity after funding waits', async t => {
+  for (const change of ['revoked', 'identity']) {
+    const f = await fixture(t, (_req, res) => limitedReply(res)); const c = continuationFixture(f); const first = await c.start();
+    c.admission.runOnce = async (_claim, execute) => {
+      if (change === 'revoked') c.docs.get(`mitrify_bot_continuations/${first.continuation.ticket}`).state = 'revoked';
+      else c.identity = { uid: 'other', email: 'other@example.invalid', emailVerified: true };
+      return execute();
+    };
+    await assert.rejects(c.send(c.body(first)), { code: 'MITRIFY_CONTINUATION_EXPIRED_OR_USED' }); assert.equal(f.requests.length, 1);
+  }
+});
+
+test('even a duplicate execution callback cannot dispatch a second continuation', async t => {
+  const f = await fixture(t, (_req, res) => limitedReply(res)); const c = continuationFixture(f); const first = await c.start();
+  c.admission.runOnce = async (_claim, execute) => {
+    const firstCall = execute(); await assert.rejects(execute(), { code: 'MITRIFY_CONTINUATION_EXPIRED_OR_USED' }); return firstCall;
+  };
+  await c.send(c.body(first)); assert.equal(f.requests.length, 2);
 });

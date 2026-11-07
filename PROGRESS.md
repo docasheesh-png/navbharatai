@@ -100729,3 +100729,8 @@ Review reproduced cancellation after the first of several already-buffered SSE e
 - Local tests and required hosted CI must pass before publication/merge. No secret values or actual account addresses were added.
 
 - Verified-user access validation: all 3,237 coverage suites passed (48,650 tests passed, 89 skipped), 67 loopback transport/access checks, 36 focused tests and all five emulator drills passed. All applicable local security/type/build/bundle/boot/dependency gates passed; missing-key smoke exited 1 as expected. Node 22.23.4/npm 11.18.0 match CI; Java 21 is Debian OpenJDK rather than hosted Temurin. Required exact-head hosted CI remains pending. No live gateway request or production activation occurred.
+### 2026-11-07 — Controlled synthetic guest load-test preparation
+
+- Added a separate default-off endpoint without Firebase login, restricted to fixed public arithmetic prompts and 1110 numbered single-use slots across three batches. Shared Firestore transactions bind expiring operator admission to the gateway configuration and inclusive hard-cap confirmation; claims are not refunded. This request ledger is not a monetary cap.
+- Ordinary chat/App Builder and their limiters remain unchanged. Invalid control tokens keep the guest/IP limiter; valid test credentials use the isolated campaign's shared limits. No campaign, credential, production setting or live traffic was created.
+- Added a barrier-start operator runner and loopback/route regressions. Required full validation and hosted CI remain pending. Live execution needs authorized runtime binding, campaign provisioning and permitted destination access; it is not claimed complete.

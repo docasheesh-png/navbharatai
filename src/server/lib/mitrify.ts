@@ -1,5 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import type { Firestore } from 'firebase-admin/firestore';
 
 /** Server-only transport. No upstream provider catalogue, pricing or capability assumptions. */
 type Env = Record<string, string | undefined>;
@@ -119,6 +120,75 @@ export async function runMitrifyPublicBot(options: { body: unknown; identify: Id
   const reply = data.choices?.[0]?.message?.content;
   if (typeof reply !== 'string' || !reply.trim()) throw new MitrifyError('MITRIFY_INVALID_RESPONSE', 502);
   return { reply };
+}
+
+/** Controlled synthetic traffic without Firebase login; not anonymous free-form chat. */
+export function mitrifyGuestTestTokenValid(token: unknown, env: Env = process.env): boolean {
+  const expected = env.MITRIFY_GUEST_TEST_TOKEN || '';
+  if (env.MITRIFY_GUEST_TEST_ENABLED !== '1' || expected.length < 32 || expected.length > 512 || typeof token !== 'string' || token.length > 512) return false;
+  const digest = (value: string) => createHash('sha256').update(value).digest();
+  return timingSafeEqual(digest(token), digest(expected));
+}
+
+/**
+ * Shared immutable slots cap a campaign at 10 + 100 + 1000 admitted calls. Claims
+ * are never refunded (including abort/failure), and transport retries reuse a claim.
+ * The server-owned campaign must bind an already enforced inclusive USD ceiling
+ * to this exact credential/endpoint/model. This ledger is NOT a monetary cap.
+ */
+export async function runMitrifyGuestTest(options: {
+  body: unknown; token: unknown; signal: AbortSignal;
+  db: Pick<Firestore, 'doc' | 'runTransaction'> | null;
+}, env: Env = process.env, log: Log = defaultLog) {
+  if (!mitrifyGuestTestTokenValid(options.token, env)) throw new MitrifyError('MITRIFY_GUEST_TEST_FORBIDDEN', 403);
+  const config = mitrifyConfig(env);
+  const campaignId = env.MITRIFY_GUEST_TEST_CAMPAIGN || '';
+  if (!config.enabled || !config.apiKey || !/^[a-zA-Z0-9_-]{1,64}$/.test(campaignId) || !options.db) {
+    throw new MitrifyError('MITRIFY_GUEST_TEST_UNAVAILABLE', 503);
+  }
+  const body = options.body as Record<string, unknown> | null;
+  if (!body || Array.isArray(body) || Object.keys(body).length !== 2
+    || ![10, 100, 1000].includes(body.batch as number) || !Number.isInteger(body.slot)
+    || (body.slot as number) < 0 || (body.slot as number) >= (body.batch as number)) {
+    throw new MitrifyError('MITRIFY_GUEST_TEST_INVALID_SLOT', 400);
+  }
+  const fingerprint = (value: string) => createHash('sha256').update(value).digest('hex');
+  const tokenFingerprint = fingerprint(env.MITRIFY_GUEST_TEST_TOKEN!);
+  const requestEnv = { MITRIFY_BASE_URL: config.baseURL, MITRIFY_MODEL: config.model,
+    MITRIFY_API_KEY: config.apiKey, MITRIFY_MAX_INFLIGHT: String(config.maxInflight) };
+  const campaign = options.db.doc(`mitrify_test_campaigns/${campaignId}`);
+  const claim = options.db.doc(`mitrify_test_campaigns/${campaignId}/claims/${body.batch}-${body.slot}`);
+  const expiresAtMs = await untilCancelled(() => options.db!.runTransaction(async tx => {
+    options.signal.throwIfAborted();
+    const record = (await tx.get(campaign)).data();
+    const now = Date.now();
+    if (!record || record.enabled !== true || !Number.isSafeInteger(record.createdAtMs)
+      || !Number.isSafeInteger(record.expiresAtMs) || record.createdAtMs > now || record.expiresAtMs <= now
+      || record.expiresAtMs - record.createdAtMs <= 0 || record.expiresAtMs - record.createdAtMs > 3_600_000
+      || record.baseURL !== config.baseURL || record.model !== config.model
+      || record.credentialFingerprint !== fingerprint(config.apiKey)
+      || record.tokenFingerprint !== tokenFingerprint
+      || record.includesAllCharges !== true || record.hardCapConfirmed !== true
+      || typeof record.maxTotalUsd !== 'number' || !Number.isFinite(record.maxTotalUsd)
+      || record.maxTotalUsd <= 0 || record.maxTotalUsd > 10) {
+      throw new MitrifyError('MITRIFY_GUEST_TEST_UNAVAILABLE', 503);
+    }
+    if ((await tx.get(claim)).exists) throw new MitrifyError('MITRIFY_GUEST_TEST_REPLAY', 409);
+    options.signal.throwIfAborted();
+    tx.create(claim, { admittedAtMs: now }); // No identifiers, prompts, tokens or fingerprints in claims.
+    return record.expiresAtMs as number;
+  }), options.signal).catch(error => {
+    if (error instanceof MitrifyError) throw error;
+    throw new MitrifyError('MITRIFY_GUEST_TEST_UNAVAILABLE', 503);
+  });
+  options.signal.throwIfAborted();
+  const remainingMs = expiresAtMs - Date.now();
+  if (remainingMs <= 0) throw new MitrifyError('MITRIFY_GUEST_TEST_UNAVAILABLE', 503);
+  const signal = AbortSignal.any([options.signal, AbortSignal.timeout(Math.min(60_000, remainingMs))]);
+  return createMitrifyClient(requestEnv, log).chat({
+    messages: [{ role: 'user', content: 'What is 2 + 2? Reply with only the number.' }],
+    max_tokens: 16, temperature: 0, stream: false,
+  }, { signal });
 }
 
 // One FIFO for every client in this process: never one pool per key/model/client.

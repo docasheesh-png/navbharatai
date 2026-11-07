@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
-import { createMitrifyClient, mitrifyConfig, withMitrifyChatPrivacyBoundary, runMitrifyPublicTest, mitrifyPublicBotStatus, runMitrifyPublicBot, MitrifyError } from '../../src/server/lib/mitrify.ts';
+import { mitrifyGuestTestTokenValid, runMitrifyGuestTest, createMitrifyClient, mitrifyConfig, withMitrifyChatPrivacyBoundary, runMitrifyPublicTest, mitrifyPublicBotStatus, runMitrifyPublicBot, MitrifyError } from '../../src/server/lib/mitrify.ts';
 
 const input = { model: 'ignored', messages: [{ role: 'system', content: 'Be brief.' }, { role: 'user', content: 'Hello.' }], temperature: 0.2, max_tokens: 12 };
 const chunk = text => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
@@ -678,4 +678,137 @@ test('models accepts an unknown runtime catalogue without pinning entries', asyn
   const result = await f.client.models(f.signal);
   assert.equal(result.status, 200); assert.equal(f.requests[0].url, '/v1/models');
   assert.deepEqual(Object.keys(result), ['status', 'headers']);
+});
+
+function guestCampaign(env) {
+  const digest = value => createHash('sha256').update(value).digest('hex');
+  const record = { enabled: true, createdAtMs: Date.now() - 1000, expiresAtMs: Date.now() + 300_000,
+    baseURL: env.MITRIFY_BASE_URL, model: mitrifyConfig(env).model,
+    credentialFingerprint: digest(env.MITRIFY_API_KEY), tokenFingerprint: digest(env.MITRIFY_GUEST_TEST_TOKEN),
+    maxTotalUsd: 10, includesAllCharges: true, hardCapConfirmed: true };
+  const claims = new Map();
+  let tail = Promise.resolve();
+  // Serialize commits to model a shared transactional store across independent callers.
+  const db = { doc: path => ({ path }), runTransaction: fn => {
+    const result = tail.then(async () => {
+      const pending = [];
+      const value = await fn({ get: async ref => ref.path.includes('/claims/')
+        ? { exists: claims.has(ref.path) } : { data: () => ({ ...record }) },
+      create: (ref, data) => pending.push([ref.path, data]) });
+      for (const [path, data] of pending) { assert.equal(claims.has(path), false); claims.set(path, data); }
+      return value;
+    });
+    tail = result.catch(() => {}); return result;
+  } };
+  return { db, record, claims };
+}
+function guestEnv(f) { return { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_GUEST_TEST_ENABLED: '1',
+  MITRIFY_GUEST_TEST_CAMPAIGN: 'loopback-campaign', MITRIFY_GUEST_TEST_TOKEN: randomUUID() }; }
+function guestCall(f, env, campaign, body = { batch: 10, slot: 0 }, extra = {}) {
+  return runMitrifyGuestTest({ body, token: env.MITRIFY_GUEST_TEST_TOKEN, signal: f.signal, db: campaign.db, ...extra }, env, () => {});
+}
+
+test('guest campaign is default-off, denies invalid tokens and needs shared admission', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const env = guestEnv(f); const c = guestCampaign(env);
+  for (const token of [undefined, '', randomUUID(), 'x'.repeat(513)]) {
+    assert.equal(mitrifyGuestTestTokenValid(token, env), false);
+    await assert.rejects(guestCall(f, env, c, undefined, { token }), { code: 'MITRIFY_GUEST_TEST_FORBIDDEN' });
+  }
+  await assert.rejects(guestCall(f, { ...env, MITRIFY_GUEST_TEST_ENABLED: undefined }, c), { code: 'MITRIFY_GUEST_TEST_FORBIDDEN' });
+  await assert.rejects(guestCall(f, { ...env, AI_BACKEND: 'direct' }, c), { code: 'MITRIFY_GUEST_TEST_UNAVAILABLE' });
+  await assert.rejects(guestCall(f, env, c, undefined, { db: null }), { code: 'MITRIFY_GUEST_TEST_UNAVAILABLE' });
+  assert.equal(f.requests.length, 0); assert.equal(c.claims.size, 0);
+});
+
+test('guest campaign rejects arbitrary content, parameters and invalid slot ranges', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const env = guestEnv(f); const c = guestCampaign(env);
+  for (const body of [null, [], {}, { batch: 10, slot: 10 }, { batch: 1000, slot: -1 }, { batch: 10, slot: 0.5 },
+    { batch: 1110, slot: 0 }, { batch: '10', slot: 0 }, { batch: 10, slot: 0, message: 'untrusted' }]) {
+    await assert.rejects(guestCall(f, env, c, body), { code: 'MITRIFY_GUEST_TEST_INVALID_SLOT' });
+  }
+  assert.equal(f.requests.length, 0); assert.equal(c.claims.size, 0);
+});
+
+test('guest admission binds inclusive cap, exact gateway configuration, token and expiry', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const env = guestEnv(f);
+  for (const patch of [{ enabled: false }, { expiresAtMs: Date.now() - 1 }, { createdAtMs: Date.now() + 99_999 },
+    { expiresAtMs: Date.now() + 7_200_000 }, { maxTotalUsd: 11 }, { maxTotalUsd: NaN }, { maxTotalUsd: 0 },
+    { includesAllCharges: false }, { hardCapConfirmed: false }, { credentialFingerprint: 'wrong' },
+    { baseURL: 'https://invalid.example/v1' }, { model: 'wrong' }, { tokenFingerprint: 'wrong' }]) {
+    const c = guestCampaign(env); Object.assign(c.record, patch);
+    await assert.rejects(guestCall(f, env, c), { code: 'MITRIFY_GUEST_TEST_UNAVAILABLE' });
+    assert.equal(c.claims.size, 0);
+  }
+  assert.equal(f.requests.length, 0);
+});
+
+test('guest shared slots allow only one dispatch under concurrent replay from separate callers', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const env = guestEnv(f); const c = guestCampaign(env);
+  const results = await Promise.allSettled(Array.from({ length: 100 }, () => guestCall(f, { ...env }, c)));
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  assert.ok(results.filter(r => r.status === 'rejected').every(r => r.reason.code === 'MITRIFY_GUEST_TEST_REPLAY'));
+  assert.equal(c.claims.size, 1); assert.equal(f.requests.length, 1);
+});
+
+test('guest 10/100/1000 barrier-start loopback batches use exactly 1110 immutable slots', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const env = guestEnv(f); const c = guestCampaign(env);
+  for (const batch of [10, 100, 1000]) {
+    let release; const barrier = new Promise(resolve => { release = resolve; });
+    const calls = Array.from({ length: batch }, (_, slot) => barrier.then(() => guestCall(f, env, c, { batch, slot })));
+    release(); const results = await Promise.all(calls);
+    assert.ok(results.every(result => result.status === 200));
+  }
+  assert.equal(f.requests.length, 1110); assert.equal(c.claims.size, 1110);
+  assert.ok(f.requests.every(r => JSON.stringify(r.body.messages) === JSON.stringify([{ role: 'user', content: 'What is 2 + 2? Reply with only the number.' }])));
+  await assert.rejects(guestCall(f, env, c, { batch: 1000, slot: 999 }), { code: 'MITRIFY_GUEST_TEST_REPLAY' });
+});
+
+test('guest failed dispatch is not refundable and transport retry consumes only one slot', async t => {
+  let attempts = 0;
+  const f = await fixture(t, (_req, res) => { if (++attempts === 1) { res.writeHead(429, { 'Retry-After': '0' }); res.end('{}'); } else reply(res); });
+  const env = guestEnv(f); const c = guestCampaign(env);
+  assert.equal((await guestCall(f, env, c)).status, 200); assert.equal(attempts, 2); assert.equal(c.claims.size, 1);
+  await assert.rejects(guestCall(f, env, c), { code: 'MITRIFY_GUEST_TEST_REPLAY' });
+  const failed = await fixture(t, (_req, res) => { res.writeHead(400); res.end('{}'); });
+  const failedEnv = guestEnv(failed); const fc = guestCampaign(failedEnv);
+  await assert.rejects(guestCall(failed, failedEnv, fc)); assert.equal(fc.claims.size, 1);
+  await assert.rejects(guestCall(failed, failedEnv, fc), { code: 'MITRIFY_GUEST_TEST_REPLAY' });
+});
+
+test('guest cancellation while admission is pending never dispatches after late completion', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const env = guestEnv(f); const c = guestCampaign(env);
+  let resolve; const gate = new Promise(r => { resolve = r; });
+  const controller = new AbortController();
+  const call = guestCall(f, env, c, undefined, { signal: controller.signal,
+    db: { ...c.db, runTransaction: async fn => { await gate; return c.db.runTransaction(fn); } } });
+  controller.abort(); await assert.rejects(call); resolve();
+  await new Promise(r => setImmediate(r)); assert.equal(f.requests.length, 0); assert.equal(c.claims.size, 0);
+});
+
+test('guest shared store outage fails closed and does not expose its error', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const env = guestEnv(f); const c = guestCampaign(env);
+  await assert.rejects(guestCall(f, env, c, undefined, { db: { ...c.db, runTransaction: async () => { throw new Error('offline'); } } }));
+  assert.equal(f.requests.length, 0);
+});
+
+test('guest runner starts three concurrent batches without login and prints metadata only', async t => {
+  const { runGuestLoadTest } = await import('../mitrify-guest-load.mjs');
+  const token = randomUUID(); const seen = []; let active = 0; let peak = 0;
+  const server = createServer((req, res) => {
+    assert.equal(req.headers.authorization, undefined); assert.equal(req.headers.cookie, undefined);
+    assert.equal(req.headers['x-mitrify-test-token'], token);
+    assert.equal(req.url, '/api/v1/chat/mitrify-guest-test');
+    let data = ''; req.on('data', chunk => { data += chunk; });
+    req.on('end', () => { seen.push(JSON.parse(data)); active++; peak = Math.max(peak, active);
+      setTimeout(() => { active--; res.setHeader('Content-Type', 'application/json'); res.end('{"completed":true}'); }, 5); });
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const printed = [];
+  const result = await runGuestLoadTest({ target: `http://127.0.0.1:${server.address().port}`, token }, line => printed.push(line));
+  assert.deepEqual(result.map(r => [r.batch, r.completed, r.peakClientPending]), [[10, 10, 10], [100, 100, 100], [1000, 1000, 1000]]);
+  assert.equal(seen.length, 1110); assert.ok(peak > 1); assert.equal(JSON.stringify(printed).includes(token), false);
+  for (const [index, batch] of [10, 100, 1000].entries()) {
+    const start = [0, 10, 110][index]; assert.ok(seen.slice(start, start + batch).every(body => body.batch === batch && Object.keys(body).length === 2));
+  }
 });

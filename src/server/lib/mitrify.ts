@@ -48,8 +48,8 @@ export function withMitrifyChatPrivacyBoundary<T>(direct: () => Promise<T>, env:
   return direct();
 }
 
-// This separate bot accepts only IDs for reviewed public text. It never receives
-// free text, profile, history, files or client-authored model parameters.
+// Presets remain for old clients. New clients submit one explicitly reviewed public
+// message; profile, history, files and client-authored model parameters are rejected.
 const publicQuestions = [
   { id: 'arithmetic', label: 'What is 2 + 2?', prompt: 'What is 2 + 2? Reply with only the number.' },
   { id: 'rainbow', label: 'Why does a rainbow appear?', prompt: 'Explain why a rainbow appears in three short sentences.' },
@@ -73,17 +73,40 @@ export async function mitrifyPublicBotStatus(identify: Identify, signal: AbortSi
   return { available: config.enabled && Boolean(config.apiKey), questions: publicQuestions.map(({ id, label }) => ({ id, label })) };
 }
 
-/** Separate user-facing public-question bot; never invokes direct providers. */
+/** Defense in depth only: user review is still required; this is not a complete PII detector. */
+function recognizableSensitiveText(text: string): boolean {
+  return /[\w.+-]+@[\w.-]+\.[a-z]{2,}/i.test(text)
+    || /(?:\d[\s().+-]*){7,}/.test(text)
+    || /\b(?:bearer\s+\S+|(?:api[_ -]?key|password|secret|private key)\s*[:=]|sk-[a-z0-9_-]{8,})/i.test(text)
+    || /\b(?:patients?|medical records?|health records?|lab reports?|prescriptions?|diagnosis|my symptoms|my name is|my address|date of birth|passport|aadhaar|aadhar|credit card|bank account|account number|upi id)\b/i.test(text)
+    || /मेरा नाम|मेरा पता|आधार|मरीज|रोगी|मेडिकल रिपोर्ट|बैंक खाता/.test(text);
+}
+
+/** Separate, user-reviewed public-text bot; never invokes direct providers. */
 export async function runMitrifyPublicBot(options: { body: unknown; identify: Identify; signal: AbortSignal }, env: Env = process.env, log: Log = defaultLog) {
   await authorizePublicBot(options.identify, options.signal, env);
   if (backend(env) !== 'mitrify') throw new MitrifyError('MITRIFY_BOT_DISABLED', 503);
   const body = options.body;
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'questionId')) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new MitrifyError('MITRIFY_BOT_PUBLIC_QUESTION_REQUIRED', 400);
   }
-  const question = publicQuestions.find(item => item.id === (body as { questionId: unknown }).questionId);
-  if (!question) throw new MitrifyError('MITRIFY_BOT_PUBLIC_QUESTION_REQUIRED', 400);
-  const result = await createMitrifyClient(env, log).chat({ messages: [{ role: 'user', content: question.prompt }], max_tokens: 256, stream: false }, { signal: options.signal });
+  const fields = body as Record<string, unknown>;
+  let prompt: string;
+  if (Object.keys(fields).length === 1 && Object.hasOwn(fields, 'questionId')) {
+    // Compatibility for older installed clients; they can still send the reviewed presets.
+    const question = publicQuestions.find(item => item.id === fields.questionId);
+    if (!question) throw new MitrifyError('MITRIFY_BOT_PUBLIC_QUESTION_REQUIRED', 400);
+    prompt = question.prompt;
+  } else {
+    if (!Object.hasOwn(fields, 'message')) throw new MitrifyError('MITRIFY_BOT_PUBLIC_QUESTION_REQUIRED', 400);
+    if (Object.keys(fields).length !== 2 || !Object.hasOwn(fields, 'message') || !Object.hasOwn(fields, 'publicContentConfirmed')
+      || fields.publicContentConfirmed !== true || typeof fields.message !== 'string' || !fields.message.trim() || fields.message.length > 2000) {
+      throw new MitrifyError('MITRIFY_BOT_REVIEW_REQUIRED', 400);
+    }
+    if (recognizableSensitiveText(fields.message)) throw new MitrifyError('MITRIFY_BOT_SENSITIVE_CONTENT', 400);
+    prompt = fields.message; // Preserve the reviewed message exactly; never append profile/history.
+  }
+  const result = await createMitrifyClient(env, log).chat({ messages: [{ role: 'user', content: prompt }], max_tokens: 256, stream: false }, { signal: options.signal });
   // Do not expose provider metadata or arbitrary response properties to the UI.
   const data = result.data as { choices?: Array<{ message?: { content?: unknown } }> };
   const reply = data.choices?.[0]?.message?.content;
@@ -202,6 +225,8 @@ export class MitrifyError extends Error {
     const messages: Record<string, string> = {
       MITRIFY_BOT_FORBIDDEN: 'This chatbot is not available for this account.',
       MITRIFY_BOT_DISABLED: 'This chatbot is not enabled on the server.',
+      MITRIFY_BOT_REVIEW_REQUIRED: 'Review and confirm one public message of up to 2000 characters, without additional fields.',
+      MITRIFY_BOT_SENSITIVE_CONTENT: 'This message may contain sensitive information and was not sent. Use the existing private chat path for sensitive information.',
       MITRIFY_BOT_PUBLIC_QUESTION_REQUIRED: 'Choose one of the public questions. Free text and additional fields are not accepted.',
       MITRIFY_TEST_DISABLED: 'The public test is disabled.',
       MITRIFY_TEST_FORBIDDEN: 'This test requires the configured verified account.',

@@ -10,6 +10,43 @@ const input = { model: 'ignored', messages: [{ role: 'system', content: 'Be brie
 const chunk = text => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
 const reply = res => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: 'Hello' } }] })); };
 
+test('typed public text is sent unchanged, alone, only after explicit confirmation', async t => {
+  const f = await fixture(t, (_req, res) => reply(res));
+  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' };
+  const identify = async () => ({ uid: 'local-only', email: env.MITRIFY_CHAT_ACCOUNT_EMAIL, emailVerified: true });
+  const message = '  Explain why the sky is blue.\nUse simple words.  ';
+  const send = body => runMitrifyPublicBot({ body, identify, signal: f.signal }, env, metadata => f.logs.push(metadata));
+  for (const body of [{ message }, { message, publicContentConfirmed: false }, { message, publicContentConfirmed: 'true' }, { message: ' ', publicContentConfirmed: true }, { message: 'a'.repeat(2001), publicContentConfirmed: true }, { message, publicContentConfirmed: true, history: [] }]) {
+    await assert.rejects(send(body), { code: 'MITRIFY_BOT_REVIEW_REQUIRED' });
+  }
+  assert.equal(f.requests.length, 0);
+  assert.deepEqual(await send({ message, publicContentConfirmed: true }), { reply: 'Hello' });
+  assert.deepEqual(f.requests[0].body.messages, [{ role: 'user', content: message }]);
+  assert.equal(f.requests[0].body.max_tokens, 256);
+  assert.equal(JSON.stringify(f.logs).includes(message), false);
+  assert.equal(JSON.stringify(f.requests[0].body).includes('local-only'), false);
+});
+
+test('recognizable sensitive patterns are blocked before upstream dispatch without logging text', async t => {
+  const f = await fixture(t, (_req, res) => reply(res));
+  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' };
+  const identify = async () => ({ uid: 'local-only', email: env.MITRIFY_CHAT_ACCOUNT_EMAIL, emailVerified: true });
+  for (const message of ['Contact sample@example.invalid', 'Call 123-456-7890', 'password=example-placeholder', 'Patient lab report for review', 'Health records for review', 'My name is Example Person', 'मेरा नाम उदाहरण है']) {
+    await assert.rejects(runMitrifyPublicBot({ body: { message, publicContentConfirmed: true }, identify, signal: f.signal }, env, metadata => f.logs.push(metadata)), { code: 'MITRIFY_BOT_SENSITIVE_CONTENT' });
+  }
+  assert.equal(f.requests.length, 0);
+  assert.deepEqual(f.logs, []);
+});
+
+test('typed-message confirmation cannot authorize an unrelated or unverified account', async t => {
+  const f = await fixture(t, (_req, res) => reply(res));
+  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' };
+  for (const identity of [null, { uid: 'other', email: 'other@example.invalid', emailVerified: true }, { uid: 'local-only', email: env.MITRIFY_CHAT_ACCOUNT_EMAIL, emailVerified: false }]) {
+    await assert.rejects(runMitrifyPublicBot({ body: { message: 'Explain rainbows.', publicContentConfirmed: true }, identify: async () => identity, signal: f.signal }, env), { code: 'MITRIFY_BOT_FORBIDDEN' });
+  }
+  assert.equal(f.requests.length, 0);
+});
+
 test('separate bot verifies account on visibility and send; caller identity cannot grant access', async t => {
   const f = await fixture(t, (_req, res) => reply(res));
   const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' };

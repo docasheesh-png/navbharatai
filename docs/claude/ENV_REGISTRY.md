@@ -4885,3 +4885,8 @@ No live deployment or provider switch is changed by the code default.
 - `MITRIFY_CHAT_ACCOUNT_EMAIL` also selects the only verified account allowed to see or call `/api/chat/mitrify-bot`. No default, client email list or committed account address. Both visibility and send are authorized server-side.
 - `AI_BACKEND=mitrify` plus a configured key permits user-clicked, server-owned public questions only. Direct mode disables sends; removing the account selector hides the entry. No free text, profile/history, files, tools, JSON output or existing-chat routing is added.
 - No environment values or credentials were installed by this change. The bot can spend gateway credits if an operator enables it and the selected user clicks a question; output/retry limits are not a verified INR ceiling. The independent single-use diagnostic still requires its own cost admission. See `docs/mitrify.md`.
+
+### 2026-11-06 — Reviewed free text in the separate account-only bot
+
+- The same account selector and backend switch now also permit one user-reviewed public message (maximum 2000 characters), with explicit per-send confirmation. Sensitive-pattern checks are conservative and incomplete; sender review remains necessary. Profile/history/files are never automatically included. Existing preset clients remain compatible.
+- No new environment values or credential changes. This does not add an INR spending ceiling, enable general chat routing, or relax server-verified account authorization. See `docs/mitrify.md` for the full disclosure and limits.

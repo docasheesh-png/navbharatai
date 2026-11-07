@@ -22,40 +22,47 @@ keyword detector, missing profile or empty history bypasses this boundary. A fut
 review must establish trusted provenance for the whole request before connecting
 the low-level transport. Do not downgrade the health classification to enable it.
 
-## Separate account-only public-question chatbot
+## Separate account-only text chatbot
 
 The sidebar's **Mitrify chat** entry appears only after the server authorizes the
 signed-in, email-verified account against `MITRIFY_CHAT_ACCOUNT_EMAIL`. Both GET
 and POST `/api/v1/chat/mitrify-bot` verify identity; hiding the UI is not the access
-control. The selector has no default and is never shipped to the browser. Other
-accounts receive 403. Changing accounts cancels pending work and discards the view.
+control. The selector has no default, accepts one email (not a comma-separated
+list), and is never shipped to the browser. Other accounts receive 403.
 
-This is a public-question bot, **not free-form chat**. Three buttons select
-server-owned arithmetic, rainbow and solar-system questions. POST accepts exactly
-one allowlisted `questionId`; text, history, profile, files and extra parameters
-are rejected. Each question is independent. The displayed conversation is
-ephemeral and never sent upstream. Mitrify receives only the fixed public prompt,
-model alias, non-streaming flag and 256-token output limit, with no account email,
-UID or authentication token. Replies are displayed as text, never executed as HTML.
+The text box accepts up to 2000 characters. Before each send, the user must review
+and confirm that the message contains no health records, personal identifiers,
+payment details, credentials or other sensitive information. The notice states
+that Mitrify and its upstream providers receive the full message and may log it.
+Changing text or sending clears confirmation. This is a user-review safeguard,
+not proof that arbitrary text is nonsensitive. Server checks reject recognizable
+email, long numeric identifier, credential and sensitive-record patterns, but
+can miss sensitive text and can reject benign text. Do not claim foolproof detection.
+
+POST accepts exactly `message` and `publicContentConfirmed: true`; extra fields,
+profile, history, files and caller parameters are rejected. The reviewed message
+is sent unchanged as the only message, with the configured model alias,
+non-streaming flag and 256-token output limit. No account identity or previous
+reply is appended. Older installed clients can still send the three reviewed
+question IDs. Replies are displayed as text, never executed as HTML. The local
+conversation is ephemeral, and account changes discard/cancel the panel.
 
 The bot uses only Mitrify; errors never invoke another provider. The shared chat
 rate limiter, transport queue/retry bounds, disconnect cancellation and 60-second
-deadline apply. This small UI uses non-streaming replies; streaming transport
-remains separately tested. The server returns only reply text, not upstream
-provider/model metadata. Existing chat and App Builder are unchanged.
+deadline apply. Error explanations are fixed local messages with bounded HTTP
+status, never raw gateway errors. Existing chat and App Builder remain unchanged.
+General health/clinical chat is still routed directly.
 
 To show the selected account's entry, configure its server-only email selector.
-To allow button clicks to call Mitrify, also set `AI_BACKEND=mitrify` and securely
-supply `MITRIFY_API_KEY`; URL/model defaults remain unchanged. Missing key or
-direct mode produces an unavailable state. Roll back sends with
-`AI_BACKEND=direct`; remove the selector to hide the entry as well. No production
-settings or credentials are changed by this code.
+To allow sends, also set `AI_BACKEND=mitrify` and securely supply `MITRIFY_API_KEY`;
+URL/model defaults remain unchanged. Missing key or direct mode produces an
+unavailable state. Roll back sends with `AI_BACKEND=direct`; remove the selector
+to hide the entry. No production settings or credentials are changed by this code.
 
-This user-operated bot can spend gateway credits when enabled and clicked. A token
+This user-operated bot can spend gateway credits when enabled and used. A token
 limit is not an INR cap. It does not implement wallet billing or claim a verified
 gateway spending ceiling. No automated or live paid test is run by this change.
-The separate single-use diagnostic below retains its stricter admission contract;
-do not substitute bot calls for an agent-authorized bounded diagnostic.
+The separate single-use diagnostic below retains its stricter admission contract.
 
 ## Isolated fixed public test (live admission unavailable)
 
@@ -99,7 +106,7 @@ complete through Mitrify. App Builder remains unchanged.
 
 Server environment only; never use a `VITE_` prefix or ship a key to a client:
 
-- `AI_BACKEND`: `direct` by default. `mitrify` enables the separate public-question
+- `AI_BACKEND`: `direct` by default. `mitrify` enables the separate reviewed-text
   bot for its configured account; all ordinary chat stays direct. The separate
   fixed diagnostic still requires cost admission.
 - `AI_PROVIDER`: legacy alias, consulted only when `AI_BACKEND` is unset/blank. An

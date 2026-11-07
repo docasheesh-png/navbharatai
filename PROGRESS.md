@@ -100794,3 +100794,26 @@ Full local coverage exposed three existing professional conversation contract as
   credential, production setting, main chain, guest test or Builder was changed.
 - Offline tests cover races, replay, privacy/account checks, bounds, cancellation,
   funding denial and revalidation. Required gate results are recorded in the PR.
+
+## 2026-11-07 — Concise Mitrify message confirmation
+
+The reported long sentence originated only in the separate bot's checkbox label;
+it was not prepended to provider requests or replies. Replace it with “I confirm
+this message contains no sensitive or personal information.” The existing visible
+provider/privacy disclosure, unchecked default, per-edit reset, confirmation gate,
+server exclusions, and continuation review remain unchanged. Sibling search found
+no other production occurrence of the removed sentence. Component regressions
+cover the concise label, retained disclosure/unchecked disabled-send state, and
+unmodified reply rendering; the existing mock transport test asserts the exact
+single user message and reply, with no confirmation text inserted. Required local
+aggregate checks and hosted CI are pending at this checkpoint; no live calls or
+production settings were changed.
+
+Validation completed for the concise-label change: 3,239 suites / 48,729 tests
+passed, 89 skipped, full coverage gate passed; 109 offline transport checks and
+all six emulator drill groups passed (queue 21/21). Type, security, dependency,
+license, build, bundle and boot gates passed. Node 22.23.4/npm 11.18.0 match CI;
+local Java is Debian OpenJDK 21, while CI uses Temurin 21. Missing-key smoke exited
+1 as expected without an inference call. Draft PR creation was rejected by
+automatic approval review for lack of branch-specific publication approval; a
+read-only lookup confirmed no PR was created. No bypass/retry was attempted.

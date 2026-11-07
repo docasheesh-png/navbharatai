@@ -126,7 +126,7 @@ export function MitrifyChatPanel({ uid, access }: { uid: string; access: Mitrify
       <textarea id="mitrify-message" aria-describedby="mitrify-privacy" value={input} maxLength={2000} rows={4} disabled={busy || !access.available}
         className="w-full rounded-lg border border-line bg-surface p-3 text-ink" onChange={event => { setInput(event.target.value); setConfirmed(false); }} />
       <label className="flex gap-2 text-sm"><input type="checkbox" checked={confirmed} disabled={busy || !access.available}
-        onChange={event => setConfirmed(event.target.checked)} />I reviewed this message: it contains no health, personal, payment or other sensitive information, and may be sent to Mitrify and its providers.</label>
+        onChange={event => setConfirmed(event.target.checked)} />I confirm this message contains no sensitive or personal information.</label>
       <button type="submit" disabled={busy || !access.available || !confirmed || !input.trim()} className="rounded-lg border border-line px-3 py-2 disabled:opacity-50">Send</button>
     </form>
     <div role="log" aria-live="polite" className="space-y-3">{messages.map((message, index) => <div key={index}><strong>{message.role}</strong><MitrifyReply text={message.text} completion={message.role === 'Mitrify' ? message.completion : 'complete'} />

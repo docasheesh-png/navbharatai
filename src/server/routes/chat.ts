@@ -1,3 +1,4 @@
+import { withFixedTextChainScope } from '../AI/fixedTextChain';
 import { mitrifyGuestTestTokenValid, runMitrifyGuestTest, MitrifyError, mitrifyPublicBotStatus, runMitrifyPublicBot, runMitrifyPublicTest, withMitrifyChatPrivacyBoundary } from '../lib/mitrify';
 import { chatAvailabilityMessage } from '../lib/chatAvailabilityMessage';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../lib/chatReplyLanguage';
@@ -82,7 +83,7 @@ async function withChatTextGateway<T>(req: Request, res: Response, handler: () =
     if (!res.headersSent && !res.writableEnded) res.status(400).json({ code: 'DOCTOR_ROUTE_REQUIRED', error: 'Please use the Doctor AI service for this mode.' });
     return;
   }
-  const legacy = () => withFreeChainEntryAdmission(req, res, handler);
+  const legacy = () => withFixedTextChainScope('chat', Array.isArray(req.body?.fileAttachments) && req.body.fileAttachments.length ? 'vision-pdf' : 'text', () => withFreeChainEntryAdmission(req, res, handler));
   if (!inferenceGatewayEnabled('chat') && !wasGatewayGuestSelected(req)) return legacy();
   const body = req.body;
   if (!body || (!body.message && !Array.isArray(body.fileAttachments))) return legacy();

@@ -25,6 +25,15 @@ async function untilCancelled<T>(work: () => T | Promise<T>, signal: AbortSignal
   finally { signal.removeEventListener('abort', abort); }
 }
 
+const mitrifyModel = (env: Env) => env.MITRIFY_MODEL?.trim() || 'mitrify/auto-cheap';
+
+/** No caller flag/regex can prove the entire ordinary-chat payload public. No live chain adapter yet. */
+export function mitrifyChainStatus(dataClass: string, capability: string, env: Env = process.env) {
+  return { model: mitrifyModel(env), eligible: false as const, reason: env.MITRIFY_CHAIN_ENABLED !== '1' ? 'mitrify-chain-disabled'
+    : capability !== 'text' ? 'mitrify-capability-excluded' : dataClass !== 'public' ? 'mitrify-privacy-blocked'
+    : 'mitrify-public-provenance-and-spend-admission-unavailable' };
+}
+
 export function mitrifyConfig(env: Env = process.env) {
   const maxInflight = env.MITRIFY_MAX_INFLIGHT?.trim() ? Number(env.MITRIFY_MAX_INFLIGHT) : 200;
   if (!Number.isInteger(maxInflight) || maxInflight < 1 || maxInflight > 1000) throw new MitrifyError('MITRIFY_CONFIGURATION');
@@ -32,7 +41,7 @@ export function mitrifyConfig(env: Env = process.env) {
     enabled: backend(env) === 'mitrify', maxInflight,
     baseURL: env.MITRIFY_BASE_URL?.trim() || 'https://mitrify.com/v1',
     apiKey: env.MITRIFY_API_KEY?.trim() || '',
-    model: env.MITRIFY_MODEL?.trim() || 'mitrify/auto-cheap',
+    model: mitrifyModel(env),
   };
 }
 

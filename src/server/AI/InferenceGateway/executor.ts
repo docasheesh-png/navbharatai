@@ -500,6 +500,11 @@ export function createInferenceExecutor(ports: ExecutionPorts) {
       } catch { return retain(claim, attemptRecord(claim, undefined, outputVisible), 'adapter-result-invalid'); }
       outputVisible ||= result.outputVisible;
       const record = attemptRecord(claim, result.outcome, outputVisible);
+      // An HTTP rejection proves no generation, not zero billing. The fixed policy
+      // must not advance a paid attempt while any supplier charge is unresolved.
+      if (snapshot.request.fixedTextChain === 'v1' && claim.binding.budget && result.rejectionEvidenceRef) {
+        return retain(claim, attemptRecord(claim, undefined, outputVisible), 'fixed-chain-billing-unresolved');
+      }
       if (!outputVisible && result.outcome.kind === 'definite-failure' && result.outcome.failureClass === 'retryable-provider-failure'
         && result.rejectionEvidenceRef && ports.readAuthoritativeRejection && ports.ledger.retainRejectedForRetry) {
         try {

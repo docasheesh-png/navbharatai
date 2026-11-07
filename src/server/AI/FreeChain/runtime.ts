@@ -1,5 +1,5 @@
 import { FIXED_TEXT_CHAIN, fixedTextChainRank } from '../fixedTextChain';
-import { mitrifyChainStatus } from '../../lib/mitrify';
+import { mitrifyConfig, MitrifyError, runApprovedMitrifyChain } from '../../lib/mitrify';
 import { capacityRevision, notifyCapacityReleased, waitForCapacity } from './capacityWait';
 import { switchedOffProviderFor } from '../../lib/providerSwitches';
 import { chatAvailabilityMessage } from '../../lib/chatAvailabilityMessage';
@@ -199,9 +199,45 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     for (const id of order) {
       if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
       if (id === 'mitrify') {
-        const status = mitrifyChainStatus('health', 'text'); // Complete chat provenance is unavailable, even for an empty history.
-        trace.attempts.push({ provider: id, model: status.model, reason: status.reason, entered: false });
-        continue;
+        const attempt = { provider: id, model: mitrifyConfig().model, reason: 'pending', entered: false }; trace.attempts.push(attempt);
+        if (trace.attempts.filter(a => a.entered).length >= cfg.maxAttempts) { attempt.reason = 'max-attempts'; break; }
+        // No inferred public classification: a server-reviewed exact payload is additionally required.
+        const prepared = trimForRung(input.message, history, system, Number.MAX_SAFE_INTEGER)!;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), Math.max(0, started + 90000 - Date.now()));
+        const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal;
+        let content = '';
+        try {
+          const result = await runApprovedMitrifyChain({ db, uid: input.context.uid, requestId: `${requestId}:mitrify`,
+            privateTurn: input.context.privateTurn, healthTurn: input.context.healthTurn, signal, maxHttpAttempts: Math.min(4, cfg.maxAttempts - trace.attempts.filter(a => a.entered).length),
+            body: { messages: [{ role: 'system', content: prepared.systemPrompt }, { role: 'user', content: prepared.prompt }], max_tokens: cfg.features.replyMaxTokens, stream: true },
+            onChunk: value => { content += value; input.onChunk?.(value); },
+            revalidate: async () => {
+              const control = await readControls(db, cfg);
+              if (!control || control.enabled === false || !cfg.enabled) throw new MitrifyError('MITRIFY_APPROVAL_REVOKED');
+            },
+            reserve: async maximumNanoUsd => {
+              triedQuota = true;
+              const control = await readControls(db, cfg).catch(() => null);
+              if (!control || control.enabled === false || !cfg.enabled) return null;
+              const month = cfg.features.monthlyCap ? await reserveMonthly(db, cfg.features.monthlyCapNanoUsd, maximumNanoUsd) : null;
+              if (cfg.features.monthlyCap && !month) return null;
+              const hold = await store.reservePaid({ requestId: `${requestId}:mitrify`, uid: input.context.uid, maxCostNanoUsd: maximumNanoUsd, capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
+              if (hold && !hold.mayDispatch) throw new MitrifyError('MITRIFY_ADMISSION_UNCERTAIN');
+              if (!hold) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); return null; }
+              attempt.entered = true;
+              return { releaseUndispatched: async () => { await store.settlePaid(hold, 0); if (month) await settleMonthly(db, month, maximumNanoUsd, 0); } };
+            },
+          });
+          if (result.kind === 'skipped') { attempt.reason = result.reason; continue; }
+          attempt.reason = 'served'; trace.rung = 'mitrify';
+          return done({ content: result.content, provider: 'MITRIFY', model: result.model, ...(result.usage ? { usage: result.usage } : {}), ok: true, latencyMs: 0 });
+        } catch (error) {
+          attempt.reason = error instanceof MitrifyError ? error.code.toLowerCase() : 'mitrify-admission-unavailable';
+          // Unknown liability, cancellation, or committed output never opens a direct fallback.
+          if (content) { trace.rung = 'mitrify'; return done({ content: input.onChunk ? content : `${content}\n\nThe response was interrupted. Please try again.`, provider: 'MITRIFY', model: attempt.model, ok: true, reason: 'stalled', latencyMs: 0 }); }
+          break;
+        } finally { clearTimeout(timer); controller.abort(); }
       }
       const baseRung = cfg.rungs.find(r => r.id === id);
       if (!baseRung) continue;

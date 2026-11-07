@@ -100751,3 +100751,18 @@ Validation checkpoint: 49 focused suites / 1,775 tests passed, then 245 issuer/l
 The user merged #4097 as f1c46c837 before hosted CI could start. Source tree matches tested head 99c23c778 exactly. Main's post-merge Actions run 42352380871 also reports startup_failure with zero jobs; no deployment of this commit was verified. Main-chat Mitrify remains non-dispatchable and fixed mode must not be treated as a complete rollout.
 
 Full local coverage exposed three existing professional conversation contract assertions: the new option changed the literal source order and the default-mode engine argument shape. Follow-up preserves the existing conversationId/platform prefix and adds fixedTextChainIngress only when the server policy is fixed-v1. Existing assertions were not weakened; two new regressions prove default shape and rejection of body-controlled policy. Targeted conversation/route checks: 23 passed. Complete coverage rerun and all applicable gates remain required before merging this follow-up. No production configuration or provider call was made; the separate guest load test is not a prerequisite for main-chain rollout.
+
+### Exact-public-payload Mitrify admission
+
+- Added actual conditional dispatch at the fixed FreeChain Mitrify position. Exact
+  server-reviewed public payload, UID, endpoint/model/credential binding, one-use
+  expiring Firestore claim and evidenced supplier hard per-request ceiling are
+  required. No approvals or production settings are created by this change.
+- Reserve all permitted HTTP attempts in the existing shared daily/monthly budget;
+  retain uncertain/used liability and stop fallback after dispatch failure or
+  partial output. Revalidate shared controls and approval before each attempt.
+- General health/private classification, selected Gateway funding requirements,
+  paid-professional funding boundaries, standalone no-fallback bot, Pro and App
+  Builder remain intact. This is not universal production activation.
+- Added local HTTP regressions and a real two-client Firestore claim race check;
+  CI now executes the admission emulator check alongside existing database drills.

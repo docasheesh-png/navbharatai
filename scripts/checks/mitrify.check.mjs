@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
-import { mitrifyGuestTestTokenValid, runMitrifyGuestTest, createMitrifyClient, mitrifyConfig, withMitrifyChatPrivacyBoundary, runMitrifyPublicTest, mitrifyPublicBotStatus, runMitrifyPublicBot, MitrifyError } from '../../src/server/lib/mitrify.ts';
+import { mitrifyChainBinding, runApprovedMitrifyChain, mitrifyGuestTestTokenValid, runMitrifyGuestTest, createMitrifyClient, mitrifyConfig, withMitrifyChatPrivacyBoundary, runMitrifyPublicTest, mitrifyPublicBotStatus, runMitrifyPublicBot, MitrifyError } from '../../src/server/lib/mitrify.ts';
 
 const input = { model: 'ignored', messages: [{ role: 'system', content: 'Be brief.' }, { role: 'user', content: 'Hello.' }], temperature: 0.2, max_tokens: 12 };
 const chunk = text => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
@@ -811,4 +811,116 @@ test('guest runner starts three concurrent batches without login and prints meta
   for (const [index, batch] of [10, 100, 1000].entries()) {
     const start = [0, 10, 110][index]; assert.ok(seen.slice(start, start + batch).every(body => body.batch === batch && Object.keys(body).length === 2));
   }
+});
+
+
+function approvedChain(f, body = input) {
+  const env = { ...f.env, MITRIFY_CHAIN_ENABLED: '1' };
+  const binding = mitrifyChainBinding('verified-user', body, env);
+  const docs = new Map(); let serial = Promise.resolve(); let held = 0; let released = 0;
+  const path = `mitrify_chain_approvals/${binding.id}`;
+  docs.set(path, { kind: 'mitrify-exact-public-approval-v1', uid: 'verified-user', payloadDigest: binding.payloadDigest,
+    gateway: binding.gateway, state: 'approved', reviewedAtMs: Date.now() - 100, expiresAtMs: Date.now() + 30000,
+    publicReview: { entirePayloadReviewed: true, containsSensitiveData: false, reviewRef: 'synthetic-public-review' },
+    supplierContract: { currency: 'USD', hardCeilingEnforced: true, includesInternalRetriesFailoversAndFees: true, evidenceRef: 'synthetic-contract-not-live', perHttpRequestCeilingNanoUsd: 100 } });
+  const db = { doc: path => ({ path }), runTransaction: fn => {
+    const p = serial.then(() => fn({ get: async ref => ({ data: () => structuredClone(docs.get(ref.path)) }), update: (ref, patch) => docs.set(ref.path, { ...docs.get(ref.path), ...patch }) }));
+    serial = p.catch(() => {}); return p;
+  } };
+  const options = { db, uid: 'verified-user', requestId: randomUUID(), body, privateTurn: false, healthTurn: false, signal: f.signal,
+    reserve: async maximum => { held += maximum; return { releaseUndispatched: async () => { released++; } }; } };
+  return { env, docs, path, options, get held() { return held; }, get released() { return released; }, run: overrides => runApprovedMitrifyChain({ ...options, ...overrides }, env, x => f.logs.push(x)) };
+}
+
+test('exact reviewed main-chain payload dispatches once with a four-attempt monetary hold', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const a = approvedChain(f);
+  assert.deepEqual(await a.run(), { kind: 'response', content: 'Hello', model: 'mitrify/auto-cheap' });
+  assert.equal(a.held, 400); assert.equal(a.released, 0);
+  assert.deepEqual(f.requests[0].body, { ...input, model: 'mitrify/auto-cheap' });
+  assert.equal(a.docs.get(a.path).attemptsStarted, 1);
+  assert.equal((await a.run()).kind, 'skipped'); assert.equal(f.requests.length, 1);
+  assert.ok(!JSON.stringify(f.logs).includes(f.key)); assert.ok(!JSON.stringify(f.logs).includes('Be brief.'));
+});
+
+test('two competing claims cannot spend the same public approval twice', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const a = approvedChain(f);
+  const results = await Promise.all([a.run({ requestId: 'one' }), a.run({ requestId: 'two' })]);
+  assert.equal(results.filter(r => r.kind === 'response').length, 1); assert.equal(f.requests.length, 1); assert.equal(a.held, 400);
+});
+
+test('private, health and unsupported requests are not downgraded by an approval', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const a = approvedChain(f);
+  for (const overrides of [{ privateTurn: true }, { healthTurn: true }, { body: { ...input, tools: [] } }, { body: { ...input, response_format: { type: 'json_object' } } }]) assert.equal((await a.run(overrides)).kind, 'skipped');
+  assert.equal(a.held, 0); assert.equal(f.requests.length, 0);
+});
+
+test('changed payload, identity, credential, alias and missing ceiling cannot reuse approval', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const a = approvedChain(f);
+  assert.equal((await a.run({ body: { ...input, temperature: 0.9 } })).kind, 'skipped');
+  assert.equal((await a.run({ uid: 'other' })).kind, 'skipped');
+  for (const env of [{ ...a.env, MITRIFY_API_KEY: randomUUID() }, { ...a.env, MITRIFY_MODEL: 'different-policy' }]) assert.equal((await runApprovedMitrifyChain(a.options, env, () => {})).kind, 'skipped');
+  a.docs.get(a.path).supplierContract.hardCeilingEnforced = false;
+  assert.equal((await a.run()).kind, 'skipped'); assert.equal(f.requests.length, 0); assert.equal(a.held, 0);
+});
+
+test('shared budget denial makes no HTTP request and consumes no supplier cost', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const a = approvedChain(f);
+  assert.deepEqual(await a.run({ reserve: async () => null }), { kind: 'skipped', reason: 'mitrify-budget' });
+  assert.equal(f.requests.length, 0);
+});
+
+test('cancel during delayed monetary admission returns promptly and releases its eventual unused hold once', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const a = approvedChain(f); const controller = new AbortController();
+  let resolveHold; let releaseCount = 0; let started; const reserved = new Promise(r => { started = r; });
+  const task = a.run({ signal: controller.signal, reserve: async () => { started(); return new Promise(r => { resolveHold = r; }); } });
+  await reserved; controller.abort(); await assert.rejects(task, { code: 'MITRIFY_CANCELLED' });
+  resolveHold({ releaseUndispatched: async () => { releaseCount++; } }); await new Promise(r => setImmediate(r));
+  assert.equal(releaseCount, 1); assert.equal(f.requests.length, 0);
+});
+
+test('admitted stream forwards before completion and preserves order', async t => {
+  let finish; const pending = new Promise(r => { finish = r; });
+  const f = await fixture(t, async (_req, res) => { res.setHeader('Content-Type', 'text/event-stream'); res.write(chunk('one')); await pending; res.end(chunk('two') + 'data: [DONE]\n\n'); });
+  const a = approvedChain(f, { ...input, stream: true }); const chunks = []; let first; const seen = new Promise(r => { first = r; });
+  const task = a.run({ onChunk: text => { chunks.push(text); first(); } }); await seen;
+  assert.deepEqual(chunks, ['one']); finish(); assert.equal((await task).content, 'onetwo'); assert.deepEqual(chunks, ['one', 'two']);
+  assert.deepEqual(f.requests[0].body.stream_options, { include_usage: true });
+});
+
+test('admitted partial stream failure is terminal and keeps the maximum hold', async t => {
+  const f = await fixture(t, (_req, res) => { res.setHeader('Content-Type', 'text/event-stream'); res.end(chunk('partial')); });
+  const a = approvedChain(f, { ...input, stream: true }); const chunks = [];
+  await assert.rejects(a.run({ onChunk: t => chunks.push(t) }), { code: 'MITRIFY_INCOMPLETE_STREAM', partial: true });
+  assert.deepEqual(chunks, ['partial']); assert.equal(f.requests.length, 1); assert.equal(a.released, 0);
+});
+
+test('remaining physical-attempt budget bounds HTTP retries and reserved liability', async t => {
+  const f = await fixture(t, (_req, res, n) => { if (n === 1) { res.statusCode = 503; res.end(); } else reply(res); });
+  const a = approvedChain(f); assert.equal((await a.run({ maxHttpAttempts: 2 })).kind, 'response');
+  assert.equal(a.held, 200); assert.equal(f.requests.length, 2); assert.equal(a.docs.get(a.path).attemptsStarted, 2);
+});
+
+test('approval revocation during backoff prevents a second HTTP attempt without refunding uncertainty', async t => {
+  let a; const f = await fixture(t, (_req, res) => { a.docs.get(a.path).state = 'revoked'; res.statusCode = 503; res.end(); });
+  a = approvedChain(f); await assert.rejects(a.run(), { code: 'MITRIFY_APPROVAL_REVOKED' });
+  assert.equal(f.requests.length, 1); assert.equal(a.released, 0);
+});
+
+test('revoked configuration prevents retry and retains the original liability', async t => {
+  let a; const f = await fixture(t, (_req, res) => { a.env.MITRIFY_CHAIN_ENABLED = '0'; res.statusCode = 503; res.end(); });
+  a = approvedChain(f); await assert.rejects(a.run(), { code: 'MITRIFY_APPROVAL_REVOKED' });
+  assert.equal(f.requests.length, 1); assert.equal(a.released, 0);
+});
+
+test('shared control revocation before dispatch releases an unused hold', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const a = approvedChain(f);
+  await assert.rejects(a.run({ revalidate: async () => { throw new MitrifyError('MITRIFY_APPROVAL_REVOKED'); } }), { code: 'MITRIFY_APPROVAL_REVOKED' });
+  assert.equal(f.requests.length, 0); assert.equal(a.released, 1);
+});
+
+test('admission database errors cannot disclose supplier credentials', async t => {
+  const f = await fixture(t, (_req, res) => reply(res)); const a = approvedChain(f);
+  a.options.db.runTransaction = async () => { throw new Error(f.key); };
+  await assert.rejects(a.run(), error => error.code === 'MITRIFY_ADMISSION_FAILED' && !String(error).includes(f.key));
+  assert.equal(f.requests.length, 0);
 });

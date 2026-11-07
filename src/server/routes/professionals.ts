@@ -1,4 +1,4 @@
-import { withFixedTextChainScope } from '../AI/fixedTextChain';
+import { fixedTextChainEnabled, withFixedTextChainScope } from '../AI/fixedTextChain';
 import { withFreeAnswerQuota, markFreeAnswer, markFreeAnswerProviderFailure, freeAnswerSignal, assertFreeAnswerActive } from '../lib/freeAnswerQuota';
 import { usageLogFields } from '../AI/Router/usageLogFields';
 import { runWithInferenceScope } from '../AI/inferencePolicy';
@@ -251,7 +251,7 @@ export function registerProfessionalsRoutes(app: Express): void {
 
     try {
       if (countedFree) assertFreeAnswerActive(req);
-      const { reply, spend, memoryStatus } = await runProfessionalChatWithUsage(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier, { fixedTextChainIngress: true, conversationId, platform: clientPlatform(req.headers['x-nbai-platform']), signal, deadlineAtMs, freeProductGateway: gate.tier === 'free', ...(countedFree ? { beforeGeneration: () => assertFreeAnswerActive(req) } : {}) });
+      const { reply, spend, memoryStatus } = await runProfessionalChatWithUsage(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier, { conversationId, platform: clientPlatform(req.headers['x-nbai-platform']), signal, deadlineAtMs, freeProductGateway: gate.tier === 'free', ...(fixedTextChainEnabled() ? { fixedTextChainIngress: true } : {}), ...(countedFree ? { beforeGeneration: () => assertFreeAnswerActive(req) } : {}) });
       if (countedFree) {
         assertFreeAnswerActive(req);
         if (!reply.trim()) throw new Error('Empty professional answer');

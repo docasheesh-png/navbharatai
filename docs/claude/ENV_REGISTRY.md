@@ -4890,3 +4890,9 @@ No live deployment or provider switch is changed by the code default.
 
 - The same account selector and backend switch now also permit one user-reviewed public message (maximum 2000 characters), with explicit per-send confirmation. Sensitive-pattern checks are conservative and incomplete; sender review remains necessary. Profile/history/files are never automatically included. Existing preset clients remain compatible.
 - No new environment values or credential changes. This does not add an INR spending ceiling, enable general chat routing, or relax server-verified account authorization. See `docs/mitrify.md` for the full disclosure and limits.
+
+### 2026-11-07 — Optional verified-user availability for the separate Mitrify bot
+
+- `MITRIFY_BOT_ACCESS`: server-only, defaults to `selected` when unset/blank. `verified` admits all signed-in accounts with a verified, nonempty email; this is not anonymous access. Unknown values fail closed.
+- Selected mode retains `MITRIFY_CHAT_ACCOUNT_EMAIL` as default/rollback. Verified mode ignores that selector only for bot visibility/dispatch. The existing INR diagnostic remains selected-account-only. Backend-off behavior, rate limits, confirmation/privacy checks and main chat stay unchanged.
+- No production switch or credential change. Public activation/live load tests remain pending authorized runtime access and the applicable total-spend safeguards; see `docs/mitrify.md`.

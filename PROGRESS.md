@@ -100721,3 +100721,11 @@ Review reproduced cancellation after the first of several already-buffered SSE e
 - Required local/hosted gates must run again. Existing GitHub CI startup failures remain unresolved; reading repository Actions permissions returned integration HTTP 403 and was not bypassed. This restriction prevents policy inspection, not local implementation/testing.
 
 - Reviewed-text validation: all 3,237 final coverage suites passed (48,650 tests passed, 89 skipped), all 63 loopback tests, 36 focused tests and all five emulator drills passed. Other applicable local gates passed. A restarted coverage attempt initially hit a stale lock owned by a defunct prior test process; final coverage used a separate report directory with identical thresholds, and the confirmed stale lock was removed. Missing-key smoke exited 1 as expected. Hosted CI and deployment remain blocked/unverified; no live inference or production change.
+
+### 2026-11-07 — Default-off verified-user availability preparation
+
+- Added explicit selected/verified access modes for the separate bot. Default/blank retains the selected-account behavior; unknown modes fail closed. Verified mode still requires server-verified UID/email and does not change rate limits, content review, direct main chat or the isolated INR diagnostic.
+- Public activation remains a separate operator step requiring authorized runtime access and applicable spending safeguards. No live request, credential change or public activation occurred. Documented valid alternative spend bounds without assuming provider discounts or token estimates prove costs; user-specific financial/access details are not published here.
+- Local tests and required hosted CI must pass before publication/merge. No secret values or actual account addresses were added.
+
+- Verified-user access validation: all 3,237 coverage suites passed (48,650 tests passed, 89 skipped), 67 loopback transport/access checks, 36 focused tests and all five emulator drills passed. All applicable local security/type/build/bundle/boot/dependency gates passed; missing-key smoke exited 1 as expected. Node 22.23.4/npm 11.18.0 match CI; Java 21 is Debian OpenJDK rather than hosted Temurin. Required exact-head hosted CI remains pending. No live gateway request or production activation occurred.

@@ -58,10 +58,17 @@ const publicQuestions = [
 type Identify = () => Promise<{ uid: string; email: string | null; emailVerified: boolean } | null>;
 
 async function authorizePublicBot(identify: Identify, signal: AbortSignal, env: Env) {
-  const target = env.MITRIFY_CHAT_ACCOUNT_EMAIL?.trim().toLowerCase();
   const identity = await untilCancelled(identify, signal);
-  if (!target || !identity?.uid || !identity.emailVerified || identity.email?.trim().toLowerCase() !== target) {
+  if (!identity?.uid || !identity.emailVerified || !identity.email?.trim()) {
     throw new MitrifyError('MITRIFY_BOT_FORBIDDEN', 403);
+  }
+  // Default/rollback preserves the existing single-account boundary. Unknown modes
+  // fail closed; neither a browser flag nor a missing selector enables public access.
+  const access = env.MITRIFY_BOT_ACCESS?.trim() || 'selected';
+  if (access !== 'selected' && access !== 'verified') throw new MitrifyError('MITRIFY_CONFIGURATION', 503);
+  if (access === 'selected') {
+    const target = env.MITRIFY_CHAT_ACCOUNT_EMAIL?.trim().toLowerCase();
+    if (!target || identity.email.trim().toLowerCase() !== target) throw new MitrifyError('MITRIFY_BOT_FORBIDDEN', 403);
   }
   signal.throwIfAborted();
 }

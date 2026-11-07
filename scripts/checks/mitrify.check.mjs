@@ -10,6 +10,60 @@ const input = { model: 'ignored', messages: [{ role: 'system', content: 'Be brie
 const chunk = text => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
 const reply = res => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ message: { content: 'Hello' } }] })); };
 
+test('verified access admits different verified accounts without a selected email', async t => {
+  const f = await fixture(t, (_req, res) => reply(res));
+  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_BOT_ACCESS: 'verified' };
+  for (const email of ['first@example.invalid', 'second@example.invalid']) {
+    const identify = async () => ({ uid: email, email, emailVerified: true });
+    assert.equal((await mitrifyPublicBotStatus(identify, f.signal, env)).available, true);
+    assert.deepEqual(await runMitrifyPublicBot({ identify, signal: f.signal, body: { message: 'Explain rainbows.', publicContentConfirmed: true } }, env, () => {}), { reply: 'Hello' });
+  }
+  assert.equal(f.requests.length, 2);
+  assert.ok(f.requests.every(r => !JSON.stringify(r.body).includes('@')));
+});
+
+test('verified access still denies unsigned, unverified and missing-email identities', async t => {
+  const f = await fixture(t, (_req, res) => reply(res));
+  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_BOT_ACCESS: 'verified' };
+  for (const identity of [null, { uid: '', email: 'first@example.invalid', emailVerified: true }, { uid: 'first', email: null, emailVerified: true }, { uid: 'first', email: ' ', emailVerified: true }, { uid: 'first', email: 'first@example.invalid', emailVerified: false }]) {
+    const identify = async () => identity;
+    await assert.rejects(mitrifyPublicBotStatus(identify, f.signal, env), { code: 'MITRIFY_BOT_FORBIDDEN' });
+    await assert.rejects(runMitrifyPublicBot({ identify, signal: f.signal, body: { message: 'Explain rainbows.', publicContentConfirmed: true } }, env), { code: 'MITRIFY_BOT_FORBIDDEN' });
+  }
+  assert.equal(f.requests.length, 0);
+});
+
+test('default, rollback and invalid access modes cannot widen account access', async t => {
+  const f = await fixture(t, (_req, res) => reply(res));
+  const identify = async () => ({ uid: 'other', email: 'other@example.invalid', emailVerified: true });
+  for (const mode of [undefined, '', ' ', 'selected']) {
+    for (const target of [undefined, 'selected@example.invalid']) {
+      await assert.rejects(mitrifyPublicBotStatus(identify, f.signal, { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_BOT_ACCESS: mode, MITRIFY_CHAT_ACCOUNT_EMAIL: target }), { code: 'MITRIFY_BOT_FORBIDDEN' });
+    }
+  }
+  for (const mode of ['public', 'anonymous', 'VERIFIED', '*']) {
+    await assert.rejects(mitrifyPublicBotStatus(identify, f.signal, { ...f.env, MITRIFY_BOT_ACCESS: mode }), { code: 'MITRIFY_CONFIGURATION' });
+  }
+  const env = { ...f.env, AI_BACKEND: 'direct', MITRIFY_BOT_ACCESS: 'verified' };
+  assert.equal((await mitrifyPublicBotStatus(identify, f.signal, env)).available, false);
+  await assert.rejects(runMitrifyPublicBot({ identify, signal: f.signal, body: { message: 'Explain rainbows.', publicContentConfirmed: true } }, env), { code: 'MITRIFY_BOT_DISABLED' });
+  assert.equal(f.requests.length, 0);
+});
+
+test('verified access does not bypass content review, sensitive checks or the main-chat boundary', async t => {
+  const f = await fixture(t, (_req, res) => reply(res));
+  const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_BOT_ACCESS: 'verified' };
+  const identify = async () => ({ uid: 'first', email: 'first@example.invalid', emailVerified: true });
+  for (const [body, code] of [[{ message: 'Explain rainbows.' }, 'MITRIFY_BOT_REVIEW_REQUIRED'], [{ message: 'Contact sample@example.invalid', publicContentConfirmed: true }, 'MITRIFY_BOT_SENSITIVE_CONTENT']]) {
+    await assert.rejects(runMitrifyPublicBot({ identify, signal: f.signal, body }, env), { code });
+  }
+  let direct = 0;
+  assert.equal(await withMitrifyChatPrivacyBoundary(async () => { direct++; return 'unchanged'; }, env, () => {}), 'unchanged');
+  assert.equal(direct, 1);
+  await assert.rejects(runMitrifyPublicTest({ identify, signal: f.signal, body: {} }, env), { code: 'MITRIFY_TEST_DISABLED' });
+  assert.equal(f.requests.length, 0);
+});
+
 test('typed public text is sent unchanged, alone, only after explicit confirmation', async t => {
   const f = await fixture(t, (_req, res) => reply(res));
   const env = { ...f.env, AI_BACKEND: 'mitrify', MITRIFY_CHAT_ACCOUNT_EMAIL: 'tester@example.invalid' };

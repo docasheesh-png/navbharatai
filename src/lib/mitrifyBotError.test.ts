@@ -4,7 +4,7 @@ import { mitrifyBotError } from './mitrifyBotError';
 describe('Mitrify phone diagnostics', () => {
   it('distinguishes configuration, authorization and gateway response failures', () => {
     expect(mitrifyBotError(401, { code: 'MITRIFY_CONFIGURATION' })).toContain('server configuration');
-    expect(mitrifyBotError(403, { code: 'MITRIFY_BOT_FORBIDDEN' })).toContain('selected verified account');
+    expect(mitrifyBotError(403, { code: 'MITRIFY_BOT_FORBIDDEN' })).toContain('allowed verified account');
     expect(mitrifyBotError(503, { code: 'MITRIFY_NETWORK' })).toContain('could not reach');
     expect(mitrifyBotError(503, { code: 'MITRIFY_INVALID_RESPONSE' })).toContain('unreadable or empty');
   });

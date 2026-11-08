@@ -54,7 +54,8 @@ describe('BR eb58abaf · 2 — platform lines follow the user\'s language', () =
   it('wired at the route\'s one emit door and in the steer handler', () => {
     const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
     expect(route).toContain('const ev = eventInUserVoice(redactEventForUser(honestResultEvent(e)), rb.voice);');
-    expect(route).toContain('const asked = voiceRequestedIn(message); if (asked) rb.voice = asked;');
+    expect(route).toContain('const askedVoice = voiceRequestedIn(message);');
+    expect(route).toContain('rb.replyVoice = askedVoice; if (platformVoiceEnabled()) rb.voice = askedVoice;');
   });
 });
 

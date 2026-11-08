@@ -1,3 +1,6 @@
+import { withReplyLanguage, replyVoiceForRequest } from '../AgentV3/replyLanguageBinding';
+import { createSteeringHandoff, STEERING_YIELD_REASON, steeringSalvage, plannedHandoffOutcome, oneShotOutcomeRecord } from '../AgentV3/steeringHandoff';
+import { createSandboxAdmissionBudget } from '../AgentV3/sandboxAdmissionBudget';
 import { routerOneAccountingScope, bindRouterOneAccountingScope, recordRouterOneRequestId, cataloguePricedRouterOneClient, cataloguePricedRouterOneRunner, cataloguePricedRouterOneText, recordRouterOneScopeUsage, routerOneCostUnconfirmed, routerOneCatalogueBuildCharges } from '../AI/RouterOne/catalogueAccounting';
 import { planKitRefresh } from '../lib/gameRecipeLayers';
 import { weakBuildAdmissionAsk } from '../AgentV3/weakBuildAdmissionAsk';
@@ -6981,7 +6984,8 @@ async function noteBuildOutcome(
       rb.lastSteerAt = Date.now();
       rb.lastSteerMessage = message;
       // "Hindi me bolo" mid-build (autopsy eb58abaf): every platform line from here on follows it.
-      if (platformVoiceEnabled()) { const asked = voiceRequestedIn(message); if (asked) rb.voice = asked; }
+      const askedVoice = voiceRequestedIn(message);
+      if (askedVoice) { rb.replyVoice = askedVoice; if (platformVoiceEnabled()) rb.voice = askedVoice; }
       // Instant, honest feedback to EVERY attached device: the message is queued (the runner emits
       // its own "picked up" narration when it actually injects it at the next step boundary).
       broadcastBuild(rb, eventInUserVoice({ type: 'narration', agent: 'system', text: `📨 Message to the team queued — it will be picked up at the next step: “${message.slice(0, 140)}${message.length > 140 ? '…' : ''}”`, ts: Date.now() }, rb.voice));
@@ -11882,6 +11886,10 @@ async function noteBuildOutcome(
     // filter by workspaceId), while the registry Map is keyed by `buildKey` (per-workspace when enabled).
     // `userId` lets the per-account cap count this account's live builds across workspaces.
     const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), originTs: requestArrivedAt, key: userId ?? 'anon', userId, workspaceId: intentWorkspaceId, steerQueue: [], powerLevel: powerLevelReqEffective, voice: platformVoiceEnabled() ? voiceOf(String(prompt ?? '')) : 'en' };
+    const originalPrompt = prompt;
+    const sandboxAdmissionBudget = createSandboxAdmissionBudget();
+    rb.replyVoice = replyVoiceForRequest(originalPrompt);
+    const steeringHandoff = createSteeringHandoff(() => rb.steerQueue, () => steerAllowedForBuild(powerLevelReqEffective));
     const primary: BuildSubscriber = {
       write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
       end: () => { if (!res.writableEnded) res.end(); },
@@ -13912,7 +13920,7 @@ async function noteBuildOutcome(
     // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
     // blank gap during a long/slow step. Best-effort; cleared in `finally`.
     const diagHeartbeatTimer: ReturnType<typeof setInterval> = setInterval(() => {
-      if (rb.ended) return;
+      if (rb.ended || abort.signal.aborted) return;
       try { buildDiagRef?.heartbeat(); } catch { /* diagnostics are best-effort */ }
       // ⏸️ WAITING FOR THE USER IS NOT BUILDING (autopsy 1219c639). Through a ten-minute key popup this
       // line said "Still building… 4 min in · ~3 min to go", and the futility breaker below counted every
@@ -13969,7 +13977,7 @@ async function noteBuildOutcome(
       // Live ETA: every 2nd tick (~2 min) show elapsed + a REVISED remaining time, adapting as the
       // build runs. Honest when it overruns the estimate (no fake "almost done"). Best-effort.
       etaTick += 1;
-      if (etaTotalMs > 0 && etaStartMs > 0 && etaTick % 2 === 0) {
+      if (!abort.signal.aborted && etaTotalMs > 0 && etaStartMs > 0 && etaTick % 2 === 0) {
         try {
           const now = Date.now();
           const elapsedMs = now - etaStartMs;
@@ -14513,16 +14521,18 @@ async function noteBuildOutcome(
           model,
           { producedNothing: usage.producedNothing === true, ...(usage.discardedOutput === true ? { discardedOutput: true } : {}), ...(phase ? { phase } : {}) },
         );
-        // …and accumulate the build total for the diagnostics report's cache-hit rate line.
-        if (cacheRead > 0) {
-          billingCtx.cacheReadInputTokens = (billingCtx.cacheReadInputTokens ?? 0) + cacheRead;
-        }
+        // BR1952: Surplus fast calls reach this callback through the runner AND fastGenerate.
+        // Receipt identity deduplicates the ledger; an independent += cache counter counted the
+        // same delivery twice. Derive the reporting total from that same accepted snapshot.
+        const providerSnapshot = providerLedger.byProvider();
+        billingCtx.cacheReadInputTokens = Object.values(providerSnapshot)
+          .reduce((total, usage) => total + (usage.cacheReadInputTokens ?? 0), 0);
         // Autopsy f04421ef — mirror the running ledger into the report so a build report READ WHILE THE
         // BUILD IS STILL RUNNING carries real token numbers. Before this, such a report printed
         // "GLM: 54 call(s) · 0 in · 0 out" and those zeros were read (by me, to the admin) as a measured
         // zero rather than an empty field. setLiveUsage is a strictly separate channel from
         // setProviderTokens and can never reach billing — see its doc comment.
-        try { buildDiag.setLiveUsage(providerLedger.byProvider(), billingCtx.cacheReadInputTokens); }
+        try { buildDiag.setLiveUsage(providerSnapshot, billingCtx.cacheReadInputTokens); }
         catch { /* diagnostics are best-effort — never affects a build */ }
         // THE MID-BUILD STOP. Every build turn and every heal turn passes through here — the same
         // choke-point discipline the wallet floor uses, and for the same reason: a ceiling written
@@ -14762,7 +14772,7 @@ async function noteBuildOutcome(
       // planner, the project planner and the fast lane's manifest are the first calls a build makes.
       // Both text-runner factories default every call to `thinking: false` — see answerNotDeliberate.ts
       // (autopsy 6a5fb04b: the roadmap planner reasoned its whole 4,000-token allowance away).
-      const makeFastTextRunner = (onUsed?: (used: string) => void, heal = false, manualUsage = false): TurnRunner => withAnswerNotDeliberation(withStopSignal(buildTurnRunner({
+      const makeFastTextRunner = (onUsed?: (used: string) => void, heal = false, manualUsage = false): TurnRunner => withReplyLanguage(withAnswerNotDeliberation(withStopSignal(buildTurnRunner({
         surplusSession,
         surplusPreWriteFailOpen,
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
@@ -14782,11 +14792,11 @@ async function noteBuildOutcome(
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
-      }), abort.signal));
+      }), abort.signal)), () => rb.replyVoice ?? voiceOf(originalPrompt));
       // The PLANNERS' runner — roadmap, blueprint, Project Mode. Same memory and callbacks as the fast
       // text runner above; only the ladder differs (see `plan` in buildTurnRunner). Repairs stay on the
       // build ladder: they rewrite code, which is the work that ladder is ordered for.
-      const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => withAnswerNotDeliberation(withStopSignal(buildTurnRunner({
+      const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => withReplyLanguage(withAnswerNotDeliberation(withStopSignal(buildTurnRunner({
         surplusSession,
         surplusPreWriteFailOpen,
         tier: powerLevelReqEffective,
@@ -14800,7 +14810,7 @@ async function noteBuildOutcome(
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
-      }), abort.signal));
+      }), abort.signal)), () => rb.replyVoice ?? voiceOf(originalPrompt));
       /**
        * 🧬 Q-1125 (2026-10-17) — THE ONE DOOR for this lane's text-only repair calls.
        *
@@ -14974,7 +14984,7 @@ async function noteBuildOutcome(
             let rmProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
             const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({
               model: fastBuildModel(),
-              system: megaRoadmapSystemPrompt(),
+              system: `${megaRoadmapSystemPrompt()}\nSelected workspace architecture: ${framework}. Keep every step compatible with it. Do not invent a single-HTML constraint unless the user explicitly asked for it.`,
               messages: [{ role: 'user', content: megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals) }],
               tools: [],
               maxTokens: 4000,
@@ -15024,7 +15034,7 @@ async function noteBuildOutcome(
             captureTurnUsage(rmProvider, { ...rmT.usage }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0, rmT.usage.cacheCreationInputTokens ?? 0);
 
             const rmParsed = parseMegaRoadmap(rmT.text, scope.famousApp);
-            const { roadmap, rejected } = roadmapGuardrail(rmParsed, scope.famousApp);
+            const { roadmap, rejected } = roadmapGuardrail(rmParsed, scope.famousApp, { framework, originalRequest: originalPrompt });
             // "no parseable roadmap" never said WHY (autopsy 6a4a799f: 120 s of a planner, then that
             // sentence alone). A cut-off reply and a malformed one need different fixes.
             if (!rmParsed) {
@@ -16097,6 +16107,8 @@ async function noteBuildOutcome(
       const todoOnlyTally = { turns: 0, latencyMs: 0, firstInRun: 0 };
       buildDiag.setTodoOnlyTally(todoOnlyTally);
       const subAgentDeps: SubAgentDeps = {
+        sandboxAdmissionBudget,
+        replyVoice: () => rb.replyVoice ?? voiceOf(originalPrompt),
         ignoreRules: () => ignoreRulesForBuild,
         onFileWrite: (path, content) => onFileWriteForSubAgents?.(path, content),
         // Count a sub-agent's write-time compiles in the ARCHITECT's numbers, which is what the report
@@ -16147,6 +16159,7 @@ async function noteBuildOutcome(
         onTodoOnlyTurn: (t) => noteTodoOnlyTurn(todoOnlyTally, t),
         // A specialist's end-of-turn notes (Q-066: its style hand-back) reach the same report as the architect's.
         onNote: (note: { code: string; message: string; detail?: string }) => {
+          if (note.code === 'SANDBOX_ADMISSION_EXHAUSTED') sandboxUnavailable = true;
           try { buildDiag.record({ phase: 'build', severity: 'info', code: note.code, message: note.message, detail: note.detail, autoResolved: true }); } catch { /* a note must never fail a build */ }
         },
         signal: abort.signal,
@@ -17491,6 +17504,8 @@ async function noteBuildOutcome(
       /** The game contract, once the kit seed has read it — the done signal's request half (requestGaps). */
       const requestContractRef: { contract: GameScopeContract | null } = { contract: null };
       const baseRunnerOpts = {
+        sandboxAdmissionBudget,
+        replyVoice: () => rb.replyVoice ?? voiceOf(originalPrompt),
         dispatcher,
         state,
         events,
@@ -17536,6 +17551,7 @@ async function noteBuildOutcome(
           return scopeMatch(c, { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) }).missing;
         },
         onNote: (note: { code: string; message: string; detail?: string }) => {
+          if (note.code === 'SANDBOX_ADMISSION_EXHAUSTED') sandboxUnavailable = true;
           // OUR style pass starts here (cancelledBuildBilling `stoppedDuringOurStylePass`).
           if (note.code === 'STYLE_RULES_RESUMED' && stylePassWindow.startedAt === null) stylePassWindow.startedAt = Date.now();
           // Truncation recovery just ordered a rewrite — do not let the futility breaker abort it
@@ -17568,7 +17584,7 @@ async function noteBuildOutcome(
         // (AGENTV3_STEER_ALL_TIERS=off) cannot leave one end open and the other closed. Spread into
         // every top-level/heal runner via baseRunnerOpts, so the team keeps listening through repair.
         ...(steerAllowedForBuild(powerLevelReqEffective)
-          ? { steerPoll: () => (rb.steerQueue && rb.steerQueue.length ? rb.steerQueue.splice(0, rb.steerQueue.length) : []), currentEta: () => lastEtaShown }
+          ? { steerPoll: () => steeringHandoff.take(), currentEta: () => lastEtaShown }
           : {}),
         agentRole: 'architect' as const,
         signal: abort.signal,
@@ -18268,6 +18284,7 @@ async function noteBuildOutcome(
         // for the lines below; it is no longer Grok — Grok judges.
         const planGrok = surplusSession ? makePlanTextRunner() : tierPlanRunner(powerLevelReqEffective, noClaudeBuild, buildBench, recordProviderBenched);
         const planRunner = new AgentRunner({
+          replyVoice: () => rb.replyVoice ?? voiceOf(originalPrompt),
           client: planGrok ?? client,
           // C2 — the plan runner has tool access too, so it gets the same guard. A planner that
           // "helpfully" edits a protected file would be the same breach by a quieter route.
@@ -18920,7 +18937,10 @@ async function noteBuildOutcome(
       peakMemoryAtStart = sandboxSessionOf(actuator, workspaceId)
         ? withTimeout(actuator.runCommand(workspaceId, PEAK_MEMORY_PROBE), 5_000, 'peak-memory').then((r) => peakProbeOutcome(r).peak, () => null)
         : Promise.resolve(null);
-      const fastLaneWouldRun = !goldenPreseeded && pastedSeed.size === 0 && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn;
+      // BR1952: a text-only lane cannot repair failed sandbox setup. The tool-capable
+      // builder remains eligible to recover it (as it did in BR1951); no build-wide abort.
+      const fastLaneWouldRun = !sandboxUnavailable && !goldenPreseeded && pastedSeed.size === 0 && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn;
+      if (sandboxUnavailable) buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_SKIPPED_SANDBOX', message: 'Workspace setup failed: text-only fast lanes cannot run against an unavailable workspace. The tool-capable builder can check for recovery; text generation cannot make this workspace writable.', autoResolved: true });
       const fastLaneRung = fastLaneWouldRun
         ? (() => {
           try {
@@ -18989,7 +19009,9 @@ async function noteBuildOutcome(
         let fastLaneReasoningRung: string | null = null;
         /** Q-926: the per-file calls a reasoning rung answered while the lane stayed on it — the measurement. */
         const laneReasoningStays: Array<{ model: string; ms: number }> = [];
+        steeringHandoff.beginLane();
         const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number, mayReason = false, heal = false): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
+          if (steeringHandoff.pending()) throw new Error(STEERING_YIELD_REASON);
           // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
           // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
           // blind spot — a truncated (max_tokens) per-file generation is exactly what produces broken
@@ -19478,7 +19500,9 @@ async function noteBuildOutcome(
         const sb = await runSimpleBuild({ prompt: fastLaneRequest, requestNotes: requestNotesText, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
           // A planned config file the starter already has is edited, never rewritten blind (isProjectConfigPath).
           readExisting: readExistingProjectFile,
-          stopLane: () => (fastLaneReasoningRung
+          originalRequest: originalPrompt,
+          yieldRequested: () => steeringHandoff.pending(),
+          stopLane: () => (steeringHandoff.pending() ? STEERING_YIELD_REASON : fastLaneReasoningRung
             ? `the lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer; the lane's per-file budget cannot carry that, so the files finished so far go to the full builder now`
             : null),
           writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: weakCandidateActive(powerLevelReqEffective) ? 1 : 3,
@@ -19522,7 +19546,7 @@ async function noteBuildOutcome(
           buildDiag.record(sb.ok
             ? { phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true }
             // A stop is not a BUILD_FAILED and is not handed to anyone (autopsy 3d1bfe2a).
-            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: sb.stopped ? 'Fast-lane outcome: stopped by the user — not a failure, and not handed off.' : sb.handedOff ? 'Fast-lane outcome: handed its plan to the full builder before a reasoning engine — not a failure.' : `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
+            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: sb.stopped ? 'Fast-lane outcome: stopped by the user — not a failure, and not handed off.' : sb.handedOff ? plannedHandoffOutcome(sb.reason) : `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
         }
         // HANDOFF FRAMING (StudySync root cause, 2026-07-16): when the fast lane timed out but SALVAGED
         // its finished files into the workspace, the full builder must treat them as ITS OWN prior work
@@ -19633,15 +19657,16 @@ async function noteBuildOutcome(
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'VERIFY_DID_NOT_RUN', message: 'The fast-lane type-check could not execute in the sandbox (after one retry) — the app shipped unverified; the agentic readiness gate stays ON.', autoResolved: false });
           }
           fastResult(sb.summary, sb.filesWritten, sb.typecheckRan !== false);
-        } else if (!sb.stopped && !abort.signal.aborted && classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason) && !fastLaneReasoningRung) {
+        } else if (!sb.stopped && !abort.signal.aborted && classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason) && !fastLaneReasoningRung && !steeringHandoff.pending()) {
           // 2) ONE-SHOT (secondary) — a single call still suits a TRIVIAL one-file app the manifest
           //    skips. Gated to the simple tiers only: a sonnet-tier (complex) prompt can never fit in
           //    one 8k-token call — it falls straight through to the agentic loop instead.
           //    …and gated on what the lane above just MEASURED. See oneShotStillViable: in the dukaan
           //    report the manifest had planned 8 files, so "the manifest skips it" was already false,
           //    and this lane still ran for 150 seconds to fail at something a single call cannot do.
-          const os = await runOneShot({ prompt: fastLaneRequest + requestNotesSuffix, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
+          const os = await runOneShot({ prompt: fastLaneRequest + requestNotesSuffix, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog, originalRequest: originalPrompt, yieldRequested: () => steeringHandoff.pending() });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : os.initialDecline ? 'ONESHOT_DECLINED' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
+          buildPrompt = steeringSalvage(os, buildPrompt, (paths) => salvagedThisBuild.push(...paths));
           if (settleInitialDecline(os.initialDecline)) {
             // The sibling declined too; no full-runner retry or preview/repair is appropriate.
           } else if (os.ok) {
@@ -19667,11 +19692,11 @@ async function noteBuildOutcome(
               } catch { osVerified = null; /* could not verify → don't block (matches fastVerify's own policy) */ }
             }
             const osOutcome = classifyBuildOutcome({ filesWritten: os.filesWritten, typecheckOk: osVerified });
-            buildDiag.record({ phase: 'build', severity: 'info', code: `OUTCOME_${osOutcome}`, message: `Build outcome: ${osOutcome}`, autoResolved: true });
+            buildDiag.record(oneShotOutcomeRecord(osOutcome, steeringHandoff.pending()));
             if (osVerified === false) {
               buildDiag.record({ phase: 'build', severity: 'warning', code: 'ONESHOT_VERIFY_FAILED', message: 'One-shot app did not compile after one repair — handing to the full builder.', autoResolved: true });
               fastLog('The one-shot app still has build errors — switching to the full builder to finish it.');
-            } else {
+            } else if (!steeringHandoff.pending()) {
               // osVerified null = the check never ran → keep the agentic gate ON (audited downstream).
               fastResult(os.summary, os.filesWritten, osVerified === true);
             }
@@ -19683,7 +19708,8 @@ async function noteBuildOutcome(
         // future lane remembers to stop — after this, an abandoned lane's write is refused and said out
         // loud. A successful result keeps its lease for post-success repairs. An initial decline has
         // already revoked its lease in settleInitialDecline; it owns an answer, not an app.
-        if (!result) laneFence.handoff();
+        if (!result) await laneFence.handoffAndDrain();
+        steeringHandoff.releaseLane();
         // C — BULLETPROOF PREVIEW: persist the produced files to the durable store SYNCHRONOUSLY the
         // moment the fast lane succeeds — not via the 3s debounce or the fire-and-forget end-of-flow
         // save, both of which can be cut off (the reviewer still running, a dropped stream, an
@@ -27170,7 +27196,10 @@ async function noteBuildOutcome(
           // the signal is the one source that cannot be wrong — see `interruptedBeforeAnyVerdict`.
           // Kept SEPARATE from `stopped` so the record below can say which it was: "you stopped it" and
           // "our server interrupted it" are different sentences to an admin.
-          const interrupted = !stopped && abort.signal.aborted && interruptedBeforeAnyVerdict(abortCauseOf(abort.signal));
+          // BR1952: an unrecovered workspace is not an engine-capability verdict, even when
+          // the terminal signal is futility rather than a provider outage. This flag was rechecked
+          // against real commands/render evidence above; an initial failure that recovered is allowed.
+          const interrupted = !stopped && (sandboxUnavailable || (abort.signal.aborted && interruptedBeforeAnyVerdict(abortCauseOf(abort.signal))));
           const refused = !stopped && modelAnswer.declined;
           const degraded = !stopped && !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
           // (d) OUR OWN CONFIGURATION (build report 58fe8254, 2026-09-15). A rung that rejects every
@@ -27211,7 +27240,7 @@ async function noteBuildOutcome(
               message: stopped
                 ? 'Did not ask this user to add credits: the build was STOPPED. A stopped build does not establish a capability limit; it is not evidence that adding credits would help.'
                 : interrupted
-                ? `Did not ask this user to add credits: our own platform interrupted this build (${abortCauseOf(abort.signal)}) before any engine could be judged. A deploy, a lock takeover or a cleanup is not a capability limit, and a fuller wallet would have changed nothing.`
+                ? `Did not ask this user to add credits: our workspace or platform prevented this build from establishing an engine capability limit (sandbox unavailable: ${sandboxUnavailable}; abort: ${abortCauseOf(abort.signal)}). A fuller wallet is not a fix for unavailable build infrastructure.`
                 : refused
                 ? 'Did not ask this user to add credits: the engine DECLINED this request and wrote no files — a refusal, or an honest "this cannot be done here" (autopsy 707f8e56: an MP4 video asked of a web-app builder, declined with an HTML5-animation offer). `modelAnswer.declined` does not tell those apart, so neither is called a policy refusal. Either way it is an answer, not a shortfall a stronger engine would fix — no upsell.'
                 : starved

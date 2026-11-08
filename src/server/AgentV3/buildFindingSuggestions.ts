@@ -662,6 +662,7 @@ const NEVER_SUGGEST = new Set([
   'FAST_LANE_PHASES',
   'FAST_LANE_SKIPPED_GAME',
   'FAST_LANE_SKIPPED_IMAGE_APP',
+  'FAST_LANE_SKIPPED_SANDBOX', // BR1952: unavailable infrastructure, never an app defect or repair offer
   // What our own failed provider calls cost — our routing's problem, never the user's next move.
   'PROVIDER_TIME_WASTED',
   // The user's own answer to the paid bug-hunt offer, and what our pass cost when they said yes. A

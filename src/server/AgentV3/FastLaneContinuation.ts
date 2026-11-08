@@ -21,7 +21,8 @@
 //
 // PURE + unit-tested. The impure LLM round trip lives at the call site in routes/agentv3.ts.
 
-import { hasEndFileMarker } from './OneShotBuilder';
+import { hasEndFileMarker, parseFileBlocks } from './OneShotBuilder';
+import { binaryTextGenerationProblem } from './binaryTextWrite';
 
 /** Provider stop reasons that mean "I ran out of output budget", not "I finished". */
 export function isTruncatedStop(stopReason: string | null | undefined): boolean {
@@ -265,6 +266,10 @@ export async function continueFastLaneGeneration<T extends FastLaneReply>(
   dropped: RejectedFile<T> | null;
   discardedReplies: T[];
 }> {
+  // BR1952's JPEG continuation could never become a valid text write. This boundary also
+  // covers one-shot and repair replies, which have no manifest to reject in advance.
+  const firstBinaryProblem = binaryTextGenerationProblem(parseFileBlocks(first.text));
+  if (firstBinaryProblem) throw new Error(firstBinaryProblem);
   let text = first.text;
   let last = first;
   let attempts = 0;
@@ -278,6 +283,8 @@ export async function continueFastLaneGeneration<T extends FastLaneReply>(
     let next: T;
     try {
       next = await deps.generate(continuationPrompt(text));
+      const binaryProblem = binaryTextGenerationProblem(parseFileBlocks(next.text));
+      if (binaryProblem) throw new Error(binaryProblem);
       // A normal stop with no answer did not finish the partial file. Do not let that stop reason
       // replace the known truncation, or charge/discard the empty reply instead of the partial one.
       if (!next.text.trim()) throw new Error('The continuation returned no text; the previous output is still truncated.');

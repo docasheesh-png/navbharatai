@@ -87,7 +87,7 @@ describe('🔴 the live tick must not count down from a number we declined to sh
   it('the heartbeat is still ENTERED for an unevidenced build — withholding a number must not withhold the measurement', () => {
     // The tick is guarded on the seeded budget. Zeroing that budget to suppress the countdown would
     // also switch off the branch that produces the measured line, turning a fix into a regression.
-    const at = route.indexOf('if (etaTotalMs > 0 && etaStartMs > 0 && etaTick % 2 === 0)');
+    const at = route.indexOf('if (!abort.signal.aborted && etaTotalMs > 0 && etaStartMs > 0 && etaTick % 2 === 0)');
     expect(at).toBeGreaterThan(-1);
     // …so nothing may zero it on the unevidenced path.
     const decision = route.indexOf('etaEvidenced = estimateIsEvidenced(');

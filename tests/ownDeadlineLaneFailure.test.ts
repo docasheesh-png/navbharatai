@@ -1,3 +1,4 @@
+import { createSteeringHandoff } from '../src/server/AgentV3/steeringHandoff';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
@@ -19,6 +20,7 @@ import {
 } from '../src/server/AgentV3/turnDeadline';
 import { makeMultiProviderTurnRunner } from '../src/server/AgentV3/providers/MultiProviderTurnRunner';
 import { BuildStoppedError } from '../src/server/AgentV3/stopSignal';
+import { BINARY_TEXT_GENERATION_PREFIX } from '../src/server/AgentV3/binaryTextWrite';
 
 /**
  * Synthetic current-code regression, NOT recovery/replay of a historical report payload.
@@ -224,6 +226,8 @@ async function runAdmission(reason: string, options: {
   const runOneShot = vi.fn(async () => ({ ok: false, summary: 'Synthetic admission only' }));
   const laneFence = { open: vi.fn(() => writeFiles), handoff: vi.fn() };
   const env = {
+    originalPrompt: 'Synthetic one-file app', steeringHandoff: createSteeringHandoff(() => [], () => true),
+    BINARY_TEXT_GENERATION_PREFIX,
     sb: { ok: options.ok ?? false, reason, stopped: options.stopped ?? false, plannedFiles: options.plannedFiles ?? 0, initialDecline: options.initialDecline },
     abort, analysis: { startTier: options.tier ?? 'haiku' }, fastLaneReasoningRung: options.reasoningRung ?? null,
     anotherLaneWorthTrying, buildDiag: { record: (row: typeof records[number]) => records.push(row) },
@@ -246,7 +250,7 @@ describe('production AST one-shot admission and skip narration, not full HTTP ex
     expect(result.runOneShot).toHaveBeenCalledTimes(1);
     expect(result.laneFence.open).toHaveBeenCalledExactlyOnceWith('one-shot');
     expect(result.runOneShot).toHaveBeenCalledWith({
-      prompt: 'Synthetic one-file app\nSynthetic note', framework: 'vite-react', scaffoldPaths: ['src/App.tsx'],
+      prompt: 'Synthetic one-file app\nSynthetic note', originalRequest: result.env.originalPrompt, yieldRequested: expect.any(Function), framework: 'vite-react', scaffoldPaths: ['src/App.tsx'],
       readExisting: result.env.readExistingProjectFile, generate: result.env.fastGenerate,
       writeFiles: result.writeFiles, startPreview: result.env.fastPreview, log: result.env.fastLog,
     });

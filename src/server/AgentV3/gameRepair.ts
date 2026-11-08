@@ -56,11 +56,13 @@ export function gameRepairPrompt(userPrompt: string, defects: readonly GameDefec
   ].join('\n');
 }
 
+export interface GameRepairProof { outcome: 'passed' | 'failed'; score: number }
+
 export interface GameRepairIO {
   /** Run one focused repair; true when the runner finished. */
   repair: (prompt: string, signal: AbortSignal) => Promise<boolean>;
   /** Play the game again and return its measured defects and still-missing named features. */
-  replay: () => Promise<{ defects: GameDefect[]; scopeMissing: string[] }>;
+  replay: () => Promise<{ defects: GameDefect[]; scopeMissing: string[]; proof: GameRepairProof | null }>;
   /** How many files changed since the snapshot. */
   changedSince: (snap: Record<string, string>) => Promise<number>;
   revert: (snap: Record<string, string>) => Promise<void>;
@@ -74,6 +76,7 @@ export interface GameRepairOutcome {
   after: GameDefectCode[] | null;
   scopeBefore: string[];
   scopeAfter: string[] | null;
+  proof: GameRepairProof | null;
 }
 
 const hardCount = (ds: readonly GameDefect[]): number => ds.filter((d) => HARD_DEFECTS.has(d.code)).length;
@@ -91,7 +94,8 @@ export async function runGameRepair(
   defects: readonly GameDefect[], scopeMissing: readonly string[], userPrompt: string,
   opts: { repairMs: number; snapshot: Record<string, string>; buildSignal: AbortSignal; io: GameRepairIO },
 ): Promise<GameRepairOutcome> {
-  const base: GameRepairOutcome = { attempted: false, kept: false, reason: '', before: defects.map((d) => d.code), after: null, scopeBefore: [...scopeMissing], scopeAfter: null };
+  const base: GameRepairOutcome = { attempted: false, kept: false, reason: '', before: defects.map((d) => d.code), after: null, scopeBefore: [...scopeMissing], scopeAfter: null, proof: null };
+  if (opts.buildSignal.aborted) return { ...base, reason: 'the build was stopped before repair' };
   if (defects.length === 0 && scopeMissing.length === 0) return { ...base, reason: 'nothing to repair' };
   if (opts.repairMs <= 0) return { ...base, reason: 'not enough build time left for a repair and its replay' };
   if (Object.keys(opts.snapshot).length === 0) return { ...base, reason: 'no snapshot of the game could be taken' };
@@ -107,11 +111,19 @@ export async function runGameRepair(
     let finished = false;
     try { finished = await opts.io.repair(gameRepairPrompt(userPrompt, defects, scopeMissing), ctl.signal); } catch { finished = false; }
     if (!finished || ctl.signal.aborted) return await undo('the repair did not finish in time');
-    if ((await opts.io.changedSince(opts.snapshot)) === 0) return { ...base, attempted: true, reason: 'the repair changed no file', after: base.before, scopeAfter: [...scopeMissing] };
+    const changed = await opts.io.changedSince(opts.snapshot);
+    if (ctl.signal.aborted) return await undo('the build stopped or the repair budget ended during verification');
+    if (changed === 0) return { ...base, attempted: true, reason: 'the repair changed no file', after: base.before, scopeAfter: [...scopeMissing] };
     const again = await opts.io.replay();
+    // Empty defects from a browser that never played are absence of evidence, not improvement.
+    if (ctl.signal.aborted) return await undo('the build stopped or the repair budget ended during replay');
+    if (!again.proof || !['passed', 'failed'].includes(again.proof.outcome)
+      || !Number.isFinite(again.proof.score) || again.proof.score < 0 || again.proof.score > 100) {
+      return await undo('the gameplay replay did not produce a measured score');
+    }
     const after = again.defects.map((d) => d.code);
     if (!repairImproved(defects, again.defects, scopeMissing, again.scopeMissing)) return await undo('played again, the game was not better (or something new broke) — undone', after, again.scopeMissing);
-    return { ...base, attempted: true, kept: true, reason: 'played again: fewer defects, nothing new broke', after, scopeAfter: again.scopeMissing };
+    return { ...base, attempted: true, kept: true, reason: 'played again: fewer defects, nothing new broke', after, scopeAfter: again.scopeMissing, proof: { ...again.proof } };
   } catch (e) {
     return await undo(`the repair could not be checked (${e instanceof Error ? e.message : String(e)})`);
   } finally {

@@ -589,9 +589,34 @@ const PERSIST_WRITE: ReadonlyArray<readonly [RegExp, string]> = [
   [/\b(?:localStorage|sessionStorage)\.\w+\s*=/, 'browser storage'],
   [/\b(?:indexedDB|IDBDatabase)\b/, 'a browser database'],
   [/\b(?:addDoc|setDoc|updateDoc|deleteDoc)\s*\(/, 'a database write'],
-  [/\.(?:insert|upsert|update|delete)\s*\(/, 'a database write'],
+
   [/method\s*:\s*["'](?:POST|PUT|PATCH|DELETE)/i, 'a write to its server'],
 ];
+
+/** A generic .update() is not persistence (BR1955's GameLoop). Require an actual call
+ * whose receiver comes from a datastore-shaped chain. Source evidence, not runtime/provider proof.
+ * AST calls exclude quoted examples/comments without banning an entire game-kit path.
+ */
+function datastoreWriteEvidence(src: string): string | null {
+  const sf = ts.createSourceFile('app.tsx', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const datastoreChain = (node: ts.Expression): boolean => {
+    if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return false;
+    return ['from', 'collection', 'doc'].includes(node.expression.name.text) || datastoreChain(node.expression.expression);
+  };
+  let found: string | null = null;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+      && ['insert', 'upsert', 'update', 'delete', 'add', 'set'].includes(node.expression.name.text)
+      && datastoreChain(node.expression.expression) && !NOT_APP_DATA_KEY.test(node.getText(sf))) {
+      found = node.getText(sf);
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
+}
 
 /** Storage keys that are a display preference or ours, never the user's records. */
 const NOT_APP_DATA_KEY = /\b(?:theme|colou?r[-_]?scheme|dark[-_]?mode|font[-_]?scale|locale|language|consent|cookie|nbai|nb-)\b/i;
@@ -613,6 +638,7 @@ export function savedStateEvidence(files: Record<string, string>): { path: strin
       if (NOT_APP_DATA_KEY.test(line)) continue;
       return { path, what };
     }
+    if (datastoreWriteEvidence(src)) return { path, what: 'a database write' };
   }
   return null;
 }

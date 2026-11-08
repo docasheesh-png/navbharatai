@@ -199,8 +199,8 @@ describe('3 · undefined classes get a readable floor at once — and the nets s
 });
 
 describe('5 · a plan-only turn cannot be repeated: the plan tool is withdrawn', () => {
-  it('pure: withdrawn until work, then for the run after a second plan-only turn', () => {
-    expect(nextTodoWithdrawal('offered', { todoOnly: true, didOtherWork: false, plannedOnlyBefore: false })).toBe('until-work');
+  it('pure: first solo plan withdraws for the run; legacy until-work and off controls stay supported', () => {
+    expect(nextTodoWithdrawal('offered', { todoOnly: true, didOtherWork: false, plannedOnlyBefore: false })).toBe('for-run');
     expect(nextTodoWithdrawal('until-work', { todoOnly: false, didOtherWork: true, plannedOnlyBefore: true })).toBe('offered');
     expect(nextTodoWithdrawal('offered', { todoOnly: true, didOtherWork: false, plannedOnlyBefore: true })).toBe('for-run');
     expect(nextTodoWithdrawal('for-run', { todoOnly: false, didOtherWork: true, plannedOnlyBefore: true })).toBe('for-run');
@@ -210,7 +210,7 @@ describe('5 · a plan-only turn cannot be repeated: the plan tool is withdrawn',
     expect(toolsThisTurn([{ name: 'update_todo' }], 'for-run').map((t) => t.name)).toEqual(['update_todo']); // plan lane keeps it
   });
 
-  it('🔴 the runner: after a plan-only turn the next call is not offered update_todo; after work it is again', async () => {
+  it('🔴 the runner: after a plan-only turn neither the next call nor the post-write call is offered update_todo', async () => {
     const use = { input_tokens: 5, output_tokens: 7 };
     const script = [
       { content: [{ type: 'tool_use', id: 't1', name: 'update_todo', input: { todos: [] } }], stop_reason: 'tool_use', usage: use },
@@ -227,7 +227,7 @@ describe('5 · a plan-only turn cannot be repeated: the plan tool is withdrawn',
     } as never).run('build');
     expect(offered[0]).toContain('update_todo');
     expect(offered[1]).not.toContain('update_todo');
-    expect(offered[2]).toContain('update_todo');
+    expect(offered[2]).not.toContain('update_todo');
   });
 });
 

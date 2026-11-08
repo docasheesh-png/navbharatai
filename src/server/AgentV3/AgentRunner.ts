@@ -1827,7 +1827,7 @@ export class AgentRunner {
                   }
                 } catch { /* the style read is advisory — the done steer stands without it */ }
                 if (styleNote) doneText = `${doneText}\n\n${styleNote}`;
-                else events.emit({ type: 'narration', agent: agentRole, ts: Date.now(), text: '✅ The app looks complete — wrapping up.' });
+                else events.emit({ type: 'narration', agent: agentRole, ts: Date.now(), text: '✅ Source/build checks are clear — final runtime checks are next.' });
               }
             }
           }

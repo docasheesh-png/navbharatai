@@ -59,7 +59,7 @@ import type { Checkpointer } from './GitManager';
 import { isWorkerRole, isPlanningOnlyRole, PLAN_YOURSELF_NOTE } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
-import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER } from './tscCommand';
+import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER, sharedBareTypecheckCommand } from './tscCommand';
 import { parseTscErrors, fixTypeOnlyValueImports as fixTypeOnlyValueImportsFromErrors, type TscError } from './EndgameRepair';
 import { tscCommandVerdict, looksLikeTypecheckCommand, tscVerdict, countTscErrors } from './TscGate';
 import { pathMissHint } from './suggestFilePath';
@@ -5785,7 +5785,7 @@ export class ToolDispatcher {
         }
         const typoFix = fixNodeModulesTypo(rawCommand);
         const cdFix = fixSandboxWorkspaceCd(typoFix.command);
-        const command = cdFix.command;
+        const command = sharedBareTypecheckCommand(cdFix.command, this.tsBuildInfoId);
         // Scaffold guard: create-* generators (`npm create vite`, `npx create-*`,
         // `npm init <gen>`) require a newer Node than the fixed-version sandbox and
         // FAIL — after which the agent tends to improvise a nested project subdir.

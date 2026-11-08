@@ -184,8 +184,8 @@ export function doneSteer(readiness: ReadinessReport | null | undefined): string
   if (!appIsDone(readiness)) return null;
   const r = readiness as ReadinessReport;
   return [
-    `[BUILD CHECKPOINT] An automatic check of the whole project says the app is complete and healthy `
-      + `— ${r.score}/100, no blockers.`,
+    `[BUILD CHECKPOINT] An automatic source/build check is clear `
+      + `— ${r.score}/100, no static blockers. This score does not establish gameplay or user-journey success.`,
     'If everything the user asked for is present, STOP HERE: write your summary and hand the app over. '
       + 'Do not add polish, refactors or extra features nobody requested.',
     'If something they asked for is genuinely still missing, ignore this and finish that one thing — '

@@ -24087,7 +24087,9 @@ async function noteBuildOutcome(
                   const out = await withTimeout(actuator.runCommand!(workspaceId, gamePlaytestScript(previewUrl, { storageState: signedInState() })), PLAYTEST_BUDGET_MS + 20_000, 'game-repair-replay');
                   const run = parsePlaytest(out.stdout);
                   const v = playtestVerdict(run, replayFromCode(files));
-                  return { defects: playtestDefects(run, v.score, missingKitLayerPaths(files)), scopeMissing: gameContract ? scopeMatch(gameContract, files).missing : [] };
+                  const outcome = playtestOutcome(v.code);
+                  return { defects: playtestDefects(run, v.score, missingKitLayerPaths(files)), scopeMissing: gameContract ? scopeMatch(gameContract, files).missing : [],
+                    proof: v.score && outcome !== 'not-run' ? { outcome, score: v.score.overall } : null };
                 },
                 changedSince: async (s0) => changedWorkspacePaths(s0, (await collectWorkspaceFiles(actuator, workspaceId)).files).length,
                 revert: revertToGreenSnapshot,
@@ -24098,7 +24100,11 @@ async function noteBuildOutcome(
             if (outcome.kept && outcome.after) {
               gamePlayed = { defects: gamePlayed.defects.filter((d) => outcome.after!.includes(d.code)), scopeMissing: outcome.scopeAfter ?? gamePlayed.scopeMissing };
               // The repaired game was PLAYED again and nothing hard remains: that replay is the gate's game proof.
-              if (gamePlayed.defects.length === 0) gateEvidence.game = 'passed';
+              if (outcome.proof) {
+                gameProof = { ...outcome.proof };
+                gateEvidence.game = gameProof.outcome;
+                if (gameProof.outcome === 'passed') buildDiag.resolveOnRecheck('GAME_PLAYTEST_ISSUES');
+              }
               if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
             }
           } catch (e) {

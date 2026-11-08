@@ -109,8 +109,9 @@ describe('fixed Doctor ingress', () => {
     expect(m.direct).not.toHaveBeenCalled(); expect(m.legacy).not.toHaveBeenCalled(); expect(m.vertex).not.toHaveBeenCalled();
     expect(m.charge.mock.calls[0][1].billableFraction).toBe(tier === 'free' ? 0 : 1);
   });
-  it('does not bill or silently switch to legacy on selected all-fail', async () => {
+  it.each(['free', 'paid'] as const)('does not bill or silently switch to legacy on selected %s all-fail', async tier => {
     vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); m.gateway.mockRejectedValue(new Error('unavailable'));
+    m.gate.mockResolvedValue({ allow: true, tier, uid: 'verified-doctor', countsAgainstFree: tier === 'free', billableFraction: tier === 'free' ? 0 : 1 });
     const res = mockRes(); await route()(request(), res); expect(res.statusCode).toBe(503);
     expect(m.legacy).not.toHaveBeenCalled(); expect(m.direct).not.toHaveBeenCalled(); expect(m.charge).not.toHaveBeenCalled();
   });

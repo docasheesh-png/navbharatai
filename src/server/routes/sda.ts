@@ -848,6 +848,13 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
 
         } catch (err: any) {
           if (sdaGate.tier === 'free') markFreeAnswerProviderFailure(req);
+          // The shared-quota producer owns generation errors after #4121. Keep selected
+          // fixed-chain outages terminal here too, without escaping quota settlement.
+          if (fixedTextChainEnabled()) {
+            console.error('[SDA] NavBharatAI conversational inference unavailable');
+            if (!res.destroyed && !res.headersSent && !res.writableEnded) res.status(503).json({ error: 'NavBharatAI is temporarily unavailable. Please try again shortly.' });
+            return;
+          }
           console.error('[SDA] Error:', err);
           if (!res.headersSent && !res.writableEnded) res.status(500).json({ error: 'Doctor AI hit an unexpected error. Please try again in a moment.' });
         }

@@ -333,16 +333,34 @@ const SEARCH_INPUT = /(?<![-\w])type\s*=\s*(?:\{\s*)?["'`]\s*search\s*["'`]|(?<!
  * wrote pass this check; the report could not say which file tipped it. The answer is now written beside
  * JOURNEY_NOT_DERIVED, so the next such report names its cause instead of leaving it to be guessed. PURE.
  */
+/** JSX syntax, not a type argument or a comment containing "<Input" (BR1951).
+ * Other template languages keep the shared markup reader; no genre exemption hides real forms.
+ */
+function dataControlRanges(path: string, source: string): Array<readonly [number, number]> {
+  if (!/\.[cm]?[jt]sx?$/i.test(path)) return scanMarkup(source).map(t => [t.index, t.index + t.tag.length] as const);
+  const kind = /\.[cm]?ts$/i.test(path) ? ts.ScriptKind.TS : ts.ScriptKind.TSX;
+  const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, kind);
+  const ranges: Array<readonly [number, number]> = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) ranges.push([node.getStart(file), node.end]);
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return ranges;
+}
+
 export function dataEntryEvidence(files: Record<string, string>): { path: string; what: string; line: string } | null {
   const unused = unreferencedComponents(files);
   // One answer to "is this a game", asked once (see GAME_SETTING_INPUT_TYPE).
   const game = isCanvasGameProject(files ?? {});
   for (const [path, src] of Object.entries(appOwnFiles(files))) {
     if (!src || unused.has(path.replace(/^\.?\/+/, ''))) continue;
+    const controls = dataControlRanges(path, src);
     for (const [re, what] of DATA_ENTRY_SIGNS) {
       // EVERY occurrence, not the first: one slider's `onChange` must not hide a real text box below it.
       const all = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
       for (let m = all.exec(src); m; m = all.exec(src)) {
+        if (!controls.some(([start, end]) => m.index >= start && m.index < end)) continue;
         if (insideNonDataControl(src, m.index + 1, game)) continue;
         const start = src.lastIndexOf('\n', m.index) + 1;
         const end = src.indexOf('\n', m.index);

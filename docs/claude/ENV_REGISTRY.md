@@ -1418,6 +1418,12 @@ the code (it is actually read somewhere) on 2026-07-11.
   🎓 **EXAM:** its own counter (`professional_exam_usage`), in QUESTIONS — a paper is SPLIT (2 free left
   + 10 asked = 2 free, 8 paid, charged `8/10` of the paper's real cost), priced on what was DELIVERED.
   An unusable paper is now charged NOTHING (the charge used to run before that check).
+  🔴 **CORRECTION 2026-11-08:** the independent professional **10 messages/day** admission is retired.
+  Signed-in Teacher, Doctor, Lawyer and the other professionals use the shared free-answer ceiling
+  (`SIGNED_IN_DAILY_DEFAULT` 50, one pool with Free chat, not 50 each). Guest public chat stays 10.
+  `PROFESSIONAL_FREE_DAILY_LIMIT` is no longer read by `gateProfessionalTurn`. A Pass holder and the
+  free-list stay unlimited. Exam's 5 free questions remain a question-pricing split, not a second
+  message cap. The header no longer shows "X/10 free today".
   ⚠️ **SAID PLAINLY, because the admin chose it knowing:** "paid" = real cost + markup, and the
   professionals' leader model is the free GLM-flash rung for BOTH tiers, so many paid answers still
   cost ₹0. That is the admin's "Asli kharcha + markup" decision, not a bug.

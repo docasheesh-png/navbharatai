@@ -71,8 +71,8 @@ export function registerProfessionalsRoutes(app: Express): void {
     res.json({ professionals: listProfessionals() });
   });
 
-  // The daily-allowance status for the CURRENT user — the UI uses this to show "X/limit free today"
-  // (messages) and the free exam questions left. Reflects the same gate the chat and exam routes enforce.
+  // Exam-question status for the current user. Message admission is the shared free-answer ceiling,
+  // not a second professional 10. The exam fields still reflect gateProfessionalExam.
   app.get('/api/professional/pass/status', async (req: Request, res: Response) => {
     const identity = await verifyFirebaseIdentity(req);
     const uid = identity?.uid || null;
@@ -257,10 +257,8 @@ export function registerProfessionalsRoutes(app: Express): void {
         if (!reply.trim()) throw new Error('Empty professional answer');
         markFreeAnswer(req);
       }
-      // Only a genuinely-answered FREE turn burns a daily message (never on a paywall block or an error).
-      if (gate.countsAgainstFree && verifiedUserId) {
-        void professionalUsageStore.increment(verifiedUserId);
-      }
+      // The shared free-answer reservation is the one credit. The retired professional_daily_usage
+      // counter is not incremented here.
       // ONE WALLET: charge the same balance a build spends, for what this answer really cost. Deliberately
       // AFTER the answer exists and never awaited into the response — a money-path problem must not cost
       // the user their reply, and charging before answering would risk billing a turn that then failed.

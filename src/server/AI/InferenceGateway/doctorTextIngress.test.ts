@@ -5,6 +5,13 @@ vi.mock('@google/genai', () => ({ GoogleGenAI: class { models = { generateConten
 vi.mock('openai', () => ({ default: class { chat = { completions: { create: m.direct } }; } }));
 vi.mock('../../lib/authMiddleware', async original => ({ ...await original<typeof import('../../lib/authMiddleware')>(), verifyFirebaseIdentity: m.identity, verifyFirebaseToken: m.verify }));
 vi.mock('../../professionals/passGate', () => ({ gateProfessionalTurn: m.gate, burnFreeMessage: m.burn }));
+vi.mock('../../lib/freeAnswerQuota', () => ({
+  withFreeAnswerQuota: (_req: unknown, _res: unknown, run: () => Promise<unknown>) => run(),
+  markFreeAnswer: () => {},
+  markFreeAnswerProviderFailure: () => {},
+  assertFreeAnswerActive: () => {},
+  freeAnswerSignal: () => undefined,
+}));
 vi.mock('./runtime', async original => ({ ...await original<typeof import('./runtime')>(), maybeGatewayText: m.gateway }));
 vi.mock('../AIRouterManager', () => ({ AIRouterManager: { getRouter: () => ({ routeRaced: m.legacy }) } }));
 vi.mock('../../lib/aiTurnCharge', () => ({ chargeForAiTurn: m.charge }));
@@ -45,7 +52,7 @@ describe('Doctor AI retains its original routing, audit and billing', () => {
     expect(m.gate.mock.calls[0][0]).toBe('verified-doctor');
     expect(m.charge.mock.calls[0][1].billableFraction).toBe(tier === 'free' ? 0 : 1);
     expect(m.charge.mock.calls[0][2]).toMatchObject({ provider: 'GLM', model: 'legacy', inputTokens: 20, outputTokens: 10 });
-    expect(m.burn).toHaveBeenCalledTimes(tier === 'free' ? 1 : 0);
+    expect(m.burn).not.toHaveBeenCalled();
   });
   it('retains the paid provider path and original independent clinical audit with both free-system flags ON', async () => {
     vi.useFakeTimers();

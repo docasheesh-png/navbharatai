@@ -176,8 +176,9 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     let paidBudgetReady = true;
     try { await publishDeploymentPaidLimit(db, cfg.paidCapNanoUsd, () => store.observePaidBudgetPolicy(cfg.paidCapNanoUsd, Date.now(), false, true)); }
     catch { paidBudgetReady = false; warnOnce('paid-budget-publish-failed'); }
-    // Failure of PAID authority cannot authorize paid work, but must not disable
-    // independently reviewed free providers. Their ordinary quota/safety gates remain.
+    // Failure of paid authority cannot authorize paid work or disable independently
+    // reviewed free providers. Their ordinary quota/safety gates remain.
+
     const explicitLanguage = input.context.replyLanguage ?? resolveChatReplyLanguage(input.message, input.history);
     const language = replyLanguageFor(input);
     const languageInstruction = explicitLanguage ? chatReplyLanguageInstruction(explicitLanguage)

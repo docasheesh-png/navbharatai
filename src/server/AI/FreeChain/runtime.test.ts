@@ -69,7 +69,7 @@ describe('free chat chain central dispatch', () => {
    expect(await router.route(input())).toMatchObject({ ok: true, provider: 'GROQ' });
    expect(m.observeBudget).toHaveBeenCalledTimes(2); expect(m.paid).not.toHaveBeenCalled();
  });
- it('cannot dispatch any fixed-chain paid rung during paid-authority failure', async () => {
+ it('blocks Mitrify and every fixed-chain paid rung when paid authority publication fails', async () => {
    m.observeBudget.mockRejectedValue(new Error('synthetic paid-policy outage'));
    m.execute.mockRejectedValue(new FreeChainProviderError('MODEL_UNAVAILABLE'));
    const cfg = config(); cfg.fixedOrder = true; cfg.maxAttempts = 12;

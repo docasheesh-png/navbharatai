@@ -1,11 +1,12 @@
 import { strictFreeRequired } from '../AI/inferencePolicy';
 // Shared Professional gate — the ONE place both the config-driven professional route and the bespoke
 // Doctor AI (SDA) route decide a turn, so "Doctor AI = same as all professionals" (admin 2026-07-15) can
-// never drift between the two. Since 2026-09-23: the first professionalFreeDailyLimit() answers a day
-// (shared across ALL professionals AND Doctor AI) are free, every answer after that is paid from the one
-// wallet; free-list and an active pass are unlimited; anonymous callers must sign in. Exam mode has its
-// own question allowance (`gateProfessionalExam`). `PROFESSIONAL_FREE_QUOTA=off` restores the previous
-// behaviour for SIGNED-IN callers. Returns the model tier + charged share for an allowed turn, or a block.
+// never drift between the two. The independent 10-message professional counter is retired: a signed-in
+// professional or Doctor AI turn is admitted by the shared free-answer ceiling (50/day, one pool with
+// Free chat), not by a second per-mode count. Free-list and an active pass stay unlimited. Anonymous
+// callers must sign in. Exam mode keeps its own question allowance (`gateProfessionalExam`).
+// `PROFESSIONAL_FREE_QUOTA=off` restores paid-from-the-first-message for SIGNED-IN callers. Returns the
+// model tier + charged share for an allowed turn, or a block.
 //
 // 🔒 AN ANONYMOUS CALLER IS DECIDED BY `anonymousCapabilities.ts`, FIRST, IN BOTH MODES (Q-622). Until
 // 2026-10-05 the `off` branch below handed a caller with no account `tier: 'paid'` — the full chain,
@@ -13,13 +14,13 @@ import { strictFreeRequired } from '../AI/inferencePolicy';
 // this file's to give: the one table says the Professionals, Exam mode and Doctor AI need an account, and
 // the result types (`CallerTier`) make `{ uid: null, tier: 'paid' }` a compile error.
 
-import { decideProfessionalAccess, splitExamQuestions } from './access';
+import { splitExamQuestions } from './access';
 import {
-  professionalFreeDailyLimit, isProfessionalFreeUser,
+  isProfessionalFreeUser,
   professionalFreeQuotaEnabled, professionalExamFreeDailyQuestions,
 } from './professionalPaid';
 import { professionalPassStore } from './ProfessionalPassStore';
-import { professionalUsageStore, professionalExamUsageStore } from './ProfessionalUsageStore';
+import { professionalExamUsageStore } from './ProfessionalUsageStore';
 import { aiWalletSpendEnabled } from '../lib/aiTurnCharge';
 import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
 import { getServerDb } from '../lib/serverDb';
@@ -88,11 +89,11 @@ async function freeTrialEndedRefusal(uid: string, freeListed: boolean): Promise<
 /** Decide access + model tier for one professional/Doctor-AI turn. `uid`/`email` MUST be the server-
  *  verified identity (never a client-claimed body field).
  *
- *  THE RULE (admin 2026-09-23, "din ke 10 message free honge, fir paid hoga"): a signed-in user's
- *  first `professionalFreeDailyLimit()` answers each day are FREE — the free model chain, never
- *  charged, and NOT refused for an empty wallet (a free message does not need a balance). After that
- *  every answer is PAID: the paid chain, charged its real cost + markup from the one wallet, and
- *  refused only when that wallet is empty. The free-list and a Pass holder are unlimited.
+ *  THE RULE: a signed-in user's professional and Doctor AI answers use the shared free-answer
+ *  ceiling, the same 50/day pool as Free chat. This gate does not keep a second 10-message counter.
+ *  The turn is on the free model chain and is not charged by the professional wallet formula; the
+ *  shared reservation is the one credit, and an empty wallet does not refuse it here. The free-list
+ *  and a Pass holder stay unlimited.
  *
  *  `surface` names the entry of the anonymous table that answers for a caller with NO account (Doctor AI
  *  passes 'doctor-ai', so its sign-in prompt names Doctor AI). It changes nothing for a signed-in caller. */
@@ -135,52 +136,20 @@ export async function gateProfessionalTurn(
     return { allow: true, countsAgainstFree: false, uid, tier: 'paid', isFreeListed: freeListed, hasActivePass, billableFraction: 1 };
   }
 
-  const freeDailyLimit = professionalFreeDailyLimit();
-  const usedToday = !freeListed && !hasActivePass ? await professionalUsageStore.getTodayCount(uid) : 0;
-  const decision = decideProfessionalAccess({
-    enabled: true, signedIn: true, isFreeListed: freeListed, hasActivePass, usedToday, freeDailyLimit,
-    // "Then paid" needs a wallet to be paid FROM. Without wallet spending an over-allowance answer
-    // could not be charged, so it is the old honest block rather than a silent free answer.
-    overQuota: walletSpend ? 'paid' : 'block',
-  });
-
-  if (decision.action === 'allow') {
-    if (decision.reason === 'paid-after-free') {
-      const balanceInr = await balanceFor(uid);
-      if (walletTooEmptyForTurn(balanceInr)) {
-        return {
-          allow: false,
-          status: WALLET_EMPTY_STATUS,
-          body: walletEmptyBody(
-            { balanceInr, what: 'this answer', alternative: `Your ${freeDailyLimit} free messages come back tomorrow.` },
-            { freeUsedUp: true, freeDailyLimit, remainingFree: 0 },
-          ),
-        };
-      }
-    }
-    // Model tier: a free message → the free chain; a paid answer, a Pass or the free-list → the paid
-    // chain. This is what makes "free = cheap models" real.
-    const free = decision.reason === 'within-free-quota';
+  // Pass and free-list stay the paid entitlement they already were: unlimited, and not
+  // newly metered by the shared ceiling. decideProfessionalAccess still owns that classification
+  // for the AI tools; professional chat no longer feeds it a 10-message count.
+  if (freeListed || hasActivePass) {
     return {
-      allow: true, countsAgainstFree: decision.countsAgainstFree, remainingFree: decision.remainingFree, uid,
-      tier: free ? 'free' : 'paid',
-      isFreeListed: freeListed, hasActivePass,
-      billableFraction: free ? 0 : 1,
+      allow: true, countsAgainstFree: false, uid, tier: 'paid',
+      isFreeListed: freeListed, hasActivePass, billableFraction: 1,
     };
   }
-  // Signed in, so the only block left is the used-up allowance. Reachable only while AI_WALLET_SPEND is
-  // off — with it on, an over-allowance answer is paid instead. So there is nothing to buy here, and the
-  // message says the one true thing left.
+  // Ordinary signed-in turn. The shared free-answer quota, not this function, admits or denies it.
+  // countsAgainstFree stays false so the retired professional_daily_usage counter cannot move.
   return {
-    allow: false,
-    status: 402,
-    body: {
-      error: `You've used your ${freeDailyLimit} free messages for today. They reset tomorrow.`,
-      code: 'professional_paywall',
-      reason: decision.reason,
-      remainingFree: 0,
-      freeDailyLimit,
-    },
+    allow: true, countsAgainstFree: false, uid, tier: 'free',
+    isFreeListed: false, hasActivePass: false, billableFraction: 0,
   };
 }
 
@@ -265,9 +234,4 @@ export function examPaperCharge(delivered: number, freeQuestions: number): { fre
   const f = Number.isFinite(freeQuestions) && freeQuestions > 0 ? Math.floor(freeQuestions) : 0;
   const freeUsed = Math.min(d, f);
   return { freeUsed, billableFraction: (d - freeUsed) / d };
-}
-
-/** Record one consumed free message (only call after a genuinely-answered free-tier turn). Best-effort. */
-export function burnFreeMessage(uid: string | null | undefined): void {
-  if (uid) void professionalUsageStore.increment(uid);
 }

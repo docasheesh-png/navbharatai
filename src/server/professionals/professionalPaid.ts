@@ -33,8 +33,12 @@ export function professionalFreeQuotaEnabled(): boolean {
   return String(process.env.PROFESSIONAL_FREE_QUOTA || '').trim().toLowerCase() !== 'off';
 }
 
-/** Daily free-message allowance, shared by every professional AND Doctor AI. Default 10 (admin
- *  2026-09-23 — it had drifted to 50 in code). Env-tunable without a deploy. */
+/**
+ * Legacy reader for `PROFESSIONAL_FREE_DAILY_LIMIT`. Default 10.
+ * Professional and Doctor AI admission does not use this number. Signed-in answers share the
+ * free-answer ceiling (50/day with Free chat). The env key remains so an old setting cannot
+ * throw, and so it cannot silently become a second cap again.
+ */
 export function professionalFreeDailyLimit(): number {
   const n = parseEnvNumber(process.env.PROFESSIONAL_FREE_DAILY_LIMIT);
   return n !== null && n >= 0 ? Math.floor(n) : 10;

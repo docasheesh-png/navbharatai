@@ -1570,7 +1570,7 @@ export function playtestSeed(env: NodeJS.ProcessEnv = process.env): number | nul
  * reads pixels of a game surface; it cannot score these, so it must say so rather than stay silent or fake a
  * score. Read from the contract's genre (gameIntent.ts) and from the code. null = not a DOM game. PURE.
  */
-export type DomGameKind = 'quiz' | 'card' | 'board' | 'puzzle';
+export type DomGameKind = 'quiz' | 'card' | 'board' | 'puzzle' | 'action';
 const DOM_GAME_CODE: ReadonlyArray<[DomGameKind, RegExp]> = [
   ['quiz', /\b(questions?\s*[:=]|correctAnswer|currentQuestion|quizState)/],
   ['board', /\b(board\s*[:=]\s*\[|checkWinner|isCheckmate|currentPlayer)/],
@@ -1581,6 +1581,8 @@ export function domGameKind(files: Record<string, string>, contract?: GameScopeC
   if (isCanvasGameProject(files)) return null;
   const g = contract?.genre;
   if (g === 'quiz' || g === 'card' || g === 'board' || g === 'puzzle') return g;
+  // BR1951: a runner drawn with DOM elements is still a game, not an app we played.
+  if (g && g !== 'unknown') return 'action';
   for (const [path, content] of Object.entries(files || {})) {
     if (/(^|\/)node_modules\//.test(path) || !CODE_FILE.test(path) || typeof content !== 'string') continue;
     if (/(^|\/)src\/(?:game\/(?:core|fx)|audio)\//.test(path)) continue;

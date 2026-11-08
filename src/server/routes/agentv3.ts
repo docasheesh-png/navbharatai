@@ -23874,6 +23874,7 @@ async function noteBuildOutcome(
               const dom = domGameNotPlayedVerdict(domKind);
               buildDiag.record({ phase: 'preview', severity: dom.severity, code: dom.code, message: dom.message, autoResolved: dom.autoResolved });
               gameProof = { outcome: playtestOutcome(dom.code), score: null };
+              gateEvidence.game = 'not-run'; // BR1951: DOM controls clicked is not a game playthrough.
             }
           } catch { /* observation only */ }
         }

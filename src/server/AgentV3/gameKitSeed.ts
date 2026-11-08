@@ -160,7 +160,7 @@ export interface GameKitSeedResult {
 /** How much of one recipe's own instructions the handoff carries. Bounded so a future recipe cannot flood the prompt. */
 export const HANDOFF_RECIPE_CHARS = 6_000;
 
-const WRITE_LINE = /^(?:Created|Updated|Unchanged|skipped existing)\s+(\S+)/;
+const WRITE_LINE = /^(?:Created|Updated|Unchanged)\s+(\S+)/;
 
 /**
  * A recipe's tool result, made compact for the build prompt: the per-file "Created …" lines become one

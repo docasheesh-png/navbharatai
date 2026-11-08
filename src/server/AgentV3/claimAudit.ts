@@ -151,7 +151,7 @@ export interface MeasuredFacts {
 /** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
 const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
 
-export type ClaimKind = 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable';
+export type ClaimKind = 'sandbox-preview-link' | 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed' | 'game-claimed-playable';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -438,6 +438,13 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
   const text = String(summary ?? '');
   if (!text.trim()) return [];
   const out: ClaimContradiction[] = [];
+
+  // BR1951: localhost inside the sandbox is not a preview address on the user's computer.
+  // Only announcements of a LIVE preview, never ordinary local-development instructions.
+  if (/\blive\s+preview[^\n]{0,120}https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?=[:/\s]|$)/i.test(text)) {
+    out.push({ kind: 'sandbox-preview-link', claimed: 'a live preview at a localhost address',
+      measured: 'that address belongs to the build sandbox, not your computer — open the Preview tab to use the published app' });
+  }
 
   // A FEATURE SOLD AS WORKING THAT ONLY PRETENDS (admin 2026-10-04, NO FAKE BUTTON). The app's own code
   // was read by shape: a login whose password is written into it, a "Continue with Google" with nothing

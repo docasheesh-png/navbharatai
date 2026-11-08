@@ -100932,6 +100932,18 @@ threshold was weakened. Re-running the full required checks on this correction.
 - Requested fixed order already exists; Groq/Cloudflare fixed mode require verified-free-no-overage. Default legacy mode remains unchanged. Gateway Mitrify adapter and paid Professional predispatch funding/settlement bridge remain unfinished; no global activation substitutes for them. Existing 250/80 output defaults apply to selected non-reasoning rungs; no runtime values or live accuracy/capacity were verified.
 - No load campaign, paid/live inference, production configuration, credentials or persistent access changed. No stored histories or accounting records deleted. Required hosted CI and deployment remain unverified until PR checks run.
 
+
+## BR1951 sequential audit — verified-state contract (merge pending)
+
+Owner order: after BR1950, inspect every outcome ascending, one report at a time. This branch audits ONLY succeeded BR1951 (`9abd4380`), not BR1952 and not all 155 queued IDs. Initial inventory1951–2105 is complete; later BR2106 does not silently extend the boundary.
+
+Complete retained report, all12 problems, all301 issues,14 commands,52 LLM entries, manifest, billing, final summary and failed-autopsy lookup reviewed. Full evidence boundaries, all30 item rows and four-field blockers are in `docs/build-report-autopsy-BR1951.md`; Q-2349–Q-2377 are independent queue IDs, not BR numbers. Five buckets:5 self-heal,2 workaround,7 skip (1 intentional optional-consent observation),9 shipped-imperfect,7 struggle. Nine technical rows fixed at platform class;20 retain explicit blocked work (2 partially mitigated). No whole-report zero-defect or historical-app repair claim.
+
+Ten class changes: unknown recipe reads return an error rather than zero-file kit success; preserved files are not compacted as writes; successful tsconfig writes invalidate cached absence across writer lanes; absent Vite/CRA entry blocks premature DONE; real JSX syntax distinguishes controls from TypeScript generics; failed managed server has nonzero receipt; undeclared direct config imports avoid two ineffective reinstalls; DOM action games are explicitly unplayed and enter summary claim checking; report counts include the actual outgoing appended issue; localhost live-preview claims are visibly corrected; zero hostile cases no longer claim a safety pass. Existing #4108 sandbox admission mitigation and Q-107 test-runner/image debt are referenced, not falsely reimplemented or closed.
+
+Regression: `tests/br1951Autopsy.test.ts` plus neighboring recipe/JSX/claim/red-team/readiness suites; separate baseline worktree reversion proof (new dependency helper retained only as no-op API to test old recovery semantics). Full CI-equivalent local gates required before push; outcomes recorded in PR handoff. No new env flags, routing/billing change, paid call, production replay, deployment, merge or external autopsy persistence. Live connector has no autopsy write operation, and its failure-only autopsy endpoint not finding this successful BR is not a missing report.
+
+Parent owns merge. BR1952 is the exact next report only AFTER this PR's merged state is confirmed; blocked actions remain in the queue after merge.
 ### 2026-11-08 — professional 10-a-day cap retired; shared 50 remains
 
 - The "X/10 free today" badge was a real second admission counter (`professionalUsageStore` + `professionalFreeDailyLimit`), not a label. Signed-in Teacher, Doctor, Lawyer and the other professionals now use the shared free-answer ceiling (50/day, one pool with Free chat). Guest public chat stays 10. Pass holders and the free-list stay unlimited. Exam mode still prices its first 5 questions separately.

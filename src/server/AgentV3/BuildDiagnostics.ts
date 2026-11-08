@@ -2944,7 +2944,12 @@ export class BuildDiagnostics {
     this.resolveRecoveredOnSuccess();
     // NARRATION IS EXCLUDED FROM ALL THREE TALLIES — see NARRATION_CODES. A repeated sentence is not
     // an error the build had, not a warning it raised, and not something it healed.
-    const counted = this.issues.filter((i) => !isNarrationEntry(i));
+    // BR1951: serialization adds a plan-only line. Count the exact outgoing snapshot,
+    // not the pre-serialization array (which reported 300 beside 301 issues).
+    const issues = this.todoOnlyTally
+      ? [...this.issues, { ts: this.endedAt ?? this.now(), ...todoOnlyTurnsLine(this.todoOnlyTally) }]
+      : [...this.issues];
+    const counted = issues.filter((i) => !isNarrationEntry(i));
     const errors = counted.filter((i) => i.severity === 'error').length;
     const warnings = counted.filter((i) => i.severity === 'warning').length;
     // Observations are neither ours to have healed nor ours to still owe — they get their own bucket, so
@@ -3001,7 +3006,7 @@ export class BuildDiagnostics {
       ok: this.ok,
       summary: this.summary,
       counts: {
-        total: this.issues.length,
+        total: issues.length,
         errors,
         warnings,
         autoResolved,
@@ -3018,9 +3023,7 @@ export class BuildDiagnostics {
       // 📋 PLAN-ONLY TURNS, BUILT HERE AND NOT WHEN GENERATION ENDED (Q-1030) — the heal lanes that run
       // after it keep counting, so the line is a property of the report, exactly as the back-fill above is.
       // Info, so it is outside every tally (see the INFO note above) and outside `problems` below.
-      issues: this.todoOnlyTally
-        ? [...this.issues, { ts: this.endedAt ?? this.now(), ...todoOnlyTurnsLine(this.todoOnlyTally) }]
-        : [...this.issues],
+      issues,
       problems: reportProblems(this.issues),
       rootCause: deriveRootCause({
         issues: this.issues, errors: this.errors, review: this.reviewText, ok: this.ok, commands: this.commands,

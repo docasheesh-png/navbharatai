@@ -1,3 +1,4 @@
+import { gatewayMitrifyCeiling, type GatewayMitrifyConfig } from '../../lib/mitrify';
 import { fixedTextChainEnabled, fixedTextChainScopeAllowed, fixedTextChainScope, FIXED_TEXT_CHAIN_MAX_ATTEMPTS } from '../fixedTextChain';
 import { modelSlotIdentity, modelSlotPath, modelSlotBinding, readModelSlotPolicy, readModelSlotState, readHeldModelSlot, type GatewayModelSlotPolicy } from './modelConcurrency';
 /**
@@ -27,7 +28,7 @@ import { readGatewayVisionHealth, readGatewayVisionUsage, readGatewayVisionCompl
 import type { GatewayInvocationPayload, GatewayOperationPolicy } from './capabilityInvocation';
 export type GatewayRuntimeTransport = (GatewayTextTransportConfig & { readonly kind?: 'text' })
   | (GatewayOpenRouterConfig & { readonly kind?: 'text'; readonly rateCard?: never })
-  | GatewayEmbeddingConfig | GatewayGroundingConfig | GatewayVisionTransportConfig;
+  | GatewayMitrifyConfig | GatewayEmbeddingConfig | GatewayGroundingConfig | GatewayVisionTransportConfig;
 
 export const GATEWAY_CATALOG_PATH = 'free_chat_chain/gateway_catalog';
 type GatewayPayload = GatewayInvocationPayload;
@@ -82,7 +83,7 @@ function usageAmount(meter: string, input: number, output: number): number {
 }
 function transportCredentialBinding(t: GatewayRuntimeTransport): string {
   if (t.kind === 'embedding') return gatewayEmbeddingCredentialBinding({ project: t.project, credentialPrincipal: t.credentialPrincipal });
-  requireValue(/^INFERENCE_GATEWAY_[A-Z0-9_]+$/.test(t.credentialEnv) && !!process.env[t.credentialEnv]);
+  requireValue((t.provider === 'MITRIFY' ? t.credentialEnv === 'MITRIFY_API_KEY' : /^INFERENCE_GATEWAY_[A-Z0-9_]+$/.test(t.credentialEnv)) && !!process.env[t.credentialEnv]);
   const binding = gatewayTextCredentialBinding(process.env[t.credentialEnv]!);
   requireValue(t.credentialBinding === binding); return binding;
 }
@@ -128,6 +129,7 @@ function requestedCapability(p: GatewaySurfacePolicy, payload: GatewayPayload): 
   throw new Error('Unsupported reviewed operation');
 }
 function maximumFor(t: GatewayRuntimeTransport, p: GatewaySurfacePolicy, payload: GatewayPayload): number {
+  if (t.provider === 'MITRIFY') return gatewayMitrifyCeiling(t);
   const rate = t.rateCard; requireValue(rate && current(rate.verifiedAtMs, rate.expiresAtMs, Date.now()) && isIdentifier(rate.version));
   if (t.kind === 'embedding') {
     requireValue(payload.kind === 'embedding' && positive(t.rateCard.maxNanoUsdPerCharacter) && t.rateCard.maxNanoUsdPerCharacter >= 25);
@@ -281,10 +283,10 @@ export class GatewayAuthorityStore {
             && current(entry.reviewedAtMs, entry.expiresAtMs, now) && entry.expiresAtMs - entry.reviewedAtMs <= 86_400_000
             && entry.review && ['account', 'terms', 'quality', 'privacy', 'capability', 'pricing'].every(k => isIdentifier(entry.review[k as keyof typeof entry.review]))
             && (entry.transport.kind ?? 'text') === capability.kind
-            && entry.legacyProvider === ({ GLM: 'glm', GEMINI: 'gemini', GROQ: 'groq', CLOUDFLARE: 'cloudflare', DEEPSEEK: 'deepseek', OPENROUTER: 'openrouter', VERTEX: 'vertex', BRAVE: 'brave' } as const)[entry.transport.provider]
+            && entry.legacyProvider === ({ GLM: 'glm', GEMINI: 'gemini', GROQ: 'groq', CLOUDFLARE: 'cloudflare', DEEPSEEK: 'deepseek', OPENROUTER: 'openrouter', VERTEX: 'vertex', BRAVE: 'brave', MITRIFY: 'mitrify' } as const)[entry.transport.provider]
             && entry.profile.adapterId === (entry.transport.kind === 'embedding' ? 'gateway-vertex-embedding-v1'
               : entry.transport.kind === 'grounding-search' ? 'gateway-brave-search-v1' : entry.transport.kind === 'vision-pdf' ? 'gateway-vision-v1'
-              : entry.transport.provider === 'OPENROUTER' ? 'gateway-openrouter-text-v1' : 'gateway-openai-text-v1') && entry.profile.modelId === entry.transport.model
+              : entry.transport.provider === 'OPENROUTER' ? 'gateway-openrouter-text-v1' : entry.transport.provider === 'MITRIFY' ? 'gateway-mitrify-text-v1' : 'gateway-openai-text-v1') && entry.profile.modelId === entry.transport.model
             && (entry.transport.kind === 'embedding' || entry.transport.kind === 'grounding-search' || entry.transport.maxOutputTokens === p.maxOutputTokens)
             && entry.accountCredentialBinding === transportCredentialBinding(entry.transport)
             && (entry.profile.charging === 'metered' || (entry.freeBillingSafety
@@ -293,6 +295,7 @@ export class GatewayAuthorityStore {
               && current(entry.freeBillingSafety.reviewedAtMs, entry.freeBillingSafety.expiresAtMs, now)
               && entry.freeBillingSafety.expiresAtMs - entry.freeBillingSafety.reviewedAtMs <= 86_400_000))
             && Array.isArray(entry.profile.quotaDimensions) && entry.profile.quotaDimensions.length > 0 && entry.profile.quotaDimensions.length <= 32);
+          if (entry.transport.provider === 'MITRIFY') { requireValue(entry.profile.charging === 'metered'); gatewayMitrifyCeiling(entry.transport, now); }
           const fencePath = gatewayAccountFencePath(entry.legacyProvider, gatewayAccountScopeIds(entry.profile.quotaDimensions));
           const fenceRaw = await this.get(tx, fencePath); const fence = validFence(fenceRaw, entry, now);
           const slotIdentity = modelSlotIdentity(entry.profile);

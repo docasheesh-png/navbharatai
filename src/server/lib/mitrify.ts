@@ -1,3 +1,8 @@
+import { gatewayTextCredentialBinding, gatewayTextPayloadDigest, GatewayTextTransportError, type GatewayTextPayload, type GatewayTextResponse } from '../AI/InferenceGateway/textTransport';
+import { evidenceBinding as gatewayEvidenceBinding, profileRejection as gatewayProfileRejection, withoutEvidence as gatewayWithoutEvidence } from '../AI/InferenceGateway/profiles';
+import { isIdentifier as gatewayIsIdentifier, supportsCapability as gatewaySupportsCapability } from '../AI/InferenceGateway/capabilities';
+import type { ProviderProfile as GatewayProviderProfile, RoutingRequest as GatewayRoutingRequest } from '../AI/InferenceGateway/types';
+import type { DispatchClaim as GatewayDispatchClaim } from '../AI/InferenceGateway/executor';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
@@ -458,4 +463,166 @@ export function createMitrifyClient(env: Env = process.env, log: Log = defaultLo
       } finally { controller.abort(); release?.(); log({ code: 'MITRIFY_FINISHED', latencyMs: Date.now() - started, partial }); }
     },
   };
+}
+
+/** Reviewed Gateway adapter. The gateway alias remains a black box: no upstream
+ * model, token price or internal retry count is used for admission/accounting.
+ * Exactly one HTTP call belongs to one durable Gateway claim. Unknown charges
+ * retain that claim's full supplier ceiling for authoritative reconciliation.
+ */
+export interface GatewayMitrifyConfig {
+  readonly kind?: 'text';
+  readonly provider: 'MITRIFY';
+  readonly baseURL: string;
+  readonly model: string;
+  readonly credentialEnv: 'MITRIFY_API_KEY';
+  readonly credentialBinding: string;
+  readonly maxOutputTokens: number;
+  readonly timeoutMs: number;
+  readonly rateCard: {
+    readonly version: string;
+    readonly perHttpRequestCeilingNanoUsd: number;
+    readonly hardCeilingEnforced: true;
+    readonly includesInternalRetriesFailoversAndFees: true;
+    readonly evidenceRef: string;
+    readonly gatewayAndAllDownstreamProcessorsReviewed: true;
+    readonly processorPolicyReviewRef: string;
+    readonly disclosureAuthorityRef: string;
+    readonly verifiedAtMs: number;
+    readonly expiresAtMs: number;
+  };
+}
+export interface GatewayMitrifyAuthorization {
+  readonly profile: GatewayProviderProfile;
+  readonly transport: GatewayMitrifyConfig;
+  readonly claim: GatewayDispatchClaim;
+  readonly request: GatewayRoutingRequest;
+}
+export interface GatewayMitrifyInput extends Omit<GatewayTextPayload, 'streaming'>, GatewayMitrifyAuthorization {
+  readonly signal: AbortSignal;
+  readonly onChunk?: (text: string) => void | Promise<void>;
+  readonly markOutputVisible: () => Promise<void>;
+  readonly assertDispatchPolicy: () => void;
+  readonly authorizeClaim: (authorization: GatewayMitrifyAuthorization) => Promise<boolean>;
+}
+/** Server catalog validation only. This does not grant a dispatch or mint a review. */
+export function gatewayMitrifyCeiling(t: GatewayMitrifyConfig, now = Date.now()): number {
+  const cfg = mitrifyConfig(); const rate = t?.rateCard;
+  const fail = (): never => { throw new GatewayTextTransportError('CONFIGURATION'); };
+  if (process.env.MITRIFY_CHAIN_ENABLED !== '1' || !t || Object.keys(t).some(k => !['kind', 'provider', 'baseURL', 'model', 'credentialEnv', 'credentialBinding', 'maxOutputTokens', 'timeoutMs', 'rateCard'].includes(k))
+    || (t.kind !== undefined && t.kind !== 'text') || t.provider !== 'MITRIFY' || t.credentialEnv !== 'MITRIFY_API_KEY'
+    || t.baseURL !== cfg.baseURL || t.model !== cfg.model || !cfg.apiKey
+    || t.credentialBinding !== gatewayTextCredentialBinding(cfg.apiKey)
+    || !Number.isSafeInteger(t.maxOutputTokens) || t.maxOutputTokens < 1 || t.maxOutputTokens > 131072
+    || !Number.isSafeInteger(t.timeoutMs) || t.timeoutMs < 1 || t.timeoutMs > 600000
+    || !rate || Object.keys(rate).some(k => !['version', 'perHttpRequestCeilingNanoUsd', 'hardCeilingEnforced', 'includesInternalRetriesFailoversAndFees', 'evidenceRef', 'gatewayAndAllDownstreamProcessorsReviewed', 'processorPolicyReviewRef', 'disclosureAuthorityRef', 'verifiedAtMs', 'expiresAtMs'].includes(k))
+    || ![rate.version, rate.evidenceRef, rate.processorPolicyReviewRef, rate.disclosureAuthorityRef].every(gatewayIsIdentifier)
+    || rate.hardCeilingEnforced !== true || rate.includesInternalRetriesFailoversAndFees !== true || rate.gatewayAndAllDownstreamProcessorsReviewed !== true
+    || !Number.isSafeInteger(rate.perHttpRequestCeilingNanoUsd) || rate.perHttpRequestCeilingNanoUsd < 1
+    || !Number.isSafeInteger(rate.verifiedAtMs) || !Number.isSafeInteger(rate.expiresAtMs)
+    || rate.verifiedAtMs > now || rate.expiresAtMs <= now || rate.expiresAtMs - rate.verifiedAtMs > 86400000) fail();
+  const url = new URL(t.baseURL);
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) fail();
+  return rate.perHttpRequestCeilingNanoUsd;
+}
+function validateGatewayMitrify(a: GatewayMitrifyAuthorization, payload: GatewayTextPayload): void {
+  const { profile: p, transport: t, claim: c, request: r } = a;
+  const maximum = gatewayMitrifyCeiling(t); const fail = (): never => { throw new GatewayTextTransportError('POLICY_BLOCKED'); };
+  if (!r || !p || !c || !c.binding || !gatewayIsIdentifier(c.id) || !gatewayIsIdentifier(c.claimId)
+    || !Number.isSafeInteger(c.queueWaitConsumedAtDispatchMs) || c.queueWaitConsumedAtDispatchMs < 0
+    || c.intentBinding !== gatewayEvidenceBinding(c.binding) || gatewayProfileRejection(p, r)
+    || !['chat', 'professional', 'doctor', 'sda'].includes(r.surface)
+    || r.capability.kind !== 'text' || p.charging !== 'metered' || p.providerId !== 'MITRIFY'
+    || p.adapterId !== 'gateway-mitrify-text-v1' || p.modelId !== t.model
+    || r.mode !== 'free-first-authorized-paid' || r.outputVisible || r.cancellation?.cancelled !== false
+    || !Number.isSafeInteger(r.deadlineAtMs) || r.deadlineAtMs <= Date.now()
+    || !Number.isSafeInteger(r.attemptTimeoutMs) || r.attemptTimeoutMs < 1) fail();
+  const b = c.binding;
+  if (b.profileId !== p.id || b.profileVersion !== p.version || b.providerId !== p.providerId || b.modelId !== p.modelId
+    || b.modelRevision !== p.modelRevision || b.adapterId !== p.adapterId || b.key.logicalRequestId !== r.logicalRequestId
+    || b.key.principalId !== r.principalId || b.key.tenantId !== r.tenantId || b.key.payloadDigest !== r.payloadDigest
+    || b.physicalAttemptId !== r.nextPhysicalAttemptId || b.budgetScopeId !== r.budgetScopeId
+    || gatewayEvidenceBinding(b.payer) !== gatewayEvidenceBinding(r.payer)
+    || b.profileBinding !== gatewayEvidenceBinding(gatewayWithoutEvidence(p)) || b.requestBinding !== gatewayEvidenceBinding(gatewayWithoutEvidence(r))
+    || r.payloadDigest !== gatewayTextPayloadDigest(payload) || !b.budget || !b.priceBinding || !b.budgetAuthorizationBinding
+    || b.budget.rateCardVersion !== t.rateCard.version || b.budget.amountNanoUsd < maximum) fail();
+  if (typeof payload.prompt !== 'string' || !payload.prompt.trim() || (payload.systemPrompt !== undefined && typeof payload.systemPrompt !== 'string')
+    || payload.schema !== undefined || (payload.images !== undefined && (!Array.isArray(payload.images) || payload.images.length))
+    || payload.modelOverride !== undefined || r.capability.kind !== 'text'
+    || r.capability.streaming !== payload.streaming || r.capability.systemPrompt !== !!payload.systemPrompt
+    || r.capability.outputTokens > t.maxOutputTokens
+    || !p.capabilities.some(support => gatewaySupportsCapability(r.capability, support))
+    || Buffer.byteLength(payload.prompt + (payload.systemPrompt ?? ''), 'utf8') + 256 > r.capability.inputTokens) fail();
+}
+export async function executeGatewayMitrify(input: GatewayMitrifyInput): Promise<GatewayTextResponse> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const controller = new AbortController(); const started = Date.now(); let content = ''; let visible = false;
+  try {
+    if (!input?.signal || typeof input.authorizeClaim !== 'function' || typeof input.markOutputVisible !== 'function'
+      || typeof input.assertDispatchPolicy !== 'function') throw new GatewayTextTransportError('POLICY_BLOCKED');
+    const a = JSON.parse(gatewayEvidenceBinding({ profile: input.profile, transport: input.transport, claim: input.claim, request: input.request })) as GatewayMitrifyAuthorization;
+    const payload: GatewayTextPayload = { prompt: input.prompt, systemPrompt: input.systemPrompt, schema: input.schema,
+      images: input.images === undefined ? undefined : [...input.images], modelOverride: input.modelOverride, streaming: !!input.onChunk };
+    validateGatewayMitrify(a, payload);
+    const expiresAt = Math.min(a.request.deadlineAtMs, Date.now() + a.request.attemptTimeoutMs, Date.now() + a.transport.timeoutMs, a.transport.rateCard.expiresAtMs);
+    timer = setTimeout(() => controller.abort(), Math.max(0, expiresAt - Date.now()));
+    const signal = AbortSignal.any([input.signal, controller.signal]);
+    const active = () => { if (signal.aborted || Date.now() >= expiresAt) throw new GatewayTextTransportError(input.signal.aborted ? 'ABORTED' : 'TIMEOUT'); };
+    const cfg = mitrifyConfig();
+    const protectedPrefix = cfg.apiKey.slice(0, Math.min(8, Math.ceil(cfg.apiKey.length / 4)));
+    let authorized = false; let finish: 'stop' | 'length' | undefined; let usage: { inputTokens: number; outputTokens: number } | undefined;
+    const inspect = async (data: any) => {
+      active();
+      if (!data || typeof data !== 'object' || data.error || !Array.isArray(data.choices) || data.choices.length > 1) throw new GatewayTextTransportError('INVALID_REQUEST');
+      const choice = data.choices[0];
+      if (choice && ((choice.index !== undefined && choice.index !== 0) || (payload.streaming ? choice.message !== undefined : choice.delta !== undefined))) throw new GatewayTextTransportError('INVALID_REQUEST');
+      const text = choice?.delta?.content ?? choice?.message?.content;
+      if (choice?.delta?.tool_calls || choice?.message?.tool_calls || choice?.delta?.function_call || choice?.message?.function_call
+        || choice?.delta?.refusal || choice?.message?.refusal || (choice?.finish_reason != null && !['stop', 'length'].includes(choice.finish_reason))) throw new GatewayTextTransportError('SAFETY_REFUSAL');
+      if ((text !== undefined && text !== null && typeof text !== 'string') || (finish && text)) throw new GatewayTextTransportError('INVALID_REQUEST');
+      if (text) {
+        // Protect the actual visible text channel, regardless of how upstream JSON
+        // paths or optional indices split a credential across events.
+        if ((content + text).includes(protectedPrefix)) throw new GatewayTextTransportError('POLICY_BLOCKED');
+        if (Buffer.byteLength(content, 'utf8') + Buffer.byteLength(text, 'utf8') > 16 * 1024 * 1024) throw new GatewayTextTransportError('INVALID_REQUEST');
+        if (!visible) { await untilCancelled(input.markOutputVisible, signal); visible = true; }
+        active(); content += text;
+        if (input.onChunk) await untilCancelled(() => input.onChunk!(text), signal);
+      }
+      if (choice?.finish_reason === 'stop' || choice?.finish_reason === 'length') {
+        if (finish && finish !== choice.finish_reason) throw new GatewayTextTransportError('INVALID_REQUEST');
+        finish = choice.finish_reason;
+      }
+      const u = data.usage;
+      if (u && Number.isSafeInteger(u.prompt_tokens) && u.prompt_tokens >= 0 && Number.isSafeInteger(u.completion_tokens) && u.completion_tokens >= 0) usage = { inputTokens: u.prompt_tokens, outputTokens: u.completion_tokens };
+    };
+    const result = await createMitrifyClient({ ...process.env, MITRIFY_BASE_URL: a.transport.baseURL, MITRIFY_MODEL: a.transport.model, MITRIFY_API_KEY: cfg.apiKey }).chat({
+      messages: [...(payload.systemPrompt ? [{ role: 'system', content: payload.systemPrompt }] : []), { role: 'user', content: payload.prompt }],
+      max_tokens: a.request.capability.kind === 'text' ? a.request.capability.outputTokens : 0, stream: payload.streaming,
+    }, { signal, maxAttempts: 1,
+      beforeAttempt: async () => {
+        active(); validateGatewayMitrify(a, payload); input.assertDispatchPolicy();
+        if (authorized) throw new GatewayTextTransportError('POLICY_BLOCKED');
+        authorized = true;
+        if (!await untilCancelled(() => input.authorizeClaim(a), signal)) throw new GatewayTextTransportError('POLICY_BLOCKED');
+        active(); validateGatewayMitrify(a, payload); input.assertDispatchPolicy();
+      },
+      ...(payload.streaming ? { onChunk: async (wire: Uint8Array) => {
+        const body = new TextDecoder().decode(wire).split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n');
+        if (body && body !== '[DONE]') await inspect(JSON.parse(body));
+      } } : {}),
+    });
+    if (!payload.streaming) await inspect(result.data);
+    active();
+    if (!authorized || !content.trim() || !finish) throw new GatewayTextTransportError('EMPTY_RESPONSE');
+    // Token usage is telemetry, not a supplier invoice or permission to refund.
+    return Object.freeze({ content, provider: 'MITRIFY', model: a.transport.model, latencyMs: Date.now() - started,
+      completeUsage: !!usage, outputVisible: visible, finishReason: finish, ...(usage ? { usage } : {}) });
+  } catch (error) {
+    if (error instanceof GatewayTextTransportError) throw error;
+    const code = input?.signal?.aborted ? 'ABORTED' : controller.signal.aborted ? 'TIMEOUT'
+      : error instanceof MitrifyError && error.status === 401 ? 'AUTH'
+      : error instanceof MitrifyError && error.status === 429 ? 'RATE_LIMIT' : 'NETWORK';
+    throw new GatewayTextTransportError(code);
+  } finally { if (timer !== undefined) clearTimeout(timer); controller.abort(); }
 }

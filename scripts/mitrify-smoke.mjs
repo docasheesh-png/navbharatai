@@ -1,5 +1,5 @@
-#!/usr/bin/env node
-// Run explicitly with Node 22.23.4: node --experimental-strip-types scripts/mitrify-smoke.mjs
+#!/usr/bin/env -S node --import tsx
+// Run explicitly with Node 22.23.4: node --import ./node_modules/tsx/dist/loader.mjs scripts/mitrify-smoke.mjs
 // This is the only live diagnostic caller. It is never run by CI or server boot.
 import { createMitrifyClient } from '../src/server/lib/mitrify.ts';
 

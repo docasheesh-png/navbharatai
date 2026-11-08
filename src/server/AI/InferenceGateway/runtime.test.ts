@@ -52,9 +52,9 @@ function context(overrides: Partial<InferenceGatewayContext> = {}): InferenceGat
     qualityTier: 'clinical', dataClass: 'health', funding: 'platform-free-fallback', mode: 'free-first-authorized-paid',
     deadlineAtMs: Date.now() + 90_000, ...overrides };
 }
-function fixture(paid = false, freeProvider: 'GLM' | 'GROQ' = 'GLM', quotaWindowMs = 61000) {
-  const state = database(); const now = Date.now(); const provider = paid ? 'DEEPSEEK' : freeProvider; const legacyProvider = paid ? 'deepseek' : freeProvider.toLowerCase();
-  const model = paid ? 'deepseek-flash' : freeProvider === 'GROQ' ? 'reviewed-groq-model' : 'glm-4.7-flash';
+function fixture(paid = false, freeProvider: 'GLM' | 'GROQ' = 'GLM', quotaWindowMs = 61000, mitrify = false) {
+  const state = database(); const now = Date.now(); const provider = mitrify ? 'MITRIFY' : paid ? 'DEEPSEEK' : freeProvider; const legacyProvider = mitrify ? 'mitrify' : paid ? 'deepseek' : freeProvider.toLowerCase();
+  const model = mitrify ? 'mitrify/auto-cheap' : paid ? 'deepseek-flash' : freeProvider === 'GROQ' ? 'reviewed-groq-model' : 'glm-4.7-flash';
   const payer = { kind: 'platform' as const, ownerId: 'reviewed-owner' };
   const quality = { tier: 'clinical' as const, gateId: 'synthetic-clinical-gate', gateVersion: 'v1' };
   const privacy = { dataClass: 'health' as const, policyId: 'synthetic-private-policy', allowedProcessingRegions: ['reviewed-region'], maxRetentionHours: 0, allowTraining: false, allowHumanReview: false };
@@ -64,13 +64,15 @@ function fixture(paid = false, freeProvider: 'GLM' | 'GROQ' = 'GLM', quotaWindow
       maxInputTokens: 4096, maxOutputTokens: 512, maxQueueWaitMs: 5000, firstOutputTimeoutMs: 5000, attemptTimeoutMs: 60_000, logicalLimitNanoUsd: 10_000_000 } },
     profiles: [{ accountCredentialBinding: gatewayTextCredentialBinding('synthetic-secret-never-live'),
       ...(paid ? {} : { freeBillingSafety: { kind: 'intrinsic-zero' as const, evidenceRef: 'reviewed-zero-price', reviewedAtMs: now - 100, expiresAtMs: now + 60_000 } }), canonicalModelId: paid ? 'deepseek-flash-canonical' : freeProvider === 'GROQ' ? 'reviewed-groq-canonical' : 'glm-flash-canonical', profile: { id: 'profile-one', version: 'v1', providerId: provider, modelId: model, modelRevision: 'reviewed-model-v1',
-      adapterId: 'gateway-openai-text-v1', status: 'approved', serviceClass: 'production', product: 'inference-api', surfaces: ['chat'],
+      adapterId: mitrify ? 'gateway-mitrify-text-v1' : 'gateway-openai-text-v1', status: 'approved', serviceClass: 'production', product: 'inference-api', surfaces: ['chat'],
       qualityApprovals: [quality], termsApprovals: ['reviewed-terms-v1'], capabilities: [{ kind: 'text', maxInputTokens: 4096, maxOutputTokens: 512, maxContextTokens: 4608, streaming: true, systemPrompt: true }],
       privacy: { dataClasses: ['health'], training: 'none', humanReview: 'none', retentionHours: 0, processingRegions: ['reviewed-region'] }, credentialOwner: payer,
       quotaDimensions: [{ scope: { providerId: provider, kind: 'account', id: 'reviewed-account-one' }, meter: 'requests/day' },
         { scope: { providerId: provider, kind: 'account', id: 'reviewed-account-one' }, meter: 'tokens/minute' }],
       charging: paid ? 'metered' : 'verified-free-no-overage', evidenceRef: 'catalog-reviewed-profile' },
-      transport: { provider, baseURL: paid ? 'https://api.deepseek.com/v1' : freeProvider === 'GROQ' ? 'https://api.groq.com/openai/v1' : 'https://api.z.ai/api/paas/v4', model,
+      transport: mitrify ? { provider: 'MITRIFY', baseURL: 'https://mitrify.com/v1', model, maxOutputTokens: 512, timeoutMs: 60_000, credentialEnv: 'MITRIFY_API_KEY', credentialBinding: gatewayTextCredentialBinding('synthetic-secret-never-live'),
+        rateCard: { version: 'reviewed-gateway-ceiling-v1', perHttpRequestCeilingNanoUsd: 5_000_000, hardCeilingEnforced: true, includesInternalRetriesFailoversAndFees: true, evidenceRef: 'review:supplier-contract', gatewayAndAllDownstreamProcessorsReviewed: true, processorPolicyReviewRef: 'review:processors', disclosureAuthorityRef: 'review:disclosure', verifiedAtMs: now - 100, expiresAtMs: now + 60_000 }
+      } : { provider: paid ? 'DEEPSEEK' : freeProvider, baseURL: paid ? 'https://api.deepseek.com/v1' : freeProvider === 'GROQ' ? 'https://api.groq.com/openai/v1' : 'https://api.z.ai/api/paas/v4', model,
         maxOutputTokens: 512, timeoutMs: 60_000, streamUsage: true, credentialEnv: 'INFERENCE_GATEWAY_TEST_CREDENTIAL', credentialBinding: gatewayTextCredentialBinding('synthetic-secret-never-live'),
         ...(paid ? { rateCard: { version: 'reviewed-rate-v1', inputNanoUsdPerMillion: 300_000_000, outputNanoUsdPerMillion: 1_200_000_000,
           cachedInputNanoUsdPerMillion: 6_000_000, verifiedAtMs: now - 100, expiresAtMs: now + 60_000 } } : {}) },
@@ -991,5 +993,113 @@ describe('fixed policy real issuer and transport', () => {
   it('does not replay or fall back after uncertain dispatch', async () => {
     vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); fixture(); network.mockRejectedValue(new Error('connection lost'));
     await expect(run()).rejects.toThrow(); expect(network).toHaveBeenCalledOnce();
+  });
+});
+
+describe('Mitrify reviewed Gateway bridge', () => {
+  const setup = () => {
+    vi.stubEnv('MITRIFY_CHAIN_ENABLED', '1');
+    vi.stubEnv('MITRIFY_API_KEY', 'synthetic-secret-never-live');
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');
+    return fixture(true, 'GLM', 61000, true);
+  };
+  it('uses the single configured alias and retains the entire reviewed ceiling without inferring token prices', async () => {
+    const f = setup(); network.mockResolvedValue(response(true));
+    const result = await run();
+    expect(result).toMatchObject({ ok: true, provider: 'MITRIFY', model: 'mitrify/auto-cheap', content: 'Verified answer' });
+    expect(network).toHaveBeenCalledOnce();
+    expect(network.mock.calls[0][0]).toBe('https://mitrify.com/v1/chat/completions');
+    const body = JSON.parse(network.mock.calls[0][1]!.body as string);
+    expect(body).toEqual({ model: 'mitrify/auto-cheap', messages: [{ role: 'system', content: 'Keep the complete instructions.' }, { role: 'user', content: 'Hello' }], max_tokens: 512, stream: false });
+    const day = civilDayWindow(Date.now(), 'Asia/Kolkata');
+    expect(f.docs.get(`free_chat_chain/paid_day_${day.key}`)).toMatchObject({ spentNanoUsd: 0, heldNanoUsd: 5_000_000, pending: 1 });
+    expect(result?.usage).toEqual({ inputTokens: 100, outputTokens: 20 });
+  });
+  it('requires the explicit chain switch, reviewed supplier ceiling, private-data policy and configured credential', async () => {
+    for (const mutate of [
+      () => vi.stubEnv('MITRIFY_CHAIN_ENABLED', '0'),
+      () => vi.stubEnv('MITRIFY_API_KEY', ''),
+      (f: ReturnType<typeof setup>) => { (f.catalog.profiles[0].transport as any).rateCard.hardCeilingEnforced = false; },
+      (f: ReturnType<typeof setup>) => { (f.catalog.profiles[0].transport as any).rateCard.gatewayAndAllDownstreamProcessorsReviewed = false; },
+      (f: ReturnType<typeof setup>) => { (f.catalog.profiles[0].transport as any).rateCard.perHttpRequestCeilingNanoUsd = 11_000_000; },
+      (f: ReturnType<typeof setup>) => { f.catalog.profiles[0].profile.privacy.dataClasses = ['public']; },
+    ]) {
+      const f = setup(); mutate(f); network.mockClear();
+      await expect(run()).rejects.toBeDefined(); expect(network).not.toHaveBeenCalled();
+    }
+  });
+  it('does not retry a Mitrify error or release an uncertain paid attempt', async () => {
+    const f = setup(); network.mockResolvedValue(new Response('', { status: 429, headers: { 'retry-after': '1' } }));
+    await expect(run()).rejects.toBeDefined(); expect(network).toHaveBeenCalledOnce();
+    const day = civilDayWindow(Date.now(), 'Asia/Kolkata');
+    expect(f.docs.get(`free_chat_chain/paid_day_${day.key}`)).toMatchObject({ spentNanoUsd: 0, heldNanoUsd: 5_000_000 });
+  });
+  it('marks a length-limited non-streamed response incomplete', async () => {
+    setup(); network.mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: 'Incomplete answer' }, finish_reason: 'length' }] }), { headers: { 'content-type': 'application/json' } }));
+    await expect(run()).resolves.toMatchObject({ content: 'Incomplete answer', reason: 'stalled' });
+  });
+  it('does not replay after visible output and reports the incomplete stream', async () => {
+    setup(); let controller!: ReadableStreamDefaultController<Uint8Array>; const chunks: string[] = [];
+    network.mockResolvedValue(new Response(new ReadableStream<Uint8Array>({ start(c) { controller = c; } }), { headers: { 'content-type': 'text/event-stream' } }));
+    const pending = run(context(), { prompt: 'Hello', systemPrompt: 'Keep the complete instructions.', onChunk: (s: string) => chunks.push(s) } as any);
+    await vi.waitFor(() => expect(network).toHaveBeenCalledOnce());
+    controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Partial"}}]}\n\n'));
+    await vi.waitFor(() => expect(chunks).toEqual(['Partial']));
+    controller.close();
+    await expect(pending).resolves.toMatchObject({ content: 'Partial', reason: 'stalled' });
+    expect(network).toHaveBeenCalledOnce();
+  });
+  it('keeps raw error bodies and credentials out of logs and public errors', async () => {
+    setup(); const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    network.mockResolvedValue(new Response(JSON.stringify({ error: { message: 'synthetic-secret-never-live' } }), { status: 401 }));
+    let failure: unknown; try { await run(); } catch (error) { failure = error; }
+    expect(failure).toBeDefined();
+    expect(String(failure)).not.toContain('synthetic-secret-never-live');
+    expect(JSON.stringify(log.mock.calls)).not.toContain('synthetic-secret-never-live');
+    expect(network).toHaveBeenCalledOnce();
+  });
+  it.each(['index', 'shape', 'same-path'])('never reconstructs a credential from split streamed text (%s)', async attack => {
+    setup(); const key = process.env.MITRIFY_API_KEY!; const chunks: string[] = [];
+    const first = { choices: [{ index: 0, delta: { content: key.slice(0, 3) } }] };
+    const second = { choices: [{ index: attack === 'index' ? 1 : 0, [attack === 'shape' ? 'message' : 'delta']: { content: key.slice(3) }, finish_reason: 'stop' }] };
+    network.mockResolvedValue(new Response(`data: ${JSON.stringify(first)}\n\ndata: ${JSON.stringify(second)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }));
+    const result = await run(context(), { prompt: 'Hello', systemPrompt: 'Keep the complete instructions.', onChunk: (s: string) => chunks.push(s) } as any);
+    expect(chunks.join('')).not.toContain(key); expect(result?.content).not.toContain(key);
+    expect(result?.reason).toBe('stalled'); expect(network).toHaveBeenCalledOnce();
+  });
+  it('cannot upgrade a length terminal to a complete stop terminal', async () => {
+    setup();
+    network.mockResolvedValue(new Response('data: {"choices":[{"delta":{"content":"Partial"},"finish_reason":"length"}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } }));
+    await expect(run(context(), { prompt: 'Hello', systemPrompt: 'Keep the complete instructions.', onChunk: () => {} } as any)).resolves.toMatchObject({ content: 'Partial', reason: 'stalled' });
+    expect(network).toHaveBeenCalledOnce();
+  });
+  it('awaits consumer backpressure and stops on an asynchronous output failure', async () => {
+    setup(); let rejectWrite!: (error: Error) => void;
+    const write = vi.fn(() => new Promise<void>((_resolve, reject) => { rejectWrite = reject; }));
+    network.mockResolvedValue(new Response('data: {"choices":[{"delta":{"content":"First"}}]}\n\ndata: {"choices":[{"delta":{"content":" Second"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } }));
+    let settled = false;
+    const pending = run(context(), { prompt: 'Hello', systemPrompt: 'Keep the complete instructions.', onChunk: write } as any).finally(() => { settled = true; });
+    await vi.waitFor(() => expect(write).toHaveBeenCalledOnce());
+    await new Promise(resolve => setTimeout(resolve, 10)); expect(settled).toBe(false);
+    rejectWrite(new Error('Synthetic closed output'));
+    await expect(pending).resolves.toMatchObject({ content: 'First', reason: 'stalled' });
+    expect(write).toHaveBeenCalledOnce(); expect(network).toHaveBeenCalledOnce();
+  });
+  it('does not invent a completed answer when the provider omitted finish_reason', async () => {
+    setup(); network.mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: 'No terminal proof' } }] }), { headers: { 'content-type': 'application/json' } }));
+    await expect(run()).rejects.toBeDefined(); expect(network).toHaveBeenCalledOnce();
+  });
+  it('includes stream usage and forwards text in order without waiting for the end', async () => {
+    setup(); const chunks: string[] = []; let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const encoder = new TextEncoder();
+    network.mockResolvedValue(new Response(new ReadableStream<Uint8Array>({ start(c) { controller = c; } }), { headers: { 'content-type': 'text/event-stream' } }));
+    const pending = run(context(), { prompt: 'Hello', systemPrompt: 'Keep the complete instructions.', onChunk: (s: string) => chunks.push(s) } as any);
+    await vi.waitFor(() => expect(network).toHaveBeenCalledOnce());
+    expect(JSON.parse(network.mock.calls[0][1]!.body as string).stream_options).toEqual({ include_usage: true });
+    controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"First"}}]}\n\n'));
+    await vi.waitFor(() => expect(chunks).toEqual(['First']));
+    controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":" Second"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'));
+    await expect(pending).resolves.toMatchObject({ content: 'First Second', ok: true });
+    expect(chunks).toEqual(['First', ' Second']);
   });
 });

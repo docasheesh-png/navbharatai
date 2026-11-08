@@ -20,9 +20,10 @@ export function fixedTextChainRank(profile: { providerId: string; modelId: strin
     if (provider === 'CLOUDFLARE' && model === '@cf/meta/llama-3.3-70b-instruct-fp8-fast') return 3;
     if (provider === 'OPENROUTER') return 4;
   }
-  // Mitrify (position 5) has no complete-payload provenance or monetary admission bridge.
-  // It must never be inferred free or dispatched through a generic OpenAI adapter.
+  // The dedicated Mitrify adapter independently validates its reviewed alias and
+  // request-wide supplier ceiling; the policy never inspects upstream models.
   if (profile.charging !== 'metered') return undefined;
+  if (provider === 'MITRIFY') return 5;
   if (provider === 'CHEAPERINFERENCE' && ['beam', 'beam-1.0-501b-a23b'].includes(model)) return 6;
   if (provider === 'DEEPINFRA' && model === 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo') return 7;
   if (provider === 'DEEPINFRA' && model === 'deepseek-ai/DeepSeek-V4-Flash-0731') return 8;

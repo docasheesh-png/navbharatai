@@ -107,6 +107,16 @@ describe('🔴 nothing is faked: live, failed, manual and not-set are four diffe
     expect(calls).toEqual([]); // nothing is called for a provider with no balance API
   });
 
+  it('Mitrify is visible to the admin without inventing a balance API or billing URL', async () => {
+    const { f, calls } = fakeFetch({});
+    const d = await readApiProviderDirectory({ env: { MITRIFY_API_KEY: SECRET }, fetchImpl: f as any });
+    expect(d.rows.find((r) => r.id === 'mitrify')).toMatchObject({
+      configuredKeys: ['MITRIFY_API_KEY'], billingUrl: null, balance: { kind: 'manual' },
+    });
+    expect(JSON.stringify(d)).not.toContain(SECRET);
+    expect(calls).toEqual([]);
+  });
+
   it('Kimi on a non-Moonshot endpoint is not asked (it has no balance API) and says why', async () => {
     const { f, calls } = fakeFetch({});
     const d = await readApiProviderDirectory({ env: { KIMI_API_KEY: SECRET, KIMI_BASE_URL: 'https://api.kimi.com/coding/v1' }, fetchImpl: f as any });

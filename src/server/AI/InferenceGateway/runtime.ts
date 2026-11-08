@@ -1,3 +1,4 @@
+import { executeGatewayMitrify } from '../../lib/mitrify';
 import { assertCanaryLegacyAllowed } from '../../AgentV3/reliability/canarySpendGuard';
 /** Server-only composition. OFF is the only route back to a legacy text path. */
 import { gatewayRollout, gatewayRolloutAllowsUid } from './rollout';
@@ -36,7 +37,7 @@ export interface GatewayTextInput {
   prompt: string;
   systemPrompt?: string;
   signal?: AbortSignal;
-  onChunk?: (chunk: string) => void;
+  onChunk?: (chunk: string) => void | Promise<void>;
   schema?: object;
   images?: string[];
   modelOverride?: string;
@@ -263,7 +264,7 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
         const adapterInput = { ...input, profile: intent.candidate.profile,
           claim, request: intent.request, signal: dispatchSignal, markOutputVisible,
           reportCostAnomaly: (error: unknown) => store.recordTrustedCostAnomaly(error, claim),
-          ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; onChunk(chunk); } } : {}),
+          ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; return onChunk(chunk); } } : {}),
           assertDispatchPolicy: () => {
             if (dispatchSignal.aborted || (authorizationStarted && !store.isDispatchClaimCurrent(claim))) throw new InferenceGatewayTerminalError('dispatch-authority-expired');
             if (!verifiedPrincipal(state) || !selectedCohortCurrent(state) || (strictFreeRequired() && intent.request.mode !== 'strict-free')) {
@@ -284,11 +285,14 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
             : transport.kind === 'vision-pdf' && input.kind === 'vision-pdf'
             ? await executeGatewayVision({ ...adapterInput, payload: input, transport })
             : (transport.kind === undefined || transport.kind === 'text') && input.kind === 'text'
-            ? transport.provider === 'OPENROUTER'
+            ? transport.provider === 'MITRIFY'
+              ? await executeGatewayMitrify({ ...adapterInput, ...input, signal: dispatchSignal, transport,
+                  ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; return onChunk(chunk); } } : {}) })
+              : transport.provider === 'OPENROUTER'
               ? await executeGatewayOpenRouter({ ...adapterInput, ...input, signal: dispatchSignal, transport,
-                  ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; onChunk(chunk); } } : {}) })
+                  ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; return onChunk(chunk); } } : {}) })
               : await executeGatewayText({ ...adapterInput, ...input, signal: dispatchSignal, transport,
-                  ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; onChunk(chunk); } } : {}) })
+                  ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; return onChunk(chunk); } } : {}) })
             : (() => { throw new InferenceGatewayTerminalError('capability-transport-mismatch'); })();
           await store.releaseTrustedModelSlot(result, claim);
           const gatewayPricingProof = 'content' in result ? createGatewayFreePricingProof(result, claim) : undefined;
@@ -319,7 +323,7 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
       for (let replans = 0; replans < 2 && outcome.kind === 'stopped' && outcome.reason === 'admission-denied-replan-required'; replans++) {
         outcome = await executor.execute(key, signal);
       }
-      if (outcome.kind === 'completed' && response && (!('content' in response) || response.content.trim())) return { ...response, ok: true, inferenceGateway: { version: 1, logicalRequestId: key.logicalRequestId, accounting: 'separate-ledger' } };
+      if (outcome.kind === 'completed' && response && (!('content' in response) || response.content.trim())) return { ...response, ok: true, ...('finishReason' in response && response.finishReason === 'length' ? { reason: 'stalled' as const } : {}), inferenceGateway: { version: 1, logicalRequestId: key.logicalRequestId, accounting: 'separate-ledger' } };
       if (committed && selectedProvider && selectedModel) return { content: committed, provider: selectedProvider as AIProviderResponse['provider'],
         model: selectedModel, latencyMs: Date.now() - issued.createdAtMs, ok: true, reason: 'stalled',
         inferenceGateway: { version: 1, logicalRequestId: key.logicalRequestId, accounting: 'separate-ledger' } };

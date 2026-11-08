@@ -107,7 +107,7 @@ or real gateway key are needed for these tests.
 An operator may explicitly run:
 
 ```sh
-node --experimental-strip-types scripts/mitrify-smoke.mjs
+node --import ./node_modules/tsx/dist/loader.mjs scripts/mitrify-smoke.mjs
 ```
 
 It exits if the environment key is missing. Otherwise it checks `/models`, then

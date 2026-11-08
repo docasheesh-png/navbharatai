@@ -1,3 +1,62 @@
+## 2026-11-08 — Reviewed Mitrify Gateway transport (partial universal-chain work)
+
+Added Mitrify to the Gateway's requested text-chain position, between reviewed
+free OpenRouter and Beam. The adapter uses the existing single Mitrify module,
+configured endpoint/alias/key, durable claim, shared budget and concurrency
+controls. It does not select Mitrify's upstream models or interpret their prices.
+The Admin provider directory now lists Mitrify with an honest manual-balance
+status; its OFF switch withdraws the key and refuses both the default and configured
+gateway hosts without disabling upstream providers.
+Only an independently reviewed all-in per-HTTP-request supplier ceiling can be
+reserved. One claim permits one HTTP call; unknown supplier charges retain their
+hold. Token telemetry is not an invoice. Current account, quality, privacy,
+processor/disclosure authority and payer reviews remain mandatory; no real review,
+credential, catalog entry or rollout permission is synthesized by this change.
+
+Streaming now preserves asynchronous downstream backpressure, ordered deltas,
+terminal proof and credential redaction across the actual rendered text. A
+length finish is incomplete, not a successful complete answer. Regressions cover
+credential fragments across choice indices/shapes, contradictory terminal events,
+partial stream failure without replay, config/review denial and liability holds.
+The standalone smoke script uses the repository's existing TS loader because the
+shared adapter now imports the Gateway's extensionless TypeScript modules.
+
+Validation so far (CI Node 22.23.4, npm 11.18.0, exact locked dependencies):
+- Focused Gateway runtime/planner: 337 passed. Dedicated Mitrify loopback suite:
+  60 passed. Missing-key smoke exits before any network request.
+- Audit, signature/attestation verification, licenses, SBOM, frontend/server/
+  benchmark types, unused imports, native guard, OAuth and answer-quality checks
+  passed. Signature verification required a writable local cache; no check removed.
+- All six locked Firestore/emulator drills passed. Local Java is OpenJDK 21,
+  rather than CI's Temurin 21.
+- Frontend/server build, bundle-size and production-dependency gates passed.
+  Boot passed with additional loopback-only network containment; existing warnings
+  and security preloads remain enabled.
+- Full coverage is NOT passed. A contained aggregate completed with 48,458 passed,
+  six failed and 89 skipped. It caught the missing Admin Mitrify directory/switch
+  entry, now fixed with regression tests. A real dependency directory and the
+  standard npm entry point resolved two local setup failures without source/test
+  changes. Three local blockers remain: a branding assertion rejects injected
+  UNDICI-EHPA warning text, tsx CLI cannot create its Unix IPC socket in this
+  environment, and the reconstructed checkout lacks one unrelated binary asset.
+- The provider-switch fixture no longer contacts real providers: it exercises the
+  installed wrappers plus actual HTTPS/HTTP2 and cached-SDK behavior on an
+  ephemeral, explicitly trusted loopback TLS server. Its 27 cases pass. No
+  warning, failing test, assertion or coverage threshold is suppressed.
+- One unrelated >1 MiB model binary cannot be fetched by the text-only repository
+  connector; all source text was matched to main. GitHub retains the original blob.
+
+
+OPEN: This is not universal activation. Paid Professional predispatch wallet
+reservation/settlement, several paid-provider Gateway transports, Gateway monthly
+budget integration and the reviewed catalog setup writer remain unfinished.
+Existing after-answer wallet charging cannot safely be promoted into atomic
+predispatch authority: concurrent wallet writers, passes/exemptions, pricing and
+exactly-once reconciliation need one consistent integration. No platform-free
+funds are borrowed for paid Professional calls. No Pro/App Builder logic, live
+provider configuration, user data or production deployment is changed. Cancelled
+load tests remain cancelled. No 99.9% availability or accuracy claim is made.
+
 ## 2026-11-04 — Follow-up: fix the eight baseline failures and Google startup guard
 
 Owner: find the root cause of all eight failed checks; Gemini and Vertex were

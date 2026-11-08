@@ -522,7 +522,7 @@ describe('fixed text chain uses approved candidates in owner order', () => {
   const models = [
     ['GLM', 'glm-4.5-flash'], ['GLM', 'glm-4.7-flash'], ['GROQ', 'openai/gpt-oss-120b'],
     ['CLOUDFLARE', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'], ['OPENROUTER', 'unknown-but-reviewed-free'],
-    ['CHEAPERINFERENCE', 'beam'], ['DEEPINFRA', 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'],
+    ['MITRIFY', 'mitrify/auto-cheap'], ['CHEAPERINFERENCE', 'beam'], ['DEEPINFRA', 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'],
     ['DEEPINFRA', 'deepseek-ai/DeepSeek-V4-Flash-0731'], ['OPENAI', 'gpt-5-nano'], ['GLM', 'glm-4.7-flashx'], ['GEMINI', 'gemini-2.5-flash-lite'],
   ];
   function fixed(overrides: Partial<RoutingRequest> = {}) { return request({ fixedTextChain: 'v1', maxPhysicalAttempts: 12, ...overrides }); }
@@ -539,7 +539,7 @@ describe('fixed text chain uses approved candidates in owner order', () => {
     const r = fixed();
     rejected(planInference(context(r, [candidate(r, 'other'), candidate(r, 'mitrify', false, { providerId: 'MITRIFY' })]).input), 'fixed-chain');
     const health = fixed({ privacy: { ...r.privacy, dataClass: 'health' } });
-    rejected(planInference(context(health, [candidate(health, 'mitrify', true, { providerId: 'MITRIFY' })]).input), 'fixed-chain');
+    rejected(planInference(context(health, [candidate(health, 'mitrify', true, { providerId: 'MITRIFY', privacy: { dataClasses: ['public'], training: 'none', humanReview: 'none', retentionHours: 0, processingRegions: ['fixture-region'] } })]).input), 'privacy');
   });
   it('retains quality/privacy/evidence gates and paid budget exhaustion', () => {
     const r = fixed(); const cs = choices(r);

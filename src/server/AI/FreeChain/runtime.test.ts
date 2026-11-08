@@ -75,7 +75,7 @@ describe('free chat chain central dispatch', () => {
    const cfg = config(); cfg.fixedOrder = true; cfg.maxAttempts = 12;
    const result = await buildFreeChainRouter({} as typeof db, cfg).route(input());
    expect(result.ok).toBe(false); expect(m.paid).not.toHaveBeenCalled();
-   for (const provider of ['cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']) {
+   for (const provider of ['mitrify', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']) {
      expect(result.freeChain?.attempts.find(a => a.provider === provider)).toMatchObject({ reason: 'paid-budget-unavailable', entered: false });
    }
    expect(m.execute.mock.calls.every(call => ['glm-4.5-flash', 'glm-4.7-flash', 'openai/gpt-oss-120b', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'].includes(call[1].model))).toBe(true);

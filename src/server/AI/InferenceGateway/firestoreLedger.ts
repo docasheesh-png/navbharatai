@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { FREE_CHAIN_COLLECTION, paidUserDocumentPath, readData, readPaidPolicy, readPaidUser, readSpendDay, writePaidUser, writeSpendDay } from '../FreeChain/paidLedger';
 import { checkedAdd, civilDayWindow, FreeChainDataError, nonnegativeInteger, validTime, type DayWindow } from '../FreeChain/quota';
-import { DEFAULT_PAID_PER_USER_DAILY_LIMIT, OWNER_PAID_DAILY_CEILING_NANO_USD, PAID_BUDGET_TIME_ZONE, type PaidBudgetPolicy, type SpendDay } from '../FreeChain/spendCap';
+import { CHAT_PAID_FALLBACK_PER_USER_LIMIT, DEFAULT_PAID_PER_USER_DAILY_LIMIT, OWNER_PAID_DAILY_CEILING_NANO_USD, PAID_BUDGET_TIME_ZONE, type PaidBudgetPolicy, type SpendDay } from '../FreeChain/spendCap';
 import { admissionBinding, admissionIntentFor, logicalRequestBinding } from './executor';
 import type { AdmissionIntent, AuthenticatedRejection, AuthoritativeUsage, DispatchClaim, ExecutionKey, ExecutionPorts,
   ExecutionSnapshot, FinalOutcome, PendingAttempt, Reservation, SpendScope, UsageViolation } from './executor';
@@ -389,7 +389,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
       demand(committed <= q.policy.limit && expected.amount <= q.policy.limit - committed);
     }
     if (amount) {
-      const userLimit = this.options.perUserDailyLimit ?? (this.fundingBoundary === 'platform-free-fallback' ? DEFAULT_PAID_PER_USER_DAILY_LIMIT : undefined);
+      const userLimit = this.options.perUserDailyLimit ?? (this.fundingBoundary === 'platform-free-fallback' ? (authority.snapshot.request.surface === 'chat' ? CHAT_PAID_FALLBACK_PER_USER_LIMIT : DEFAULT_PAID_PER_USER_DAILY_LIMIT) : undefined);
       demand(claiming ? current.paidUserCount >= 1 && (userLimit === undefined || current.paidUserCount <= userLimit) : userLimit === undefined || current.paidUserCount < userLimit);
       const b = authority.snapshot.budget;
       demand(policy && policy.revision === authority.paidPolicyRevision && policy.updatedAt <= now && (policy.budgetMode === 'uncapped' || policy.capNanoUsd > 0) && b

@@ -100,7 +100,10 @@ Reservations and conservative ceiling bookings are not reported as supplier invo
 The pre-existing Gateway USD10 planner bound was stale against the owner's existing
 FreeChain USD17 ceiling; the planner now reuses that existing ceiling and still
 requires the actual approved budget (no new allowance). The free per-user guard is
-pre-existing. Those free-pool restrictions are not
+pre-existing; merged main #4118 removes the redundant 20-attempt counter for product
+chat in favor of its existing signed-in 50/day and guest 10/day answer allowance.
+Gateway chat follows that same constant; explicitly configured limits and other
+surfaces keep their guards. Those free-pool restrictions are not
 borrowed for paid professionals: that pool follows its explicitly approved
 `capNanoUsd`/`budgetMode` and request limit, with no invented dollar or per-user-attempt default.
 Gateway now binds existing `budgetMode=uncapped` into budget evidence and rereads

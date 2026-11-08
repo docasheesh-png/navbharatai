@@ -68,7 +68,7 @@ function database() {
 }
 const NOW = Date.parse('2026-10-22T12:00:00.000Z');
 const MONEY = 1_000_000_000;
-function fixture(state = database(), id = 'logical-one', cost = 2 * MONEY, startNow = NOW, principalId = `${id}-principal`, slotLimit?: number) {
+function fixture(state = database(), id = 'logical-one', cost = 2 * MONEY, startNow = NOW, principalId = `${id}-principal`, slotLimit?: number, perUserDailyLimit?: number) {
   let now = startNow;
   let clock = () => now;
   const window = civilDayWindow(now, PAID_BUDGET_TIME_ZONE);
@@ -159,7 +159,7 @@ function fixture(state = database(), id = 'logical-one', cost = 2 * MONEY, start
   if (!state.docs.has('free_chat_chain/paid_budget_policy')) state.seed('free_chat_chain/paid_budget_policy', {
     kind: 'paid_budget_policy', version: 1, revision: 1, capNanoUsd: 10 * MONEY, updatedAt: startNow, source: 'admin',
   });
-  const ledger = new FirestoreInferenceLedger(state.db, { now: () => clock(),
+  const ledger = new FirestoreInferenceLedger(state.db, { ...(perUserDailyLimit === undefined ? {} : {perUserDailyLimit}), now: () => clock(),
     principal: { principalId: r.principalId, tenantId: r.tenantId },
     platformScope: { id: 'platform-free', ownerId: 'platform-owner' }, adminEmails: () => [] });
   function intent(): AdmissionIntent {
@@ -446,7 +446,7 @@ describe('inactive Firestore inference ledger', () => {
   });
   it('shares the legacy UID daily guard and commits only one remaining turn across old/new routers', async () => {
     const state = database(); const uid = 'same-authenticated-uid';
-    const f = fixture(state, 'shared-user-gateway', MONEY, NOW, uid);
+    const f = fixture(state, 'shared-user-gateway', MONEY, NOW, uid, undefined, 20);
     const uidHash = createHash('sha256').update(uid).digest('hex');
     const path = paidUserDocumentPath(f.window.key, uidHash);
     state.seed(path, { kind: 'paid_user', day: f.window.key, uidHash, requests: 19 });
@@ -455,7 +455,7 @@ describe('inactive Firestore inference ledger', () => {
       requestId: 'shared-user-legacy', uid, maxCostNanoUsd: MONEY }, NOW)]);
     expect(Number(gateway.kind === 'held') + Number(old !== null)).toBe(1);
     expect(state.docs.get(path)).toMatchObject({ requests: 20 });
-    const next = fixture(state, 'same-user-next-request', MONEY, NOW, uid);
+    const next = fixture(state, 'same-user-next-request', MONEY, NOW, uid, undefined, 20);
     expect(await next.ledger.reserve(next.intent())).toEqual({ kind: 'denied' });
     expect(await legacy.reservePaid({ requestId: 'same-user-legacy-next', uid, maxCostNanoUsd: 1 }, NOW)).toBeNull();
     expect(f.day()).toMatchObject({ pending: 1, heldNanoUsd: MONEY });
@@ -854,11 +854,17 @@ describe('durable uncapped daily policy compatibility', () => {
 });
 
 describe('uncapped does not bypass non-daily safeguards',()=>{
- function uncapped(){const f=fixture();f.state.seed('free_chat_chain/paid_budget_policy',{kind:'paid_budget_policy',version:1,revision:1,capNanoUsd:0,budgetMode:'uncapped',updatedAt:NOW,source:'admin'});f.authority.snapshot={...f.authority.snapshot,budget:{...f.authority.snapshot.budget!,budgetMode:'uncapped',periodLimitNanoUsd:0,remainingPeriodNanoUsd:0}};f.seal();return f;}
- it('retains the existing free-pool per-user attempt limit',async()=>{
-  const f=uncapped();const uidHash=createHash('sha256').update(f.key.principalId).digest('hex');
+ function uncapped(limit?:number){const f=fixture(undefined,undefined,undefined,undefined,undefined,undefined,limit);f.state.seed('free_chat_chain/paid_budget_policy',{kind:'paid_budget_policy',version:1,revision:1,capNanoUsd:0,budgetMode:'uncapped',updatedAt:NOW,source:'admin'});f.authority.snapshot={...f.authority.snapshot,budget:{...f.authority.snapshot.budget!,budgetMode:'uncapped',periodLimitNanoUsd:0,remainingPeriodNanoUsd:0}};f.seal();return f;}
+ it('retains an explicitly configured per-user attempt limit',async()=>{
+  const f=uncapped(20);const uidHash=createHash('sha256').update(f.key.principalId).digest('hex');
   f.state.seed(paidUserDocumentPath(f.window.key,uidHash),{kind:'paid_user',day:f.window.key,uidHash,requests:20});
   expect(await f.ledger.reserve(f.intent())).toMatchObject({kind:'denied'});
+ });
+ it('does not restore the second 20-attempt chat counter removed by the upstream answer-allowance fix',async()=>{
+  const f=uncapped();const uidHash=createHash('sha256').update(f.key.principalId).digest('hex');
+  f.state.seed(paidUserDocumentPath(f.window.key,uidHash),{kind:'paid_user',day:f.window.key,uidHash,requests:20});
+  expect(await f.ledger.reserve(f.intent())).toMatchObject({kind:'held'});
+  expect(f.state.docs.get(paidUserDocumentPath(f.window.key,uidHash))).toMatchObject({requests:21});
  });
  it('never enrolls metered work in strict-free mode',()=>{
   const f=uncapped();f.updateRequest({mode:'strict-free'});expect(()=>f.intent()).toThrow('ineligible');

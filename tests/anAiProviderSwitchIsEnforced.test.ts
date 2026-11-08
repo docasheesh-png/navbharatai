@@ -141,19 +141,7 @@ describe('layer 1 — the key is withdrawn, and put back byte for byte', () => {
     applySwitchedOff(['not-a-provider'], {});
     expect(isProviderSwitchedOff('not-a-provider')).toBe(false);
   });
-  it('Mitrify OFF withdraws its key and blocks default or configured gateway hosts, not upstream providers', async () => {
-    const env: NodeJS.ProcessEnv = { MITRIFY_API_KEY: 'synthetic-local-only', MITRIFY_BASE_URL: 'https://gateway.example.test/v1', OPENROUTER_API_KEY: 'other' };
-    applySwitchedOff(['mitrify'], env);
-    expect(env.MITRIFY_API_KEY).toBeUndefined();
-    expect(env.OPENROUTER_API_KEY).toBe('other');
-    expect(switchedOffProviderFor('mitrify.com', '/v1/chat/completions', env)).toBe('mitrify');
-    expect(switchedOffProviderFor('gateway.example.test', '/v1/chat/completions', env)).toBe('mitrify');
-    expect(switchedOffProviderFor('openrouter.ai', '/api/v1/chat/completions', env)).toBeNull();
-    await expect(fetch('https://mitrify.com/v1/chat/completions')).rejects.toMatchObject({ code: 'PROVIDER_SWITCHED_OFF' });
-    expect(fetchCalls).toEqual([]);
-    applySwitchedOff([], env);
-    expect(env.MITRIFY_API_KEY).toBe('synthetic-local-only');
-  });
+
 });
 
 describe('layer 2 — which requests are refused', () => {

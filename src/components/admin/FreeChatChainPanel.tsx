@@ -225,7 +225,7 @@ export function FreeChatChainPanel({ adminToken }: { adminToken: string }): Reac
             setReason(''); setNotice('');
           }}>Review uncapped mode</button>
         </div>
-        <p className="text-sm text-muted">No edit can exceed $10 USD or this deployment’s configured limit. A verified absent policy can be initialized only through this explicit review. Failed or malformed reads block all edits; they never count as an uninitialized policy.</p>
+        <p className="text-sm text-muted">Finite edits cannot exceed $17 USD or this deployment’s configured limit. Ordinary chat traffic activates the one-time uncapped rollout; later reviewed capped-mode changes remain authoritative. Failed or malformed reads block all edits; they never count as an uninitialized policy.</p>
       </div>
       <div className="rounded-xl border border-line bg-card p-4 space-y-3">
         <h3 className="font-bold text-ink">Last 24 hours: 1-in-64 routing samples</h3>

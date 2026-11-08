@@ -21,7 +21,7 @@ import { selectedForFreeChain, rolloutBucket, type FreeChainContext } from './ro
 import { readControls, readControlsForSelection, writeControls, controlRef } from './control';
 import { FreeChainStore } from './store';
 import { FreeChainCache, safeCacheKey } from './cache';
-import { maximumCostNanoUsd, usdToNanoUsd, type PaidReservation } from './spendCap';
+import { CHAT_PAID_FALLBACK_PER_USER_LIMIT, maximumCostNanoUsd, usdToNanoUsd, type PaidReservation } from './spendCap';
 import { trimForRung } from './trim';
 import { tryAcquireRungSlot, releaseRungSlot, routeTurn, orderForRoute, effectiveMaxOutput, trimHistory, preparedSystemPrompt, faqCacheable, reserveMonthly, settleMonthly, type TurnRoute } from './masterPlan';
 import { CHAT_CONTEXT_LIMITATION, historyForModelRequest } from '../../../lib/chatContextWindow';
@@ -235,7 +235,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
               if (!control || control.enabled === false || !cfg.enabled) return null;
               const month = cfg.features.monthlyCap ? await reserveMonthly(db, cfg.features.monthlyCapNanoUsd, maximumNanoUsd) : null;
               if (cfg.features.monthlyCap && !month) return null;
-              const hold = await store.reservePaid({ uncappedRollout: true, requestId: `${requestId}:mitrify`, uid: input.context.uid, maxCostNanoUsd: maximumNanoUsd, capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
+              const hold = await store.reservePaid({ uncappedRollout: true, requestId: `${requestId}:mitrify`, uid: input.context.uid, maxCostNanoUsd: maximumNanoUsd, capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: CHAT_PAID_FALLBACK_PER_USER_LIMIT });
               if (hold && !hold.mayDispatch) throw new MitrifyError('MITRIFY_ADMISSION_UNCERTAIN');
               if (!hold) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); return null; }
               attempt.entered = true;
@@ -341,7 +341,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
             if (!month) { attempt.reason = 'monthly-budget'; continue; }
             monthHold = { month, amount };
           }
-          reservation = await store.reservePaid({ uncappedRollout: true, requestId: id === 'deepseek' ? requestId : `${requestId}:${id}`, uid: input.context.uid, maxCostNanoUsd: quote(cfg, 1048576, rung.maxOutputTokens, rung), capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
+          reservation = await store.reservePaid({ uncappedRollout: true, requestId: id === 'deepseek' ? requestId : `${requestId}:${id}`, uid: input.context.uid, maxCostNanoUsd: quote(cfg, 1048576, rung.maxOutputTokens, rung), capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: CHAT_PAID_FALLBACK_PER_USER_LIMIT });
           if (!reservation?.mayDispatch) { attempt.reason = 'budget'; continue; }
         }
         if (controller.signal.aborted || Date.now() >= deadlineAt) { attempt.reason = 'aborted'; break; }

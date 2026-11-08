@@ -10,15 +10,15 @@
 // not pause OURSELVES". `pausedAt` is written from exactly three places, all inside our own idle and
 // orphan sweeps. So every other way a sandbox stops running left the record looking alive:
 //
-//   • E2B pausing it when its own `timeoutMs` expires — which is now the NORMAL end for any sandbox
-//     both sweeps miss, because #2782 set `lifecycle: { onTimeout: 'pause' }` deliberately;
+//   • E2B pausing it at timeout when its lifecycle permits it — new creates request pause, but
+//     connect/setTimeout do not convert legacy kill policies and this list cannot verify them;
 //   • E2B killing it, which is what happened before #2782;
 //   • the sandbox dying for any other reason.
 //
 // None of those is billing. All of them were counted as "billed by the minute". And the error runs
-// the other way too: the orphan sweep writes `pausedAt` after three FAILED pause attempts
-// (`shouldMarkPausedAfterFailure`) precisely because the machine might still be alive — so a sandbox
-// that really is running can be counted as stopped.
+// the other way too: before the safety repair, the orphan sweep wrote `pausedAt` after three FAILED
+// pause attempts even though the machine might still be alive. That historical false settlement
+// has since been removed; provider state remains the authority for this counter.
 //
 // 🔒 THE RULE THIS BREAKS is the one about status indicators: a number that claims money is being
 // spent must reflect real state, never a guess. On the platform's largest infrastructure line, an
@@ -28,7 +28,12 @@
 // `running` is the state that bills. Everything here is PURE except the injected lister, so the
 // pagination, the bounding and the honest-unknown rules are unit-testable without a network.
 
-/** One sandbox as E2B reports it. Only the field this module judges on is required. */
+/**
+ * Fields accepted from the provider adapter. E2B SDK 2.50.0's list paginator currently drops
+ * lifecycle, even if present in the raw response. Its getInfo mapping differs. The running count
+ * is measured, but real list results therefore have UNKNOWN policies. Do not infer defaults or
+ * add per-machine getInfo calls here; this admin read must remain bounded and list-only.
+ */
 export interface ListedSandbox {
   state?: string | null;
   /** Only explicit provider-reported timeout actions count; absence is unknown. */
@@ -144,7 +149,7 @@ export async function countRunningSandboxes(
  */
 export function liveSandboxNote(count: LiveSandboxCount): string {
   if (count.running === null) return count.reason || 'Could not ask the sandbox provider — this is unknown, not zero.';
-  if (count.running === 0 && !count.truncated) return 'Nothing running in the configured provider account — no machine is billing compute right now.';
+  if (count.running === 0 && !count.truncated) return 'Provider listing reported no running VMs in the configured account.';
   const base = `Running now — billed by the minute${count.truncated ? ' (at least; more pages not read)' : ''}`;
   return base;
 }
@@ -155,5 +160,8 @@ export function runningSandboxLifecycleNote(count: LiveSandboxCount): string {
   const scope = 'Configured provider account; running VMs only. Paused VMs are not inventoried.';
   if (!summary || count.running === null) return `${scope} Timeout policies unknown: no successful reading.`;
   const coverage = summary.partial ? 'Partial reading; counts are lower bounds.' : 'Bounded listing completed; not an atomic snapshot.';
-  return `${scope} ${coverage} Pause on timeout: ${summary.pauseOnTimeout}; kill on timeout: ${summary.killOnTimeout}; unknown policy: ${summary.unknown}. Observed at ${summary.observedAt}. Policy does not guarantee workspace recovery.`;
+  if (count.running > 0 && summary.unknown === count.running) {
+    return `${scope} ${coverage} Timeout policy unknown for ${summary.unknown} running VMs: this listing/SDK supplies no recognized timeout policies. Pause/kill behavior is unknown; workspace recovery cannot be confirmed. Observed at ${summary.observedAt}.`;
+  }
+  return `${scope} ${coverage} Reported pause on timeout: ${summary.pauseOnTimeout}; reported kill on timeout: ${summary.killOnTimeout}; unknown policy: ${summary.unknown}. Observed at ${summary.observedAt}. Policy does not guarantee workspace recovery.`;
 }

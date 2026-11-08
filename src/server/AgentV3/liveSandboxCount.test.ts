@@ -8,14 +8,17 @@
  * WE did not pause OURSELVES".
  *
  * `pausedAt` is written from three places, all inside our own sweeps. A sandbox E2B paused at its own
- * timeout — the normal end for anything both sweeps miss, since #2782 set `onTimeout: 'pause'` — or
- * killed, therefore looked alive and billing forever. The error runs the other way too: the orphan
- * sweep stamps `pausedAt` after three FAILED pause attempts precisely because the machine may still
- * be running, which under-counts a real cost.
+ * timeout (new creates request pause; legacy policies remain unverified), or killed, therefore
+ * looked alive and billing forever. The error runs the other way too: the orphan
+ * sweep historically stamped `pausedAt` after three FAILED pause attempts even when the machine
+ * might still be running. That false settlement was removed by the subsequent safety repair.
  *
  * These rules are the ones that keep the replacement honest.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { Script, createContext } from 'node:vm';
 import {
   countRunningSandboxes,
   liveSandboxNote,
@@ -40,7 +43,8 @@ describe('counting what is actually running', () => {
     const fetchPage: SandboxPageFetcher = async () => page(['paused', 'paused', 'paused']);
     const r = await countRunningSandboxes(fetchPage);
     expect(r.running).toBe(0);
-    expect(liveSandboxNote(r)).toMatch(/no machine is billing/i);
+    expect(liveSandboxNote(r)).toBe('Provider listing reported no running VMs in the configured account.');
+    expect(runningSandboxLifecycleNote(r)).toContain('not an atomic snapshot');
   });
 
   it('walks pages and sums across them', async () => {
@@ -221,5 +225,52 @@ describe('bounded running-only timeout-policy summary', () => {
   it('never claims no machines are billing for a truncated zero reading', () => {
     expect(liveSandboxNote({ running: 0, truncated: true })).toContain('at least');
     expect(liveSandboxNote({ running: 0, truncated: true })).not.toContain('no machine');
+  });
+});
+
+
+describe('installed SDK list contract, entirely in memory', () => {
+  it('drops raw lifecycle fields and honestly reports all running timeout policies as unknown', async () => {
+    const sdkRequire = createRequire(require.resolve('e2b'));
+    const sdkPath = sdkRequire.resolve('e2b');
+    const raw = ['pause', 'kill'].map((onTimeout, index) => ({
+      sandboxID: `offline-${index}`, templateID: 'offline-template', state: 'running',
+      startedAt: '2026-11-08T00:00:00Z', endAt: '2026-11-08T00:06:00Z',
+      cpuCount: 2, memoryMB: 4096, envdVersion: 'offline', lifecycle: { onTimeout, autoResume: false },
+    }));
+    const requests: string[] = [];
+    // Run the installed, unmodified CJS SDK in an isolated Node realm. Reject optional native
+    // transport imports so its documented global-fetch fallback uses only this in-memory stub.
+    // No native fetch is exposed to the SDK and no socket or real credential is used.
+    const context = createContext({
+      exports: {}, require: sdkRequire,
+      process: { release: { name: 'node' }, versions: { node: process.versions.node }, env: {} },
+      Request, Response, Headers, URL, URLSearchParams, AbortController, AbortSignal,
+      TextEncoder, TextDecoder, ReadableStream, Buffer, setTimeout, clearTimeout, console,
+      fetch: async (input: Request | string | URL) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        requests.push(url);
+        expect(new URL(url).pathname).toBe('/v2/sandboxes');
+        expect(new URL(url).searchParams.get('state')).toBe('running');
+        return new Response(JSON.stringify(raw), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    });
+    new Script(readFileSync(sdkPath, 'utf8'), {
+      filename: sdkPath,
+      importModuleDynamically: async () => { throw new Error('Native transport unavailable in offline SDK contract test'); },
+    }).runInContext(context);
+    const sdk = context.exports as typeof import('e2b');
+    const paginator = sdk.Sandbox.list({ apiKey: 'offline-test-key', query: { state: ['running'] }, retries: 0 });
+    const items = await paginator.nextItems();
+    expect(requests).toHaveLength(1);
+    expect(raw.every(item => item.lifecycle.onTimeout)).toBe(true);
+    expect(items).toHaveLength(2);
+    expect(items.every(item => !Object.hasOwn(item, 'lifecycle'))).toBe(true);
+    const result = await countRunningSandboxes(async () => ({ items, nextToken: paginator.hasNext ? paginator.nextToken : null }));
+    expect(result).toMatchObject({ running: 2, lifecycle: { pauseOnTimeout: 0, killOnTimeout: 0, unknown: 2 } });
+    expect(runningSandboxLifecycleNote(result)).toContain('listing/SDK supplies no recognized timeout policies');
+    expect(runningSandboxLifecycleNote(result)).toContain('workspace recovery cannot be confirmed');
+    expect(runningSandboxLifecycleNote(result)).not.toContain('Pause on timeout: 0');
+    expect(requests).toHaveLength(1);
   });
 });

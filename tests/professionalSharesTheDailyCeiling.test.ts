@@ -47,6 +47,50 @@ describe('professionals share the signed-in ceiling and do not keep a 10-a-day b
     expect(await quota.status(person, at + 51)).toMatchObject({ used: 50, remaining: 0 });
   });
 
+  it('one in-flight answer blocks a second for the same owner, and a provider failure refunds that one credit', async () => {
+    const quota = store();
+    const person = { key: 'user:owner-a', limit: SIGNED_IN_DAILY_DEFAULT };
+    const other = { key: 'user:owner-b', limit: SIGNED_IN_DAILY_DEFAULT };
+    const [first, second, outsider] = await Promise.all([
+      quota.reserve(person, id(1), at),
+      quota.reserve(person, id(2), at),
+      quota.reserve(other, id(3), at),
+    ]);
+    const allowed = [first, second].filter(result => result.allowed);
+    expect(allowed).toHaveLength(1);
+    expect([first, second].find(result => !result.allowed)).toMatchObject({ reason: 'busy' });
+    expect(outsider.allowed).toBe(true);
+    if (!allowed[0].allowed || !outsider.allowed) return;
+    expect(await quota.settle(allowed[0].reservation, 'provider-failed', at + 1)).toBe(true);
+    expect(await quota.settle(allowed[0].reservation, 'provider-failed', at + 2)).toBe(true);
+    expect(await quota.status(person, at + 2)).toMatchObject({ used: 0, remaining: 50, inProgress: false });
+    const retry = await quota.reserve(person, id(4), at + 3);
+    expect(retry.allowed).toBe(true);
+    if (!retry.allowed) return;
+    expect(await quota.settle(retry.reservation, 'answered', at + 4)).toBe(true);
+    expect(await quota.settle(retry.reservation, 'provider-failed', at + 5)).toBe(false);
+    expect(await quota.status(person, at + 5)).toMatchObject({ used: 1, remaining: 49 });
+    expect(await quota.settle(outsider.reservation, 'answered', at + 4)).toBe(true);
+    expect(await quota.status(other, at + 5)).toMatchObject({ used: 1, remaining: 49 });
+  });
+
+  it('the 50th held answer leaves no second credit, and a refund of that hold allows exactly one more', async () => {
+    const quota = store();
+    const person = { key: 'user:boundary', limit: SIGNED_IN_DAILY_DEFAULT };
+    for (let n = 1; n <= 49; n++) await answer(quota, person, n);
+    const fiftieth = await quota.reserve(person, id(50), at + 50);
+    expect(fiftieth.allowed).toBe(true);
+    if (!fiftieth.allowed) return;
+    expect(await quota.reserve(person, id(51), at + 50)).toMatchObject({ allowed: false, reason: 'busy' });
+    expect(await quota.settle(fiftieth.reservation, 'provider-failed', at + 51)).toBe(true);
+    const replacement = await quota.reserve(person, id(52), at + 52);
+    expect(replacement.allowed).toBe(true);
+    if (!replacement.allowed) return;
+    expect(await quota.settle(replacement.reservation, 'answered', at + 53)).toBe(true);
+    expect(await quota.reserve(person, id(53), at + 54)).toMatchObject({ allowed: false, reason: 'daily-limit' });
+    expect(await quota.status(person, at + 54)).toMatchObject({ used: 50, remaining: 0 });
+  });
+
   it('a guest public chat is still denied on the 11th', async () => {
     expect(GUEST_DAILY_DEFAULT).toBe(10);
     const quota = store();

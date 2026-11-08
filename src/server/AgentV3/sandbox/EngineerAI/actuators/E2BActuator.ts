@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { assertNotCanaryWorkspace } from '../../../reliability/canaryIsolation';
 import { assertCanaryLegacyAllowed } from '../../../reliability/canarySpendGuard';
 import { manifestRangeRepairEnabled, repairUnavailableRanges, manifestRepairNote } from '../../../manifestRangeRepair';
@@ -755,6 +756,9 @@ export class E2BActuator implements IEngineerActuator {
   // The live SESSION per workspace — see sandboxSessions.ts. Started on create/resume, fed by the
   // op-hold (busy time), finalised when this instance pauses or drops the machine.
   private _session = new Map<string, SandboxSession>();
+  // Key by the exact local observation, not workspace: reconnects must not borrow an old promise.
+  // Weak keys plus explicit removal at end avoid retaining completed observations.
+  private _sessionStartWrites = new WeakMap<SandboxSession, Promise<void>>();
   // When the op count went 0 → 1, so busy time is the union of overlapping operations, not their sum.
   private _busySince = new Map<string, number>();
   // When this workspace's sandbox was created/resumed here. A v5 build runs a real VM billed by
@@ -1304,14 +1308,16 @@ export class E2BActuator implements IEngineerActuator {
     return { ...s, busyMs };
   }
 
-  /** Close the session and write its final numbers durably. Called by whoever stops the machine. */
+  /** Close this local observation; the end is not proof that a provider pause succeeded. */
   private _endSession(workspaceId: string, endedBy: SandboxSession['endedBy']): void {
     const s = this._session.get(workspaceId);
     this._session.delete(workspaceId);
     this._busySince.delete(workspaceId);
     if (!s) return;
     const final: SandboxSession = { ...s, endedAt: Date.now(), endedBy };
-    void sandboxStore.recordSessionEnd(workspaceId, final).catch(() => {});
+    const startWrite = this._sessionStartWrites.get(s);
+    this._sessionStartWrites.delete(s);
+    void (startWrite ?? Promise.resolve()).then(() => sandboxStore.recordSessionEnd(workspaceId, final)).catch(() => {});
   }
 
   /** True while any sandbox operation is still running for this workspace. */
@@ -1475,12 +1481,12 @@ export class E2BActuator implements IEngineerActuator {
    * never add latency to a build. (It writes no userId: a record created here is filled in by the
    * end-of-build record(), and nothing about resume or reaping depends on that field.)
    */
-  private _touchDurable(workspaceId: string, sandboxId: string): void {
+  private _touchDurable(workspaceId: string, sandboxId: string): Promise<void> | undefined {
     if (!sandboxResumeEnabled() || !workspaceId || !sandboxId) return;
     const now = Date.now();
     if (!shouldTouchDurable(this._lastDurableTouch.get(workspaceId), now)) return;
     this._lastDurableTouch.set(workspaceId, now);
-    void sandboxStore.touch(workspaceId, sandboxId).catch(() => {});
+    return sandboxStore.touch(workspaceId, sandboxId).catch(() => {});
   }
 
   /** A cached handle's heartbeat must not overwrite a newer allocation owned elsewhere. */
@@ -1666,24 +1672,27 @@ export class E2BActuator implements IEngineerActuator {
     usageTracker.record(workspaceId, 'sandbox');
     // WHY, not just THAT: the zone names the caller (a build, the preview door, a wake, a publish,
     // a file read…), and the session record is what turns "1,110 starts a month" into a table.
-    {
-      const session: SandboxSession = {
-        sandboxId: sandbox.sandboxId,
-        origin: this._sandboxOrigin.get(workspaceId) ?? 'unknown',
-        reason: currentSandboxReason(),
-        startedAt: Date.now(),
-        busyMs: 0,
-        ops: 0,
-      };
-      this._session.set(workspaceId, session);
-      this._busySince.delete(workspaceId);
-      if (sandboxResumeEnabled()) void sandboxStore.recordSessionStart(workspaceId, session).catch(() => {});
-    }
+    const session: SandboxSession = {
+      observationId: randomUUID(),
+      sandboxId: sandbox.sandboxId,
+      origin: this._sandboxOrigin.get(workspaceId) ?? 'unknown',
+      reason: currentSandboxReason(),
+      startedAt: Date.now(),
+      busyMs: 0,
+      ops: 0,
+    };
+    this._session.set(workspaceId, session);
+    this._busySince.delete(workspaceId);
+    const startSnapshot = { ...session };
     if (!this._sandboxStartedAt.has(workspaceId)) this._sandboxStartedAt.set(workspaceId, Date.now());
     // Durable from the FIRST moment the sandbox exists, not from the end of the build — that gap was
     // what made a running build indistinguishable from an abandoned one.
     this._lastDurableTouch.delete(workspaceId);
-    this._touchDurable(workspaceId, sandbox.sandboxId);
+    const identityTouch = this._touchDurable(workspaceId, sandbox.sandboxId);
+    if (sandboxResumeEnabled()) {
+      this._sessionStartWrites.set(session,
+        sandboxStore.recordSessionStart(workspaceId, startSnapshot, identityTouch).catch(() => {}));
+    }
     // RECREATE-AFTER-DEATH restore: a fresh sandbox comes back EMPTY, so the app goes back INTO it —
     // from the durable store first and this instance's warm cache second. See `_restoreFreshSandbox`.
     if (freshCreate) await this._restoreFreshSandbox(workspaceId);

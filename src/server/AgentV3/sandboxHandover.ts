@@ -1,31 +1,7 @@
-// PHASE 0 of the in-browser preview plan — where does a sandbox's billed life actually GO?
-//
-// WHY THIS EXISTS. The plan (IN_BROWSER_PREVIEW_PLAN.md §0) opens by correcting my own framing: I was
-// about to argue that hardening the in-browser preview would remove most of the E2B bill. The
-// arithmetic already recorded in CLAUDE.md says otherwise — AGENTV3_SANDBOX_IDLE_MINUTES is 5 (this
-// comment said 15 until 2026-08-22; it was written the same day the change landed), which caps TOTAL
-// idle across 1,260 sandboxes at ~105 billed hours (~$8.70/month). The idle lever is spent. So the
-// remaining ~1,970 of 2,078 billed hours must be real build activity, which no browser can absorb.
-//
-// That correction came from arithmetic on a monthly total. This module replaces the arithmetic with a
-// per-build MEASUREMENT, because the same project has now twice acted on a remembered number instead of
-// a read one, and "an estimate wearing a roadmap" is exactly what Phase 3 must not be approved on.
-//
-// THE ONE QUESTION IT ANSWERS: after a build's own work FINISHED, how much longer did its sandbox stay
-// billable — and how much of that belonged to a frontend-only app the browser could have served itself?
-// That number, and nothing else, is what Phase 3 (hand the preview over and pause the sandbox) can
-// reclaim.
-//
-// NO NEW TELEMETRY. Both halves are already persisted:
-//   • the build report  → `startedAt` / `endedAt` / the manifest's file paths (DiagnosticsStore)
-//   • the sandbox record → `updatedAt` / `pausedAt` (SandboxStore; `pausedAt` is stamped by BOTH pause
-//     paths — the owning instance's idle sweep AND the durable orphan reaper — so the common case is
-//     covered, not just orphans)
-// Adding a new recorder would mean waiting weeks for data we can read today.
-//
-// PURE and deterministic. UNKNOWN IS A FIRST-CLASS ANSWER: a sandbox with no `pausedAt` was not held
-// for zero minutes, it was held for a time we cannot see (the process died, or E2B's own lifetime
-// expired). Counting those as zero would flatter exactly the number this exists to test.
+// Read-only legacy build/pause timing proxies. The workspace-only join does not establish exact
+// sandbox identity or non-overlapping provider billing intervals. Preserve numeric API fields for
+// compatibility, but do not interpret frontend-only hold or its global-rate projection as savings.
+// Missing pause metadata stays unknown; a recorded pause is still local evidence, not an invoice.
 
 import { builtAServer } from './serverNecessity';
 
@@ -60,7 +36,7 @@ export type HandoverSample =
       known: true;
       /** ms the build's own work took. */
       buildMs: number;
-      /** ms the sandbox stayed billable AFTER the build finished — the window Phase 3 targets. */
+      /** Legacy proxy: time between the build end and workspace record's pause timestamp. */
       heldAfterMs: number;
       /** True when the build wrote no server code, so the browser could have served the preview. */
       frontendOnly: boolean;
@@ -102,15 +78,15 @@ export interface HandoverTally {
   measured: number;
   /** Why the rest could not be measured, counted by cause. */
   unknown: Record<HandoverUnknown, number>;
-  /** Total hours of real build work across the measured builds. */
+  /** Sum of reported build durations across paired records; may overlap. */
   buildHours: number;
-  /** Total hours those sandboxes stayed billable after their build finished. */
+  /** Sum of build-to-pause timing proxies; not distinct billed intervals. */
   heldAfterHours: number;
   /** Of the measured builds, how many wrote no server code. */
   frontendOnlyCount: number;
   /**
-   * Held-after hours belonging to frontend-only builds — the ONLY hours Phase 3 can actually reclaim.
-   * An app with a server still needs the sandbox to answer its own API calls.
+   * Legacy name: frontend-only build-to-pause proxy hours, not measured reclaimable time.
+   * Interval identity, overlap and actual preview requirements have not been verified.
    */
   recoverableHours: number;
   /** Epoch ms of the earliest and latest measured build, so a rate can be stated with its window. */
@@ -176,7 +152,7 @@ import { sandboxUsdPerHour } from './sandboxRate';
 export interface HandoverProjection {
   /** Days the measured sample spans. 0 when fewer than two builds landed. */
   spanDays: number;
-  /** Reclaimable hours per day, at the sample's own rate. */
+  /** Legacy frontend-only timing proxy per day, not verified savings. */
   recoverableHoursPerDay: number;
   /** A 30-day extrapolation in USD. An extrapolation — the field name says so on purpose. */
   monthlyUsdEstimate: number;
@@ -201,28 +177,22 @@ export function projectHandover(t: HandoverTally, usdPerHour = sandboxUsdPerHour
   };
 }
 
-/**
- * The honest headline — the measured split first, the extrapolation last, and the limits stated inline.
- *
- * It says what share of billed life is post-build holding, because that is the whole question: if the
- * share is small, Phase 3 is a reliability change and must not be sold as a cost one, and this sentence
- * is what stops it being sold as a cost one.
- */
+/** Describe the unchanged legacy timing proxies without treating them as billing or savings. */
 export function handoverHeadline(t: HandoverTally, p: HandoverProjection = projectHandover(t)): string {
+  const limits = 'Workspace-only joins may pair different sandbox observations or overlap across builds. These are sampled timing proxies, not provider-billed intervals or measured savings.';
   if (!t || t.measured <= 0) {
-    return `No builds could be measured yet (${t?.examined ?? 0} looked at). A build needs both a settled report and a stamped sandbox pause before its hold is visible.`;
+    return `No builds could be paired yet (${t?.examined ?? 0} looked at). Missing timing is unknown, not zero. ${limits}`;
   }
-  const billed = t.buildHours + t.heldAfterHours;
-  const heldPct = billed > 0 ? Math.round((t.heldAfterHours / billed) * 100) : 0;
   const parts = [
-    `Across ${t.measured} measured builds: ${t.buildHours}h of real build work and ${t.heldAfterHours}h of sandbox held AFTER the build finished — post-build holding is ${heldPct}% of billed sandbox life.`,
-    `${t.recoverableHours}h of that belongs to frontend-only apps (${t.frontendOnlyCount} builds), which is the only part handing the preview to the browser can reclaim.`,
+    `Across ${t.measured} paired build records: ${t.buildHours}h of reported build duration and ${t.heldAfterHours}h between build ends and recorded pauses.`,
+    `${t.recoverableHours}h of the latter is associated with frontend-only manifests (${t.frontendOnlyCount} builds); this does not establish avoidable time.`,
+    limits,
   ];
   if (p.monthlyUsdEstimate > 0) {
-    parts.push(`Over the sample's ${p.spanDays} days that extrapolates to about $${p.monthlyUsdEstimate}/month — an EXTRAPOLATION from this window, not a bill.`);
+    parts.push('The legacy monthly projection is not a savings forecast: interval identity, non-overlap and per-session rates are unverified.');
   }
   if (t.measured < t.examined) {
-    parts.push(`${t.examined - t.measured} of ${t.examined} builds could not be measured and are excluded, never counted as zero.`);
+    parts.push(`${t.examined - t.measured} of ${t.examined} builds could not be paired and are excluded, never counted as zero.`);
   }
   return parts.join(' ');
 }

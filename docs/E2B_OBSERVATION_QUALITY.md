@@ -1,0 +1,17 @@
+# Sandbox timing observation quality
+
+The existing admin sandbox-handover endpoint reads at most 500 recent workspace records, a bounded build sample and 14 daily start-counter documents. It now describes those same rows without additional queries, provider calls, writes or polling. Numeric legacy response fields remain unchanged; `observationQuality` and `observationNote` are additive.
+
+The quality summary partitions returned workspace records into missing sessions, invalid intervals, unended observations and observations with recorded end metadata. The field `locallyEndedObservation` classifies metadata, not verified lifecycle events. Zero-duration valid observations are counted separately rather than conflated with missing data. It reports timestamp bounds only from valid numeric intervals, recorded end reasons, and observations without an observation ID as legacy/unverified. Identity presence is not proof of trustworthy chronology or completeness.
+
+These records contain only the latest stored session per workspace. Earlier observations can be overwritten; process crashes and provider expiry can leave no observed end. The store reader can return an empty array after a failed read, so empty results cannot establish an empty fleet. Local end records, particularly dropped handles, do not prove a provider stopped billing. Legacy nested-merge records can also carry stale fields; this read-only change does not repair persistence.
+
+Operation time measures instrumented actuator operations. Its complement may contain model waits, active previews, build holds or unobserved activity; it is not measured waste. Workspace-only build/pause joins do not establish exact sandbox interval identity. Duplicate or overlapping observations and build intervals are not deduplicated. The helper intentionally does not sum their durations into cost or invent completed-app counts.
+
+`completeHistory` and `providerReconciled` are always false. `actualComputeUsd` and `reclaimableMs` remain null, including for empty samples and valid zero-duration observations. Daily create/connect counters are best-effort and use a separate window, not a denominator for session averages or successful-app cost.
+
+Legacy fields named `recoverableHours` and `monthlyUsdEstimate` remain for API compatibility, but are unverified timing proxies and an old global-rate projection. The UI no longer presents that projection as savings. Resource-specific rates, deployed template resources, provider invoices, unique non-overlapping intervals and equivalent completed-app outcomes are required before reporting financial savings. No billing rates, resources, lifecycle policy, persistence or user app content changes here.
+
+Allocation identity counts are orthogonal to the interval partition: missing/invalid top-level sandbox IDs, missing/invalid session sandbox IDs, matching pairs and mismatched pairs are reported without exposing IDs. A timestamp-valid session may belong to a different allocation. Even matching IDs cannot prove current ownership or prevent late writes.
+
+Unverified operation accounting is counted separately for missing, nonfinite or negative busy time/operation counts, fractional operation counts, and busy time exceeding a valid ended interval. Valid timestamps alone do not establish reliable operation totals. Legacy numeric calculations are unchanged. The short warning stays visible; detailed quality counts and caveats use a native, keyboard-accessible expandable disclosure.

@@ -17,6 +17,8 @@ import type { SandboxReason } from './sandboxSessionZone';
 import { ownCgroupMemoryProbe } from '../lib/cgroupSelf';
 
 export interface SandboxSession {
+  /** Unique local observation, not a provider session or ownership token. Absent on legacy rows. */
+  observationId?: string;
   sandboxId: string;
   /** How the machine came up — created fresh, resumed, or created after a refused resume. */
   origin: string;
@@ -31,7 +33,7 @@ export interface SandboxSession {
   /** Operations run (commands, installs, file ops that hold the machine). */
   ops: number;
   endedAt?: number;
-  /** What stopped it, when we know. */
+  /** Why this local observation ended; not a provider pause acknowledgment. */
   endedBy?: 'idle-sweep' | 'orphan-sweep' | 'dropped';
 }
 

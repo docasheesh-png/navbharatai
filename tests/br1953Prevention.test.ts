@@ -7,6 +7,7 @@ import { verbatimTemplateSkipsModel } from '../src/server/AgentV3/templateVerify
 import { STARTER_TEMPLATES } from '../src/components/agentv3/starterTemplates';
 import { goldenComponentHarness } from './helpers/goldenComponentHarness';
 import { makeSubAgentSpawn } from '../src/server/AgentV3/SubAgent';
+import { isPlainReadCommand } from '../src/server/AgentV3/shellWriteTargets';
 import { AgentRunner } from '../src/server/AgentV3/AgentRunner';
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
@@ -117,6 +118,28 @@ describe('BR1953 review-domain contract, including the admitted Surplus path', (
     expect(goldenQuestionReviewIssue(PROMPT, 'Repair question review.', {new_string:'interface Review { rating: number; }'})).toContain('Not run');
     expect(goldenQuestionReviewIssue(PROMPT, 'Remove unrequested feedback.', {old_string:'interface Review { rating: number; }',new_string:''})).toBeNull();
     expect(goldenQuestionReviewIssue('Build an invoice app.', 'Add ratings.', { get content() { throw Error('must not inspect'); } })).toBeNull();
+  });
+  it('a shell read of rating source is not a rating mutation; actual shell writers still pass the contract', () => {
+    for (const command of ['rg "rating: number" src/App.tsx', 'rg "rating: number;" src/App.tsx', 'rg "rating: number|stars: number" src/App.tsx']) {
+      expect(isPlainReadCommand(command)).toBe(true);
+      expect(goldenQuestionReviewIssue(PROMPT, INTENT, {command})).toBeNull();
+    }
+    expect(goldenQuestionReviewIssue(PROMPT, INTENT, {command: 'printf "rating: number" > src/ratings.ts'})).toContain('Not run');
+    expect(goldenQuestionReviewIssue(PROMPT, INTENT, {command: `node -e 'require("fs").writeFileSync("src/ratings.ts", "rating: number")'`})).toContain('Not run');
+  });
+  it.each(GOLDEN_SCAFFOLDS.filter(g=>g.tier==='simple'))('admitted authorship and verify-only ownership cannot contradict one another: $id', golden => {
+    const own=goldenBuildPrompt(golden, 'Build the requested app.', undefined, {mustAuthorCode:true});
+    expect(own).toContain('admitted engine must author'); expect(own).not.toContain('make NO edits'); expect(own).not.toContain('[VERIFY & FINISH');
+    expect(own).toContain('Do not add unrelated features merely to manufacture a diff');
+    const verify=goldenBuildPrompt(golden, 'Build the requested app.'); expect(verify).toContain('[VERIFY & FINISH');
+  });
+  it('production prompt ownership comes from actual admitted SURPLUS, not a provider name, user guess or new flag', () => {
+    const route=readFileSync('src/server/routes/agentv3.ts','utf8');
+    expect(route).toContain("goldenBuildPrompt(golden, buildPrompt, chipExtensionTextOf(prompt), { mustAuthorCode: surplusAdmissionDiag?.code === 'SURPLUS_ADMITTED' })");
+  });
+  it.each(['npm install star-ratings', 'find src -delete', 'rg --pre=mutator "rating: number" src', 'file -C -m pattern', 'file --comp pattern', 'rg "rating: number" src | node writer.js', 'rg "rating: number" src & node writer.js', 'rg "rating: number" src; rm src/App.tsx', 'node -e \'writeFile()\'', 'printf x > src/App.tsx', 'bash -c \'rg rating src\''])('unknown/writing commands never become reads merely because a literal target is absent: %s', command => {
+    expect(isPlainReadCommand(command)).toBe(false);
+    expect(goldenQuestionReviewIssue(PROMPT, INTENT, {command})).toContain('Not run');
   });
   it('explicit user extensions and non-exam review apps keep their own authority', () => {
     expect(goldenQuestionReviewIssue(PROMPT + ' Add question star ratings.', INTENT)).toBeNull();

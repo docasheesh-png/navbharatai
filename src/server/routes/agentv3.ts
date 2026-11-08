@@ -18709,9 +18709,9 @@ async function noteBuildOutcome(
               buildDiag.record({ phase: 'build', severity: 'info', code: 'GOLDEN_SCAFFOLD', message: `Pre-seeded the tested "${golden.label}" template (${Object.keys(goldenFiles).length} files) — the builder verifies & customizes instead of writing from scratch.`, autoResolved: true });
               events.emit({ type: 'narration', agent: 'architect', text: `⚡ Starting from NavBharatAI's tested "${golden.label}" app template — verifying and customizing it for you.`, ts: Date.now() });
               // HANDOFF FRAMING (same discipline as the fast-lane salvage below): the builder must treat the
-              // scaffold as ITS OWN work to verify — never alien clutter to re-plan or rewrite. Tier-aware, and the
-              // template's recipe instructions ride along (goldenBuildPrompt, autopsy 303e8a6f).
-              buildPrompt = goldenBuildPrompt(golden, buildPrompt, chipExtensionTextOf(prompt));
+              // scaffold as a concrete saved foundation, never alien clutter. An admitted engine still authors
+              // the requested code itself; verified-only ownership and recipe instructions ride along (goldenBuildPrompt, autopsy 303e8a6f).
+              buildPrompt = goldenBuildPrompt(golden, buildPrompt, chipExtensionTextOf(prompt), { mustAuthorCode: surplusAdmissionDiag?.code === 'SURPLUS_ADMITTED' });
             }
           }
         } catch (seedErr) {

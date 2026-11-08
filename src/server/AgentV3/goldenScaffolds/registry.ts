@@ -1,3 +1,4 @@
+import { isPlainReadCommand } from '../shellWriteTargets';
 // AgentV3 — Golden Scaffold registry (admin 2026-08-02: "starter apps pre-built, cloud me stored,
 // direct banwane par instantly ban jaye").
 //
@@ -332,6 +333,10 @@ export const EXAM_REVIEW_CONTRACT = '[QUESTION REVIEW CONTRACT] Review of every 
 export function goldenQuestionReviewIssue(originalPrompt: string, proposal: string, input?: Record<string, unknown>): string | null {
   // Exact/bare exam chips only. A custom addition, an edit or any other app keeps its own scope.
   if (goldenScaffoldForPrompt(originalPrompt)?.id !== 'exam-prep') return null;
+  // A source search is not a proposed mutation. Unknown commands still get checked; an unparsed
+  // write target is never used as evidence that a command is read-only.
+  const command = input?.command;
+  if (typeof command === 'string' && Object.keys(input!).every(k => ['command', 'cwd', 'timeout', 'timeoutSeconds', 'background'].includes(k)) && isPlainReadCommand(command)) return null;
   const contradicts = (text: string): boolean => {
     const affirmative = text.replace(/\b(?:do not|don't|never|not|without)\s+(?:add(?:ing)?|implement(?:ing)?|includ(?:e|ing))?\s*(?:(?:a|an|any|new|the|separate)\s+)*(?:reviews?(?:\s*[/&]\s*|\s+(?:and|or)\s+))?(?:star[- ]?)?ratings?\b/gi, '');
     return /\b(?:add|implement|load|save|persist|include|build)\b[^.;\n]{0,120}\bratings?\b|\brating\s*[?:=]|\b(?:setRating|StarRating)\b/i.test(affirmative);
@@ -349,7 +354,7 @@ export function goldenQuestionReviewIssue(originalPrompt: string, proposal: stri
     ? 'Not run — this change adds unrequested ratings. ' + EXAM_REVIEW_CONTRACT : null;
 }
 
-export function goldenBuildPrompt(golden: GoldenScaffold, buildPrompt: string, extension?: string | null): string {
+export function goldenBuildPrompt(golden: GoldenScaffold, buildPrompt: string, extension?: string | null, ownership: { mustAuthorCode?: boolean } = {}): string {
   const added = String(extension ?? '').trim();
   // The user's own words on top of a chip (chipExtensionFor, autopsy ca99778e) — said FIRST and as the priority.
   const customise = added
@@ -370,6 +375,10 @@ export function goldenBuildPrompt(golden: GoldenScaffold, buildPrompt: string, e
       `READ all three FIRST. It is a STARTING POINT, not the finished app — BUILD OUT everything the request below asks for that is not there yet, ` +
       `reusing those existing components and the useCollection pattern rather than inventing a second set. Add new screens as their own files under src/. ` +
       `Do NOT rewrite what already works, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.`
+    : ownership.mustAuthorCode
+    ? `[AUTHOR THE EXACT REQUEST IN THIS WORKING FOUNDATION] The admitted engine must author the requested app code itself; the tested template is a reference foundation, not a substitute for that authorship. ` +
+      `READ src/App.tsx first, then author the requested implementation in the existing file structure. Preserve correct features and working controls. Do not add unrelated features merely to manufacture a diff; implement exactly the user's scope. ` +
+      `Read the exact region before edit_file, or use write_file for a whole file you author. Verify the resulting implementation; prepared files alone are not browser render or workflow proof. ` + KEEP_THE_SWITCH
     : `[VERIFY & FINISH — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested, working "${golden.label}" app template. ` +
       `This tested template is the starting point for the request below. READ src/App.tsx first. If the request matches the template (it should — the prompt is the template's own), ` +
       `make NO edits unless tsc fails or the request asks for something the template does not do — a finished template needs no polish, and every edit is a chance to break it. Preparing template files does not by itself confirm that the live preview has started or rendered. Before any edit_file, read_file the exact region you will change (one read of src/App.tsx, not fragments) — never edit text you have not read. Otherwise run the type check and finish. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists. ` +

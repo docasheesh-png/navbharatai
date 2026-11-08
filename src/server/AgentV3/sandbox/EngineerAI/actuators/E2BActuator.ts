@@ -18,7 +18,7 @@ import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDe
 import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
 import { appPortsFrom } from '../../../appPorts';
 import type { DevFramework } from './devServerHost';
-import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
+import { planDevServerRecovery, classifyDevServerFailure, undeclaredDevDependency, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
 import { recordDevServerLaunch } from '../../../devServerLaunchLog';
 import { dbProvisionScript, parseDbProvision, provisionOutcomeNote, provisionDiagnostics, CANONICAL_DB_URL, type DbProvisionOutcome } from '../../dbProvisionVerify';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
@@ -2527,7 +2527,10 @@ export class E2BActuator implements IEngineerActuator {
         // not take is exactly the fake-success the second absolute rule forbids.
         // The escalation is now decided AFTER the loop (below), so every attempt inside it performs a real
         // recovery. `code_fix` still short-circuits — a source error fails identically on every restart.
-        const diag = classifyDevServerFailure(devLog);
+        const failure = classifyDevServerFailure(devLog);
+        const diag = failure.recovery === 'reinstall'
+          ? undeclaredDevDependency(failure, devLog, await sandbox.files.read(`${WORKSPACE_ROOT}/package.json`).catch(() => null))
+          : failure;
         lastDiagnosis = diag;
         if (diag.recovery === 'code_fix') {
           stdout += `\n[health-check] ${diag.detail}`;
@@ -2688,7 +2691,7 @@ export class E2BActuator implements IEngineerActuator {
       // would faithfully replay the command that did not work.
       if (portUp) recordDevServerLaunch(workspaceId, command, livePort);
 
-      return { exitCode: 0, stdout, stderr };
+      return { exitCode: portUp ? 0 : 1, stdout, stderr };
     }
 
     // REGULAR command with DEAD-SANDBOX recreate-retry (root-cause fix for the "81 commands died on a

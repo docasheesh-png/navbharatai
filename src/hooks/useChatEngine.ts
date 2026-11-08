@@ -1,4 +1,5 @@
 import { CHAT_CLIENT_DEADLINE_MS } from '../lib/chatDeadline';
+import { historyForModelRequest } from '../lib/chatContextWindow';
 import { chatReplyLanguageFromPicker, resolveChatReplyLanguage } from '../lib/chatReplyLanguage';
 import { scrubVendorBrands } from '../shared/brandScrub';
 import { newFreeAnswerRequestId, notifyFreeAnswerChanged } from '../lib/freeAnswerStatus';
@@ -147,7 +148,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
       const response = await axios.post(endpoint, {
         message: prompt,
         preferredModel: selectedModel === 'auto' ? 'gemini' : selectedModel,
-        history: history,
+        history: historyForModelRequest(history),
         replyLanguage: resolveChatReplyLanguage(prompt, history) ?? chatReplyLanguageFromPicker(preferredLanguage),
         mode: mode,
         intent: intent,
@@ -497,7 +498,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
             message: messageToSend,
             preferredModel: isNbi ? 'gemini' : selectedModel,
             replyLanguage: resolveChatReplyLanguage(messageToSend, historyForAPI) ?? chatReplyLanguageFromPicker(preferredLanguage),
-            history: historyForAPI.slice(-40).map(m => ({ sender: m.sender, text: String(m.text || '').slice(0, 2000) })),
+            history: historyForModelRequest(historyForAPI),
             memorySummary: memorySummary || undefined,
             agent: currentAgent,
             mode: currentMode,

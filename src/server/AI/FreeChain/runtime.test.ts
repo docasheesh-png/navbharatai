@@ -88,10 +88,50 @@ describe('free chat chain central dispatch', () => {
  expect(result.provider).toBe('GROQ'); expect(result.ok).toBe(true); expect(m.execute).toHaveBeenCalledTimes(1);
  expect(JSON.stringify(result.freeChain)).not.toContain('fake-local-key'); expect(m.paid).not.toHaveBeenCalled();
  });
+ it('keeps an early fact from a 100-message thread on every fallback attempt', async () => {
+  const history = [
+    { sender: 'user', text: 'Remember that my city is Pune.' },
+    { sender: 'ai', text: 'Noted.' },
+    ...Array.from({ length: 100 }, (_, i) => ({ sender: i % 2 ? 'ai' : 'user', text: `filler turn ${i}` })),
+    { sender: 'user', text: 'What city did I name at the start?' },
+  ];
+  const original = history.map(row => row.text);
+  m.execute.mockRejectedValueOnce(new FreeChainProviderError('TIMEOUT')).mockImplementation(successful('Pune'));
+  const result = await buildFreeChainRouter(db, config('groq,cloudflare')).route({ ...input(), message: 'please answer', history });
+  expect(result).toMatchObject({ ok: true, provider: 'CLOUDFLARE' });
+  expect(m.execute).toHaveBeenCalledTimes(2);
+  for (const [request] of m.execute.mock.calls) {
+    expect(request.prompt).toContain('Remember that my city is Pune.');
+    expect(request.prompt).toContain('What city did I name at the start?');
+    expect(request.prompt.indexOf('Pune')).toBeLessThan(request.prompt.indexOf('What city did I name'));
+    expect(request.systemPrompt).not.toContain('Pune');
+  }
+  expect(history.map(row => row.text)).toEqual(original);
+ });
  it('falls through before first text on retryable failure', async () => {
  m.execute.mockRejectedValueOnce(new FreeChainProviderError('RATE_LIMIT')).mockImplementation(successful('second'));
  const chunks: string[]=[]; const result = await buildFreeChainRouter(db, config()).route({ ...input(), onChunk: s=>chunks.push(s) });
  expect(result.provider).toBe('CLOUDFLARE'); expect(chunks).toEqual(['second']); expect(result.freeChain?.fallbacks).toBe(1); expect(m.cooldown).toHaveBeenCalled();
+ });
+ it('keeps an early fact from a 100-message thread on every fallback attempt', async () => {
+  const history = [
+    { sender: 'user', text: 'Remember that my city is Pune.' },
+    { sender: 'ai', text: 'Noted.' },
+    ...Array.from({ length: 100 }, (_, i) => ({ sender: i % 2 ? 'ai' : 'user', text: `filler turn ${i}` })),
+    { sender: 'user', text: 'What city did I name at the start?' },
+  ];
+  const original = history.map(row => row.text);
+  m.execute.mockRejectedValueOnce(new FreeChainProviderError('TIMEOUT')).mockImplementation(successful('Pune'));
+  const result = await buildFreeChainRouter(db, config('groq,cloudflare')).route({ ...input(), message: 'please answer', history });
+  expect(result).toMatchObject({ ok: true, provider: 'CLOUDFLARE' });
+  expect(m.execute).toHaveBeenCalledTimes(2);
+  for (const [request] of m.execute.mock.calls) {
+    expect(request.prompt).toContain('Remember that my city is Pune.');
+    expect(request.prompt).toContain('What city did I name at the start?');
+    expect(request.prompt.indexOf('Pune')).toBeLessThan(request.prompt.indexOf('What city did I name'));
+    expect(request.systemPrompt).not.toContain('Pune');
+  }
+  expect(history.map(row => row.text)).toEqual(original);
  });
  it.each([false, true])('keeps the explicit script in every provider request, including quality=%s and history trim', async teachingTurn => {
  const history = [{ sender: 'user', text: 'Please explain world trade.' }, { sender: 'ai', text: 'A Roman-script answer.' }, { sender: 'user', text: 'devnaagri me bataao' }, ...Array.from({ length: 10 }, (_, i) => ({ sender: 'user', text: `Follow-up ${i}` }))];

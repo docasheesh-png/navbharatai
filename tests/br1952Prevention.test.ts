@@ -16,6 +16,8 @@ import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
 import { defaultToolCatalog } from '../src/server/AgentV3/ToolCatalog';
 import { abortBuild, interruptedBeforeAnyVerdict, abortCauseOf } from '../src/server/AgentV3/buildAbortCause';
+import { createProviderUsageLedger } from '../src/server/AgentV3/ProviderUsageLedger';
+import { evaluateSurplusReceipt } from '../src/server/AI/SurplusRegistry/receiptPolicy';
 
 const manifest = 'src/App.tsx :: root component\nsrc/components/VideoPlayer.tsx :: real player';
 const contract = 'export interface VideoMetadata { id: string; title: string }';
@@ -90,6 +92,23 @@ describe('the shared contract is a real saved prerequisite, not an announcement 
     };
     expect((await runSimpleBuild(h.deps)).ok).toBe(true);
     expect(h.saved.filter(f=>f.path==='src/types.ts')).toHaveLength(1);
+  });
+  it('stop after an acknowledged prerequisite keeps exactly that file without starting consumers or rewriting it', async () => {
+    const ac = new AbortController();
+    const h = lane({ signal: ac.signal });
+    const original = h.deps.writeFiles;
+    h.deps.writeFiles = async files => {
+      const receipt = await original(files);
+      if (files.some(f => f.path === 'src/types.ts')) ac.abort();
+      return receipt;
+    };
+    const r = await runSimpleBuild(h.deps);
+    expect(r.stopped).toBe(true);
+    expect(r.filesWritten).toBe(1);
+    expect(r.salvagedPaths).toEqual(['src/types.ts']);
+    expect(h.saved.map(f => f.path)).toEqual(['src/types.ts']);
+    expect(h.calls.filter(s => s.includes('write THIS file'))).toHaveLength(0);
+    expect(h.logs.some(s => s.includes('Wrote the shared contract'))).toBe(false);
   });
   it('a pending contract save settles before timeout handoff; no duplicate salvage or late consumers', async () => {
     vi.useFakeTimers();
@@ -275,5 +294,57 @@ describe('whole-server class census: a new sibling needs the same boundary and a
     expect(simple).not.toContain('`✓ ${spec.path}');
     expect(simple.indexOf('const contractSave = await savingContract')).toBeGreaterThan(-1);
     expect(simple.indexOf('const contractSave = await savingContract')).toBeLessThan(simple.indexOf('deps.log?.(`📐 Wrote the shared contract'));
+  });
+});
+
+// Retained BR1952 cache total 259264 differs from its sole provider's 209040 by 50224.
+// The Surplus fast text runner reports usage, then fastGenerate reports the same delivery again.
+// Receipt identity deduplicates the ledger, but the old independent cache counter did not.
+function cacheCapture() {
+  const init = declaration('captureTurnUsage').initializer as ts.ArrowFunction;
+  const body = init.body as ts.Block;
+  const snapshot = body.statements.findIndex(n => ts.isTryStatement(n) && n.getText(ast).includes('buildDiag.setLiveUsage('));
+  expect(snapshot).toBeGreaterThan(0);
+  const ledger = createProviderUsageLedger();
+  const billingCtx: { cacheReadInputTokens?: number } = {};
+  const live = vi.fn();
+  // Execute the original production prefix through its live-snapshot statement. Later wallet/
+  // watchdog behavior is out of this reporting-only regression, not replaced with fake charges.
+  const capture = execute(`return (...args) => { return (${init.parameters.length ? `(${init.parameters.map(p=>p.getText(ast)).join(',')})` : '()'} => {${body.statements.slice(0,snapshot+1).map(n=>n.getText(ast)).join('\n')}})(...args); };`, {
+    routerOneCostUnconfirmed: () => false, costUnconfirmedNoted: false,
+    usageUnreportedFired: false, currentBillingPhase: () => undefined,
+    providerLedger: ledger, billingCtx, buildDiag: {setLiveUsage: live},
+  }) as (provider: string, usage: Record<string,unknown>, model: string, cacheRead?: number, cacheWrite?: number) => void;
+  return {capture, ledger, billingCtx, live};
+}
+function cacheReceipt(callId: string) {
+  const now = 1800000000000;
+  const binding = {buildId:'offline-build',callId,accountId:'offline-account',modelId:'model-a',modelVersion:'v1',providerId:'provider-a',endpoint:'https://api.surplusintelligence.ai/min90/v1',offerId:null,startedAt:now-1};
+  return evaluateSurplusReceipt({provider:'surplus',product:'app-builder',binding,disposition:'failed',now,tariff:null,
+    receipt:{...binding,kind:'validated-surplus-response',identitySource:'server-dispatch-id',receiptId:callId,requestId:callId,currency:'USD',buyerCostMicro:'1',costSource:'usage.buyer_cost_micro',responseComplete:true,receivedAt:now,evidenceSha256:'b'.repeat(64),additionalCharges:'none',usage:{semantics:'disjoint-token-counts-v1',mappingReviewId:'mapping',tokens:{input:'10',output:'2',cacheRead:'5',cacheWrite:'0',reasoning:'0'}}},
+  });
+}
+describe('cache-hit report totals must share the receipt-deduplicated ledger', () => {
+  it('a repeated Surplus delivery does not increase the cache total a second time', () => {
+    const h = cacheCapture();
+    const surplusReceipt = cacheReceipt('same-call');
+    expect(surplusReceipt.accountId).toBe('offline-account');
+    const usage = {inputTokens:15,outputTokens:2,cacheReadInputTokens:5,surplusReceipt};
+    h.capture('SURPLUS',usage,'model-a',5);
+    h.capture('SURPLUS',usage,'model-a',5);
+    expect(h.ledger.callsByProvider?.()).toEqual({SURPLUS:1});
+    expect(h.ledger.total()).toEqual({inputTokens:15,outputTokens:2});
+    expect(h.billingCtx.cacheReadInputTokens).toBe(5);
+    expect(h.live.mock.lastCall).toEqual([h.ledger.byProvider(),5]);
+  });
+  it('distinct receipts and real legacy calls accumulate, while no-cache calls retain earlier cache shares', () => {
+    const h = cacheCapture();
+    for (const call of ['first','second']) h.capture('SURPLUS',{inputTokens:15,outputTokens:2,cacheReadInputTokens:5,surplusReceipt:cacheReceipt(call)},'model-a',5);
+    h.capture('GLM',{inputTokens:10,outputTokens:1},'legacy',3,2);
+    h.capture('GLM',{inputTokens:10,outputTokens:1},'legacy');
+    expect(h.billingCtx.cacheReadInputTokens).toBe(13);
+    expect(h.ledger.callsByProvider?.()).toEqual({SURPLUS:2,GLM:2});
+    expect(h.ledger.byProvider().GLM.cacheCreationInputTokens).toBe(2);
+    expect(h.live.mock.lastCall).toEqual([h.ledger.byProvider(),13]);
   });
 });

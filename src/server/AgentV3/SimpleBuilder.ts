@@ -2071,7 +2071,10 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   const saveForPreviewNow = (files: OneShotFile[]): void => {
     if (lapsed || files.length === 0 || !handOffEarlySaveEnabled()) return;
     // Copied now: the import fixes rewrite these objects later, and the save is of the files as they are now.
-    const batch = files.map((f) => ({ path: f.path, content: f.content }));
+    // BR1952: the prerequisite contract already landed before consumers began. A later hand-off
+    // must not write that acknowledged (path, content) again. Unknown/refused receipts still retry.
+    const batch = files.filter((f) => !alreadyThere(f)).map((f) => ({ path: f.path, content: f.content }));
+    if (batch.length === 0) return;
     handOffSaves.push(
       Promise.resolve()
         .then(() => writeAndLearn(batch))

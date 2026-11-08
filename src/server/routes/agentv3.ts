@@ -14513,16 +14513,18 @@ async function noteBuildOutcome(
           model,
           { producedNothing: usage.producedNothing === true, ...(usage.discardedOutput === true ? { discardedOutput: true } : {}), ...(phase ? { phase } : {}) },
         );
-        // …and accumulate the build total for the diagnostics report's cache-hit rate line.
-        if (cacheRead > 0) {
-          billingCtx.cacheReadInputTokens = (billingCtx.cacheReadInputTokens ?? 0) + cacheRead;
-        }
+        // BR1952: Surplus fast calls reach this callback through the runner AND fastGenerate.
+        // Receipt identity deduplicates the ledger; an independent += cache counter counted the
+        // same delivery twice. Derive the reporting total from that same accepted snapshot.
+        const providerSnapshot = providerLedger.byProvider();
+        billingCtx.cacheReadInputTokens = Object.values(providerSnapshot)
+          .reduce((total, usage) => total + (usage.cacheReadInputTokens ?? 0), 0);
         // Autopsy f04421ef — mirror the running ledger into the report so a build report READ WHILE THE
         // BUILD IS STILL RUNNING carries real token numbers. Before this, such a report printed
         // "GLM: 54 call(s) · 0 in · 0 out" and those zeros were read (by me, to the admin) as a measured
         // zero rather than an empty field. setLiveUsage is a strictly separate channel from
         // setProviderTokens and can never reach billing — see its doc comment.
-        try { buildDiag.setLiveUsage(providerLedger.byProvider(), billingCtx.cacheReadInputTokens); }
+        try { buildDiag.setLiveUsage(providerSnapshot, billingCtx.cacheReadInputTokens); }
         catch { /* diagnostics are best-effort — never affects a build */ }
         // THE MID-BUILD STOP. Every build turn and every heal turn passes through here — the same
         // choke-point discipline the wallet floor uses, and for the same reason: a ceiling written

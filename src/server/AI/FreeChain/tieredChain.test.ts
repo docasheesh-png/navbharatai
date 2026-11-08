@@ -233,10 +233,10 @@ describe('fixed-order FreeChain opt-in', () => {
   expect(result).toMatchObject({ provider: 'MITRIFY', reason: 'stalled' }); expect(chunks).toEqual(['partial']);
   expect(m.execute).toHaveBeenCalledTimes(4); expect(m.paid).toHaveBeenCalledOnce(); expect(m.settle).not.toHaveBeenCalled();
  });
- it('an existing health classification blocks Mitrify even when its switch is on', async () => {
+ it('health classification cannot bypass configuration and reviewed admission', async () => {
   vi.stubEnv('MITRIFY_CHAIN_ENABLED', '1'); m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
   const result = await buildFreeChainRouter(db, fixed()).route({ ...input(), context: { ...input().context, healthTurn: true } });
-  expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'mitrify', entered: false, reason: 'mitrify-privacy-blocked' }));
+  expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'mitrify', entered: false, reason: 'mitrify-configuration' }));
   expect(m.paid).not.toHaveBeenCalled();
  });
  it('stops after a paid transport failure with an unresolved charge', async () => {

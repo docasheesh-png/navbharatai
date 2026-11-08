@@ -32,7 +32,7 @@ export type AdminPageId =
   | 'users' | 'userreports' | 'ratings'
   | 'apps' | 'publishing' | 'review' | 'bots'
   | 'reports' | 'apkreports' | 'health'
-  | 'engines' | 'livemodels' | 'free-chat-chain' | 'provider-diagnostics'
+  | 'engines' | 'livemodels' | 'free-chat-chain'
   | 'revenue' | 'ads' | 'api-providers'
   | 'security'
   | 'messages'
@@ -67,7 +67,7 @@ export const ADMIN_TABS: readonly AdminTabDef[] = [
     { id: 'apkreports', label: 'Phone builds' },
     { id: 'health', label: 'Engine health' },
   ] },
-  { id: 'engines', label: 'AI Engines', pages: [{ id: 'engines', label: 'AI Engines' }, { id: 'livemodels', label: 'Live Model Registry' }, { id: 'free-chat-chain', label: 'Free Chat Chain' }, { id: 'provider-diagnostics', label: 'Provider testing bots' }] },
+  { id: 'engines', label: 'AI Engines', pages: [{ id: 'engines', label: 'AI Engines' }, { id: 'livemodels', label: 'Live Model Registry' }, { id: 'free-chat-chain', label: 'Free Chat Chain' }] },
   // Ads (admin 2026-10-20): the admin's own products shown to people who have not paid. Under Money because
   // an ad exists to earn, and the page beside Revenue is where the admin already looks for what earns.
   { id: 'money', label: 'Money', pages: [

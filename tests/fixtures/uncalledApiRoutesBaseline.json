@@ -78,7 +78,5 @@
   "POST /api/failedbr/oauth/register": "external: OAuth-enabled remote MCP clients discover and call this endpoint for scoped report access; optional autopsy metadata writes require fresh explicit consent (docs/FAILED_BUILD_REPORTS.md)",
   "GET /api/failedbr/oauth/authorize": "external: OAuth-enabled remote MCP clients discover and call this endpoint for scoped report access; optional autopsy metadata writes require fresh explicit consent (docs/FAILED_BUILD_REPORTS.md)",
   "POST /api/failedbr/oauth/token": "external: OAuth-enabled remote MCP clients discover and call this endpoint for scoped report access; optional autopsy metadata writes require fresh explicit consent (docs/FAILED_BUILD_REPORTS.md)",
-  "POST /api/failedbr/oauth/revoke": "external: OAuth-enabled remote MCP clients discover and call this endpoint for scoped report access; optional autopsy metadata writes require fresh explicit consent (docs/FAILED_BUILD_REPORTS.md)",
-  "POST /api/chat/mitrify-public-test": "external: authorized operator HTTP client using the configured verified account session, empty JSON only (docs/mitrify.md). No end-user UI; live calls remain unavailable until a verified single-use cost-admission adapter is wired.",
-  "POST /api/chat/mitrify-guest-test": "external: scripts/mitrify-guest-load.mjs calls this isolated synthetic endpoint without Firebase login, using an expiring operator control token and shared single-use campaign slots. No end-user UI; see docs/mitrify.md."
+  "POST /api/failedbr/oauth/revoke": "external: OAuth-enabled remote MCP clients discover and call this endpoint for scoped report access; optional autopsy metadata writes require fresh explicit consent (docs/FAILED_BUILD_REPORTS.md)"
 }

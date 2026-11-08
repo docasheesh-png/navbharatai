@@ -366,7 +366,8 @@ describe('generateGame3D — the objects a world is made of', () => {
     expect(surfaces).toContain("let DEFAULT_DETAIL: Detail = 'lite'");
     expect(objects).toContain('export { setDetailLevel, getDetailLevel };');
     // Default is LITE on purpose: a plain "3d game" must not be taxed for detail nobody asked for.
-    expect(objects).toMatch(/const tier = \(o\?: BaseOpts\): Detail => o\?\.detail \?\? getDetailLevel\(\)/);
+    // Autopsy 61279465: the same rule, then the device clamp (a software renderer draws 'lite').
+    expect(objects).toMatch(/const tier = \(o\?: BaseOpts\): Detail => resolveDetail\(o\?\.detail \?\? getDetailLevel\(\)\)/);
   });
 
   it('the CAR is a silhouette, not a box — a profile with wheel wells, arches, glass, emitting lights', () => {

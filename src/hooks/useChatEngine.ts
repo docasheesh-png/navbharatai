@@ -1,3 +1,4 @@
+import { CHAT_CLIENT_DEADLINE_MS } from '../lib/chatDeadline';
 import { chatReplyLanguageFromPicker, resolveChatReplyLanguage } from '../lib/chatReplyLanguage';
 import { scrubVendorBrands } from '../shared/brandScrub';
 import { newFreeAnswerRequestId, notifyFreeAnswerChanged } from '../lib/freeAnswerStatus';
@@ -10,7 +11,8 @@ import { newFreeAnswerRequestId, notifyFreeAnswerChanged } from '../lib/freeAnsw
 // destructures the SAME handleSendForTab/handleSend identifiers back, so every call site is unchanged.
 
 import axios from 'axios';
-import { useRef } from 'react';
+import { useRef, useEffect } from 'react';
+import { PendingChatQuestions } from '../lib/pendingChatQuestions';
 import type { Dispatch, SetStateAction } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import type { Message, ErrorContext, ViewType, FileSystem } from '../types';
@@ -77,6 +79,9 @@ interface ChatTurnScope {
   stopped: boolean;
   finished: boolean;
   streamingMessageId: string | null;
+  succeeded?: boolean;
+  incomplete?: boolean;
+  scope?: string;
 }
 
 export function useChatEngine(deps: ChatEngineDeps) {
@@ -93,6 +98,16 @@ export function useChatEngine(deps: ChatEngineDeps) {
   // Every asynchronous continuation belongs to its own turn. Stop may allow a successor before the
   // old transport settles; the old turn must never reset its state, append a notice or replace its controller.
   const activeTurnRef = useRef<ChatTurnScope | null>(null);
+  const pendingQuestions = useRef(new PendingChatQuestions());
+  const latest = useRef(deps); latest.current = deps;
+  const mounted = useRef(true);
+  const sendLatest = useRef<(text:string)=>Promise<void>>(async()=>{});
+  const queueScope = (state: ChatEngineDeps) => JSON.stringify([state.user?.uid ?? 'guest', state.currentSessionId, state.mode, state.activeAgent, state.activeView]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current=false;pendingQuestions.current.clear();const turn=activeTurnRef.current;if(turn){turn.stopped=true;turn.controller?.abort();} };
+  }, []);
+
   const ownsTurn = (turn: ChatTurnScope) => activeTurnRef.current === turn;
   const assertActiveTurn = (turn: ChatTurnScope) => {
     if (!ownsTurn(turn) || turn.stopped) throw new DOMException('Stopped', 'AbortError');
@@ -123,7 +138,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
     const controller = new AbortController();
     assertActiveTurn(turn);
     turn.controller = controller;
-    const timeoutId = setTimeout(() => controller.abort(), 95000);
+    const timeoutId = setTimeout(() => controller.abort(), CHAT_CLIENT_DEADLINE_MS);
 
     try {
       const headers = { ...(await authHeader()) };
@@ -166,6 +181,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
       if (controller.signal.aborted) throw new ChatStreamTerminalError({ code: 'CHAT_OUTCOME_UNKNOWN', message: 'The reply was stopped.', partial: false });
       const terminal = gatewayChatFailure(response.data);
       if (terminal) throw new ChatStreamTerminalError(terminal);
+      if (response.data.stalled === true) turn.incomplete = true;
       return response.data.reply;
     } catch (error: any) {
       clearTimeout(timeoutId);
@@ -247,12 +263,12 @@ export function useChatEngine(deps: ChatEngineDeps) {
     };
   };
 
-  const handleSendForTab = async (tabId: ViewType, overrideMessage?: string, files: File[] = []) => {
+  const handleSendForTab = async (tabId: ViewType, overrideMessage?: string, files: File[] = [], queued = false) => {
       // ... (existing logic, maybe add files to messages)
     const isNbi = tabId === 'nbi_chat';
     const answerRequestId = newFreeAnswerRequestId();
     const currentInput = input;
-    const currentMessages = messages;
+    const currentMessages = queued ? latest.current.messages : messages;
     const activeSession = sessions.find(s => s.id === currentSessionId);
     const restoredMessages = asMessageArray(activeSession?.restoredMessages);
     const memorySummary = activeSession?.memorySummary || '';
@@ -262,14 +278,14 @@ export function useChatEngine(deps: ChatEngineDeps) {
     const setMessagesForTab: typeof setMessages = value => {
       if (current()) setMessages(prev => current() ? (typeof value === 'function' ? value(prev) : value) : prev);
     };
-    const setInputForTab = setInput;
+    const setInputForTab: typeof setInput = queued ? () => {} : setInput;
     const setIsLoadingForTab: typeof setIsLoading = value => { if (current()) setIsLoading(value); };
     const setIntentForTab = setActiveIntent;
     const currentAgent = activeAgent;
     const currentMode = mode;
 
     const msgInput = typeof overrideMessage === 'string' ? overrideMessage : '';
-    if (!msgInput && !input.trim() && !errorContext?.lastInput && files.length === 0 || isLoading
+    if (!msgInput && !input.trim() && !errorContext?.lastInput && files.length === 0 || (!queued && (isLoading || pendingQuestions.current.size>0))
       || (activeTurnRef.current && !activeTurnRef.current.finished && !activeTurnRef.current.stopped)) return;
 
     const messageToSend = msgInput || currentInput.trim() || errorContext?.lastInput || '';
@@ -301,7 +317,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
       }
     }
 
-    turn = { controller: null, stopped: false, finished: false, streamingMessageId: null };
+    turn = { controller: null, stopped: false, finished: false, streamingMessageId: null, scope: queueScope(latest.current) };
     activeTurnRef.current = turn;
     // Lock before attachment preparation yields, not only after the first await.
     setIsLoadingForTab(true);
@@ -502,8 +518,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
             vials: loadVials(),
             stream: true,
           }),
-          // The user can Stop this turn OR it self-cancels after 90s — whichever fires first.
-          signal: AbortSignal.any([userAbort.signal, AbortSignal.timeout(90000)]),
+          // Stop is immediate; the client deadline leaves the server time to finish safe fallbacks.
+          signal: AbortSignal.any([userAbort.signal, AbortSignal.timeout(CHAT_CLIENT_DEADLINE_MS)]),
         }); } catch (error) {
           if (userAbort.signal.aborted) throw error;
           // No response is not proof of non-dispatch. Do not issue a new logical request.
@@ -703,6 +719,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
          }
       }
 
+      turn.succeeded = !data?.stalled && !turn.incomplete;
     } catch (error: any) {
       if (!ownsTurn(turn)) return;
       // The user pressed Stop — this is NOT an error. Keep whatever streamed so far (marked stopped) and
@@ -750,7 +767,25 @@ export function useChatEngine(deps: ChatEngineDeps) {
       notifyFreeAnswerChanged();
       turn.finished = true;
       turn.controller = null;
+      if (ownsTurn(turn)) {
+        if (!turn.succeeded || turn.stopped) pendingQuestions.current.clear();
+        else setTimeout(() => {
+          if (!mounted.current || !ownsTurn(turn!) || latest.current.activeView !== 'nbi_chat' || turn?.scope!==queueScope(latest.current)) {pendingQuestions.current.clear();return;}
+          const next=pendingQuestions.current.take(queueScope(latest.current));
+          if(next)void sendLatest.current(next).catch(()=>pendingQuestions.current.clear());
+        },0);
+      }
     }
+  };
+  sendLatest.current = text => handleSendForTab('nbi_chat',text,[],true);
+  // Explicit composer action; ordinary duplicate Send remains guarded as before.
+  const queueQuestion = (text = latest.current.input): boolean => {
+    const turn=activeTurnRef.current;
+    if(!mounted.current || !turn || turn.finished || turn.stopped || latest.current.activeView!=='nbi_chat' || turn.scope!==queueScope(latest.current))return false;
+    const accepted=pendingQuestions.current.enqueue(queueScope(latest.current),text);
+    if(accepted){latest.current.setInput('');latest.current.addToast(`Question queued (${pendingQuestions.current.size}/3). It expires after 90 seconds.`, 'info');}
+    else latest.current.addToast('You can queue up to three short text questions.', 'info');
+    return accepted;
   };
 
   const handleSend = async (overrideMessage?: string) => {
@@ -761,6 +796,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
   // STOP — cancel the reply that is streaming right now (admin 2026-08-13). Marks it a deliberate stop so
   // the partial reply is kept (not replaced by an error), aborts the fetch, and clears the busy state.
   const stop = () => {
+    pendingQuestions.current.clear();
     const turn = activeTurnRef.current;
     if (!turn || turn.finished) return;
     turn.stopped = true;
@@ -830,5 +866,5 @@ export function useChatEngine(deps: ChatEngineDeps) {
         ? downscaleImage(file)
         : readFileRaw(file)
     ));
-  return { handleSendForTab, handleSend, stop, unsend };
+  return { handleSendForTab, handleSend, queueQuestion, stop, unsend };
 }

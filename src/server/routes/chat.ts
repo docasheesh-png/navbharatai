@@ -1,3 +1,6 @@
+import { CHAT_SERVER_DEADLINE_MS } from '../../lib/chatDeadline';
+import { withFixedTextChainScope } from '../AI/fixedTextChain';
+import { withMitrifyChatPrivacyBoundary } from '../lib/mitrify';
 import { chatAvailabilityMessage } from '../lib/chatAvailabilityMessage';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../lib/chatReplyLanguage';
 import { FREE_CHAT_LANGUAGE_RULE, chatReplyLanguageInstruction } from '../lib/freeChatReplyLanguage';
@@ -20,7 +23,6 @@ import { directDoseReply, sanitizeVials, parseVialTeaching, vialRememberedMessag
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { clientPlatform } from '../AppContext/iosPurchaseGuard';
 import { buildDocumentContext } from '../lib/attachmentText';
-import { toSafeClientMessage } from '../lib/httpError';
 import { runVisionChain } from '../lib/visionChain';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { groundingStatusFor, firstTokenLog } from '../lib/chatGrounding';
@@ -81,12 +83,12 @@ async function withChatTextGateway<T>(req: Request, res: Response, handler: () =
     if (!res.headersSent && !res.writableEnded) res.status(400).json({ code: 'DOCTOR_ROUTE_REQUIRED', error: 'Please use the Doctor AI service for this mode.' });
     return;
   }
-  const legacy = () => withFreeChainEntryAdmission(req, res, handler);
+  const legacy = () => withFixedTextChainScope('chat', Array.isArray(req.body?.fileAttachments) && req.body.fileAttachments.length ? 'vision-pdf' : 'text', () => withFreeChainEntryAdmission(req, res, handler));
   if (!inferenceGatewayEnabled('chat') && !wasGatewayGuestSelected(req)) return legacy();
   const body = req.body;
   if (!body || (!body.message && !Array.isArray(body.fileAttachments))) return legacy();
   if (res.destroyed || res.writableEnded) return;
-  const deadlineAtMs = Date.now() + 90_000;
+  const deadlineAtMs = Date.now() + CHAT_SERVER_DEADLINE_MS;
   const controller = new AbortController();
   onClientGone(res, () => controller.abort());
   try {
@@ -980,11 +982,15 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         // Never leak the raw inference error (may name a provider/model) to the client.
         if (strictFreeRequired()) return res.status(503).json({ code: 'STRICT_FREE_UNAVAILABLE', reply: 'No verified free model is currently available. Please try again later.', error: 'No paid fallback was used.' });
         if (isGatewayTerminalError(e)) return res.status(503).json({ code: 'INFERENCE_GATEWAY_UNAVAILABLE', reply: 'The AI service is temporarily unavailable. Please try again later.' });
-        res.status(500).json({ reply: 'Backend AI inference failed', error: toSafeClientMessage(e, 'Backend AI inference failed') });
+        // An unlabeled 500 is shown to signed-in users as "High server load", which hides a
+        // provider failure the chain can still fail over, and a finished all-failed result.
+        // Keep the recognized unavailable code so the client shows the honest notice.
+        const failure = unavailableChatReply(chatAvailabilityMessage('temporary', { message, history: req.body?.history, replyLanguage }));
+        res.status(503).json(failure);
       }
     }
   };
 
-  app.post('/api/chat/navbharat', freeModuleInferenceScope,       chatLimiter, (req, res) => withChatDailyQuota(req, res, () => withChatTextGateway(req, res, () => chatHandler(req, res, 'navbharat'))));
-  app.post('/api/chat/navbharatai', freeModuleInferenceScope,     chatLimiter, (req, res) => withChatDailyQuota(req, res, () => withChatTextGateway(req, res, () => chatHandler(req, res, 'navbharat'))));
+  app.post('/api/chat/navbharat', freeModuleInferenceScope,       chatLimiter, (req, res) => withChatDailyQuota(req, res, () => withChatTextGateway(req, res, () => withMitrifyChatPrivacyBoundary(() => chatHandler(req, res, 'navbharat')))));
+  app.post('/api/chat/navbharatai', freeModuleInferenceScope,     chatLimiter, (req, res) => withChatDailyQuota(req, res, () => withChatTextGateway(req, res, () => withMitrifyChatPrivacyBoundary(() => chatHandler(req, res, 'navbharat')))));
 }

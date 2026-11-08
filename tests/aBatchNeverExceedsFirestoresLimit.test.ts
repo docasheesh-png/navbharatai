@@ -101,18 +101,19 @@ describe('census: every batch is bounded', () => {
     }
   });
 
-  it('number allocation adds at most one counter write to the history transaction', async () => {
+  it('number allocation adds at most one counter write and one registry row to the history transaction', async () => {
     const writes: string[] = [];
     const doc = (path: string): any => ({ path, collection: (name: string) => ({ doc: (id: string) => doc(`${path}/${name}/${id}`) }) });
     const db = {
       collection: (name: string) => ({ doc: (id: string) => doc(`${name}/${id}`) }),
       runTransaction: async (callback: (tx: any) => Promise<void>) => callback({
-        get: async (ref: { path: string }) => ({ exists: ref.path === 'admin_failed_report_numbers/counter', data: () => ref.path === 'admin_failed_report_numbers/counter' ? { nextNumber: 1 } : undefined }),
+        get: async (ref: { path: string }) => ({ exists: ref.path === 'admin_build_report_counter/counter', data: () => ref.path === 'admin_build_report_counter/counter' ? { state: 'ready', nextNumber: 1 } : undefined }),
         set: (ref: { path: string }) => { writes.push(ref.path); },
       }),
     };
     await commitDiagnosticsHistory(db as never, 'synthetic-workspace', { startedAt: 100, endedAt: 200, ok: false }, 300);
-    expect(writes.sort()).toEqual(['admin_failed_report_numbers/counter', 'workspace_diagnostics_v3/synthetic-workspace', 'workspace_diagnostics_v3/synthetic-workspace/history/100'].sort());
+    expect(writes.sort()).toEqual(['admin_build_report_counter/counter', 'build_report_numbers/synthetic-workspace~100',
+      'workspace_diagnostics_v3/synthetic-workspace', 'workspace_diagnostics_v3/synthetic-workspace/history/100'].sort());
   });
 
 });

@@ -134,7 +134,7 @@ describe('🔒 the wiring — the two numbers can never drift apart again', () =
   });
 
   it('the SDK bound and the runner bound are ONE number', () => {
-    expect(route).toContain('new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts, timeoutMs })');
+    expect(route).toContain('new OpenAiToolRunner(pricedClient, { model, ...runnerOpts, timeoutMs })');
   });
 
   it('the ask is clamped from the EFFECTIVE clock (after the lane deadline), not the configured one', () => {

@@ -784,3 +784,24 @@ Two admin-mandated additions to the billing surface (both verified live: a real 
   the user no longer downloads a report at all (admin 2026-07-29): "Report" submits it server-side to the
   admin inbox and the user receives only `{ ok }`. The standing rule is unchanged and permanent: **do NOT
   surface provider names on any user-facing screen.**
+
+## Owner revision — 2026-11-01: Weak order and Pro sandbox fee
+
+This supersedes older conflicting policy above. Weak uses admitted Surplus, then
+eligible Router One, then GLM, then its existing tail. Test-profile pins and
+no-fallback overrides cannot bypass Weak; other bands keep their routing. Missing
+keys, explicit engine disable, admission, maintenance, spend, stop and no-Sonnet/Opus
+safeguards remain authoritative. Plan/heal/complex lanes keep the prefix while
+preserving provider model selection; explicit failed-rung retries can advance.
+
+Router One's prospective verified model-expense multiplier is 2.5, once, not 10;
+Surplus remains 10. Positive Router One settlement is NOT implemented without
+verified request/account-bound final supplier receipts; its unknown expense is
+still absorbed and audited, never priced from Sonnet or token tariffs.
+
+ALL Pro bands replace measured sandbox billing with a SERVICE FEE equal to 2.5%
+of the pre-sandbox user subtotal AFTER existing waiver/stop/free rules and build
+discount with the AI-cost floor. Total = discounted subtotal × 1.025. The measured
+VM expense stays separate internally and cannot stack into customer markup/floors.
+Zero bills stay zero; independent hosting/database subscriptions are excluded.
+See docs/billing/router-one-reconciliation.md for limitations and exact formula.

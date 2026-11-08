@@ -10,14 +10,21 @@ export interface AdmissionQueueLimits {
   perUserQueued: number;
 }
 export const DEFAULT_ADMISSION_QUEUE_LIMITS: Readonly<AdmissionQueueLimits> = Object.freeze({
-  maxActive: 8, maxQueued: 64, maxWaitMs: 5000, perUserActive: 1, perUserQueued: 1,
+  maxActive: 8, maxQueued: 1024, maxWaitMs: 5000, perUserActive: 1, perUserQueued: 1,
 });
+/** Serialized payload budget, not a measurement of total V8 heap. Leave RAM for active work. */
+export const MAX_QUEUED_PAYLOAD_BYTES = 16 * 1024 * 1024;
+export function admissionPayloadBytes(payload: unknown): number {
+  try { return Buffer.byteLength(JSON.stringify(payload) ?? '', 'utf8'); }
+  catch { return MAX_QUEUED_PAYLOAD_BYTES + 1; }
+}
 export type AdmissionDenial = 'capacity' | 'queue-full' | 'timeout' | 'aborted' | 'user-limit';
 export type AdmissionResult = { admitted: true; release: () => void; waitedMs: number }
   | { admitted: false; reason: AdmissionDenial; waitedMs: number };
-export interface AdmissionRequest extends Partial<AdmissionQueueLimits> { uid: string; signal?: AbortSignal }
+export interface AdmissionRequest extends Partial<AdmissionQueueLimits> { uid: string; signal?: AbortSignal; payloadBytes?: number }
 interface Waiting {
   uid: string; signal?: AbortSignal; enqueuedAt: number; deadline: number;
+  payloadBytes: number;
   resolve: (result: AdmissionResult) => void;
   timer: ReturnType<typeof setTimeout>;
   abort: () => void;
@@ -35,6 +42,7 @@ function limitsFor(input: AdmissionRequest): AdmissionQueueLimits | null {
 export class FreeChainAdmissionQueue {
   private limits: AdmissionQueueLimits = { ...DEFAULT_ADMISSION_QUEUE_LIMITS };
   private active = 0;
+  private queuedPayloadBytes = 0;
   private readonly activeByUser = new Map<string, number>();
   private readonly queuedByUser = new Map<string, number>();
   private readonly waiting: Waiting[] = [];
@@ -43,7 +51,8 @@ export class FreeChainAdmissionQueue {
   acquire(input: AdmissionRequest): Promise<AdmissionResult> {
     if (input.signal?.aborted) return Promise.resolve({ admitted: false, reason: 'aborted', waitedMs: 0 });
     const limits = limitsFor(input);
-    if (!limits || typeof input.uid !== 'string' || !input.uid.trim() || input.uid.length > 512) {
+    const payloadBytes = input.payloadBytes ?? 0;
+    if (!limits || !Number.isSafeInteger(payloadBytes) || payloadBytes < 0 || typeof input.uid !== 'string' || !input.uid.trim() || input.uid.length > 512) {
       return Promise.resolve({ admitted: false, reason: 'capacity', waitedMs: 0 });
     }
     // New server configuration governs all FUTURE grants; already active work is never revoked.
@@ -55,12 +64,14 @@ export class FreeChainAdmissionQueue {
     }
     if (limits.maxWaitMs === 0) return Promise.resolve({ admitted: false, reason: 'capacity', waitedMs: 0 });
     if (this.waiting.length >= limits.maxQueued) return Promise.resolve({ admitted: false, reason: 'queue-full', waitedMs: 0 });
+    if (payloadBytes > MAX_QUEUED_PAYLOAD_BYTES - this.queuedPayloadBytes) return Promise.resolve({ admitted: false, reason: 'capacity', waitedMs: 0 });
     const enqueuedAt = Date.now();
     return new Promise(resolve => {
-      const entry: Waiting = { uid: input.uid, signal: input.signal, enqueuedAt, deadline: enqueuedAt + limits.maxWaitMs,
+      const entry: Waiting = { uid: input.uid, signal: input.signal, payloadBytes, enqueuedAt, deadline: enqueuedAt + limits.maxWaitMs,
         resolve, timer: undefined as unknown as ReturnType<typeof setTimeout>, abort: () => this.reject(entry, 'aborted') };
       entry.timer = setTimeout(() => this.reject(entry, 'timeout'), limits.maxWaitMs);
       this.waiting.push(entry);
+      this.queuedPayloadBytes += payloadBytes;
       this.queuedByUser.set(entry.uid, (this.queuedByUser.get(entry.uid) ?? 0) + 1);
       input.signal?.addEventListener('abort', entry.abort, { once: true });
       // Defends custom signals whose abort occurred while registering the listener.
@@ -94,6 +105,7 @@ export class FreeChainAdmissionQueue {
     const index = this.waiting.indexOf(entry);
     if (index < 0) return false;
     this.waiting.splice(index, 1);
+    this.queuedPayloadBytes -= entry.payloadBytes;
     clearTimeout(entry.timer);
     entry.signal?.removeEventListener('abort', entry.abort);
     this.decrement(this.queuedByUser, entry.uid);
@@ -105,8 +117,12 @@ export class FreeChainAdmissionQueue {
     this.drain();
   }
   private drain(): void {
+    // Saturated arrivals cannot grant anything. Avoid scanning the entire burst on every arrival.
+    // Each waiter still owns its timeout; grant-time deadline checks below remain authoritative.
+    if (this.active >= this.limits.maxActive) return;
     // At most 1024 bounded entries. Resolve only after removal, so abort/release is idempotent.
     for (let i = 0; i < this.waiting.length;) {
+      if (this.active >= this.limits.maxActive) break;
       const entry = this.waiting[i];
       const expired = Date.now() >= entry.deadline;
       if (entry.signal?.aborted || expired) {

@@ -1,4 +1,3 @@
-import { ProviderDiagnosticPanels } from './admin/ProviderDiagnosticPanels';
 import { InferenceGatewaySetupPanel } from './admin/InferenceGatewaySetupPanel';
 import { FreeChatChainPanel } from './admin/FreeChatChainPanel';
 import { DeepinfraComparisonPanel } from './admin/DeepinfraComparisonPanel';
@@ -28,6 +27,10 @@ import { confirmCopy, ownerConfirmCopy, MODERATION_ROUTE, type ModerationAction 
 import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
 import { BotsLedgerPanel } from './admin/BotsLedgerPanel';
 import { AdsPanel } from './admin/AdsPanel';
+import { ApiProvidersPanel } from './admin/ApiProvidersPanel';
+import { ProviderSwitchesPanel } from './admin/ProviderSwitchesPanel';
+import { GameAssetLiveCheckPanel } from './admin/GameAssetLiveCheckPanel';
+import { chatProviderHealth, chatProviderLatencyText } from '../lib/chatProviderHealth';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
 import {
   ADMIN_TABS, ENGINE_REPORTS_ON, tabOfPage, tabDef, firstPageOf, pageTitle, pageBadge, pageHint,
@@ -2655,10 +2658,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
             </div>
           )}
 
-          {activeTab === 'provider-diagnostics' && (
-            <ProviderDiagnosticPanels key={adminToken} adminToken={adminToken} />
-          )}
-
           {activeTab === 'free-chat-chain' && (
             <>
               <FreeChatChainPanel adminToken={adminToken} />
@@ -2674,6 +2673,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── AI ENGINES TAB ── */}
           {activeTab === 'engines' && (
             <div className="space-y-6">
+              {/* AI PROVIDER SWITCHES (admin 2026-11-04): real, enforced on/off per provider — providerSwitches.ts. */}
+              <ProviderSwitchesPanel adminToken={adminToken} />
+              {/* L3 step 1 (admin 2026-11-04): can this server really download game assets? Writes nothing. */}
+              <GameAssetLiveCheckPanel adminToken={adminToken} />
               {/* ── THE REAL BUILD ENGINES ───────────────────────────────────────────────────
                   Admin, 2026-09-17: *"ai engine wale page ko bhi update karo, woh fake hai abhi."*
                   They were right. What used to sit here were the CHAT router's in-memory counters,
@@ -2771,23 +2774,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {Object.entries(analytics?.liveProviderStats || {}).map(([name, stat]: any) => {
-                  const isOnCooldown = stat.cooldownUntil > Date.now();
-                  const secondsLeft = isOnCooldown ? Math.ceil((stat.cooldownUntil - Date.now()) / 1000) : 0;
-                  // 🔒 A PROVIDER THAT HAS NEVER RUN IS NOT "HEALTHY". The old card printed a green
-                  // Healthy badge on zero requests, which is the most misleading state a status light
-                  // can have — it reads as "checked and fine" when nothing was ever checked.
-                  const everRan = Number(stat.requestCount) > 0;
+                  // 🔒 The badge reads EVERY fact the server sends — circuit, cooldown, errors, in-flight
+                  // (chatProviderHealth.ts). It used to read two, and painted a provider failing 3 of 3 calls green.
+                  const health = chatProviderHealth(stat, Date.now());
+                  const dot = { danger: 'bg-danger animate-pulse', warn: 'bg-warn', neutral: 'bg-faint', ok: 'bg-success', busy: 'bg-warn animate-pulse' }[health.tone];
+                  const badge = { danger: 'bg-danger/10 border-danger/40 text-danger', warn: 'bg-warn/10 border-warn/40 text-warn', neutral: 'bg-raised border-line text-muted', ok: 'bg-success/10 border-success/40 text-success', busy: 'bg-warn/10 border-warn/40 text-warn' }[health.tone];
                   return (
-                    <div key={name} className={`bg-card border rounded-[1.5rem] p-5 space-y-3 ${isOnCooldown ? 'border-red-500/30' : 'border-line'}`}>
+                    <div key={name} data-testid={`chat-provider-${name}`} className={`bg-card border rounded-[1.5rem] p-5 space-y-3 ${health.tone === 'danger' ? 'border-danger/40' : 'border-line'}`}>
                       <div className="flex justify-between items-center">
                         <div className="flex items-center gap-3">
-                          <div className={`w-3 h-3 rounded-full ${isOnCooldown ? 'bg-red-500 animate-pulse text-on-accent' : !everRan ? 'bg-faint' : stat.inFlight > 0 ? 'bg-amber-500 animate-pulse text-on-accent' : 'bg-emerald-500 text-on-accent'}`} />
+                          <div className={`w-3 h-3 rounded-full ${dot}`} />
                           <span className="font-black text-ink uppercase font-mono">{name}</span>
                         </div>
-                        <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${isOnCooldown ? 'bg-red-500/10 border-red-500/30 text-danger' : !everRan ? 'bg-raised border-line text-muted' : 'bg-emerald-500/10 border-emerald-500/30 text-success'}`}>
-                          {isOnCooldown ? `Cooldown ${secondsLeft}s` : !everRan ? 'Not used yet' : 'Healthy'}
-                        </span>
+                        <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${badge}`}>{stat.capacityOnly ? 'Capacity pool' : health.label}</span>
                       </div>
+                      {stat.capacityOnly
+                        ? <p className="text-[10px] text-muted">An AI Chat concurrency pool for one account — calls in flight, not a separate engine.</p>
+                        : health.detail && <p className="text-[10px] text-muted">{health.detail}</p>}
                       <div className="grid grid-cols-3 gap-2 text-center">
                         <div className="bg-well rounded-lg p-2">
                           <div className="text-[9px] text-muted uppercase font-bold">In-Flight</div>
@@ -2795,7 +2798,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         </div>
                         <div className="bg-well rounded-lg p-2">
                           <div className="text-[9px] text-muted uppercase font-bold">Avg Latency</div>
-                          <div className="text-sm font-black text-warn font-mono">{everRan ? `${stat.avgLatencyMs}ms` : '—'}</div>
+                          <div className="text-sm font-black text-warn font-mono">{chatProviderLatencyText(stat)}</div>
                         </div>
                         <div className="bg-well rounded-lg p-2">
                           <div className="text-[9px] text-muted uppercase font-bold">Errors</div>
@@ -2930,6 +2933,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     );
                   })}
                 </div>
+                {/* Turns NO engine answered — not ranked as providers (they are users who got no answer). */}
+                {(analytics?.unansweredTurns || []).length > 0 && (
+                  <div className="border-t border-line pt-3 space-y-1" data-testid="unanswered-turns">
+                    <p className="text-[10px] text-danger font-bold uppercase tracking-widest">Not answered by any provider</p>
+                    {(analytics?.unansweredTurns || []).map((u: any) => (
+                      <p key={u.key} className="text-xs text-ink"><span className="font-mono font-bold">{u.requests}</span> — {u.label}</p>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Rate-limited providers */}
@@ -5066,7 +5078,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   )}
                 />
                 <p className="text-[10px] text-muted">
-                  Newest build first. Chronological ranks (#1 oldest → newest) across retained latest-per-workspace reports, before filters — separate from the retained-failure chronological ranks on /failedbr; existing permanent IDs are shown separately. Existing ranks may use a 10-minute snapshot; new builds refresh after a short cooldown. Temporary failures retry twice. Retention can change these ranks. Missing ranks show — n/a. Showing {allBuilds.length}
+                  Newest build first. Each build shows its permanent build report number — the same number /failedbr shows for it, given once when the build started and never changed, before filters. Temporary failures retry twice. Missing numbers show — n/a. Showing {allBuilds.length}
                   {allBuildsFetched && allBuildsFetched.fetched >= allBuildsFetched.limit
                     /* Honest about the fetch ceiling: at the limit there may be OLDER builds this
                        list has not looked at, so "0 failed" must not read as "none exist". */
@@ -5192,6 +5204,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               crop, the live preview and the list are `admin/AdsPanel.tsx`; the data is /api/admin/ads. */}
           {activeTab === 'ads' && (
             <AdsPanel headers={headers} />
+          )}
+
+          {/* API PROVIDERS (admin 2026-11-03): every outside API, its billing link, and the live balance where the
+              provider has a balance API. `admin/ApiProvidersPanel.tsx`; the data is /api/admin/api-providers. */}
+          {activeTab === 'api-providers' && (
+            <ApiProvidersPanel adminToken={adminToken} />
           )}
 
           {/* ── APPS · BOTS (admin 2026-10-05) — who built which hosted chat bot, and whether a WhatsApp bot is signed ── */}

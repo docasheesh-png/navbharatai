@@ -253,6 +253,8 @@ interface AIChatProps {
   isLoading: boolean;
   /** Opt-in normal-chat pending copy; other surfaces retain their existing indicator. */
   showReplyPendingStatus?: boolean;
+  /** Presentation-only opt-in for the ordinary AI Chat composer. */
+  composerSendPosition?: 'text' | 'bottom-right';
   activeIntent?: string;
   mode?: AgentMode;
   onModeChange?: (mode: AgentMode) => void;
@@ -303,6 +305,7 @@ interface AIChatProps {
    */
   onMessagesChange?: (next: Message[]) => void;
   onStop?: () => void;
+  onQueueQuestion?: () => boolean;
   /** Take back the last message: stops any in-flight reply and removes the last exchange (admin 2026-08-13). */
   onUnsend?: () => void;
   // Guider (Hybrid) confirmation card: a proposed design awaiting Approve / Edit / Answer.
@@ -319,6 +322,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   onSend,
   isLoading,
   showReplyPendingStatus,
+  composerSendPosition,
   activeIntent = 'social',
   mode = 'planning',
   onModeChange,
@@ -344,6 +348,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   onSendSuggestion,
   onMessagesChange,
   onStop,
+  onQueueQuestion,
   onUnsend,
   guiderPlan,
   guiderReplanning,
@@ -1235,6 +1240,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                 none of them can look different from this one again. History and Mode still show only
                 where the phone's bottom bar is absent, and never beside Pro's own mode dropdown. */}
             <ComposerShell
+              sendPosition={composerSendPosition}
               onOpenHistory={showFreeHistoryButton ? onOpenHistory : undefined}
               onOpenMode={showFreeModeButton ? onOpenModePicker : undefined}
               controls={(
@@ -1296,6 +1302,11 @@ export const AIChat: React.FC<AIChatProps> = ({
                     {/* UNSEND moved out of the composer (admin 2026-08-14): it now lives ON the last sent
                         message bubble and appears only while the reply is still coming — see the message
                         footer above. The composer keeps just Stop (while loading) and Send. */}
+                    {isLoading && onQueueQuestion && (
+                      <button type="button" onClick={() => onQueueQuestion()} disabled={!input.trim() || attachments.length>0}
+                        title="Queue this text question after the current answer" aria-label="Queue question"
+                        className="px-2 py-1 rounded text-xs border border-line disabled:opacity-40">Queue</button>
+                    )}
                     {isLoading && onStop ? (
                       // ONE-CLICK STOP (admin 2026-08-13: "galat search rukti nahi") — a running reply must
                       // end the instant this is tapped, not after a confirm dialog the user has to dismiss.
@@ -1317,6 +1328,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                           dismissKeyboardOnMobile(textareaRef.current);
                         }}
                         disabled={(!input.trim() && attachments.length === 0) || isLoading}
+                        aria-label={composerSendPosition === 'bottom-right' ? 'Send message' : undefined}
                         className={COMPOSER_SEND_CLASS}
                       >
                         <ArrowUp className="w-4 h-4" strokeWidth={2.5} />

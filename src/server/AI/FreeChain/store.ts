@@ -1,3 +1,4 @@
+import { inQuotaLane, QuotaLaneBusyError } from './quotaLane';
 import { createHash } from 'node:crypto';
 import { sanitizeText } from '../../../lib/observability/sanitize';
 import type { Firestore } from 'firebase-admin/firestore';
@@ -43,10 +44,15 @@ function readCooldown(raw: unknown): number {
   if (!nonnegativeInteger((raw as Raw).until)) throw new FreeChainDataError('Malformed cooldown');
   return (raw as Raw).until as number;
 }
-function observePaidPolicy(current: PaidBudgetPolicy | null, capNanoUsd: number, now: number): PaidBudgetPolicy {
-  if (current && current.capNanoUsd <= capNanoUsd) return current;
+function observePaidPolicy(current: PaidBudgetPolicy | null, capNanoUsd: number, now: number, uncappedRollout = false): PaidBudgetPolicy {
+  // One-time deployment authorization; never override a safety trip or a later explicit cap.
+  if (uncappedRollout && !current?.uncappedRolloutVersion && current?.source !== 'safety') {
+    return { kind: 'paid_budget_policy', version: 1, revision: checkedAdd(current?.revision ?? 0, 1),
+      capNanoUsd: current?.capNanoUsd ?? capNanoUsd, budgetMode: 'uncapped', uncappedRolloutVersion: 1, updatedAt: now, source: 'deployment' };
+  }
+  if (current && (current.budgetMode === 'uncapped' || current.capNanoUsd <= capNanoUsd)) return current;
   return { kind: 'paid_budget_policy', version: 1, revision: checkedAdd(current?.revision ?? 0, 1),
-    capNanoUsd, updatedAt: now, source: 'deployment' };
+    ...(current?.uncappedRolloutVersion ? { uncappedRolloutVersion: current.uncappedRolloutVersion } : {}), capNanoUsd, updatedAt: now, source: 'deployment' };
 }
 function readReservation(raw: unknown): StoredReservation {
   const r = raw as StoredReservation;
@@ -95,7 +101,7 @@ export class FreeChainStore {
     if (!this.db) return { allowed: false, reason: 'store_unavailable', resetAt: startedAt + 60_000 };
     try {
       const refs = this.quotaRefs(input);
-      return await this.db.runTransaction(async tx => {
+      return await inQuotaLane(this.db, input.provider, () => this.db!.runTransaction(async tx => {
         const [quotaSnap, neuronSnap, cooldownSnap] = await Promise.all([tx.get(refs.quota), tx.get(refs.neurons), tx.get(refs.cooldown)]);
         // Reads can wait or retry behind a newer valid commit. Validate against trusted time
         // AFTER those reads, never the older request-start time or a ledger-controlled timestamp.
@@ -122,9 +128,9 @@ export class FreeChainStore {
             { requests: 0, tokens: 0, neurons: input.limits.neuronsPerRequest! }, now), 'neurons'));
         }
         return { allowed: true, reason: 'allowed' as const, resetAt: ledgerResetAt(ledger, 'day', now) };
-      });
+      }));
     } catch (error) {
-      return { allowed: false, reason: error instanceof FreeChainDataError ? 'store_corrupt' : 'store_unavailable', resetAt: startedAt + 60_000 };
+      return { allowed: false, reason: error instanceof QuotaLaneBusyError ? 'local_capacity' : error instanceof FreeChainDataError ? 'store_corrupt' : 'store_unavailable', resetAt: error instanceof QuotaLaneBusyError ? Date.now() : startedAt + 60_000 };
     }
   }
   /** Cooldowns only extend. A late, shorter Retry-After cannot unbench an account early. */
@@ -161,7 +167,7 @@ export class FreeChainStore {
     validTime(startedAt);
     if (!this.db) throw new Error('Free chat safety store unavailable');
     const refs = this.quotaRefs(input);
-    return this.db.runTransaction(async tx => {
+    return inQuotaLane(this.db, input.provider, () => this.db!.runTransaction(async tx => {
       const [quotaSnap, neuronSnap, cooldownSnap] = await Promise.all([tx.get(refs.quota), tx.get(refs.neurons), tx.get(refs.cooldown)]);
       const now = fixedNow === undefined ? Date.now() : fixedNow;
       validTime(now);
@@ -171,29 +177,34 @@ export class FreeChainStore {
       return { available: true, usage: { ...quotaUsage(ledger), neuronsPerDay: quotaUsage(neurons).neuronsPerDay },
         minuteResetAt: ledgerResetAt(ledger, 'minute', now), dailyResetAt: ledgerResetAt(ledger, 'day', now),
         cooldownUntil: readCooldown(readData(cooldownSnap)) };
-    });
+    }));
   }
   /** Pure read: missing authority is not an implied budget and GET must never change policy. */
   async readPaidBudgetPolicy(): Promise<PaidBudgetPolicy | null> {
     return readPaidPolicy(readData(await this.ref('paid_budget_policy').get()));
   }
   /** Publish validated deployment configuration even when paid routing is disabled or the cap is zero. */
-  async observePaidBudgetPolicy(capNanoUsd = DEFAULT_PAID_CAP_NANO_USD, now = Date.now(), requireExisting = false): Promise<PaidBudgetPolicy> {
+  async observePaidBudgetPolicy(capNanoUsd = DEFAULT_PAID_CAP_NANO_USD, now = Date.now(), requireExisting = false, uncappedRollout = false): Promise<PaidBudgetPolicy> {
     if (!validPaidCapNanoUsd(capNanoUsd)) throw new Error('Invalid spend cap');
     validTime(now);
     const ref = this.ref('paid_budget_policy');
     return this.db!.runTransaction(async tx => {
       const current = readPaidPolicy(readData(await tx.get(ref)));
       if (requireExisting && !current) throw new Error('Shared budget authority absent');
-      const next = observePaidPolicy(current, capNanoUsd, now);
+      const next = observePaidPolicy(current, capNanoUsd, now, uncappedRollout);
       // The authority never expires or resets at midnight. Stale revisions may only LOWER it.
-      if (next !== current) tx.set(ref, next);
+      if (next !== current) {
+        tx.set(ref, next);
+        if (next.uncappedRolloutVersion && !current?.uncappedRolloutVersion) tx.set(this.db!.doc(`${FREE_CHAIN_COLLECTION}/state/actions/paid-budget-rollout-${next.revision}`), {
+          kind: 'paid_budget_policy_change', actorKind: 'owner_authorized_deployment', reason: 'Uncapped chat rollout v1', before: current, after: next, at: now,
+        });
+      }
       return next;
     });
   }
   /** Authenticated-admin boundary is enforced by the caller. This is the ONLY explicit raise path. */
   async setPaidBudgetPolicy(input: PaidBudgetPolicyUpdateInput, now = Date.now()): Promise<PaidBudgetPolicyUpdateResult> {
-    if (!input || !validPaidCapNanoUsd(input.capNanoUsd) || !nonnegativeInteger(input.expectedRevision)
+    if (!input || (input.budgetMode !== undefined && input.budgetMode !== 'capped' && input.budgetMode !== 'uncapped') || !validPaidCapNanoUsd(input.capNanoUsd) || !nonnegativeInteger(input.expectedRevision)
       || typeof input.actorUid !== 'string' || !input.actorUid.trim() || input.actorUid.length > 512
       || typeof input.reason !== 'string' || !input.reason.trim() || input.reason.trim().length > 500) {
       return { ok: false, reason: 'invalid_input' };
@@ -206,7 +217,7 @@ export class FreeChainStore {
         const current = readPaidPolicy(readData(await tx.get(ref)));
         if ((current?.revision ?? 0) !== input.expectedRevision) return { ok: false, reason: 'conflict', ...(current ? { policy: current } : {}) };
         const next: PaidBudgetPolicy = { kind: 'paid_budget_policy', version: 1, revision: checkedAdd(input.expectedRevision, 1),
-          capNanoUsd: input.capNanoUsd, updatedAt: now, source: 'admin' };
+          uncappedRolloutVersion: 1, ...(input.budgetMode ? { budgetMode: input.budgetMode } : {}), capNanoUsd: input.capNanoUsd, updatedAt: now, source: 'admin' };
         tx.set(ref, next);
         // Existing actions retention is 180 days; the financial authority itself has NO expiry.
         tx.set(this.db!.doc(`${FREE_CHAIN_COLLECTION}/state/actions/paid-budget-policy-${next.revision}`), {
@@ -233,10 +244,15 @@ export class FreeChainStore {
       return await this.db.runTransaction(async tx => {
         const [held, daily, user, policySnap] = await Promise.all([tx.get(ref), tx.get(dayRef), tx.get(userRef), tx.get(policyRef)]);
         const currentPolicy = readPaidPolicy(readData(policySnap));
-        const policy = observePaidPolicy(currentPolicy, configuredCap, now);
+        const policy = observePaidPolicy(currentPolicy, configuredCap, now, input.uncappedRollout);
         const cap = policy.capNanoUsd;
         // Publish stricter configuration even if this call is denied or is an idempotent replay.
-        if (policy !== currentPolicy) tx.set(policyRef, policy);
+        if (policy !== currentPolicy) {
+          tx.set(policyRef, policy);
+          if (policy.uncappedRolloutVersion && !currentPolicy?.uncappedRolloutVersion) tx.set(this.db!.doc(`${FREE_CHAIN_COLLECTION}/state/actions/paid-budget-rollout-${policy.revision}`), {
+            kind: 'paid_budget_policy_change', actorKind: 'owner_authorized_deployment', reason: 'Uncapped chat rollout v1', before: currentPolicy, after: policy, at: now,
+          });
+        }
         let day: SpendDay, userCount: number;
         try {
           const existing = readData(held);
@@ -250,12 +266,12 @@ export class FreeChainStore {
         } catch { return null; } // A bad accounting document cannot prevent a valid global lowering.
         const committed = checkedAdd(day.heldNanoUsd, day.spentNanoUsd);
         // Compare remaining capacity without overflowing and rolling back a valid policy lowering.
-        if (userCount >= perUserLimit || committed > cap || input.maxCostNanoUsd > cap - committed
+        if (userCount >= perUserLimit || (policy.budgetMode !== 'uncapped' && (committed > cap || input.maxCostNanoUsd > cap - committed))
           || day.requests === Number.MAX_SAFE_INTEGER) return null;
         const reservation: StoredReservation = { kind: 'paid_reservation', version: 1, status: 'held', id,
           day: window.key, uidHash, maxCostNanoUsd: input.maxCostNanoUsd, createdAt: now };
         writeSpendDay(tx, this.db!, { ...day, heldNanoUsd: checkedAdd(day.heldNanoUsd, input.maxCostNanoUsd),
-          requests: checkedAdd(day.requests, 1), pending: checkedAdd(day.pending, 1) }, cap, now, this.adminEmails);
+          requests: checkedAdd(day.requests, 1), pending: checkedAdd(day.pending, 1) }, cap, now, this.adminEmails, policy?.budgetMode);
         writePaidUser(tx, this.db!, window, uidHash, checkedAdd(userCount, 1));
         // No expiry, even after settlement: this small tombstone prevents replay of a physical call ID.
         tx.set(ref, reservation);
@@ -289,7 +305,7 @@ export class FreeChainStore {
         const cap = policy?.capNanoUsd ?? daily.capNanoUsd;
         if (!nonnegativeInteger(cap) || day.pending < 1 || day.heldNanoUsd < stored.maxCostNanoUsd) throw new FreeChainDataError('Inconsistent held cost');
         writeSpendDay(tx, this.db!, { ...day, heldNanoUsd: day.heldNanoUsd - stored.maxCostNanoUsd,
-          spentNanoUsd: checkedAdd(day.spentNanoUsd, actualCostNanoUsd), pending: day.pending - 1 }, cap, now, this.adminEmails);
+          spentNanoUsd: checkedAdd(day.spentNanoUsd, actualCostNanoUsd), pending: day.pending - 1 }, cap, now, this.adminEmails, policy?.budgetMode);
         // Actual cost above the hold is recorded honestly and blocks further spend, never clipped.
         tx.set(ref, { ...stored, status: 'settled', actualCostNanoUsd, settledAt: now });
         return true;
@@ -305,8 +321,8 @@ export class FreeChainStore {
       const day = readSpendDay(readData(daily), window);
       const policy = readPaidPolicy(readData(policySnap));
       const committedNanoUsd = checkedAdd(day.heldNanoUsd, day.spentNanoUsd);
-      return { ...day, available: policy !== null, committedNanoUsd, capNanoUsd: policy?.capNanoUsd ?? null,
-        policyRevision: policy?.revision ?? null, remainingNanoUsd: policy ? Math.max(0, policy.capNanoUsd - committedNanoUsd) : null };
+      return { ...day, budgetMode: policy?.budgetMode ?? 'capped', available: policy !== null, committedNanoUsd, capNanoUsd: policy?.capNanoUsd ?? null,
+        policyRevision: policy?.revision ?? null, remainingNanoUsd: policy && policy.budgetMode !== 'uncapped' ? Math.max(0, policy.capNanoUsd - committedNanoUsd) : null };
     });
   }
 }

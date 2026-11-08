@@ -118,6 +118,10 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   admin_failed_report_oauth_clients: { kind: 'platform', why: 'OAuth dynamic client registrations for the owner-only failed-report connector (failedReportOAuth.ts): client name, redirect URLs and a HASHED secret, capped at 100 in a transaction, 30-day expiry, expired rows swept on the next registration — no customer data' },
   admin_failed_report_oauth_requests: { kind: 'platform', why: 'pending owner-consent requests for that connector (failedReportOAuth.ts): client id, redirect URL, PKCE challenge, and after approval a HASHED one-time code; capped at 100, 10-minute expiry (2 minutes once approved), deleted on denial or code exchange, expired rows swept on the next request — no customer data' },
   admin_failed_report_access: { kind: 'platform', why: 'bounded owner-issued report-access configuration (at most 100 hashed credentials, transaction-enforced); not customer-owned data, 30-day authentication expiry, owner revocation removes the record' },
+  admin_provider_switches: { kind: 'forever', why: 'the AI provider on/off switches: one state doc with a bounded 50-change history; deleting it would switch every provider back on' },
+  admin_api_provider_accounts: { kind: 'forever', why: 'the admin’s own note of which login each outside API account uses — one small doc per provider, replaced in place, cleared by the admin' },
+  admin_build_report_counter: { kind: 'forever', why: 'singleton counter for permanent build report numbers (every outcome); deleting it would let a number be issued twice' },
+  build_report_numbers: { kind: 'workspace', why: "one row per build report holding its permanent number, keyed `${workspaceId}~${startedAt}`; erased with the workspace and on the report's own 180-day clock" },
   admin_failed_report_numbers: { kind: 'forever', why: 'singleton counter for permanent failed-build report numbers (max+1 on retain); deleting it would allow reuse and break agent references' },
   user_vault_pin:      { kind: 'user', why: "the user's App Lock PIN record — doc id IS the uid" },
   agentv3_mcp_library: { kind: 'user', why: "the user's saved MCP servers — doc id IS the uid" },
@@ -398,10 +402,12 @@ const SCOPED_DOCUMENT_RECEIVERS: Record<string, Record<string, { why: string; as
     ref: { why: 'controlRef returns the fixed free_chat_chain/state document; its actions child has an explicit 180-day subcollection retention policy',
       assignment: /const ref = controlRef\(db\)/ },
   },
-  'src/server/lib/buildReportNumbering.ts': {
+  // Moved from buildReportNumbering.ts (2026-11-02): the rank scan there was retired; the same read-only
+  // walk of each workspace's history now lives in the registry's one-time backfill inventory.
+  'src/server/lib/buildReportRegistry.ts': {
     ref: {
       why: 'parent is a workspace_diagnostics_v3 query document snapshot; its history is the existing workspace subcollection, read-only here',
-      assignment: /const history = parent\.ref\.collection\('history'\)/,
+      assignment: /parent\.ref\.collection\('history'\)\.orderBy\(FieldPath\.documentId\(\)\)/,
     },
   },
   'src/server/lib/failedReportAutopsy.ts': {

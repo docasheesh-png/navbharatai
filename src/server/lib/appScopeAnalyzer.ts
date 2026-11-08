@@ -19,7 +19,7 @@
 import { countEnumeratedFeatures, notAFeatureLine, BIG_SOFTWARE_NOUN, sectionedSpecSize } from '../AgentV3/enumeratedFeatures';
 import { withoutMachineText } from './machineText';
 import { glossDevanagari, withEnglishReading } from './devanagariTechTerms';
-import { MEDIA_PLAYER_APP } from './RequirementGapAnalyzer';
+import { MEDIA_PLAYER_APP, withoutDeclinedSentences } from './RequirementGapAnalyzer';
 import { megaProjectSignals, MEGA_SCALE_MIN, MEGA_BULLETS_WITH_NOUN, MEGA_BULLETS_ALONE, type MegaProjectSignals } from '../AgentV3/ProjectPlan';
 
 export type AppSize = 'small' | 'large';
@@ -280,7 +280,9 @@ export function analyzeAppScope(prompt: string): AppScope {
   const readable = withEnglishReading(text);
   const subject = withEnglishReading(requestSubject(text));
   const famous = FAMOUS_APPS.find((f) => namesAsProduct(readable, f.re, { needsIntent: true, subject }));
-  const heavy = HEAVY_INFRA.filter((h) => h.re.test(readable));
+  // Infrastructure the user DECLINED is not infrastructure the app needs (autopsy 958aa1ec: "no login, multiplayer,
+  // purchases or backend" was read as "needs multiplayer / online play" and the racing game became a LARGE build).
+  const heavy = HEAVY_INFRA.filter((h) => h.re.test(withEnglishReading(withoutDeclinedSentences(text))));
   const feats = featureCount(text);
   // THE SIZE SIGNALS ONLY PROJECT MODE USED TO READ (Q-138): an explicit scale, a big-software system with
   // named parts, and a spec long enough to be a project. Read through Project Mode's own function, so the

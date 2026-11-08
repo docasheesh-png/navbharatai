@@ -58,7 +58,7 @@ export interface PlatformChecks {
   /** The 390×844 touch check. */
   phone?: PhoneOutcome;
   /** The game playtest (gamePlaytest.ts): played with keys, a drag and a thumb, and scored. */
-  game?: { outcome: PhoneOutcome; score?: number | null };
+  game?: { outcome: PhoneOutcome; score?: number | null; unplayed?: boolean };
 }
 
 export interface ProofOpts {
@@ -92,6 +92,11 @@ export function platformChecksProof(checks: PlatformChecks, opts: ProofOpts): Us
   const g = checks.game;
   if (g && g.outcome === 'passed') passes.push(`NavBharatAI played your game — it answered its controls on a keyboard and a touch screen, and scored ${g.score ?? '—'}/100.`);
   else if (g && g.outcome === 'failed') problems.push(`NavBharatAI played your game and found something to fix (Game Quality Score ${g.score ?? '—'}/100).`);
+  // 🔴 A game the playtest tried and could not play is NOT VERIFIED, and the card says so (autopsy 61279465:
+  // the user read "complete and working" about a train game nobody had driven). Not a defect in the game —
+  // a check that could not finish — so it is its own line, never a pass and never silence.
+  const unverified: string[] = [];
+  if (g && g.outcome === 'not-run' && g.unplayed) unverified.push('NavBharatAI could not finish playing your game here, so its controls and camera are not verified yet.');
 
   if (checks.phone === 'passed') passes.push('Your app was opened on a phone-sized screen — it fits, and its buttons are big enough to tap.');
   else if (checks.phone === 'failed') problems.push('On a phone-sized screen your app does not fit properly yet.');
@@ -105,13 +110,15 @@ export function platformChecksProof(checks: PlatformChecks, opts: ProofOpts): Us
   if (checks.typecheck === 'passed') passes.push('The whole app was compiled with no errors.');
   else if (checks.typecheck === 'failed') problems.push('The app compiles with errors still in it.');
 
-  const steps = [...problems, ...passes].slice(0, MAX_PROOF_LINES);
+  const steps = [...problems, ...unverified, ...passes].slice(0, MAX_PROOF_LINES);
   if (steps.length === 0) return { ok: false, headline: '', steps: [] };
   return {
-    ok: problems.length === 0,
-    headline: problems.length === 0
-      ? 'NavBharatAI checked your app'
-      : 'NavBharatAI checked your app and found a problem',
+    ok: problems.length === 0 && unverified.length === 0,
+    headline: problems.length > 0
+      ? 'NavBharatAI checked your app and found a problem'
+      : unverified.length > 0
+        ? 'NavBharatAI checked your app — the game itself is not verified yet'
+        : 'NavBharatAI checked your app',
     steps,
   };
 }

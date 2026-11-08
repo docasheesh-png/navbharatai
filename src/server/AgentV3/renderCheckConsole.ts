@@ -199,3 +199,21 @@ export function splitAssetMisses(lines: readonly string[]): { kept: string[]; as
   for (const l of Array.isArray(lines) ? lines : []) (on && isStaticAssetMiss(l) ? assetMisses : kept).push(l);
   return { kept, assetMisses };
 }
+
+/**
+ * 🔴 WHAT A CLEAN CONSOLE READ COVERS (Q-2303, autopsy 8701aaa1 / c71e56de). The builder's `console_errors` tool said
+ * "the console was read and it was clean" and the builder declared the game fixed — once after a read taken BEFORE
+ * its last edit, so the browser had never run the code it was vouching for. A clean read is evidence only about the
+ * page a browser had open, at the time it had it open. This says which, so a stale read cannot pass as proof. PURE.
+ */
+export function consoleCleanVerdict(opts: { lastSessionAt?: number; lastWriteAt?: number; now: number }): string {
+  const ago = (t: number) => `${Math.max(0, Math.round((opts.now - t) / 1000))}s ago`;
+  if (opts.lastSessionAt !== undefined && opts.lastWriteAt !== undefined && opts.lastSessionAt < opts.lastWriteAt) {
+    return `No errors were recorded — but the newest browser look at the app was ${ago(opts.lastSessionAt)}, BEFORE your last `
+      + `file change (${ago(opts.lastWriteAt)}). It never ran the current code, so this is NOT evidence that your change works. `
+      + 'Take a screenshot (or a browser_action) now, then ask again.';
+  }
+  return `No runtime browser errors in the window — a browser looked at the app ${opts.lastSessionAt !== undefined ? ago(opts.lastSessionAt) : 'in this window'}`
+    + `${opts.lastWriteAt !== undefined ? ', after your last change' : ''}, and its console was clean. This covers what that page did while `
+    + "it was open: a game's errors while it is PLAYED are measured by NavBharatAI's own playtest, not by this read.";
+}

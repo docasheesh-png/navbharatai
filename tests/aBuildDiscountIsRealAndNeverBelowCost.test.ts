@@ -177,7 +177,7 @@ describe('REVERSION GUARDS — both settle paths apply it, last, with our cost a
   const route = src('src/server/routes/agentv3.ts');
 
   it('the normal settle: after every zeroing rule, before the charge is recorded or debited', () => {
-    const at = route.indexOf('floorUsd: decidedRealCostUsd + decidedSandboxUsd');
+    const at = route.indexOf('floorUsd: decidedRealCostUsd');
     const onboarding = route.indexOf("zeroBillReason = 'free onboarding build (new-user welcome credit)'");
     const recorded = route.indexOf('userCostStore.record(userId, effectiveBilledUsd)');
     const debited = route.indexOf('billedInr: effectiveBilledUsd * usdInrRate(),');
@@ -188,7 +188,7 @@ describe('REVERSION GUARDS — both settle paths apply it, last, with our cost a
   });
 
   it('the time-capped finalizer applies the same rule before it records and debits', () => {
-    const at = route.indexOf('floorUsd: decided.realCostUsd + decided.sandboxUsd');
+    const at = route.indexOf('floorUsd: decided.realCostUsd');
     const setBilling = route.indexOf('billedUsd: Math.round(watchdogBilledUsd * 1_000_000) / 1_000_000');
     const debit = route.indexOf('billedInr: watchdogBilledUsd * usdInrRate(),');
     expect(at).toBeGreaterThan(0);
@@ -197,8 +197,8 @@ describe('REVERSION GUARDS — both settle paths apply it, last, with our cost a
   });
 
   it('both paths hand the decision to the user-facing breakdown and the message', () => {
-    expect(route).toContain('usdInrRate(), livePreviewCharge, buildDiscount);');
-    expect(route).toContain('usdInrRate(), watchdogLivePreview, watchdogDiscount)');
+    expect(route).toContain('usdInrRate(), livePreviewCharge, buildDiscount, settledSandboxFee);');
+    expect(route).toContain('usdInrRate(), watchdogLivePreview, watchdogDiscount, watchdogSandboxFee)');
     expect(route.match(/buildDiscountLine\(\{/g)?.length).toBe(2);
     // Three since 2026-09-28: the live ₹ figure reads the same setting once, up front, so what the
     // user watches during the build is discounted exactly as the bill will be (liveBuildCost.ts).

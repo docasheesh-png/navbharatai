@@ -29,6 +29,8 @@
 // PURE builder → the caller writes the files. The generated code imports three; the generator does not.
 
 import { kitTypeContract } from './kitTypeContract';
+// L3 is emitted only by acknowledged build-time acquisition, never by the default procedural kit.
+export { generateGameAssetRuntime } from './GameAssetRuntimeGenerator';
 
 export interface Game3DResult {
   files: Record<string, string>;
@@ -37,6 +39,7 @@ export interface Game3DResult {
 }
 
 const RENDERER = `import * as THREE from 'three';
+import { softwareRenderer } from './surfaces';
 
 /**
  * The renderer, set up the way a scene actually needs — not the defaults.
@@ -58,15 +61,22 @@ export interface RendererOptions {
   shadows?: boolean;
 }
 
+/** The pixel ratio on a software renderer: half the pixels of 1x in each direction is a quarter of the shading. */
+export const SOFTWARE_PIXEL_RATIO = 0.5;
+
 export function createRenderer(options: RendererOptions = {}): THREE.WebGLRenderer {
+  // No GPU (a software renderer — see surfaces.ts softwareRenderer): every pixel is shaded by the CPU, so draw fewer
+  // of them and skip multisampling. Measured on the 61279465 train scene: this is what turns 2 frames a second into a
+  // playable game in the build sandbox's browser and on a device without a GPU. A real GPU is unaffected.
+  const software = softwareRenderer();
   const renderer = new THREE.WebGLRenderer({
     canvas: options.canvas,
-    antialias: options.antialias ?? true,
+    antialias: software ? false : (options.antialias ?? true),
     powerPreference: 'high-performance',
     // Only ask for alpha when it is really needed: a transparent canvas costs blending every frame.
     alpha: false,
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, options.maxPixelRatio ?? 2));
+  renderer.setPixelRatio(software ? SOFTWARE_PIXEL_RATIO : Math.min(window.devicePixelRatio || 1, options.maxPixelRatio ?? 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
 
   // The four lines that decide whether the scene looks right.
@@ -314,6 +324,7 @@ export function disposeMaterials(): void {
 const CAMERA = `import * as THREE from 'three';
 import { damp } from '../core/feel';
 import { vehicleAt, isVehicle } from './objects';
+import { groundHeightAt } from './surfaces';
 
 /**
  * Camera rigs.
@@ -330,7 +341,16 @@ import { vehicleAt, isVehicle } from './objects';
  * face +Z (objects.ts, MODEL_FORWARD). For a character that does not matter (it turns to face where it
  * walks); for a vehicle it is the whole bug — see update().
  */
-export type CameraKind = 'third-person' | 'first-person' | 'top-down' | 'side-scroller' | 'orbit' | 'fixed' | 'chase';
+export type CameraKind = 'third-person' | 'first-person' | 'top-down' | 'side-scroller' | 'orbit' | 'fixed' | 'chase' | 'cinematic';
+
+/**
+ * How much of a LONG vehicle the chase view frames, in metres behind its pivot (a train, a bus convoy).
+ * Past this the camera rides ABOVE the trailing units instead of behind the last one, so the lead unit
+ * stays big enough to read while the first coaches and the track ahead stay in view.
+ */
+export const CHASE_FRAME_MAX = 40;
+/** How far ahead of a vehicle's nose the ground first shows over its roof in the chase view, in metres. */
+export const CHASE_SIGHT_M = 30;
 
 /** What a rig frames: a point, or the object itself — which also tells it which way the object faces. */
 export type CameraTarget = THREE.Vector3 | THREE.Object3D;
@@ -350,7 +370,7 @@ export interface CameraRigOptions {
 
 export class CameraRig {
   readonly camera: THREE.PerspectiveCamera;
-  private readonly kind: CameraKind;
+  private kind: CameraKind;
   private readonly distance: number;
   private readonly height: number;
   private readonly stiffness: number;
@@ -368,6 +388,9 @@ export class CameraRig {
   private readonly travelLast = new THREE.Vector3();
   private travelSeen = false;
   private travelKnown = false;
+  /** Each framed object's extent in its own heading frame (+Z forward, metres), refreshed as it changes. */
+  private readonly extents = new WeakMap<THREE.Object3D, { box: THREE.Box3 | null; parts: number; age: number }>();
+  private cinematicAngle = 0.6;
 
   constructor(options: CameraRigOptions = {}) {
     this.kind = options.kind ?? 'third-person';
@@ -402,6 +425,10 @@ export class CameraRig {
     for (const c of list) c.updateMatrixWorld(true);
   }
 
+  /** Switch view at run time (a "camera" button: 'chase' ↔ 'first-person' ↔ 'cinematic'). */
+  setKind(kind: CameraKind): void { this.kind = kind; }
+  get currentKind(): CameraKind { return this.kind; }
+
   /** Feed the frame's look delta (Input.lookX/lookY). */
   look(dx: number, dy: number, sensitivity = 0.0025): void {
     this.yawAngle -= dx * sensitivity;
@@ -427,7 +454,8 @@ export class CameraRig {
    */
   update(target: CameraTarget, delta: number): void {
     const object = isObject3D(target) ? target : vehicleAt(target);
-    if (this.kind === 'chase') {
+    if (this.kind === 'cinematic' && object) { this.cinematic(object, delta); return; }
+    if (this.kind === 'chase' || this.kind === 'cinematic') {
       if (object) this.follow(object, delta);
       else this.chasePoint(target as THREE.Vector3, delta);
       return;
@@ -495,7 +523,101 @@ export class CameraRig {
    */
   follow(object: THREE.Object3D, delta: number, lookAhead = 4): void {
     object.getWorldPosition(this.followPos);
-    this.chaseFrom(this.followPos, this.headingOf(object), delta, lookAhead);
+    this.chaseFrom(this.followPos, this.headingOf(object), delta, lookAhead, object);
+  }
+
+  /**
+   * 📐 THE OBJECT'S REAL SIZE, in its own heading frame: +Z forward, +Y up, metres (world scale kept, its
+   * rotation removed). min.z < 0 is how far it reaches BEHIND its pivot, max.y how tall it stands.
+   *
+   * 🔴 WHY (admin 2026-11-04, train build 61279465: "the third-person camera is positioned inside the
+   * train"). The chase view sat a FIXED 7 m behind and 2.2 m above the pivot — right for a 4.5 m car,
+   * and INSIDE a 20 m locomotive, whose own body then filled the screen. The offset now comes from this
+   * box, so a car, a bus, a plane and a 90 m train are each framed from outside their own geometry.
+   * Refreshed when its part count changes (a coach coupled on) and every 30 frames otherwise.
+   */
+  extentOf(object: THREE.Object3D): THREE.Box3 | null {
+    let parts = 0;
+    object.traverse(() => { parts++; });
+    const seen = this.extents.get(object);
+    if (seen && seen.parts === parts && seen.age++ < 30) return seen.box;
+    object.updateMatrixWorld(true);
+    object.getWorldPosition(this.targetPos);
+    object.getWorldQuaternion(this.followQuat);
+    const frame = new THREE.Matrix4().compose(this.targetPos, this.followQuat, new THREE.Vector3(1, 1, 1)).invert();
+    const box = new THREE.Box3();
+    const part = new THREE.Box3();
+    const m = new THREE.Matrix4();
+    object.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.visible || !mesh.geometry || (o as THREE.InstancedMesh).isInstancedMesh) return;
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      const b = mesh.geometry.boundingBox;
+      if (!b || b.isEmpty()) return;
+      box.union(part.copy(b).applyMatrix4(m.multiplyMatrices(frame, mesh.matrixWorld)));
+    });
+    const out = box.isEmpty() || ![box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z].every(Number.isFinite) ? null : box;
+    this.extents.set(object, { box: out, parts, age: 0 });
+    return out;
+  }
+
+  /** Is a world point inside the object's own box (grown by \`margin\`)? The penetration test every view uses. */
+  insideOf(object: THREE.Object3D, point: THREE.Vector3, margin = 0.25): boolean {
+    const box = this.extentOf(object);
+    if (!box) return false;
+    object.getWorldPosition(this.targetPos);
+    object.getWorldQuaternion(this.followQuat);
+    const local = point.clone().sub(this.targetPos).applyQuaternion(this.followQuat.clone().invert());
+    return box.clone().expandByScalar(margin).containsPoint(local);
+  }
+
+  /** CINEMATIC — a slow drifting three-quarter view from outside the vehicle, for menus and replays. */
+  private cinematic(object: THREE.Object3D, delta: number): void {
+    const fwd = this.headingOf(object).clone();
+    object.getWorldPosition(this.followPos);
+    const box = this.extentOf(object);
+    const len = box ? box.max.z - box.min.z : 4;
+    const top = box ? Math.max(0, box.max.y) : this.height;
+    this.cinematicAngle += delta * 0.15;
+    const a = 0.6 + Math.sin(this.cinematicAngle) * 0.5;
+    const dir = fwd.clone().negate().applyAxisAngle(new THREE.Vector3(0, 1, 0), a);
+    const r = Math.max(this.distance * 1.3, Math.min(len, CHASE_FRAME_MAX) * 0.9 + 6);
+    const wanted = this.followPos.clone().addScaledVector(dir, r);
+    wanted.y += Math.max(this.height * 1.4, top * 1.5);
+    this.keepClear(object, wanted);
+    if (!this.cameraUsable(object, wanted, r)) this.camera.position.copy(wanted);
+    else this.camera.position.set(
+      damp(this.camera.position.x, wanted.x, 2, delta),
+      damp(this.camera.position.y, wanted.y, 2, delta),
+      damp(this.camera.position.z, wanted.z, 2, delta),
+    );
+    this.camera.lookAt(this.followPos.x, this.followPos.y + top * 0.5, this.followPos.z);
+  }
+
+  /**
+   * The camera may not end up inside the vehicle it frames, nor under the ground. Pushes \`wanted\` up
+   * over the object's roof, and above the terrain, in place.
+   */
+  private keepClear(object: THREE.Object3D | null, wanted: THREE.Vector3): void {
+    if (object && this.insideOf(object, wanted, 0.3)) {
+      const box = this.extentOf(object);
+      object.getWorldPosition(this.targetPos);
+      if (box) wanted.y = this.targetPos.y + box.max.y + 0.8;
+    }
+    const ground = groundHeightAt(wanted.x, wanted.z);
+    if (Number.isFinite(ground) && wanted.y < ground + 0.5) wanted.y = ground + 0.5;
+  }
+
+  /**
+   * Can the camera be damped from where it is, or must it be put straight at \`wanted\`? Not when its
+   * position is not a number, when it sits inside the object (a fresh rig at the origin, a respawn
+   * onto it), or when it is far further away than any chase would leave it (a teleport).
+   */
+  private cameraUsable(object: THREE.Object3D | null, wanted: THREE.Vector3, reach: number): boolean {
+    const p = this.camera.position;
+    if (![p.x, p.y, p.z].every(Number.isFinite)) return false;
+    if (object && this.insideOf(object, p, 0.05)) return false;
+    return p.distanceTo(wanted) < Math.max(12, reach * 3);
   }
 
   /** The object's forward (its local +Z) in the world, flattened onto the ground. */
@@ -522,44 +644,87 @@ export class CameraRig {
     }
     this.travelLast.copy(point);
     this.travelSeen = true;
-    this.chaseFrom(this.targetPos.copy(point), this.travelFwd, delta, 4);
+    this.chaseFrom(this.travelLast.clone(), this.travelFwd, delta, 4, null);
   }
 
   /** Inside a vehicle ('first-person'): eye height, looking where the vehicle points, pitch still the player's. */
   private cockpit(vehicle: THREE.Object3D): void {
-    const fwd = this.headingOf(vehicle);
+    const fwd = this.headingOf(vehicle).clone();
+    const box = this.extentOf(vehicle);
     vehicle.getWorldPosition(this.followPos);
     this.camera.position.copy(this.followPos).add(new THREE.Vector3(0, this.height * 0.8, 0));
+    // A LONG vehicle (a train, a bus) is driven from its front cab, not from its middle: at the pivot the
+    // driver's eye would sit 10 m back inside a locomotive, looking at the inside of its own body.
+    if (box && box.max.z - box.min.z > 8) {
+      this.camera.position.copy(this.followPos).addScaledVector(fwd, Math.max(0, box.max.z - 1.2));
+      this.camera.position.y = this.followPos.y + Math.max(1.2, box.max.y * 0.72);
+    }
     this.yawAngle = Math.atan2(-fwd.x, -fwd.z);
     this.camera.rotation.set(this.pitch, this.yawAngle, 0, 'YXZ');
   }
 
-  /** The one chase view: \`distance\` behind \`pos\` along \`fwd\`, \`height\` up, looking past it. */
-  private chaseFrom(pos: THREE.Vector3, fwd: THREE.Vector3, delta: number, lookAhead: number): void {
+  /**
+   * The one chase view: behind \`pos\` along \`fwd\`, above it, looking past its FRONT.
+   *
+   * 📐 SIZED BY THE OBJECT (see extentOf). \`distance\` and \`height\` are the MINIMUM for a car-sized
+   * target; a bigger one pushes them out to clear its own rear and roof, so the camera never starts in,
+   * or damps through, the thing it is following. A target longer than CHASE_FRAME_MAX behind its pivot is
+   * framed over its trailing units. A portrait phone sees less sideways, so the view backs off a little.
+   */
+  private chaseFrom(pos: THREE.Vector3, fwd: THREE.Vector3, delta: number, lookAhead: number, object: THREE.Object3D | null): void {
+    fwd = fwd.clone();
+    const box = object ? this.extentOf(object) : null;
+    const behindExt = box ? Math.max(0, -box.min.z) : 0;
+    const frontExt = box ? Math.max(0, box.max.z) : 0;
+    const top = box ? Math.max(0, box.max.y) : 0;
+    const framed = Math.min(behindExt, CHASE_FRAME_MAX);
+    const portrait = this.camera.aspect > 0 && this.camera.aspect < 1 ? 1 + (1 - this.camera.aspect) * 0.35 : 1;
+    let dist = this.distance;
+    let height = this.height;
+    if (box) {
+      dist = Math.max(this.distance, framed + Math.max(3, Math.min(behindExt + frontExt, CHASE_FRAME_MAX) * 0.25)) * portrait;
+      // The sightline over the roof's FRONT edge must reach the ground CHASE_SIGHT_M ahead of the nose, so
+      // the track or road in front is in view instead of hidden behind the vehicle's own body.
+      height = Math.max(this.height, top * 1.2 + Math.min(behindExt + frontExt, CHASE_FRAME_MAX) * 0.08,
+        top + (top / CHASE_SIGHT_M) * (dist + frontExt));
+      if (behindExt > framed) height = Math.max(height, top + 2.5);
+    }
+
     const focus = pos.clone();
-    focus.y += this.height * 0.5;
-    let wanted = pos.clone().addScaledVector(fwd, -this.distance);
-    wanted.y += this.height;
+    focus.y += box ? Math.max(this.height * 0.5, top * 0.6) : this.height * 0.5;
+    let wanted = pos.clone().addScaledVector(fwd, -dist);
+    wanted.y += height;
 
     if (this.collidables.length > 0) {
       const dir = wanted.clone().sub(focus);
-      const dist = dir.length();
+      const span = dir.length();
       this.ray.set(focus, dir.normalize());
-      this.ray.far = dist;
-      const hit = this.ray.intersectObjects(this.collidables, true)[0];
+      this.ray.far = span;
+      // 🔴 ITS OWN BODY IS NOT AN OBSTACLE. A game that lists the train among its colliders made the ray
+      // hit the inside of the locomotive at once — and pulled the camera INTO it, the reported defect.
+      const hit = this.ray.intersectObjects(this.collidables, true).find((h) => !object || !this.isPartOf(h.object, object));
       if (hit) wanted = focus.clone().add(dir.multiplyScalar(Math.max(0.6, hit.distance - 0.3)));
     }
+    this.keepClear(object, wanted);
 
     // A new target, respawn or sharp turn can leave the old camera IN FRONT. Damping from there
-    // would show headlights and mirror steering until it caught up. Never render that hemisphere.
+    // would show headlights and mirror steering until it caught up. Never render that hemisphere —
+    // nor from inside the vehicle, nor from a position that is not a number.
     const behind = this.camera.position.clone().sub(pos).dot(fwd) < -0.001;
-    if (behind) this.dampTo(wanted, delta);
+    if (behind && this.cameraUsable(object, wanted, dist)) this.dampTo(wanted, delta);
     else this.camera.position.copy(wanted);
-    const look = pos.clone().addScaledVector(fwd, lookAhead);
-    look.y += this.height * 0.35;
+    // A damped step may still pass through the body on a sharp turn: never render a frame from inside it.
+    if (object && this.insideOf(object, this.camera.position, 0.05)) this.camera.position.copy(wanted);
+    const look = pos.clone().addScaledVector(fwd, frontExt + lookAhead);
+    look.y += box ? Math.max(this.height * 0.35, top * 0.5) : this.height * 0.35;
     this.camera.lookAt(look);
     // The yaw whose third-person offset (sin yaw, cos yaw) points BEHIND the object: offset = -fwd.
     this.yawAngle = Math.atan2(-fwd.x, -fwd.z);
+  }
+
+  private isPartOf(o: THREE.Object3D, root: THREE.Object3D): boolean {
+    for (let p: THREE.Object3D | null = o; p; p = p.parent) if (p === root) return true;
+    return false;
   }
 
   private dampTo(wanted: THREE.Vector3, delta: number): void {
@@ -581,7 +746,8 @@ export class CameraRig {
 
 const WORLD = `import * as THREE from 'three';
 import { sharedMaterial, paletteColor, type PaletteName } from './materials';
-import { surfaceMaterial, enableAO, getDetailLevel, mergeGeometries, type Detail, type SurfaceKind } from './surfaces';
+import { surfaceMaterial, enableAO, getDetailLevel, resolveDetail, mergeGeometries, registerTerrain, shapedHeight, type Detail, type SurfaceKind } from './surfaces';
+export { groundHeightAt, syncGround } from './surfaces';
 
 /**
  * Procedural world building — an environment with no asset library.
@@ -643,17 +809,12 @@ export function createTerrain(options: TerrainOptions = {}): THREE.Mesh {
   const geo = new THREE.PlaneGeometry(size, size, segments, segments);
   geo.rotateX(-Math.PI / 2);
 
+  // 🔒 ONE HEIGHT FUNCTION. The vertices are set from terrainHeightFn() and the surface sampler reads
+  // the SAME vertex heights back, triangle by triangle, so what the car stands on is exactly what is drawn.
+  const field = terrainHeightFn(options);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
   if (!options.flat) {
-    const noise = valueNoise2D(options.seed ?? 1);
-    const amp = options.amplitude ?? 6;
-    const freq = options.frequency ?? 0.02;
-    const pos = geo.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), z = pos.getZ(i);
-      // Two octaves: a broad shape plus a finer detail pass. One octave looks like rolling blobs.
-      const h = noise(x * freq, z * freq) * amp + noise(x * freq * 3.7, z * freq * 3.7) * amp * 0.25;
-      pos.setY(i, h);
-    }
+    for (let i = 0; i < pos.count; i++) pos.setY(i, field(pos.getX(i), pos.getZ(i)));
     pos.needsUpdate = true;
     // Without recomputed normals the lighting is flat and the hills are invisible.
     geo.computeVertexNormals();
@@ -677,7 +838,7 @@ export function createTerrain(options: TerrainOptions = {}): THREE.Mesh {
   // 🔴 THE REAL TIER IS TEXTURED. This used to be a flat palette colour in every tier, so after
   // setDetailLevel('real') the car, the road and the trees were textured and the ground under all of
   // them — the largest thing on screen — was not. One texel per ~3 m reads as grass, not as a pattern.
-  const detail = options.detail ?? getDetailLevel();
+  const detail = resolveDetail(options.detail ?? getDetailLevel());
   let material: THREE.Material;
   if (detail === 'real') {
     const m = surfaceMaterial(options.surface ?? groundSurface(palette), { repeat: Math.max(8, Math.round(size / 3)) });
@@ -692,7 +853,56 @@ export function createTerrain(options: TerrainOptions = {}): THREE.Mesh {
   }
   const mesh = new THREE.Mesh(geo, material);
   mesh.receiveShadow = true;
+  const heightAt = surfaceSampler(pos, size, segments, mesh);
+  mesh.userData.heightAt = heightAt;
+  // Every driveVehicle(), groundScene() and createRoad() now follows these hills — no opt-in to forget.
+  // rebuild() re-cuts the ground under roads declared before OR after this terrain.
+  registerTerrain({
+    base: field, drawn: heightAt, step: size / segments, flat: !!options.flat,
+    rebuild: () => {
+      if (options.flat) return;
+      for (let i = 0; i < pos.count; i++) pos.setY(i, shapedHeight(pos.getX(i) + mesh.position.x, pos.getZ(i) + mesh.position.z) - mesh.position.y);
+      pos.needsUpdate = true;
+      geo.computeVertexNormals();
+      geo.computeBoundingSphere();
+      geo.computeBoundingBox();
+    },
+  });
   return mesh;
+}
+
+/**
+ * The analytic height field createTerrain() displaces its vertices with (0 everywhere when flat). Two
+ * octaves: a broad shape plus a finer detail pass. One octave looks like rolling blobs.
+ */
+export function terrainHeightFn(options: TerrainOptions = {}): (x: number, z: number) => number {
+  if (options.flat) return () => 0;
+  const noise = valueNoise2D(options.seed ?? 1);
+  const amp = options.amplitude ?? 6;
+  const freq = options.frequency ?? 0.02;
+  return (x, z) => noise(x * freq, z * freq) * amp + noise(x * freq * 3.7, z * freq * 3.7) * amp * 0.25;
+}
+
+/**
+ * The height of the DRAWN surface at world (x, z): the grid's vertex heights interpolated over the same
+ * two triangles per cell PlaneGeometry draws (diagonal from (ix, iz+1) to (ix+1, iz)). Follows the mesh
+ * if the game moves it. Outside the terrain it clamps to the edge.
+ */
+function surfaceSampler(pos: THREE.BufferAttribute, size: number, segments: number, mesh: THREE.Object3D) {
+  const n = segments + 1;
+  const step = size / segments;
+  const half = size / 2;
+  const hAt = (ix: number, iz: number) => pos.getY(iz * n + ix);
+  return (wx: number, wz: number): number => {
+    const x = wx - mesh.position.x, z = wz - mesh.position.z;
+    const gx = Math.min(segments - 1e-6, Math.max(0, (x + half) / step));
+    const gz = Math.min(segments - 1e-6, Math.max(0, (z + half) / step));
+    const ix = Math.floor(gx), iz = Math.floor(gz);
+    const fx = gx - ix, fz = gz - iz;
+    const a = hAt(ix, iz), b = hAt(ix, iz + 1), c = hAt(ix + 1, iz + 1), d = hAt(ix + 1, iz);
+    const h = fx + fz <= 1 ? a + (d - a) * fx + (b - a) * fz : c + (b - c) * (1 - fx) + (d - c) * (1 - fz);
+    return h * mesh.scale.y + mesh.position.y;
+  };
 }
 
 export interface ScatterOptions {
@@ -802,7 +1012,339 @@ export type Detail = 'real' | 'lite';
  */
 let DEFAULT_DETAIL: Detail = 'lite';
 export function setDetailLevel(detail: Detail): void { DEFAULT_DETAIL = detail; }
-export function getDetailLevel(): Detail { return DEFAULT_DETAIL; }
+export function getDetailLevel(): Detail { return resolveDetail(DEFAULT_DETAIL); }
+
+/**
+ * 🖥️ A BROWSER WITH NO GPU DRAWS THE LITE TIER (autopsy 61279465). The train game asked for 'real' — textured,
+ * normal-mapped materials shaded per pixel — and in a software renderer (SwiftShader, llvmpipe: the build sandbox's
+ * browser, and a device with no usable GPU) that drew 2.5 frames a second; the lite tier drew 6.5 and the playtest
+ * then had time to play it. Measured on that scene, not guessed. A phone or laptop WITH a GPU is unaffected.
+ */
+let SOFTWARE_GL: boolean | null = null;
+export function softwareRenderer(): boolean {
+  if (SOFTWARE_GL !== null) return SOFTWARE_GL;
+  SOFTWARE_GL = false;
+  try {
+    const c = document.createElement('canvas');
+    const gl = (c.getContext('webgl2') || c.getContext('webgl')) as WebGLRenderingContext | null;
+    if (gl && typeof gl.getParameter === 'function') {
+      const info = gl.getExtension('WEBGL_debug_renderer_info');
+      const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) ?? '');
+      SOFTWARE_GL = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(name);
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+  } catch { SOFTWARE_GL = false; }
+  return SOFTWARE_GL;
+}
+/** The tier a request for \`d\` really gets on this device. */
+export function resolveDetail(d: Detail): Detail { return d === 'real' && softwareRenderer() ? 'lite' : d; }
+
+// ── THE GROUND (2026-11-02, "car zameen me dhas jaati hai") ──────────────────────────────────────
+// 🔴 createTerrain() pushed its vertices up into hills, but the height lived ONLY in the mesh: nothing
+// else could ask "how high is the ground here?", and driveVehicle() moved x and z and never touched y.
+// So every car in every racing game drove at the y it was born at (ROAD_SURFACE_Y) — straight through
+// the first hill. The ONE height registry lives here, where world.ts (which builds the hills) and
+// objects.ts (which drives on them) both already import from. createTerrain() registers itself, so a
+// game never has to opt in.
+//
+// 🔴 ROOT CAUSE 2 (admin, same day): createRoad() laid a FLAT strip at ROAD_SURFACE_Y while the terrain
+// rose into hills around and over it — grass above the asphalt, and a car on the road read as sunk.
+// Roads, tracks and rails are now CORRIDORS declared here: the terrain is cut/filled under each one to a
+// smooth road profile (blended at the shoulders), the strip drapes onto that same profile, and movers
+// read the road surface from the same registry. Order-free: a road made before the terrain, or moved
+// after it, re-drapes on the next syncGround() (called by the terrain, the road's own render, every
+// driven vehicle and the shell's groundScene).
+export type GroundHeight = (x: number, z: number) => number;
+/** A strip the ground is shaped to: a road, a rail track, a path. Its centre line is the object's local Z. */
+export interface Corridor {
+  obj: THREE.Object3D;
+  halfWidth: number;
+  /** Straight corridors: half their length along local Z. Path corridors: set from the path. */
+  halfLength: number;
+  /** Metres over which the cut/fill blends back into the natural terrain. */
+  shoulder: number;
+  /** Height of the DRIVABLE surface above the profile (asphalt 0.03, rail top 0.53). */
+  surfaceOffset: number;
+  /** How far the terrain is dug below the profile under the corridor, so no grass pokes through. */
+  dig: number;
+  /** 'road' wins over 'rail' where they cross (a level crossing): vehicles stay on the asphalt. */
+  kind?: 'road' | 'rail' | 'path';
+  /** A curved or closed centre line in the object's local x/z (createRoad({ path })). Absent: straight along Z. */
+  path?: CorridorPath;
+  /** An explicit height profile along s (a hill, a bridge deck, a ramp into a lake). Default: the smoothed land. */
+  profile?: (s: number) => number;
+  /** Under a bridge the land is not cut up to the deck: it drops this far below it instead (a valley). */
+  valley?: number;
+  /** Re-lay the corridor's own meshes on the profile. */
+  drape?: () => void;
+  sig?: string;
+}
+export interface CorridorPath { pts: Array<{ x: number; z: number }>; cum: number[]; total: number; closed: boolean; box: [number, number, number, number] }
+/** Build a corridor path from points (already smooth — createRoad samples a spline every 2 m). */
+export function corridorPath(points: Array<{ x: number; z: number }>, closed = false): CorridorPath {
+  const pts = points.map((p) => ({ x: p.x, z: p.z }));
+  if (closed && pts.length > 2) pts.push({ ...pts[0] });
+  const cum = [0];
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    if (i > 0) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
+    minX = Math.min(minX, pts[i].x); maxX = Math.max(maxX, pts[i].x); minZ = Math.min(minZ, pts[i].z); maxZ = Math.max(maxZ, pts[i].z);
+  }
+  return { pts, cum, total: cum[cum.length - 1], closed, box: [minX, minZ, maxX, maxZ] };
+}
+/** Point and unit tangent at distance s along a path (local coordinates). */
+export function pathPose(p: CorridorPath, s: number): { x: number; z: number; tx: number; tz: number } {
+  let t = p.closed ? ((s % p.total) + p.total) % p.total : Math.max(0, Math.min(p.total, s));
+  let i = 1;
+  while (i < p.cum.length - 1 && p.cum[i] < t) i++;
+  const a = p.pts[i - 1], b = p.pts[i];
+  const len = Math.max(1e-9, p.cum[i] - p.cum[i - 1]);
+  t = (t - p.cum[i - 1]) / len;
+  return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, tx: (b.x - a.x) / len, tz: (b.z - a.z) / len };
+}
+interface TerrainReg { base: GroundHeight; drawn: GroundHeight; step: number; flat: boolean; rebuild: () => void }
+let OVERRIDE: GroundHeight | null = null;
+let TERRAIN: TerrainReg | null = null;
+const CORRIDORS: Corridor[] = [];
+let DIRTY = true;
+let TERRAIN_SIG = 0;
+
+/** Force a ground (tests, a custom world). null clears EVERYTHING: terrain, corridors and the override. */
+export function setGround(heightAt: GroundHeight | null): void {
+  OVERRIDE = heightAt;
+  if (!heightAt) { TERRAIN = null; CORRIDORS.length = 0; }
+  DIRTY = true;
+}
+/** createTerrain() (or a track stream) registers itself here; a game never calls this. */
+export function registerTerrain(t: TerrainReg | null): void { TERRAIN = t; TERRAIN_SIG++; DIRTY = true; syncGround(); }
+/** Declare a road / track / path corridor. createRoad() and createRailTrack() do this themselves. */
+export function declareCorridor(c: Corridor): Corridor { CORRIDORS.push(c); DIRTY = true; syncGround(); return c; }
+export function removeCorridor(c: Corridor): void { const i = CORRIDORS.indexOf(c); if (i >= 0) { CORRIDORS.splice(i, 1); DIRTY = true; syncGround(); } }
+/** How many corridors are live — a streamed track must keep this bounded (tests read it). */
+export function corridorCount(): number { return CORRIDORS.length; }
+
+/** World centre and heading of an object placed by position + rotation.y (through its parents). */
+function frameOf(o: THREE.Object3D): { x: number; y: number; z: number; a: number } {
+  let x = 0, y = 0, z = 0, a = 0;
+  for (let n: THREE.Object3D | null = o; n; n = n.parent) {
+    const r = n.rotation.y, c = Math.cos(r), sn = Math.sin(r);
+    const nx = c * x + sn * z, nz = -sn * x + c * z;
+    x = nx + n.position.x; z = nz + n.position.z; y += n.position.y; a += r;
+  }
+  return { x, y, z, a };
+}
+/** A corridor-local point to world x/z. */
+function toWorld(c: Corridor, lx: number, lz: number) {
+  const f = frameOf(c.obj), cs = Math.cos(f.a), sn = Math.sin(f.a);
+  return { x: f.x + cs * lx + sn * lz, z: f.z - sn * lx + cs * lz };
+}
+/**
+ * Where a world point is relative to a corridor: s along it, lat across it (+ is the corridor's local
+ * +X side), and out = how far past an OPEN end it is (0 inside the length).
+ */
+function localOf(c: Corridor, x: number, z: number): { s: number; lat: number; out: number } {
+  const f = frameOf(c.obj);
+  const dx = x - f.x, dz = z - f.z, sn = Math.sin(f.a), cs = Math.cos(f.a);
+  const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;
+  const p = c.path;
+  if (!p) return { s: lz, lat: lx, out: Math.max(0, Math.abs(lz) - c.halfLength) };
+  let best = Infinity, bs = 0, blat = 0, bout = 0;
+  const n = p.pts.length;
+  for (let i = 1; i < n; i++) {
+    const a = p.pts[i - 1], b = p.pts[i];
+    const ex = b.x - a.x, ez = b.z - a.z;
+    const len2 = ex * ex + ez * ez || 1e-9, len = Math.sqrt(len2);
+    const raw = ((lx - a.x) * ex + (lz - a.z) * ez) / len2;
+    const t = Math.max(0, Math.min(1, raw));
+    const fx = a.x + ex * t, fz = a.z + ez * t;
+    const d2 = (lx - fx) * (lx - fx) + (lz - fz) * (lz - fz);
+    if (d2 < best) {
+      best = d2;
+      bs = p.cum[i - 1] + t * len;
+      // +X of a corridor whose tangent is (tx, tz) is (tz, -tx), as createRoad lays its lanes.
+      blat = ((lx - a.x) * ez - (lz - a.z) * ex) / len;
+      bout = !p.closed && ((i === 1 && raw < 0) || (i === n - 1 && raw > 1)) ? Math.abs(raw < 0 ? raw : raw - 1) * len : 0;
+    }
+  }
+  return { s: bs, lat: blat, out: bout };
+}
+const inside = (c: Corridor, x: number, z: number, pad: number): boolean => {
+  if (!c.path) return true;
+  const f = frameOf(c.obj);
+  const dx = x - f.x, dz = z - f.z, sn = Math.sin(f.a), cs = Math.cos(f.a);
+  const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;
+  const [a, b, cc, d] = c.path.box;
+  return lx >= a - pad && lx <= cc + pad && lz >= b - pad && lz <= d + pad;
+};
+/** World point at distance s along the corridor's centre line. */
+function centreAt(c: Corridor, s: number): { x: number; z: number } {
+  if (c.path) { const q = pathPose(c.path, s); return toWorld(c, q.x, q.z); }
+  return toWorld(c, 0, Math.max(-c.halfLength, Math.min(c.halfLength, s)));
+}
+/**
+ * The corridor's height profile at distance s: its explicit profile, or the natural terrain averaged over
+ * ±12 m of centre line (a road climbs a hill as a gradient, not as every bump); 0 with no terrain. A RAIL
+ * that crosses a road is lowered (blended over 10 m) so its rail top is flush with the asphalt: a level
+ * crossing, never a ramp a car jumps.
+ */
+export function corridorProfile(c: Corridor, s: number): number {
+  let h: number;
+  if (c.profile) h = c.profile(s);
+  else if (!TERRAIN || TERRAIN.flat) h = 0;
+  else {
+    let sum = 0;
+    for (let k = -4; k <= 4; k++) { const q = centreAt(c, s + k * 3); sum += TERRAIN.base(q.x, q.z); }
+    h = sum / 9;
+  }
+  if (c.kind === 'rail') {
+    const q = centreAt(c, s);
+    const x = crossingAt(q.x, q.z, 10);
+    if (x) {
+      const w = 1 - smoothstep(x.dist / 10);
+      h += (x.surface + 0.01 - c.surfaceOffset - h) * w;
+    }
+  }
+  return h;
+}
+/**
+ * At a level crossing the asphalt may slope ACROSS the rail, so a rail vertex is made flush with the road
+ * surface at its OWN position, not just the centre line's: returns the lift to add to a vertex of corridor
+ * \`c\` at corridor-local (lx, lz) whose height above the profile is \`above\` (0 when no road is near).
+ */
+export function crossingLift(c: Corridor, lx: number, lz: number, profileH: number): number {
+  if (c.kind !== 'rail') return 0;
+  const w0 = toWorld(c, lx, lz);
+  const x = crossingAt(w0.x, w0.z, 10);
+  if (!x) return 0;
+  const w = 1 - smoothstep(x.dist / 10);
+  return (x.surface + 0.01 - c.surfaceOffset - profileH) * w;
+}
+/** The nearest ROAD within \`reach\` metres of its edge: its surface height there and the distance. */
+function crossingAt(x: number, z: number, reach: number): { surface: number; dist: number } | null {
+  let best: { surface: number; dist: number } | null = null;
+  for (const r of CORRIDORS) {
+    if (r.kind !== 'road' || !inside(r, x, z, r.halfWidth + reach)) continue;
+    const l = localOf(r, x, z);
+    const dist = Math.hypot(Math.max(0, Math.abs(l.lat) - r.halfWidth), l.out);
+    if (dist > reach) continue;
+    if (!best || dist < best.dist) best = { surface: corridorProfile(r, l.s) + r.surfaceOffset, dist };
+  }
+  return best;
+}
+const coreMargin = () => (TERRAIN && !TERRAIN.flat ? 1.5 * TERRAIN.step + 0.5 : 0);
+const smoothstep = (t: number) => { const u = Math.max(0, Math.min(1, t)); return u * u * (3 - 2 * u); };
+
+/** The height the TERRAIN is drawn at: natural hills, cut/filled under every corridor (roads win ties). */
+export function shapedHeight(x: number, z: number): number {
+  if (!TERRAIN) return 0;
+  const b = TERRAIN.base(x, z);
+  if (TERRAIN.flat) return b;
+  let h = b, bestW = 0, bestRoad = false, bestT = Infinity;
+  for (const c of CORRIDORS) {
+    if (!inside(c, x, z, c.halfWidth + coreMargin() + c.shoulder)) continue;
+    const { s, lat, out } = localOf(c, x, z);
+    const ds = Math.max(0, Math.abs(lat) - (c.halfWidth + coreMargin()));
+    const dist = Math.hypot(ds, out);
+    if (dist >= c.shoulder) continue;
+    const w = 1 - smoothstep(dist / c.shoulder);
+    const target = corridorProfile(c, s) - (c.valley ?? c.dig);
+    // Two corridors both fully over this point (a level crossing): dig to the LOWER one, so grass never
+    // covers the rail bed beside the road nor the road itself.
+    if (w >= 0.999 && bestW >= 0.999) { if (target < bestT) { bestT = target; h = target; } continue; }
+    const road = c.kind === 'road';
+    if (w < bestW || (w === bestW && (bestRoad || !road))) continue;
+    bestW = w; bestRoad = road; bestT = target;
+    h = b + (target - b) * w;
+  }
+  return h;
+}
+/** The drivable surface of a corridor under (x, z), or null off every corridor. A road wins over a rail. */
+export function corridorSurfaceAt(x: number, z: number): number | null {
+  let best: number | null = null, bestRoad = false;
+  for (const c of CORRIDORS) {
+    if (!inside(c, x, z, c.halfWidth)) continue;
+    const { s, lat, out } = localOf(c, x, z);
+    if (Math.abs(lat) > c.halfWidth || out > 0) continue;
+    const h = corridorProfile(c, s) + c.surfaceOffset;
+    const road = c.kind === 'road';
+    if (best === null || (road && !bestRoad) || (road === bestRoad && h > best)) { best = h; bestRoad = road; }
+  }
+  return best;
+}
+const GROUND_FN: GroundHeight = (x, z) => {
+  const road = CORRIDORS.length ? corridorSurfaceAt(x, z) : null;
+  if (road !== null) return road;
+  return TERRAIN ? TERRAIN.drawn(x, z) : 0;
+};
+/**
+ * The ground every mover follows: the road/rail surface on a corridor, the DRAWN terrain elsewhere.
+ * null when the world has neither (a space game, an arena you floored yourself).
+ */
+export function getGround(): GroundHeight | null {
+  if (OVERRIDE) return OVERRIDE;
+  return TERRAIN || CORRIDORS.length ? GROUND_FN : null;
+}
+/** Ground height at (x, z) for anything a game places — 0 when there is no ground. */
+export function groundHeightAt(x: number, z: number): number { const g = getGround(); return g ? g(x, z) : 0; }
+/**
+ * Bring terrain and corridors into agreement after either was created or moved. Cheap when nothing
+ * changed (a signature per corridor). Returns true when it re-shaped anything.
+ */
+export function syncGround(): boolean {
+  let changed = DIRTY;
+  for (const c of CORRIDORS) {
+    const f = frameOf(c.obj);
+    const sig = [f.x.toFixed(3), f.y.toFixed(3), f.z.toFixed(3), f.a.toFixed(4), TERRAIN_SIG].join('|');
+    if (sig !== c.sig) { c.sig = sig; changed = true; }
+  }
+  if (!changed) return false;
+  DIRTY = false;
+  TERRAIN?.rebuild();
+  for (const c of CORRIDORS) c.drape?.();
+  return true;
+}
+
+// WATER IS THE ONLY PLACE A THING MAY GO BELOW THE GROUND, and only where a game SAYS there is water.
+const WATER: Array<(x: number, z: number) => boolean> = [];
+/** Declare a water region (a lake, a river course): groundScene() lets objects over it sink or float. */
+export function addWater(isWater: (x: number, z: number) => boolean): () => void {
+  WATER.push(isWater);
+  return () => { const i = WATER.indexOf(isWater); if (i >= 0) WATER.splice(i, 1); };
+}
+export function clearWater(): void { WATER.length = 0; }
+export function isWaterAt(x: number, z: number): boolean { return WATER.some((w) => w(x, z)); }
+
+/**
+ * 🔒 NOTHING SINKS (admin 2026-11-02, t311u): keep ONE object's origin at or above the ground under it
+ * (plus userData.groundOffset, default 0). Opt-outs are explicit: userData.ground = false (a bird, a
+ * plane, a projectile, a hand-placed bridge deck), or a declared water region under it.
+ */
+export function groundObject(obj: THREE.Object3D, ground: GroundHeight | null = getGround()): boolean {
+  if (!ground || obj.userData.ground === false || obj.userData.heightAt) return false;
+  const x = obj.position.x, z = obj.position.z;
+  if (WATER.length && isWaterAt(x, z)) return false;
+  const floor = ground(x, z) + (Number(obj.userData.groundOffset) || 0);
+  if (obj.position.y < floor) { obj.position.y = floor; return true; }
+  return false;
+}
+
+/**
+ * Ground every top-level dynamic thing in a scene — vehicles, the player, NPCs, animals, props, trains —
+ * after each fixed step. The game shell calls this itself, so a game cannot forget it. Lights, cameras,
+ * particle systems, instanced batches (already placed per instance) and the terrain itself are skipped.
+ * Returns how many objects were lifted out of the ground this step.
+ */
+export function groundScene(root: THREE.Object3D, ground: GroundHeight | null = getGround()): number {
+  syncGround();
+  if (!ground) return 0;
+  let lifted = 0;
+  for (const obj of root.children) {
+    const o = obj as THREE.Object3D & { isLight?: boolean; isCamera?: boolean; isPoints?: boolean; isInstancedMesh?: boolean; isSprite?: boolean; isLine?: boolean };
+    if (o.isLight || o.isCamera || o.isPoints || o.isInstancedMesh || o.isSprite || o.isLine) continue;
+    if (groundObject(o, ground)) lifted++;
+  }
+  return lifted;
+}
 
 export type SurfaceKind =
   | 'brick' | 'plaster' | 'wood' | 'bark' | 'stone' | 'asphalt'
@@ -1020,9 +1562,15 @@ export function surfaceMaps(kind: SurfaceKind, opts: { seed?: number; size?: num
  * call \`enableAO(geometry)\` on anything you want occlusion on.
  */
 export function surfaceMaterial(
-  kind: SurfaceKind,
+  kind: SurfaceKind | 'glass',
   opts: { color?: number; repeat?: number; seed?: number; size?: number } = {},
 ): THREE.MeshStandardMaterial {
+  // 🔴 ONE WORD, TWO VOCABULARIES (autopsy 61279465). MaterialKind has 'glass' and SurfaceKind did not, so a
+  // train's windows asked for as glass failed the typecheck twice and cost two repair turns.
+  // Glass has no grain to texture, so it is answered here, plainly — the word works in both places.
+  if (kind === 'glass') {
+    return new THREE.MeshStandardMaterial({ color: opts.color ?? 0x9ec9e8, roughness: 0.06, metalness: 0, transparent: true, opacity: 0.38, envMapIntensity: 1.2 });
+  }
   const repeat = opts.repeat ?? 4;
   const maps = repeatedMaps(kind, repeat, opts);
   const look = SURFACE_LOOK[kind] ?? SURFACE_LOOK.stone;
@@ -1616,15 +2164,16 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
 // feature this codebase forbids. Say "real-looking", never "photorealistic".
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 const OBJECTS = `import * as THREE from 'three';
-import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, mergeGeometries, type SurfaceKind, type Detail } from './surfaces';
+import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, resolveDetail, mergeGeometries, getGround, addWater, declareCorridor, removeCorridor, corridorProfile, crossingLift, corridorPath, pathPose, registerTerrain, shapedHeight, syncGround, groundHeightAt, type Corridor, type CorridorPath, type SurfaceKind, type Detail } from './surfaces';
 
 // The detail tier lives in surfaces.ts so the ground reads the same setting as the objects; it is
 // re-exported here so \`import { setDetailLevel } from './objects'\` keeps working everywhere.
 export { setDetailLevel, getDetailLevel };
+export { groundHeightAt, syncGround, pathPose, corridorPath };
 export type { Detail };
 
 interface BaseOpts { detail?: Detail; seed?: number }
-const tier = (o?: BaseOpts): Detail => o?.detail ?? getDetailLevel();
+const tier = (o?: BaseOpts): Detail => resolveDetail(o?.detail ?? getDetailLevel());
 
 function rng(seed: number): () => number {
   let t = (seed >>> 0) || 1;
@@ -2559,6 +3108,15 @@ export function createTraffic(options: TrafficOptions = {}): Traffic {
     v.object.rotation.y = v.dir === 1 ? 0 : Math.PI;
     root.add(v.object);
   }
+  root.userData.ground = false;   // each vehicle is grounded on its own, below — not the group's origin
+  // ON the road surface wherever the road climbs, not at a flat ROAD_SURFACE_Y under the hills.
+  const settle = (o: THREE.Object3D) => {
+    if (!getGround()) { o.position.y = ROAD_SURFACE_Y; return; }
+    root.updateMatrixWorld(true);
+    const w = o.getWorldPosition(new THREE.Vector3());
+    o.position.y += groundHeightAt(w.x, w.z) - w.y;
+  };
+  for (const v of vehicles) settle(v.object);
 
   /** Distance along v's direction of travel from v's nose to the nearest obstacle's tail in its lane. */
   const gapAhead = (v: TrafficVehicle, avoid: THREE.Object3D[]): { gap: number; speed: number } => {
@@ -2603,6 +3161,7 @@ export function createTraffic(options: TrafficOptions = {}): Traffic {
       // Round the end of the road, back on at the start of its own lane.
       const along = v.object.position.z * v.dir;
       if (along > L / 2) v.object.position.z = (along - L) * v.dir;
+      settle(v.object);
       rollWheels(v.object, v.speed, step);
     }
   };
@@ -2680,8 +3239,60 @@ export interface VehicleTuning {
   steerRate?: number;
   /** Speed at start. NOT zero: a racing/driving game whose car sits still reads as broken. */
   startSpeed?: number;
+  /**
+   * The ground to drive on: a height function, or false for none (a boat, a plane, a track you place
+   * yourself). Default: the last createTerrain(), so a car follows the hills with no extra call.
+   */
+  ground?: ((x: number, z: number) => number) | false;
+  /** Height of the model's origin above the ground (createCar's origin is at the tyres: default 0). */
+  rideHeight?: number;
+  /** Wheelbase and track used to read the slope under the car (pitch and roll), metres. */
+  length?: number;
+  width?: number;
 }
-export interface VehicleState { speed: number; heading: number }
+export interface VehicleState { speed: number; heading: number; pitch?: number; roll?: number }
+
+/**
+ * Put a vehicle ON the ground under it: y follows the surface with a soft suspension on the way DOWN
+ * (never below it on the way up — a car does not sink into a hill), and the body pitches and rolls to
+ * the slope read under its four corners. Returns the new pitch and roll, or null with no ground.
+ */
+export function settleOnGround(
+  vehicle: THREE.Object3D,
+  heading: number,
+  dt: number,
+  tuning: VehicleTuning = {},
+  prev: { pitch?: number; roll?: number } = {},
+): { pitch: number; roll: number } | null {
+  if (tuning.ground === undefined) syncGround();
+  const ground = tuning.ground === false ? null : (tuning.ground ?? getGround());
+  if (!ground) return null;
+  // The ground already IS the asphalt (or rail top) on a corridor, so the tyres sit ON it: 0.
+  const ride = tuning.rideHeight ?? 0;
+  const L = (tuning.length ?? 2.6) / 2, W = (tuning.width ?? 1.6) / 2;
+  const x = vehicle.position.x, z = vehicle.position.z;
+  const fx = Math.sin(heading), fz = Math.cos(heading);   // the nose (+Z of the model)
+  const lx = Math.cos(heading), lz = -Math.sin(heading);  // the driver's left (+X of the model)
+  const fl = ground(x + fx * L + lx * W, z + fz * L + lz * W), fr = ground(x + fx * L - lx * W, z + fz * L - lz * W);
+  const bl = ground(x - fx * L + lx * W, z - fz * L + lz * W), br = ground(x - fx * L - lx * W, z - fz * L - lz * W);
+  const hF = (fl + fr) / 2, hB = (bl + br) / 2, hLft = (fl + bl) / 2, hRgt = (fr + br) / 2;
+  const floor = Math.max(ground(x, z), (hF + hB) / 2) + ride;
+  const k = 1 - Math.exp(-14 * Math.max(0, dt));
+  // Up is instant (the tyres are ON the surface); down is sprung — never below the floor.
+  const y = vehicle.position.y;
+  vehicle.position.y = y <= floor ? floor : Math.max(floor, y + (floor - y) * k);
+  // Positive rotation.x tips +Z DOWN: a nose higher than the tail is a NEGATIVE pitch.
+  const pitchT = Math.atan2(hB - hF, 2 * L);
+  // Positive rotation.z lifts +X (the driver's left): left side higher is a POSITIVE roll.
+  const rollT = Math.atan2(hLft - hRgt, 2 * W);
+  const p0 = prev.pitch ?? pitchT, r0 = prev.roll ?? rollT;
+  const pitch = p0 + (pitchT - p0) * k;
+  const roll = r0 + (rollT - r0) * k;
+  vehicle.rotation.order = 'YXZ';   // heading first, then the slope — pitch is about the CAR's own axis
+  vehicle.rotation.x = pitch;
+  vehicle.rotation.z = roll;
+  return { pitch, roll };
+}
 
 /**
  * The vehicle's state, starting from where the model already points (its rotation.y). It also marks the
@@ -2689,8 +3300,70 @@ export interface VehicleState { speed: number; heading: number }
  * start screen where the game has not begun driving it yet.
  */
 export function createVehicleState(vehicle: THREE.Object3D, tuning: VehicleTuning = {}): VehicleState {
+  assertVehicle(vehicle, 'createVehicleState');
   noteVehicle(vehicle, null);
-  return { speed: tuning.startSpeed ?? 5, heading: vehicle.rotation.y };
+  const heading = vehicle.rotation.y;
+  // Start ON the ground, wherever the game put it (a car born at y = 0.03 on a 4 m hill is inside it).
+  const slope = settleOnGround(vehicle, heading, 1, tuning);
+  const state: VehicleState = { speed: tuning.startSpeed ?? 5, heading, ...(slope ?? {}) };
+  issuedStates.add(state);
+  heldState.set(vehicle, { state, lastForeign: null });
+  return state;
+}
+
+/**
+ * 🔴 THE CAR KEEPS ITS OWN STATE (autopsy 8701aaa1 / 7aa2fe7c / c71e56de, 2026-11-02; admin: "jab bhi koi
+ * vehicle game banaya jaye, to vehicle chalni chahiye — 50% vehicles chalti hi nahi hai").
+ *
+ * driveVehicle used to be a pure function: speed only grew if the game wrote the result back into a
+ * variable that outlived the frame. Every way of getting that wrong froze the car, silently:
+ *   • the return value discarded — driveVehicle(car, drive, axis, dt) with no "drive =";
+ *   • a fresh state every frame — "const s = (ctx as any).vehicleState || { speed: 0, heading: 0 }" (the
+ *     reported build: speed went 0 → 0.15 → back to 0, so the car crept a few millimetres and stopped);
+ *   • no state at all — driveVehicle(car, undefined, …) threw "reading 'speed'" every frame.
+ * Now the kit holds each vehicle's state. The state object the game passes is UPDATED IN PLACE and
+ * returned, so a discarded return still accumulates; a missing state uses the vehicle's own; and a
+ * literal re-made with the same values frame after frame (which can only be a lost state) is replaced
+ * by the vehicle's own. A state the game sets ONCE (a respawn, a crash stop) is still obeyed.
+ */
+const issuedStates = new WeakSet<object>();
+const heldState = new WeakMap<THREE.Object3D, { state: VehicleState; lastForeign: { speed: number; heading: number } | null }>();
+const warnedNoState = new WeakSet<THREE.Object3D>();
+
+function assertVehicle(vehicle: unknown, fn: string): asserts vehicle is THREE.Object3D {
+  const v = vehicle as THREE.Object3D | null | undefined;
+  if (!v || !v.position || !v.rotation) {
+    // A clear, actionable error instead of "Cannot read properties of undefined (reading 'rotation')".
+    throw new Error(fn + '() was given no vehicle (got ' + String(vehicle) + '). Keep the car in a variable '
+      + 'declared OUTSIDE setup() — "let car; let drive;" next to the game — set it in setup() and use it in update().');
+  }
+}
+
+/** The state to drive from this frame — see the block above. */
+function resolveState(vehicle: THREE.Object3D, state: VehicleState | null | undefined, tuning: VehicleTuning): VehicleState {
+  const held = heldState.get(vehicle);
+  if (state && typeof state === 'object' && issuedStates.has(state)) {
+    if (held) { held.state = state; held.lastForeign = null; } else heldState.set(vehicle, { state, lastForeign: null });
+    return state;
+  }
+  if (!state || typeof state !== 'object' || typeof state.speed !== 'number' || typeof state.heading !== 'number') {
+    if (!warnedNoState.has(vehicle)) {
+      warnedNoState.add(vehicle);
+      console.warn('driveVehicle() was given no vehicle state — driving from the state the car already has. Write "drive = driveVehicle(car, drive, ctx.input.axis(), dt)" with "let drive = createVehicleState(car)" outside update().');
+    }
+    if (held) return held.state;
+    return createVehicleState(vehicle, tuning);
+  }
+  // A state the kit never handed out. The same values as the last one, frame after frame, is a state
+  // re-made from scratch every frame (it never remembers what the kit returned): drive from the car's own.
+  const prev = held?.lastForeign;
+  const remade = !!held && !!prev && prev.speed === state.speed && prev.heading === state.heading;
+  const snapshot = { speed: state.speed, heading: state.heading };
+  if (remade && held) { held.lastForeign = snapshot; return held.state; }
+  // Otherwise the game set it on purpose (a respawn, a crash stop): obey it, and keep it from now on.
+  issuedStates.add(state);
+  heldState.set(vehicle, { state, lastForeign: snapshot });
+  return state;
 }
 
 /**
@@ -2713,6 +3386,8 @@ export function driveVehicle(
   dt: number,
   tuning: VehicleTuning = {},
 ): VehicleState {
+  assertVehicle(vehicle, 'driveVehicle');
+  state = resolveState(vehicle, state, tuning);
   const maxSpeed = tuning.maxSpeed ?? 25;
   const reverseSpeed = tuning.reverseSpeed ?? 6;
   const accel = tuning.accel ?? 9;
@@ -2739,9 +3414,16 @@ export function driveVehicle(
   vehicle.rotation.y = heading;
   vehicle.position.x += Math.sin(heading) * speed * dt;
   vehicle.position.z += Math.cos(heading) * speed * dt;
+  // 🔴 FOLLOW THE GROUND. This used to stop at x/z, so y stayed wherever the car was born and every
+  // racing game drove into its first hill. settleOnGround reads the same heights the terrain is drawn from.
+  const slope = settleOnGround(vehicle, heading, dt, tuning, state);
   rollWheels(vehicle, speed, dt);   // every wheel of a car, a bike or a cycle — a no-op for a horse
   noteVehicle(vehicle, axis);
-  return { speed, heading };
+  // IN PLACE: the game's own state object now holds the new values, whether or not it keeps the return.
+  state.speed = speed;
+  state.heading = heading;
+  if (slope) { state.pitch = slope.pitch; state.roll = slope.roll; }
+  return state;
 }
 
 // ── TREE ─────────────────────────────────────────────────────────────────────────────────────────
@@ -2921,6 +3603,14 @@ export function createRiver(options: RiverOptions = {}): River {
     m.geometry.computeVertexNormals();
   };
   update(0);
+  m.userData.ground = false;   // the water surface is placed by the river itself
+  // Its meandering course is WATER: the one place groundScene() lets a thing go below the grass.
+  addWater((x, z) => {
+    const lz = z - m.position.z;
+    if (Math.abs(lz) > L / 2) return false;
+    const cx = m.position.x + Math.sin(lz * 0.03) * W * 0.9 + Math.sin(lz * 0.011) * W * 1.6;
+    return Math.abs(x - cx) < W / 2;
+  });
   return { mesh: m, update };
 }
 
@@ -2957,7 +3647,21 @@ export function createDesert(options: DesertOptions = {}): THREE.Mesh {
 }
 
 // ── ROAD ─────────────────────────────────────────────────────────────────────────────────────────
-export interface RoadOptions extends BaseOpts { length?: number; width?: number; lanes?: number }
+export interface RoadOptions extends BaseOpts {
+  length?: number;
+  width?: number;
+  lanes?: number;
+  /**
+   * A CURVED road: control points [x, z] (or {x, z}) it passes through, smoothed into a spline. With
+   * closed: true it is a circuit. The terrain is cut to it and it drapes on the hills like a straight one.
+   */
+  path?: Array<[number, number] | { x: number; z: number }>;
+  closed?: boolean;
+  /** An explicit height along the road (a designed hill, a ramp). Default: the smoothed land under it. */
+  profile?: (s: number) => number;
+  /** A bridge deck: the land under it drops this far below the road instead of being filled up to it. */
+  valley?: number;
+}
 
 /**
  * How high the road's surface sits above the ground plane (y = 0). Place a vehicle's wheels on it.
@@ -2975,15 +3679,17 @@ export const ROAD_SURFACE_Y = 0.03;
  * edge lines and kerbs on BOTH sides. \`real\` also adds the darker worn tracks where wheels actually run.
  */
 export function createRoad(options: RoadOptions = {}): THREE.Group {
+  if (options.path && options.path.length >= 2) return createCurvedRoad(options);
   const d = tier(options);
   const L = options.length ?? 300;
   const W = options.width ?? 8;
   const lanes = options.lanes ?? 2;
   const group = new THREE.Group();
+  // 🔴 SEGMENTED, so it can bend over a hill: one vertex row every 2 m along the road.
+  const seg = Math.max(1, Math.ceil(L / 2));
 
-  const surface = mesh(new THREE.PlaneGeometry(W, L, 1, d === 'real' ? 60 : 1), shared('asphalt', d, 0x3a3c40, d === 'real' ? 40 : 1), d);
-  surface.rotation.x = -Math.PI / 2;
-  surface.position.y = ROAD_SURFACE_Y;
+  const surface = mesh(strip(W, L, seg, 0, 0), shared('asphalt', d, 0x3a3c40, d === 'real' ? 40 : 1), d);
+  surface.userData.drape = ROAD_SURFACE_Y;
   surface.castShadow = false;
   group.add(surface);
 
@@ -2993,21 +3699,21 @@ export function createRoad(options: RoadOptions = {}): THREE.Group {
   // Dashed centre line — 3 m mark, 6 m gap is close to the real Indian standard.
   const dashes = Math.floor(L / 9);
   for (let i = 0; i < dashes; i++) {
-    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 3), paint);
-    dash.rotation.x = -Math.PI / 2;
-    dash.position.set(0, ROAD_SURFACE_Y + 0.008, -L / 2 + i * 9 + 4.5);
+    const dash = new THREE.Mesh(strip(0.14, 3, 2, 0, -L / 2 + i * 9 + 4.5), paint);
+    dash.userData.drape = ROAD_SURFACE_Y + 0.008;
     group.add(dash);
   }
   // BOTH sides. This loop used to end in \`break\` after the first pass, so a road had one edge line and
   // one kerb — and that kerb, at (side * W) / 2 + 0.15, sat INSIDE the asphalt on the left.
   for (const side of [-1, 1]) {
-    const edge = new THREE.Mesh(new THREE.PlaneGeometry(0.12, L), paint);
-    edge.rotation.x = -Math.PI / 2;
-    edge.position.set(side * (W / 2 - 0.35), ROAD_SURFACE_Y + 0.008, 0);
+    const edge = new THREE.Mesh(strip(0.12, L, seg, side * (W / 2 - 0.35), 0), paint);
+    edge.userData.drape = ROAD_SURFACE_Y + 0.008;
     group.add(edge);
     if (d === 'real') {
-      const kerb = mesh(new THREE.BoxGeometry(0.3, 0.16, L), shared('stone', d, 0xb9b3a6, 20), d);
-      kerb.position.set(side * (W / 2 + 0.15), 0.08, 0);
+      const kg = new THREE.BoxGeometry(0.3, 0.16, L, 1, 1, seg);
+      kg.translate(side * (W / 2 + 0.15), 0, 0);
+      const kerb = mesh(kg, shared('stone', d, 0xb9b3a6, 20), d);
+      kerb.userData.drape = 0.08;
       group.add(kerb);
     }
   }
@@ -3018,14 +3724,553 @@ export function createRoad(options: RoadOptions = {}): THREE.Group {
     for (let lane = 0; lane < lanes; lane++) {
       const laneCentre = -W / 2 + (W / lanes) * (lane + 0.5);
       for (const off of [-0.75, 0.75]) {
-        const wear = new THREE.Mesh(new THREE.PlaneGeometry(0.55, L), wearMat);
-        wear.rotation.x = -Math.PI / 2;
-        wear.position.set(laneCentre + off, ROAD_SURFACE_Y + 0.004, 0);
+        const wear = new THREE.Mesh(strip(0.55, L, seg, laneCentre + off, 0), wearMat);
+        wear.userData.drape = ROAD_SURFACE_Y + 0.004;
         group.add(wear);
       }
     }
   }
+  layOnGround(group, surface, { halfWidth: W / 2 + (d === 'real' ? 0.3 : 0), halfLength: L / 2, surfaceOffset: ROAD_SURFACE_Y, kind: 'road', profile: options.profile, valley: options.valley });
   return group;
+}
+
+/** Sample a smooth centre line every \`step\` metres through the given control points. */
+export function samplePath(points: Array<[number, number] | { x: number; z: number }>, closed = false, step = 2): Array<{ x: number; z: number }> {
+  const v = points.map((p) => (Array.isArray(p) ? new THREE.Vector3(p[0], 0, p[1]) : new THREE.Vector3(p.x, 0, p.z)));
+  if (v.length === 2 && !closed) {
+    const n = Math.max(1, Math.ceil(v[0].distanceTo(v[1]) / step));
+    return Array.from({ length: n + 1 }, (_, i) => ({ x: v[0].x + (v[1].x - v[0].x) * (i / n), z: v[0].z + (v[1].z - v[0].z) * (i / n) }));
+  }
+  const curve = new THREE.CatmullRomCurve3(v, closed, 'centripetal');
+  const n = Math.max(2, Math.ceil(curve.getLength() / step));
+  const out = curve.getSpacedPoints(n).map((q) => ({ x: q.x, z: q.z }));
+  if (closed) out.pop();   // corridorPath closes it again
+  return out;
+}
+
+/**
+ * A ribbon along a path: for each [s0, s1] interval, a strip \`width\` wide whose centre sits \`lat\` to the
+ * path's +X side. Carries a 'trackS' attribute (distance along the road) so it drapes on any profile.
+ */
+export function ribbonGeometry(path: CorridorPath, lat: number, width: number, spans: Array<[number, number]>, step = 2): THREE.BufferGeometry {
+  const pos: number[] = [], sAttr: number[] = [], uv: number[] = [], idx: number[] = [];
+  for (const [s0, s1] of spans) {
+    const n = Math.max(1, Math.ceil((s1 - s0) / step));
+    const first = pos.length / 3;
+    for (let i = 0; i <= n; i++) {
+      const sv = s0 + ((s1 - s0) * i) / n;
+      const q = pathPose(path, sv);
+      const nx = q.tz, nz = -q.tx;   // +X of the road
+      for (const side of [-1, 1]) {
+        const o = lat + (side * width) / 2;
+        pos.push(q.x + nx * o, 0, q.z + nz * o);
+        sAttr.push(sv);
+        uv.push(side < 0 ? 0 : 1, sv / Math.max(1, width));
+      }
+      if (i > 0) { const a = first + (i - 1) * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('trackS', new THREE.Float32BufferAttribute(sAttr, 1));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+/** A road along a spline (createRoad({ path })): asphalt, dashed centre line, edge lines, all draped. */
+function createCurvedRoad(options: RoadOptions): THREE.Group {
+  const d = tier(options);
+  const W = options.width ?? 8;
+  const path = corridorPath(samplePath(options.path!, !!options.closed), !!options.closed);
+  const L = path.total;
+  const group = new THREE.Group();
+  const surface = mesh(ribbonGeometry(path, 0, W, [[0, L]]), shared('asphalt', d, 0x3a3c40, d === 'real' ? 40 : 1), d);
+  surface.userData.drape = ROAD_SURFACE_Y;
+  surface.castShadow = false;
+  group.add(surface);
+  const paint = new THREE.MeshStandardMaterial({ color: 0xe8e4d8, roughness: 0.75, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const spans: Array<[number, number]> = [];
+  for (let s0 = 3; s0 + 3 <= L; s0 += 9) spans.push([s0, s0 + 3]);
+  if (spans.length) { const dash = new THREE.Mesh(ribbonGeometry(path, 0, 0.14, spans, 1.5), paint); dash.userData.drape = ROAD_SURFACE_Y + 0.008; group.add(dash); }
+  for (const side of [-1, 1]) {
+    const edge = new THREE.Mesh(ribbonGeometry(path, side * (W / 2 - 0.35), 0.12, [[0, L]]), paint);
+    edge.userData.drape = ROAD_SURFACE_Y + 0.008;
+    group.add(edge);
+  }
+  layOnGround(group, surface, { halfWidth: W / 2, halfLength: L / 2, surfaceOffset: ROAD_SURFACE_Y, kind: 'road', path, profile: options.profile, valley: options.valley });
+  group.userData.path = path;
+  return group;
+}
+
+/** A flat strip along local Z (width across X), centred at (x, z), \`seg\` rows along its length. */
+function strip(width: number, length: number, seg: number, x: number, z: number): THREE.BufferGeometry {
+  const g = new THREE.PlaneGeometry(width, length, 1, seg);
+  g.rotateX(-Math.PI / 2);
+  g.translate(x, 0, z);
+  return g;
+}
+
+/**
+ * 🔒 Declare \`group\` as a corridor and drape every child mesh that has userData.drape (its height above
+ * the profile) onto the corridor's profile — vertex by vertex, along the group's local Z. The terrain
+ * under it is cut/filled to the same profile, so asphalt, rails and grass always agree. \`anchor\`
+ * re-syncs on render, so a road moved after creation re-drapes without the game doing anything.
+ */
+function layOnGround(group: THREE.Group, anchor: THREE.Mesh, o: { halfWidth: number; halfLength: number; surfaceOffset: number; kind: 'road' | 'rail' | 'path'; path?: CorridorPath; profile?: (s: number) => number; valley?: number }): void {
+  group.userData.ground = false;   // laid by its corridor, never lifted by its origin
+  for (const m of group.children as THREE.Mesh[]) {
+    if (m.userData.drape === undefined || !m.geometry) continue;
+    const p = m.geometry.attributes.position as THREE.BufferAttribute;
+    const base = new Float32Array(p.count);
+    for (let i = 0; i < p.count; i++) base[i] = p.getY(i);
+    m.userData.baseY = base;
+  }
+  const corridor: Corridor = {
+    obj: group, halfWidth: o.halfWidth, halfLength: o.halfLength, shoulder: o.valley ? 24 : 10, surfaceOffset: o.surfaceOffset, dig: 0.06,
+    kind: o.kind, path: o.path, profile: o.profile, valley: o.valley,
+    drape: () => {
+      for (const m of group.children as THREE.Mesh[]) {
+        const base = m.userData.baseY as Float32Array | undefined;
+        if (!base) continue;
+        const p = m.geometry.attributes.position as THREE.BufferAttribute;
+        const sA = m.geometry.attributes.trackS as THREE.BufferAttribute | undefined;   // a curved strip knows its s
+        for (let i = 0; i < p.count; i++) {
+          const sv = sA ? sA.getX(i) : p.getZ(i) + m.position.z;
+          const ph = corridorProfile(corridor, sv);
+          const lift = corridor.kind === 'rail' ? crossingLift(corridor, p.getX(i) + m.position.x, sv, ph) : 0;
+          p.setY(i, base[i] + ph + lift + Number(m.userData.drape) - m.position.y);
+        }
+        p.needsUpdate = true;
+        m.geometry.computeVertexNormals();
+        m.geometry.computeBoundingSphere();   // or frustum culling hides a road that climbed out of its old box
+        m.geometry.computeBoundingBox();
+      }
+    },
+  };
+  declareCorridor(corridor);   // drapes it now, and again whenever the terrain or the road moves
+  group.userData.corridor = corridor;
+  anchor.onBeforeRender = () => { syncGround(); };
+}
+
+/** Rail top above the track profile: a train's wheels (and getGround() on the track) sit here. */
+export const RAIL_TOP_Y = 0.53;
+export interface RailTrackOptions extends BaseOpts { length?: number; gauge?: number }
+
+/**
+ * A RAILWAY LINE that lies ON the land: a ballast bed, sleepers every 0.65 m and two steel rails, all
+ * draped on one smooth profile with the terrain cut and filled under it (the same corridor a road uses).
+ * Runs along local Z. A train on it: train.position.y = groundHeightAt(x, z) — that is the rail top.
+ */
+export function createRailTrack(options: RailTrackOptions = {}): THREE.Group {
+  const d = tier(options);
+  const L = options.length ?? 300;
+  const gauge = options.gauge ?? 1.676;   // Indian broad gauge
+  const seg = Math.max(1, Math.ceil(L / 2));
+  const group = new THREE.Group();
+  const bg = new THREE.BoxGeometry(3.2, 0.3, L, 1, 1, seg);
+  const ballast = mesh(bg, shared('stone', d, 0x7a746b, 30), d);
+  ballast.userData.drape = 0.15;
+  group.add(ballast);
+  const n = Math.floor(L / 0.65);
+  const sleeperList: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < n; i++) { const g = new THREE.BoxGeometry(2.6, 0.08, 0.24); g.translate(0, 0, -L / 2 + (i + 0.5) * 0.65); sleeperList.push(g); }
+  if (sleeperList.length) {
+    const sleepers = mesh(mergeGeometries(sleeperList), shared('wood', d, 0x5a4632, 4), d);
+    sleepers.userData.drape = 0.34;
+    group.add(sleepers);
+  }
+  const steel = new THREE.MeshStandardMaterial({ color: 0x8d9299, metalness: 0.85, roughness: 0.35 });
+  for (const side of [-1, 1]) {
+    const rg = new THREE.BoxGeometry(0.07, 0.15, L, 1, 1, seg);
+    rg.translate(side * gauge / 2, 0, 0);
+    const rail = new THREE.Mesh(rg, steel);
+    rail.userData.drape = RAIL_TOP_Y - 0.075;
+    group.add(rail);
+  }
+  layOnGround(group, ballast, { halfWidth: 1.6, halfLength: L / 2, surfaceOffset: RAIL_TOP_Y, kind: 'rail' });
+  return group;
+}
+
+// ── TRACKS: A PLAN THE USER DESCRIBED, STREAMED FOREVER OR ENDED WHERE THEY SAID ─────────────────
+// (admin 2026-11-02, t315u: "kuch der baad road khatam ho, aage ja kar paani aa jaye … user ke anusar
+// game bane"). A racing / endless world is a TRACK PLAN — an ordered list of pieces — not one hand-built
+// road. createTrackStream() lays the pieces end to end (each one starts EXACTLY where the last ended:
+// position, heading, height and width), keeps a few ahead of the player, recycles the ones behind, moves
+// a chunk of terrain with each piece, rebases the origin so a long drive never loses float precision,
+// and counts distance and laps. loop: 'infinite' repeats the pieces (A..I, A..I, …), 'none' ends the
+// track (an 'end' barrier or a 'water' shore are terminal), 'circuit' closes it into a loop, and
+// loopFrom: k plays pieces 0..k-1 once and loops the rest. DERIVE THE PLAN FROM THE USER'S WORDS; the
+// default (DEFAULT_TRACK_PLAN, infinite) is only for a user who said nothing about the course.
+export type TrackPieceKind = 'straight' | 'curve' | 'hill' | 'bridge' | 'tunnel' | 'checkpoint' | 'finish' | 'water' | 'end';
+export type TrackScenery = 'village' | 'city' | 'forest' | 'field' | 'desert';
+export interface TrackPiece {
+  kind: TrackPieceKind;
+  /** Metres along the road (a curve's length is its arc). */
+  length?: number;
+  /** Curves: total turn in radians, + = to the LEFT of the driver. */
+  angle?: number;
+  /** Hills: how high the crest rises above the start (m). */
+  rise?: number;
+  scenery?: TrackScenery;
+  name?: string;
+}
+export interface TrackPlan {
+  pieces: TrackPiece[];
+  loop?: 'infinite' | 'none' | 'circuit';
+  /** With loop 'infinite': pieces before this index are played once, the rest loop for ever. */
+  loopFrom?: number;
+  width?: number;
+  /** Pieces kept ahead of / behind the player. */
+  ahead?: number;
+  behind?: number;
+  seed?: number;
+  /** Rolling land around the track. */
+  amplitude?: number;
+  frequency?: number;
+  /** Distance from the origin at which the world is shifted back (floating origin). */
+  rebaseAt?: number;
+  /** Coins and cones per piece; they change every loop (more cones each lap). false = none. */
+  pickups?: boolean;
+}
+/** The default endless course: nine DIFFERENT pieces, A..I, looped for ever. */
+export const DEFAULT_TRACK_PLAN: TrackPlan = {
+  loop: 'infinite',
+  pieces: [
+    { kind: 'straight', length: 120, scenery: 'village', name: 'A village straight' },
+    { kind: 'curve', angle: Math.PI / 3, length: 140, scenery: 'field', name: 'B left sweeper' },
+    { kind: 'hill', length: 160, rise: 7, scenery: 'forest', name: 'C forest hill' },
+    { kind: 'curve', angle: -Math.PI / 3, length: 140, scenery: 'forest', name: 'D right sweeper' },
+    { kind: 'bridge', length: 100, scenery: 'field', name: 'E river bridge' },
+    { kind: 'straight', length: 140, scenery: 'city', name: 'F city straight' },
+    { kind: 'tunnel', length: 80, scenery: 'city', name: 'G tunnel' },
+    { kind: 'curve', angle: Math.PI / 4, length: 120, scenery: 'desert', name: 'H desert bend' },
+    { kind: 'checkpoint', length: 60, scenery: 'village', name: 'I checkpoint' },
+  ],
+};
+export interface TrackPose { x: number; z: number; heading: number; y: number }
+export interface TrackSegment {
+  piece: TrackPiece;
+  /** Index in the plan, the loop it belongs to, and its order in the stream. */
+  index: number;
+  loop: number;
+  serial: number;
+  start: TrackPose;
+  end: TrackPose;
+  /** Distance along the whole track where this piece begins. */
+  startDistance: number;
+  length: number;
+  road: THREE.Group;
+  ground: THREE.Mesh;
+  extras: THREE.Group;
+  pickups: THREE.Object3D[];
+  terminal: boolean;
+  dispose: () => void;
+}
+export interface TrackStatus { distance: number; lap: number; segment: TrackSegment | null; ended: boolean; rebased: THREE.Vector3 | null }
+export interface TrackStream {
+  root: THREE.Group;
+  plan: TrackPlan;
+  segments: TrackSegment[];
+  /** Where a vehicle should start: on the first piece, facing along it. */
+  startPose: TrackPose;
+  /** Call every frame with the player's object: streams pieces, rebases the origin (moving the player and \`carry\`). */
+  update: (player: THREE.Object3D, carry?: THREE.Object3D[]) => TrackStatus;
+  /** Pieces ever created (for a lap / variety HUD) and pieces alive now. */
+  stats: () => { created: number; alive: number };
+  dispose: () => void;
+  /** Called for every new piece — spawn your own traffic, coins or scenery with the per-loop rng. */
+  onSegment?: (segment: TrackSegment, rand: () => number) => void;
+  onCheckpoint?: (segment: TrackSegment, lap: number) => void;
+}
+
+/**
+ * The rolling land around a streamed track: two octaves of seeded value noise (the same recipe as
+ * createTerrain, kept here so objects.ts stays free of a world.ts import).
+ */
+function rollingLand(amp: number, freq: number, seed: number): (x: number, z: number) => number {
+  const r = rng(seed);
+  const table = new Float32Array(256);
+  for (let i = 0; i < 256; i++) table[i] = r();
+  const at = (x: number, y: number) => table[(((x * 73856093) ^ (y * 19349663)) >>> 0) % 256];
+  const sm = (t: number) => t * t * (3 - 2 * t);
+  const noise = (x: number, y: number) => {
+    const xi = Math.floor(x), yi = Math.floor(y), u = sm(x - xi), v = sm(y - yi);
+    return (at(xi, yi) * (1 - u) + at(xi + 1, yi) * u) * (1 - v) + (at(xi, yi + 1) * (1 - u) + at(xi + 1, yi + 1) * u) * v;
+  };
+  return (x, z) => noise(x * freq, z * freq) * amp + noise(x * freq * 3.7, z * freq * 3.7) * amp * 0.25;
+}
+
+/** Centre-line points of one piece from a pose, every 2 m. Pure geometry, so joins are exact. */
+function piecePoints(piece: TrackPiece, start: TrackPose): { pts: Array<{ x: number; z: number }>; end: TrackPose; length: number } {
+  const L = Math.max(10, piece.length ?? (piece.kind === 'end' ? 40 : piece.kind === 'water' ? 70 : 120));
+  const turn = piece.kind === 'curve' ? (piece.angle ?? Math.PI / 3) : 0;
+  const n = Math.max(2, Math.ceil(L / 2));
+  const pts: Array<{ x: number; z: number }> = [];
+  let x = start.x, z = start.z, h = start.heading;
+  pts.push({ x, z });
+  for (let i = 1; i <= n; i++) {
+    const ds = L / n;
+    // Midpoint rule: heading changes evenly along the arc; + turn is to the driver's LEFT (+X of a +Z car).
+    const hm = h + (turn / n) / 2;
+    x += Math.sin(hm) * ds; z += Math.cos(hm) * ds;
+    h += turn / n;
+    pts.push({ x, z });
+  }
+  return { pts, end: { x, z, heading: h, y: start.y }, length: L };
+}
+
+/** The road height along one piece, from its start height. Every piece returns to y0 except the terminal ones. */
+function pieceProfile(piece: TrackPiece, y0: number, L: number): (s: number) => number {
+  if (piece.kind === 'hill') { const rise = piece.rise ?? 7; return (s) => y0 + rise * Math.sin(Math.PI * Math.max(0, Math.min(1, s / L))) ** 2; }
+  if (piece.kind === 'water') return (s) => y0 - 4.5 * Math.max(0, Math.min(1, s / L)) ** 2;   // a slipway into the lake
+  return () => y0;
+}
+
+export function createTrackStream(planIn: TrackPlan = DEFAULT_TRACK_PLAN, options: BaseOpts = {}): TrackStream {
+  const d = tier(options);
+  const plan: TrackPlan = { ...DEFAULT_TRACK_PLAN, ...planIn, pieces: planIn.pieces && planIn.pieces.length ? planIn.pieces : DEFAULT_TRACK_PLAN.pieces };
+  const W = plan.width ?? 9;
+  const ahead = Math.max(1, plan.ahead ?? 3);
+  const behind = Math.max(0, plan.behind ?? 1);
+  const rebaseAt = plan.rebaseAt ?? 800;
+  const seed = plan.seed ?? 11;
+  const root = new THREE.Group();
+  root.userData.ground = false;
+  // The land: rolling noise in WORLD coordinates (origin-shift aware), cut to every piece by the registry.
+  const origin = { x: 0, z: 0 };
+  const field = rollingLand(plan.amplitude ?? 5, plan.frequency ?? 0.015, seed);
+  const base = (x: number, z: number) => field(x + origin.x, z + origin.z);
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x5a7d3a, roughness: 0.95, metalness: 0 });
+  const segments: TrackSegment[] = [];
+  registerTerrain({ base, drawn: shapedHeight, step: 2, flat: false, rebuild: () => { for (const sg of segments) rebuildGround(sg.ground); } });
+
+  function rebuildGround(m: THREE.Mesh): void {
+    const p = m.geometry.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < p.count; i++) p.setY(i, shapedHeight(p.getX(i) + m.position.x, p.getZ(i) + m.position.z));
+    p.needsUpdate = true;
+    m.geometry.computeVertexNormals();
+    m.geometry.computeBoundingSphere();
+  }
+  /** A strip of land ±60 m around the piece; its first row IS the previous strip's last row (seamless). */
+  function groundChunk(path: CorridorPath): THREE.Mesh {
+    const cols = 30, rows = Math.max(1, Math.ceil(path.total / 2));
+    const pos: number[] = [], idx: number[] = [];
+    for (let r = 0; r <= rows; r++) {
+      const q = pathPose(path, (path.total * r) / rows);
+      for (let c = 0; c <= cols; c++) { const o = -60 + (120 * c) / cols; pos.push(q.x + q.tz * o, 0, q.z - q.tx * o); }
+      if (r > 0) for (let c = 0; c < cols; c++) { const a = (r - 1) * (cols + 1) + c, b = a + cols + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    const m = new THREE.Mesh(geo, groundMat);
+    m.receiveShadow = true;
+    m.userData.ground = false;
+    rebuildGround(m);
+    return m;
+  }
+
+  let pose: TrackPose = { x: 0, z: 0, heading: 0, y: 0 };
+  let cursor = 0, loop = 0, serial = 0, distance = 0, ended = false, created = 0;
+  const loopFrom = Math.max(0, Math.min(plan.pieces.length - 1, plan.loopFrom ?? 0));
+  const stream: TrackStream = {
+    root, plan, segments, startPose: { ...pose },
+    update: () => ({ distance: 0, lap: 0, segment: null, ended: false, rebased: null }),
+    stats: () => ({ created, alive: segments.length }),
+    dispose: () => { while (segments.length) segments.shift()!.dispose(); groundMat.dispose(); registerTerrain(null); },
+  };
+
+  function nextPiece(): { piece: TrackPiece; index: number } | null {
+    if (ended) return null;
+    if (cursor >= plan.pieces.length) {
+      if (plan.loop === 'infinite') { cursor = loopFrom; loop++; } else return null;
+    }
+    const index = cursor++;
+    return { piece: plan.pieces[index], index };
+  }
+
+  function spawn(): boolean {
+    const next = nextPiece();
+    if (!next) return false;
+    const { piece, index } = next;
+    const geom = piecePoints(piece, pose);
+    const path = corridorPath(geom.pts);
+    const profile = pieceProfile(piece, pose.y, geom.length);
+    const terminal = piece.kind === 'end' || piece.kind === 'water';
+    const road = createRoad({ path: geom.pts.map((q) => [q.x, q.z] as [number, number]), width: W, detail: d, profile, valley: piece.kind === 'bridge' ? 7 : undefined });
+    const extras = new THREE.Group(); extras.userData.ground = false;
+    const removers: Array<() => void> = [];
+    const mid = pathPose(path, geom.length / 2);
+    if (piece.kind === 'bridge') {
+      // A river runs in the valley under the deck: WATER, declared — the one place a thing may go below.
+      const water = new THREE.Mesh(new THREE.PlaneGeometry(26, 200), new THREE.MeshStandardMaterial({ color: 0x2f6f8f, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.9 }));
+      water.rotation.x = -Math.PI / 2; water.rotation.z = Math.atan2(mid.tx, mid.tz) + Math.PI / 2;
+      water.position.set(mid.x, pose.y - 5.5, mid.z); water.userData.ground = false; extras.add(water);
+      const mx = mid.x, mz = mid.z, tx = mid.tx, tz = mid.tz;
+      removers.push(addWater((x, z) => Math.abs((x - mx) * tx + (z - mz) * tz) < 13 && Math.hypot(x - mx, z - mz) < 100));
+      const stone = shared('stone', d, 0xb9b3a6, 6);
+      for (const k of [-1, 1]) for (const side of [-1, 1]) {
+        const q = pathPose(path, geom.length / 2 + k * 9);
+        const pillar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 8, 1.2), stone);
+        pillar.position.set(q.x + q.tz * side * (W / 2 - 0.8), pose.y - 4, q.z - q.tx * side * (W / 2 - 0.8)); extras.add(pillar);
+      }
+      for (const side of [-1, 1]) {
+        const rail = new THREE.Mesh(ribbonGeometry(path, side * (W / 2 + 0.1), 0.25, [[0, geom.length]]), stone);
+        rail.position.y = pose.y + 0.9; extras.add(rail);
+      }
+    }
+    if (piece.kind === 'tunnel') {
+      const arch = new THREE.Mesh(new THREE.CylinderGeometry(W * 0.75, W * 0.75, geom.length, 20, 1, true, -Math.PI / 2, Math.PI), shared('stone', d, 0x8b8378, 8));
+      (arch.material as THREE.Material).side = THREE.DoubleSide;
+      arch.rotation.x = Math.PI / 2; arch.rotation.order = 'YXZ'; arch.rotation.y = Math.atan2(mid.tx, mid.tz);
+      arch.position.set(mid.x, pose.y, mid.z); extras.add(arch);
+    }
+    if (piece.kind === 'checkpoint' || piece.kind === 'finish' || piece.kind === 'end') {
+      const q = pathPose(path, piece.kind === 'end' ? geom.length - 1 : geom.length / 2);
+      const col = piece.kind === 'end' ? 0xd12b2b : piece.kind === 'finish' ? 0xffffff : 0xf2b705;
+      const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.5 });
+      const gate = new THREE.Group();
+      if (piece.kind === 'end') gate.add(new THREE.Mesh(new THREE.BoxGeometry(W + 2, 1.2, 0.6), mat)).children[0].position.set(0, 0.6, 0);
+      else {
+        for (const side of [-1, 1]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.4, 5, 0.4), mat); post.position.set(side * (W / 2 + 0.6), 2.5, 0); gate.add(post); }
+        const beam = new THREE.Mesh(new THREE.BoxGeometry(W + 1.6, 0.8, 0.4), mat); beam.position.y = 5; gate.add(beam);
+      }
+      gate.position.set(q.x, profile(piece.kind === 'end' ? geom.length - 1 : geom.length / 2), q.z); gate.rotation.y = Math.atan2(q.tx, q.tz);
+      gate.userData.ground = false; extras.add(gate);
+    }
+    if (piece.kind === 'water') {
+      // The road runs down a slipway into a lake: the far half is declared WATER (a boat floats, a car sinks).
+      const q = pathPose(path, geom.length * 0.8);
+      const lake = new THREE.Mesh(new THREE.CircleGeometry(70, 40), new THREE.MeshStandardMaterial({ color: 0x2f6f8f, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.92 }));
+      lake.rotation.x = -Math.PI / 2; lake.position.set(q.x + q.tx * 50, pose.y - 1.5, q.z + q.tz * 50); lake.userData.ground = false; extras.add(lake);
+      const cx = lake.position.x, cz = lake.position.z;
+      removers.push(addWater((x, z) => Math.hypot(x - cx, z - cz) < 70));
+    }
+    const ground = groundChunk(path);
+    root.add(road, ground, extras);
+    // Per-loop variation: the same piece gets different coins and more cones every lap.
+    const rand = rng(seed * 7919 + loop * 104729 + index * 131);
+    const pickups: THREE.Object3D[] = [];
+    if (plan.pickups !== false && !terminal) {
+      const coinMat = new THREE.MeshStandardMaterial({ color: 0xffc83d, metalness: 0.8, roughness: 0.3, emissive: 0x3a2a00 });
+      const coneMat = new THREE.MeshStandardMaterial({ color: 0xff6a00, roughness: 0.6 });
+      const coins = 4 + Math.floor(rand() * 6), cones = Math.min(8, loop + Math.floor(rand() * 2));
+      for (let i = 0; i < coins + cones; i++) {
+        const sv = 8 + rand() * (geom.length - 16);
+        const lane = (Math.floor(rand() * 3) - 1) * (W / 3);
+        const q = pathPose(path, sv);
+        const isCoin = i < coins;
+        const o = isCoin ? new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.12, 8, 16), coinMat) : new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.8, 10), coneMat);
+        o.position.set(q.x + q.tz * lane, profile(sv) + ROAD_SURFACE_Y + (isCoin ? 1 : 0.4), q.z - q.tx * lane);
+        o.userData.kind = isCoin ? 'coin' : 'cone';
+        o.userData.groundOffset = isCoin ? 1 : 0.4;
+        extras.add(o); pickups.push(o);
+      }
+    }
+    const seg: TrackSegment = {
+      piece, index, loop, serial: serial++, start: { ...pose }, end: { ...geom.end, y: profile(geom.length) },
+      startDistance: distance, length: geom.length, road, ground, extras, pickups, terminal,
+      dispose: () => {
+        for (const r of removers) r();
+        removeCorridor(road.userData.corridor as Corridor);
+        for (const g of [road, ground, extras]) {
+          g.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry) m.geometry.dispose(); });
+          root.remove(g);
+        }
+      },
+    };
+    distance += geom.length;
+    pose = seg.end;
+    segments.push(seg);
+    created++;
+    if (terminal) ended = true;
+    if (plan.loop === 'circuit' && cursor >= plan.pieces.length) {
+      ended = true;
+      closeCircuit();
+    }
+    stream.onSegment?.(seg, rand);
+    return true;
+  }
+
+  /** A circuit: one closing spline from the last piece's end back to the first piece's start, tangent at both. */
+  function closeCircuit(): void {
+    const a = pose, b = stream.startPose;
+    const gap = Math.hypot(b.x - a.x, b.z - a.z);
+    if (gap < 1) return;
+    const k = Math.min(gap / 3, 60);
+    const ctrl: Array<[number, number]> = [
+      [a.x, a.z], [a.x + Math.sin(a.heading) * k, a.z + Math.cos(a.heading) * k],
+      [b.x - Math.sin(b.heading) * k, b.z - Math.cos(b.heading) * k], [b.x, b.z],
+    ];
+    const pts = samplePath(ctrl);
+    const path = corridorPath(pts);
+    const y0 = a.y, y1 = b.y;
+    const road = createRoad({ path: ctrl, width: W, detail: d, profile: (s) => y0 + (y1 - y0) * smoothT(s / Math.max(1, path.total)) });
+    const ground = groundChunk(path);
+    const extras = new THREE.Group();
+    root.add(road, ground, extras);
+    segments.push({
+      piece: { kind: 'straight', name: 'circuit closer' }, index: -1, loop, serial: serial++, start: { ...a }, end: { ...b },
+      startDistance: distance, length: path.total, road, ground, extras, pickups: [], terminal: false,
+      dispose: () => { removeCorridor(road.userData.corridor as Corridor); for (const g of [road, ground, extras]) { g.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry) m.geometry.dispose(); }); root.remove(g); } },
+    });
+    distance += path.total;
+  }
+  const smoothT = (t: number) => { const u = Math.max(0, Math.min(1, t)); return u * u * (3 - 2 * u); };
+
+  /** Which live piece is the player on, and how far along it. */
+  function locate(p: THREE.Vector3): { seg: TrackSegment; s: number } | null {
+    let best: { seg: TrackSegment; s: number; d: number } | null = null;
+    for (const sg of segments) {
+      const path = sg.road.userData.path as CorridorPath;
+      let bd = Infinity, bs = 0;
+      for (let i = 0; i < path.pts.length; i++) {
+        const dd = (path.pts[i].x + sg.road.position.x - p.x) ** 2 + (path.pts[i].z + sg.road.position.z - p.z) ** 2;
+        if (dd < bd) { bd = dd; bs = path.cum[i]; }
+      }
+      if (!best || bd <= best.d) best = { seg: sg, s: bs, d: bd };   // at a join the NEXT piece wins
+    }
+    if (!best) return null;
+    // At (or a hair before) a piece's end, the player is at the START of the next one.
+    const i = segments.indexOf(best.seg);
+    if (best.s >= best.seg.length - 0.25 && i < segments.length - 1) return { seg: segments[i + 1], s: 0 };
+    return { seg: best.seg, s: best.s };
+  }
+
+  // The first pieces exist before the first frame, so the start screen shows a road.
+  for (let i = 0; i < ahead + 1; i++) if (!spawn()) break;
+  let lastCheckpoint = -1;
+
+  stream.update = (player, carry = []) => {
+    let rebased: THREE.Vector3 | null = null;
+    // FLOATING ORIGIN: far from 0 a float32 loses centimetres (jitter); shift the WORLD back, keep the land.
+    if (Math.hypot(player.position.x, player.position.z) > rebaseAt) {
+      const sx = player.position.x, sz = player.position.z;
+      origin.x += sx; origin.z += sz;
+      for (const c of root.children) { c.position.x -= sx; c.position.z -= sz; }
+      for (const o of [player, ...carry]) { o.position.x -= sx; o.position.z -= sz; }
+      // Every piece is a child of root and was just moved; its path is LOCAL to its group, so the
+      // corridors, the land (world-noise + origin) and the drape all agree after one sync.
+      pose = { ...pose, x: pose.x - sx, z: pose.z - sz };
+      for (const sg of segments) for (const q of [sg.start, sg.end]) { q.x -= sx; q.z -= sz; }
+      stream.startPose = { ...stream.startPose, x: stream.startPose.x - sx, z: stream.startPose.z - sz };
+      syncGround();
+      rebased = new THREE.Vector3(sx, 0, sz);
+    }
+    const here = locate(player.position);
+    if (!here) return { distance: 0, lap: 0, segment: null, ended, rebased };
+    const at = segments.indexOf(here.seg);
+    while (segments.length - 1 - at < ahead && spawn()) { /* stream ahead */ }
+    while (segments.indexOf(here.seg) > behind) segments.shift()!.dispose();
+    if ((here.seg.piece.kind === 'checkpoint' || here.seg.piece.kind === 'finish') && here.s > here.seg.length / 2 && lastCheckpoint !== here.seg.serial) {
+      lastCheckpoint = here.seg.serial;
+      stream.onCheckpoint?.(here.seg, here.seg.loop);
+    }
+    return { distance: here.seg.startDistance + here.s, lap: here.seg.loop, segment: here.seg, ended, rebased };
+  };
+  return stream;
 }
 
 // ── HOUSE ────────────────────────────────────────────────────────────────────────────────────────
@@ -3037,7 +4282,8 @@ export interface HouseOptions extends BaseOpts {
   /** Wall colour. Defaults to one of the washes Indian houses are actually painted in. */
   wallColor?: number;
   /** 'flat' — RCC roof with a parapet and a water tank (towns, most villages). 'tiled' — sloped clay tiles. */
-  roof?: 'flat' | 'tiled';
+  /** 'tile' is accepted as 'tiled' — the SurfaceKind spelling a builder reaches for (autopsy 61279465: TS2820). */
+  roof?: 'flat' | 'tiled' | 'tile';
 }
 
 /** The colours houses in an Indian village or town are really washed in — not white boxes. */
@@ -3060,7 +4306,7 @@ export function createHouse(options: HouseOptions = {}): THREE.Group {
   const storeys = Math.max(1, Math.min(2, Math.round(options.storeys ?? 1)));
   const H = storeys * 3;
   const wash = options.wallColor ?? HOUSE_WASHES[Math.floor(r() * HOUSE_WASHES.length)];
-  const roofKind = options.roof ?? (r() < 0.7 ? 'flat' : 'tiled');
+  const roofKind = options.roof === 'tile' ? 'tiled' : options.roof ?? (r() < 0.7 ? 'flat' : 'tiled');
   const group = new THREE.Group();
 
   const wall = shared('plaster', d, wash, 2);
@@ -4473,7 +5719,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
       "import { createTerrain, scatterInstances, treeGeometry } from './game/three/world';\n" +
       "import { createHumanoid } from './game/three/humanoid';\n" +
       "import { createCar, createTree, createMountain, createRoad, createHouse, createRiver, createAnimal,\n" +
-      "  createMotorcycle, createVehicleState, driveVehicle, ROAD_SURFACE_Y } from './game/three/objects';\n" +
+      "  createMotorcycle, createRailTrack, createVehicleState, driveVehicle, groundHeightAt } from './game/three/objects';\n" +
       "import { CameraRig } from './game/three/camera';\n" +
       "import { Input } from './game/core/input';\n" +
       '\n' +
@@ -4485,7 +5731,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
       "applyEnvironment(scene, renderer, 'sunset');            // reflections — do NOT skip this\n" +
       "setDetailLevel('real');   // 'real' when the user asked for real/asli; 'lite' for plain 3D\n" +
       "const terrain = createTerrain({ palette: 'indianVillage' });\n" +
-      'scene.add(terrain, createTree({ height: 7 }), createMountain({ size: 140, height: 50 }), createRoad({ length: 400 }));\n' +
+      'scene.add(terrain, createTree({ height: 7 }), createMountain({ size: 140, height: 50 }), createRoad({ length: 400 }));   // the road drapes over the hills; the ground is cut to it\n' +
+      "const rail = createRailTrack({ length: 400 }); rail.position.x = 30; scene.add(rail);   // a train rides at groundHeightAt(x, z) on it\n" +
       "scene.add(scatterInstances(treeGeometry(), sharedMaterial('foliage', paletteColor('forest', 1)), { count: 400 }));\n" +
       "scene.add(new THREE.Mesh(enableAO(new THREE.BoxGeometry(6, 3, 0.3)), surfaceMaterial('brick', { repeat: 6 })));\n" +
       "const house = createHouse({ roof: 'flat', storeys: 2 }); house.position.set(16, 0, 0); house.rotation.y = -Math.PI / 2; scene.add(house); // door faces +Z — turn it to the road\n" +
@@ -4496,7 +5743,7 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '// DRIVING. Every model faces +Z (MODEL_FORWARD). driveVehicle owns the control signs; the camera stays BEHIND.\n' +
       'const car = createCar({ color: 0xb42b2b });\n' +
       'car.rotation.y = Math.PI; // local +Z nose faces world -Z, into the screen\n' +
-      'car.position.y = ROAD_SURFACE_Y;   // wheels ON the asphalt, which sits 3 cm above the ground\n' +
+      'car.position.y = groundHeightAt(0, 0);   // ON the road surface; driveVehicle keeps it there over every hill\n' +
       'scene.add(car);\n' +
       'let drive = createVehicleState(car);   // starts moving, pointing where the model points\n' +
       "const rig = new CameraRig({ kind: 'chase', collidables: [terrain, house] });\n" +
@@ -4543,9 +5790,24 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '  only said 3D. A hand-written box car beside these reads as a bug, not a style.\n' +
       '- 🔴 ANYTHING DRIVEN OR RIDDEN: move it with driveVehicle(vehicle, state, input.axis(), dt) — the raw\n' +
       "  axis, never a sign you worked out — and frame it with a 'chase' rig (rig.update(vehicle, dt)) or\n" +
-      '  rig.follow(vehicle, dt). The camera then sits BEHIND it: the player sees the TAIL lights, and LEFT\n' +
+      '  rig.follow(vehicle, dt). driveVehicle also keeps it ON the hills of createTerrain() (height, pitch,\n' +
+      '  roll): never set a driven vehicle\'s position.y yourself. groundHeightAt(x, z) is THE ground height\n' +
+      '  (road/rail surface on a road or track, terrain elsewhere) for anything else you place or move — a\n' +
+      '  train, traffic, NPCs, props. Roads are createRoad() and rails createRailTrack(): never a flat\n' +
+      '  PlaneGeometry at ROAD_SURFACE_Y over hilly terrain (the grass covers it and the car looks sunk).\n' +
+      '  The game shell grounds every scene object each step; set userData.ground = false only for a\n' +
+      '  flyer, and addWater(fn) for the only places something may sink. The camera then sits BEHIND it: the player sees the TAIL lights, and LEFT\n' +
       '  turns it to the left of the screen. A camera you place yourself at +Z of the car is IN FRONT of it\n' +
       '  (every model faces +Z) — the player sees the headlights and every control reads as reversed.\n' +
+      "- 🛣️ A RACING / DRIVING / ENDLESS course is a TRACK PLAN: createTrackStream({ pieces, loop }) from\n" +
+      "  objects.ts, scene.add(stream.root), and stream.update(car) every frame (it streams pieces ahead,\n" +
+      "  recycles behind, rebases the origin and returns { distance, lap, segment, ended }). DERIVE the\n" +
+      "  pieces from the user's words — 'straight' | 'curve' (angle, + = left) | 'hill' (rise) | 'bridge' |\n" +
+      "  'tunnel' | 'checkpoint' | 'finish' | 'water' (road runs into a lake: declared water) | 'end' (a\n" +
+      "  barrier) — loop: 'infinite' (repeat; loopFrom: k keeps an intro once), 'none' (the course ENDS),\n" +
+      "  or 'circuit' (closes back to the start). Only when the user said nothing about the course use\n" +
+      "  DEFAULT_TRACK_PLAN (nine different pieces looped for ever). Start the car at stream.startPose.\n" +
+      "  A one-off curved road or circuit: createRoad({ path: [[x, z], ...], closed }).\n" +
       "- 🌦️ An outdoor world gets atmosphere.ts: createAtmosphere({ scene, renderer, camera, lighting })\n" +
       "  — a day-night clock (dayLength seconds per day) and weather via setWeather('rain'|'storm'|'snow'|\n" +
       "  'fog'|'dust'|'cloudy'|'clear', seconds). addNightLight(lamp), wet([roadMaterial]), and\n" +

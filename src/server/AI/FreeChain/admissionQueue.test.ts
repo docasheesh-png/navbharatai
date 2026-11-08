@@ -1,11 +1,11 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { FreeChainAdmissionQueue, DEFAULT_ADMISSION_QUEUE_LIMITS, freeChainAdmissionQueue, type AdmissionRequest, type AdmissionResult } from './admissionQueue';
+import { FreeChainAdmissionQueue, DEFAULT_ADMISSION_QUEUE_LIMITS, MAX_QUEUED_PAYLOAD_BYTES, admissionPayloadBytes, freeChainAdmissionQueue, type AdmissionRequest, type AdmissionResult } from './admissionQueue';
 function granted(result: AdmissionResult) { if (!result.admitted) throw new Error(`Unexpected ${result.reason}`); return result; }
 const request = (uid: string, extra: Partial<AdmissionRequest> = {}): AdmissionRequest => ({ uid, maxActive: 1, maxQueued: 4, maxWaitMs: 1000, ...extra });
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-22T12:00:00Z')); });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 describe('bounded process-local free-chat turn admission', () => {
- it('has conservative frozen defaults and a reusable singleton', () => { expect(DEFAULT_ADMISSION_QUEUE_LIMITS).toEqual({maxActive:8,maxQueued:64,maxWaitMs:5000,perUserActive:1,perUserQueued:1});expect(Object.isFrozen(DEFAULT_ADMISSION_QUEUE_LIMITS)).toBe(true);expect(freeChainAdmissionQueue).toBeInstanceOf(FreeChainAdmissionQueue); });
+ it('has conservative frozen defaults and a reusable singleton', () => { expect(DEFAULT_ADMISSION_QUEUE_LIMITS).toEqual({maxActive:8,maxQueued:1024,maxWaitMs:5000,perUserActive:1,perUserQueued:1});expect(Object.isFrozen(DEFAULT_ADMISSION_QUEUE_LIMITS)).toBe(true);expect(freeChainAdmissionQueue).toBeInstanceOf(FreeChainAdmissionQueue); });
  it('grants immediately, frees all user state, and release is idempotent', async () => { const q=new FreeChainAdmissionQueue();const a=granted(await q.acquire(request('a')));expect(a.waitedMs).toBe(0);expect(q.snapshot()).toEqual({active:1,queued:0,activeUsers:1,queuedUsers:0});a.release();a.release();expect(q.snapshot()).toEqual({active:0,queued:0,activeUsers:0,queuedUsers:0}); });
  it('queues and grants FIFO when a slot is released', async()=>{const q=new FreeChainAdmissionQueue();const a=granted(await q.acquire(request('a')));const b=q.acquire(request('b'));const c=q.acquire(request('c'));await vi.advanceTimersByTimeAsync(50);a.release();const second=granted(await b);expect(second.waitedMs).toBe(50);expect(q.snapshot().queued).toBe(1);second.release();granted(await c).release();expect(vi.getTimerCount()).toBe(0);});
  it('rejects overflow without creating another timer or retained user',async()=>{const q=new FreeChainAdmissionQueue();const a=granted(await q.acquire(request('a',{maxQueued:1})));const b=q.acquire(request('b',{maxQueued:1}));expect(await q.acquire(request('c',{maxQueued:1}))).toMatchObject({admitted:false,reason:'queue-full'});expect(q.snapshot()).toEqual({active:1,queued:1,activeUsers:1,queuedUsers:1});expect(vi.getTimerCount()).toBe(1);a.release();granted(await b).release();});
@@ -54,6 +54,40 @@ describe('bounded process-local free-chat turn admission', () => {
   expect(q.snapshot().active).toBe(1);
   a.release();
  });
- it('bounds a 10,000 distinct-user burst to 8 active and 64 queued',async()=>{const q=new FreeChainAdmissionQueue();const pending=Array.from({length:10000},(_,i)=>q.acquire({uid:`user-${i}`}));expect(q.snapshot()).toEqual({active:8,queued:64,activeUsers:8,queuedUsers:64});expect(vi.getTimerCount()).toBe(64);const first=await Promise.all(pending.slice(0,8));const overflow=await Promise.all(pending.slice(72));expect(overflow.every(r=>!r.admitted&&r.reason==='queue-full')).toBe(true);await vi.advanceTimersByTimeAsync(DEFAULT_ADMISSION_QUEUE_LIMITS.maxWaitMs);expect((await Promise.all(pending.slice(8,72))).every(r=>!r.admitted&&r.reason==='timeout')).toBe(true);first.forEach(r=>granted(r).release());expect(q.snapshot()).toEqual({active:0,queued:0,activeUsers:0,queuedUsers:0});expect(vi.getTimerCount()).toBe(0);});
+ it('bounds a 10,000 distinct-user burst to 8 active and 1024 queued',async()=>{const q=new FreeChainAdmissionQueue();const pending=Array.from({length:10000},(_,i)=>q.acquire({uid:`user-${i}`}));expect(q.snapshot()).toEqual({active:8,queued:1024,activeUsers:8,queuedUsers:1024});expect(vi.getTimerCount()).toBe(1024);const first=await Promise.all(pending.slice(0,8));const overflow=await Promise.all(pending.slice(1032));expect(overflow.every(r=>!r.admitted&&r.reason==='queue-full')).toBe(true);await vi.advanceTimersByTimeAsync(DEFAULT_ADMISSION_QUEUE_LIMITS.maxWaitMs);expect((await Promise.all(pending.slice(8,1032))).every(r=>!r.admitted&&r.reason==='timeout')).toBe(true);first.forEach(r=>granted(r).release());expect(q.snapshot()).toEqual({active:0,queued:0,activeUsers:0,queuedUsers:0});expect(vi.getTimerCount()).toBe(0);});
  it('a 10,000 same-user burst retains only one active and one waiting',async()=>{const q=new FreeChainAdmissionQueue();const pending=Array.from({length:10000},()=>q.acquire({uid:'same-user'}));expect(q.snapshot()).toEqual({active:1,queued:1,activeUsers:1,queuedUsers:1});expect((await Promise.all(pending.slice(2))).every(r=>!r.admitted&&r.reason==='user-limit')).toBe(true);granted(await pending[0]).release();granted(await pending[1]).release();expect(q.snapshot().queuedUsers).toBe(0);});
+});
+
+it('bounds retained serialized payloads and recovers the byte budget on abort/grant/timeout', async () => {
+ const q = new FreeChainAdmissionQueue();
+ const first = granted(await q.acquire(request('active')));
+ const controller = new AbortController();
+ const full = q.acquire(request('full', {payloadBytes:MAX_QUEUED_PAYLOAD_BYTES,signal:controller.signal}));
+ expect(await q.acquire(request('overflow',{payloadBytes:1}))).toMatchObject({admitted:false,reason:'capacity'});
+ controller.abort(); expect(await full).toMatchObject({admitted:false,reason:'aborted'});
+ const next=q.acquire(request('next',{payloadBytes:MAX_QUEUED_PAYLOAD_BYTES}));
+ first.release(); const active=granted(await next);
+ const expired=q.acquire(request('expired',{payloadBytes:MAX_QUEUED_PAYLOAD_BYTES}));
+ await vi.advanceTimersByTimeAsync(1000);expect(await expired).toMatchObject({reason:'timeout'});
+ const recovered=q.acquire(request('recovered',{payloadBytes:MAX_QUEUED_PAYLOAD_BYTES}));
+ active.release();granted(await recovered).release();expect(q.snapshot().queued).toBe(0);
+});
+it('counts UTF-8 JSON payloads and fails closed for unserializable payloads',()=>{
+ expect(admissionPayloadBytes({message:'नमस्ते'})).toBe(Buffer.byteLength(JSON.stringify({message:'नमस्ते'})));
+ const circular:any={};circular.self=circular;expect(admissionPayloadBytes(circular)).toBeGreaterThan(MAX_QUEUED_PAYLOAD_BYTES);
+});
+it.each([-1,NaN,Infinity,1.5])('rejects invalid payload size %s',async payloadBytes=>{
+ expect(await new FreeChainAdmissionQueue().acquire(request('u',{payloadBytes}))).toMatchObject({admitted:false,reason:'capacity'});
+});
+
+it('completes a 1024-user burst without exceeding eight active turns or leaking state', async () => {
+ const q=new FreeChainAdmissionQueue();let peak=0,completed=0;
+ const work=Array.from({length:1024},(_,i)=>q.acquire({uid:`burst-${i}`,payloadBytes:1024}).then(async result=>{
+  const slot=granted(result);peak=Math.max(peak,q.snapshot().active);
+  await new Promise(resolve=>setTimeout(resolve,25));completed++;slot.release();
+ }));
+ expect(q.snapshot()).toMatchObject({active:8,queued:1016});
+ await vi.advanceTimersByTimeAsync(3200);await Promise.all(work);
+ expect(completed).toBe(1024);expect(peak).toBe(8);
+ expect(q.snapshot()).toEqual({active:0,queued:0,activeUsers:0,queuedUsers:0});expect(vi.getTimerCount()).toBe(0);
 });

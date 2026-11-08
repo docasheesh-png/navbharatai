@@ -18,9 +18,9 @@ describe('FREE-chain configuration is explicit and fail-closed', () => {
     expect(cfg.errors).toContain('FREE_CHAIN_GROQ_MODEL');
     expect(cfg.rungs.find(r => r.id === 'groq')?.model).toBe('');
   });
-  it('defaults OFF, zero rollout, no public cache, Gemini skipped and no invented Google quota', () => {
+  it('defaults ON with full rollout, Gemini skipped and no invented Google quota', () => {
     const cfg = freeChainConfig({});
-    expect(cfg).toMatchObject({ enabled: false, rolloutPercent: 0, cacheEnabled: true, skipGemini: true,
+    expect(cfg).toMatchObject({ enabled: true, rolloutPercent: 100, cacheEnabled: true, skipGemini: true,
       privacyApproved: false, paidCapNanoUsd: 10_000_000_000, paidPerUserDaily: 20, safetyMargin: .9, errors: [] });
     expect(cfg.order).toEqual(['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter', 'cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
     expect(cfg.rungs.find(r => r.id === 'gemini')).toMatchObject({ rpm: 0, rpd: 0, tpm: 0, tpd: 0, reason: 'privacy' });

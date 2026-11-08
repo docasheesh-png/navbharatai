@@ -1,3 +1,4 @@
+import { FIXED_TEXT_CHAIN_MAX_ATTEMPTS } from '../fixedTextChain';
 import { modelSlotIdentity, modelSlotPath, modelSlotBinding, readModelSlotPolicy, readModelSlotState, readHeldModelSlot, type GatewayModelSlotPolicy, type GatewayModelSlotState, type HeldModelSlot } from './modelConcurrency';
 /**
  * Firestore hold/claim ledger composed by the server-only runtime. No default DB,
@@ -117,6 +118,7 @@ interface LogicalState {
   kind: 'gateway_logical'; version: 1; key: ExecutionKey; requestIdentity: string;
   cancellationId: string; cancelled: boolean; outputVisible: boolean; terminal: boolean; completed: boolean;
   activeAttemptId: string | null; attempts: AttemptRecord[]; queueWaitConsumedMs: number;
+  fixedTextChain?: 'v1';
   heldNanoUsd: number; spentNanoUsd: number; logicalLimitNanoUsd: number;
 }
 interface AttemptState {
@@ -213,13 +215,15 @@ export class FirestoreInferenceLedger implements LedgerPort {
     if (value === undefined) {
       demand(r.attempts.length === 0 && nonnegativeInteger(r.queueWaitConsumedMs) && r.queueWaitConsumedMs <= r.maxQueueWaitMs && !r.outputVisible);
       return { kind: 'gateway_logical', version: 1, key: authority.key, requestIdentity: logicalRequestBinding(r),
+        ...(r.fixedTextChain === 'v1' ? { fixedTextChain: 'v1' as const } : {}),
         cancellationId: r.cancellation.id, cancelled: r.cancellation.cancelled, outputVisible: false, terminal: false, completed: false,
         activeAttemptId: null, attempts: [], queueWaitConsumedMs: r.queueWaitConsumedMs, heldNanoUsd: 0, spentNanoUsd: 0,
         logicalLimitNanoUsd: count(authority.logicalLimitNanoUsd) };
     }
     const l = raw(value, 'gateway_logical') as unknown as LogicalState;
     demand(same(l.key, authority.key) && l.requestIdentity === logicalRequestBinding(r)
-      && l.cancellationId === r.cancellation.id && l.logicalLimitNanoUsd === authority.logicalLimitNanoUsd);
+      && l.cancellationId === r.cancellation.id && l.logicalLimitNanoUsd === authority.logicalLimitNanoUsd
+      && l.fixedTextChain === r.fixedTextChain);
     this.validateLogical(l);
     return l;
   }
@@ -227,7 +231,8 @@ export class FirestoreInferenceLedger implements LedgerPort {
     demand(validKey(l.key) && typeof l.requestIdentity === 'string' && isIdentifier(l.cancellationId)
       && ['cancelled', 'outputVisible', 'terminal', 'completed'].every(k => typeof (l as unknown as Raw)[k] === 'boolean')
       && (l.activeAttemptId === null || isIdentifier(l.activeAttemptId))
-      && Array.isArray(l.attempts) && l.attempts.length <= 4 && l.attempts.every(validRecord)
+      && (l.fixedTextChain === undefined || l.fixedTextChain === 'v1')
+      && Array.isArray(l.attempts) && l.attempts.length <= (l.fixedTextChain === 'v1' ? FIXED_TEXT_CHAIN_MAX_ATTEMPTS : 4) && l.attempts.every(validRecord)
       && new Set(l.attempts.map(a => a.physicalAttemptId)).size === l.attempts.length
       && [l.queueWaitConsumedMs, l.heldNanoUsd, l.spentNanoUsd, l.logicalLimitNanoUsd].every(nonnegativeInteger));
     checkedAdd(l.heldNanoUsd, l.spentNanoUsd);

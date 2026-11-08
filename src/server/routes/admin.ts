@@ -1,3 +1,4 @@
+import { getChatOutcomeObservation } from '../AI/chatOutcomeObservation';
 import { adjustAdminBuildTokens, AdminTokenAdjustmentError } from '../lib/adminTokenAdjustment';
 import { adminTokenAdjustmentReceipt } from '../lib/adminTokenAdjustmentReceipt';
 import { freeProgramStore } from '../lib/freeProgram';
@@ -5,10 +6,12 @@ import { walletMergeResolveEnabled } from '../lib/walletResolve';
 import { validRequestId } from '../lib/walletOps';
 import { registerInferenceGatewayAdminRoutes } from './inferenceGatewayAdmin';
 import { registerFreeChatChainRoutes } from './freeChatChainAdmin';
-import { registerProviderDiagnosticRoutes } from './providerDiagnostics';
 import { registerDeepinfraComparisonRoutes } from './deepinfraComparison';
 import { registerLiveModelRegistryRoutes } from './liveModelRegistry';
 import { registerSurplusRegistryAdminRoutes } from './surplusRegistryAdmin';
+import { registerApiProvidersAdminRoutes } from './apiProvidersAdmin';
+import { registerProviderSwitchesAdminRoutes } from './providerSwitchesAdmin';
+import { registerGameAssetsAdminRoutes } from './gameAssetsAdmin';
 import { sendAdminOwnerApps } from './adminOwnerApps';
 import { readBuildReportNumbers, ReportNumberingInputError } from '../lib/buildReportNumbering';
 import { registerAiMaintenanceRoutes } from './aiMaintenance';
@@ -65,7 +68,7 @@ import { buildDiscountStore, BUILD_DISCOUNT_MAX_PCT, BUILD_DISCOUNT_CACHE_MS } f
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mergeWallets } from '../lib/accountMerge';
 import { serverStats } from '../lib/serverStats';
-import { getProviderStats, getRouterOutcomeStats } from '../AI/Router/AIRouter';
+import { getProviderStats, getRouterOutcomeStats, visibleProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { metricsTimeline } from '../lib/metricsTimeline';
@@ -92,7 +95,7 @@ import { parseStatusFilter, parseDateFilter, sinceMsFor, buildMatchesFilters, st
 import { accountTier, matchesTier, parseTierFilter, type AccountTier } from '../lib/accountTier';
 import { freeListLabelForStoredEmail } from '../AgentV3/featureFlag';
 import { sandboxStore } from '../AgentV3/SandboxStore';
-import { liveSandboxNote, type LiveSandboxCount } from '../AgentV3/liveSandboxCount';
+import { liveSandboxNote, runningSandboxLifecycleNote, type LiveSandboxCount } from '../AgentV3/liveSandboxCount';
 import { buildActuator } from './actuatorFactory';
 import { runningBuildCount } from '../AgentV3/runningBuildRegistry';
 import { tallyHandover, projectHandover, handoverHeadline, handoverSample } from '../AgentV3/sandboxHandover';
@@ -118,7 +121,7 @@ import { saveNotification, normalizeTarget } from '../lib/AdminNotificationStore
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore, platformHealthInputs } from '../lib/HealthScore';
-import { summariseUsage, marginInr } from '../lib/usageLedger';
+import { summariseUsage, marginInr, NOT_A_PROVIDER } from '../lib/usageLedger';
 import { platformMarginWindow } from '../lib/platformMargin';
 import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
 import { usdToInr } from '../lib/UsdInrRate';
@@ -216,6 +219,12 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'admin_failed_report_autopsies',
   // Singleton counter for permanent failed-build report numbers (RETAINED_INDEFINITELY).
   'admin_failed_report_numbers',
+  // The build report registry (one row per report, 180 days) and its counter (RETAINED_INDEFINITELY).
+  'build_report_numbers', 'admin_build_report_counter',
+  // The admin's note of which login each outside API account uses (RETAINED_INDEFINITELY; one doc per provider).
+  'admin_api_provider_accounts',
+  // The AI provider on/off switches: one state doc with a bounded change history (RETAINED_INDEFINITELY).
+  'admin_provider_switches',
   'hosting_billing', 'hosting_period_usage',
   // Already on clocks, and absent from this inventory for the same reason the eleven above were.
   'takedown_records', 'safety_flags', 'admin_audit_log', 'build_jobs', 'build_failures',
@@ -446,9 +455,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
   registerLiveModelRegistryRoutes(app, verifyAdminToken);
   registerSurplusRegistryAdminRoutes(app, verifyAdminToken);
+  registerApiProvidersAdminRoutes(app, verifyAdminToken);
+  registerProviderSwitchesAdminRoutes(app, verifyAdminToken);
+  registerGameAssetsAdminRoutes(app, verifyAdminToken);
   registerFreeChatChainRoutes(app, verifyAdminToken);
   registerDeepinfraComparisonRoutes(app, verifyAdminToken);
-  registerProviderDiagnosticRoutes(app);
   registerInferenceGatewayAdminRoutes(app, verifyAdminToken);
   registerAiMaintenanceRoutes(app, verifyAdminToken);
   registerFreeProgramRoutes(app, verifyAdminToken);
@@ -825,15 +836,15 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         return typeof actuator.countRunningSandboxes === 'function'
           ? await actuator.countRunningSandboxes()
           : { running: null, truncated: false, reason: 'No cloud sandbox provider is configured on this deployment.' };
-      } catch (err) {
-        return { running: null, truncated: false, reason: err instanceof Error ? err.message : 'Could not reach the sandbox provider.' };
+      } catch {
+        return { running: null, truncated: false, reason: 'Could not reach the sandbox provider.' };
       }
     })();
     const liveSandboxes = liveCount.running;
     // ONE reading of this instance's load per response, so the health score and the load panel beside it can
     // never disagree (audit 2026-10-11, F15).
     const load = serverLoad.snapshot();
-    const providerStats = guard(() => getProviderStats());
+    const providerStats = guard(() => visibleProviderStats(getProviderStats()));
 
     // The same composite health inputs the dedicated /health-score endpoint reports, from the same
     // real signals. Kept identical on purpose — two health numbers would be worse than none.
@@ -860,6 +871,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       instanceUptimeSeconds: Math.round(process.uptime()),
       liveSandboxes,
       liveSandboxNote: liveSandboxNote(liveCount),
+      liveSandboxLifecycle: liveCount.lifecycle ?? null,
+      liveSandboxLifecycleNote: runningSandboxLifecycleNote(liveCount),
       // How hard THIS instance is working right now. One instance of several — the client says so.
       serverLoad: load,
       // Whether alerts can reach the admin OUTSIDE the app, and plainly why not when they cannot.
@@ -1872,7 +1885,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // Provider ranking by request count — from the SAME rollup as the burn map (see above).
       // `avgLatencyMs` is null when no latency was recorded, never 0: "unmeasured" and "instant" are
       // different facts, and the old tally printed the legacy rows as "0 ms avg".
+      // Turns NO provider answered are not engines — listed apart, never ranked (NOT_A_PROVIDER, usageLedger.ts).
+      const unansweredTurns = Object.entries(usage.byProvider)
+        .filter(([name]) => name in NOT_A_PROVIDER)
+        .map(([name, r]) => ({ key: name, label: NOT_A_PROVIDER[name], requests: r.requests }))
+        .sort((a, b) => b.requests - a.requests);
       const providerRanking = Object.entries(usage.byProvider)
+        .filter(([name]) => !(name in NOT_A_PROVIDER))
         .map(([name, r]) => ({
           name,
           requests: r.requests,
@@ -1910,7 +1929,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         }));
 
       // Live provider stats from AIRouter
-      const liveProviderStats = getProviderStats();
+      const liveProviderStats = visibleProviderStats(getProviderStats());
 
       return res.json({
         // WHAT THIS ROUTE MEASURES, stated so the screen can say it (admin Monitor capture, 2026-09-14).
@@ -1945,7 +1964,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         hitsSinceBoot: true,
         hitsSinceBootSeconds: Math.round(process.uptime()),
         newUsersToday, activeUsers24h,
-        providerRanking, tokenPurchaseCount, recentPurchases,
+        providerRanking, unansweredTurns, tokenPurchaseCount, recentPurchases,
         liveProviderStats,
         failedLoginAttempts: serverStats.failedLoginIPs.slice(-20),
       });
@@ -3513,6 +3532,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // with the rate so the board can refuse to grade two requests as a platform verdict.
       if (req > 0) readings.providerErrorRate = (Number(outcomes?.failed) || 0) / req;
       readings.providerRequests = req;
+      readings.chatOutcomes = getChatOutcomeObservation();
     } catch { /* unknown */ }
 
     // Sandbox load — live E2B machines. The SAME reading the Monitor's "Live sandboxes" tile uses, so
@@ -3564,6 +3584,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
     const tiles = loadBoard(readings);
     res.json({
+      routingObservations: readings.chatOutcomes,
       level: worstLevel(tiles),
       tiles,
       // Named so the screen can say WHICH ceilings it could not read, rather than showing a quiet zero.

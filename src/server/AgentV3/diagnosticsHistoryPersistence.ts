@@ -1,9 +1,9 @@
-import { settledFailure } from '../lib/failedReportEligibility';
 import type { Firestore } from 'firebase-admin/firestore';
+import { applyRegistryPlan, planRegistryWrite, readRegistryForWrite } from '../lib/buildReportRegistry';
 
-/** Singleton counter for permanent failed-report numbers. Never age-deleted. */
+/** RETIRED (2026-11-02): the old failures-only counter. Nothing ever created it, so it numbered
+ *  nothing; it is kept classified so a document there, if one ever appeared, is never reused. */
 export const FAILED_REPORT_NUMBER_COLLECTION = 'admin_failed_report_numbers';
-export const FAILED_REPORT_NUMBER_DOC = 'counter';
 
 type DiagnosticsSnapshot = { startedAt: number; endedAt?: number; ok?: boolean; buildId?: string; workspaceId?: string };
 const knownId = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
@@ -61,10 +61,14 @@ function validReportNumber(value: unknown): value is number {
  * documents can find the report even if the independent latest-report write fails.
  * The merge never replaces the latest report, its timestamp, or other metadata.
  *
- * Settled failures also receive a permanent reportNumber = max+1 (never renumbered).
- * Re-saving the same history id keeps the existing number. In-progress and successful
- * builds are not numbered. A missing or invalid counter preserves the report without
- * allocating a number; only a separately reviewed initialization may establish the counter.
+ * EVERY report — of every outcome, from its first save — is numbered in the same transaction
+ * through the build report registry (`buildReportRegistry.ts`): one permanent number per report,
+ * taken once from one counter, never renumbered. Re-saving the same report keeps its number and
+ * only updates its outcome. Until the counter is ready (the one-time backfill of older reports),
+ * nothing is allocated and the backfill numbers the report instead.
+ *
+ * The old failures-only `reportNumber` allocator (whose counter nothing ever created) is retired.
+ * A legacy `reportNumber` already on a document is carried forward untouched, never reissued.
  */
 export async function commitDiagnosticsHistory(
   db: Firestore,
@@ -77,39 +81,24 @@ export async function commitDiagnosticsHistory(
   const historyRef = root.collection('history').doc(String(report.startedAt));
   const progressFields = inProgress === undefined ? {} : { inProgress };
 
-  const counterRef = db.collection(FAILED_REPORT_NUMBER_COLLECTION).doc(FAILED_REPORT_NUMBER_DOC);
   await db.runTransaction(async (tx) => {
     const histSnap = await tx.get(historyRef);
     const previous = histSnap.data();
     const previousReport = previous?.report;
     // An independently retried progress flush must never erase an already settled report.
     if (terminalReport(previousReport) && (!terminalReport(report) || inProgress === true)) return;
+    const registry = validTime(report.startedAt) ? await readRegistryForWrite(tx, db, workspaceId, report.startedAt) : null;
 
     const metadata: Record<string, unknown> = {};
     const existing = previous?.reportNumber;
     if (validReportNumber(existing)) {
       metadata.reportNumber = existing;
-      metadata.numberedAt = typeof previous?.numberedAt === 'number' && Number.isFinite(previous.numberedAt) && previous.numberedAt > 0
-        ? previous.numberedAt : savedAt;
+      if (typeof previous?.numberedAt === 'number' && Number.isFinite(previous.numberedAt) && previous.numberedAt > 0) metadata.numberedAt = previous.numberedAt;
     }
-    if (!inProgress && settledFailure(report)) {
-      const counterSnap = await tx.get(counterRef);
-      const counter = counterSnap.data();
-      const next = counter?.nextNumber;
-      let issue: string | undefined;
-      if (!counterSnap.exists) issue = 'counter_uninitialized';
-      else if (counter?.numberingBlocked === true || !validReportNumber(next)) issue = 'counter_invalid';
-      else if (validReportNumber(existing) && next <= existing) issue = 'counter_inconsistent';
-      else if (next >= Number.MAX_SAFE_INTEGER) issue = 'counter_exhausted';
-      if (issue) {
-        // Numbering failure cannot discard the forensic report or silently reuse an ID.
-        metadata.numberingIssue = issue;
-        if (issue === 'counter_inconsistent') tx.set(counterRef, { numberingBlocked: true }, { merge: true });
-      } else if (!validReportNumber(existing)) {
-        metadata.reportNumber = next;
-        metadata.numberedAt = savedAt;
-        tx.set(counterRef, { nextNumber: next + 1, updatedAt: savedAt }, { merge: true });
-      }
+    if (registry) {
+      applyRegistryPlan(tx, db, workspaceId, report.startedAt, planRegistryWrite(registry.existing, registry.counter, {
+        workspaceId, historyId: String(report.startedAt), report, inProgress, savedAt,
+      }));
     }
     tx.set(root, { historyAvailable: true }, { merge: true });
     tx.set(historyRef, { report, savedAt, ...metadata, ...progressFields });

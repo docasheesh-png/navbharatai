@@ -66,7 +66,12 @@ describe('keepKitOnRewrite — a rewrite of the stylesheet keeps the kit rules i
   it('carries the tokens, light and dark, only where the new content does not set them', () => {
     const keep = keepKitOnRewrite('src/index.css', DESIGN_KIT_CSS, ARCHITECT_CSS, ON)!;
     expect(keep.tokens).toContain('--muted');
-    expect(keep.content).toMatch(/prefers-color-scheme: dark[\s\S]*--muted/);
+    // ☀️ No device-following block from the kit (2026-11-02); the dark value rides only behind the switch.
+    expect(keep.content).not.toContain('prefers-color-scheme');
+    expect(keep.content).toMatch(/:root\.dark[^{]*\{[^}]*--muted/);
+    // The APP's own device-following block (its own choice, e.g. the user asked to follow the phone) is kept.
+    const ownFollow = keepKitOnRewrite('src/index.css', `${DESIGN_KIT_CSS}\n@media (prefers-color-scheme: dark) {\n  :root {\n    --muted: #aaaaaa;\n  }\n}\n`, ARCHITECT_CSS, ON)!;
+    expect(ownFollow.content).toMatch(/prefers-color-scheme: dark[\s\S]*--muted: #aaaaaa/);
     const ownMuted = keepKitOnRewrite('src/index.css', DESIGN_KIT_CSS, `${ARCHITECT_CSS}:root { --muted: #999; }\n`, ON)!;
     expect(ownMuted.tokens).not.toContain('--muted');
   });

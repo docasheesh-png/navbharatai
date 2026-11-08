@@ -164,6 +164,8 @@ async function readStream(
   // question, and zero bytes past the grace period is below any floor. Without `canAbandon` nothing changes.
   const pollMs = opts.canAbandon ? CRAWL_POLL_MS : Number.POSITIVE_INFINITY;
   let lastChunkAt = now();
+  /** When the first produced byte arrived — see STREAM_PRODUCING_WINDOW_MS. null until then. */
+  let firstByteAt: number | null = null;
   let pending: Promise<IteratorResult<OpenAiStreamChunkLike>> | null = null;
   const disarm = () => { pending?.catch(() => { /* abandoned — see the stall branch below */ }); };
 
@@ -205,7 +207,7 @@ async function readStream(
         const answerOver = opts.answerBy !== undefined && !acc.hasAnswer() && opts.answerBy - now() <= 0;
         if (answerOver && !idleOver && !ceilingOver) { disarm(); abort(); return 'no-answer'; }
         if (!idleOver && !ceilingOver) {
-          if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt, firstByteGraceMs: opts.firstByteGraceMs }) && opts.canAbandon?.()) {
+          if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt, firstByteGraceMs: opts.firstByteGraceMs, ...(firstByteAt !== null ? { producingMs: now() - firstByteAt } : {}) }) && opts.canAbandon?.()) {
             disarm();
             abort();
             return 'slow';
@@ -230,6 +232,8 @@ async function readStream(
       const before = acc.textSoFar().length;
       const reasoningBefore = acc.reasoningSoFar().length;
       acc.push(step.value);
+      // The provider's first produced byte: from here the crawl floor measures producing time only (5413e6f1).
+      if (firstByteAt === null && acc.producedBytes() > 0) firstByteAt = now();
       // REAL incremental text now, not one block at the end: the loop's onText contract finally
       // receives the answer as it is written, which is what a user watching a build sees.
       if (opts.onText) {
@@ -247,7 +251,7 @@ async function readStream(
       }
       // …and the THIRD state: answering, but so slowly that waiting costs more than moving on. Judged
       // only when the caller says another rung is available — see `canAbandon`.
-      if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt, firstByteGraceMs: opts.firstByteGraceMs }) && opts.canAbandon?.()) {
+      if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt, firstByteGraceMs: opts.firstByteGraceMs, ...(firstByteAt !== null ? { producingMs: now() - firstByteAt } : {}) }) && opts.canAbandon?.()) {
         abort();
         return 'slow';
       }

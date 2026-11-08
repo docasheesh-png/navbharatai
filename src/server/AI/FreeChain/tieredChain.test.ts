@@ -16,6 +16,7 @@ vi.mock('./telemetry', () => ({ logFreeChain: vi.fn() }));
 import { chatAvailabilityMessage } from '../../lib/chatAvailabilityMessage';
 import { buildFreeChainRouter, busyMessage, orderForUser, type FreeChainInput } from './runtime';
 import { freeChainConfig } from './config';
+import * as mitrify from '../../lib/mitrify';
 import { resetAllBreakers } from '../Router/CircuitBreaker';
 import { FreeChainProviderError } from './providers/openAiCompatProvider';
 m.observeBudget.mockImplementation(async (cap: number) => ({ capNanoUsd: cap, revision: 1 }));
@@ -37,7 +38,7 @@ beforeEach(() => {
  m.quota.mockResolvedValue({ available: true, usage: { rpm: 1, rpd: 2, tpm: 3, tpd: 4, neuronsPerDay: 5 }, dailyResetAt: Date.now()+1000, minuteResetAt: Date.now()+1000, cooldownUntil: 0 });
  m.spend.mockResolvedValue({ available: true, capNanoUsd: 2e9, policyRevision: 3, heldNanoUsd: 0, spentNanoUsd: 0 });
 });
-afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 const VERIFIED = '2099-01-01';
 function tiered(order: string, extra: Record<string, string> = {}) {
@@ -55,7 +56,7 @@ describe('owner tiered free chat module (Tier 1 → Tier 2 → Tier 3)', () => {
   const firstPaid = cfg.order.findIndex(id => ['cheapinf', 'llama8b', 'dsv4flash', 'glmflashx', 'gpt5nano', 'geminipaid', 'deepseek'].includes(id));
   expect(cfg.order.slice(0, firstPaid)).toEqual(['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter']);
   expect(cfg.order.slice(firstPaid)).toEqual(['cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
-  expect(cfg.maxAttempts).toBe(4); expect(cfg.stickySpread).toBe(false);
+  expect(cfg.maxAttempts).toBe(cfg.order.length); expect(cfg.stickySpread).toBe(false);
   expect(cfg.rungs.find(r => r.id === 'gemini')?.model).toBe('gemini-2.5-flash-lite');
  });
  it('rejects a configured order that promotes any paid rung above a free one', () => {
@@ -102,6 +103,30 @@ describe('owner tiered free chat module (Tier 1 → Tier 2 → Tier 3)', () => {
   const result = await buildFreeChainRouter(db, cfg).route(input());
   expect(m.execute).toHaveBeenCalledTimes(3); expect(result.freeChain?.attempts.at(-1)?.reason).toBe('max-attempts');
  });
+ it('reaches paid backup after four eligible free attempts instead of abandoning the chain', async () => {
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  for (let n = 0; n < 4; n++) m.execute.mockRejectedValueOnce(new FreeChainProviderError('SERVER'));
+  m.execute.mockImplementation(successful('fifth attempt answer'));
+  const cfg = tiered('glm45,glm47,groq,cloudflare,llama8b');
+  const chunks: string[] = [];
+  const result = await buildFreeChainRouter(db, cfg).route({ ...input(), onChunk: c => chunks.push(c) });
+  expect(cfg.maxAttempts).toBe(5);
+  expect(result).toMatchObject({ ok: true, provider: 'DEEPINFRA' });
+  expect(m.execute).toHaveBeenCalledTimes(5);
+  expect(result.freeChain?.fallbacks).toBe(4);
+  expect(m.paid).toHaveBeenCalledOnce(); expect(m.settle).toHaveBeenCalledOnce();
+  expect(chunks).toEqual(['fifth attempt answer']);
+ });
+ it('allows the full configured chain while keeping explicit smaller caps and invalid values fail-closed', () => {
+  expect(freeChainConfig({}).maxAttempts).toBe(11);
+  expect(freeChainConfig({ FREE_CHAIN_MAX_ATTEMPTS: '18' }).maxAttempts).toBe(18);
+  expect(freeChainConfig({ FREE_CHAIN_MAX_ATTEMPTS: '3' }).maxAttempts).toBe(3);
+  for (const value of ['19', '0', '-1', '2.5', 'Infinity', 'NaN']) {
+    expect(freeChainConfig({ FREE_CHAIN_MAX_ATTEMPTS: value }).errors).toContain('FREE_CHAIN_MAX_ATTEMPTS');
+  }
+  expect(freeChainConfig({}).ttftMs).toBe(15_000);
+  expect(freeChainConfig({ FREE_CHAIN_TTFT_MS: '6000' }).ttftMs).toBe(6_000);
+ });
  it('429 Retry-After cools the provider for exactly that long, shared across instances', async () => {
   const now = Date.now();
   m.execute.mockRejectedValueOnce(new FreeChainProviderError('RATE_LIMIT', 1_200_000)).mockImplementation(successful());
@@ -132,12 +157,12 @@ describe('owner tiered free chat module (Tier 1 → Tier 2 → Tier 3)', () => {
 
 describe('master plan routing through the live chain', () => {
  beforeEach(() => { m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true }); m.settle.mockResolvedValue(undefined); });
- it('a teaching question goes straight to DeepInfra DeepSeek', async () => {
-  const result = await buildFreeChainRouter(db, tiered('groq,llama8b,dsv4flash')).route({ ...input(), message: 'NEET exam ka syllabus samjhao' });
+ it('explicit route-reorder opt-in sends a teaching question to DeepInfra DeepSeek', async () => {
+  const result = await buildFreeChainRouter(db, tiered('groq,llama8b,dsv4flash', { FREE_CHAIN_ROUTE_REORDER_ENABLED: 'on' })).route({ ...input(), message: 'NEET exam ka syllabus samjhao' });
   expect(result.freeChain?.route).toBe('quality'); expect(result.freeChain?.rung).toBe('dsv4flash'); expect(m.paid).toHaveBeenCalledOnce();
  });
  it('without the DeepInfra key the quality route falls back to the normal free order (no breakage)', async () => {
-  const result = await buildFreeChainRouter(db, tiered('groq,llama8b,dsv4flash', { FREE_CHAIN_DEEPINFRA_API_KEY: '' })).route({ ...input(), message: 'NEET exam ka syllabus samjhao' });
+  const result = await buildFreeChainRouter(db, tiered('groq,llama8b,dsv4flash', { FREE_CHAIN_DEEPINFRA_API_KEY: '', FREE_CHAIN_ROUTE_REORDER_ENABLED: 'on' })).route({ ...input(), message: 'NEET exam ka syllabus samjhao' });
   expect(result).toMatchObject({ ok: true }); expect(result.freeChain?.rung).toBe('groq'); expect(result.freeChain?.route).toBe('normal');
  });
  it('monthly cap reached skips paid rungs without dispatch', async () => {
@@ -177,5 +202,81 @@ describe('exhausted FreeChain notices respect explicit language and do not inven
   expect(result.content).toBe(chatAvailabilityMessage('temporary'));
   expect(result.freeChain?.attempts.map(a=>a.reason)).toEqual(['budget']);
   expect(result.ok).toBe(false);expect(m.execute).not.toHaveBeenCalled();expect(m.settle).not.toHaveBeenCalled();
+ });
+});
+
+describe('fixed-order FreeChain opt-in', () => {
+ function fixed(extra: Record<string, string> = {}) { return tiered('gpt5nano,groq', { TEXT_CHAIN_POLICY: 'fixed-v1', FREE_CHAIN_STICKY_SPREAD: 'on', FREE_CHAIN_ROUTE_REORDER: 'on', ...extra }); }
+ it('ignores competing order/sticky/cache selectors but retains an explicit smaller attempt limit', () => {
+  const cfg = fixed(); expect(cfg.order).toEqual(['glm45','glm47','groq','cloudflare','openrouter','cheapinf','llama8b','dsv4flash','gpt5nano','glmflashx','geminipaid']);
+  expect(cfg.stickySpread).toBe(false); expect(cfg.features.routeReorder).toBe(false); expect(cfg.cacheEnabled).toBe(false); expect(cfg.maxAttempts).toBe(12);
+  expect(fixed({ FREE_CHAIN_MAX_ATTEMPTS: '2' }).maxAttempts).toBe(2);
+ });
+ it.each([false, true])('starts GLM45 then GLM47 and stops on success, streaming=%s', streaming => {
+  m.execute.mockRejectedValueOnce(new FreeChainProviderError('SERVER')).mockImplementation(successful('second answer'));
+  const chunks: string[] = [];
+  return buildFreeChainRouter(db, fixed()).route({ ...input(), ...(streaming ? { onChunk: (s: string) => chunks.push(s) } : {}) }).then(result => {
+   expect(m.execute.mock.calls.map(c => c[1].model)).toEqual(['glm-4.5-flash','glm-4.7-flash']); expect(result.ok).toBe(true);
+   if (streaming) expect(chunks).toEqual(['second answer']);
+  });
+ });
+ it('does not let the admin exclusive selector bypass the requested free-first order', async () => {
+  vi.stubEnv('CHEAPERINFERENCE', 'admin');
+  await buildFreeChainRouter(db, fixed()).route({ ...input(), context: { ...input().context, isAdmin: true } });
+  expect(m.execute.mock.calls[0][1].model).toBe('glm-4.5-flash');
+ });
+ it('records a disabled Mitrify slot and preserves budget denial', async () => {
+  m.execute.mockRejectedValue(new FreeChainProviderError('SERVER')); m.paid.mockResolvedValue(null);
+  const result = await buildFreeChainRouter(db, fixed()).route(input());
+  expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'mitrify', entered: false, reason: 'mitrify-chain-disabled' }));
+  expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'llama8b', entered: false, reason: 'budget' }));
+ });
+ it.each([false, true])('admitted Mitrify uses the same shared budget and stops the fixed chain, streaming=%s', async streaming => {
+  m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
+  m.paid.mockResolvedValue({ id: 'mitrify-hold', day: 'd', uidHash: 'u', maxCostNanoUsd: 400, createdAt: 0, mayDispatch: true });
+  const admitted = vi.spyOn(mitrify, 'runApprovedMitrifyChain').mockImplementation(async options => {
+   expect(options.privateTurn).toBe(false); expect(options.healthTurn).toBe(false);
+   expect(options.body).toMatchObject({ stream: true, messages: [{ role: 'system', content: expect.any(String) }, { role: 'user', content: 'hello' }] });
+   expect(await options.reserve(400)).not.toBeNull(); options.onChunk?.('approved reply');
+   return { kind: 'response', content: 'approved reply', model: 'mitrify/auto-cheap', usage: { inputTokens: 10, outputTokens: 2 } };
+  });
+  const chunks: string[] = []; const result = await buildFreeChainRouter(db, fixed()).route({ ...input(), ...(streaming ? { onChunk: (s: string) => chunks.push(s) } : {}) });
+  expect(result).toMatchObject({ provider: 'MITRIFY', content: 'approved reply', ok: true });
+  expect(admitted).toHaveBeenCalledOnce(); expect(m.paid).toHaveBeenCalledOnce();
+  expect(m.paid.mock.calls[0][0]).toMatchObject({ uid: 'owner', maxCostNanoUsd: 400, capNanoUsd: fixed().paidCapNanoUsd });
+  expect(m.execute.mock.calls.map(c => c[1].model)).toEqual(['glm-4.5-flash', 'glm-4.7-flash', 'openai/gpt-oss-120b', '@cf/meta/llama-3.3-70b-instruct-fp8-fast']);
+  expect(m.settle).not.toHaveBeenCalled(); if (streaming) expect(chunks).toEqual(['approved reply']);
+ });
+ it('a Mitrify failure after admission cannot open any subsequent direct rung', async () => {
+  m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
+  m.paid.mockResolvedValue({ id: 'mitrify-hold', day: 'd', uidHash: 'u', maxCostNanoUsd: 400, createdAt: 0, mayDispatch: true });
+  vi.spyOn(mitrify, 'runApprovedMitrifyChain').mockImplementation(async options => {
+   await options.reserve(400); options.onChunk?.('partial'); throw new mitrify.MitrifyError('MITRIFY_INCOMPLETE_STREAM', 0, true);
+  });
+  const chunks: string[] = []; const result = await buildFreeChainRouter(db, fixed()).route({ ...input(), onChunk: s => chunks.push(s) });
+  expect(result).toMatchObject({ provider: 'MITRIFY', reason: 'stalled' }); expect(chunks).toEqual(['partial']);
+  expect(m.execute).toHaveBeenCalledTimes(4); expect(m.paid).toHaveBeenCalledOnce(); expect(m.settle).not.toHaveBeenCalled();
+ });
+ it('health classification cannot bypass configuration and reviewed admission', async () => {
+  vi.stubEnv('MITRIFY_CHAIN_ENABLED', '1'); m.execute.mockRejectedValue(new FreeChainProviderError('SERVER'));
+  const result = await buildFreeChainRouter(db, fixed()).route({ ...input(), context: { ...input().context, healthTurn: true } });
+  expect(result.freeChain?.attempts).toContainEqual(expect.objectContaining({ provider: 'mitrify', entered: false, reason: 'mitrify-configuration' }));
+  expect(m.paid).not.toHaveBeenCalled();
+ });
+ it('stops after a paid transport failure with an unresolved charge', async () => {
+  m.execute.mockRejectedValue(new FreeChainProviderError('NETWORK'));
+  m.paid.mockResolvedValue({ id: 'held', day: 'day', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  const result = await buildFreeChainRouter(db, fixed()).route(input());
+  const models = m.execute.mock.calls.map(c => c[1].model);
+  expect(models.at(-1)).toBe('meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo');
+  expect(models).not.toContain('deepseek-ai/DeepSeek-V4-Flash-0731');
+  expect(result.ok).toBe(false); expect(m.paid).toHaveBeenCalledOnce(); expect(m.settle).not.toHaveBeenCalled();
+ });
+ it('does not retry partial output or cancellation', async () => {
+  const chunks: string[] = []; m.execute.mockImplementationOnce(async (arg) => { arg.onChunk('partial'); throw new FreeChainProviderError('SERVER'); });
+  const result = await buildFreeChainRouter(db, fixed()).route({ ...input(), onChunk: s => chunks.push(s) });
+  expect(result.reason).toBe('stalled'); expect(chunks).toEqual(['partial']); expect(m.execute).toHaveBeenCalledOnce();
+  m.execute.mockClear(); const controller = new AbortController(); controller.abort();
+  await buildFreeChainRouter(db, fixed()).route({ ...input(), signal: controller.signal }); expect(m.execute).not.toHaveBeenCalled();
  });
 });

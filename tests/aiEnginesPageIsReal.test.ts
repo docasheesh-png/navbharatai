@@ -1,3 +1,4 @@
+import { chatProviderHealth } from '../src/lib/chatProviderHealth';
 // "AI ENGINE WALE PAGE KO BHI UPDATE KARO, WOH FAKE HAI ABHI" — admin, 2026-09-17.
 //
 // They were right, and the page was wrong in three separate ways. Each one is pinned here, because
@@ -105,8 +106,10 @@ describe('🔒 "could not read" and "nothing ran" never render the same', () => 
 
 describe('a provider that never ran is not "Healthy"', () => {
   it('the status is derived from whether it has ever served a request', () => {
-    expect(dash).toContain('const everRan = Number(stat.requestCount) > 0;');
-    expect(dash).toContain('Not used yet');
+    expect(dash).toContain('chatProviderHealth(stat, Date.now())');
+    expect(chatProviderHealth({ requestCount: 0 }, 100)).toMatchObject({ label: 'Not used yet', tone: 'neutral' });
+    expect(chatProviderHealth({ requestCount: 3, errorCount: 3 }, 100).tone).toBe('danger');
+    expect(chatProviderHealth({ requestCount: 3, errorCount: 0 }, 100).tone).toBe('ok');
   });
 
   it('the chat counters are labelled for what they are — one instance, since boot', () => {

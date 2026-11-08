@@ -101,7 +101,7 @@ describe('the wiring — the fact must REACH the report, or the flag is decorati
   it('the turn runner forwards measured:false to the usage callback', () => {
     const at = runner.indexOf('opts.onTurnComplete?.(');
     expect(at).toBeGreaterThan(0);
-    expect(runner.slice(at, at + 600)).toContain("measured: false");
+    expect(runner.slice(at, runner.indexOf('});', at) + 3)).toContain("measured: false");
   });
 
   it('captureTurnUsage records USAGE_NOT_REPORTED — the choke point every build and heal turn passes', () => {

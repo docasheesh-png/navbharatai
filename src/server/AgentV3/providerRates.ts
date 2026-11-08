@@ -1,3 +1,4 @@
+import { routerOneCatalogueEntryCost } from '../AI/RouterOne/catalogueAccounting';
 import { PublicBuildEngineError } from '../lib/buildEngineError';
 import { isRouterOneAccountingProvider, RouterOneAccountingUnavailableError } from '../AI/RouterOne/accounting';
 import { isSurplusReceiptDecision, type SurplusReceiptDecision } from '../AI/SurplusRegistry/receiptPolicy';
@@ -353,6 +354,8 @@ export class SurplusAccountingUnavailableError extends PublicBuildEngineError {
 }
 
 export interface ProviderCostEntry {
+  routerOneReceipt?: import('../AI/RouterOne/catalogueAccounting').RouterOneCatalogueReceipt;
+  routerOneAccountingConflict?: boolean;
   surplusReceipt?: SurplusReceiptDecision;
   surplusAbsorbed?: boolean;
   surplusAccountingConflict?: boolean;
@@ -372,7 +375,7 @@ export function realProviderCostUsd(entries: ProviderCostEntry[], remainder: Bil
   let total = 0;
   let surplusExpenseExact = 0n;
   for (const e of entries) {
-    if (isRouterOneAccountingProvider(e.provider)) throw new RouterOneAccountingUnavailableError();
+    if (isRouterOneAccountingProvider(e.provider)) { total += routerOneCatalogueEntryCost(e); continue; }
     if (e.provider.toUpperCase() === 'SURPLUS') {
       const receipt = e.surplusReceipt;
       if (e.surplusAccountingConflict || !isSurplusReceiptDecision(receipt)

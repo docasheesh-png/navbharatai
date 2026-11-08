@@ -28,7 +28,7 @@ function slot(base: AIProvider, priority: number, model: string): AIProvider {
     // actually streams on would keep billing after they left. Same class as the dropped model pin
     // directly above: a wrapper that forgets an argument silently disables the feature behind it.
     executeStream: base.executeStream
-      ? (p, sys, cb, _model, signal) => base.executeStream!(p, sys, cb, model, signal)
+      ? (p, sys, cb, _model, signal, onUsage) => base.executeStream!(p, sys, cb, model, signal, onUsage)
       : undefined,
   };
 }

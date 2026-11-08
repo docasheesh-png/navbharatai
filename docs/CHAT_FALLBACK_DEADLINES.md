@@ -1,0 +1,11 @@
+# Chat fallback and deadline contract
+
+Ordinary signed-in FreeChain chat now visits every eligible configured rung by default (11 in the default order), instead of stopping after four physical calls. An explicit `FREE_CHAIN_MAX_ATTEMPTS` can still lower the bound; values up to the 18 registered providers are accepted. Fixed-chain routing keeps its own attempt limit and liability rules.
+
+First content gets 15 seconds by default instead of 6. `FREE_CHAIN_TTFT_MS` remains available, and exclusive-admin CheaperInference retains its existing longer first-content grace. Provider attempts still stop after at most 90 seconds, and FreeChain dispatch and provider work have a 240-second cancellation budget. The browser waits 255 seconds so a server terminal response and answer-credit settlement have time to arrive. Datastore/preflight and settlement awaits remain cooperative, so this is not a guaranteed end-to-end response time. Gateway chat uses the same server ceiling, but guest grants still impose their own earlier expiry.
+
+The answer-credit lease renews every 10 seconds with the existing 30-second ownership lease. New ordinary-chat reservations use the 240-second deadline; Professionals, exam and repo-analyst retain their existing 90-second default. Existing 90-second reservations remain valid without extending their deadline, resetting usage, or releasing uncertain costs. Wallet-paid chat uses the same request bound with a longer chat-only inflight lock; generic wallet and App Builder locks are unchanged.
+
+Fallback is allowed only before any answer text is delivered. Partial output, safety refusals, invalid requests, policy failures and cancellation remain terminal. Provider terms, privacy filters, switches, quota/circuit limits and cost accounting are unchanged. No live provider review, key, production environment variable or hold is edited by this patch. Explicit production overrides continue to win.
+
+Tests cover paid backup after four free failures, a healthy 12-second first response, success after 120 seconds of failed attempts, the global four-minute ceiling, suppressed late chunks, explicit attempt limits, historical reservation compatibility, and shared client/server deadline wiring. Existing partial-stream, cancellation, privacy and quota suites remain mandatory.

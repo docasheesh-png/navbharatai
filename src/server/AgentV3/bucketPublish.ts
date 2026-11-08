@@ -90,6 +90,8 @@ const TYPES: Record<string, string> = {
   mp3: 'audio/mpeg',
   wav: 'audio/wav',
   wasm: 'application/wasm',
+  glb: 'model/gltf-binary',
+  gltf: 'model/gltf+json',
 };
 
 /**

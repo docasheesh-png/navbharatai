@@ -109,6 +109,14 @@ export function sandboxBillableUsd(
   return cost.usd;
 }
 
+/** Internal rate-priced expense, independent of the retired customer billing switch.
+ * Missing verified configuration stays unavailable (zero in this legacy numeric telemetry field),
+ * never the placeholder. The user service fee is computed separately from their subtotal.
+ */
+export function sandboxExpenseUsd(cost: SandboxCostRecord | null, env: NodeJS.ProcessEnv = process.env): number {
+  return sandboxBillableUsd(cost, { ...env, AGENTV3_BILL_SANDBOX: 'on' });
+}
+
 /**
  * Why the sandbox cost is or is not on this bill — for the admin report, never the user's.
  *
@@ -129,7 +137,14 @@ export function sandboxBillingNote(
   cost: SandboxCostRecord | null,
   env: NodeJS.ProcessEnv = process.env,
   billedSeconds?: number | null,
+  subtotalFeePolicy = false,
 ): string {
+  if (subtotalFeePolicy) {
+    const measured = cost && billedSeconds != null && Number.isFinite(billedSeconds) && billedSeconds >= 0
+      ? sandboxCost(Math.min(cost.seconds, billedSeconds), env) : cost;
+    const expense = sandboxExpenseUsd(measured, env);
+    return `Sandbox infrastructure: ${expense > 0 ? `$${expense.toFixed(4)} at configured rate` : 'expense unavailable'}. Internal expense only; customer sandbox service fee is 2.5% of the discounted pre-sandbox subtotal.`;
+  }
   if (!cost || !(cost.usd > 0)) return 'Sandbox time: not measured on this build.';
   const on = String(env.AGENTV3_BILL_SANDBOX || '').trim().toLowerCase() === 'on';
   const rate = Number(env.E2B_USD_PER_HOUR);

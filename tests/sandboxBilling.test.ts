@@ -56,21 +56,23 @@ describe('the two-key gate — a placeholder rate must never reach a real bill',
   });
 });
 
-describe('it reaches the real cost BEFORE the markup, which is the only place it belongs', () => {
+describe('2026-11-01: infrastructure expense is separate from the customer subtotal', () => {
   const ledger = { entries: () => [], total: () => ({ inputTokens: 0, outputTokens: 0 }), byProvider: () => ({}) } as any;
   const sink = { inputTokens: 0, outputTokens: 0 };
 
-  it('a sandbox cost increases the bill on a non-Opus tier', () => {
+  it('sandbox expense no longer increases the AI subtotal', () => {
     const without = decideBuildBilledUsd(ledger, sink, 'off', 'u1', 'a@b.c', 0);
     const withSandbox = decideBuildBilledUsd(ledger, sink, 'off', 'u1', 'a@b.c', 0.25);
-    expect(withSandbox.effectiveBilledUsd).toBeGreaterThan(without.effectiveBilledUsd);
+    expect(withSandbox.effectiveBilledUsd).toBe(without.effectiveBilledUsd);
+    expect(withSandbox.sandboxUsd).toBe(0.25);
   });
 
-  it('it is MARKED UP like any other real cost, not added on top afterwards', () => {
+  it('a sandbox-only build cannot acquire the old markup', () => {
     // The formula is literally tieredMarkup(real cost); a wall-clock VM is as real a cost as a token,
     // so it belongs INSIDE the markup, not bolted on after it.
     const r = decideBuildBilledUsd(ledger, sink, 'off', 'u1', 'a@b.c', 1);
-    expect(r.effectiveBilledUsd).toBeGreaterThan(1);
+    expect(r.effectiveBilledUsd).toBe(0);
+    expect(r.sandboxUsd).toBe(1);
   });
 
   it('a negative or junk sandbox cost can never reduce a bill', () => {
@@ -157,10 +159,10 @@ describe('WIRING — the cost is read at BILLING time, not after it', () => {
     expect(route).toContain('billableSandboxDetail(actuator, workspaceId, buildStartedAt)');
     // The cap itself, now named before it is priced so the seconds can be reported alongside the ₹.
     expect(route).toContain('const billable = Math.min(seconds, buildSeconds);');
-    expect(route).toContain('sandboxBillableUsd(sandboxCost(billable))');
+    expect(route).toContain('sandboxExpenseUsd(sandboxCost(billable))');
     // And the number the USER is shown is that same one — not a second measurement taken later.
-    expect(route).toContain('usdInrRate(), livePreviewCharge, buildDiscount)');
-    expect(route).toContain('usdInrRate(), watchdogLivePreview, watchdogDiscount)');
+    expect(route).toContain('usdInrRate(), livePreviewCharge, buildDiscount, settledSandboxFee)');
+    expect(route).toContain('usdInrRate(), watchdogLivePreview, watchdogDiscount, watchdogSandboxFee)');
   });
 
   it('an UNKNOWN build start bills nothing rather than guessing', () => {
@@ -210,7 +212,7 @@ describe('WIRING — the cost is read at BILLING time, not after it', () => {
     expect(route).toContain("code: 'SANDBOX_BILLING'");
     // ⚠️ ANCHORED ON THE FACT, NOT THE ARGUMENT LIST. What this case is about is that the line states
     // what reached the BILL — so it must be handed the billed seconds, not only the held ones.
-    expect(route).toContain('sandboxBillingNote(sandboxCost(held), process.env, billedSandboxSeconds)');
+    expect(route).toContain('sandboxBillingNote(sandboxCost(held), process.env, billedSandboxSeconds, true)');
     expect(route).toContain('const billedSandboxSeconds = billableSandboxDetail(');
   });
 });

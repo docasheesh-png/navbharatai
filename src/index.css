@@ -291,6 +291,23 @@ html.nb-native-shell .nb-selectable {
   user-select: text;
 }
 
+/* MONACO'S OWN iOS "SHOW KEYBOARD" WIDGET IS HIDDEN (admin 2026-11-05).
+
+   Monaco's standalone bundle registers `iPadShowKeyboard`, which paints a 58×36 box in the editor's
+   bottom-right corner on every iOS device. Its only action is `editor.focus()` — it OPENS the
+   keyboard. On a touchscreen a tap anywhere in the code already does that, so the widget duplicates
+   a gesture the user cannot avoid while occupying the corner, and the admin reported it as exactly
+   that. Our own control (`Editor.tsx`, decided by `keyboardDismiss.ts`) takes that corner and does
+   the inverse — it CLOSES the keyboard, which nothing else in the app could do once
+   `installKeyboardBehaviour` removed iOS's accessory bar.
+
+   ⚠️ Keep this rule alongside the replacement, never alone: hiding the widget without a way to
+   dismiss the keyboard leaves the user worse off than Monaco's default. Locked by
+   `tests/theKeyboardCanBeClosed.test.ts`. */
+.monaco-editor .iPadShowKeyboard {
+  display: none !important;
+}
+
 
 @layer base {
   /* ── DNA-level theme palette (admin 2026-07-14) ──────────────────────────────────────────────

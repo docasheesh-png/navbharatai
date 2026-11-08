@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Request } from 'express';
 const m = vi.hoisted(() => ({ verify: vi.fn(), acquire: vi.fn(), release: vi.fn() }));
 vi.mock('../../lib/authMiddleware', () => ({ verifyFirebaseToken: m.verify }));
-vi.mock('../FreeChain/admissionQueue', () => ({ freeChainAdmissionQueue: { acquire: m.acquire } }));
+vi.mock('../FreeChain/admissionQueue', async original => ({ ...await original<typeof import('../FreeChain/admissionQueue')>(), freeChainAdmissionQueue: { acquire: m.acquire } }));
 import { runWithAuthenticatedInferenceGatewayRequest, runWithInferenceGatewayContext, runWithInferenceGatewayEntryAdmission } from './runtime';
 import type { InferenceGatewayContext } from './context';
 const context = (overrides: Partial<InferenceGatewayContext> = {}): InferenceGatewayContext => ({
@@ -62,4 +62,10 @@ it('revoking a selected canary during its queue wait blocks prompt work and rele
   const handler = vi.fn(); m.acquire.mockImplementationOnce(async () => { vi.stubEnv('INFERENCE_GATEWAY_CANARY_UIDS', ''); return { admitted: true, waitedMs: 1, release: m.release }; });
   await expect(trusted(() => runWithInferenceGatewayEntryAdmission(handler))).rejects.toMatchObject({ reason: 'disabled-after-selection' });
   expect(handler).not.toHaveBeenCalled(); expect(m.release).toHaveBeenCalledOnce();
+});
+
+it('accounts the verified ingress body using UTF-8 bytes, including history and attachments',async()=>{
+ const body={message:'नमस्ते',history:[{role:'user',content:'पहला सवाल'}],fileAttachments:[{data:'synthetic'}]};
+ await runWithAuthenticatedInferenceGatewayRequest({body} as Request,()=>runWithInferenceGatewayContext(context(),()=>runWithInferenceGatewayEntryAdmission(async()=>undefined)));
+ expect(m.acquire).toHaveBeenCalledWith(expect.objectContaining({payloadBytes:Buffer.byteLength(JSON.stringify(body),'utf8')}));
 });

@@ -2,14 +2,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adminHeaders } from '../../lib/adminFetch';
 import {
   freeChainBudgetFingerprint, freeChainControlFingerprint, freeChainControls, freeChainPercent, freeChainProviderLabel, freeChainProviderTier, freeChainTimestamp, freeChainUsd,
-  FREE_CHAIN_METRICS_SCAN_LIMIT, FREE_CHAIN_MAX_PAID_CAP_USD, isFreeChainBudgetResponse, validFreeChainBudgetUsd, isFreeChainAdminMetrics, isFreeChainAdminView, validFreeChainReason, type FreeChainAdminMetrics, type FreeChainAdminView, type FreeChainControlAction,
+  isFreeChainConfigurationErrorResponse, FREE_CHAIN_METRICS_SCAN_LIMIT, FREE_CHAIN_MAX_PAID_CAP_USD, isFreeChainBudgetResponse, validFreeChainBudgetUsd, isFreeChainAdminMetrics, isFreeChainAdminView, validFreeChainReason, type FreeChainAdminMetrics, type FreeChainAdminView, type FreeChainControlAction,
 } from '../../lib/freeChatChainView';
 
 const ROOT = '/api/v1/admin/free-chat-chain';
 const button = 'min-h-11 rounded-lg border border-line px-3 py-2 text-sm text-ink disabled:opacity-40';
 const input = 'min-h-11 rounded-lg border border-line bg-well px-3 py-2 text-sm text-ink';
 type Change = Pick<FreeChainControlAction, 'enabled' | 'rolloutPercent' | 'disabledProviders'>;
-type Pending = { title: string; description: string; fingerprint: string } & ({ kind: 'control'; change: Change; expectedControls: FreeChainControlAction['expectedControls'] } | { kind: 'budget'; capUsd: number; expectedRevision: number });
+type Pending = { title: string; description: string; fingerprint: string } & ({ kind: 'control'; change: Change; expectedControls: FreeChainControlAction['expectedControls'] } | { kind: 'budget'; budgetMode?: 'capped' | 'uncapped'; capUsd: number; expectedRevision: number });
 const visible = () => typeof document === 'undefined' || document.visibilityState !== 'hidden';
 
 /** Saved server observations only. Opening or refreshing this screen never calls a model. */
@@ -48,6 +48,7 @@ export function FreeChatChainPanel({ adminToken }: { adminToken: string }): Reac
       const response = await fetch(ROOT, { headers: adminHeaders(adminToken), signal: controller.signal });
       const body: unknown = await response.json();
       if (!mounted.current || generation !== epoch.current) return;
+      if (response.status === 503 && isFreeChainConfigurationErrorResponse(body)) throw new Error('Invalid FREE_CHAIN_ORDER configuration. The server routing order needs review. No settings were changed; controls remain blocked.');
       if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? 'Admin sign-in or authorization required.' : `Chain status read failed (HTTP ${response.status}).`);
       if (!isFreeChainAdminView(body)) throw new Error('Chain status is incomplete or unreadable. No usage or routing health can be confirmed.');
       setView(body); setError(''); setNow(Date.now());
@@ -127,7 +128,7 @@ export function FreeChatChainPanel({ adminToken }: { adminToken: string }): Reac
     try {
       const response = await fetch(pending.kind === 'budget' ? `${ROOT}/budget` : `${ROOT}/control`, {
         method: 'POST', headers: { ...adminHeaders(adminToken), 'Content-Type': 'application/json' },
-        body: JSON.stringify(pending.kind === 'budget' ? { capUsd: pending.capUsd, expectedRevision: pending.expectedRevision, reason: reason.trim() } : { ...pending.change, reason: reason.trim(), expectedControls: pending.expectedControls }), signal: controller.signal,
+        body: JSON.stringify(pending.kind === 'budget' ? { ...(pending.budgetMode ? { budgetMode: pending.budgetMode } : {}), capUsd: pending.capUsd, expectedRevision: pending.expectedRevision, reason: reason.trim() } : { ...pending.change, reason: reason.trim(), expectedControls: pending.expectedControls }), signal: controller.signal,
       });
       const body: unknown = await response.json();
       if (!mounted.current || generation !== epoch.current) return;
@@ -136,7 +137,7 @@ export function FreeChatChainPanel({ adminToken }: { adminToken: string }): Reac
         if (response.status === 409) { setPending(null); throw new Error('Chain controls changed during review. Refresh and review the current settings.'); }
         throw new Error(response.status === 401 || response.status === 403 ? 'Admin sign-in or authorization required.' : `Control was not confirmed (HTTP ${response.status}).`);
       }
-      if (pending.kind === 'budget' && (!isFreeChainBudgetResponse(body) || body.capUsd !== pending.capUsd || body.policyRevision <= pending.expectedRevision)) throw new Error('The budget response was unreadable.');
+      if (pending.kind === 'budget' && (!isFreeChainBudgetResponse(body) || (body.budgetMode ?? 'capped') !== (pending.budgetMode ?? 'capped') || body.capUsd !== pending.capUsd || body.policyRevision <= pending.expectedRevision)) throw new Error('The budget response was unreadable.');
       if (!body || typeof body !== 'object' || !('ok' in body) || body.ok !== true) throw new Error('The control response was unreadable.');
       setPending(null); setRollout(''); setBudget(''); setNotice(pending.kind === 'budget' ? 'Budget control recorded. Existing holds remain; this does not refund or cancel already-dispatched work. A stricter deployment revision may lower the cap again.' : 'Control recorded. The environment gate, quota checks and paid budget still apply; in-flight requests are not cancelled.');
       await load();
@@ -157,7 +158,7 @@ export function FreeChatChainPanel({ adminToken }: { adminToken: string }): Reac
   const rolloutValid = nextRollout !== null && Number.isInteger(nextRollout) && nextRollout >= 0 && nextRollout <= 100 && nextRollout !== view?.rolloutPercent;
   const nextBudget = budget.trim() === '' ? null : Number(budget);
   const budgetRevision = view?.paid.policyState === 'uninitialized' ? 0 : view?.paid.policyRevision ?? null;
-  const budgetValid = validFreeChainBudgetUsd(nextBudget) && !!view && budgetRevision !== null && view.paid.configuredCapUsd !== null && nextBudget <= view.paid.configuredCapUsd && nextBudget !== view.paid.capUsd;
+  const budgetValid = validFreeChainBudgetUsd(nextBudget) && !!view && budgetRevision !== null && view.paid.configuredCapUsd !== null && nextBudget <= view.paid.configuredCapUsd && (nextBudget !== view.paid.capUsd || view.paid.budgetMode === 'uncapped');
   return <section aria-label="Free Chat Chain" className="space-y-4">
     <div className="rounded-xl border border-line bg-card p-4 space-y-3">
       <div className="flex flex-wrap justify-between gap-3">
@@ -203,7 +204,7 @@ export function FreeChatChainPanel({ adminToken }: { adminToken: string }): Reac
       <div className="rounded-xl border border-line bg-card p-4 space-y-3">
         <h3 className="font-bold text-ink">Paid safety net, today (India / IST)</h3>
         <dl className="grid sm:grid-cols-3 gap-3 text-sm text-body">
-          <div><dt className="font-bold">Effective shared daily cap</dt><dd>{freeChainUsd(view.paid.capUsd)}</dd></div>
+          <div><dt className="font-bold">Effective shared daily cap</dt><dd>{view.paid.budgetMode === 'uncapped' ? 'Uncapped (usage still recorded)' : freeChainUsd(view.paid.capUsd)}</dd></div>
           <div><dt className="font-bold">This deployment’s configured limit</dt><dd>{freeChainUsd(view.paid.configuredCapUsd)}</dd></div>
           <div><dt className="font-bold">Shared policy revision</dt><dd>{view.paid.policyState === 'uninitialized' ? 'Not initialized; verified absent' : view.paid.policyRevision}</dd></div>
           <div><dt className="font-bold">Reserved upper-bound cost</dt><dd>{freeChainUsd(view.paid.reservedUsd)}</dd></div>
@@ -212,14 +213,19 @@ export function FreeChatChainPanel({ adminToken }: { adminToken: string }): Reac
         <p className="text-sm text-muted">Reservations are conservative cost protection, not invoices. Booked liability includes authenticated actual records and conservative ceilings calculated from complete usage and reviewed maximum prices. It is not provider invoice reconciliation. Missing or incomplete usage keeps the full reservation held. Missing measurements are unavailable, never zero. The cap is total across this chain’s paid fallback providers, not per provider, and is separate from the existing funded builder wallet. Payment settings cannot be changed here.</p>
         <p className="text-sm text-muted">Lowering the cap does not refund or cancel already-dispatched work, clear existing holds, or erase settled usage. Held and settled amounts may exceed a newly lowered cap. Raising requires an explicit audited review; retire inconsistent deployment revisions first because a stale stricter revision can lower the shared cap again.</p>
         <div className="flex flex-wrap items-end gap-3">
-          <label className="text-sm text-body">New total daily cap (USD, 0–10, cents)<input aria-label="New total daily cap" type="number" min={0} max={Math.min(FREE_CHAIN_MAX_PAID_CAP_USD, view.paid.configuredCapUsd ?? 0)} step="0.01" value={budget} disabled={controlsBlocked || budgetRevision === null || view.paid.configuredCapUsd === null} onChange={e => setBudget(e.target.value)} className={`${input} block w-full`} /></label>
+          <label className="text-sm text-body">New total daily cap (USD, 0–17, cents)<input aria-label="New total daily cap" type="number" min={0} max={Math.min(FREE_CHAIN_MAX_PAID_CAP_USD, view.paid.configuredCapUsd ?? 0)} step="0.01" value={budget} disabled={controlsBlocked || budgetRevision === null || view.paid.configuredCapUsd === null} onChange={e => setBudget(e.target.value)} className={`${input} block w-full`} /></label>
           <button type="button" className={button} disabled={controlsBlocked || !budgetValid} onClick={() => {
             if (controlsBlocked || !budgetValid || nextBudget === null || budgetRevision === null) return;
             setPending({ kind: 'budget', title: view.paid.policyState === 'uninitialized' ? 'Initialize shared paid fallback budget' : 'Change total paid fallback cap', description: `${view.paid.policyState === 'uninitialized' ? 'Initialize the verified absent shared cap' : `Change the shared cap from ${freeChainUsd(view.paid.capUsd)}`} to ${freeChainUsd(nextBudget)} per India / IST day across all paid fallback providers, using policy revision ${budgetRevision}. This is an intentional budget change, not a payment or wallet edit. Existing holds and already-dispatched work remain unchanged. A stale stricter deployment can reapply a lower limit.`, capUsd: nextBudget, expectedRevision: budgetRevision, fingerprint: freeChainBudgetFingerprint(view) });
             setReason(''); setNotice('');
           }}>{view.paid.policyState === 'uninitialized' ? 'Review budget initialization' : 'Review budget change'}</button>
+          <button type="button" className={button} disabled={controlsBlocked || budgetRevision === null || view.paid.budgetMode === 'uncapped' || view.paid.capUsd === null} onClick={() => {
+            if (controlsBlocked || budgetRevision === null || view.paid.capUsd === null) return;
+            setPending({ kind: 'budget', budgetMode: 'uncapped', title: 'Remove paid chat monetary caps', description: 'Remove shared daily and monthly monetary limits for legacy and Free Chat Chain paid fallback. Provider charges can continue without a monetary ceiling. Usage, existing holds, per-user quotas, provider limits and safety checks remain. Deploy this version to every serving instance before activation. The separate Inference Gateway plan limits are unchanged.', capUsd: view.paid.capUsd, expectedRevision: budgetRevision, fingerprint: freeChainBudgetFingerprint(view) });
+            setReason(''); setNotice('');
+          }}>Review uncapped mode</button>
         </div>
-        <p className="text-sm text-muted">No edit can exceed $10 USD or this deployment’s configured limit. A verified absent policy can be initialized only through this explicit review. Failed or malformed reads block all edits; they never count as an uninitialized policy.</p>
+        <p className="text-sm text-muted">Finite edits cannot exceed $17 USD or this deployment’s configured limit. Ordinary chat traffic activates the one-time uncapped rollout; later reviewed capped-mode changes remain authoritative. Failed or malformed reads block all edits; they never count as an uninitialized policy.</p>
       </div>
       <div className="rounded-xl border border-line bg-card p-4 space-y-3">
         <h3 className="font-bold text-ink">Last 24 hours: 1-in-64 routing samples</h3>

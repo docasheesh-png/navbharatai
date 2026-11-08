@@ -228,8 +228,9 @@ describe('paid fallback reservations', () => {
       expect(await store.reservePaid({ ...paid(`invalid-${capNanoUsd}`), capNanoUsd }, NOW)).toBeNull();
       await expect(store.observePaidBudgetPolicy(capNanoUsd, NOW)).rejects.toThrow('Invalid spend cap');
     }
-    expect(await store.reservePaid(paid('cost-above-owner-ceiling', OWNER_PAID_DAILY_CEILING_NANO_USD + 1), NOW)).toBeNull();
     expect(db.docs.size).toBe(0);
+    expect(await store.reservePaid(paid('cost-above-owner-ceiling', OWNER_PAID_DAILY_CEILING_NANO_USD + 1), NOW)).toBeNull();
+    expect(db.docs.size).toBe(1); // A valid oversized quote observes policy but cannot dispatch in capped mode.
     expect(await store.reservePaid({ ...paid('zero-cap'), capNanoUsd: 0 }, NOW)).toBeNull();
     expect(await store.spendSnapshot(NOW)).toMatchObject({ capNanoUsd: 0, remainingNanoUsd: 0 });
     expect(db.docs.size).toBe(1); // The denied call still durably publishes the global zero cap.
@@ -455,6 +456,43 @@ describe('durable paid-budget authority', () => {
       expect(db.matching('paid_day')[0][1].heldNanoUsd).toBe(100_000_000);
       expect(db.matching('paid_budget_policy_change')).toHaveLength(0);
     }
+  });
+  it('deploys uncapped globally once without resetting liability or overriding a subsequent stop', async () => {
+    const db = new FakeFirestore(), store = db.store();
+    const old = await store.reservePaid(paid('pre-deploy'), NOW);
+    const dayBefore = db.matching('paid_day')[0][1];
+    const migrated = await store.observePaidBudgetPolicy(0, NOW, false, true);
+    expect(migrated).toMatchObject({ budgetMode: 'uncapped', uncappedRolloutVersion: 1, revision: 2 });
+    expect(db.matching('paid_day')[0][1]).toEqual(dayBefore);
+    expect(await store.reservePaid({ ...paid('all-users'), uncappedRollout: true, capNanoUsd: 0 }, NOW)).not.toBeNull();
+    expect(await store.setPaidBudgetPolicy(admin(0, 2), NOW)).toMatchObject({ ok: true });
+    expect(await store.observePaidBudgetPolicy(10 * NANO_USD, NOW, false, true)).toMatchObject({ capNanoUsd: 0, revision: 3 });
+    expect(await store.reservePaid({ ...paid('stopped'), uncappedRollout: true }, NOW)).toBeNull();
+    expect(await store.settlePaid(old!, 1, NOW)).toBe(true);
+  });
+  it('legacy paid admission initializes uncapped once, but never overrides safety shutdowns', async () => {
+    const db = new FakeFirestore(), store = db.store();
+    expect(await store.reservePaid({ ...paid('legacy-first'), uncappedRollout: true, capNanoUsd: 0 }, NOW)).not.toBeNull();
+    expect(await store.readPaidBudgetPolicy()).toMatchObject({ budgetMode: 'uncapped', uncappedRolloutVersion: 1 });
+    db.docs.set(policyPath, { kind: 'paid_budget_policy', version: 1, revision: 2, capNanoUsd: 0, source: 'safety', updatedAt: NOW });
+    expect(await store.reservePaid({ ...paid('safety-blocked'), uncappedRollout: true }, NOW)).toBeNull();
+    expect(await store.readPaidBudgetPolicy()).toMatchObject({ source: 'safety', capNanoUsd: 0 });
+  });
+  it('uncapped is an audited CAS mode, preserves holds and replay fences, and can return to capped', async () => {
+    const db = new FakeFirestore(), store = db.store();
+    await store.reservePaid(paid('old-hold'), NOW);
+    const before = db.matching('paid_day')[0][1];
+    expect(await store.setPaidBudgetPolicy({ ...admin(0, 1), budgetMode: 'uncapped' }, NOW)).toMatchObject({ ok: true });
+    expect(db.matching('paid_day')[0][1]).toEqual(before);
+    const hold = await store.reservePaid({ ...paid('uncapped'), capNanoUsd: 0, maxCostNanoUsd: 20 * NANO_USD }, NOW);
+    expect(hold?.mayDispatch).toBe(true);
+    expect((await store.reservePaid({ ...paid('uncapped'), capNanoUsd: 0, maxCostNanoUsd: 20 * NANO_USD }, NOW))?.mayDispatch).toBe(false);
+    expect(await store.observePaidBudgetPolicy(0, NOW)).toMatchObject({ budgetMode: 'uncapped', revision: 2 });
+    expect(await store.spendSnapshot(NOW)).toMatchObject({ budgetMode: 'uncapped', remainingNanoUsd: null, heldNanoUsd: 20 * NANO_USD + 100_000_000 });
+    expect(await store.setPaidBudgetPolicy({ ...admin(0, 1), budgetMode: 'capped' }, NOW)).toMatchObject({ ok: false, reason: 'conflict' });
+    expect(await store.setPaidBudgetPolicy({ ...admin(0, 2), budgetMode: 'capped' }, NOW)).toMatchObject({ ok: true });
+    expect(await store.reservePaid(paid('blocked-again'), NOW)).toBeNull();
+    expect(await store.settlePaid(hold!, 1, NOW)).toBe(true);
   });
   it('initializes and explicitly raises only with revision CAS and an atomic hashed-actor audit', async () => {
     const db = new FakeFirestore(), store = db.store();

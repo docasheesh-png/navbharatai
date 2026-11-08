@@ -1,3 +1,4 @@
+import { proSandboxFee, proSandboxFeeFields } from '../src/server/AgentV3/proSandboxFee';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -89,6 +90,7 @@ const finalOutcome = one(nodes.filter(ts.isIfStatement).filter((n) => text(n.exp
 const zeroBill = one(nodes.filter(ts.isIfStatement).filter((n) => text(n.expression) === 'expectsArtifacts && builderWroteCount() === 0' && text(n).includes('zeroBillReasonFor(')), 'zero-artifact billing and upsell');
 const finish = statementContainingCall('buildDiag.finish', (n) => text(n).includes('result.ok, result.summary'));
 const billing = statementContainingCall('buildDiag.setBilling');
+const sandboxFeeAssignment = one(nodes.filter(ts.isExpressionStatement).filter(n => text(n.expression) === 'effectiveBilledUsd = settledSandboxFee.totalUsd'), 'settled sandbox fee assignment');
 const providerTokens = statementContainingCall('buildDiag.setProviderTokens');
 const resultEvent = statementContainingCall('emit', (n) => text(n).includes("type: 'result', ...result"));
 const pureFunctions = ['shouldRetryEmptyBuild', 'sessionCostCapUsd'].map((name) => text(one(nodes.filter(ts.isFunctionDeclaration).filter((n) => n.name?.text === name), name)).replace(/^export /, '')).join('\n');
@@ -132,6 +134,8 @@ function program(mutation?: Mutation): string {
     ${outcomeCode}
     let effectiveBilledUsd = result.billedUsd; let zeroBillReason;
     ${text(zeroBill)}
+    ${text(variable('settledSandboxFee'))}
+    ${text(sandboxFeeAssignment)}
     const reconciledProviderUsage = { synthetic: { ...osUsage } };
     ${text(providerTokens)}
     const settledBilledInr = Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100;
@@ -250,7 +254,7 @@ async function runCaller(options: { files: Record<string, string>; replies?: str
     buildStarvedItsOutputBudget, providerDegradedMessage,
     // These presentation-only fakes are reached by NON-decline controls, never used to decide admission.
     answerOnlyNow: () => false, assessBuildInput: () => ({ buildable: true }), freeTierUpsellMessage: () => 'SYNTHETIC_UPSELL',
-    interruptedBeforeAnyVerdict, zeroBillReasonFor, buildBillingLabel, chargeRecordFields,
+    interruptedBeforeAnyVerdict, zeroBillReasonFor, buildBillingLabel, chargeRecordFields, proSandboxFee, proSandboxFeeFields,
     usdInrRate: () => 80, email: undefined, isAgentV3FreeUser: () => false, billingActive: true,
     walletDebit: null, decidedRealCostUsd: 1, decidedSandboxUsd: 0, onlyOpus: false, noClaudeBuild: false,
     leakedClaudeProvider: null, projectContinue: {}, buildId: 'synthetic-build', promptHash: 'synthetic-prompt',

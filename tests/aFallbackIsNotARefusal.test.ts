@@ -74,13 +74,13 @@ describe('🔒 a rate with no sample is not a measurement', () => {
     const tile = aiTile({ providerErrorRate: 0.5, providerRequests: 40 });
     expect(tile.level).toBe('critical');
     expect(tile.display).toBe('50% unanswered');
-    expect(tile.note).toContain('no answer from ANY engine');
+    expect(tile.note).toContain('recorded requests had no answer');
   });
 
-  it('a healthy platform says a fallback still counts as answered', () => {
+  it('a low legacy failure sample does not claim platform health', () => {
     const tile = aiTile({ providerErrorRate: 0, providerRequests: 40 });
     expect(tile.level).toBe('ok');
-    expect(tile.note).toContain('fell back to a second engine still counts as answered');
+    expect(tile.note).toContain('not all-user reliability or answer accuracy');
   });
 
   it('an unread rate is still unknown, with its own wording', () => {
@@ -105,3 +105,16 @@ describe('🔒 a rate with no sample is not a measurement', () => {
     expect(code).not.toContain('err += Number(st?.errorCount) || 0;');
   });
 });
+
+ it('shows recent separate outcomes even when the legacy sample is empty', () => {
+   const tile = aiTile({ providerRequests: 0, chatOutcomes: {
+     scope: 'this-process-universal-router-calls', windowMinutes: 15,
+     counts: { complete: 2, partial: 1, refused: 1, cancelled: 3, failed: 4 },
+     bySurface: {}, failureReasons: { authentication: 2 },
+   } });
+   expect(tile.display).toBe('unknown');
+   expect(tile.note).toContain('2 transport-complete, 1 partial, 1 refused, 3 cancelled, 4 failed');
+   expect(tile.note).toContain('authentication=2');
+   expect(tile.note).toContain('does not verify correctness');
+   expect(tile.note).not.toContain('more API keys');
+ });

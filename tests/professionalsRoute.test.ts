@@ -56,6 +56,20 @@ describe('professional chat route — verified identity only', () => {
     verifyIdentityMock.mockReset().mockResolvedValue(null);
   });
 
+  it.each(['legacy', 'fixed-v1'])('selects the internal chain option only from server policy %s', async policy => {
+    const prior = process.env.TEXT_CHAIN_POLICY; process.env.TEXT_CHAIN_POLICY = policy;
+    try {
+      verifyIdentityMock.mockResolvedValue({ uid: 'uid-verified', email: null });
+      const res = mockRes();
+      await chatHandler()(mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hello', conversationId: 'conv-safe', fixedTextChainIngress: policy === 'legacy' } }), res);
+      expect(res.statusCode).toBe(200);
+      const opts = runChatMock.mock.calls[0][5];
+      expect(opts.conversationId).toBe('conv-safe');
+      if (policy === 'fixed-v1') expect(opts.fixedTextChainIngress).toBe(true);
+      else expect(opts).not.toHaveProperty('fixedTextChainIngress');
+    } finally { if (prior === undefined) delete process.env.TEXT_CHAIN_POLICY; else process.env.TEXT_CHAIN_POLICY = prior; }
+  });
+
   it('threads the VERIFIED uid into the engine (memory key), never the body userId', async () => {
     verifyIdentityMock.mockResolvedValue({ uid: 'uid-verified', email: null });
     const res = mockRes();

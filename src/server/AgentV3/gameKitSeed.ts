@@ -277,3 +277,8 @@ export function builderWrittenCount(written: ReadonlyMap<string, string>, kitSee
   for (const [p, c] of written) if (kitSeeded.get(p) !== c) n++;
   return n;
 }
+
+/** L3 preparation is allowed only after this new-game seed actually installed its 3D recipe. */
+export function gameKitCanPrepareAssets(results: readonly GameKitSeedResult[]): boolean {
+  return results.some(result => result.recipe === 'generate_game_3d' && result.ok);
+}

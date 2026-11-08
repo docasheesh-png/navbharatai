@@ -2,11 +2,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import express from 'express';
 import { request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
-const mocked = vi.hoisted(() => ({ scope: vi.fn(), page: vi.fn(), detail: vi.fn(), create: vi.fn(), list: vi.fn(), revoke: vi.fn(), tokenOk: vi.fn() }));
+const mocked = vi.hoisted(() => ({ scope: vi.fn(), page: vi.fn(), detail: vi.fn(), create: vi.fn(), list: vi.fn(), revoke: vi.fn(), tokenOk: vi.fn(), allList: vi.fn(), allDetail: vi.fn() }));
 const oauth = vi.hoisted(() => ({ register: vi.fn(), authorize: vi.fn(), pending: vi.fn(), decide: vi.fn(), token: vi.fn(), tokenOk: vi.fn(), tokenPrincipal: vi.fn(), revoke: vi.fn() }));
 const autopsy = vi.hoisted(() => ({ read: vi.fn(), update: vi.fn() }));
 vi.mock('../src/server/lib/failedReportOAuth', async original => ({ ...await original<any>(), reportOAuthService: () => oauth }));
 vi.mock('../src/server/lib/scopeFailureReports', () => ({ readScopeFailures: mocked.scope }));
+vi.mock('../src/server/lib/buildReportList', async original => ({ ...await original<any>(), readBuildReportList: mocked.allList, readBuildReportWithDigest: mocked.allDetail }));
 vi.mock('../src/server/lib/failedReportAccess', () => ({ createReportAccess: mocked.create, listReportAccess: mocked.list, revokeReportAccess: mocked.revoke, reportTokenOk: mocked.tokenOk }));
 vi.mock('../src/server/lib/failedBuildReports', async (original) => ({ ...await original<any>(), readFailedBuildPage: mocked.page, readFailedBuildWithDigest: mocked.detail }));
 vi.mock('../src/server/lib/failedReportAutopsy', async original => ({ ...await original<any>(),
@@ -38,6 +39,8 @@ beforeAll(async () => {
 });
 afterAll(async () => { await new Promise<void>((r) => server.close(() => r())); });
 beforeEach(() => { mocked.scope.mockReset().mockResolvedValue({ failures: [], nextCursor: null }); mocked.page.mockReset().mockResolvedValue({ reports: [], nextCursor: null, scanned: 1 }); mocked.detail.mockReset().mockResolvedValue({ report: { ok: false }, reportDigest: failedReportDigest({ ok: false }) }); mocked.tokenOk.mockReset().mockImplementation(async (s) => s === 'Bearer read-only'); mocked.create.mockReset().mockResolvedValue({ id: 'a'.repeat(64), token: 'only-once' }); mocked.list.mockResolvedValue([]); mocked.revoke.mockResolvedValue(undefined);
+  mocked.allList.mockReset().mockResolvedValue({ reports: [], nextCursor: null, scanned: 0, filter: { outcome: 'all', order: 'newest' }, numbering: { state: 'ready', highestAssigned: 0 } });
+  mocked.allDetail.mockReset().mockResolvedValue(null);
   oauth.tokenOk.mockReset().mockResolvedValue(false); oauth.tokenPrincipal.mockReset().mockResolvedValue(null);
   autopsy.read.mockReset().mockResolvedValue({ reportDigest: 'a'.repeat(64), revision: 0, state: 'not_started', record: null });
   autopsy.update.mockReset().mockResolvedValue({ reportDigest: 'a'.repeat(64), revision: 1, state: 'in_progress', record: {} });
@@ -89,7 +92,7 @@ describe('private report HTTP boundary', () => {
   it('serves authenticated MCP initialization, read tools, notifications and honest errors', async () => {
     const call = (body: unknown, headers = bearer) => request('/api/v1/failedbr/mcp', { method: 'POST', headers, body });
     expect((await call(rpc('initialize'))).body.result.capabilities).toEqual({ tools: {} });
-    expect((await call(rpc('tools/list'))).body.result.tools).toHaveLength(4);
+    expect((await call(rpc('tools/list'))).body.result.tools).toHaveLength(6);
     expect((await call(rpc('tools/call', { name: 'list_failed_builds', arguments: { cursor: 'next' } }))).body.result.content[0].text).toContain('nextCursor');
     expect(mocked.page).toHaveBeenCalledWith('next', undefined);
     expect((await call(rpc('tools/call', { name: 'get_failed_build', arguments: { workspaceId: 'app', historyId: '100' } }))).body.result.content[0].text).toContain('false');
@@ -100,6 +103,32 @@ describe('private report HTTP boundary', () => {
     expect((await request('/api/v1/failedbr/mcp', { headers: bearer })).status).toBe(405);
     mocked.page.mockRejectedValueOnce(new Error('offline'));
     expect((await call(rpc('tools/call', { name: 'list_failed_builds' }))).body.error.code).toBe(-32603);
+  });
+});
+
+describe('every build report, with outcome filter and sort (list_build_reports / get_build_report)', () => {
+  const call = (body: unknown, headers: Record<string, string> = bearer) => request('/api/v1/failedbr/mcp', { method: 'POST', headers, body });
+  it('passes the outcome filter and the order through MCP, behind the same read gate', async () => {
+    const tools = (await call(rpc('tools/list'))).body.result.tools;
+    const list = tools.find((t: any) => t.name === 'list_build_reports');
+    expect(list.inputSchema.properties.outcome.enum).toEqual(['all', 'failed', 'succeeded', 'stopped', 'unfinished']);
+    expect(list.inputSchema.properties.order.enum).toEqual(['newest', 'oldest']);
+    expect(list.annotations).toMatchObject({ readOnlyHint: true });
+    await call(rpc('tools/call', { name: 'list_build_reports', arguments: { outcome: 'succeeded', order: 'oldest', limit: 5 } }));
+    expect(mocked.allList).toHaveBeenLastCalledWith({ outcome: 'succeeded', order: 'oldest', limit: 5 });
+    expect((await request('/api/v1/failedbr/mcp', { method: 'POST', body: rpc('tools/call', { name: 'list_build_reports' }) })).status).toBe(401);
+  });
+  it('an invalid filter is -32602, never an empty list', async () => {
+    const { FailedReportsInputError } = await import('../src/server/lib/failedBuildReports');
+    mocked.allList.mockRejectedValue(new FailedReportsInputError('outcome must be one of: all, failed.'));
+    expect((await call(rpc('tools/call', { name: 'list_build_reports', arguments: { outcome: 'bogus' } }))).body.error.code).toBe(-32602);
+  });
+  it('reads one report of any outcome with its number, or says it is not retained', async () => {
+    expect((await call(rpc('tools/call', { name: 'get_build_report', arguments: { workspaceId: 'app', historyId: '100' } }))).body.result.isError).toBe(true);
+    mocked.allDetail.mockResolvedValue({ report: { ok: true, startedAt: 100 }, reportDigest: 'd'.repeat(64), number: 7, outcome: 'succeeded' });
+    const text = JSON.parse((await call(rpc('tools/call', { name: 'get_build_report', arguments: { workspaceId: 'app', historyId: '100' } }))).body.result.content[0].text);
+    expect(text).toEqual({ ok: true, startedAt: 100, reportNumber: 7, outcome: 'succeeded', reportDigest: 'd'.repeat(64) });
+    expect(mocked.allDetail).toHaveBeenLastCalledWith('app', '100');
   });
 });
 
@@ -134,7 +163,7 @@ describe('separate autopsy write boundary', () => {
     oauth.tokenPrincipal.mockResolvedValue({ grantId: 'b'.repeat(64), owner: 'owner', clientId: 'client', scope: 'failed-reports:read failed-reports:autopsy' });
     const headers = { Authorization: 'Bearer explicit-write' };
     const tools = (await request('/api/v1/failedbr/mcp', { method: 'POST', headers, body: rpc('tools/list') })).body.result.tools;
-    expect(tools.map((t: any) => t.name)).toEqual(['list_scope_failures', 'list_failed_builds', 'get_failed_build', 'get_failed_build_autopsy', 'set_failed_build_autopsy']);
+    expect(tools.map((t: any) => t.name)).toEqual(['list_scope_failures', 'list_build_reports', 'get_build_report', 'list_failed_builds', 'get_failed_build', 'get_failed_build_autopsy', 'set_failed_build_autopsy']);
     expect(tools.at(-1).annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
     expect((await request(path, { method: 'POST', headers, body: { status: 'in_progress' } })).status).toBe(200);
     expect(autopsy.update).toHaveBeenCalledWith('app', '100', { status: 'in_progress' }, `oauth:${'b'.repeat(64)}`);

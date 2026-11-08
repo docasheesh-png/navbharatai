@@ -35,7 +35,17 @@ export function fastLaneReasoningGateEnabled(env: NodeJS.ProcessEnv = process.en
 
 export function fastLaneRungDecision(
   rungs: readonly LadderRung[],
-  opts: { complex: boolean; isKeyed?: (rung: LadderRung) => boolean; enabled?: boolean },
+  opts: {
+    complex: boolean; isKeyed?: (rung: LadderRung) => boolean; enabled?: boolean;
+    /**
+     * 🔴 THE ENGINE THAT ACTUALLY OPENS THE BUILD, when it is not a ladder rung (Q-2310 — autopsies 958aa1ec and
+     * 61279465). A Weak build admitted to Surplus runs on the Surplus model (qwen3-coder in 61279465), and a pinned
+     * build on Router One; this gate read the LADDER's rung (kimi-k2.7-code) and recorded "the engine this build
+     * opens on always reasons first" about a model the build never used. One question, one answer: the model asked
+     * about is the model that runs.
+     */
+    opensOn?: { provider: string; model: string } | null;
+  },
 ): FastLaneRungDecision {
   // The lane skips keyless rungs exactly like the chain it runs on, so its opener is the first KEYED
   // rung at or after the ladder's opening position.
@@ -43,11 +53,12 @@ export function fastLaneRungDecision(
   const openedAt = openingRung(rungs, { complex: opts.complex });
   const rung = rungs.slice(Math.max(0, openedAt - 1)).find(keyed) ?? null;
   if (opts.enabled === false || !rung) return { rung, skip: false, reason: '' };
-  if (!modelAlwaysReasons(rung.model)) return { rung, skip: false, reason: '' };
+  const runs = opts.opensOn && opts.opensOn.model ? opts.opensOn : { provider: rung.provider, model: rung.model };
+  if (!modelAlwaysReasons(runs.model)) return { rung, skip: false, reason: '' };
   return {
     rung,
     skip: true,
-    reason: `The build opens on ${rung.provider} ${rung.model}, which always reasons before it answers; the fast lane's single plan call is bounded for a rung that answers directly, so it would spend its cap and hand over with nothing. Going straight to the full builder on the same model.`,
+    reason: `The build opens on ${runs.provider} ${runs.model}, which always reasons before it answers; the fast lane's single plan call is bounded for a rung that answers directly, so it would spend its cap and hand over with nothing. Going straight to the full builder on the same model.`,
   };
 }
 

@@ -113,8 +113,10 @@ export function decideMarkupOnProof(input: {
  * stopped it before a file was written, so the report carried that sentence beside `billedUsd: 0`. The
  * waiver still happened and is still worth recording; the line now says what became of it. PURE.
  */
-export function markupWaiverSettledLine(reason: string, finalBilledUsd: number, zeroBillReason?: string): string {
-  const base = String(reason ?? '').trim();
+export function markupWaiverSettledLine(reason: string, finalBilledUsd: number, zeroBillReason?: string, subtotalFeePolicy = false): string {
+  const base = subtotalFeePolicy
+    ? String(reason ?? '').trim().replace('billed at real cost only', 'AI subtotal billed at real cost only') + ' The separately itemized sandbox service fee is 2.5% of the settled AI subtotal.'
+    : String(reason ?? '').trim();
   if (Number.isFinite(finalBilledUsd) && finalBilledUsd > 0) return base;
   const why = String(zeroBillReason ?? '').trim();
   return `${base} Superseded: the final bill is ₹0${why ? ` (${why})` : ''}.`;

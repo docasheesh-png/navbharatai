@@ -42,6 +42,15 @@
 // <body> — from the SAME palette the media query uses (`withThemeSwitch` below), so they can never drift. No
 // switch set: the page follows the device, exactly as before.
 
+// ☀️ 2026-11-02 (admin: "jab tak user saf saf na bol de, tab tak light mode me hi game banne chahiye"). Every app and
+// game NavBharatAI built came out DARK on most phones, and nobody had asked for dark. Root cause: this kit followed the
+// DEVICE (`color-scheme: light dark` + `@media (prefers-color-scheme: dark)`), and most phones are set to dark — so
+// the user's phone setting, not the user's request, chose the app's look. The kit is now LIGHT, whatever the device
+// says. Its dark palette is unchanged and lives ONLY behind the switch (`KIT_DARK_SWITCH`): an app is dark when the
+// app itself sets `data-theme="dark"` / class `dark` — which the builder does only when the user asked for it
+// (`LIGHT_THEME_BY_DEFAULT_RULE`). The game recipe's own dark values are tokens now, so a game is light by default
+// too and dark under the same switch.
+
 /** The selectors a theme switch sets. Exported so the prompt, the kit and the tests name the same hooks. */
 export const KIT_DARK_SWITCH = ':root.dark, :root[data-theme="dark"], body.dark, body[data-theme="dark"]';
 export const KIT_LIGHT_SWITCH = ':root.light, :root[data-theme="light"], body.light, body[data-theme="light"]';
@@ -50,9 +59,11 @@ const declsOf = (body: string): Array<[string, string]> =>
   [...body.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]);
 
 /**
- * The kit with its switch blocks written in, right after the system-preference block: the dark switch carries
- * exactly the media query's tokens, the light switch the `:root` value of each of them. PURE; a kit whose
- * palette blocks cannot be found is returned unchanged (designKit.test.ts fails on that, loudly).
+ * The kit with its dark palette moved behind the switch. The source below writes the dark palette as a
+ * `prefers-color-scheme` block (one readable place for it); this REPLACES that block with the two switch blocks —
+ * the dark switch carries exactly its tokens, the light switch the `:root` value of each — so the device setting no
+ * longer applies at all. PURE; a kit whose palette blocks cannot be found is returned unchanged (designKit.test.ts
+ * fails on that, loudly).
  */
 export function withThemeSwitch(css: string): string {
   const media = /@media \(prefers-color-scheme: dark\) \{\n {2}:root \{\n([\s\S]*?)\n {2}\}\n\}\n/.exec(css);
@@ -69,14 +80,14 @@ export function withThemeSwitch(css: string): string {
   const block = (selector: string, scheme: string, decls: Array<[string, string]>) =>
     `${selector} {\n  color-scheme: ${scheme};\n${decls.map(([k, v]) => `  ${k}: ${v};`).join('\n')}\n}\n`;
   const at = media.index + media[0].length;
-  return `${css.slice(0, at)}
-/* A theme switch beats the device setting: the class or data-theme on <html> or <body>. */
+  return `${css.slice(0, media.index)}/* Light unless the APP chooses dark: the class or data-theme on <html> or <body>. The phone's own dark
+   setting does not change the app (2026-11-02) — the user's request does. */
 ${block(KIT_DARK_SWITCH, 'dark', [...dark, ...derived])}
 ${block(KIT_LIGHT_SWITCH, 'light', [...lightOfDark, ...derived])}${css.slice(at)}`;
 }
 
 export const DESIGN_KIT_CSS = withThemeSwitch(`:root {
-  color-scheme: light dark;
+  color-scheme: light;
   --bg: #f6f7fb;
   --fg: #17171c;
   --muted: #6b7280;
@@ -99,8 +110,16 @@ export const DESIGN_KIT_CSS = withThemeSwitch(`:root {
   --shadow: 0 1px 2px rgba(16, 17, 28, 0.06), 0 8px 24px rgba(16, 17, 28, 0.06);
   --shadow-lg: 0 24px 48px -20px rgba(16, 17, 28, 0.28);
   --ring: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
-  --game-bg: #0b0a1a;
-  --game-fg: #f5f5ff;
+  --game-bg: #eef1ff;
+  --game-fg: #17171c;
+  --game-glow: color-mix(in srgb, var(--accent-strong) 16%, var(--game-bg));
+  --game-scrim: rgba(246, 247, 251, 0.74);
+  --game-glass: rgba(23, 23, 28, 0.06);
+  --game-glass-hover: rgba(23, 23, 28, 0.1);
+  --game-glass-active: rgba(23, 23, 28, 0.16);
+  --game-line: rgba(23, 23, 28, 0.14);
+  --game-chip: rgba(255, 255, 255, 0.78);
+  --game-track: rgba(23, 23, 28, 0.1);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -120,6 +139,16 @@ export const DESIGN_KIT_CSS = withThemeSwitch(`:root {
     --border: #2a2a35;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
     --shadow-lg: 0 24px 48px -20px rgba(0, 0, 0, 0.7);
+    --game-bg: #0b0a1a;
+    --game-fg: #f5f5ff;
+    --game-glow: color-mix(in srgb, var(--accent-strong) 38%, var(--game-bg));
+    --game-scrim: rgba(8, 7, 20, 0.6);
+    --game-glass: rgba(255, 255, 255, 0.12);
+    --game-glass-hover: rgba(255, 255, 255, 0.2);
+    --game-glass-active: rgba(255, 255, 255, 0.3);
+    --game-line: rgba(255, 255, 255, 0.22);
+    --game-chip: rgba(0, 0, 0, 0.45);
+    --game-track: rgba(255, 255, 255, 0.18);
   }
 }
 
@@ -499,29 +528,29 @@ small, .muted, .text-muted { color: var(--muted); }
    a player sees first. Written as plain divs it reads as a web page with a picture in it. Every control
    here is a real <button>: a clickable div cannot be reached by keyboard or screen reader, and
    NavBharatAI's own check cannot press it to prove the game starts. */
-.nb-game { position: relative; min-height: 100dvh; overflow: hidden; background: radial-gradient(circle at 50% 28%, color-mix(in srgb, var(--accent-strong) 38%, var(--game-bg)), var(--game-bg) 72%); color: var(--game-fg); touch-action: manipulation; }
+.nb-game { position: relative; min-height: 100dvh; overflow: hidden; background: radial-gradient(circle at 50% 28%, var(--game-glow), var(--game-bg) 72%); color: var(--game-fg); touch-action: manipulation; }
 .nb-game canvas { display: block; width: 100%; height: 100%; }
-.nb-game-screen { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; align-content: center; gap: 16px; padding: 24px; text-align: center; background: rgba(8, 7, 20, 0.6); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); animation: nb-fade-in var(--dur) var(--ease) both; }
+.nb-game-screen { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; align-content: center; gap: 16px; padding: 24px; text-align: center; background: var(--game-scrim); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); animation: nb-fade-in var(--dur) var(--ease) both; }
 .nb-game-title { margin: 0; font-size: clamp(2.25rem, 9vw, 4.5rem); font-weight: 900; line-height: 1; letter-spacing: -0.03em; background: linear-gradient(135deg, var(--game-fg), color-mix(in srgb, var(--accent) 80%, var(--game-fg)) 55%, color-mix(in srgb, var(--accent-2) 70%, var(--game-fg))); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 8px 24px color-mix(in srgb, var(--accent) 55%, transparent)); }
 .nb-game-sub { color: color-mix(in srgb, var(--game-fg) 72%, transparent); font-size: 1rem; }
 .nb-game-btn { min-width: 200px; min-height: 52px; padding: 12px 32px; border: 0; border-radius: 999px; background: linear-gradient(135deg, var(--accent-strong), var(--accent-2)); color: var(--accent-fg); font-size: 1.1rem; font-weight: 800; letter-spacing: 0.02em; box-shadow: 0 12px 32px -8px color-mix(in srgb, var(--accent-strong) 80%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.25); animation: nb-pulse 1.8s var(--ease) infinite; }
 .nb-game-btn:hover { background: linear-gradient(135deg, var(--accent-deep), var(--accent-2)); color: var(--accent-fg); animation-play-state: paused; transform: translateY(-2px) scale(1.02); }
-.nb-game-btn-secondary { background: rgba(255, 255, 255, 0.1); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22); animation: none; }
-.nb-game-btn-secondary:hover { background: rgba(255, 255, 255, 0.18); }
+.nb-game-btn-secondary { background: var(--game-glass); box-shadow: inset 0 0 0 1px var(--game-line); color: var(--game-fg); animation: none; }
+.nb-game-btn-secondary:hover { background: var(--game-glass-hover); color: var(--game-fg); }
 .nb-game-hud { position: absolute; top: max(12px, env(safe-area-inset-top)); left: 12px; right: 12px; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 8px; pointer-events: none; }
 .nb-game-hud button { pointer-events: auto; }
-.nb-game-stat { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px; background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); color: var(--game-fg); font-weight: 800; font-variant-numeric: tabular-nums; }
+.nb-game-stat { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px; background: var(--game-chip); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); box-shadow: inset 0 0 0 1px var(--game-line); color: var(--game-fg); font-weight: 800; font-variant-numeric: tabular-nums; }
 /* A health/energy bar. Set its fill with a 0–1 number: style="--value: 0.6". The fill scales (transform),
    it does not resize, so it stays smooth. */
-.nb-game-bar { width: 140px; height: 12px; border-radius: 999px; overflow: hidden; background: rgba(255, 255, 255, 0.18); }
+.nb-game-bar { width: 140px; height: 12px; border-radius: 999px; overflow: hidden; background: var(--game-track); }
 .nb-game-bar-fill { height: 100%; transform-origin: left center; transform: scaleX(var(--value, 1)); background: linear-gradient(90deg, var(--success), color-mix(in srgb, var(--success) 50%, var(--game-fg))); transition: transform var(--dur) var(--ease); }
 /* On-screen keys for a phone. Round, thumb-sized, and they do not scroll or zoom the page when held. */
 .nb-game-pad { position: absolute; left: 16px; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); z-index: 5; display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; pointer-events: none; }
 .nb-game-pad > * { pointer-events: auto; }
 .nb-game-keys { display: flex; gap: 12px; }
-.nb-game-key { width: 64px; height: 64px; min-height: 64px; padding: 0; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24); color: var(--game-fg); font-size: 1.4rem; font-weight: 800; touch-action: none; user-select: none; -webkit-user-select: none; }
-.nb-game-key:hover { background: rgba(255, 255, 255, 0.2); }
-.nb-game-key:active { transform: scale(0.94); background: rgba(255, 255, 255, 0.3); }
+.nb-game-key { width: 64px; height: 64px; min-height: 64px; padding: 0; border: 0; border-radius: 50%; background: var(--game-glass); box-shadow: inset 0 0 0 1px var(--game-line); color: var(--game-fg); font-size: 1.4rem; font-weight: 800; touch-action: none; user-select: none; -webkit-user-select: none; }
+.nb-game-key:hover { background: var(--game-glass-hover); }
+.nb-game-key:active { transform: scale(0.94); background: var(--game-glass-active); }
 @media (hover: hover) and (pointer: fine) { .nb-game-pad { display: none; } }
 
 /* ══════════════════════════════════════════════════════════════════════════════════════════════

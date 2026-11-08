@@ -463,9 +463,9 @@ export default function App() {
     function draw() {
       if (!ctx) return;
       const css = getComputedStyle(document.documentElement);
-      ctx.fillStyle = css.getPropertyValue('--card').trim() || '#17171f';
+      ctx.fillStyle = css.getPropertyValue('--card').trim() || '#ffffff'; // the kit's light card when unread
       ctx.fillRect(0, 0, W, H);
-      const accent = css.getPropertyValue('--accent').trim() || '#7c74ff';
+      const accent = css.getPropertyValue('--accent').trim() || '#4f46e5';
       for (const o of pool.current) {
         if (!o.live) continue;
         ctx.beginPath();

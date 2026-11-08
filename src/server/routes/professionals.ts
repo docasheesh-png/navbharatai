@@ -1,3 +1,4 @@
+import { fixedTextChainEnabled, withFixedTextChainScope } from '../AI/fixedTextChain';
 import { withFreeAnswerQuota, markFreeAnswer, markFreeAnswerProviderFailure, freeAnswerSignal, assertFreeAnswerActive } from '../lib/freeAnswerQuota';
 import { usageLogFields } from '../AI/Router/usageLogFields';
 import { runWithInferenceScope } from '../AI/inferencePolicy';
@@ -250,7 +251,7 @@ export function registerProfessionalsRoutes(app: Express): void {
 
     try {
       if (countedFree) assertFreeAnswerActive(req);
-      const { reply, spend, memoryStatus } = await runProfessionalChatWithUsage(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier, { conversationId, platform: clientPlatform(req.headers['x-nbai-platform']), signal, deadlineAtMs, freeProductGateway: gate.tier === 'free', ...(countedFree ? { beforeGeneration: () => assertFreeAnswerActive(req) } : {}) });
+      const { reply, spend, memoryStatus } = await runProfessionalChatWithUsage(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier, { conversationId, platform: clientPlatform(req.headers['x-nbai-platform']), signal, deadlineAtMs, freeProductGateway: gate.tier === 'free', ...(fixedTextChainEnabled() ? { fixedTextChainIngress: true } : {}), ...(countedFree ? { beforeGeneration: () => assertFreeAnswerActive(req) } : {}) });
       if (countedFree) {
         assertFreeAnswerActive(req);
         if (!reply.trim()) throw new Error('Empty professional answer');
@@ -355,7 +356,7 @@ export function registerProfessionalsRoutes(app: Express): void {
         gate.tier,
         { conversationId: conversationIdFromBody(req.body?.conversationId), platform: clientPlatform(req.headers['x-nbai-platform']), signal, deadlineAtMs, freeProductGateway: gate.tier === 'free', ...(gate.tier === 'free' ? { beforeGeneration: () => assertFreeAnswerActive(req) } : {}) },
       );
-      const { reply, spend, memoryStatus } = await withFreeProfessionalGateway(req, { selected: gate.tier === 'free', uid: verifiedUserId, professionalId: config.id, deadlineAtMs, signal }, generate);
+      const { reply, spend, memoryStatus } = await withFixedTextChainScope('professional', 'tool-json', () => withFreeProfessionalGateway(req, { selected: gate.tier === 'free', uid: verifiedUserId, professionalId: config.id, deadlineAtMs, signal }, generate));
       if (gate.tier === 'free') assertFreeAnswerActive(req);
       const paper = parseExamPaper(reply, Math.min(spec.count, EXAM_MAX_QUESTIONS));
       if (gate.tier === 'free' && paper.questions.length > 0) markFreeAnswer(req);

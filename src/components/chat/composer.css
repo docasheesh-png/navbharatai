@@ -273,3 +273,25 @@
   /* Free/shared: no Search/Clear chrome crowding the action bar. */
   .nb-composer-tools-content > .order-0 { display: none !important; }
 }
+
+/* Ordinary AI Chat only: keep the action inside the card, clear of its rounded border.
+ * Normal flex flow reserves Send/Stop AND the optional Queue button's actual width. */
+.nb-composer-box[data-composer-send-position="bottom-right"] .nb-composer-send-slot {
+  top: auto !important;
+  bottom: auto !important;
+  right: auto !important;
+  position: static !important;
+  transform: none;
+  gap: 4px;
+}
+
+.nb-composer-box[data-composer-send-position="bottom-right"] [data-composer-toolbar] {
+  min-height: 50px;
+  padding: 4px 10px 10px 8px !important;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.nb-composer-box[data-composer-send-position="bottom-right"] .nb-composer-text {
+  padding-right: 14px !important;
+}

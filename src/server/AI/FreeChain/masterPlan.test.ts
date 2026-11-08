@@ -15,7 +15,7 @@ describe('master plan config', () => {
     const off = freeChainConfig({ FREE_CHAIN_CONCURRENCY_ENABLED: 'off', FREE_CHAIN_ROUTER_ENABLED: 'off', FREE_CHAIN_STABLE_PREFIX_ENABLED: 'off', FREE_CHAIN_COMPACT_PROMPT_ENABLED: 'off', FREE_CHAIN_OUTPUT_CAP_ENABLED: 'off', FREE_CHAIN_HISTORY_TRIM_ENABLED: 'off', FREE_CHAIN_FAQ_CACHE_ENABLED: 'off', FREE_CHAIN_MONTHLY_CAP_ENABLED: 'off', FREE_CHAIN_THROTTLE_ENABLED: 'off', FREE_CHAIN_CACHE_ENABLED: 'off' });
     expect(Object.values(off.features).filter(v => v === true)).toEqual([]); expect(off.cacheEnabled).toBe(false); expect(off.errors).toEqual([]);
   });
-  it('master switch stays OFF by default so production is unchanged until the owner enables it', () => { expect(on().enabled).toBe(false); });
+  it('ordinary chat defaults to the chain while explicit OFF remains authoritative', () => { expect(on().enabled).toBe(true); expect(freeChainConfig({ FREE_CHAIN_ENABLED: 'off' }).enabled).toBe(false); });
   it('monthly cap cannot exceed $520 and daily cap accepts the owner $17', () => {
     expect(freeChainConfig({ FREE_CHAIN_MONTHLY_CAP_USD: '600' }).errors).toContain('FREE_CHAIN_MONTHLY_CAP_USD');
     const c = freeChainConfig({ FREE_CHAIN_PAID_DAILY_CAP_USD: '17' }); expect(c.errors).toEqual([]); expect(c.paidCapNanoUsd).toBe(17e9);
@@ -78,10 +78,14 @@ describe('rule-based router', () => {
     expect(routeTurn(c, { message: 'exam tips', history: [], throttled: true }).route).toBe('quality');
   });
   it('router off → normal', () => { expect(routeTurn(freeChainConfig({ FREE_CHAIN_ROUTER_ENABLED: 'off' }), { message: 'hi', history: [] }).route).toBe('normal'); });
-  it('route orders', () => {
+  it.each(['normal', 'fast', 'quality'] as const)('preserves every default rung for %s', route => {
+    expect(on().features.routeReorder).toBe(false);
+    expect(orderForRoute(on().order, route)).toEqual(on().order);
+  });
+  it('route orders with explicit reorder opt-in', () => {
     const o = on().order;
-    expect(orderForRoute(o, 'quality')).toEqual(['dsv4flash', 'cheapinf', 'gpt5nano', 'glmflashx', 'geminipaid']);
-    expect(orderForRoute(o, 'fast')).not.toContain('dsv4flash');
+    expect(orderForRoute(o, 'quality', true)).toEqual(['dsv4flash', 'cheapinf', 'gpt5nano', 'glmflashx', 'geminipaid']);
+    expect(orderForRoute(o, 'fast', true)).not.toContain('dsv4flash');
     expect(orderForRoute(o, 'normal')).toBe(o);
   });
 });
@@ -142,8 +146,8 @@ describe('monthly cap', () => {
     const docs = new Map<string, any>();
     const ref = (path: string) => ({ path, get: async () => ({ data: () => docs.get(path) }) });
     const node: any = (path: string) => ({ collection: (c: string) => ({ doc: (d: string) => Object.assign(node(`${path}/${c}/${d}`), ref(`${path}/${c}/${d}`)) }) });
-    return { docs, collection: (c: string) => ({ doc: (d: string) => node(`${c}/${d}`) }),
-      runTransaction: async (fn: any) => fn({ get: async (r: any) => ({ data: () => docs.get(r.path) }), set: (r: any, v: any) => docs.set(r.path, { ...(docs.get(r.path) ?? {}), ...v }) }) } as any;
+    return { docs, doc: ref, collection: (c: string) => ({ doc: (d: string) => node(`${c}/${d}`) }),
+      runTransaction: async (fn: any) => fn({ get: async (r: any) => ({ exists: docs.has(r.path), data: () => docs.get(r.path) }), set: (r: any, v: any) => docs.set(r.path, { ...(docs.get(r.path) ?? {}), ...v }) }) } as any;
   }
   it('holds, refuses past the cap, settles actual cost and releases never-dispatched holds', async () => {
     const db = fakeDb(); const now = Date.parse('2026-10-24T00:00:00Z');
@@ -153,6 +157,19 @@ describe('monthly cap', () => {
     expect(await reserveMonthly(db, 10, 5, now)).toBe('2026-10');
     await settleMonthly(db, m!, 5, 0, now);
     expect([...db.docs.values()][0]).toMatchObject({ heldNanoUsd: 0, spentNanoUsd: 2 });
+  });
+  it('uncapped authority preserves monthly accounting beyond the limit and rejects invalid modes', async () => {
+    const db = fakeDb(); const now = Date.parse('2026-10-24T00:00:00Z');
+    const path = 'free_chat_chain/paid_budget_policy';
+    const policy = { kind: 'paid_budget_policy', version: 1, revision: 1, capNanoUsd: 0, budgetMode: 'uncapped', updatedAt: now, source: 'admin' };
+    db.docs.set(path, policy);
+    expect(await reserveMonthly(db, 0, 25, now)).toBe('2026-10');
+    expect(await reserveMonthly(db, 0, 25, now)).toBe('2026-10');
+    expect(db.docs.get('free_chat_chain/state/paid_month/2026-10')).toMatchObject({ heldNanoUsd: 50, spentNanoUsd: 0 });
+    db.docs.set(path, { ...policy, budgetMode: 'capped' });
+    expect(await reserveMonthly(db, 0, 1, now)).toBeNull();
+    db.docs.set(path, { ...policy, budgetMode: 'bogus' });
+    expect(await reserveMonthly(db, 0, 1, now)).toBeNull();
   });
   it('storage failure fails closed', async () => { expect(await reserveMonthly({ collection: () => { throw new Error('x'); } } as any, 10, 1)).toBeNull(); });
   it('month boundary follows IST', () => { expect(monthKey(Date.parse('2026-10-31T19:00:00Z'))).toBe('2026-11'); });

@@ -13,14 +13,18 @@
 //
 // Kill switch: AGENTV3_GAME_SCOPE_CONTRACT=off restores the pre-contract behaviour exactly.
 
+import { withoutDeclinedSentences } from '../lib/RequirementGapAnalyzer';
 export type GameGenre =
   | 'racing' | 'shooter' | 'platformer' | 'puzzle' | 'quiz' | 'card' | 'board' | 'runner'
-  | 'arcade' | 'sports' | 'fighting' | 'rpg' | 'strategy' | 'snake' | 'unknown';
+  | 'arcade' | 'sports' | 'fighting' | 'rpg' | 'strategy' | 'snake' | 'simulator' | 'unknown';
 export type GameDimension = '2d' | '3d' | 'unspecified';
 export type GameControl = 'keyboard' | 'touch' | 'mouse' | 'gamepad';
 export type GameFeature =
   | 'score' | 'levels' | 'lives' | 'timer' | 'enemies' | 'powerups' | 'leaderboard'
-  | 'multiplayer' | 'sound' | 'restart' | 'pause' | 'health';
+  | 'multiplayer' | 'sound' | 'restart' | 'pause' | 'health' | 'throttle' | 'braking';
+/** The vehicle the player drives or flies, when the request names one. */
+export type GameVehicle = 'train' | 'car' | 'bus' | 'truck' | 'motorcycle' | 'bicycle' | 'aircraft' | 'boat' | 'tractor' | 'rickshaw';
+export type GameCamera = 'third-person' | 'first-person' | 'top-down' | 'unspecified';
 
 export interface GameScopeContract {
   genre: GameGenre;
@@ -31,6 +35,21 @@ export interface GameScopeContract {
   requiredFeatures: GameFeature[];
   /** Did the request name a win or lose condition (game over, win, finish line…)? */
   winLoseNamed: boolean;
+  /**
+   * 🔴 WHAT WAS LOST BEFORE (autopsy 61279465, 2026-11-04). "Create a 3D train simulator with a realistic
+   * train, railway tracks, trees, buildings and mountains … free external 3D assets … mobile controls"
+   * became {genre: unknown, requiredFeatures: []} — the train, the track, the scenery, the camera and the
+   * assets were nowhere in the contract, so nothing after planning could hold the build to them. These four
+   * fields carry them. Optional so a contract recorded before them still reads.
+   */
+  /** The vehicle the player controls, or null. */
+  vehicle?: GameVehicle | null;
+  /** The camera the request named; for a driven vehicle with none named, the chase view ('third-person'). */
+  camera?: GameCamera;
+  /** The world the request named, in the reviewed catalogue's words (train, railway track, tree, building, mountain…). */
+  subjects?: string[];
+  /** Did the request ask for real 3D models/assets rather than primitive placeholders? */
+  externalAssets?: boolean;
 }
 
 export function gameScopeContractEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -38,6 +57,10 @@ export function gameScopeContractEnabled(env: NodeJS.ProcessEnv = process.env): 
 }
 
 const GENRES: ReadonlyArray<[GameGenre, RegExp]> = [
+  // A SIMULATOR is read first only when the request SAYS simulator/simulation or names a train or a plane —
+  // "racing simulator" still says racing below, because a race is the stronger signal of what the game is.
+  ['racing', /\b(rac(e|ing)|kart|drift)\b/i],
+  ['simulator', /\b(simulat(or|ion)|sim game|train (game|driver|driving)|(train|railway|rail|locomotive|metro) (simulator|game)|flight sim|flying game|bus driving|truck driving|driving school|parking game)\b|\btrain\b.*\b(rail(way)?s?|tracks?|locomotive|station|coach(es)?)\b|\b(rail(way)?s?|tracks?|locomotive|station)\b.*\btrains?\b/i],
   ['racing', /\b(rac(e|ing)|car game|kart|drift|bike game|motorcycle|car wal[ae] khel|gaadi wal[ae] khel)\b/i],
   ['snake', /\bsnake\b/i],
   ['quiz', /\b(quiz|trivia)\b/i],
@@ -67,6 +90,35 @@ const FEATURES: ReadonlyArray<[GameFeature, RegExp]> = [
   ['restart', /\b(restart|play again|retry|replay)\b/i],
   ['pause', /\bpause\b/i],
   ['health', /\b(health|hp|health ?bar)\b/i],
+  ['throttle', /\b(accelerat(e|ion|or)|throttle|speed control|gas pedal)\b/i],
+  ['braking', /\bbrak(e|es|ing)\b/i],
+];
+
+const VEHICLES: ReadonlyArray<[GameVehicle, RegExp]> = [
+  ['train', /\b(locomotives?|railway engine|metro|rail ?car)\b|\btrains?\s+(simulator|simulation|game|driv\w*|ride|station|tracks?|journey|coach(es)?)\b|\b(a|the|3d|3-d|realistic|passenger|express|goods|freight|bullet|steam|electric|diesel|toy|indian)\s+trains?\b(?!\s+(your|my|his|her|their|to)\b)/i],
+  ['aircraft', /\b(aircraft|aeroplanes?|airplanes?|planes?|jet|helicopter|flight)\b/i],
+  ['bus', /\bbus(es)?\b/i],
+  ['truck', /\b(trucks?|lorry|lorries)\b/i],
+  ['tractor', /\btractors?\b/i],
+  ['rickshaw', /\b(auto ?rickshaw|rickshaw|tuk ?tuk)\b/i],
+  ['motorcycle', /\b(motor ?(cycle|bike)s?|bike game|scooter)\b/i],
+  ['bicycle', /\b(bicycles?|cycling)\b/i],
+  ['boat', /\b(boats?|ships?|sailing)\b/i],
+  ['car', /\b(cars?|gaadi|taxi|jeep|drive|driving)\b/i],
+];
+
+/** Named world subjects → the catalogue's own words (assetPlan aliases). Order is the order they are listed. */
+const SUBJECTS: ReadonlyArray<[string, RegExp]> = [
+  ['train', /\b(locomotives?|railway engine|metro|rail ?car)\b|\btrains?\s+(simulator|simulation|game|driv\w*|ride|station|tracks?|journey|coach(es)?)\b|\b(a|the|3d|3-d|realistic|passenger|express|goods|freight|bullet|steam|electric|diesel|toy|indian)\s+trains?\b(?!\s+(your|my|his|her|their|to)\b)/i],
+  ['railway track', /\b(rail(way)?s?|tracks?|rail ?line)\b/i],
+  ['station', /\b(railway )?stations?\b/i],
+  ['road', /\b(roads?|highway|street)\b/i],
+  ['tree', /\b(trees?|forest|jungle)\b/i],
+  ['building', /\b(buildings?|city|skyscrapers?|town)\b/i],
+  ['house', /\b(house|houses|village|huts?)\b/i],
+  ['mountain', /\b(mountains?|hills?|valley)\b/i],
+  ['river', /\b(rivers?|lake|water|bridge)\b/i],
+  ['rock', /\b(rocks?|boulders?)\b/i],
 ];
 
 const CONTROLS: ReadonlyArray<[GameControl, RegExp]> = [
@@ -78,24 +130,49 @@ const CONTROLS: ReadonlyArray<[GameControl, RegExp]> = [
 
 /** The request's own words → the contract. PURE; never throws. */
 export function buildGameContract(prompt: string | null | undefined): GameScopeContract {
-  const text = String(prompt ?? '');
+  // What the user DECLINED is not what they named (autopsy 958aa1ec: "no login, multiplayer, purchases" made
+  // multiplayer a required feature). The same reader the domain and the complexity signals use.
+  const text = withoutDeclinedSentences(String(prompt ?? ''));
   const genre = GENRES.find(([, re]) => re.test(text))?.[0] ?? 'unknown';
   const dimension: GameDimension = /\b3\s?-?d\b|three\.?js|open world/i.test(text) ? '3d' : /\b2\s?-?d\b/i.test(text) ? '2d' : 'unspecified';
+  const requiredFeatures = FEATURES.filter(([, re]) => re.test(text)).map(([f]) => f);
+  const vehicle = VEHICLES.find(([, re]) => re.test(text))?.[0] ?? null;
+  // A vehicle the player DRIVES is driven: it speeds up and it stops. A train, bus or car simulator that
+  // cannot brake is not the game that was asked for, whether or not the request spelt the word out.
+  // Only for a SIMULATOR: an endless lane-change racer drives itself and never brakes, and the contract's own rule
+  // is that a feature is required only when named (theDeclinedListStaysDeclined) — a simulator is where driving IS the game.
+  if (vehicle && genre === 'simulator') {
+    // A plane or a boat is throttled, not braked.
+    const implied = vehicle === 'aircraft' || vehicle === 'boat' ? (['throttle'] as const) : (['throttle', 'braking'] as const);
+    for (const f of implied) if (!requiredFeatures.includes(f)) requiredFeatures.push(f);
+  }
+  const camera: GameCamera = /\b(first[- ]person|cockpit|cab view|fps)\b/i.test(text) ? 'first-person'
+    : /\b(top[- ]down|bird'?s[- ]eye|overhead)\b/i.test(text) ? 'top-down'
+      : /\b(third[- ]person|chase cam(era)?|behind the)\b/i.test(text) || vehicle ? 'third-person' : 'unspecified';
   return {
     genre,
     dimension,
     controls: CONTROLS.filter(([, re]) => re.test(text)).map(([c]) => c),
-    requiredFeatures: FEATURES.filter(([, re]) => re.test(text)).map(([f]) => f),
+    requiredFeatures,
     winLoseNamed: /\b(game over|win|lose|winner|finish line|you died|checkmate)\b/i.test(text),
+    vehicle,
+    camera,
+    subjects: SUBJECTS.filter(([, re]) => re.test(text)).map(([n]) => n),
+    externalAssets: !/\b(procedural (geometry )?only|no (external|downloaded|3d) (image\/)?(models?|assets?))\b/i.test(text) && /\b(external|free|real|realistic|cc0|downloaded?|glb|gltf)\b[^.]{0,40}\b(3d )?(assets?|models?)\b|\bnot (primitive|placeholder)|\bno (primitive|placeholder)s?\b/i.test(text),
   };
 }
 
 /** The block the builder reads in the kit handoff. '' when the contract adds nothing. PURE. */
 export function gameContractBlock(c: GameScopeContract): string {
-  if (c.genre === 'unknown' && c.requiredFeatures.length === 0 && c.controls.length === 0 && c.dimension === 'unspecified') return '';
+  if (c.genre === 'unknown' && c.requiredFeatures.length === 0 && c.controls.length === 0 && c.dimension === 'unspecified' && !c.vehicle && !(c.subjects ?? []).length) return '';
   const lines = [
     '[GAME SCOPE CONTRACT — read from the request, checked after the build]',
     `Genre: ${c.genre}. View: ${c.dimension}.`,
+    c.vehicle ? `The player drives: a ${c.vehicle} — it must speed up, slow down and stop under the player's control, on keys AND touch.` : '',
+    c.camera === 'third-person' && c.vehicle ? `Camera: a chase view from OUTSIDE the ${c.vehicle} — CameraRig({ kind: 'chase' }) and rig.follow(${c.vehicle === 'train' ? 'train' : 'vehicle'}, dt) every frame. The rig sizes itself to the model, so never hand it a fixed offset and never place the camera yourself.`
+      : c.camera && c.camera !== 'unspecified' ? `Camera: ${c.camera}.` : '',
+    (c.subjects ?? []).length ? `The world the user named — every one must be in the scene: ${(c.subjects ?? []).join(', ')}.` : '',
+    c.externalAssets ? 'The user asked for real 3D models, not primitive placeholders — use the models already in src/game/three/assetModels.ts where they exist.' : '',
     c.controls.length ? `Controls the user asked for: ${c.controls.join(', ')} (keep touch working on a phone too).` : 'Controls: keyboard AND on-screen touch.',
     c.requiredFeatures.length ? `Features the user named — each must really work in the game: ${c.requiredFeatures.join(', ')}.` : '',
     c.winLoseNamed ? 'The request names a win/lose condition — the game must reach it and show it.' : 'Give the game a clear goal and a game-over / win screen with a way to play again.',
@@ -117,6 +194,8 @@ const PRESENT: Readonly<Record<GameFeature, RegExp>> = {
   restart: /\b(play again|restart|try again|retry|replay)\b/i,
   pause: /\bpause/i,
   health: /\b(health|hp)\b/i,
+  throttle: /\b(throttle|accelerat\w*|setSpeed|driveVehicle)\b|\bspeed\s*[+-]?=/i,
+  braking: /\b(brak\w*|decelerat\w*|driveVehicle)\b/i,
 };
 
 export interface ScopeMatch { present: GameFeature[]; missing: GameFeature[] }

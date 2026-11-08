@@ -1,3 +1,4 @@
+import { CHAT_SERVER_DEADLINE_MS, CHAT_CLIENT_DEADLINE_MS } from '../../lib/chatDeadline';
 import { confirmedFreeAnswerSettlement, stageFreeAnswerCompletion } from './freeAnswerCompletion';
 import { chatAvailabilityMessage } from './chatAvailabilityMessage';
 import { runWithFreeAnswerContext } from './freeAnswerQuotaContext';
@@ -7,10 +8,10 @@ import type { Express, Request, Response } from 'express';
 import { verifyFirebaseToken, rateLimiter } from './authMiddleware';
 import { addressRateKey } from './clientAddress';
 import { GUEST_ID_HEADER, readGuestId } from './guestDailyQuota';
-import { FreeAnswerQuotaStore, FreeAnswerQuotaWindowChangedError, type FreeAnswerQuotaSubject } from './freeAnswerQuotaStore';
+import { FreeAnswerQuotaStore, FreeAnswerQuotaWindowChangedError, FREE_ANSWER_REQUEST_MS, type FreeAnswerQuotaSubject } from './freeAnswerQuotaStore';
 import { getServerDb } from './serverDb';
 import { unifiedWalletConfig, signedInDailyLimit, guestFreeDailyLimit, surfaceIsCharged, type ChatSurface, detectLang, insufficientBalanceMessage, lowBalanceNotice, rateLimitedMessage } from './unifiedWallet/policy';
-import { UnifiedWalletGate, holdChatMessage, closeChatHold } from './unifiedWallet/store';
+import { UnifiedWalletGate, holdChatMessage, closeChatHold, INFLIGHT_TTL_MS } from './unifiedWallet/store';
 
 const leases = new WeakMap<Request, { controller: AbortController; leaseUntil: number; answered: boolean; failed: boolean; disconnected: boolean }>();
 const codes: Record<string, string> = { 'daily-limit': 'DAILY_LIMIT', busy: 'BUSY', duplicate: 'DUPLICATE', 'attempt-limit': 'ATTEMPT_LIMIT' };
@@ -68,13 +69,16 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
         reject(res,'duplicate'); return;
       }
     }
-    const reserved=await store.reserve(subject,requestId);
+    const requestMs=options.surface === 'chat' ? CHAT_SERVER_DEADLINE_MS : FREE_ANSWER_REQUEST_MS;
+    const reserved=options.surface === 'chat'
+      ? await store.reserve(subject,requestId,undefined,requestMs)
+      : await store.reserve(subject,requestId);
     if (!reserved.allowed) {
       // UNIFIED WALLET: a signed-in user past today's free messages pays 0.1 credit from the ONE wallet
       // that also pays for Pro builds. Guests have no wallet — they get main's refusal.
       // Every Free surface is paid after the quota (owner); the explicit list can narrow it.
       if (surfaceIsCharged(options.surface) && reserved.reason==='daily-limit' && subject.key.startsWith('user:')) {
-        return await runWalletPaidTurn(req,res,run,subject.key.slice(5),requestId,lang,controller,()=>disconnected);
+        return await runWalletPaidTurn(req,res,run,subject.key.slice(5),requestId,lang,controller,()=>disconnected,requestMs);
       }
       reject(res,reserved.reason); return;
     }
@@ -137,13 +141,14 @@ export async function withFreeAnswerQuota<T>(req: Request, res: Response, run: (
  * only if output was delivered, otherwise release (cancel before first token, failure, timeout). Release/settle
  * are retried idempotently; a hold that still cannot be closed is recorded for the sweeper.
  */
-async function runWalletPaidTurn<T>(req: Request, res: Response, run: () => Promise<T>, uid: string, requestId: string, lang: ReturnType<typeof detectLang>, controller: AbortController, isDisconnected: () => boolean): Promise<T | void> {
+async function runWalletPaidTurn<T>(req: Request, res: Response, run: () => Promise<T>, uid: string, requestId: string, lang: ReturnType<typeof detectLang>, controller: AbortController, isDisconnected: () => boolean, requestMs: number): Promise<T | void> {
   const cfg=unifiedWalletConfig();
   const db=getServerDb();
   const gate=new UnifiedWalletGate();
   const principal=`user:${uid}`;
   const owner=randomUUID();
-  if (!(await gate.acquireInflight(principal,owner))) { reject(res,'busy'); return; }
+  const deadlineAt = Date.now() + requestMs;
+  if (!(await gate.acquireInflight(principal,owner,Date.now(),requestMs === CHAT_SERVER_DEADLINE_MS ? CHAT_CLIENT_DEADLINE_MS : INFLIGHT_TTL_MS))) { reject(res,'busy'); return; }
   try {
     const held=await holdChatMessage(db,uid,requestId,cfg);
     if (!held.ok) {
@@ -153,12 +158,12 @@ async function runWalletPaidTurn<T>(req: Request, res: Response, run: () => Prom
     try { await gate.recordHold(held.charge,uid); } catch { console.error(`[UNIFIED WALLET] ALERT hold record not written for ${held.charge.holdId}`); }
     const notice=lowBalanceNotice(lang,held.charge.balanceTokens,cfg);
     if (notice && !res.headersSent) res.setHeader('X-NB-Wallet-Notice',encodeURIComponent(notice));
-    const lease={controller,leaseUntil:Date.now()+90_000,answered:false,failed:false,disconnected:isDisconnected()};
+    const lease={controller,leaseUntil:deadlineAt,answered:false,failed:false,disconnected:isDisconnected()};
     leases.set(req,lease);
-    const timer=setTimeout(()=>controller.abort(),90_000);
+    const timer=setTimeout(()=>controller.abort(),Math.max(0,deadlineAt-Date.now()));
     let finished=false;
     try {
-      return await runWithFreeAnswerContext({signal:controller.signal,assertActive:()=>{if(finished||controller.signal.aborted){controller.abort();throw new Error('Paid chat answer expired');}}},run);
+      return await runWithFreeAnswerContext({signal:controller.signal,assertActive:()=>{if(finished||controller.signal.aborted||Date.now()>=deadlineAt){controller.abort();throw new Error('Paid chat answer expired');}}},run);
     } finally {
       finished=true; clearTimeout(timer);
       leases.delete(req);

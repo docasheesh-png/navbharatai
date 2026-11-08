@@ -2,7 +2,7 @@
  * 🧪 TEMPORARY OWNER TEST ACCOUNT (owner 2026-10-29 / 2026-10-31).
  *
  * ONE place for the owner's debug profile `z@gmail.com`. Used by:
- *   • Surplus no-fallback + raw errors   (AI/SurplusRegistry/surplusNoFallback.ts)
+ *   (Surplus no-fallback / Router One pin / raw errors retired 2026-11-02 — z routes normally.)
  *   • FREE publish + hosting + domains   (hostingPlan.ts, hostingAddonLedger.ts,
  *                                         hostingBillingSweep.ts, mobileShip.ts)
  *

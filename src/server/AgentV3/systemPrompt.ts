@@ -21,7 +21,7 @@ import { TODO_RIDES_WITH_WORK } from './todoOnlyTurn';
 import { DEVICE_POWERS_RULE } from './devicePowers';
 import { LISTENING_PORTS_COMMAND } from './PortDiscovery';
 import { appAiGatewayEnabled } from '../lib/appAiGateway';
-import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE, LIGHT_THEME_BY_DEFAULT_RULE } from './noEvalRule';
 
 /**
  * The #1 conversation rule — mirror the user's language, never default to Hindi. The platform's
@@ -523,7 +523,7 @@ export const DESIGN_KIT_BRIEF: readonly string[] = [
   '  `.stack`/`.row` (flex), `.field` (label+input). Headings (h1–h4) already have a type scale.',
   '  Reach for these classes and the palette vars first; extend them — do not hand-roll unstyled divs.',
   '- SCREEN RECIPES ALREADY IN THE STYLESHEET (Phase 3.2) — USE THESE INSTEAD OF INVENTING YOUR OWN.',
-  '  The screens every app needs are already designed, responsive and dark-mode aware. Writing a fresh',
+  '  The screens every app needs are already designed, responsive, light, and dark-ready. Writing a fresh',
   '  version of one is slower AND worse than reaching for these:',
   '    • DATA TABLE — wrap in `.nb-table-wrap` + `<table class="nb-table">` (sticky header, zebra rows,',
   '      hover; scrolls sideways INSIDE its box so a phone page never scrolls horizontally). Numeric',
@@ -615,7 +615,10 @@ export const VEHICLE_CAMERA_RULE_LINES: readonly string[] = [
   'lights), never its face. Every model faces its local +Z. The camera goes on the OPPOSITE side from the',
   'nose — in plain three.js, with or without the game kit:',
   '    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(car.quaternion); // where the nose points',
-  '    camera.position.copy(car.position).addScaledVector(forward, -6); camera.position.y += 2.5;',
+  '    // Sized by the MODEL, measured ONCE before it turns — a fixed 6 m sits INSIDE a bus or a 20 m train:',
+  '    const size = new THREE.Box3().setFromObject(car).getSize(new THREE.Vector3());',
+  '    const back = Math.max(6, size.z / 2 + 4), up = Math.max(2.5, size.y * 1.6);',
+  '    camera.position.copy(car.position).addScaledVector(forward, -back); camera.position.y += up;',
   '    camera.lookAt(car.position);',
   'i.e. camera = car.position − forward·d + up·h: at −Z LOCAL of a +Z model, looking at the car. NEVER',
   'camera.position.z = car.position.z + d — for a +Z model that is IN FRONT of the car: the player sees the',
@@ -710,6 +713,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     CORS_RULE,
     SEED_PASSWORD_RULE,
     NO_FAKE_FEATURE_RULE,
+    LIGHT_THEME_BY_DEFAULT_RULE,
     '',
     'Conversation:',
     '- Reply to anything the user says. If they greet you (e.g. "hello") or ask a',
@@ -813,9 +817,9 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '- **RESTRAINED, ENGINEERED LOOK — NOT AN "AI TEMPLATE".** Use the accent sparingly (primary',
     '  actions, links, active state) on neutral surfaces; solid fills, not gradients, on buttons. No',
     '  decorative gradients, gradient text, glow, glassmorphism or staggered entrance animations, and no',
-    '  emoji in headings, nav or labels, unless the user asks for them. The design kit follows the device',
-    '  light/dark setting by itself; a light/dark SWITCH sets `data-theme="dark"` / `"light"` (or the class',
-    '  `dark` / `light`) on <html> — the kit styles exactly those, and any other hook styles nothing. Write real,',
+    '  emoji in headings, nav or labels, unless the user asks for them. The design kit is LIGHT whatever the',
+    '  device says; it is dark only when the app sets `data-theme="dark"` (or the class `dark`) on <html> — a',
+    '  switch toggles `"dark"` / `"light"` there; the kit styles exactly those, and any other hook styles nothing. Write real,',
     '  specific copy — no hype words ("revolutionary", "next-gen", "unleash"), no invented stats,',
     '  ratings or testimonials; clearly labelled sample data only where the app needs data to show.',
     '- 🏷️ EVERY FORM FIELD IS ADDRESSABLE — a `name`, AND a label. Give each `<input>`, `<select>` and',

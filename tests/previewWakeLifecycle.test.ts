@@ -103,7 +103,7 @@ describe('link 2, the other half — the sandbox is held for the OPERATION, not 
     const at = actuator.indexOf('private async _sweepIdleSandboxes(');
     const sweep = actuator.slice(at, at + 900);
     const holdAt = sweep.indexOf('this._opInFlight(workspaceId)');
-    const idleAt = sweep.indexOf('now - last > limit');
+    const idleAt = sweep.indexOf('now - last <= limit');
     expect(holdAt).toBeGreaterThan(-1);
     expect(idleAt).toBeGreaterThan(holdAt);
     // On the same guard as the build flag — one `continue`, two reasons a machine is not idle.

@@ -1,3 +1,6 @@
+import { fixedTextChainEnabled } from '../AI/fixedTextChain';
+import { isGatewayRouteSelected } from '../AI/InferenceGateway/runtime';
+import { InferenceGatewayTerminalError } from '../AI/InferenceGateway/dispatchBoundary';
 import { placePlatformContext } from '../lib/platformContext';
 import { cleanTurns } from '../../lib/platformTags';
 import { callProfessionalAIWithUsage, type ProfessionalAnswer } from '../lib/professionalRouting';
@@ -100,6 +103,9 @@ export type ProfessionalTier = 'free' | 'paid';
 // the exact same engine (admin 2026-07-24) with zero drift. This thin wrapper keeps the callers here
 // unchanged and preserves the professional-specific error message.
 async function resilientCall(systemPrompt: string, prompt: string, tier: ProfessionalTier, opts: ProfessionalChatOptions): Promise<ProfessionalAnswer> {
+  // A paid professional cannot borrow the FreeChain platform budget. Until its
+  // reviewed funding bridge exists, fixed-order selection is terminal, not legacy fallback.
+  if (opts.fixedTextChainIngress && fixedTextChainEnabled() && !isGatewayRouteSelected()) throw new InferenceGatewayTerminalError('fixed-chain-professional-authority-unavailable');
   try {
     return await (opts.beforeGeneration
       ? callProfessionalAIWithUsage(systemPrompt, prompt, tier, { signal: opts.signal, beforeDispatch: opts.beforeGeneration })
@@ -135,6 +141,8 @@ export async function runProfessionalChat(
 
 /** Per-turn options that are neither the message nor the identity. */
 export interface ProfessionalChatOptions {
+  /** Server-owned ordinary professional chat ingress; never accepted from request bodies. */
+  fixedTextChainIngress?: boolean;
   /** Server-owned quota lease fence after memory/grounding and before actual generation. */
   beforeGeneration?: () => void;
   /** Server-only Free product ingress opt-in, never copied from request payloads or API model tiers. */

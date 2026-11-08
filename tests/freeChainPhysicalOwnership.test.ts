@@ -71,9 +71,16 @@ describe('FreeChain physical ownership', () => {
    expect.soft(m.execute.mock.calls.length, 'extra dispatch cannot enter while the physical pool is full').toBe(cap);
    expect.soft(peak,'physical count cannot exceed its unchanged cap').toBe(cap);
   } finally {
-   for (const resolve of pending) resolve();
+   for (const resolve of pending.splice(0)) resolve();
    await flush();
-   if(ninth) { await vi.advanceTimersByTimeAsync(cfg.ttftMs+1000); await ninth; }
+   if(ninth) {
+    // Bounded capacity waiting now resumes this turn only after the originals physically settle.
+    // Its new SDK call must also settle; watchdog expiry alone must never erase its ownership.
+    expect(m.execute).toHaveBeenCalledTimes(cap+1);expect(active).toBe(1);expect(peak).toBe(cap);
+    expect(getProviderStats()[account].inFlightByUniverse['free-chat-chain']).toBe(1);
+    for (const resolve of pending.splice(0)) resolve();
+    await flush();await ninth;
+   }
    expect(getProviderStats()[account].inFlightByUniverse['free-chat-chain']).toBe(0);
    if(id==='glm45') expect(rungInFlight(id)).toBe(0);
   }

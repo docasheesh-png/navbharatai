@@ -1,6 +1,7 @@
 import { assertLegacyInferenceAllowed } from '../../inferencePolicy';
 import OpenAI from 'openai';
-import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
+import { AIProvider, AIProviderResponse, readProviderUsage, type ProviderUsage } from '../ProviderTypes';
+import { openAiStreamFinished, openAiStreamUsage } from '../streamUsage';
 
 /**
  * OpenAI provider for the CHAT router — added 2026-09-15 so GPT Nano can serve the FREE ladder.
@@ -126,7 +127,7 @@ export class OpenAiChatProvider implements AIProvider {
     }
   }
 
-  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal): Promise<string> {
+  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal, onUsage?: (usage: ProviderUsage) => void): Promise<string> {
     assertLegacyInferenceAllowed('direct-text-provider');
     // THE MODEL MUST RIDE THE STREAM. Chat streams, so a rung that ignores its pinned model streams
     // on the provider default — the exact bug that made every Vertex rung run gemini-2.5-pro.
@@ -141,16 +142,24 @@ export class OpenAiChatProvider implements AIProvider {
         messages,
         max_tokens: 8000,
         stream: true,
+        stream_options: { include_usage: true },
       }, signal ? { signal } : undefined);
       let full = '';
+      let usage: ProviderUsage | undefined;
+      let finished = false;
       for await (const chunk of stream) {
         // The client left: stop consuming AND stop paying. The SDK abort above tears the socket down,
         // so this loop normally ends by throwing; the check is the belt to that braces, for an SDK
         // version that resolves the stream instead of rejecting it (Q-621).
         if (signal?.aborted) break;
+        if (chunk.choices?.length) finished = chunk.choices.every(choice => openAiStreamFinished(choice.finish_reason));
+        // include_usage's terminal chunk contains totals and an empty choices array.
+        // A later non-receipt chunk invalidates an earlier receipt rather than guessing its finality.
+        usage = chunk.choices?.length === 0 ? openAiStreamUsage(chunk.usage) : undefined;
         const text = chunk.choices[0]?.delta?.content || '';
         if (text) { full += text; onChunk(text); }
       }
+      if (!signal?.aborted && finished && usage) onUsage?.(usage);
       return full;
     } catch (err) {
       OpenAiChatProvider.explain(err, pinned);

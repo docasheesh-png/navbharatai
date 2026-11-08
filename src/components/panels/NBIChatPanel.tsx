@@ -150,6 +150,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
           onMessagesChange={(next) => setMessages(next)}
           isLoading={isLoading}
           showReplyPendingStatus
+          composerSendPosition="bottom-right"
           activeIntent={activeIntent}
           isPinned={currentSession?.isPinned || false}
           onTogglePin={() => togglePin(currentSessionId)}

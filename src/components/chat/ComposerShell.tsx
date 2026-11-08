@@ -33,7 +33,7 @@ export const COMPOSER_ICON_CLASS =
 
 /**
  * Send — a filled circle on the Type field's right edge, an arrow pointing up. 36px thumb target.
- * Tools stay on their own row below; Send never lives in that tools row.
+ * Default surfaces keep tools below; ordinary chat opts into the lower action row.
  */
 export const COMPOSER_SEND_CLASS =
   'h-9 w-9 rounded-full bg-accent text-on-accent disabled:opacity-30 disabled:cursor-not-allowed hover:brightness-110 transition-all flex items-center justify-center active:scale-95';
@@ -54,8 +54,10 @@ export interface ComposerShellProps {
   children: React.ReactNode;
   /** The quiet controls for the wrapping bottom row: attach, mic, voice, star. */
   controls: React.ReactNode;
-  /** The Send / Stop button, on the right edge of the Type field. */
+  /** The Send / Stop controls; position is presentation-only, handlers stay with the caller. */
   send: React.ReactNode;
+  /** Ordinary chat may opt into an inset lower-right action; other surfaces keep their layout. */
+  sendPosition?: 'text' | 'bottom-right';
 }
 
 /** Blank card space focuses the editor; real controls keep their own click behavior. */
@@ -110,7 +112,7 @@ function useWholeBoxInput() {
   return { ref: boxRef, onMouseDown, onClick };
 }
 
-export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, send }: ComposerShellProps) {
+export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, send, sendPosition = 'text' }: ComposerShellProps) {
   const wholeBox = useWholeBoxInput();
   // The column sits at the BOTTOM of the row and never stretches (admin 2026-09-24: *"jab text jyada
   // bada ho, aur input box ka size badhe, to history/mode button ka size na bade, bas input box ka size
@@ -125,14 +127,15 @@ export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, s
   return (
     <div className={`${CONVERSATION_COLUMN_CLASS} flex items-end gap-2`} data-composer-layout="two-rows">
       {rail}
-      <div className={`${COMPOSER_BOX_CLASS} flex-1 min-w-0 cursor-text ${controls ? '' : 'nb-composer-no-tools'}`} ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick}>
+      <div className={`${COMPOSER_BOX_CLASS} flex-1 min-w-0 cursor-text ${controls ? '' : 'nb-composer-no-tools'}`} data-composer-send-position={sendPosition === 'bottom-right' ? sendPosition : undefined} ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick}>
         <div className="relative w-full min-w-0">
           {children}
-          <div className={COMPOSER_SEND_SLOT_CLASS}>{send}</div>
+          {sendPosition === 'text' && <div className={COMPOSER_SEND_SLOT_CLASS}>{send}</div>}
         </div>
-        {controls ? (
+        {controls || sendPosition === 'bottom-right' ? (
           <div className="nb-composer-actionbar flex items-center justify-between gap-2" data-composer-toolbar="">
             <MobileComposerTools><div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto">{controls}</div></MobileComposerTools>
+            {sendPosition === 'bottom-right' && <div className={COMPOSER_SEND_SLOT_CLASS}>{send}</div>}
           </div>
         ) : null}
       </div>

@@ -141,6 +141,14 @@ describe('BR1953 review-domain contract, including the admitted Surplus path', (
     expect(isPlainReadCommand(command)).toBe(false);
     expect(goldenQuestionReviewIssue(PROMPT, INTENT, {command})).toContain('Not run');
   });
+  it('path metadata and deletion-only commands do not introduce a rating feature', () => {
+    expect(goldenQuestionReviewIssue(PROMPT, 'Remove the unrequested widget.', {path:'src/StarRating.tsx',old_string:'export const StarRating = 1;',new_string:'export const AnswerReview = 1;'})).toBeNull();
+    expect(goldenQuestionReviewIssue(PROMPT, 'Remove StarRating and setRating.', {command:'rm src/StarRating.tsx'})).toBeNull();
+    expect(goldenQuestionReviewIssue(PROMPT, 'Remove the unrequested widget.', {path:'src/App.tsx',symbol:'StarRating',code:'export const AnswerReview = 1;'})).toBeNull();
+    for (const content of ['function StarRating() {}', 'setRating(5)', 'return <StarRating />']) expect(goldenQuestionReviewIssue(PROMPT, 'Repair the result.', {content})).toContain('Not run');
+    expect(goldenQuestionReviewIssue(PROMPT, 'Remove the unrequested widget.', {command:'rm src/StarRating.tsx; printf "rating: number" > src/ratings.ts'})).toContain('Not run');
+    expect(goldenQuestionReviewIssue(PROMPT, 'Repair the result.', {path:'src/StarRating.tsx',new_string:'export const StarRating = 1;'})).toContain('Not run');
+  });
   it('explicit user extensions and non-exam review apps keep their own authority', () => {
     expect(goldenQuestionReviewIssue(PROMPT + ' Add question star ratings.', INTENT)).toBeNull();
     expect(goldenQuestionReviewIssue('Build a customer reviews and ratings app.', INTENT)).toBeNull();
@@ -148,7 +156,7 @@ describe('BR1953 review-domain contract, including the admitted Surplus path', (
   });
 });
 
-function runFixture(options: { stopAfterReady?: boolean; proposal?: string; guard?: boolean; earlyStop?: boolean; failAfterReady?: boolean; toolInput?: Record<string, unknown>; scopePrompt?: string }) {
+function runFixture(options: { stopAfterReady?: boolean; proposal?: string; guard?: boolean; earlyStop?: boolean; failAfterReady?: boolean; toolInput?: Record<string, unknown>; scopePrompt?: string; toolName?: string }) {
   const ac = new AbortController(); const events = new AgentEventStream(); const notes: string[] = []; const dispatched: string[] = []; let calls = 0;
   const client: MessagesCreateClient = { messages: { create: async () => {
     calls++;
@@ -156,7 +164,7 @@ function runFixture(options: { stopAfterReady?: boolean; proposal?: string; guar
     if (options.stopAfterReady && calls === 21) { ac.abort(); throw Error('cancelled'); }
     if (options.failAfterReady && calls === 21) throw Error('synthetic fatal');
     if (options.proposal && calls > 1) return { content: [{type:'text',text:'Stopped without making that change.'}], stop_reason:'end_turn', usage:{input_tokens:1,output_tokens:1} } as never;
-    return { content: [{type:'text',text:options.proposal ?? 'Checking the requested paper.'}, {type:'tool_use',id:'t'+calls,name:'edit_file',input:options.toolInput ?? {path:'src/App.tsx',old_string:'x',new_string:'y'}}], stop_reason:'tool_use', usage:{input_tokens:1,output_tokens:1} } as never;
+    return { content: [{type:'text',text:options.proposal ?? 'Checking the requested paper.'}, {type:'tool_use',id:'t'+calls,name:options.toolName ?? 'edit_file',input:options.toolInput ?? {path:'src/App.tsx',old_string:'x',new_string:'y'}}], stop_reason:'tool_use', usage:{input_tokens:1,output_tokens:1} } as never;
   } } };
   const dispatcher = { dispatch: async (tu: {id:string;name:string}) => { dispatched.push(tu.name); return {tool_use_id:tu.id,content:'ok',is_error:false}; }, changeCount:()=>dispatched.length, wroteAnything:()=>true,
     assessBuildReadiness:async()=>({score:100,ready:true,blockers:[],warnings:[],tier:'production'}), lastTypecheckErrorCount:()=>0, undefinedClassesNow:async()=>[] };
@@ -166,6 +174,14 @@ function runFixture(options: { stopAfterReady?: boolean; proposal?: string; guar
 }
 
 describe('production AgentRunner boundaries: refusal and readiness attribution survive cancellation', () => {
+  it.each(['edit_file','bash'])('actual %s removal of an unwanted widget remains executable', async toolName => {
+    const toolInput = toolName === 'bash' ? {command:'rm src/StarRating.tsx'} : {path:'src/StarRating.tsx',old_string:'export const StarRating = 1;',new_string:'export const AnswerReview = 1;'};
+    const run=runFixture({guard:true,proposal:'Remove StarRating and setRating.',toolName,toolInput});
+    await run.result;
+    expect(run.dispatched).toEqual([toolName]);
+    expect(run.notes).not.toContain('REQUEST_SCOPE_REFUSED');
+  });
+
   it('refuses the actual contradictory edit before dispatch, not just a prompt suggestion', async () => {
     const f = runFixture({proposal:INTENT,guard:true}); await f.result; expect(f.dispatched).toEqual([]); expect(f.notes).toContain('REQUEST_SCOPE_REFUSED');
   });

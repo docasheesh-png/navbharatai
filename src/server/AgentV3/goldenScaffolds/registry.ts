@@ -339,16 +339,16 @@ export function goldenQuestionReviewIssue(originalPrompt: string, proposal: stri
   if (typeof command === 'string' && Object.keys(input!).every(k => ['command', 'cwd', 'timeout', 'timeoutSeconds', 'background'].includes(k)) && isPlainReadCommand(command)) return null;
   const contradicts = (text: string): boolean => {
     const affirmative = text.replace(/\b(?:do not|don't|never|not|without)\s+(?:add(?:ing)?|implement(?:ing)?|includ(?:e|ing))?\s*(?:(?:a|an|any|new|the|separate)\s+)*(?:reviews?(?:\s*[/&]\s*|\s+(?:and|or)\s+))?(?:star[- ]?)?ratings?\b/gi, '');
-    return /\b(?:add|implement|load|save|persist|include|build)\b[^.;\n]{0,120}\bratings?\b|\brating\s*[?:=]|\b(?:setRating|StarRating)\b/i.test(affirmative);
+    return /\b(?:add|implement|load|save|persist|include|build)\b[^.;\n]{0,120}\bratings?\b|\brating\s*[?:=]|\b(?:setRating|StarRating)\s*[(=]|<StarRating\b/i.test(affirmative);
   };
   // Inspect the proposed values without serializing/copying an entire large tool payload. Search
-  // text is NOT new code: removing an old rating field must remain possible.
+  // text and target metadata are NOT new code: repairing/removing an old rating widget must remain possible.
   const seen = new Set<object>();
   const introduced = (value: unknown): boolean => {
     if (typeof value === 'string') return contradicts(value);
     if (!value || typeof value !== 'object' || seen.has(value)) return false;
     seen.add(value);
-    return Object.entries(value).some(([key, child]) => !['old_string', 'oldString', 'old_content'].includes(key) && introduced(child));
+    return Object.entries(value).some(([key, child]) => !['old_string', 'oldString', 'old_content', 'path', 'file_path', 'filePath', 'cwd', 'symbol', 'symbolName'].includes(key) && introduced(child));
   };
   return contradicts(proposal) || introduced(input)
     ? 'Not run — this change adds unrequested ratings. ' + EXAM_REVIEW_CONTRACT : null;

@@ -43,6 +43,7 @@ interface MonitorResponse {
   liveSandboxes: number | null;
   /** The measured sub-line for that tile — it must never claim "billed" about an unmeasured number. */
   liveSandboxNote?: string;
+  liveSandboxLifecycleNote?: string;
   /** Can alerts reach the admin outside the app? Carries the reason, never the key. */
   emailAlerts?: { configured: boolean; reason: string; recipients: number };
   compliance?: { grievanceOfficerNamed: boolean; grievanceWarning: string };
@@ -463,6 +464,11 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
           Icon={Cpu}
         />
       </div>
+      {data?.liveSandboxLifecycleNote ? (
+        <p className="mt-2 rounded border border-line bg-card px-3 py-2 text-xs text-muted" aria-label="Running sandbox timeout policies">
+          {data.liveSandboxLifecycleNote}
+        </p>
+      ) : null}
       {sandboxRateNote ? (
         // A wrong cost figure is worse than a missing one, because it is the one an admin acts on.
         // Shown in full rather than summarised: the sentence carries both numbers and the exact key

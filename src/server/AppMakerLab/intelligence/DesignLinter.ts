@@ -168,18 +168,19 @@ function scoreToGrade(score: number): 'A' | 'B' | 'C' | 'D' {
  */
 export const TOKEN_MODULE_PATH = /(?:^|\/)(?:design|theme|themes|tokens?|design-tokens)\/[^/]+\.(?:[cm]?[jt]sx?)$|(?:^|\/)(?:colou?rs|palette|palettes|theme|themes|tokens|design-tokens)\.(?:[cm]?[jt]sx?)$/i;
 
-export function lintDesign(code: string, opts: { tokenModuleCode?: string } = {}): DesignLintResult {
+export function lintDesign(code: string, opts: { tokenModuleCode?: string; colorCode?: string } = {}): DesignLintResult {
   const src = typeof code === 'string' ? code : '';
-  const allColors = extractHexColors(src);
+  const colorSource = opts.colorCode ?? src;
+  const allColors = extractHexColors(colorSource);
   // The palette itself is not a violation of the palette — see `extractTokenColors`. What the budget
   // is for is ad-hoc colour, so only colours used OUTSIDE a token declaration are counted against it.
   // Every colour a design-token MODULE declares is a token too (`TOKEN_MODULE_PATH`).
-  const tokenColors = new Set([...extractTokenColors(src), ...extractHexColors(opts.tokenModuleCode ?? '')]);
+  const tokenColors = new Set([...extractTokenColors(colorSource), ...extractHexColors(opts.tokenModuleCode ?? '')]);
   const colors = allColors.filter((c) => !tokenColors.has(c));
   const fonts = extractFontFamilies(src);
   const spacing = extractSpacingPx(src);
   const offGrid = offGridSpacing(spacing);
-  const hasTokens = /var\(\s*--/.test(src);
+  const hasTokens = /var\(\s*--/.test(colorSource);
 
   const violations: DesignViolation[] = [];
   let penalty = 0;

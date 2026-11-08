@@ -431,9 +431,9 @@ import { continueFastLaneGeneration, isTruncatedStop, MAX_CONTINUATIONS } from '
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
 import { recordReasoningStays } from '../AgentV3/FastLaneBudget';
 import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
-import { buildGameContract, gameContractBlock, gameScopeContractEnabled, type GameScopeContract } from '../AgentV3/gameIntent';
+import { type GameScopeContract } from '../AgentV3/gameIntent';
 import { prepareGameAssets } from '../AgentV3/gameAssets/assetSeed';
-import { gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
+import { gameTurnHandoff, gameKitCanPrepareAssets, gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
@@ -18868,19 +18868,8 @@ async function noteBuildOutcome(
               if (gameKitSeeded.length > 0) {
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_KIT_SEEDED', autoResolved: true, message: gameKitSeededMessage(kitResults, kitFiles, Date.now() - kitStartedAt),
                   detail: `recipes ${(kitRecipesMs / 1000).toFixed(1)} s` + (kitAssetsMs != null ? ` · 3D assets ${(kitAssetsMs / 1000).toFixed(1)} s (${kitAssetsStatus || 'unknown'})` : ' · 3D assets not prepared') });
-                // Game Engine Ultra Phase 1 (gameIntent.ts): the request's scope contract rides in the handoff.
-                // Kill switch AGENTV3_GAME_SCOPE_CONTRACT=off. Pure, best-effort — never touches the build.
-                let contractText = '';
-                try {
-                  if (gameScopeContractEnabled()) {
-                    gameContract = buildGameContract(prompt);
-                    requestContractRef.contract = gameContract;
-                    contractText = gameContractBlock(gameContract);
-                    if (contractText) buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_CONTRACT', autoResolved: true, message: `Game scope contract: ${JSON.stringify(gameContract)}` });
-                  }
-                } catch { gameContract = null; contractText = ''; }
                 if (localGameAssetHandoff) buildPrompt = `${localGameAssetHandoff}\n\n${buildPrompt}`;
-                buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(prompt), contract: contractText })}\n\n---\n\n${buildPrompt}`;
+                buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(prompt) })}\n\n---\n\n${buildPrompt}`;
               } else {
                 gameKitSeedFailed = kitResults.length > 0;
                 gameKitSkipReason = kitResults.length > 0
@@ -18906,6 +18895,19 @@ async function noteBuildOutcome(
           } catch { /* observation only */ }
         }
       }
+
+      // BR1954: existing-game edits, skipped/failed seeds and golden games also receive the contract.
+      // Reuse held source, including only acknowledged refresh/seed changes; no project reset or paid probe.
+      try {
+        const gameHandoff = gameTurnHandoff(prompt, {
+          ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles),
+        }, { writingRun: expectsArtifacts, moduleTurn: !!projectModuleRef, importTurn: isImportTurn, stopped: abort.signal.aborted });
+        gameContract = gameHandoff.contract;
+        requestContractRef.contract = gameContract;
+        if (gameHandoff.block) buildPrompt = `${gameHandoff.block}\n\n---\n\n${buildPrompt}`;
+        if (gameContract) buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_CONTRACT', autoResolved: true,
+          message: `Game scope contract: ${JSON.stringify(gameContract)}` });
+      } catch { /* unavailable contract is not permission to change an existing project */ }
 
       // ── ONE-SHOT FAST LANE (additive, flag-gated; the agentic loop is untouched) ──
       // For a SIMPLE new-build app, try ONE cheap generation call first (no Architect, no

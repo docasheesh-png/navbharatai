@@ -17,7 +17,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const OUT = join(ROOT, 'src/server/lib/gameKitHistory.ts');
@@ -34,10 +34,10 @@ async function filesOf(entry, rev) {
   const read = (p) => (rev ? execFileSync('git', ['show', `${rev}:${p}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 << 20 }) : readFileSync(join(ROOT, p), 'utf8'));
   const tmp = mkdtempSync(join(tmpdir(), 'kit-history-'));
   try {
-    const outfile = join(tmp, 'gen.mjs');
+    const outfile = join(tmp, 'gen.cjs');
     await build({
       stdin: { contents: read(entry), loader: 'ts', sourcefile: entry, resolveDir: ROOT },
-      bundle: true, platform: 'node', format: 'esm', outfile, logLevel: 'silent',
+      bundle: true, platform: 'node', format: 'cjs', outfile, logLevel: 'silent',
       plugins: [{
         name: 'at-rev',
         setup(b) {
@@ -57,7 +57,10 @@ async function filesOf(entry, rev) {
         },
       }],
     });
-    const mod = await import(pathToFileURL(outfile).href);
+    // Generators may import Node-aware CJS libraries (the TypeScript compiler API).
+    // A real CJS bundle preserves their native require/fs/__dirname contract; an ESM
+    // bundle shim throws before any generator or additive history registration can run.
+    const mod = createRequire(import.meta.url)(outfile);
     const out = [];
     for (const [name, fn] of Object.entries(mod)) {
       if (!/^generate/.test(name) || typeof fn !== 'function') continue;

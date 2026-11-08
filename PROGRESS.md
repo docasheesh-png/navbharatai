@@ -100980,3 +100980,6 @@ BR1952 final ledger census refinement: I014 engine-unavailable error and I106 OU
 
 
 The completed first integration coverage run additionally caught five source-guard mismatches: seeded-page gate now has independent sandbox availability, live cache snapshot uses its accepted ledger binding, ETA remains entered only while active, and generated “not saved yet” must not be mistaken for the kept-work narration. Guards retain their original seeded-page/live-report/measurement/white-label invariants while recognizing these stricter conditions. The initial run is archived as failed, never a passing final gate.
+
+
+BR1952 integrated parent-verified latest main e4bc40b197867ff5d71f7692083174029e4cd38a (#4117) by a normal merge, no rebase/force. Verified all52 imported chat paths identical to main; BR1952 does not change routing, flags, credentials or deployments. The otherwise-corrected pre-#4117 local CI and demo-emulator runs were explicitly stopped as obsolete; partial gates do not count as final green. Full CI-equivalent recipe restarts on this final integrated code.

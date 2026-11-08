@@ -406,14 +406,60 @@ describe('free chat chain central dispatch', () => {
     arg.signal?.addEventListener('abort', () => reject(new FreeChainProviderError('ABORTED')), { once: true });
   })).mockRejectedValueOnce(new FreeChainProviderError('NETWORK'));
   const pending = buildFreeChainRouter(db, config('groq,cloudflare')).route(input());
-  await vi.advanceTimersByTimeAsync(7_000);
+  await vi.advanceTimersByTimeAsync(16_000);
   const result = await pending;
   expect(result.ok).toBe(false);
-  expect(result.freeChain?.attempts.map(attempt => attempt.reason)).toEqual(['timeout:first-token:6000ms', 'network']);
+  expect(result.freeChain?.attempts.map(attempt => attempt.reason)).toEqual(['timeout:first-token:15000ms', 'network']);
   expect(m.execute).toHaveBeenCalledTimes(2);
   expect(m.paid).not.toHaveBeenCalled();
  });
 
+ it('keeps a healthy slow first response alive beyond the former six-second limit', async () => {
+  vi.useFakeTimers();
+  m.execute.mockImplementationOnce(async (arg, cfg) => {
+    await new Promise(resolve => setTimeout(resolve, 12_000));
+    return successful('slow but healthy')(arg, cfg);
+  });
+  const pending = buildFreeChainRouter(db, config()).route(input());
+  await vi.advanceTimersByTimeAsync(13_000);
+  expect(await pending).toMatchObject({ ok: true, content: 'slow but healthy' });
+  expect(m.execute).toHaveBeenCalledOnce();
+  expect(vi.getTimerCount()).toBe(0);
+ });
+ it('can finish a later eligible fallback after the former ninety-second request limit', async () => {
+  vi.useFakeTimers();
+  const cfg = config('glm45,glm47,groq,cloudflare,deepseek'); cfg.ttftMs = 30_000;
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  for (let n = 0; n < 4; n++) m.execute.mockImplementationOnce((arg: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+    arg.signal?.addEventListener('abort', () => reject(new FreeChainProviderError('ABORTED')), { once: true });
+  }));
+  m.execute.mockImplementation(successful('later answer'));
+  const pending = buildFreeChainRouter(db, cfg).route(input());
+  await vi.advanceTimersByTimeAsync(121_000);
+  expect(await pending).toMatchObject({ ok: true, content: 'later answer' });
+  expect(m.execute).toHaveBeenCalledTimes(5);
+  expect(vi.getTimerCount()).toBe(0);
+ });
+ it('caps the whole chain at four minutes even with longer per-attempt first-content overrides', async () => {
+  vi.useFakeTimers();
+  const cfg = config('glm45,glm47,groq,cloudflare'); cfg.ttftMs = 90_000;
+  const signals: AbortSignal[] = []; const late: Array<(s: string) => void> = []; const finish: Array<() => void> = [];
+  m.execute.mockImplementation((arg: { signal: AbortSignal; onChunk: (s: string) => void }) => {
+    signals.push(arg.signal); late.push(arg.onChunk);
+    return new Promise(resolve => finish.push(() => resolve({ rateLimitHeaders: {} }))); // deliberately ignores cancellation
+  });
+  const chunks: string[] = [];
+  const pending = buildFreeChainRouter(db, cfg).route({ ...input(), onChunk: c => chunks.push(c) });
+  await vi.advanceTimersByTimeAsync(241_000);
+  expect((await pending).ok).toBe(false);
+  expect(m.execute).toHaveBeenCalledTimes(3);
+  expect(signals.every(signal => signal.aborted)).toBe(true);
+  const before = [...chunks]; late.forEach(chunk => chunk('late reply'));
+  expect(chunks).toEqual(before);
+  expect(m.execute.mock.calls[2][1].timeoutMs).toBe(60_000);
+  finish.forEach(resolve => resolve()); await vi.advanceTimersByTimeAsync(0);
+  expect(vi.getTimerCount()).toBe(0);
+ });
  it('non-admin chain still skips open circuit without probing', async () => {
   vi.stubEnv('CHEAPERINFERENCE', 'all');
   vi.stubEnv('CHEAPERINFERENCE_API_KEY', 'ci_live_test_key');

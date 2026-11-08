@@ -92,9 +92,17 @@ describe('Free Chat Chain admin API', () => {
 
 describe('audited shared paid-budget endpoint', () => {
   const budget = { capUsd: 0, expectedRevision: 3, reason: 'Stop new paid fallback reservations' };
-  it.each([{}, null, { ...budget, capUsd: 10.01 }, { ...budget, capUsd: '0' }, { ...budget, capUsd: 0.001 }, { ...budget, expectedRevision: undefined }, { ...budget, expectedRevision: -1 }, { ...budget, actorUid: 'spoof' }, { ...budget, reason: 'short' }])('rejects malformed or over-ceiling budget %# without calling storage', async body => {
+  it.each([{}, null, { ...budget, capUsd: 17.01 }, { ...budget, capUsd: '0' }, { ...budget, capUsd: 0.001 }, { ...budget, expectedRevision: undefined }, { ...budget, expectedRevision: -1 }, { ...budget, actorUid: 'spoof' }, { ...budget, reason: 'short' }])('rejects malformed or over-ceiling budget %# without calling storage', async body => {
     const { handler, response } = setup(); await handler('POST', '/budget')({ body }, response);
     expect(response.status).toHaveBeenCalledWith(400); expect(mocks.budget).not.toHaveBeenCalled(); expect(mocks.audit).not.toHaveBeenCalled();
+  });
+  it.each([10.01, 17])('accepts the supported finite boundary %s for audited runtime validation', async capUsd => {
+    const { handler, response } = setup(); const body = { ...budget, capUsd };
+    mocks.budget.mockResolvedValue({ ok: true, capUsd, policyRevision: 4 });
+    await handler('POST', '/budget')({ body }, response);
+    expect(mocks.budget).toHaveBeenCalledExactlyOnceWith(body, 'verified-owner');
+    expect(response.json).toHaveBeenCalledWith({ ok: true, capUsd, policyRevision: 4 });
+    expect(response.status).not.toHaveBeenCalled();
   });
   it('uses verified actor and records only the confirmed policy revision', async () => {
     const { handler, response } = setup(); const result = { ok: true, capUsd: 0, policyRevision: 4 }; mocks.budget.mockResolvedValue(result);

@@ -1,4 +1,5 @@
 import { chatAttemptLimits, watchChatAttempt } from './attemptBudget';
+import { CHAT_SERVER_DEADLINE_MS, CHAT_PROVIDER_ATTEMPT_MS } from '../../../lib/chatDeadline';
 import { FIXED_TEXT_CHAIN, fixedTextChainRank } from '../fixedTextChain';
 import { mitrifyConfig, MitrifyError, runApprovedMitrifyChain } from '../../lib/mitrify';
 import { capacityRevision, notifyCapacityReleased, waitForCapacity } from './capacityWait';
@@ -149,7 +150,7 @@ function reportedChargeNanoUsd(response: unknown): number | null {
 /** This namespace is not installed in AIRouterManager: other consumers of 'free' stay untouched. */
 export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeChainConfig(), refreshConfig?: () => FreeChainConfig) {
   const store = new FreeChainStore(db);
-  async function routeAdmitted(input: FreeChainInput, queueWaitMs: number): Promise<FreeChainResult> {
+  async function routeAdmitted(input: FreeChainInput, queueWaitMs: number, deadlineAt: number): Promise<FreeChainResult> {
     await assertAiAvailable();
     const started = Date.now() - queueWaitMs; const requestId = randomUUID();
     const trace: FreeChainTelemetry = { requestId, queueWaitMs, rung: null, provider: 'NONE', model: 'none', attempts: [], fallbacks: 0, cacheHit: false, costUsdEstimate: null, ttftMs: null, latencyMs: 0, rolloutBucket: rolloutBucket(input.context.uid) };
@@ -198,8 +199,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     for (;;) {
     const observedCapacity = capacityRevision(); let capacityBusy = false;
     for (const [position, id] of order.entries()) {
-      if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
-      if (cfg.fixedOrder && Date.now() >= started + 90000) break;
+      if (input.signal?.aborted || Date.now() >= deadlineAt) return done({ ...empty('aborted'), content: '' });
       if (id === 'mitrify') {
         // A malformed optional supplier must not take down the later healthy rungs.
         let model: string;
@@ -212,7 +212,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         // Preserve classification; server review must cover the exact payload and all required data classes.
         const prepared = trimForRung(input.message, history, system, Number.MAX_SAFE_INTEGER)!;
         const controller = new AbortController();
-        const mitrifyLimits = chatAttemptLimits({ firstTokenMs: cfg.ttftMs, idleMs: 30000, hardCapMs: 90000 }, started + 90000, order.length - position);
+        const mitrifyLimits = chatAttemptLimits({ firstTokenMs: cfg.ttftMs, idleMs: 30000, hardCapMs: CHAT_PROVIDER_ATTEMPT_MS }, deadlineAt, order.length - position);
         let timer = setTimeout(() => controller.abort(), mitrifyLimits.firstTokenMs);
         const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal;
         let content = '';
@@ -222,7 +222,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
             body: { messages: [{ role: 'system', content: prepared.systemPrompt }, { role: 'user', content: prepared.prompt }], max_tokens: cfg.features.replyMaxTokens, stream: true },
             onChunk: value => {
               if (signal.aborted) return;
-              if (value) { clearTimeout(timer); timer = setTimeout(() => controller.abort(), Math.min(30000, Math.max(1, started + 90000 - Date.now()))); }
+              if (value) { clearTimeout(timer); timer = setTimeout(() => controller.abort(), Math.min(30000, Math.max(1, deadlineAt - Date.now()))); }
               content += value; input.onChunk?.(value);
             },
             revalidate: async () => {
@@ -345,10 +345,10 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           reservation = await store.reservePaid({ uncappedRollout: true, requestId: id === 'deepseek' ? requestId : `${requestId}:${id}`, uid: input.context.uid, maxCostNanoUsd: quote(cfg, 1048576, rung.maxOutputTokens, rung), capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
           if (!reservation?.mayDispatch) { attempt.reason = 'budget'; continue; }
         }
-        if (controller.signal.aborted) { attempt.reason = 'aborted'; break; }
+        if (controller.signal.aborted || Date.now() >= deadlineAt) { attempt.reason = 'aborted'; break; }
         const execute = (chunk: (value: string) => void): Promise<void> => {
           physical = Promise.resolve().then(async () => {
-            if (controller.signal.aborted) throw new FreeChainProviderError('ABORTED');
+            if (controller.signal.aborted || Date.now() >= deadlineAt) throw new FreeChainProviderError('ABORTED');
             attempt.entered = true;
             if (id === 'openrouter') {
               const stickyRef = controlRef(db).collection('sticky').doc(input.context.conversationKey);
@@ -357,7 +357,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
               completeUsage = !!response.usage;
               await stickyRef.set({ model: response.model, expiresAt: Date.now() + 86400000, expireAt: new Date(Date.now() + 86400000) });
             } else {
-              const provider = new OpenAiCompatProvider({ provider: names[id] as ConstructorParameters<typeof OpenAiCompatProvider>[0]['provider'], key: rung.key, envName: rung.keyEnv, model: rung.model, baseURL: rung.baseURL, priority: cfg.order.indexOf(id), maxOutputTokens: rung.maxOutputTokens, timeoutMs: 90000, streamUsage: rung.streamUsage,
+              const provider = new OpenAiCompatProvider({ provider: names[id] as ConstructorParameters<typeof OpenAiCompatProvider>[0]['provider'], key: rung.key, envName: rung.keyEnv, model: rung.model, baseURL: rung.baseURL, priority: cfg.order.indexOf(id), maxOutputTokens: rung.maxOutputTokens, timeoutMs: Math.max(1, Math.min(CHAT_PROVIDER_ATTEMPT_MS, deadlineAt - Date.now())), streamUsage: rung.streamUsage,
                 ...(id === 'gemini' || id === 'geminipaid' ? { extraBody: { reasoning_effort: 'none' } } : id === 'gpt5nano' ? { extraBody: { reasoning_effort: 'minimal' } }
                   // Beam's chat card allows effort low|medium|high|xhigh|max. `low` is the fastest.
                   // none/minimal are not on that card. 2048 tokens leaves room after thinking.
@@ -375,14 +375,14 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
           return physical;
         };
         // Beam (and other cheapinf models) may stream reasoning before delta.content.
-          // Free-chat default FREE_CHAIN_TTFT_MS=6s was killing exclusive admin as cheapinf:timeout.
+          // The ordinary first-content budget must still preserve the longer exclusive-admin grace.
           const firstTokenMs = id === 'cheapinf'
             ? cheapinfFirstTokenMs(exclusiveAdmin, cfg.ttftMs)
             : cfg.ttftMs;
-          const configuredLimits = { ...(watchdogLimits(undefined, 'free') ?? { firstTokenMs, idleMs: 30000, hardCapMs: 120000 }), firstTokenMs };
-          const limits = cfg.fixedOrder ? chatAttemptLimits(configuredLimits, started + 90000, order.length - position) : configuredLimits;
-          const watch = await watchChatAttempt(execute, chunk => { if (!chunk) return; if (trace.ttftMs === null) trace.ttftMs = Date.now() - started; content += chunk; input.onChunk?.(chunk); },
-            limits, controller.signal);
+          const configuredLimits = { ...(watchdogLimits(undefined, 'free') ?? { firstTokenMs, idleMs: 30000, hardCapMs: CHAT_PROVIDER_ATTEMPT_MS }), firstTokenMs };
+          const boundedLimits = { ...configuredLimits, hardCapMs: Math.max(1, Math.min(configuredLimits.hardCapMs, CHAT_PROVIDER_ATTEMPT_MS, deadlineAt - Date.now())) };
+          const limits = cfg.fixedOrder ? chatAttemptLimits(boundedLimits, deadlineAt, order.length - position) : boundedLimits;
+          const watch = await watchChatAttempt(execute, chunk => { if (!chunk) return; if (trace.ttftMs === null) trace.ttftMs = Date.now() - started; content += chunk; input.onChunk?.(chunk); }, limits, controller.signal);
           if (watch.verdict !== 'completed') {
             controller.abort();
             partial = watch.delivered;
@@ -453,7 +453,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     }
     if (!triedQuota && capacityBusy && ++capacityRounds <= 32) {
       const released = await waitForCapacity(observedCapacity, capacityDeadline, input.signal);
-      if (input.signal?.aborted) return done({ ...empty('aborted'), content: '' });
+      if (input.signal?.aborted || Date.now() >= deadlineAt) return done({ ...empty('aborted'), content: '' });
       if (released) continue;
     }
     break;
@@ -466,7 +466,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       ttftCapMs: Number.isFinite(ttftCapMs) ? ttftCapMs : undefined,
     })); input.onChunk?.(result.content, 'notice'); return done(result);
   }
-  return { async route(input: FreeChainInput): Promise<FreeChainResult> {
+  async function routeWithinDeadline(input: FreeChainInput, deadlineAt: number): Promise<FreeChainResult> {
     const entry = input.context.entryAdmission;
     if (isEntryAdmission(entry, input.context.uid)) input = { ...input, signal: input.signal ? AbortSignal.any([input.signal, entry.signal]) : entry.signal };
     if (input.signal?.aborted) return { ...empty('aborted'), content: '' };
@@ -496,8 +496,16 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
         const result = empty('all-failed', input, adminDetailFor(input, early));
         input.onChunk?.(result.content, 'notice'); return result;
       }
-      return await routeAdmitted(input, admission.waitedMs);
+      return await routeAdmitted(input, admission.waitedMs, deadlineAt);
     } finally { admission.release(); }
+  }
+  return { async route(input: FreeChainInput): Promise<FreeChainResult> {
+    const deadlineAt = Date.now() + CHAT_SERVER_DEADLINE_MS;
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), CHAT_SERVER_DEADLINE_MS);
+    const signal = input.signal ? AbortSignal.any([input.signal, deadline.signal]) : deadline.signal;
+    try { return await routeWithinDeadline({ ...input, signal }, deadlineAt); }
+    finally { clearTimeout(timer); }
   } };
 }
 

@@ -115,5 +115,6 @@ export interface AIProvider {
    * `tests/anAbandonedStreamStopsCosting.test.ts` is the census that keeps this true for every
    * provider, including ones added later.
    */
-  executeStream?(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal): Promise<string>;
+  /** Optional complete provider receipt, emitted only after the stream finishes normally. */
+  executeStream?(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal, onUsage?: (usage: ProviderUsage) => void): Promise<string>;
 }

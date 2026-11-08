@@ -18,7 +18,8 @@ import { randomUUID } from 'node:crypto';
 import { FreeChainStore } from '../AI/FreeChain/store';
 import { NANO_USD, OWNER_PAID_DAILY_CEILING_NANO_USD, DEFAULT_PAID_CAP_NANO_USD, maximumCostNanoUsd, type PaidReservation } from '../AI/FreeChain/spendCap';
 import { realRateFor } from '../AgentV3/providerRates';
-import type { AIProvider, AIProviderResponse } from '../AI/Router/ProviderTypes';
+import type { AIProvider, AIProviderResponse, ProviderUsage } from '../AI/Router/ProviderTypes';
+import { completeStreamUsage, vertexStreamUsage } from '../AI/Router/streamUsage';
 
 /** The surfaces whose Free-tier paid calls draw on the shared cap (telemetry only). */
 export type FreeTierPaidSurface = 'free-chat' | 'professional-free-fallback' | 'sda-free' | 'vision-free';
@@ -69,12 +70,16 @@ function rateProvider(model: string): string { return model.startsWith('gpt-') ?
 
 /** Conservative maximum cost of one call, from the shared rate card. Null when it cannot be priced. */
 export function quoteFreeTierPaidNanoUsd(model: string, inputTokens: number, outputTokens: number): number | null {
+  const quote = priceFreeTierPaidNanoUsd(model, inputTokens, outputTokens, 1);
+  return quote !== null && quote > 0 ? quote : null;
+}
+function priceFreeTierPaidNanoUsd(model: string, inputTokens: number, outputTokens: number, minimumTokens: number): number | null {
   if (!isFreeTierPaidModelAllowed(model)) return null;
   try {
     const rate = realRateFor(rateProvider(model), model);
     const inNano = Math.ceil(rate.inputPerMTok * NANO_USD), outNano = Math.ceil(rate.outputPerMTok * NANO_USD);
-    const quote = maximumCostNanoUsd(Math.max(1, Math.ceil(inputTokens)), Math.max(1, Math.ceil(outputTokens)), inNano, outNano);
-    return quote > 0 ? quote : null;
+    const quote = maximumCostNanoUsd(Math.max(minimumTokens, Math.ceil(inputTokens)), Math.max(minimumTokens, Math.ceil(outputTokens)), inNano, outNano);
+    return quote >= 0 ? quote : null;
   } catch { return null; }
 }
 
@@ -124,16 +129,16 @@ export async function reserveFreeTierPaid(input: { surface: FreeTierPaidSurface;
 
 /** Settle with the provider-reported usage. Missing usage leaves the full hold booked (conservative). */
 export async function settleFreeTierPaid(hold: FreeTierPaidHold | null, usage?: { inputTokens?: number; outputTokens?: number } | null): Promise<void> {
-  if (!hold || !usage || !Number.isInteger(usage.inputTokens) || !Number.isInteger(usage.outputTokens)) return;
-  const actual = quoteFreeTierPaidNanoUsd(hold.model, usage.inputTokens!, usage.outputTokens!);
+  const complete = completeStreamUsage(usage?.inputTokens, usage?.outputTokens);
+  if (!hold || !complete) return;
+  const actual = priceFreeTierPaidNanoUsd(hold.model, complete.inputTokens, complete.outputTokens, 0);
   if (actual === null) return;
   await store()?.settlePaid(hold.reservation, actual).catch(() => false);
 }
 
 /** Gemini `usageMetadata` → usage (thinking tokens are billed as output). */
 export function geminiUsage(um: any): { inputTokens?: number; outputTokens?: number } | undefined {
-  if (!um || !Number.isInteger(um.promptTokenCount) || !Number.isInteger(um.candidatesTokenCount)) return undefined;
-  return { inputTokens: um.promptTokenCount, outputTokens: um.candidatesTokenCount + (Number.isInteger(um.thoughtsTokenCount) ? um.thoughtsTokenCount : 0) };
+  return vertexStreamUsage(um);
 }
 
 /** Output ceiling assumed for a hold when the call itself sets none (2.5 models may think). */
@@ -183,10 +188,19 @@ export function cappedFreeTierRung(base: AIProvider, surface: FreeTierPaidSurfac
       return response;
     },
     executeStream: base.executeStream
-      ? async (prompt, systemPrompt, onChunk, m, signal) => {
+      ? async (prompt, systemPrompt, onChunk, m, signal, onUsage) => {
         signal?.throwIfAborted();
         const hold = await reserve(prompt, systemPrompt);
-        return dispatchWithFreeTierPaidHold(hold, signal, () => base.executeStream!(prompt, systemPrompt, onChunk, m, signal));
+        let reported: ProviderUsage | undefined;
+        const content = await dispatchWithFreeTierPaidHold(hold, signal, () => base.executeStream!(prompt, systemPrompt, onChunk, m, signal,
+          usage => { reported = completeStreamUsage(usage?.inputTokens, usage?.outputTokens); }));
+        // A rejected/aborted stream, missing receipt, or failed settlement retains the hold.
+        // Completion text alone never proves zero cost. Existing reservations are untouched.
+        if (!signal?.aborted && reported) {
+          await settleFreeTierPaid(hold, reported);
+          onUsage?.(reported);
+        }
+        return content;
       }
       : undefined,
   };

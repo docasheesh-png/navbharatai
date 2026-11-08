@@ -1,3 +1,4 @@
+import { CHAT_SERVER_DEADLINE_MS } from '../../lib/chatDeadline';
 import { fixedTextChainEnabled, withFixedTextChainScope } from '../AI/fixedTextChain';
 import { withMitrifyChatPrivacyBoundary } from '../lib/mitrify';
 import { chatAvailabilityMessage } from '../lib/chatAvailabilityMessage';
@@ -88,7 +89,7 @@ async function withChatTextGateway<T>(req: Request, res: Response, handler: () =
   const body = req.body;
   if (!body || (!body.message && !Array.isArray(body.fileAttachments))) return legacy();
   if (res.destroyed || res.writableEnded) return;
-  const deadlineAtMs = Date.now() + 90_000;
+  const deadlineAtMs = Date.now() + CHAT_SERVER_DEADLINE_MS;
   const controller = new AbortController();
   onClientGone(res, () => controller.abort());
   try {

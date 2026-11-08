@@ -72,13 +72,13 @@ describe('census: every streaming provider takes the abort signal', () => {
 // ── THE WIRING: the signal must survive every hop between chat.ts and the provider ─────────────────
 describe('the signal reaches the provider from the route', () => {
   it('ProviderTypes declares the parameter at all', () => {
-    expect(read('src/server/AI/Router/ProviderTypes.ts')).toContain('signal?: AbortSignal): Promise<string>;');
+    expect(read('src/server/AI/Router/ProviderTypes.ts')).toContain('signal?: AbortSignal, onUsage?: (usage: ProviderUsage) => void): Promise<string>;');
   });
 
   it('a SLOTTED rung forwards it — most of the free ladder is slotted', () => {
     // The same class as the dropped model pin: a wrapper that forgets an argument silently disables
     // the whole feature behind it, on the one path chat actually streams over.
-    expect(read('src/server/AI/AIRouterManager.ts')).toContain('base.executeStream!(p, sys, cb, model, signal)');
+    expect(read('src/server/AI/AIRouterManager.ts')).toContain('base.executeStream!(p, sys, cb, model, signal, onUsage)');
   });
 
   it('the sequential ladder passes it, watchdog or not', () => {

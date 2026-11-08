@@ -148,16 +148,16 @@ function runnerRequestText(text: string): string {
 }
 
 const RUNNER_MECHANICS: ReadonlyArray<[RunnerMechanic, RegExp]> = [
-  ['auto-run', /\b(?:auto[- ]?run|continuous(?:ly)?\s+(?:forward|run)|endless\s+runn(?:er|ing))\b|लगातार[^।\n]{0,55}(?:दौड़|दौड़)/i],
-  ['lane-change', /\b(?:lane[- ]?(?:chang\w*|switch\w*)|switch\s+lanes?|change\s+lanes?)\b|\bswipe\s+left\b[^।\n]{0,65}\bright\b|रास्ता\s*बदल/i],
+  ['auto-run', /\b(?:auto[- ]?run|continuous(?:ly)?\s+(?:forward|run)|endless\s+runn(?:er|ing))\b|लगातार[^.!?\n]{0,55}(?:दौड़|दौड़)/i],
+  ['lane-change', /\b(?:lane[- ]?(?:chang\w*|switch\w*)|switch\s+lanes?|change\s+lanes?)\b|\bswipe\s+left\b[^.!?\n]{0,65}\bright\b|रास्ता\s*बदल/i],
   ['jump', /\bjump(?:ing)?\b|(?:कूद|जंप)/i],
   ['slide', /\bslid(?:e|ing)\b|स्लाइड/i],
   ['obstacles', /\bobstacles?\b|बाधा(?:एं|एँ|ओं)?/i],
-  ['currency-counters', /\b(?:coin|diamond|currency)s?\s*(?:counter|count|balance)s?\b|काउंटर|अलग[^।\n]{0,20}गिनती/i],
+  ['currency-counters', /\b(?:coin|diamond|currency)s?\s*(?:counter|count|balance)s?\b|काउंटर|अलग[^.!?\n]{0,20}गिनती/i],
   ['character-shop', /\bcharacter\s+shop\b|कैरेक्टर\s*(?:शॉप|दुकान)/i],
-  ['currency-unlocks', /\b(?:coin|diamond)s?\b[^।\n]{0,60}(?:\bspend\w*\b|खर्च)[^।\n]{0,80}\bunlock\w*\b|\b(?:spend|use)\b[^।\n]{0,30}\b(?:coin|diamond)s?\b[^।\n]{0,80}\bunlock\w*\b|(?:सिक्के|हीरे)[^।\n]{0,60}खर्च[^।\n]{0,80}अनलॉक/i],
+  ['currency-unlocks', /\b(?:coin|diamond)s?\b[^.!?\n]{0,60}(?:\bspend\w*\b|खर्च)[^.!?\n]{0,80}\bunlock\w*\b|\b(?:spend|use)\b[^.!?\n]{0,30}\b(?:coin|diamond)s?\b[^.!?\n]{0,80}\bunlock\w*\b|(?:सिक्के|हीरे)[^.!?\n]{0,60}खर्च[^.!?\n]{0,80}अनलॉक/i],
   ['high-score', /\bhigh\s*score\b|हाई\s*स्कोर|सर्वाधिक\s*स्कोर/i],
-  ['collision-game-over', /\b(?:collision|collid\w*|crash)\b[^।\n]{0,100}\bgame\s*over\b|टक्कर[^।\n]{0,80}\bgame\s*over\b/i],
+  ['collision-game-over', /\b(?:collision|collid\w*|crash)\b[^.!?\n]{0,100}\bgame\s*over\b|टक्कर[^.!?\n]{0,80}\bgame\s*over\b/i],
 ];
 
 function runnerRequirements(prompt: string): Pick<GameScopeContract, 'runnerMechanics' | 'collectibles' | 'minimumUnlockableCharacters'> {

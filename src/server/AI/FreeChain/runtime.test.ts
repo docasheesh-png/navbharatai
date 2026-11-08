@@ -19,6 +19,7 @@ import { DEFAULT_ORDER, freeChainConfig } from './config';
 import { applySwitchedOff, __resetProviderSwitchesForTests } from '../../lib/providerSwitches';
 import { getBreaker, resetAllBreakers } from '../Router/CircuitBreaker';
 import { FreeChainProviderError } from './providers/openAiCompatProvider';
+import { GUEST_DAILY_DEFAULT, SIGNED_IN_DAILY_DEFAULT } from '../../lib/unifiedWallet/policy';
 import { FreeChainConfigurationError, freeChainConfigurationErrorResponse, isFreeChainConfigurationErrorResponse, isFreeChainAdminView, isFreeChainAdminMetrics } from '../../../lib/freeChatChainView';
 import type { ChatReplyLanguage } from '../../../lib/chatReplyLanguage';
 m.observeBudget.mockImplementation(async (cap: number) => ({ capNanoUsd: cap, revision: 1 }));
@@ -126,10 +127,72 @@ describe('free chat chain central dispatch', () => {
  expect(result.provider).toBe('GROQ'); expect(result.ok).toBe(true); expect(m.execute).toHaveBeenCalledTimes(1);
  expect(JSON.stringify(result.freeChain)).not.toContain('fake-local-key'); expect(m.paid).not.toHaveBeenCalled();
  });
+ it('keeps an early fact from a 100-message thread on every fallback attempt', async () => {
+  const history = [
+    { sender: 'user', text: 'Remember that my city is Pune.' },
+    { sender: 'ai', text: 'Noted.' },
+    ...Array.from({ length: 100 }, (_, i) => ({ sender: i % 2 ? 'ai' : 'user', text: `filler turn ${i}` })),
+    { sender: 'user', text: 'What city did I name at the start?' },
+  ];
+  const original = history.map(row => row.text);
+  m.execute.mockRejectedValueOnce(new FreeChainProviderError('TIMEOUT')).mockImplementation(successful('Pune'));
+  const result = await buildFreeChainRouter(db, config('groq,cloudflare')).route({ ...input(), message: 'please answer', history });
+  expect(result).toMatchObject({ ok: true, provider: 'CLOUDFLARE' });
+  expect(m.execute).toHaveBeenCalledTimes(2);
+  for (const [request] of m.execute.mock.calls) {
+    expect(request.prompt).toContain('Remember that my city is Pune.');
+    expect(request.prompt).toContain('What city did I name at the start?');
+    expect(request.prompt.indexOf('Pune')).toBeLessThan(request.prompt.indexOf('What city did I name'));
+    expect(request.systemPrompt).not.toContain('Pune');
+  }
+  expect(history.map(row => row.text)).toEqual(original);
+ });
  it('falls through before first text on retryable failure', async () => {
  m.execute.mockRejectedValueOnce(new FreeChainProviderError('RATE_LIMIT')).mockImplementation(successful('second'));
  const chunks: string[]=[]; const result = await buildFreeChainRouter(db, config()).route({ ...input(), onChunk: s=>chunks.push(s) });
  expect(result.provider).toBe('CLOUDFLARE'); expect(chunks).toEqual(['second']); expect(result.freeChain?.fallbacks).toBe(1); expect(m.cooldown).toHaveBeenCalled();
+ });
+ it.each(['TIMEOUT', 'RATE_LIMIT', 'EMPTY_RESPONSE', 'SERVER'] as const)('after a successful turn, a later %s uses the next provider with the same ordered history and system instructions', async code => {
+  const history = [
+    { sender: 'user', text: 'Remember that my city is Pune and answer the next question in English.' },
+    { sender: 'ai', text: 'Haan, main bilkul normal answer de raha hoon.' },
+  ];
+  const router = buildFreeChainRouter(db, config('groq,cloudflare'));
+  const turn1 = await router.route({ ...input(), message: 'Are you working?', history: history.slice(0, 1) });
+  expect(turn1).toMatchObject({ ok: true, provider: 'GROQ' });
+  m.execute.mockReset();
+  m.execute.mockRejectedValueOnce(new FreeChainProviderError(code)).mockImplementation(successful('English answer'));
+  const turn2 = await router.route({ ...input(), message: 'hindi me kyu doge? apko english nahi ati?', history });
+  expect(turn2).toMatchObject({ ok: true, provider: 'CLOUDFLARE', content: 'English answer' });
+  expect(m.execute).toHaveBeenCalledTimes(2);
+  const failed = m.execute.mock.calls[0][0];
+  const recovered = m.execute.mock.calls[1][0];
+  expect(recovered.systemPrompt).toBe(failed.systemPrompt);
+  expect(recovered.prompt).toBe(failed.prompt);
+  expect(recovered.prompt.indexOf('Remember that my city is Pune')).toBeLessThan(recovered.prompt.indexOf('Haan, main bilkul normal answer'));
+  expect(recovered.prompt).toContain('hindi me kyu doge?');
+  expect(recovered.systemPrompt).not.toContain('Pune');
+  expect(recovered.systemPrompt).not.toContain('hindi me kyu doge');
+ });
+ it('does not dispatch a provider already inside an auth or quota window', async () => {
+  getBreaker('free-chat-chain:groq').honorRemoteOpenUntil(Date.now() + 60_000, 'quota_exhausted:http=429');
+  const result = await buildFreeChainRouter(db, config('groq,cloudflare')).route(input());
+  expect(result).toMatchObject({ ok: true, provider: 'CLOUDFLARE' });
+  expect(m.execute).toHaveBeenCalledOnce();
+  expect(m.execute.mock.calls[0][1].provider).toBe('CLOUDFLARE');
+ });
+ it('keeps the signed-in 50 and guest 10 answer allowances as the only per-user message caps', () => {
+  expect(SIGNED_IN_DAILY_DEFAULT).toBe(50);
+  expect(GUEST_DAILY_DEFAULT).toBe(10);
+ });
+ it('does not spend a second paid dispatch on a chat turn just because an earlier paid count reached twenty', async () => {
+  m.paid.mockResolvedValue({ id: 'held', day: '2026-11-08', uidHash: 'owner', maxCostNanoUsd: 1, createdAt: 1, mayDispatch: true });
+  m.settle.mockResolvedValue(true);
+  const cfg = config('deepseek');
+  cfg.deepseekPrices.input = 0.3; cfg.deepseekPrices.output = 1.2;
+  const result = await buildFreeChainRouter(db, cfg).route(input());
+  expect(result.ok).toBe(true);
+  expect(m.paid.mock.calls[0][0].perUserLimit).toBe(Number.MAX_SAFE_INTEGER);
  });
  it.each([false, true])('keeps the explicit script in every provider request, including quality=%s and history trim', async teachingTurn => {
  const history = [{ sender: 'user', text: 'Please explain world trade.' }, { sender: 'ai', text: 'A Roman-script answer.' }, { sender: 'user', text: 'devnaagri me bataao' }, ...Array.from({ length: 10 }, (_, i) => ({ sender: 'user', text: `Follow-up ${i}` }))];

@@ -21,9 +21,10 @@ import { selectedForFreeChain, rolloutBucket, type FreeChainContext } from './ro
 import { readControls, readControlsForSelection, writeControls, controlRef } from './control';
 import { FreeChainStore } from './store';
 import { FreeChainCache, safeCacheKey } from './cache';
-import { maximumCostNanoUsd, usdToNanoUsd, type PaidReservation } from './spendCap';
+import { CHAT_PAID_FALLBACK_PER_USER_LIMIT, maximumCostNanoUsd, usdToNanoUsd, type PaidReservation } from './spendCap';
 import { trimForRung } from './trim';
 import { tryAcquireRungSlot, releaseRungSlot, routeTurn, orderForRoute, effectiveMaxOutput, trimHistory, preparedSystemPrompt, faqCacheable, reserveMonthly, settleMonthly, type TurnRoute } from './masterPlan';
+import { CHAT_CONTEXT_LIMITATION, historyForModelRequest } from '../../../lib/chatContextWindow';
 import { logFreeChain, type FreeChainTelemetry } from './telemetry';
 import { OpenAiCompatProvider, FreeChainProviderError, type FreeChainProviderResponse } from './providers/openAiCompatProvider';
 import { FreeRoutingError } from '../LiveRegistry/dispatcher';
@@ -147,6 +148,17 @@ function reportedChargeNanoUsd(response: unknown): number | null {
   try { return usdToNanoUsd(amount); } catch { return null; }
 }
 /** This namespace is not installed in AIRouterManager: other consumers of 'free' stay untouched. */
+function historyForChain(cfg: FreeChainConfig, history: unknown[]): unknown[] {
+  if (!Array.isArray(history)) return history;
+  const text = (row: unknown) => {
+    if (!row || typeof row !== 'object') return '';
+    const value = row as { text?: unknown; content?: unknown };
+    return typeof value.text === 'string' ? value.text : typeof value.content === 'string' ? value.content : '';
+  };
+  if (history.some(row => text(row).includes(CHAT_CONTEXT_LIMITATION))) return history;
+  if (history.length > 40) return historyForModelRequest(history);
+  return trimHistory(cfg, history);
+}
 export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeChainConfig(), refreshConfig?: () => FreeChainConfig) {
   const store = new FreeChainStore(db);
   async function routeAdmitted(input: FreeChainInput, queueWaitMs: number, deadlineAt: number): Promise<FreeChainResult> {
@@ -173,7 +185,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     // Master plan: stable cacheable prefix (dynamic parts last) and the compact core, both kill-switchable.
     const system = `${preparedSystemPrompt(cfg, input.systemPrompt ?? '')}\n\n${languageInstruction}`;
     const cacheKey = !cfg.fixedOrder && cfg.cacheEnabled ? safeCacheKey({ message: input.message, history: input.history, eligible: input.context.cacheEligible, language, systemPrompt: system, modelFamily: JSON.stringify(cfg.rungs.map(r => [r.id, r.model])), faq: cfg.features.faqCache && faqCacheable(input.message) }) : null;
-    const history = trimHistory(cfg, input.history);
+    const history = historyForChain(cfg, input.history);
     if (cacheKey) {
       const hit = await new FreeChainCache(db).get(cacheKey).catch(() => null);
       const cacheControls = hit ? await readControls(db, cfg).catch(() => null) : null;
@@ -228,7 +240,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
               if (!control || control.enabled === false || !cfg.enabled) return null;
               const month = cfg.features.monthlyCap ? await reserveMonthly(db, cfg.features.monthlyCapNanoUsd, maximumNanoUsd) : null;
               if (cfg.features.monthlyCap && !month) return null;
-              const hold = await store.reservePaid({ uncappedRollout: true, requestId: `${requestId}:mitrify`, uid: input.context.uid, maxCostNanoUsd: maximumNanoUsd, capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
+              const hold = await store.reservePaid({ uncappedRollout: true, requestId: `${requestId}:mitrify`, uid: input.context.uid, maxCostNanoUsd: maximumNanoUsd, capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: CHAT_PAID_FALLBACK_PER_USER_LIMIT });
               if (hold && !hold.mayDispatch) throw new MitrifyError('MITRIFY_ADMISSION_UNCERTAIN');
               if (!hold) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); return null; }
               attempt.entered = true;
@@ -335,7 +347,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
             if (!month) { attempt.reason = 'monthly-budget'; continue; }
             monthHold = { month, amount };
           }
-          reservation = await store.reservePaid({ uncappedRollout: true, requestId: id === 'deepseek' ? requestId : `${requestId}:${id}`, uid: input.context.uid, maxCostNanoUsd: quote(cfg, 1048576, rung.maxOutputTokens, rung), capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
+          reservation = await store.reservePaid({ uncappedRollout: true, requestId: id === 'deepseek' ? requestId : `${requestId}:${id}`, uid: input.context.uid, maxCostNanoUsd: quote(cfg, 1048576, rung.maxOutputTokens, rung), capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: CHAT_PAID_FALLBACK_PER_USER_LIMIT });
           if (!reservation?.mayDispatch) { attempt.reason = 'budget'; continue; }
         }
         if (controller.signal.aborted || Date.now() >= deadlineAt) { attempt.reason = 'aborted'; break; }

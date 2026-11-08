@@ -95,7 +95,7 @@ import { parseStatusFilter, parseDateFilter, sinceMsFor, buildMatchesFilters, st
 import { accountTier, matchesTier, parseTierFilter, type AccountTier } from '../lib/accountTier';
 import { freeListLabelForStoredEmail } from '../AgentV3/featureFlag';
 import { sandboxStore } from '../AgentV3/SandboxStore';
-import { liveSandboxNote, type LiveSandboxCount } from '../AgentV3/liveSandboxCount';
+import { liveSandboxNote, runningSandboxLifecycleNote, type LiveSandboxCount } from '../AgentV3/liveSandboxCount';
 import { buildActuator } from './actuatorFactory';
 import { runningBuildCount } from '../AgentV3/runningBuildRegistry';
 import { tallyHandover, projectHandover, handoverHeadline, handoverSample } from '../AgentV3/sandboxHandover';
@@ -836,8 +836,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         return typeof actuator.countRunningSandboxes === 'function'
           ? await actuator.countRunningSandboxes()
           : { running: null, truncated: false, reason: 'No cloud sandbox provider is configured on this deployment.' };
-      } catch (err) {
-        return { running: null, truncated: false, reason: err instanceof Error ? err.message : 'Could not reach the sandbox provider.' };
+      } catch {
+        return { running: null, truncated: false, reason: 'Could not reach the sandbox provider.' };
       }
     })();
     const liveSandboxes = liveCount.running;
@@ -871,6 +871,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       instanceUptimeSeconds: Math.round(process.uptime()),
       liveSandboxes,
       liveSandboxNote: liveSandboxNote(liveCount),
+      liveSandboxLifecycle: liveCount.lifecycle ?? null,
+      liveSandboxLifecycleNote: runningSandboxLifecycleNote(liveCount),
       // How hard THIS instance is working right now. One instance of several — the client says so.
       serverLoad: load,
       // Whether alerts can reach the admin OUTSIDE the app, and plainly why not when they cannot.

@@ -1,7 +1,7 @@
 # Local sandbox observation persistence
 
 Audit baseline: `1660a99683561811e5d517df46e2eacc14a7f679`.
-Combined validation includes main `f3a147ce88f0635607adb7e857507b409bae93d1`.
+Combined validation includes main `94641a9c524380ab64236ebe2ab77a673d8ccf16`.
 
 This repair changes telemetry persistence only. It does not change sandbox sizing,
 timeouts, create/connect/restore/pause behavior, identity-write semantics, billing

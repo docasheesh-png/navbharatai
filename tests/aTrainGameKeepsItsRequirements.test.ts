@@ -113,9 +113,10 @@ describe('the user is told the truth too: an unplayed game is "not verified yet"
 
 describe('🔒 the route feeds the playtest into the gate on EVERY way the playtest ends', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-  it('played, timed out / crashed, could not be reached, and re-played after a repair', () => {
+  it('played, timed out / crashed, could not be reached, DOM-only, and re-played after a repair', () => {
     expect(route).toMatch(/gameProof = \{ outcome: playtestOutcome\(verdict\.code\)[^\n]*\n[^\n]*unplayed = true[^\n]*\n[\s\S]{0,200}gateEvidence\.game = gameProof\.outcome;/);
-    expect(route.match(/gateEvidence\.game = 'not-run';/g)?.length).toBe(2);
+    expect(route.match(/gateEvidence\.game = 'not-run';/g)?.length).toBe(3);
+    expect(route).toMatch(/if \(domKind\) \{[\s\S]{0,500}gateEvidence\.game = 'not-run';/);
     expect(route).toMatch(/if \(gamePlayed\.defects\.length === 0\) gateEvidence\.game = 'passed';/);
   });
 });

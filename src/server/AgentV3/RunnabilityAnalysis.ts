@@ -44,7 +44,7 @@ function parsePkg(raw?: string | null): Pkg | null {
  * Report concrete "the app can't run/build" defects. PURE & deterministic.
  * `assessed` is false (with no findings) when there is no Node manifest/code to judge.
  */
-export function analyzeRunnability(graph: ProjectGraph, packageJson?: string | null): RunnabilityReport {
+export function analyzeRunnability(graph: ProjectGraph, packageJson?: string | null, partialModule = false): RunnabilityReport {
   const files = Array.isArray(graph?.files) ? graph.files : [];
   const pkg = parsePkg(packageJson);
   const codeFiles = files.filter((f) => /\.(t|j)sx?$/.test(f));
@@ -75,7 +75,9 @@ export function analyzeRunnability(graph: ProjectGraph, packageJson?: string | n
   const hasIndexHtml = files.some((f) => /(^|\/)index\.html$/.test(f));
   if (usesViteOrCra && !hasIndexHtml) {
     findings.push({
-      level: 'medium',
+      // BR1951: a config-only project scored 92 and triggered DONE. No entry is
+      // a run blocker, not a polish warning; a pristine graph is not a built app.
+      level: partialModule ? 'medium' : 'high',
       message: 'A Vite/CRA app has no index.html entry — the dev server has nothing to serve.',
     });
   }

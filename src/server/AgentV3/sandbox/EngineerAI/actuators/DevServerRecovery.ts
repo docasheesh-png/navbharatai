@@ -836,3 +836,21 @@ export function parseDevServerHealthLine(output: string): { up: boolean; port: n
   if (down) return { up: false, port: Number(down[1]) };
   return null;
 }
+
+/** BR1951: reinstalling an unchanged manifest cannot supply an undeclared direct import.
+ * Unknown manifest/importer or a dependency's own import retains ordinary recovery.
+ */
+export function undeclaredDevDependency(diagnosis: DevServerDiagnosis, log: string, manifest: string | null): DevServerDiagnosis {
+  if (diagnosis.recovery !== 'reinstall' || !manifest) return diagnosis;
+  const missing = /Cannot find (?:package|module) ['"]([^'"]+)['"][^\n]* imported from ([^\n]+)/i.exec(stripAnsi(log));
+  if (!missing || /(?:^|\/)node_modules\//.test(missing[2])) return diagnosis;
+  if (!/(?:^|\/)(?:vite|webpack|next|rollup)\.config\.|\/(?:src|app|pages)\//.test(missing[2])) return diagnosis;
+  const name = missing[1].startsWith('@') ? missing[1].split('/').slice(0, 2).join('/') : missing[1].split('/')[0];
+  if (!/^(?:@[\w.-]+\/)?[\w-][\w.-]*$/.test(name)) return diagnosis;
+  try {
+    const pkg = JSON.parse(manifest);
+    if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) return diagnosis;
+    if ([pkg.dependencies, pkg.devDependencies, pkg.optionalDependencies, pkg.peerDependencies].some(deps => deps && name in deps)) return diagnosis;
+    return { ...diagnosis, recovery: 'code_fix', detail: `Undeclared dependency "${name}" imported by the app. Add a version compatible with its existing framework to package.json, then install. Reinstalling the unchanged manifest cannot supply it.` };
+  } catch { return diagnosis; }
+}

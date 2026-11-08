@@ -114,6 +114,17 @@ afterEach(() => { loopbackTransport = undefined; __resetProviderSwitchesForTests
 afterAll(() => { globalThis.fetch = originalNetwork.fetch; https.request = originalNetwork.request; https.get = originalNetwork.get; http2.connect = originalNetwork.connect; syncBuiltinESMExports(); });
 
 describe('layer 1 — the key is withdrawn, and put back byte for byte', () => {
+  it('Mitrify off withdraws its key, fences default and configured hosts, and leaves builder accounts alone', () => {
+    const env: NodeJS.ProcessEnv = { MITRIFY_API_KEY: 'synthetic-mitrify-key', MITRIFY_BASE_URL: 'https://reviewed-gateway.example/v1', ROUTER_ONE_API_KEY: 'synthetic-builder-key' };
+    applySwitchedOff(['mitrify'], env);
+    expect(env.MITRIFY_API_KEY).toBeUndefined(); expect(providerHasKey('mitrify', env)).toBe(true);
+    expect(switchedOffProviderFor('mitrify.com', '/v1/chat/completions', env)).toBe('mitrify');
+    expect(switchedOffProviderFor('reviewed-gateway.example', '/v1/chat/completions', env)).toBe('mitrify');
+    expect(switchedOffProviderFor('api.router.one', '/v1/chat/completions', env)).toBeNull();
+    expect(env.ROUTER_ONE_API_KEY).toBe('synthetic-builder-key');
+    applySwitchedOff([], env); expect(env.MITRIFY_API_KEY).toBe('synthetic-mitrify-key');
+  });
+
   it('withdraws every key of the provider (patterns included) and nothing else', () => {
     const env: NodeJS.ProcessEnv = { GLM_API_KEY: 'g1', GLM_API_KEY_2: 'g2', FREE_CHAIN_GLM_API_KEY: 'g3', KIMI_API_KEY: 'k', GLM_BASE_URL: 'https://x', CLOUDFLARE_API_TOKEN: 'dns' };
     applySwitchedOff(['glm'], env);

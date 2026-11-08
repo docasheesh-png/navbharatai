@@ -31,16 +31,18 @@ export function readPaidPolicy(raw: unknown): PaidBudgetPolicy | null {
   if (raw === undefined) return null;
   const p = raw as PaidBudgetPolicy & Raw;
   if (!p || p.kind !== 'paid_budget_policy' || p.version !== 1 || !nonnegativeInteger(p.revision) || p.revision < 1
+    || (p.uncappedRolloutVersion !== undefined && p.uncappedRolloutVersion !== 1)
+    || (p.budgetMode !== undefined && p.budgetMode !== 'capped' && p.budgetMode !== 'uncapped')
     || !validPaidCapNanoUsd(p.capNanoUsd) || !nonnegativeInteger(p.updatedAt)
     || (p.source !== 'deployment' && p.source !== 'admin' && p.source !== 'safety') || 'expiresAt' in p || 'expireAt' in p) {
     throw new FreeChainDataError('Malformed paid budget policy');
   }
   validTime(p.updatedAt);
-  return { kind: p.kind, version: p.version, revision: p.revision, capNanoUsd: p.capNanoUsd, updatedAt: p.updatedAt, source: p.source };
+  return { ...(p.uncappedRolloutVersion ? { uncappedRolloutVersion: p.uncappedRolloutVersion } : {}), ...(p.budgetMode ? { budgetMode: p.budgetMode } : {}), kind: p.kind, version: p.version, revision: p.revision, capNanoUsd: p.capNanoUsd, updatedAt: p.updatedAt, source: p.source };
 }
 /** Same atomic administrator notifications and retention rules as the original store writer. */
-export function writeSpendDay(tx: Transaction, db: Pick<Firestore, 'doc'>, day: SpendDay, capNanoUsd: number, now: number, adminEmails: () => string[]): void {
-  const reached = spendThresholds(day, capNanoUsd);
+export function writeSpendDay(tx: Transaction, db: Pick<Firestore, 'doc'>, day: SpendDay, capNanoUsd: number, now: number, adminEmails: () => string[], budgetMode?: 'capped' | 'uncapped'): void {
+  const reached = budgetMode === 'uncapped' ? [] : spendThresholds(day, capNanoUsd);
   const alertedPercent = [...day.alertedPercent, ...reached];
   const committed = checkedAdd(day.heldNanoUsd, day.spentNanoUsd);
   const recipients = [...new Set(adminEmails().map(email => email.trim().toLowerCase()).filter(Boolean))].slice(0, 50);

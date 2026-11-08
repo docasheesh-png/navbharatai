@@ -5,8 +5,8 @@ interface Publication { cap: number; promise: Promise<void>; retryAt?: number }
 const publications = new WeakMap<object, Publication>();
 export const DEPLOYMENT_BUDGET_OBSERVATION_TIMEOUT_MS = 5_000;
 
-function boundedObservation(observe: () => Promise<{ capNanoUsd: number; revision: number }>) {
-  return new Promise<{ capNanoUsd: number; revision: number }>((resolve, reject) => {
+function boundedObservation(observe: () => Promise<{ capNanoUsd: number; revision: number; budgetMode?: 'capped' | 'uncapped' }>) {
+  return new Promise<{ capNanoUsd: number; revision: number; budgetMode?: 'capped' | 'uncapped' }>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Budget observation timed out')),
       DEPLOYMENT_BUDGET_OBSERVATION_TIMEOUT_MS);
     // A timeout does not prove the write failed. A late lower limit remains valid;
@@ -24,14 +24,14 @@ function boundedObservation(observe: () => Promise<{ capNanoUsd: number; revisio
 export function publishDeploymentPaidLimit(
   database: object,
   cap: number,
-  observe: () => Promise<{ capNanoUsd: number; revision: number }>,
+  observe: () => Promise<{ capNanoUsd: number; revision: number; budgetMode?: 'capped' | 'uncapped' }>,
 ): Promise<void> {
   if (!validPaidCapNanoUsd(cap)) return Promise.reject(new Error('Invalid deployment budget'));
   const previous = publications.get(database);
   if (previous?.cap === cap && (previous.retryAt === undefined || Date.now() < previous.retryAt)) return previous.promise;
   const current: Publication = { cap, promise: Promise.resolve() };
   current.promise = boundedObservation(observe).then(policy => {
-    if (!validPaidCapNanoUsd(policy.capNanoUsd) || policy.capNanoUsd > cap
+    if (!validPaidCapNanoUsd(policy.capNanoUsd) || (policy.budgetMode !== 'uncapped' && policy.capNanoUsd > cap)
       || !Number.isSafeInteger(policy.revision) || policy.revision < 1) throw new Error('Invalid shared budget observation');
   }).catch(() => {
     current.retryAt = Date.now() + 1_000;

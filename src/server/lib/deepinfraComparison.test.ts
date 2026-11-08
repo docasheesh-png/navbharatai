@@ -45,6 +45,11 @@ describe('DeepInfra comparison orchestration', () => {
     expect(fake.reserve.mock.calls.reduce((n, call) => n + call[0].maxCostNanoUsd, 0)).toBeLessThan(2e9);
     expect(fake.reserve.mock.calls[0][0].maxCostNanoUsd).toBeGreaterThan(.06e9); // full context, not a guessed chars/token ratio
   });
+  it('uncapped shared authority remains available without inventing remaining dollars', async () => {
+    fake.snapshot.mockResolvedValue({ available: true, budgetMode: 'uncapped', remainingNanoUsd: null });
+    expect(await comparisonStatus()).toMatchObject({ budgetAvailable: true, remainingBudgetUsd: null });
+    expect((await runComparison(id, 'owner', new AbortController().signal, await tariff())).completed).toBe(true);
+  });
   it('saved replay returns the existing result with no new paid calls', async () => {
     const first = await runComparison(id, 'owner', new AbortController().signal, await tariff());
     fake.execute.mockClear(); fake.reserve.mockClear();

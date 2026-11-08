@@ -1,3 +1,4 @@
+import { readData, readPaidPolicy, FREE_CHAIN_COLLECTION } from './paidLedger';
 /**
  * NavBharatAI Chat — Final Master Plan (owner, 2026-10-24). Pure helpers + two tiny stores used by
  * runtime.ts. Provider reordering is opt-in; other features retain their kill switches.
@@ -166,9 +167,11 @@ export async function reserveMonthly(db: Firestore, capNanoUsd: number, amount: 
   try {
     const ref = monthRef(db, month);
     return await db.runTransaction(async tx => {
+      const policy = readPaidPolicy(readData(await tx.get(db.doc(`${FREE_CHAIN_COLLECTION}/paid_budget_policy`))));
       const d = (await tx.get(ref)).data() ?? {};
-      const held = Number.isSafeInteger(d.heldNanoUsd) ? d.heldNanoUsd : 0; const spent = Number.isSafeInteger(d.spentNanoUsd) ? d.spentNanoUsd : 0;
-      if (held + spent + amount > capNanoUsd) return null;
+      const held = d.heldNanoUsd ?? 0; const spent = d.spentNanoUsd ?? 0;
+      if (!Number.isSafeInteger(held) || !Number.isSafeInteger(spent)) return null;
+      if (!Number.isSafeInteger(amount) || amount <= 0 || held < 0 || spent < 0 || !Number.isSafeInteger(held + spent + amount) || (policy?.budgetMode !== 'uncapped' && held + spent + amount > capNanoUsd)) return null;
       tx.set(ref, { heldNanoUsd: held + amount, spentNanoUsd: spent, updatedAt: now }, { merge: true });
       return month;
     });

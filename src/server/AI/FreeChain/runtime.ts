@@ -160,7 +160,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       await persistFreeChainSample(db, trace, result.ok);
       return { ...result, latencyMs: trace.latencyMs, freeChain: trace };
     };
-    try { await publishDeploymentPaidLimit(db, cfg.paidCapNanoUsd, () => store.observePaidBudgetPolicy(cfg.paidCapNanoUsd)); }
+    try { await publishDeploymentPaidLimit(db, cfg.paidCapNanoUsd, () => store.observePaidBudgetPolicy(cfg.paidCapNanoUsd, Date.now(), false, true)); }
     catch { return done(empty('all-failed', input, adminDetailFor(input, 'paid-budget-publish-failed'))); }
     const explicitLanguage = input.context.replyLanguage ?? resolveChatReplyLanguage(input.message, input.history);
     const language = replyLanguageFor(input);
@@ -181,7 +181,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
     if (routed.route === 'quality' && !['teaching', 'medical'].includes(routed.reason) && cfg.features.throttle) {
       const spend = await store.spendSnapshot(Date.now()).catch(() => null);
       const cap = spend?.capNanoUsd ?? cfg.paidCapNanoUsd;
-      if (spend && cap > 0 && spend.committedNanoUsd * 100 >= cap * cfg.features.throttlePercent) routed = routeTurn(cfg, { message: input.message, history: input.history, teachingMode: input.context.teachingTurn, throttled: true });
+      if (spend && spend.budgetMode !== 'uncapped' && cap > 0 && spend.committedNanoUsd * 100 >= cap * cfg.features.throttlePercent) routed = routeTurn(cfg, { message: input.message, history: input.history, teachingMode: input.context.teachingTurn, throttled: true });
     }
     // CHEAPERINFERENCE=admin: free-chain ladder OFF for verified admins — only cheapinf answers.
     const exclusiveAdmin = !cfg.fixedOrder && input.context.isAdmin === true && cheaperInferenceMode() === 'admin';
@@ -223,7 +223,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
               if (!control || control.enabled === false || !cfg.enabled) return null;
               const month = cfg.features.monthlyCap ? await reserveMonthly(db, cfg.features.monthlyCapNanoUsd, maximumNanoUsd) : null;
               if (cfg.features.monthlyCap && !month) return null;
-              const hold = await store.reservePaid({ requestId: `${requestId}:mitrify`, uid: input.context.uid, maxCostNanoUsd: maximumNanoUsd, capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
+              const hold = await store.reservePaid({ uncappedRollout: true, requestId: `${requestId}:mitrify`, uid: input.context.uid, maxCostNanoUsd: maximumNanoUsd, capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
               if (hold && !hold.mayDispatch) throw new MitrifyError('MITRIFY_ADMISSION_UNCERTAIN');
               if (!hold) { if (month) await settleMonthly(db, month, maximumNanoUsd, 0); return null; }
               attempt.entered = true;
@@ -329,7 +329,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
             if (!month) { attempt.reason = 'monthly-budget'; continue; }
             monthHold = { month, amount };
           }
-          reservation = await store.reservePaid({ requestId: id === 'deepseek' ? requestId : `${requestId}:${id}`, uid: input.context.uid, maxCostNanoUsd: quote(cfg, 1048576, rung.maxOutputTokens, rung), capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
+          reservation = await store.reservePaid({ uncappedRollout: true, requestId: id === 'deepseek' ? requestId : `${requestId}:${id}`, uid: input.context.uid, maxCostNanoUsd: quote(cfg, 1048576, rung.maxOutputTokens, rung), capNanoUsd: cfg.paidCapNanoUsd, perUserLimit: cfg.paidPerUserDaily });
           if (!reservation?.mayDispatch) { attempt.reason = 'budget'; continue; }
         }
         if (controller.signal.aborted || Date.now() >= deadlineAt) { attempt.reason = 'aborted'; break; }
@@ -541,13 +541,13 @@ export async function controlFreeChain(action: FreeChainControlAction, actor: st
 export async function controlFreeChainBudget(value: FreeChainBudgetAction, actor: string): Promise<FreeChainBudgetResponse> {
   const action = readFreeChainBudgetAction(value);
   const cfg = freeChainConfig();
-  if (!action || Math.round(action.capUsd * 100) * 10_000_000 > cfg.paidCapNanoUsd) throw new Error('FREE_CHAIN_BUDGET_INVALID_INPUT');
+  if (!action || (action.budgetMode !== 'uncapped' && Math.round(action.capUsd * 100) * 10_000_000 > cfg.paidCapNanoUsd)) throw new Error('FREE_CHAIN_BUDGET_INVALID_INPUT');
   if (cfg.errors.includes('FREE_CHAIN_PAID_DAILY_CAP_USD')) throw new Error('FREE_CHAIN_BUDGET_UNAVAILABLE');
   const db = getServerDb(); if (!db) throw new Error('FREE_CHAIN_STORE_UNAVAILABLE');
-  const result = await new FreeChainStore(db).setPaidBudgetPolicy({ capNanoUsd: Math.round(action.capUsd * 100) * 10_000_000,
+  const result = await new FreeChainStore(db).setPaidBudgetPolicy({ ...(action.budgetMode ? { budgetMode: action.budgetMode } : {}), capNanoUsd: Math.round(action.capUsd * 100) * 10_000_000,
     expectedRevision: action.expectedRevision, actorUid: actor, reason: sanitizeText(action.reason, 500).slice(0, 500) });
   if (!result.ok) throw new Error(result.reason === 'conflict' ? 'FREE_CHAIN_BUDGET_CONFLICT' : result.reason === 'invalid_input' ? 'FREE_CHAIN_BUDGET_INVALID_INPUT' : 'FREE_CHAIN_BUDGET_UNAVAILABLE');
-  return { ok: true, capUsd: result.policy.capNanoUsd / 1e9, policyRevision: result.policy.revision };
+  return { ok: true, ...(result.policy.budgetMode ? { budgetMode: result.policy.budgetMode } : {}), capUsd: result.policy.capNanoUsd / 1e9, policyRevision: result.policy.revision };
 }
 export async function freeChainAdminView(): Promise<FreeChainAdminView> {
   const cfg = freeChainConfig();
@@ -567,7 +567,7 @@ export async function freeChainAdminView(): Promise<FreeChainAdminView> {
       usage: usage.available ? { ...usage.usage } : undefined, nextResetAt: usage.dailyResetAt, limits: { rpm: rung.rpm, rpd: rung.rpd, tpm: rung.tpm, tpd: rung.tpd, ...(rung.id === 'cloudflare' ? { neuronsPerDay: 10000 } : {}) }, circuit: getBreaker(`free-chat-chain:${rung.id}`).snapshot() };
   }));
   return { order: cfg.order, enabled: cfg.enabled, runtimeEnabled: control.enabled, rolloutPercent: control.rolloutPercent, allowListConfigured: cfg.allowUids.length > 0, providers,
-    paid: { policyState: spend.available ? 'initialized' : 'uninitialized', configuredCapUsd: cfg.errors.includes('FREE_CHAIN_PAID_DAILY_CAP_USD') ? null : cfg.paidCapNanoUsd / 1e9, capUsd: spend.capNanoUsd === null ? null : spend.capNanoUsd / 1e9, policyRevision: spend.policyRevision, reservedUsd: spend.available ? spend.heldNanoUsd / 1e9 : null, reportedUsd: spend.available ? spend.spentNanoUsd / 1e9 : null },
+    paid: { budgetMode: spend.budgetMode ?? 'capped', policyState: spend.available ? 'initialized' : 'uninitialized', configuredCapUsd: cfg.errors.includes('FREE_CHAIN_PAID_DAILY_CAP_USD') ? null : cfg.paidCapNanoUsd / 1e9, capUsd: spend.capNanoUsd === null ? null : spend.capNanoUsd / 1e9, policyRevision: spend.policyRevision, reservedUsd: spend.available ? spend.heldNanoUsd / 1e9 : null, reportedUsd: spend.available ? spend.spentNanoUsd / 1e9 : null },
 
     limitations: [
       (() => { const s = cheaperInferenceAdminStatus(); return `CheaperInference (${s.defaultModel} @ ${s.baseUrl}): mode=${s.mode}, key=${s.apiKeyConfigured ? 'configured' : 'missing'} (off|admin|all). Default off; admin = exclusive for verified admins; all = first paid rung for everyone.`.slice(0, 500); })(),

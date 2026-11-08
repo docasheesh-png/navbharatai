@@ -10,6 +10,8 @@ export const PAID_BUDGET_TIME_ZONE = 'Asia/Kolkata';
 export const SPEND_ALERT_THRESHOLDS = [50, 80, 100] as const;
 export type SpendAlertThreshold = typeof SPEND_ALERT_THRESHOLDS[number];
 export interface PaidReservationInput {
+  /** Internal deployment migration, never sourced from client request data. */
+  uncappedRollout?: boolean;
   /** A server-issued id identifying ONE physical call, stable across duplicate admission attempts. */
   requestId: string;
   uid: string;
@@ -37,6 +39,10 @@ export interface SpendDay extends DayWindow {
   alertedPercent: SpendAlertThreshold[];
 }
 export interface PaidBudgetPolicy {
+  /** Missing on older policies means capped. Uncapped never serializes Infinity. */
+  budgetMode?: 'capped' | 'uncapped';
+  /** One-time owner-requested uncapped rollout. Explicit later caps remain authoritative. */
+  uncappedRolloutVersion?: 1;
   kind: 'paid_budget_policy';
   version: 1;
   revision: number;
@@ -45,6 +51,7 @@ export interface PaidBudgetPolicy {
   source: 'deployment' | 'admin' | 'safety';
 }
 export interface PaidBudgetPolicyUpdateInput {
+  budgetMode?: 'capped' | 'uncapped';
   capNanoUsd: number;
   /** Zero means no policy exists yet. All existing policies start at revision one. */
   expectedRevision: number;
@@ -55,6 +62,7 @@ export interface PaidBudgetPolicyUpdateInput {
 export type PaidBudgetPolicyUpdateResult = { ok: true; policy: PaidBudgetPolicy }
   | { ok: false; reason: 'invalid_input' | 'conflict' | 'policy_corrupt' | 'unavailable'; policy?: PaidBudgetPolicy };
 export interface SpendSnapshot extends SpendDay {
+  budgetMode?: 'capped' | 'uncapped';
   available: boolean;
   committedNanoUsd: number;
   /** Null until a validated deployment or explicit administrator initializes the authority. */
@@ -85,7 +93,7 @@ export function validPaidCapNanoUsd(value: unknown): value is number {
 export function validatePaidInput(input: PaidReservationInput): void {
   if (!input || typeof input.requestId !== 'string' || !input.requestId.trim() || input.requestId.length > 512
     || typeof input.uid !== 'string' || !input.uid.trim() || input.uid.length > 512
-    || !validPaidCapNanoUsd(input.maxCostNanoUsd) || input.maxCostNanoUsd <= 0
+    || !nonnegativeInteger(input.maxCostNanoUsd) || input.maxCostNanoUsd <= 0
     || !validPaidCapNanoUsd(input.capNanoUsd ?? DEFAULT_PAID_CAP_NANO_USD)
     || !nonnegativeInteger(input.perUserLimit ?? DEFAULT_PAID_PER_USER_DAILY_LIMIT)) throw new Error('Invalid paid reservation');
 }

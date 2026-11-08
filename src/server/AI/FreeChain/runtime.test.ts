@@ -171,6 +171,7 @@ describe('free chat chain central dispatch', () => {
  set: (ref: any, value: unknown) => docs.set(ref.path, value),
  }) };
  const store = new real.FreeChainStore(database as any);
+ await store.setPaidBudgetPolicy({ capNanoUsd: cap * 1e9, expectedRevision: 0, actorUid: 'test-admin', reason: 'Explicit capped policy after uncapped rollout' });
  m.observeBudget.mockImplementation(value => store.observePaidBudgetPolicy(value));
  m.paid.mockImplementation(value => store.reservePaid(value));
  m.settle.mockImplementation((reservation, actual) => store.settlePaid(reservation, actual));
@@ -600,7 +601,7 @@ describe('admin budget view and explicit CAS mutation', () => {
  const action = { capUsd: 0.29, expectedRevision: 3, reason: 'Deliberate bounded budget change' };
  it('shows actual shared authority rather than a higher local deployment cap, without any observation write', async () => {
   vi.stubEnv('FREE_CHAIN_PAID_DAILY_CAP_USD', '10'); m.spend.mockResolvedValue({ available: true, capNanoUsd: 0, policyRevision: 9, heldNanoUsd: 3e9, spentNanoUsd: 1e9 });
-  expect((await freeChainAdminView()).paid).toEqual({ policyState: 'initialized', capUsd: 0, configuredCapUsd: 10, policyRevision: 9, reservedUsd: 3, reportedUsd: 1 });
+  expect((await freeChainAdminView()).paid).toEqual({ budgetMode: 'capped', policyState: 'initialized', capUsd: 0, configuredCapUsd: 10, policyRevision: 9, reservedUsd: 3, reportedUsd: 1 });
   expect(m.spend).toHaveBeenCalledWith(expect.any(Number)); expect(m.observeBudget).not.toHaveBeenCalled(); expect(m.setBudget).not.toHaveBeenCalled();
  });
  it('missing authority stays unavailable rather than using the configured allowance', async () => {
@@ -675,7 +676,7 @@ it.each(['0.000005', undefined])('uses the same supplier evidence for monthly se
  m.execute.mockImplementation(async(arg,cfg)=>({...await successful()(arg,cfg),supplierChargeUsd:amount}));
  let record:Record<string,number>={};const writes:Record<string,number>[]=[];
  const ref={collection:(_name:string)=>ref,doc:(_name:string)=>ref};
- const monthDb={collection:(_name:string)=>ref,runTransaction:async(fn:(tx:unknown)=>Promise<unknown>)=>fn({get:async()=>({data:()=>record}),set:(_ref:unknown,data:Record<string,number>)=>{record={...data};writes.push({...data});}})};
+ const monthDb={doc:(_name:string)=>({policy:true}),collection:(_name:string)=>ref,runTransaction:async(fn:(tx:unknown)=>Promise<unknown>)=>fn({get:async(r:any)=>({exists:!r.policy,data:()=>r.policy?undefined:record}),set:(_ref:unknown,data:Record<string,number>)=>{record={...data};writes.push({...data});}})};
  const cfg=freeChainConfig({FREE_CHAIN_ENABLED:'on',FREE_CHAIN_ROLLOUT_PERCENT:'100',FREE_CHAIN_ORDER:'cheapinf',CHEAPERINFERENCE:'admin',CHEAPERINFERENCE_API_KEY:'ci_live_test_key',FREE_CHAIN_MONTHLY_CAP_ENABLED:'on'});
  const result=await buildFreeChainRouter(monthDb as unknown as typeof db,cfg).route({...input(),context:{...input().context,isAdmin:true}});
  expect(result.ok).toBe(true);expect(writes).toHaveLength(2);

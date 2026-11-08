@@ -7,7 +7,7 @@ Baseline: `6dca2d474871aeafa615ebc683517f0de1e2c61b`. This is a narrow lifecycle
 ## Existing controls, not new savings
 
 - Ordinary idle pause: 5 minutes; current static snapshot: 3 minutes (`sandboxReaper.ts`, `sandboxLifetime.ts`).
-- Provider pause-on-timeout: 6 minutes, extended by a busy heartbeat every 2 minutes. Operation-driven extensions are throttled (`sandboxLifetime.ts`, `E2BActuator.ts`).
+- New create requests ask for pause-on-timeout: 6 minutes, extended by a busy heartbeat every 2 minutes. Operation-driven extensions are throttled (`sandboxLifetime.ts`, `E2BActuator.ts`). E2B connect/setTimeout do not convert a legacy kill-on-timeout lifecycle; the running fleet's policies are unverified. Do not disable application pauses or shorten timeouts based on an assumed provider policy.
 - Durable activity refresh: 5-minute throttle; orphan eligibility: three missed refreshes plus a 5-minute margin, normally 20 minutes. Eligibility is not a deadline or a proof that a VM is stopped.
 - Workspace reuse, durable resume, dependencies baked into templates and static preview snapshots already exist. No new warm pool is introduced.
 - Template workflow defaults: 2 vCPU/4 GiB for the ordinary builder, 4 vCPU/8 GiB for Android/full-stack. Actual production template and overrides were not read. Do not downsize builds without measured memory and latency headroom.
@@ -25,7 +25,7 @@ Baseline: `6dca2d474871aeafa615ebc683517f0de1e2c61b`. This is a narrow lifecycle
 ## Limits and open work
 
 1. **No global pause fence yet.** A remote instance can become active after the final durable read and before the provider pause. Metadata compare-and-set prevents false settlement; it cannot undo a pause or protect an in-flight remote command. Coordinated ownership across every create/resume/activity/pause path remains open. See `PHASE2_ALLOCATION_AUTHORITY_DESIGN.md`, which is a design, not an implemented allocation authority.
-2. The scan cursor is process-local. Restarts reset it, and a large history takes multiple sweeps. This does not promise complete account inventory or a 20-minute cleanup SLA. Provider pause-on-timeout remains the primary crash backstop.
+2. The scan cursor is process-local. Restarts reset it, and a large history takes multiple sweeps. This does not promise complete account inventory or a 20-minute cleanup SLA. Requested provider pause-on-timeout remains the intended crash backstop for new allocations; legacy policy is unverified.
 3. Unknown durable state is not permission to pause. Missing or mismatched records are skipped. The conditional heartbeat cannot repair a failed initial identity write or resurrect a deleted record.
 4. Existing session “idle” time is wall time outside measured sandbox operations; model wait and active previews can appear idle. It is not all waste. Reconcile provider usage with session reasons, active builds, previews, cold starts, resume latency, template resources and successful build counts before estimating savings.
 5. The cost rate is currently global while templates differ in size. Add immutable per-session resource/rate attribution before using it to justify sizing decisions.
@@ -39,3 +39,6 @@ Run all required workflow checks and the complete coverage suite on the PR head.
 Before production rollout, observe a representative baseline and validate active build, preview, pause/resume, concurrent return, database outage and recovery scenarios in a non-production deployment. Stop on changed files, missing data, duplicate allocation or worse build/preview outcomes. Compare compute cost per successful build and per active preview at similar workload mix. A 90% reduction is only a stretch target until measured.
 
 Rollback is a code revert. This patch adds no collection migration, deletes no durable record, and leaves existing timeouts and sizing unchanged. A revert would also restore the older destructive pause-failure escalation, so review that consequence before reverting indiscriminately.
+
+
+The five-page SDK list cannot verify legacy timeout policies: E2B SDK 2.50.0 omits lifecycle from list results. See [Running sandbox observation limits](E2B_RUNNING_OBSERVABILITY.md) for the actual-SDK contract test and honest unknown reporting.

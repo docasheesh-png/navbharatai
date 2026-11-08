@@ -6,6 +6,11 @@ export const NANO_USD = 1_000_000_000;
 export const OWNER_PAID_DAILY_CEILING_NANO_USD = 17 * NANO_USD;
 export const DEFAULT_PAID_CAP_NANO_USD = 10 * NANO_USD;
 export const DEFAULT_PAID_PER_USER_DAILY_LIMIT = 20;
+/**
+ * Chat fallback must not keep a second per-user counter under the signed-in 50/day
+ * and guest 10/day answer allowance. Provider rate and quota windows stay separate.
+ */
+export const CHAT_PAID_FALLBACK_PER_USER_LIMIT = Number.MAX_SAFE_INTEGER;
 export const PAID_BUDGET_TIME_ZONE = 'Asia/Kolkata';
 export const SPEND_ALERT_THRESHOLDS = [50, 80, 100] as const;
 export type SpendAlertThreshold = typeof SPEND_ALERT_THRESHOLDS[number];

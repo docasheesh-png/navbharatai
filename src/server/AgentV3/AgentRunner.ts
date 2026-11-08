@@ -244,6 +244,8 @@ export interface AgentRunnerOptions {
    * "✅ The app looks complete" before the train could accelerate or brake; 19 steps of real work followed.
    */
   requestGaps?: () => readonly string[];
+  /** Original-user scope binding for proposed mutations; reads and cancellation retain their own semantics. */
+  requestActionIssue?: (proposal: string, input?: Record<string, unknown>) => string | null;
   /**
    * Admin-only note from inside the loop (autopsy 95598899). Called when the loop declines to
    * override the model — the one decision that otherwise leaves no trace at all, since a turn that
@@ -932,6 +934,8 @@ export class AgentRunner {
     let noOpTurnsAfterFinal = 0;
     const loopGuardOn = loopGuardEnabled();
     const loopThreshold = loopGuardThreshold();
+    // The first readiness measurement belongs to the BUILD, not a resume-loop iteration or exit kind.
+    let readyMark: ReadyMark | null = null;
     try {
       // eslint-disable-next-line no-labels
       stepResumeLoop: for (;;) {
@@ -939,7 +943,6 @@ export class AgentRunner {
       // its answer nobody read. `readyMark` is the MEASUREMENT (when was this app first finished?) and
       // is recorded whether or not the model acts on the steer.
       const doneCfg = doneSignalConfig();
-      let readyMark: ReadyMark | null = null;
       let doneSignalled = false;
       /** A due done-check skipped because its step failed — the next clean step runs it (autopsy 6ae30b33). */
       let doneMissedAt: number | undefined;
@@ -953,14 +956,14 @@ export class AgentRunner {
         });
         await persist('stopped');
         events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
-        return { ok: false, summary, steps, usage, billedUsd: billed() };
+        return { ok: false, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
       };
       while (steps < stepCap) {
         if (admission?.exhausted && !this.opts.signal?.aborted) {
           try { this.opts.onNote?.({ code: 'SANDBOX_ADMISSION_EXHAUSTED', message: SANDBOX_ADMISSION_BLOCKED }); } catch { /* observation only */ }
           await persist('error');
           events.emit({ type: 'done', ok: false, summary: SANDBOX_ADMISSION_BLOCKED, ts: Date.now() });
-          return { ok: false, summary: SANDBOX_ADMISSION_BLOCKED, steps, usage, billedUsd: billed() };
+          return { ok: false, summary: SANDBOX_ADMISSION_BLOCKED, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
         }
         steps++;
 
@@ -989,7 +992,7 @@ export class AgentRunner {
           const summary = timedOutSummary(minutes, ending);
           await persist(builtSomething ? 'complete' : 'stopped');
           events.emit({ type: 'done', ok: builtSomething, summary, ts: Date.now() });
-          return { ok: builtSomething, summary, steps, usage, billedUsd: billed(), timedOut: true };
+          return { ok: builtSomething, summary, steps, usage, billedUsd: billed(), timedOut: true, ...(readyMark ? { readyAt: readyMark } : {}) };
         }
 
         // OUR STYLE PASS HAS A CAP OF ITS OWN (stylePassCap.ts, r6–r10 autopsy). It only ever starts on a build
@@ -1607,6 +1610,14 @@ export class AgentRunner {
             const r = await dispatchWithBudget({ ...tu, name: aliasTo });
             return { ...r, content: `${toolAliasNote(tu.name, aliasTo)}${r.content}` };
           }
+          if (this.opts.requestActionIssue && toolUseCouldProduceWork(tu)) {
+            const issue = this.opts.requestActionIssue(turn.text ?? '', tu.input);
+            if (issue) {
+              try { this.opts.onNote?.({ code: 'REQUEST_SCOPE_REFUSED', message: issue }); } catch { /* observation only */ }
+              events.emit({ type: 'narration', agent: agentRole, text: issue, ts: Date.now() });
+              return { tool_use_id: tu.id, content: issue, is_error: true };
+            }
+          }
           // 🔑 A TOOL CALL THE MODEL ASKED FOR IS MARKED AS ONE (modelToolWrites.ts, autopsy 9c612cdb). Every write
           // it makes is then the model's by evidence, so a platform step that named no pass can no longer be
           // reported as "the build loop". A repair the platform started is marked as that, not as the build.
@@ -1765,7 +1776,7 @@ export class AgentRunner {
             const summary = 'Stopped this run: after being told twice to stop, the model kept sending steps that do '
               + `nothing (${noOpTurnsAfterFinal} more turns of empty, refused or proven unchanged calls). Nothing further would have changed.`;
             events.emit({ type: 'narration', agent: agentRole, text: `⚠️ ${summary}`, ts: Date.now() });
-            return { ok: false, summary, steps, usage, billedUsd: billed() };
+            return { ok: false, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
           }
         }
         // TIME BUDGET — the one thing the model was never told (see `budgetStagesSent` above). Rides the
@@ -2060,7 +2071,7 @@ export class AgentRunner {
       const message = err instanceof Error ? err.message : String(err);
       await persist('error');
       events.emit({ type: 'error', message, ts: Date.now() });
-      return { ok: false, summary: `Error: ${message}`, steps, usage, billedUsd: billed() };
+      return { ok: false, summary: `Error: ${message}`, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
     }
   }
 }

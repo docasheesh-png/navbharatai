@@ -70,7 +70,7 @@ import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContrac
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { isInertCommand } from '../AgentV3/inertCommand';
-import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp, seedableScaffoldFor, chipExtensionTextOf, templateOnlyBuild } from '../AgentV3/goldenScaffolds/registry';
+import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp, seedableScaffoldFor, chipExtensionTextOf, templateOnlyBuild, goldenQuestionReviewIssue } from '../AgentV3/goldenScaffolds/registry';
 import { parseKeyPool } from '../lib/keyPool';
 import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
@@ -16106,7 +16106,11 @@ async function noteBuildOutcome(
       // is handed the OBJECT and builds its line when it serializes — never from a number read mid-build.
       const todoOnlyTally = { turns: 0, latencyMs: 0, firstInRun: 0 };
       buildDiag.setTodoOnlyTally(todoOnlyTally);
+      // A real later team message makes this a customised request; never let the initial chip overrule it.
+      const requestActionIssue = (proposal: string, input?: Record<string, unknown>) => intent === 'new_build' && !isEditMode && !rb.lastSteerAt
+        ? goldenQuestionReviewIssue(originalPrompt, proposal, input) : null;
       const subAgentDeps: SubAgentDeps = {
+        requestActionIssue,
         sandboxAdmissionBudget,
         replyVoice: () => rb.replyVoice ?? voiceOf(originalPrompt),
         ignoreRules: () => ignoreRulesForBuild,
@@ -17545,6 +17549,7 @@ async function noteBuildOutcome(
         // are built. The done signal must not tell a module turn it may stop (autopsy 50378049).
         projectModule: () => projectModuleRef?.name ?? null,
         // A game is not "complete" while a feature its contract names is missing from its own code (autopsy 61279465).
+        requestActionIssue,
         requestGaps: () => {
           const c = requestContractRef.contract;
           if (!c || c.requiredFeatures.length === 0) return [];
@@ -18704,9 +18709,9 @@ async function noteBuildOutcome(
               buildDiag.record({ phase: 'build', severity: 'info', code: 'GOLDEN_SCAFFOLD', message: `Pre-seeded the tested "${golden.label}" template (${Object.keys(goldenFiles).length} files) — the builder verifies & customizes instead of writing from scratch.`, autoResolved: true });
               events.emit({ type: 'narration', agent: 'architect', text: `⚡ Starting from NavBharatAI's tested "${golden.label}" app template — verifying and customizing it for you.`, ts: Date.now() });
               // HANDOFF FRAMING (same discipline as the fast-lane salvage below): the builder must treat the
-              // scaffold as ITS OWN work to verify — never alien clutter to re-plan or rewrite. Tier-aware, and the
-              // template's recipe instructions ride along (goldenBuildPrompt, autopsy 303e8a6f).
-              buildPrompt = goldenBuildPrompt(golden, buildPrompt, chipExtensionTextOf(prompt));
+              // scaffold as a concrete saved foundation, never alien clutter. An admitted engine still authors
+              // the requested code itself; verified-only ownership and recipe instructions ride along (goldenBuildPrompt, autopsy 303e8a6f).
+              buildPrompt = goldenBuildPrompt(golden, buildPrompt, chipExtensionTextOf(prompt), { mustAuthorCode: surplusAdmissionDiag?.code === 'SURPLUS_ADMITTED' });
             }
           }
         } catch (seedErr) {

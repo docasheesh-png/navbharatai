@@ -49,3 +49,7 @@ it('bounds a stalled observation and never treats a late write as permission', a
   await expect(publishDeploymentPaidLimit(database, 0, async () => ({ capNanoUsd: 0, revision: 2 }))).resolves.toBeUndefined();
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it('an explicitly uncapped durable authority survives lower standby deployment observations', async () => {
+  await expect(publishDeploymentPaidLimit({}, 0, async () => ({ capNanoUsd: 10e9, revision: 2, budgetMode: 'uncapped' }))).resolves.toBeUndefined();
+});

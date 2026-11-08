@@ -826,7 +826,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
             // that one now names the real cause (an empty balance vs a used-up daily allowance). It no
             // longer offers the Professional Pass, which was removed on 2026-08-10 and could never be
             // bought in the first place.
-            : res.status === 402 ? 'You have used your free messages for today, or your balance is empty. Add credit to carry on.'
+            : res.status === 402 ? 'Your balance is empty, or this request is not covered. Add credit to carry on.'
             : res.status === 429 ? 'Doctor AI is busy right now — please try again in a few seconds.'
             : 'Doctor AI could not respond right now. Please try again in a moment.');
         setMessages(prev => [...prev, {

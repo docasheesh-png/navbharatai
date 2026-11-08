@@ -31,6 +31,8 @@
 /** One sandbox as E2B reports it. Only the field this module judges on is required. */
 export interface ListedSandbox {
   state?: string | null;
+  /** Only explicit provider-reported timeout actions count; absence is unknown. */
+  lifecycle?: { onTimeout?: unknown } | null;
 }
 
 /**
@@ -55,7 +57,19 @@ export const MAX_SANDBOX_PAGES = 5;
 /** The state that actually costs money. A paused sandbox bills no compute; only a running one does. */
 export const BILLING_STATE = 'running';
 
+export interface RunningSandboxLifecycle {
+  scope: 'configured provider account';
+  population: 'running only';
+  /** Completion time of this bounded read, not a transactionally consistent fleet snapshot. */
+  observedAt: string;
+  partial: boolean;
+  pauseOnTimeout: number | null;
+  killOnTimeout: number | null;
+  unknown: number | null;
+}
+
 export interface LiveSandboxCount {
+  lifecycle?: RunningSandboxLifecycle;
   /** Machines E2B says are RUNNING right now, or null when we could not ask. */
   running: number | null;
   /**
@@ -78,29 +92,48 @@ export interface LiveSandboxCount {
 export async function countRunningSandboxes(
   fetchPage: SandboxPageFetcher | null | undefined,
 ): Promise<LiveSandboxCount> {
+  let pauseOnTimeout = 0;
+  let killOnTimeout = 0;
+  let unknown = 0;
+  const lifecycle = (partial: boolean, failed = false): RunningSandboxLifecycle => ({
+    scope: 'configured provider account',
+    population: 'running only',
+    observedAt: new Date().toISOString(),
+    partial,
+    pauseOnTimeout: failed ? null : pauseOnTimeout,
+    killOnTimeout: failed ? null : killOnTimeout,
+    unknown: failed ? null : unknown,
+  });
   if (typeof fetchPage !== 'function') {
-    return { running: null, truncated: false, reason: 'No cloud sandbox provider is configured on this deployment.' };
+    return { running: null, truncated: false, lifecycle: lifecycle(true, true), reason: 'No cloud sandbox provider is configured on this deployment.' };
   }
   let running = 0;
   let token: string | undefined;
   try {
     for (let page = 0; page < MAX_SANDBOX_PAGES; page++) {
       const res = await fetchPage(token);
-      const items = Array.isArray(res?.items) ? res.items : [];
+      if (!Array.isArray(res?.items)) throw new Error('Invalid provider page');
+      const items = res.items;
       for (const s of items) {
-        if (String(s?.state ?? '').trim().toLowerCase() === BILLING_STATE) running++;
+        if (String(s?.state ?? '').trim().toLowerCase() !== BILLING_STATE) continue;
+        running++;
+        if (s?.lifecycle?.onTimeout === 'pause') pauseOnTimeout++;
+        else if (s?.lifecycle?.onTimeout === 'kill') killOnTimeout++;
+        else unknown++;
       }
       const next = res?.nextToken;
-      if (!next) return { running, truncated: false };
+      if (!next) return { running, truncated: false, lifecycle: lifecycle(false) };
       token = next;
     }
     // Ran out of pages before running out of sandboxes: the number is a floor, and says so.
-    return { running, truncated: true };
-  } catch (err) {
+    return { running, truncated: true, lifecycle: lifecycle(true) };
+  } catch {
     return {
       running: null,
       truncated: false,
-      reason: err instanceof Error ? `Could not reach the sandbox provider: ${err.message}` : 'Could not reach the sandbox provider.',
+      lifecycle: lifecycle(true, true),
+      // Provider errors can contain credentials, URLs or identifiers. Never return their raw text.
+      reason: 'Could not read the sandbox provider; running machines and timeout policies are unknown.',
     };
   }
 }
@@ -111,7 +144,16 @@ export async function countRunningSandboxes(
  */
 export function liveSandboxNote(count: LiveSandboxCount): string {
   if (count.running === null) return count.reason || 'Could not ask the sandbox provider — this is unknown, not zero.';
-  if (count.running === 0) return 'Nothing running — no machine is billing right now.';
+  if (count.running === 0 && !count.truncated) return 'Nothing running in the configured provider account — no machine is billing compute right now.';
   const base = `Running now — billed by the minute${count.truncated ? ' (at least; more pages not read)' : ''}`;
   return base;
+}
+
+/** Admin-only explanation; timeout policy is not a promise of recovery or an inventory of paused VMs. */
+export function runningSandboxLifecycleNote(count: LiveSandboxCount): string {
+  const summary = count.lifecycle;
+  const scope = 'Configured provider account; running VMs only. Paused VMs are not inventoried.';
+  if (!summary || count.running === null) return `${scope} Timeout policies unknown: no successful reading.`;
+  const coverage = summary.partial ? 'Partial reading; counts are lower bounds.' : 'Bounded listing completed; not an atomic snapshot.';
+  return `${scope} ${coverage} Pause on timeout: ${summary.pauseOnTimeout}; kill on timeout: ${summary.killOnTimeout}; unknown policy: ${summary.unknown}. Observed at ${summary.observedAt}. Policy does not guarantee workspace recovery.`;
 }

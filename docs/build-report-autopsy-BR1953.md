@@ -14,7 +14,7 @@ Prepared 9 November 2026 (IST). BR1953 ONLY; next is BR1954 only after the paren
 
 Historical/inspection findings: **0 self-healed,0 workaround,3 skipped,8 shipped-imperfect/broken,1 struggle =12**. D03–D08 are executable defects discovered in the current seeded component; the historical run is NOT claimed to have exercised those edges. Review safeguards are separate: **2 skipped,5 broken,1 struggle =8**, all introduced/repaired before this PR is handed off, never attributed to the historical app.
 
-**State:**10 report/inspection rows fixed in this branch,1 already fixed by merged #4123,1 blocked historical-source attribution;8 review rows fixed in this branch. Nine prevention classes. Pending parent review/merge and final exact-head gate; no whole-report claim that every past app defect is repaired.
+**State:**10 report/inspection rows fixed in this branch,1 already fixed by merged #4123,1 blocked historical-source attribution;8 review rows fixed in this branch. The18 branch prevention rows comprise10 report/inspection rows plus8 review-only safeguards, NOT18 historical failures. Nine prevention classes. Pending parent merge and final exact-head metadata gate; no whole-report claim that every past app defect is repaired.
 
 | Item / ID | Bucket | Evidence | Problem | Root/class and sibling treatment | Disposition |
 |---|---|---|---|---|---|
@@ -181,3 +181,9 @@ Every retained issue is accounted for below. Ordinary measurements/control-flow 
 | I090 | PROVIDER_TIME_WASTED | Provider time: no engine wasted any time this build (a call stopped by our own clock is not counted here, nor one the user stopped — see PROVIDER_FALLBACK / LLM_CALL_BUDGET_ENDED /… | Zero provider-error waste does not mean zero semantic/economic struggle; D02. |
 | I091 | STRICT_TRIAL | TypeScript mode: loose-new | Loose-new is reported explicitly, not strict coverage. |
 | I092 | TODO_ONLY_TURNS | No model turn while the app was generated was spent only on updating the plan (update_todo with no other tool call). | D10 |
+
+## PR and independent review checkpoint
+
+PR [#4125](https://github.com/docasheesh-png/navbharatai/pull/4125), code head `aeb95f14ef9b0991fe2d179a247511c9048c0088`: independent read-only review PASS, no files changed by the reviewer. The full current workflow-equivalent code-head gate passed:3235 suites;48948 tests passed,95 existing skips,zero failures; every other required build/test gate and all6 private checksum-locked demo-emulator drills passed. This is local evidence, not a hosted-CI green claim.
+
+This PR-number/ledger-label commit changes documentation only. Its complete exact-head gate is rerun before the final handoff; final hash-bound evidence is `/workspace/br-autopsy-1953/verification-manifest.json` and the PR body, rather than a self-referential commit SHA embedded here. New fixed rows remain pending merge; Q-2439 remains historical-source blocked. No server autopsy state was written.

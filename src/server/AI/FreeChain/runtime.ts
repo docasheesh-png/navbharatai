@@ -160,8 +160,12 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       await persistFreeChainSample(db, trace, result.ok);
       return { ...result, latencyMs: trace.latencyMs, freeChain: trace };
     };
+    let paidBudgetReady = true;
     try { await publishDeploymentPaidLimit(db, cfg.paidCapNanoUsd, () => store.observePaidBudgetPolicy(cfg.paidCapNanoUsd, Date.now(), false, true)); }
-    catch { return done(empty('all-failed', input, adminDetailFor(input, 'paid-budget-publish-failed'))); }
+    catch { paidBudgetReady = false; warnOnce('paid-budget-publish-failed'); }
+    // Failure of paid authority cannot authorize paid work or disable independently
+    // reviewed free providers. Their ordinary quota/safety gates remain.
+
     const explicitLanguage = input.context.replyLanguage ?? resolveChatReplyLanguage(input.message, input.history);
     const language = replyLanguageFor(input);
     const languageInstruction = explicitLanguage ? chatReplyLanguageInstruction(explicitLanguage)
@@ -246,6 +250,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       const attempt = { provider: id, model: rung.model, reason: 'pending', entered: false }; trace.attempts.push(attempt);
       // Bounded latency: at most cfg.maxAttempts PHYSICAL calls per turn; skipped rungs are free.
       if (trace.attempts.filter(a => a.entered).length >= cfg.maxAttempts) { attempt.reason = 'max-attempts'; break; }
+      if (!paidBudgetReady && isPaidRung(id)) { attempt.reason = 'paid-budget-unavailable'; continue; }
       const reason = rungReason(rung, cfg, input); if (reason) { attempt.reason = reason; continue; }
       const prepared = trimForRung(input.message, history, system, rung.maxInputTokens);
       if (!prepared) { attempt.reason = 'context-capacity'; continue; }

@@ -27,6 +27,9 @@ async function untilCancelled<T>(work: () => T | Promise<T>, signal: AbortSignal
 
 const mitrifyModel = (env: Env) => env.MITRIFY_MODEL?.trim() || 'mitrify/auto-cheap';
 
+/** Exact opt-in spelling is part of the existing reviewed chain protocol. */
+export function mitrifyChainEnabled(env: Env = process.env): boolean { return env.MITRIFY_CHAIN_ENABLED === '1'; }
+
 /** Classification alone neither authorizes nor prohibits dispatch: exact server review and monetary admission are required. */
 export function mitrifyChainStatus(_dataClass: string, capability: string, env: Env = process.env) {
   return { model: mitrifyModel(env), eligible: false as const, reason: env.MITRIFY_CHAIN_ENABLED !== '1' ? 'mitrify-chain-disabled'
@@ -67,6 +70,25 @@ function reviewedChainData(a: any, privateTurn: boolean, healthTurn: boolean): b
     && ['reviewRef', 'disclosureAuthorityRef', 'processorTermsRef', 'protectionsRef'].every(key => reference(review[key]));
 }
 
+/** Read-only eligibility, not a dispatch permission. The transport still claims and
+ * revalidates the exact review transactionally immediately before the HTTP call. */
+export function mitrifyReviewedApprovalCeiling(value: unknown, input: {
+  uid: string; binding: ReturnType<typeof mitrifyChainBinding>; privateTurn: boolean; healthTurn: boolean; now: number;
+}): number | undefined {
+  const a = value as any;
+    if (!a || !reviewedChainData(a, input.privateTurn, input.healthTurn) || a.uid !== input.uid || a.payloadDigest !== input.binding.payloadDigest
+      || (a.gateway?.baseURL !== input.binding.gateway.baseURL || a.gateway?.model !== input.binding.gateway.model || a.gateway?.credentialBinding !== input.binding.gateway.credentialBinding) || a.state !== 'approved'
+      || !Number.isSafeInteger(a.reviewedAtMs) || a.reviewedAtMs > input.now || !Number.isSafeInteger(a.expiresAtMs)
+      || a.expiresAtMs <= input.now || a.expiresAtMs > a.reviewedAtMs + 3600000
+      || a.supplierContract?.currency !== 'USD' || a.supplierContract?.hardCeilingEnforced !== true
+      || a.supplierContract?.includesInternalRetriesFailoversAndFees !== true
+      || typeof a.supplierContract?.evidenceRef !== 'string' || !a.supplierContract.evidenceRef.trim()
+      || !Number.isSafeInteger(a.supplierContract?.perHttpRequestCeilingNanoUsd)
+      || a.supplierContract.perHttpRequestCeilingNanoUsd <= 0
+      || !Number.isSafeInteger(a.supplierContract.perHttpRequestCeilingNanoUsd * 4)) return undefined;
+  return a.supplierContract.perHttpRequestCeilingNanoUsd;
+}
+
 /** Reads an independently reviewed approval, then owns one durable dispatch claim.
  * The supplier contract must enforce the stated ceiling PER HTTP REQUEST including
  * all its internal retries/failovers/fees. Four transport attempts are reserved in
@@ -75,7 +97,7 @@ function reviewedChainData(a: any, privateTurn: boolean, healthTurn: boolean): b
  */
 export async function runApprovedMitrifyChain(options: {
   db: Firestore; uid: string; body: Record<string, unknown>; privateTurn: boolean; healthTurn: boolean;
-  requestId: string; signal: AbortSignal; maxHttpAttempts?: number; onChunk?: (text: string) => void; revalidate?: () => Promise<void>;
+  requestId: string; signal: AbortSignal; maxHttpAttempts?: number; onChunk?: (text: string) => void | Promise<void>; revalidate?: () => Promise<void>; beforeHttpDispatch?: () => void;
   reserve: (maximumNanoUsd: number) => Promise<null | { releaseUndispatched(): Promise<void> }>;
 }, env: Env = process.env, log: Log = defaultLog): Promise<
   { kind: 'skipped'; reason: string } |
@@ -102,19 +124,11 @@ export async function runApprovedMitrifyChain(options: {
   const now = Date.now();
   const approval = await untilCancelled(() => options.db.runTransaction(async tx => {
     const a = (await tx.get(ref)).data();
-    if (!a || !reviewedChainData(a, privateTurn, healthTurn) || a.uid !== options.uid || a.payloadDigest !== binding.payloadDigest
-      || (a.gateway?.baseURL !== binding.gateway.baseURL || a.gateway?.model !== binding.gateway.model || a.gateway?.credentialBinding !== binding.gateway.credentialBinding) || a.state !== 'approved'
-      || !Number.isSafeInteger(a.reviewedAtMs) || a.reviewedAtMs > now || !Number.isSafeInteger(a.expiresAtMs)
-      || a.expiresAtMs <= now || a.expiresAtMs > a.reviewedAtMs + 3600000
-      || a.supplierContract?.currency !== 'USD' || a.supplierContract?.hardCeilingEnforced !== true
-      || a.supplierContract?.includesInternalRetriesFailoversAndFees !== true
-      || typeof a.supplierContract?.evidenceRef !== 'string' || !a.supplierContract.evidenceRef.trim()
-      || !Number.isSafeInteger(a.supplierContract?.perHttpRequestCeilingNanoUsd)
-      || a.supplierContract.perHttpRequestCeilingNanoUsd <= 0
-      || !Number.isSafeInteger(a.supplierContract.perHttpRequestCeilingNanoUsd * 4)) return null;
+    const perHttpCeiling = mitrifyReviewedApprovalCeiling(a, { uid: options.uid, binding, privateTurn, healthTurn, now });
+    if (!a || perHttpCeiling === undefined) return null;
     options.signal.throwIfAborted();
     tx.update(ref, { state: 'claimed', requestId: options.requestId, claimedAtMs: now, attemptsStarted: 0, maxHttpAttempts });
-    return { maximumNanoUsd: a.supplierContract.perHttpRequestCeilingNanoUsd * maxHttpAttempts, expiresAtMs: a.expiresAtMs, policyDigest: policyDigest(a) };
+    return { maximumNanoUsd: perHttpCeiling * maxHttpAttempts, expiresAtMs: a.expiresAtMs, policyDigest: policyDigest(a) };
   }), options.signal).catch(() => { throw new MitrifyError(options.signal.aborted ? 'MITRIFY_CANCELLED' : 'MITRIFY_ADMISSION_FAILED'); });
   if (!approval) return { kind: 'skipped', reason: 'mitrify-data-approval-or-ceiling-unavailable' };
   let hold: Awaited<ReturnType<typeof options.reserve>> = null;
@@ -124,14 +138,14 @@ export async function runApprovedMitrifyChain(options: {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(0, approval.expiresAtMs - Date.now()));
   const signal = AbortSignal.any([options.signal, controller.signal]);
-  const inspect = (data: any) => {
+  const inspect = async (data: any) => {
     const choice = data?.choices?.[0];
     if (choice?.delta?.tool_calls || choice?.delta?.function_call || choice?.message?.tool_calls || choice?.message?.function_call
       || choice?.delta?.refusal || choice?.message?.refusal || ['content_filter', 'safety', 'sensitive'].includes(choice?.finish_reason)) throw new MitrifyError('MITRIFY_POLICY_BLOCKED', 0, !!content);
     if (finished && (choice?.delta?.content || choice?.message?.content)) throw new MitrifyError('MITRIFY_INCOMPLETE_STREAM', 0, !!content);
     if (choice?.finish_reason === 'stop') finished = true;
     const text = choice?.delta?.content ?? choice?.message?.content;
-    if (typeof text === 'string') { content += text; options.onChunk?.(text); }
+    if (typeof text === 'string') { content += text; await options.onChunk?.(text); }
     const u = data?.usage;
     if (Number.isSafeInteger(u?.prompt_tokens) && u.prompt_tokens >= 0 && Number.isSafeInteger(u?.completion_tokens) && u.completion_tokens >= 0) usage = { inputTokens: u.prompt_tokens, outputTokens: u.completion_tokens };
     if (choice?.finish_reason === 'length') throw new MitrifyError('MITRIFY_INCOMPLETE_STREAM', 0, !!content);
@@ -154,14 +168,16 @@ export async function runApprovedMitrifyChain(options: {
           signal.throwIfAborted(); tx.update(ref, { attemptsStarted: a.attemptsStarted + 1 });
         }), signal);
         // Conservatively retain the hold if cancellation/crash races the actual fetch.
+        options.beforeHttpDispatch?.();
+        signal.throwIfAborted();
         entered = true;
       },
       ...(body.stream === true ? { onChunk: (wire: Uint8Array) => {
         const payload = new TextDecoder().decode(wire).split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n');
-        if (payload && payload !== '[DONE]') inspect(JSON.parse(payload));
+        if (payload && payload !== '[DONE]') return inspect(JSON.parse(payload));
       } } : {}),
     });
-    if (body.stream !== true) inspect(result.data);
+    if (body.stream !== true) await inspect(result.data);
     signal.throwIfAborted();
     if (!content.trim()) throw new MitrifyError('MITRIFY_INVALID_RESPONSE');
     if (!finished) throw new MitrifyError('MITRIFY_INCOMPLETE_STREAM', 0, true);

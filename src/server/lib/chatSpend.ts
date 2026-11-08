@@ -1,4 +1,4 @@
-import { isGatewayFreePricingProof } from '../AI/InferenceGateway/pricingEvidence';
+import { readGatewayMeteredPricingProof, isGatewayFreePricingProof } from '../AI/InferenceGateway/pricingEvidence';
 import type { AIProviderResponse } from '../AI/Router/ProviderTypes';
 import { isVerifiedFreeProof } from '../AI/LiveRegistry/proof';
 import type { FreeTextResult } from '../AI/LiveRegistry/dispatcher';
@@ -38,7 +38,7 @@ export interface ChatTurnUsage {
 
 export interface ChatTurnCost {
   /** Gateway liability lives in its separate ledger; unknown is never an invoice cost. */
-  costBasis?: 'verified-free' | 'unpriced-gateway';
+  costBasis?: 'verified-free' | 'metered-gateway' | 'unpriced-gateway';
   tokensMeasured?: boolean;
   /** Some gateway turns have no exact cost; known legacy amounts remain additive. */
   costIncomplete?: boolean;
@@ -80,6 +80,13 @@ export function chatTurnCost(usage: ChatTurnUsage | null | undefined, usdInr: nu
   if (isGatewayFreePricingProof(usage.gatewayPricingProof, { provider: usage.provider, model: usage.model,
     logicalRequestId: usage.inferenceGateway?.logicalRequestId, usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } })) {
     return { ...ZERO, measured: true, inputTokens, outputTokens, costBasis: 'verified-free', tokensMeasured: true };
+  }
+  const metered = readGatewayMeteredPricingProof(usage.gatewayPricingProof, { provider: usage.provider, model: usage.model,
+    logicalRequestId: usage.inferenceGateway?.logicalRequestId, usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } });
+  if (metered) {
+    const realUsd = metered.tariffNanoUsd / 1e9; const billedUsd = tieredMarkupUsd(realUsd);
+    return { measured: true, costBasis: 'metered-gateway', tokensMeasured: true, realUsd, billedUsd,
+      billedInr: Math.round(billedUsd * (Number.isFinite(usdInr) && usdInr > 0 ? usdInr : 0) * 100) / 100, inputTokens, outputTokens };
   }
   if (usage.inferenceGateway !== undefined || usage.gatewayPricingProof !== undefined) {
     // A conservative reservation/ceiling is not actual invoice spend. Preserve tokens,
@@ -149,6 +156,7 @@ export function sumChatTurnCosts(costs: ChatTurnCost[], usdInr: number): ChatTur
   const rupees = Number.isFinite(usdInr) && usdInr > 0 ? usdInr : 0;
   return {
     measured: true,
+    ...(list.some(c => c.costBasis === 'metered-gateway') ? { costBasis: 'metered-gateway' as const } : {}),
     ...(list.some(c => c.costBasis === 'unpriced-gateway' || c.costIncomplete)
       ? { costIncomplete: true, costBasis: 'unpriced-gateway' as const, tokensMeasured: true } : {}),
     realUsd,

@@ -39,7 +39,6 @@ describe('gateway funding boundary resolution, not spend authorization', () => {
   });
 
   it.each([
-    ['existing-professional', 'professional-predispatch-reservation'],
     ['existing-tenant', 'tenant-predispatch-reservation'],
     ['funded-builder', 'builder-predispatch-reservation'],
     ['tenant-byok', 'byok-account-authorization'],
@@ -54,13 +53,18 @@ describe('gateway funding boundary resolution, not spend authorization', () => {
       .toEqual(resolveGatewayFundingAuthority(claimed, 'verified-user'));
   });
 
-  it.each(['builder', 'developer-api', 'published-app', 'image-generation', 'image-enhancement', 'doctor', 'sda'] as const)(
+  it.each(['builder', 'developer-api', 'published-app', 'image-generation', 'image-enhancement'] as const)(
     'does not divert %s to the platform fallback pool even when mislabeled', surface => {
       expect(resolveGatewayFundingAuthority(context({ surface }), 'verified-user')).toEqual({
         kind: 'unavailable', reason: 'funding-integration-unavailable', missingAuthority: 'surface-funding-mismatch',
       });
     },
   );
+
+  it.each(['professional', 'doctor', 'sda', 'developer-api'] as const)('%s requires a separate reviewed supplier authority, never wallet balance', surface => {
+    expect(resolveGatewayFundingAuthority(context({ surface, funding: 'existing-professional' }), 'verified-user')).toEqual({ kind: 'platform-authority-required' });
+    expect(resolveGatewayFundingAuthority(context({ surface, funding: 'existing-professional' }), null)).toEqual({ kind: 'unavailable', reason: 'context-unverified' });
+  });
 
   it('fails closed for unknown funding boundaries and future surfaces', () => {
     expect(resolveGatewayFundingAuthority(context({ funding: 'new-wallet' as GatewayFundingBoundary }), 'verified-user')).toEqual({

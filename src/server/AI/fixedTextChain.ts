@@ -8,7 +8,7 @@ export function fixedTextChainEnabled(env: Record<string, string | undefined> = 
   return policy === 'fixed-v1';
 }
 export function fixedTextChainScope(surface: string, capability: string): boolean {
-  return ['chat', 'professional', 'doctor', 'sda'].includes(surface) && capability === 'text';
+  return ['chat', 'professional', 'doctor', 'sda', 'developer-api'].includes(surface) && capability === 'text';
 }
 /** Exact models requested by the owner; this mapping asserts no capability, price or approval. */
 export function fixedTextChainRank(profile: { providerId: string; modelId: string; charging: string }): number | undefined {
@@ -20,9 +20,9 @@ export function fixedTextChainRank(profile: { providerId: string; modelId: strin
     if (provider === 'CLOUDFLARE' && model === '@cf/meta/llama-3.3-70b-instruct-fp8-fast') return 3;
     if (provider === 'OPENROUTER') return 4;
   }
-  // Mitrify (position 5) has no complete-payload provenance or monetary admission bridge.
-  // It must never be inferred free or dispatched through a generic OpenAI adapter.
+  // Opaque Mitrify alias is bound by its reviewed dedicated transport, never inferred free.
   if (profile.charging !== 'metered') return undefined;
+  if (provider === 'MITRIFY') return 5;
   if (provider === 'CHEAPERINFERENCE' && ['beam', 'beam-1.0-501b-a23b'].includes(model)) return 6;
   if (provider === 'DEEPINFRA' && model === 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo') return 7;
   if (provider === 'DEEPINFRA' && model === 'deepseek-ai/DeepSeek-V4-Flash-0731') return 8;

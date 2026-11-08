@@ -522,12 +522,12 @@ describe('fixed text chain uses approved candidates in owner order', () => {
   const models = [
     ['GLM', 'glm-4.5-flash'], ['GLM', 'glm-4.7-flash'], ['GROQ', 'openai/gpt-oss-120b'],
     ['CLOUDFLARE', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'], ['OPENROUTER', 'unknown-but-reviewed-free'],
-    ['CHEAPERINFERENCE', 'beam'], ['DEEPINFRA', 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'],
+    ['MITRIFY', 'mitrify/auto-cheap'], ['CHEAPERINFERENCE', 'beam'], ['DEEPINFRA', 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'],
     ['DEEPINFRA', 'deepseek-ai/DeepSeek-V4-Flash-0731'], ['OPENAI', 'gpt-5-nano'], ['GLM', 'glm-4.7-flashx'], ['GEMINI', 'gemini-2.5-flash-lite'],
   ];
   function fixed(overrides: Partial<RoutingRequest> = {}) { return request({ fixedTextChain: 'v1', maxPhysicalAttempts: 12, ...overrides }); }
   function choices(r: RoutingRequest) { return models.map(([providerId, modelId], i) => candidate(r, `rung-${i}`, i >= 5, { providerId, modelId, quotaDimensions: [{ scope: { providerId, kind: 'organization', id: 'shared-org' }, meter: 'requests/day' }] })); }
-  it.each(['chat', 'professional', 'doctor', 'sda'] as const)('orders eligible %s profiles without cheaper-price or latency reordering', surface => {
+  it.each(['chat', 'professional', 'doctor', 'sda', 'developer-api'] as const)('orders eligible %s profiles without cheaper-price or latency reordering', surface => {
     const r = fixed({ surface }); const cs = choices(r); const b = { ...budget(r), allowedProfileIds: cs.map(c => c.profile.id) };
     for (let i = 0; i < cs.length; i++) expect(plan(planInference(context(r, cs.slice(i).reverse(), b).input)).profileId).toBe(`rung-${i}`);
   });
@@ -538,8 +538,9 @@ describe('fixed text chain uses approved candidates in owner order', () => {
   it('cannot promote an unreviewed/free-looking provider or classify Mitrify as free', () => {
     const r = fixed();
     rejected(planInference(context(r, [candidate(r, 'other'), candidate(r, 'mitrify', false, { providerId: 'MITRIFY' })]).input), 'fixed-chain');
-    const health = fixed({ privacy: { ...r.privacy, dataClass: 'health' } });
-    rejected(planInference(context(health, [candidate(health, 'mitrify', true, { providerId: 'MITRIFY' })]).input), 'fixed-chain');
+    const paid = candidate(r, 'mitrify', true, { providerId: 'MITRIFY', quotaDimensions: [{ scope: { providerId: 'MITRIFY', kind: 'organization', id: 'shared-org' }, meter: 'requests/day' }] });
+    expect(plan(planInference(context(r, [paid], { ...budget(r), allowedProfileIds: ['mitrify'] }).input)).profileId).toBe('mitrify');
+    // Exact-data permission is additionally enforced by the dedicated transport, never by preference ordering.
   });
   it('retains quality/privacy/evidence gates and paid budget exhaustion', () => {
     const r = fixed(); const cs = choices(r);

@@ -21,6 +21,8 @@
 // Off by default. `AI_WALLET_SPEND=on` is what makes any of it real, so this ships and bakes long
 // before it moves a single rupee of anyone's balance.
 
+import { createHash } from 'node:crypto';
+import { readGatewayMeteredPricingProof } from '../AI/InferenceGateway/pricingEvidence';
 import { chatTurnCost, sumChatTurnCosts, type ChatTurnUsage, type ChatTurnCost } from './chatSpend';
 import { debitWalletRolledUp } from './walletDebit';
 import { featureLabel, featureRollupRef, type WalletFeature } from './walletFeature';
@@ -71,6 +73,7 @@ export type AiChargeReason =
   | 'free-list'     // admin/test account
   | 'pass'          // already paid for by the Professional Pass
   | 'free-allowance' // inside the day's free allowance — the free messages are free
+  | 'pricing-identity-mismatch' // authentic usage belongs to a different verified principal
   | 'unmeasured'    // the provider reported no usage; we refuse to invent one
   | 'free-model'    // measured, and genuinely cost nothing
   | 'charge';       // a real, measured cost to draw from the wallet
@@ -106,6 +109,7 @@ export function decideAiCharge(
   if (ctx.hasActivePass) return no('pass');
   const fraction = billableFractionOf(ctx);
   if (fraction <= 0) return no('free-allowance');
+  if (debitOperations(ctx, [usage]) === null) return no('pricing-identity-mismatch');
   if (!cost.measured) return no('unmeasured');
   if (cost.billedInr <= 0) return no('free-model');
 
@@ -144,7 +148,7 @@ export function decideAiChargeForTurns(
   usdInr: number,
   env: NodeJS.ProcessEnv = process.env,
 ): AiChargeDecision {
-  const cost = sumChatTurnCosts((usages || []).map((u) => chatTurnCost(u, usdInr)), usdInr);
+  const cost = sumChatTurnCosts(uniqueGatewayTurns(usages || []).map((u) => chatTurnCost(u, usdInr)), usdInr);
   const no = (reason: AiChargeReason): AiChargeDecision => ({ charge: false, reason, billedInr: 0, cost });
 
   if (!aiWalletSpendEnabled(env)) return no('disabled');
@@ -153,6 +157,7 @@ export function decideAiChargeForTurns(
   if (ctx.hasActivePass) return no('pass');
   const fraction = billableFractionOf(ctx);
   if (fraction <= 0) return no('free-allowance');
+  if (debitOperations(ctx, usages) === null) return no('pricing-identity-mismatch');
   if (!cost.measured) return no('unmeasured');
   if (cost.billedInr <= 0) return no('free-model');
 
@@ -165,6 +170,27 @@ export interface AiChargeResult extends AiChargeDecision {
   /** True when the wallet was actually debited. */
   debited: boolean;
   tokensDebited: number;
+}
+
+function gatewayChargeIdentity(usage: ChatTurnUsage | null | undefined) {
+  return readGatewayMeteredPricingProof(usage?.gatewayPricingProof, { provider: usage?.provider, model: usage?.model,
+    logicalRequestId: usage?.inferenceGateway?.logicalRequestId, usage: { inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens } });
+}
+function debitOperations(ctx: AiChargeContext, usages: Array<ChatTurnUsage | null | undefined>): string[] | null {
+  const operations: string[] = [];
+  for (const usage of usages) {
+    const proof = gatewayChargeIdentity(usage); if (!proof) continue;
+    if (proof.principalId !== ctx.userId) return null;
+    operations.push(createHash('sha256').update(JSON.stringify([proof.logicalRequestId, proof.physicalAttemptId])).digest('hex'));
+  }
+  return [...new Set(operations)];
+}
+function uniqueGatewayTurns(usages: Array<ChatTurnUsage | null | undefined>) {
+  const seen = new Set<string>();
+  return usages.filter(usage => { const proof = gatewayChargeIdentity(usage); if (!proof) return true;
+    const key = JSON.stringify([proof.logicalRequestId, proof.physicalAttemptId]);
+    if (seen.has(key)) return false; seen.add(key); return true;
+  });
 }
 
 /**
@@ -182,7 +208,7 @@ export async function chargeForAiTurn(
   nowMs: number,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AiChargeResult> {
-  return applyAiCharge(db, ctx, decideAiCharge(ctx, usage, usdInr, env), nowMs);
+  return applyAiCharge(db, ctx, decideAiCharge(ctx, usage, usdInr, env), nowMs, debitOperations(ctx, [usage]));
 }
 
 /** The multi-call form — one charge for every model call a single request made. See above. */
@@ -194,7 +220,8 @@ export async function chargeForAiTurns(
   nowMs: number,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AiChargeResult> {
-  return applyAiCharge(db, ctx, decideAiChargeForTurns(ctx, usages, usdInr, env), nowMs);
+  const unique = uniqueGatewayTurns(usages);
+  return applyAiCharge(db, ctx, decideAiChargeForTurns(ctx, unique, usdInr, env), nowMs, debitOperations(ctx, unique));
 }
 
 async function applyAiCharge(
@@ -202,8 +229,11 @@ async function applyAiCharge(
   ctx: AiChargeContext,
   decision: AiChargeDecision,
   nowMs: number,
+  operations: string[] | null,
 ): Promise<AiChargeResult> {
   if (!decision.charge || !ctx.userId) return { ...decision, debited: false, tokensDebited: 0 };
+
+  if (operations === null) return { ...decision, charge: false, reason: 'pricing-identity-mismatch', billedInr: 0, debited: false, tokensDebited: 0 };
 
   // ONE BUCKET PER FEATURE PER DAY. The ledger stays bounded exactly as before (a handful of rows a
   // day at the very most), and the wallet history finally says "Doctor AI" instead of a word that
@@ -211,6 +241,7 @@ async function applyAiCharge(
   const feature: WalletFeature = ctx.feature ?? 'tools';
   const res = await debitWalletRolledUp(db, ctx.userId, {
     billedInr: decision.billedInr,
+    ...(operations.length ? { operationIds: operations } : {}),
     rollupRef: featureRollupRef(feature, nowMs),
     description: featureLabel(feature) || AI_SPEND_LEDGER_LABEL,
     feature,

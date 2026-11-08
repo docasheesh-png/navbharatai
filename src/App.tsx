@@ -42,7 +42,7 @@ import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
 // AgentV3Launcher removed — v5.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
 import { fetchBuildSession } from './services/buildService';
-import { Bot, Zap, MessageSquare, MessagesSquare, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Briefcase, LayoutGrid, Layers, Store, Info, Package, Wand2, FileDiff } from 'lucide-react';
+import { Bot, Zap, MessageSquare, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Briefcase, LayoutGrid, Layers, Store, Info, Package, Wand2, FileDiff } from 'lucide-react';
 import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
 // Play compliance (admin 2026-08-04): medical-class assistants are hidden inside the Play-distributed
@@ -53,7 +53,6 @@ import { isComingSoonTool } from './lib/comingSoonTools';
 // SDAChat kept eager — used immediately on tab open
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { useNotificationInbox, NotificationPanel } from './components/NotificationBell';
-import { useMitrifyBot } from './hooks/useMitrifyBot';
 import { RewardsChecklistCard } from './components/RewardsChecklistCard';
 import { walletNeedsTopUp } from './lib/walletNeedsTopUp';
 import { FloatingExitFocusButton } from './components/FloatingExitFocusButton';
@@ -138,7 +137,6 @@ const SettingsPanel = _lz(() => import('./components/panels/SettingsPanel'), 'Se
 const AdminLoginPanel = _lz(() => import('./components/panels/AdminLoginPanel'), 'AdminLoginPanel');
 const BillingPanel = _lz(() => import('./components/panels/BillingPanel'), 'BillingPanel');
 const NBIChatPanel = _lz(() => import('./components/panels/NBIChatPanel'), 'NBIChatPanel');
-const MitrifyChatPanel = _lz(() => import('./components/panels/MitrifyChatPanel'), 'MitrifyChatPanel');
 const SDAChat = _lz(() => import('./components/sda/SDAChat'), 'SDAChat');
 const ProfessionalsView = _lz(() => import('./components/professionals/ProfessionalsView'), 'ProfessionalsView');
 const ProfessionalChat = _lz(() => import('./components/professionals/ProfessionalChat'), 'ProfessionalChat');
@@ -290,7 +288,6 @@ export default function App() {
   }, [deviceMode]);
 
   const [user, setUser] = useState<FirebaseUser | null>(null);
-  const mitrifyBot = useMitrifyBot(user?.uid);
   // 🔔 The notifications inbox lives at App level (admin 2026-09-22): its unread count is drawn on the
   // ☰ button and the sidebar's Notifications row while the panel is CLOSED, so a component that only
   // existed while open could not carry it. One hook, three readers, one number.
@@ -760,6 +757,13 @@ export default function App() {
   // present (a session that began before the split), so this fix can never itself close someone's app.
   const [openTabs, setOpenTabs] = useState<ViewType[]>(() =>
     (restoreV3Tab(readV3TabFlag(), readV3ViewFlag()) ? ['nbi_pro_chat'] : []));
+  // Old persisted tabs can reference the retired diagnostic bot. Keep other tabs/history intact.
+  useEffect(() => {
+    if (String(activeView) === 'mitrify_chat') setActiveView('home');
+    if (openTabs.some(tab => String(tab) === 'mitrify_chat')) {
+      setOpenTabs(tabs => tabs.filter(tab => String(tab) !== 'mitrify_chat'));
+    }
+  }, [activeView, openTabs]);
   // child→parent tab map: which tab opened each option, so ✕-closing Settings/Professionals also closes
   // the options launched from inside it (admin bug 2026-07-11). Populated in toggleTab, pruned in closeTab.
   const [tabOpeners, setTabOpeners] = useState<Partial<Record<ViewType, ViewType>>>({});
@@ -1401,13 +1405,6 @@ export default function App() {
     if (isAuthGatedView(activeView)) setShowAuth(true);
   }, [loadingUser, user, activeView]);
 
-  // Losing account capability closes the private view instead of leaving a blank tab.
-  useEffect(() => {
-    if (mitrifyBot) return;
-    setActiveView(view => view === 'mitrify_chat' ? 'home' : view);
-    setOpenTabs(tabs => tabs.includes('mitrify_chat') ? tabs.filter(tab => tab !== 'mitrify_chat') : tabs);
-  }, [mitrifyBot]);
-
   // Admin login = full app access. When the admin is signed in (separate server
   // password auth), treat them as a logged-in user so the app never forces the
   // Firebase login modal. A real Firebase sign-in always takes precedence; the
@@ -1442,7 +1439,6 @@ export default function App() {
    * to. The old `tabHistories` was written and never read — Back goes Home (androidBack.ts). Q-600 batch five.
    */
   const toggleTab = useCallback((view: ViewType, _pushToHistory = true, conversationId?: string, resumeEndedAt?: number): boolean => {
-    if (view === 'mitrify_chat' && !mitrifyBot) return false;
     // Play compliance choke point: EVERY tab-open path goes through toggleTab, so blocking here (plus
     // the render guards below) means a medical view cannot open in the native shell no matter which
     // button, deep link, or restored state asked for it.
@@ -1539,7 +1535,7 @@ export default function App() {
 
     setActiveView(view);
     return true;
-  }, [user, openTabs, activeView, addLog, setShowAuth, openChats, activeChatId, addToast, viewWindows, mitrifyBot]);
+  }, [user, openTabs, activeView, addLog, setShowAuth, openChats, activeChatId, addToast, viewWindows]);
 
   // Cross-component navigation (billing PR 5): deeply-nested surfaces (e.g. the v5.0 panel inside
   // ProV3Surface, which gets no nav callback) can request a view switch by dispatching
@@ -2550,7 +2546,6 @@ export default function App() {
   const menuItems = useMemo(() => [
     { id: 'home',         label: 'Home',              icon: Bot },
     { id: 'nbi_chat',     label: COPY.branding.aiChatName,  icon: MessageSquare },
-    ...(mitrifyBot ? [{ id: 'mitrify_chat', label: 'Mitrify chat', icon: MessagesSquare }] : []),
     { id: 'nbi_pro_chat', label: 'NavBharatAI Pro', icon: Bot },
     { id: 'professionals', label: 'Professionals',    icon: Briefcase, status: 'New' },
     // Other AI opens its OWN header tab like Free/Pro/Professionals (admin 2026-07-23): without a menuItems
@@ -2612,7 +2607,7 @@ export default function App() {
     { id: 'apk',          label: 'APK Builder',       icon: Package },
     { id: 'diff',         label: 'Diff',              icon: FileDiff },
     { id: 'imagegen',     label: 'AI Image Gen',      icon: Wand2 },
-  ], [mitrifyBot]);
+  ], []);
   /**
    * Which ids the header can draw a chip for — its registered menu items. `lib/headerTab.ts` asks this
    * rather than restating the list: a view with no chip lights the tab it was entered through.
@@ -3585,7 +3580,6 @@ export default function App() {
             />
           )}
 
-          {activeView === 'mitrify_chat' && mitrifyBot && user && <MitrifyChatPanel key={user.uid} uid={user.uid} access={mitrifyBot} />}
 
           {(activeView === 'nbi_chat') && (
             <NBIChatPanel

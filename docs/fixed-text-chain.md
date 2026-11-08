@@ -32,11 +32,13 @@ reservation-rate checks. No credential, allowance or price is configured here.
   `MITRIFY_CHAIN_ENABLED=1` alone does not authorize a request. It requires a
   one-use server-owned `mitrify_chain_approvals` record bound to the exact payload,
   authenticated UID, endpoint, configured alias and credential. A trusted operator
-  must have reviewed the entire payload as public and independently verified an
+  must have reviewed the entire payload and its permitted data classes, processor
+  suitability, disclosure authority and protections (see docs/mitrify.md), and independently verified an
   enforceable per-HTTP-request supplier ceiling including internal failovers,
   retries and fees. No public approval writer or automatic approval exists.
   Records expire within one hour; each HTTP retry revalidates the immutable
-  approval and current shared controls. Health/private flags always exclude it.
+  approval and current shared controls. Old v1 approvals remain public-only; v2
+  approvals can cover private/health data without a blanket classification ban.
   The existing shared daily/monthly FreeChain pool reserves the ceiling times the
   remaining transport-attempt allowance (at most four). Used reservations remain
   conservative liabilities until authoritative reconciliation; they are not
@@ -44,7 +46,7 @@ reservation-rate checks. No credential, allowance or price is configured here.
   provably undispatched hold is released. Duplicate claims cannot dispatch.
   Selected InferenceGateway and paid-professional funding bridges are still
   unavailable; this adapter does not enroll or fund those routes.
-  Existing standalone Mitrify bot/diagnostics retain their no-fallback behavior.
+  Standalone Mitrify bot/diagnostic interfaces have been removed.
   Model policy continues to come from `MITRIFY_MODEL` in the Mitrify module.
 - Existing authenticated FreeChain enrollment and selected guest Gateway
   admission remain required. A fixed-mode request without them is terminal,
@@ -61,5 +63,5 @@ reservation-rate checks. No credential, allowance or price is configured here.
 
 Consequently this change does not establish “100% all chats use the same chain.”
 A rollout needs reviewed ingress coverage, paid-professional funding integration,
-and real reviewed Mitrify public-payload/merchant-ceiling evidence. No live model calls, public load test,
+and real reviewed Mitrify data-processing/merchant-ceiling evidence. No live model calls, public load test,
 production environment changes or deployment verification are included.

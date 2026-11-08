@@ -1,155 +1,46 @@
-# Optional Mitrify public-question bot; general chat stays direct
+# Mitrify main-chain transport
 
-This change provides a server-only OpenAI-compatible transport and offline tests.
-It does **not** make arbitrary NavBharatAI chat eligible for Mitrify. Both ordinary
-chat entry points retain their existing callback, quota, routing and billing behavior.
-App Builder, Pro, Doctor/SDA, professionals, tools, JSON output, vision and embeddings
-are unchanged. No credential or deployment settings are installed by this change.
+The separate menu chatbot, continuation/public/guest test endpoints, and their
+exclusive implementation have been removed. Stored history and accounting records
+are retained. No production flags or credentials are changed by this removal.
 
-## Privacy boundary
+## Main-chat eligibility
 
-`routes/chat.ts` classifies general chat as health/clinical. A conversation may include
-patient data, personal information, profile, memory, attachments and history. The
-existing six-question public cache corpus proves only the question's content, not
-the full outgoing system prompt. Its broader FAQ eligibility is not privacy proof.
-The gateway may forward the full prompt to third-party free-model providers or
-Surplus sellers. Never send health records, personal identifiers, payment details
-or other sensitive data through this route; features handling them stay direct.
+`TEXT_CHAIN_POLICY` still defaults to `legacy`; `fixed-v1` defines the requested
+order, with Mitrify after verified-free OpenRouter and before CheaperInference.
+`MITRIFY_CHAIN_ENABLED=1` permits checking admission; it does not authorize dispatch.
+The Gateway has no Mitrify adapter and paid Professional funding integration remains
+unavailable. Do not enable a global switch as a substitute for these integrations.
+Pro and App Builder are unchanged.
 
-`withMitrifyChatPrivacyBoundary` therefore keeps **all current general chat direct**,
-even with `AI_BACKEND=mitrify`, and logs `MITRIFY_PRIVACY_BLOCKED`. No client flag,
-keyword detector, missing profile or empty history bypasses this boundary. A future
-review must establish trusted provenance for the whole request before connecting
-the low-level transport. Do not downgrade the health classification to enable it.
+The earlier unconditional private/health prohibition is removed from the legacy
+main-chain adapter. Exact server-owned payload approvals remain necessary:
 
-## Separate authenticated text chatbot
+- `mitrify-exact-public-approval-v1` retains its public-only scope.
+- `mitrify-exact-data-approval-v2` uses `dataReview.entirePayloadReviewed=true`,
+  `approvedDataClasses` covering every server-classified `private`/`health` class
+  (or `public` for neither), `gatewayAndAllDownstreamProcessorsReviewed=true`, and
+  nonempty `reviewRef`, `disclosureAuthorityRef`, `processorTermsRef`, `protectionsRef`.
+  These refer to actual independently reviewed evidence; code does not create it.
 
-The sidebar's **Mitrify chat** entry appears only after the server authorizes the
-signed-in, email-verified account. Both GET and POST `/api/v1/chat/mitrify-bot`
-verify identity; hiding the UI is not the access control.
+Both versions bind the same exact payload, verified user, gateway URL/model and
+credential binding. One-hour expiry, atomic one-use claim, revocation checks,
+capability limits, supplier-enforced inclusive charge ceiling and existing shared
+monetary holds remain mandatory. Changing review evidence invalidates dispatch.
+No new approval writer, browser assertion, credentials, supplier suitability claim
+or production authorization is introduced. Missing evidence skips this rung.
 
-`MITRIFY_BOT_ACCESS` defaults to `selected` (including unset/blank). This preserves
-`MITRIFY_CHAT_ACCOUNT_EMAIL`: exactly one verified email, never a comma-separated
-list. Missing selector denies access. `verified` permits all signed-in users with
-a verified, nonempty email; it ignores the selector for this bot only. Unknown
-mode values fail closed. This is not anonymous access: the client still requires
-login and the server still verifies identity. The separate operator diagnostic
-retains its selected-account and admission checks.
+Complete main-chain replies require a confirmed `stop` finish reason. Length,
+missing finish reason, refusal or interrupted output cannot become complete success
+or silently replay into another provider. The transport itself remains reusable.
 
-Deploying this code does not enable broader access. Changing to `verified` is an
-operator activation step, pending authorized runtime access and the applicable
-spending safeguards. Roll back broader access with `MITRIFY_BOT_ACCESS=selected`
-and the existing selector; `AI_BACKEND=direct` disables bot sends for every account.
-The existing 20 requests/minute/account limiter is unchanged in both modes.
+## Configuration
 
-The text box accepts up to 2000 characters. Before each send, the user must review
-and confirm that the message contains no health records, personal identifiers,
-payment details, credentials or other sensitive information. The notice states
-that Mitrify and its upstream providers receive the full message and may log it.
-Changing text or sending clears confirmation. This is a user-review safeguard,
-not proof that arbitrary text is nonsensitive. Server checks reject recognizable
-email, long numeric identifier, credential and sensitive-record patterns, but
-can miss sensitive text and can reject benign text. Do not claim foolproof detection.
-
-POST accepts exactly `message` and `publicContentConfirmed: true`; extra fields,
-profile, history, files and caller parameters are rejected by this new-message endpoint. The reviewed message
-is sent unchanged as the only message, with the configured model alias,
-non-streaming flag and a 8,192-token default output allowance.
-`MITRIFY_BOT_MAX_OUTPUT_TOKENS` can select an integer from 1 to 32,768 on the
-server; blank/unset uses 8,192. This application ceiling does not establish the
-selected model’s supported maximum. Use a value supported by the gateway policy;
-models still have finite context/output limits. Invalid or infinite values fail
-closed. Browser parameters cannot override this setting. No account identity or previous
-reply is appended. Older installed clients can still send the three reviewed
-question IDs. Replies are displayed as text, never executed as HTML. The local
-conversation is ephemeral, and account changes discard/cancel the panel.
-
-The response includes a local `completion` label: `complete` only for an explicit
-`stop`, `length` for a token-limit stop, `filtered` for a content-filter stop, or
-`unconfirmed` when the reason is absent, null or unknown. The panel preserves all
-returned text and displays a separate accessible warning for every non-complete
-status (including an older server that omits the status). No continuation or
-extra generation request is sent automatically. A timeout or malformed response
-remains an error; partial JSON is never treated as a complete reply.
-
-The bot uses only Mitrify; errors never invoke another provider. The shared chat
-rate limiter, transport queue/retry bounds, disconnect cancellation and 60-second
-deadline apply. Error explanations are fixed local messages with bounded HTTP
-status, never raw gateway errors. Existing chat and App Builder remain unchanged.
-General health/clinical chat is still routed directly.
-
-In selected mode, configure the server-only email selector to show that account's entry.
-To allow sends, also set `AI_BACKEND=mitrify` and securely supply `MITRIFY_API_KEY`;
-URL/model defaults remain unchanged. Missing key or direct mode produces an
-unavailable state. Roll back sends with `AI_BACKEND=direct`; remove the selector
-to hide the entry in selected mode. No production settings or credentials are changed by this code.
-
-This user-operated bot can spend gateway credits when enabled and used. A token
-limit is not an INR cap. It does not implement wallet billing or claim a verified
-gateway spending ceiling. No automated or live paid test is run by this change.
-The separate single-use diagnostic below retains its stricter admission contract.
-
-## Isolated fixed public test (live admission unavailable)
-
-`POST /api/v1/chat/mitrify-public-test` (also the permanent unversioned alias
-`/api/chat/mitrify-public-test`) is an operator-only diagnostic, not an end-user UI.
-Its caller is an operator using the configured account's existing authenticated
-HTTP session; no token or key should be pasted into chat or logs. It
-accepts **only an empty JSON object**. The server owns the entire outgoing payload:
-"What is 2 + 2? Reply with only the number.", 16 output tokens, no streaming, and no
-system prompt, identity, profile, history, memory, attachments or caller parameters.
-Only a verified Firebase account with verified email matching the server-only
-`MITRIFY_CHAT_ACCOUNT_EMAIL` selector may enter. Other accounts receive 403. The
-selector does not pause or switch either ordinary-chat endpoint.
-The isolated endpoint has a 60-second execution deadline and aborts on disconnect.
-Waiting for identity or admission is cancellation-aware; a late admission callback
-cannot dispatch after cancellation. External operations must still honor their signal.
-
-The test uses only Mitrify and has no direct-provider fallback. The OpenAI response body and metadata headers are returned without changing the
-provider wording or assuming a consistent style. A response that echoes the server
-credential is refused rather than exposed. Transport retries belong to the same logical test.
-
-**No live cost-admission adapter is wired.** Even a matching account, valid key and
-`AI_BACKEND=mitrify` receive `MITRIFY_TEST_BUDGET_UNVERIFIED`; no provider is called.
-There is no client field or environment boolean that bypasses this guard. The
-module's server-only admission interface is exercised with local mock adapters.
-A real adapter must verify a gateway-enforced finite INR ceiling covering every
-attempt and upstream failover, bind it to the exact endpoint/model/credential
-fingerprint, and atomically consume the fixed test ID once per account across
-instances. Failure, cancellation or restart must not restore the authorization
-without proof that no charge occurred. A local token estimate or ledger alone is
-not a charge ceiling. The module snapshots the dispatch configuration before
-admission and does not log the key or its fingerprint.
-
-Before a live test, an operator must provide a verifiable gateway-side spending
-bound and authenticated account execution access, then wire and review that
-admission adapter. This repository contains no production account address,
-credential, cap configuration or inferred model price. Ordinary free-form chat remains direct and is not claimed
-complete through Mitrify. App Builder remains unchanged.
-
-## Configuration and rollback
-
-Server environment only; never use a `VITE_` prefix or ship a key to a client:
-
-- `AI_BACKEND`: `direct` by default. `mitrify` enables the separate reviewed-text
-  bot for accounts authorized by its access mode; all ordinary chat stays direct. The separate
-  fixed diagnostic still requires cost admission.
-- `AI_PROVIDER`: legacy alias, consulted only when `AI_BACKEND` is unset/blank. An
-  explicit `AI_BACKEND` always wins, including rollback to `direct`; conflicting
-  aliases produce a metadata-only diagnostic. Invalid switch values stay direct.
-- `MITRIFY_MAX_INFLIGHT`: defaults to 200; accepts integers 1–1000. Invalid explicit
-  values fail configuration validation for the transport, never affect the direct path.
-- `MITRIFY_BASE_URL`: defaults to `https://mitrify.com/v1`.
-- `MITRIFY_API_KEY`: required for bot sends and manual diagnostics; no default.
-- `MITRIFY_MODEL`: defaults to `mitrify/auto-cheap`; the default is defined once in the module.
-- `MITRIFY_BOT_ACCESS`: `selected` by default; `verified` permits all verified signed-in
-  users of the separate bot. Unknown values fail closed. No browser-controlled override.
-- `MITRIFY_CHAT_ACCOUNT_EMAIL`: no default; server-only verified-account selector for
-  selected bot mode and the isolated public test. It grants no diagnostic cost admission
-  and does not switch ordinary chat.
-
-Rollback: set `AI_BACKEND=direct`. No deployment or key rotation is needed for this
-code switch. This switch does not modify any existing provider settings.
+Server-only `MITRIFY_BASE_URL`, `MITRIFY_API_KEY`, `MITRIFY_MODEL` and
+`MITRIFY_MAX_INFLIGHT` retain their existing defaults. `AI_BACKEND` and legacy
+`AI_PROVIDER` do not globally reroute ordinary chat. Roll back fixed ordering with
+`TEXT_CHAIN_POLICY=legacy`; disable main-chain Mitrify with `MITRIFY_CHAIN_ENABLED=0`.
+Never place credentials in browser code or logs.
 
 ## Transport contract
 
@@ -192,7 +83,7 @@ logging requirement over printing an untrusted provider's raw error message.
 
 ## Concurrency and queue bounds
 
-A single process-wide FIFO is shared by all transport clients, including diagnostics.
+A single process-wide FIFO is shared by all transport clients, and main-chain requests.
 A permit covers the entire logical call: retries/backoff, body reads and downstream
 stream callbacks. It is released once on completion, failure or cancellation. Queued
 cancellation removes the request without dispatching it. Pending requests expire
@@ -226,154 +117,5 @@ HTTP status, X-Mitrify headers, first streamed event time and the first 100 repl
 characters. HTML at `/models` is rejected and stops the inference calls. It does
 not establish a production privacy approval. No live endpoint success is claimed.
 
-The manual smoke script is a separate operator diagnostic, not the single-account
-public-test endpoint. It makes two chat calls and has no verified account or hard
-spend-cap admission; do not use it as a substitute for that authorized test.
-
-## Bounded concurrent load-test prerequisites
-
-Use the user's authorized aggregate ceiling across all batches, retries, gateway
-failovers and charges. Inspect the test credential's applicable limit, scope and
-remaining balance through authorized runtime access; never request its value in
-chat. A user's confirmation of an existing limit is configuration evidence, not
-missing spending permission. A documented non-overdraft prepaid balance with auto-topup
-disabled can also bound spend. Alternatively, atomic conservative reservations
-can work if a documented enforceable maximum covers every request/attempt and
-charge. A token estimate, an unverified discount, an unenforced ledger or stopping
-after dispatch is not a charge ceiling. Gateway-specific budget APIs are not the
-only possible proof.
-
-Keep the test's credential/endpoint/model binding fixed and include prior charges
-and concurrent consumers of the same cap. Do not broaden public traffic or start
-live batches before authorized runtime access can establish the applicable bound.
-The legacy single-use INR admission is not a new USD campaign budget.
-
-Start each batch behind one barrier, not a serial request loop. Ordinary bot
-requests still face the 20/minute/account limiter; a 100/1000-request run through
-that route will mostly measure rate rejection. A separately authorized operator
-runner must report its distinct scope and use an atomic bounded campaign, rather
-than disabling the public limiter. Default transport capacity is 200 active per
-process, with 1000 waiting and a 30-second queue timeout; the HTTP route deadline
-is 60 seconds. A 1000-request client burst is not proof of 1000 concurrent upstream
-requests. Measure actual concurrency, queueing, status, latency, retries and total
-charges. Loopback mock timings establish no production capacity. Use only fixed
-synthetic public text; never profile/history/health/payment/personal data.
-
-## Controlled synthetic guest campaign (default off)
-
-`POST /api/v1/chat/mitrify-guest-test` tests requests without Firebase login. It is
-not a public chatbot, and it does not change main chat or bot account access. The
-only accepted body is `{ "batch": 10, "slot": 0 }`, with batch 10, 100 or 1000 and
-an integer slot from zero through batch minus one. Every call sends the same
-server-owned arithmetic question, with no profile, history, personal data or
-caller-selected parameters. There is no direct-provider fallback.
-
-Activation requires all of the following, provisioned by an authorized operator;
-this change provisions none of them:
-
-- `AI_BACKEND=mitrify` and the existing securely bound gateway configuration.
-- `MITRIFY_GUEST_TEST_ENABLED=1`; unset/other values deny admission.
-- `MITRIFY_GUEST_TEST_CAMPAIGN`: a unique identifier of 1–64 letters, digits,
-  underscores or hyphens.
-- `MITRIFY_GUEST_TEST_TOKEN`: a separate high-entropy control token, 32–512
-  characters. This is not the gateway key; never put either in a URL, browser
-  bundle, repository, logs or chat. Clients send the control token only in
-  `X-Mitrify-Test-Token`.
-- An Admin-SDK-only Firestore document `mitrify_test_campaigns/<campaign>` with
-  `enabled: true`, integer `createdAtMs`/`expiresAtMs` defining at most one hour,
-  exact `baseURL` and `model`, SHA-256 `credentialFingerprint` and
-  `tokenFingerprint`, `hardCapConfirmed: true`, `includesAllCharges: true`, and
-  finite `maxTotalUsd` greater than zero and at most 10. Existing default-deny
-  Firestore rules protect this collection and its claims from all clients.
-
-The document records operator confirmation of an already enforced inclusive
-spending limit on that exact gateway credential. It does not create, verify at
-Mitrify, or replace a monetary limit. Confirm the key binding and applicable
-remaining allowance through authorized runtime access before provisioning. Do
-not reset/increase the gateway limit or allow other spending outside the total
-approved ceiling during a campaign. No live adapter reads or modifies gateway
-billing settings.
-
-Each `(batch, slot)` is claimed atomically in a shared Firestore transaction
-before dispatch. The 1110 possible slots are the shared request bound across
-instances. There are no refunds after failure, cancellation or ambiguous commit;
-replays return 409. Store errors, expired/disabled campaigns and configuration
-mismatches fail closed. Transport retries remain within the same claim and must
-be covered by the gateway monetary ceiling. Never delete claim documents or
-reuse a campaign to rerun a batch. Expiry bounds admission and aborts active
-requests; already incurred charges remain chargeable.
-
-Invalid control tokens retain the existing guest/IP rate limiter. Authorized
-campaign requests use their shared slot bound instead of the ordinary 20/minute
-chat limit **only on this isolated test endpoint**. All existing chat limits stay
-unchanged. A stolen control token can consume the campaign's remaining slots;
-keep it private and revoke admission by disabling the flag or campaign record.
-Already admitted work may still complete until cancellation/expiry.
-
-`scripts/mitrify-guest-load.mjs` accepts the NavBharatAI origin in
-`MITRIFY_GUEST_TEST_TARGET` and the control token securely from the environment.
-It starts each batch behind a single barrier, waits for that batch, then starts
-the next; it never retries HTTP requests itself. It prints counts/statuses,
-latencies, launch spread and peak pending client requests only. Status `0` means a
-local network, timeout or response-read failure, not an HTTP status. A configuration,
-authorization, replay or 503 admission failure stops larger batches. It sends no
-login cookie or Firebase token. A 65-second client timeout does not refund a
-claim. The script cannot provision or enable the campaign and should run only
-from an authorized environment with permitted destination access.
-
-Client concurrency is not upstream concurrency: the server transport still has
-its 200-active per-process default queue and deadline. Test results include
-admission/storage/transport latency. Actual upstream activity and charges require
-safe operator telemetry. Local mock results do not establish production capacity.
-Rollback: unset `MITRIFY_GUEST_TEST_ENABLED` and disable the campaign record.
-
-Local shared-admission check: with a loopback Firestore emulator running, execute
-`node --experimental-strip-types scripts/mitrify-guest-emulator.mjs`. It uses a
-demo project, ephemeral mock credentials and a loopback gateway, never production.
-It exercises concurrent replay through two independent Firestore clients, unique
-slot admission and revocation.
-
-
-## Explicit continuation capability (production unavailable)
-
-Only a `length` reply may offer **Review and continue**. The user must inspect the
-exact original prompt, accumulated answer and continuation instruction, then
-confirm again that all of it—including generated text—is public and nonsensitive.
-The next request resends only those three messages. No profile, files or unrelated
-history is included. New text is appended with a blank-line separator; repetitions
-are retained and no exact or unlimited completion is promised.
-
-`POST /api/v1/chat/mitrify-bot/continue` preserves verified account authorization,
-selected/verified access scope, no-store responses and the existing rate limiter.
-It accepts only a server-issued ticket, prompt, accumulated answer, exact reviewed
-instruction and explicit public-content confirmation. Browser fields cannot grant
-funding or override model, token, round, context or identity bounds.
-
-The server permits at most three continuation rounds in the original ten-minute
-window, at most 32 KiB of serialized request context per round, the original
-configured output allowance and a 60-second per-call deadline. Oversized context
-is rejected in full, never trimmed. Each round uses one HTTP attempt with no
-transport retries. Only a new `length` outcome can offer another reviewed round;
-filtered, unconfirmed, cancelled, failed or uncertain outcomes cannot continue.
-
-Firestore tickets bind the verified UID, exact context digest, configured gateway
-and credential digest, output allowance, instruction and expiry. Transactions
-consume each ticket once across processes before funding/dispatch. Claimed tickets
-are never restored after cancellation or ambiguous failure. Records store digests
-and admission metadata, not prompt/answer content. Existing client-deny rules cover
-the collection. An eventual production integration must arrange bounded retention
-of expired tickets; deleting an expired ticket cannot authorize its replay.
-
-**No production funding adapter is provided or installed.** The actual route
-passes none, initial length replies report `funding-unavailable`, and continuation
-requests return `MITRIFY_CONTINUATION_FUNDING_UNAVAILABLE` without an upstream call.
-The UI disables continuation and explains the missing admission. There is no
-client/environment switch that bypasses this boundary.
-
-The server-only `MitrifyContinuationAdmission.runOnce` contract requires an
-independently verified payer and finite enforced/reserved monetary coverage for
-the exact request/credential/endpoint/model, including supplier failovers and
-fees. It must retain uncertain liabilities and reject exhausted or revoked funds.
-The implementation includes deterministic mock adapters only in offline tests;
-those are not real spending authority. Existing merchant caps and the separate
-$10 synthetic load-test authorization are neither changed nor repurposed.
+The manual smoke script is an operator tool; it is not a public bot endpoint and
+must not be run without authorization for its potential charges.

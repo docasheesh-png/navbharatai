@@ -1,4 +1,3 @@
-import { ProviderDiagnosticPanels } from './admin/ProviderDiagnosticPanels';
 import { InferenceGatewaySetupPanel } from './admin/InferenceGatewaySetupPanel';
 import { FreeChatChainPanel } from './admin/FreeChatChainPanel';
 import { DeepinfraComparisonPanel } from './admin/DeepinfraComparisonPanel';
@@ -2657,10 +2656,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </div>
               </div>
             </div>
-          )}
-
-          {activeTab === 'provider-diagnostics' && (
-            <ProviderDiagnosticPanels key={adminToken} adminToken={adminToken} />
           )}
 
           {activeTab === 'free-chat-chain' && (

@@ -539,7 +539,7 @@ describe('fixed text chain uses approved candidates in owner order', () => {
     const r = fixed();
     rejected(planInference(context(r, [candidate(r, 'other'), candidate(r, 'mitrify', false, { providerId: 'MITRIFY' })]).input), 'fixed-chain');
     const health = fixed({ privacy: { ...r.privacy, dataClass: 'health' } });
-    rejected(planInference(context(health, [candidate(health, 'mitrify', true, { providerId: 'MITRIFY' })]).input), 'privacy');
+    rejected(planInference(context(health, [candidate(health, 'mitrify', true, { providerId: 'MITRIFY' })]).input), 'fixed-chain');
   });
   it('retains quality/privacy/evidence gates and paid budget exhaustion', () => {
     const r = fixed(); const cs = choices(r);

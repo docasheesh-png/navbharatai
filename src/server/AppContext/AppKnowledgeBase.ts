@@ -41,15 +41,6 @@ export interface AppFeature {
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   {
-    id: 'admin_concurrent_engine_checks',
-    name: 'Admin concurrent engine checks',
-    path: 'Admin panel → AI Engines → Provider testing bots',
-    description: 'Verified administrators can configure an approved batch budget, prior spend and attempts, remaining count, concurrency and output settings. Batch requests use durable single-dispatch identities and retain unknown billing liabilities. Existing shared budget controls and independent engine switches remain effective. Manual diagnostic bots are separate. Loading the panel never sends inference.',
-    howToUse: 'Read the original batch, enter the approved scope and payment conversion ceiling, save, then explicitly run. Abort stops unsent work; already dispatched requests can still be billed. Read individual receipts and quality outcomes. Resuming preserves attempts, spend and held liabilities. This does not establish large-scale capacity or guarantee every answer is correct.',
-    relatedFeatures: [],
-    keywords: ['admin', 'concurrent checks', 'batch budget', 'engine diagnostics', 'abort unsent'],
-  },
-  {
     id: 'shared_free_daily_answers',
     name: 'Shared Free daily answer ceiling',
     path: 'Free chat or Professionals → Shared Free daily ceiling',
@@ -3113,7 +3104,7 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     path: 'Admin Dashboard → AI Engines → AI provider switches (verified admin only)',
     description: 'One on/off switch per AI service the platform uses. Turning one OFF really stops it everywhere — builds, chat, images, voice and Free Chat: its keys are withdrawn on every server and its network calls are refused, so work moves to the next service in line or the feature says it is unavailable. Turning it back ON restores it exactly. Every change needs a reason and is kept in a change history (who, when, why). The page shows whether this server has applied the latest change; every other server applies it within 10 seconds.',
     howToUse: 'Verified admins open AI Engines, press the switch next to a service, type a reason (for example "balance finished") and confirm. To undo, press the switch again. The change history lists the last changes.',
-    relatedFeatures: ['admin-api-providers', 'admin-provider-diagnostics'],
+    relatedFeatures: ['admin-api-providers'],
     keywords: ['provider switch', 'turn off provider', 'disable ai provider', 'kill switch', 'ai on off', 'provider band karo', 'provider off', 'engine off'],
   },
   {
@@ -3122,17 +3113,8 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     path: 'Admin Dashboard → Money → API Providers (verified admin only)',
     description: 'One list of every outside API service the platform uses: whether its key is set (key names only, never values), what it is used for (for example Pro builds, chat replies, Free Chat, image generation, reading photos, build sandboxes, payments), the login (email) the admin recorded for each account, editable on the row, a 🔗 Open billing button for each account, and the live balance for services that offer a balance API, graded OK / LOW / EMPTY. Rows that need attention come first: empty, then low, then could-not-check, then services that need a manual check on their billing page. A service with no balance API is shown as "check manually", never as OK. The LOW line is set by ADMIN_PROVIDER_LOW_BALANCE_USD (default 5 USD).',
     howToUse: 'Verified admins open Money → API Providers. The page checks balances when it opens; press "Check balances now" to check again. Press 🔗 Open billing on any row to top up or read its usage on that service’s own site.',
-    relatedFeatures: ['admin-provider-diagnostics', 'admin-metrics'],
-    keywords: ['api providers', 'provider balance', 'balance low', 'balance khatam', 'top up', 'billing link', 'api credits', 'recharge api', 'admin balance check'],
-  },
-  {
-    id: 'admin-provider-diagnostics',
-    name: 'Admin connection tests',
-    path: 'Admin Dashboard → AI Engines → Provider testing bots (verified admin only)',
-    description: 'Two independent manual connection tests show the real reply, supplier-reported cost when available, measured latency and sanitized diagnostics. Independent diagnostic-only switches default OFF. A verified admin can enable or disable each connection; disabling preserves history and holds and cannot guarantee cancellation of already admitted supplier requests. Admins enter text for a direct request using provider defaults. These manual tests have no diagnostic pricing/catalog/supply/FX preflight, allowance, one-call slot, prompt-size cap, output cap or custom response deadline. Provider and hosting limits still apply. Exact supplier cost is displayed only when reported; otherwise it stays unknown. Durable submission identity prevents automatic duplicate calls. Historical spending holds are untouched. This does not prove the app builder works, and historical benchmark holds are preserved.',
-    howToUse: 'Verified admins open Provider testing bots, verify status, explicitly enable the selected diagnostic switch, refresh status, and enter a prompt and manually send it to the selected connection. Loading the panel sends no test. After a connection loss, recover or retry admission with the original request key; never create a replacement key for an uncertain run. Other users cannot access these endpoints.',
     relatedFeatures: ['admin-metrics'],
-    keywords: ['admin connection test', 'provider tests', 'diagnostic cost', 'test recovery'],
+    keywords: ['api providers', 'provider balance', 'balance low', 'balance khatam', 'top up', 'billing link', 'api credits', 'recharge api', 'admin balance check'],
   },
   {
     id: 'admin-metrics',

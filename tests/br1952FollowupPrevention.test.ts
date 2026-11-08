@@ -145,17 +145,23 @@ describe('BR1952 B-INFRA: bounded real recovery, not repeated identical full-bui
   it.each([false,true])('unrelated error and quoted successful stdout do not poison workspace admission (success=%s)',async success=>{
     const budget=createSandboxAdmissionBudget();const a=tool('a');for(let i=0;i<4;i++)await budget.dispatch(a,async()=>({tool_use_id:a.id,is_error:!success,content:success?capacity(a).content:'Error: npm registry rate limit exceeded'}));expect(budget.exhausted).toBe(false);
   });
+  it.each(['append_file','write_files_batch'])('the sandbox-writing sibling %s cannot bypass the same exhausted budget',async name=>{
+    const budget=createSandboxAdmissionBudget();let probes=0;
+    for(const id of ['first','recovery']){const call=tool(id);await budget.dispatch(call,async()=>capacity(call))}
+    const call=tool('blocked-writer',name);const refused=await budget.dispatch(call,async()=>{probes++;return capacity(call)});
+    expect(probes).toBe(0);expect(refused.content).toBe(SANDBOX_ADMISSION_BLOCKED);expect(budget.exhausted).toBe(true);
+  });
   it('non-sandbox tools cannot reset a proven failure, but remain available',async()=>{
     const budget=createSandboxAdmissionBudget();for(const id of['a','b'])await budget.dispatch(tool(id),async()=>capacity(tool(id)));let called=false;
     await budget.dispatch(tool('todo','update_todo'),async()=>{called=true;return{tool_use_id:'todo',is_error:false,content:'updated'}});expect(called).toBe(true);expect(budget.exhausted).toBe(true);
   });
-  it('the real AgentRunner stops after failed admission plus one failed recovery, not a third model/probe',async()=>{
+  it.each([true,false])('the real AgentRunner stops after failed admission plus one failed recovery, including a read-only child (artifacts=%s)',async expectsArtifacts=>{
     let model=0,probes=0;const budget=createSandboxAdmissionBudget();const notes:string[]=[];
-    const client={runTurn:async()=>{model++;return{...finalTurn,text:'',stopReason:'tool_use',toolUses:[tool(`c${model}`)]}}};
+    const client={runTurn:async()=>{model++;return{...finalTurn,text:'',stopReason:'tool_use',toolUses:[tool(`c${model}`,expectsArtifacts?'bash':'glob')]}}};
     const dispatch=async(c:ToolUse)=>{probes++;return capacity(c)};
-    const r=await runner(client,dispatch,{expectsArtifacts:true,sandboxAdmissionBudget:budget,onNote:n=>notes.push(n.code)}).run(original);
+    const r=await runner(client,dispatch,{expectsArtifacts,sandboxAdmissionBudget:budget,onNote:n=>notes.push(n.code)}).run(original);
     expect(r.ok).toBe(false);expect(model).toBe(2);expect(probes).toBe(2);expect(r.summary).toBe(SANDBOX_ADMISSION_BLOCKED);expect(notes).toContain('SANDBOX_ADMISSION_EXHAUSTED');expect(isAppFinding({code:'SANDBOX_ADMISSION_EXHAUSTED'} as never)).toBe(false);expect(r.summary).not.toMatch(/saved|user stopped/i);
-    await runner(client,dispatch,{expectsArtifacts:true,sandboxAdmissionBudget:budget}).run('Retry or heal');expect(model).toBe(2);expect(probes).toBe(2);
+    await runner(client,dispatch,{expectsArtifacts,sandboxAdmissionBudget:budget}).run('Retry or heal');expect(model).toBe(2);expect(probes).toBe(2);
   });
 });
 

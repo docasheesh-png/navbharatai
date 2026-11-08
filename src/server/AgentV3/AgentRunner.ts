@@ -596,7 +596,8 @@ export class AgentRunner {
     const agentRole: AgentRole = this.opts.agentRole ?? 'architect';
     const toolConcurrency = Math.max(1, this.opts.toolConcurrency ?? 4);
     const expectsArtifacts = this.opts.expectsArtifacts === true;
-    const admission = expectsArtifacts ? this.opts.sandboxAdmissionBudget ?? createSandboxAdmissionBudget() : null;
+    // A read-only specialist still uses the parent workspace: an explicit shared budget binds every role.
+    const admission = this.opts.sandboxAdmissionBudget ?? (expectsArtifacts ? createSandboxAdmissionBudget() : null);
     const readinessGate = this.opts.readinessGate === true;
     const lintGate = this.opts.lintGate === true;
     // P-PIPE — build-end dependency-health advisory (OSV/CVE + strong-copyleft). Default-OFF admin flag

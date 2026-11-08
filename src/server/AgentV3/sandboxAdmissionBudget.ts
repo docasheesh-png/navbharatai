@@ -1,7 +1,7 @@
 import type { ToolUse } from './ClaudeClient';
 import type { ToolResult } from './ToolDispatcher';
 
-const SANDBOX_TOOLS = new Set(['bash', 'glob', 'read_file', 'write_file', 'edit_file', 'list_directory', 'grep', 'screenshot', 'browser_action', 'find_ui_element']);
+const SANDBOX_TOOLS = new Set(['bash', 'glob', 'read_file', 'write_file', 'append_file', 'write_files_batch', 'edit_file', 'list_directory', 'grep', 'screenshot', 'browser_action', 'find_ui_element']);
 const CAPACITY = /^(?:Error:\s*)?Rate limit exceeded, please try again later - you have reached the maximum number of concurrent E2B sandboxes \(\d+\)/;
 export const SANDBOX_ADMISSION_BLOCKED = 'Workspace admission is still unavailable after a recovery attempt. Stopping this attempt without completing the app; no capacity, quota or machine was changed. Existing files are kept. Try again when workspace capacity is available.';
 

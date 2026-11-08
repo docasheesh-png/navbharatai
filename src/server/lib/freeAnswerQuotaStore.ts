@@ -1,3 +1,4 @@
+import { CHAT_SERVER_DEADLINE_MS } from '../../lib/chatDeadline';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import { getServerDb } from './serverDb';
@@ -6,6 +7,8 @@ import type { FreeAnswerQuotaStatus } from '../../lib/freeAnswerQuota';
 /** User admission leases are NOT physical-provider occupancy or provider-money reservations. */
 export const FREE_ANSWER_LEASE_MS = 30_000;
 export const FREE_ANSWER_REQUEST_MS = 90_000;
+// Only the ordinary-chat ingress requests the longer fallback budget.
+export const FREE_ANSWER_CHAT_REQUEST_MS = CHAT_SERVER_DEADLINE_MS;
 const COLLECTION = 'free_answer_quota';
 const IP_ATTEMPT_LIMIT = 100;
 const ATTEMPTS_PER_CREDIT = 3;
@@ -52,7 +55,7 @@ function validReservation(raw: unknown): raw is FreeAnswerReservation {
   const r = raw as FreeAnswerReservation;
   return !!r && digest.test(r.id) && uuid.test(r.owner) && digest.test(r.principalHash)
     && /^\d{4}-\d{2}-\d{2}$/.test(r.day) && count(r.startedAt) && count(r.deadlineAt)
-    && count(r.leaseExpiresAt) && r.deadlineAt === r.startedAt + FREE_ANSWER_REQUEST_MS
+    && count(r.leaseExpiresAt) && [FREE_ANSWER_REQUEST_MS, FREE_ANSWER_CHAT_REQUEST_MS].includes(r.deadlineAt - r.startedAt)
     && r.leaseExpiresAt > r.startedAt && r.leaseExpiresAt <= r.deadlineAt
     && windowFor(r.startedAt).day === r.day;
 }
@@ -136,12 +139,13 @@ export class FreeAnswerQuotaStore {
     if (!this.db) throw new Error('Free answer quota storage unavailable');
     return this.db.doc(`${COLLECTION}/${id}`);
   }
-  async reserve(subject: FreeAnswerQuotaSubject, requestId: string, fixedNow?: number): Promise<FreeAnswerQuotaDecision> {
+  async reserve(subject: FreeAnswerQuotaSubject, requestId: string, fixedNow?: number, requestMs = FREE_ANSWER_REQUEST_MS): Promise<FreeAnswerQuotaDecision> {
     const principalHash = identity(subject); const clock = transactionClock(fixedNow); demand(uuid.test(requestId));
     const id = hash(`${principalHash}:${requestId.toLowerCase()}`);
     const principalRef = this.ref(`principal_${principalHash}`); const attemptRef = this.ref(`attempt_${id}`);
     // Retries retain owner identity AND the original request deadline; database delay buys no extra time.
-    const owner = randomUUID(); const deadlineAt = clock.startedAt + FREE_ANSWER_REQUEST_MS;
+    demand(requestMs === FREE_ANSWER_REQUEST_MS || requestMs === FREE_ANSWER_CHAT_REQUEST_MS);
+    const owner = randomUUID(); const deadlineAt = clock.startedAt + requestMs;
     return this.db!.runTransaction(async tx => {
       const { result, day, now } = await readCurrentDay(clock, async day => {
         const dayRef = this.ref(`day_${principalHash}_${day}`);

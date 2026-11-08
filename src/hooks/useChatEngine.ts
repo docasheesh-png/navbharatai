@@ -1,3 +1,4 @@
+import { CHAT_CLIENT_DEADLINE_MS } from '../lib/chatDeadline';
 import { chatReplyLanguageFromPicker, resolveChatReplyLanguage } from '../lib/chatReplyLanguage';
 import { scrubVendorBrands } from '../shared/brandScrub';
 import { newFreeAnswerRequestId, notifyFreeAnswerChanged } from '../lib/freeAnswerStatus';
@@ -137,7 +138,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
     const controller = new AbortController();
     assertActiveTurn(turn);
     turn.controller = controller;
-    const timeoutId = setTimeout(() => controller.abort(), 95000);
+    const timeoutId = setTimeout(() => controller.abort(), CHAT_CLIENT_DEADLINE_MS);
 
     try {
       const headers = { ...(await authHeader()) };
@@ -517,8 +518,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
             vials: loadVials(),
             stream: true,
           }),
-          // The user can Stop this turn OR it self-cancels after 90s — whichever fires first.
-          signal: AbortSignal.any([userAbort.signal, AbortSignal.timeout(90000)]),
+          // Stop is immediate; the client deadline leaves the server time to finish safe fallbacks.
+          signal: AbortSignal.any([userAbort.signal, AbortSignal.timeout(CHAT_CLIENT_DEADLINE_MS)]),
         }); } catch (error) {
           if (userAbort.signal.aborted) throw error;
           // No response is not proof of non-dispatch. Do not issue a new logical request.

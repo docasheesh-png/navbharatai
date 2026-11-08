@@ -115,7 +115,9 @@ describe('Q-284 · the platform knows the Python backend and how to start it', (
   });
 
   // The real script, in real bash, with a real venv. The server is Python's own http.server (declared in a
-  // Procfile, an empty requirements.txt), so nothing is downloaded. Skipped where python3 has no venv.
+  // Procfile, an empty requirements.txt). Disable both index access and pip's otherwise independent
+  // version check: the real boot must be testable without making any external network request.
+  // Skipped where python3 has no venv.
   const venvWorks = spawnSync('python3', ['-c', 'import venv, ensurepip']).status === 0;
   (venvWorks ? it : it.skip)('the boot really creates the venv, starts the server, and is a no-op the second time', () => {
     const root = mkdtempSync(join(tmpdir(), 'nbai-pyboot-'));
@@ -126,7 +128,10 @@ describe('Q-284 · the platform knows the Python backend and how to start it', (
       writeFileSync(join(root, 'api/Procfile'), 'web: python3 -m http.server $PORT --bind 127.0.0.1\n');
       const plan = { ...pythonBackendPlan({ 'api/requirements.txt': '', 'api/Procfile': 'web: python3 -m http.server $PORT --bind 127.0.0.1\n' })!, port };
       expect(plan.dir).toBe('api');
-      const run = () => execFileSync('bash', ['-c', pythonBackendBootCommand(plan)], { cwd: root, encoding: 'utf8', timeout: 120_000 });
+      const run = () => execFileSync('bash', ['-c', pythonBackendBootCommand(plan)], {
+        cwd: root, encoding: 'utf8', timeout: 120_000,
+        env: { ...process.env, PIP_NO_INDEX: '1', PIP_DISABLE_PIP_VERSION_CHECK: '1' },
+      });
       expect(readBackendBoot(run()).state).toBe('up');
       expect(readBackendBoot(run()).state).toBe('already');
     } finally {

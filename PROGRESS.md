@@ -56,6 +56,15 @@ exactly-once reconciliation need one consistent integration. No platform-free
 funds are borrowed for paid Professional calls. No Pro/App Builder logic, live
 provider configuration, user data or production deployment is changed. Cancelled
 load tests remain cancelled. No 99.9% availability or accuracy claim is made.
+## 2026-11-08 — E2B lifecycle safety audit, first bounded repair
+
+Baseline: 6dca2d474871aeafa615ebc683517f0de1e2c61b. Requested objective: reduce sandbox waste without damaging user-built apps. This is not a measured savings claim, a production rollout, or completion of the broader optimization program.
+
+Fixed: raw-document pagination prevents stale history starving later orphan candidates; automatic pause failures no longer escalate to kill or false paused metadata; sweeps are single-flight; allocation/activity compare-and-set and local rechecks preserve replacement state; busy heartbeats refresh only an existing matching durable allocation. Timeouts, template resources, build logic and user data are unchanged.
+
+Proof: 21 sandbox test files / 282 tests pass with Node 22.23.4, npm 11.18.0 and lockfile dependencies. A real local Firestore emulator passed tied-record pagination and allocation/activity CAS/heartbeat checks. All six existing emulator drill scripts passed. Security/signature/license/SBOM, frontend/server/benchmark typechecks, unused-import/native guards, OAuth/Mitrify/quality checks, build, bundle, boot and server-dependency checks passed locally. Full coverage is not yet a passing result: an initial reconstructed checkout retained one file already deleted on main (corrected locally), and this environment's Node proxy warning makes the existing branding stderr-empty assertion fail. Required PR CI must pass; no gate is bypassed or weakened.
+
+OPEN: cross-instance ownership fencing between the final activity read and provider pause; real provider baseline and per-template cost attribution; existing snapshot expiry/recovery evidence; safe staged rollout and measured savings. The scan cursor is process-local and is not a complete-inventory or 20-minute reclamation guarantee. See docs/E2B_COST_SAFETY_REVIEW.md for root causes, tests, limits, rollout and rollback.
 
 ## 2026-11-04 — Follow-up: fix the eight baseline failures and Google startup guard
 

@@ -21,9 +21,9 @@ export interface FreeChainControlAction {
   reason: string;
   expectedControls: FreeChainControls;
 }
-export const FREE_CHAIN_MAX_PAID_CAP_USD = 10;
-export interface FreeChainBudgetAction { capUsd: number; expectedRevision: number; reason: string }
-export interface FreeChainBudgetResponse { ok: true; capUsd: number; policyRevision: number }
+export const FREE_CHAIN_MAX_PAID_CAP_USD = 17;
+export interface FreeChainBudgetAction { budgetMode?: 'capped' | 'uncapped'; capUsd: number; expectedRevision: number; reason: string }
+export interface FreeChainBudgetResponse { budgetMode?: 'capped' | 'uncapped'; ok: true; capUsd: number; policyRevision: number }
 export const FREE_CHAIN_METRICS_SCAN_LIMIT = 4096;
 /** Expensive history observations are requested separately, never part of status polling. */
 export interface FreeChainAdminMetrics {
@@ -57,6 +57,7 @@ export interface FreeChainAdminView {
     circuit?: { state: string; openedUntil: number };
   }>;
   paid: {
+    budgetMode?: 'capped' | 'uncapped';
     /** Effective durable shared authority, not this process's configured limit. */
     capUsd: number | null;
     /** Uninitialized is proved by a successful read, never inferred from an error. */
@@ -73,6 +74,7 @@ const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v ===
 const number = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 const nullableNumber = (v: unknown): v is number | null => v === null || number(v);
 const rate = (v: unknown): v is number | null => v === null || (number(v) && v <= 1);
+const budgetMode = (v: unknown): boolean => v === undefined || v === 'capped' || v === 'uncapped';
 const cap = (v: unknown): v is number | null => v === null || (number(v) && v <= FREE_CHAIN_MAX_PAID_CAP_USD);
 const revision = (v: unknown): v is number => number(v) && Number.isSafeInteger(v);
 const quantities = (v: unknown): boolean => object(v) && Object.values(v).every(nullableNumber);
@@ -97,7 +99,7 @@ export function isFreeChainAdminView(v: unknown): v is FreeChainAdminView {
     || !number(v.rolloutPercent) || !Number.isInteger(v.rolloutPercent) || v.rolloutPercent > 100 || typeof v.allowListConfigured !== 'boolean'
     || !providers(v.order) || !Array.isArray(v.providers) || v.providers.length !== FREE_CHAIN_PROVIDER_IDS.length
     || !providers(v.providers.map(p => object(p) ? p.id : null))
-    || !object(v.paid) || !(v.paid.policyState === 'uninitialized' ? v.paid.capUsd === null && v.paid.policyRevision === null : v.paid.policyState === 'initialized' && number(v.paid.capUsd) && revision(v.paid.policyRevision) && v.paid.policyRevision > 0) || !cap(v.paid.capUsd) || !cap(v.paid.configuredCapUsd) || !(v.paid.policyRevision === null || revision(v.paid.policyRevision)) || !nullableNumber(v.paid.reservedUsd) || !nullableNumber(v.paid.reportedUsd)
+    || !object(v.paid) || !budgetMode(v.paid.budgetMode) || !(v.paid.policyState === 'uninitialized' ? v.paid.capUsd === null && v.paid.policyRevision === null : v.paid.policyState === 'initialized' && number(v.paid.capUsd) && revision(v.paid.policyRevision) && v.paid.policyRevision > 0) || !cap(v.paid.capUsd) || !cap(v.paid.configuredCapUsd) || !(v.paid.policyRevision === null || revision(v.paid.policyRevision)) || !nullableNumber(v.paid.reservedUsd) || !nullableNumber(v.paid.reportedUsd)
     || !Array.isArray(v.limitations) || !v.limitations.every(s => typeof s === 'string')) return false;
   return v.providers.every(p => object(p) && typeof p.model === 'string' && typeof p.configured === 'boolean' && typeof p.disabled === 'boolean'
     && (p.reason === undefined || typeof p.reason === 'string')
@@ -144,15 +146,15 @@ export function validFreeChainBudgetUsd(v: unknown): v is number {
   return number(v) && v <= FREE_CHAIN_MAX_PAID_CAP_USD && /^\d+(?:\.\d{1,2})?$/.test(String(v));
 }
 export function readFreeChainBudgetAction(v: unknown): FreeChainBudgetAction | null {
-  if (!object(v) || !validFreeChainBudgetUsd(v.capUsd) || !revision(v.expectedRevision) || !validFreeChainReason(v.reason)
-    || Object.keys(v).some(k => !['capUsd', 'expectedRevision', 'reason'].includes(k))) return null;
-  return { capUsd: v.capUsd, expectedRevision: v.expectedRevision, reason: v.reason.trim() };
+  if (!object(v) || !budgetMode(v.budgetMode) || !validFreeChainBudgetUsd(v.capUsd) || !revision(v.expectedRevision) || !validFreeChainReason(v.reason)
+    || Object.keys(v).some(k => !['capUsd', 'expectedRevision', 'reason', 'budgetMode'].includes(k))) return null;
+  return { ...(v.budgetMode ? { budgetMode: v.budgetMode as 'capped' | 'uncapped' } : {}), capUsd: v.capUsd, expectedRevision: v.expectedRevision, reason: v.reason.trim() };
 }
 export function isFreeChainBudgetResponse(v: unknown): v is FreeChainBudgetResponse {
-  return object(v) && v.ok === true && validFreeChainBudgetUsd(v.capUsd) && revision(v.policyRevision) && v.policyRevision > 0;
+  return object(v) && v.ok === true && budgetMode(v.budgetMode) && validFreeChainBudgetUsd(v.capUsd) && revision(v.policyRevision) && v.policyRevision > 0;
 }
 export function freeChainBudgetFingerprint(view: FreeChainAdminView): string {
-  return JSON.stringify([view.paid.policyState, view.paid.capUsd, view.paid.configuredCapUsd, view.paid.policyRevision]);
+  return JSON.stringify([view.paid.budgetMode, view.paid.policyState, view.paid.capUsd, view.paid.configuredCapUsd, view.paid.policyRevision]);
 }
 
 export function freeChainControls(view: FreeChainAdminView): FreeChainControls {

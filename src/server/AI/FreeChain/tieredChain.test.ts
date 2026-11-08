@@ -56,7 +56,7 @@ describe('owner tiered free chat module (Tier 1 → Tier 2 → Tier 3)', () => {
   const firstPaid = cfg.order.findIndex(id => ['cheapinf', 'llama8b', 'dsv4flash', 'glmflashx', 'gpt5nano', 'geminipaid', 'deepseek'].includes(id));
   expect(cfg.order.slice(0, firstPaid)).toEqual(['glm45', 'glm47', 'groq', 'cloudflare', 'openrouter']);
   expect(cfg.order.slice(firstPaid)).toEqual(['cheapinf', 'llama8b', 'dsv4flash', 'gpt5nano', 'glmflashx', 'geminipaid']);
-  expect(cfg.maxAttempts).toBe(4); expect(cfg.stickySpread).toBe(false);
+  expect(cfg.maxAttempts).toBe(cfg.order.length); expect(cfg.stickySpread).toBe(false);
   expect(cfg.rungs.find(r => r.id === 'gemini')?.model).toBe('gemini-2.5-flash-lite');
  });
  it('rejects a configured order that promotes any paid rung above a free one', () => {
@@ -102,6 +102,30 @@ describe('owner tiered free chat module (Tier 1 → Tier 2 → Tier 3)', () => {
   const cfg = tiered('glm47,groq,cloudflare,glmflashx,llama8b', { FREE_CHAIN_MAX_ATTEMPTS: '3' });
   const result = await buildFreeChainRouter(db, cfg).route(input());
   expect(m.execute).toHaveBeenCalledTimes(3); expect(result.freeChain?.attempts.at(-1)?.reason).toBe('max-attempts');
+ });
+ it('reaches paid backup after four eligible free attempts instead of abandoning the chain', async () => {
+  m.paid.mockResolvedValue({ id: 'r', day: 'd', uidHash: 'u', maxCostNanoUsd: 1, createdAt: 0, mayDispatch: true });
+  for (let n = 0; n < 4; n++) m.execute.mockRejectedValueOnce(new FreeChainProviderError('SERVER'));
+  m.execute.mockImplementation(successful('fifth attempt answer'));
+  const cfg = tiered('glm45,glm47,groq,cloudflare,llama8b');
+  const chunks: string[] = [];
+  const result = await buildFreeChainRouter(db, cfg).route({ ...input(), onChunk: c => chunks.push(c) });
+  expect(cfg.maxAttempts).toBe(5);
+  expect(result).toMatchObject({ ok: true, provider: 'DEEPINFRA' });
+  expect(m.execute).toHaveBeenCalledTimes(5);
+  expect(result.freeChain?.fallbacks).toBe(4);
+  expect(m.paid).toHaveBeenCalledOnce(); expect(m.settle).toHaveBeenCalledOnce();
+  expect(chunks).toEqual(['fifth attempt answer']);
+ });
+ it('allows the full configured chain while keeping explicit smaller caps and invalid values fail-closed', () => {
+  expect(freeChainConfig({}).maxAttempts).toBe(11);
+  expect(freeChainConfig({ FREE_CHAIN_MAX_ATTEMPTS: '18' }).maxAttempts).toBe(18);
+  expect(freeChainConfig({ FREE_CHAIN_MAX_ATTEMPTS: '3' }).maxAttempts).toBe(3);
+  for (const value of ['19', '0', '-1', '2.5', 'Infinity', 'NaN']) {
+    expect(freeChainConfig({ FREE_CHAIN_MAX_ATTEMPTS: value }).errors).toContain('FREE_CHAIN_MAX_ATTEMPTS');
+  }
+  expect(freeChainConfig({}).ttftMs).toBe(15_000);
+  expect(freeChainConfig({ FREE_CHAIN_TTFT_MS: '6000' }).ttftMs).toBe(6_000);
  });
  it('429 Retry-After cools the provider for exactly that long, shared across instances', async () => {
   const now = Date.now();

@@ -274,6 +274,17 @@ describe('durable shared paid-budget review', () => {
     expect(renderToStaticMarkup(root())).toContain('Budget control recorded. Existing holds remain');
     expect(renderToStaticMarkup(root())).toContain('$3.0000 USD');
   });
+  it('reviews uncapped mode explicitly and confirms mode plus revision without erasing holds', async () => {
+    const after = view(); after.paid.budgetMode = 'uncapped'; after.paid.policyRevision = 4;
+    const f = vi.fn().mockResolvedValueOnce(response(view())).mockResolvedValueOnce(response({ ok: true, budgetMode: 'uncapped', capUsd: 2, policyRevision: 4 })).mockResolvedValue(response(after)); await mount(f);
+    button('Review uncapped mode').props.onClick();
+    expect(renderToStaticMarkup(root())).toContain('Provider charges can continue without a monetary ceiling');
+    expect(f).toHaveBeenCalledTimes(1); fillReason(); submit(); await settle();
+    expect(f).toHaveBeenCalledWith('/api/v1/admin/free-chat-chain/budget', expect.objectContaining({ body: JSON.stringify({ budgetMode: 'uncapped', capUsd: 2, expectedRevision: 3, reason: 'Investigating provider errors' }) }));
+    expect(renderToStaticMarkup(root())).toContain('Uncapped (usage still recorded)');
+    expect(renderToStaticMarkup(root())).toContain('$3.0000 USD');
+    expect(button('Review uncapped mode').props.disabled).toBe(true);
+  });
   it('a raise is reviewed deliberately rather than submitted by number input or status refresh', async () => {
     const f = vi.fn(async () => response(view())); await mount(f); fillBudget('10'); button('Review budget change').props.onClick(); fillReason();
     expect(renderToStaticMarkup(root())).toContain('intentional budget change'); expect(f).toHaveBeenCalledTimes(1);

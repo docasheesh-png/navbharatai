@@ -1,3 +1,4 @@
+import { CHAT_FIRST_CONTENT_MS } from '../../../lib/chatDeadline';
 import { fixedTextChainEnabled, FIXED_TEXT_CHAIN, FIXED_TEXT_CHAIN_MAX_ATTEMPTS } from '../fixedTextChain';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { cheaperInferenceMode, cheaperInferenceApiKeyConfigured, cheaperInferenceSharedAccessPermitted } from '../../lib/cheaperInferencePolicy';
@@ -64,7 +65,7 @@ export interface FreeChainConfig {
   queue: { maxActive: number; maxQueued: number; maxWaitMs: number; perUserActive: number; perUserQueued: number };
   deepseekPrices: { input: number; output: number; cached: number };
   openRouterModels: string[]; rungs: RungConfig[]; errors: string[];
-  /** Max PHYSICAL provider attempts per turn (owner spec: 3-4). Skipped rungs do not count. */
+  /** Visit the eligible chain before giving up. Skipped rungs do not count as physical attempts. */
   maxAttempts: number;
   fixedOrder?: boolean;
   /** Spread users across equal-cost free Tier-1 rungs by a stable uid hash (continuity + load spread). */
@@ -217,13 +218,13 @@ export function freeChainConfig(env: NodeJS.ProcessEnv = process.env): FreeChain
   });
   const config: FreeChainConfig = { enabled: flag('FREE_CHAIN_ENABLED', true) && freeChainEnabled(env), rolloutPercent: num('FREE_CHAIN_ROLLOUT_PERCENT', 100, 0, 100),
     allowUids: list(env.FREE_CHAIN_ALLOW_UIDS), order: order as ProviderId[], skipGemini, privacyApproved,
-    ttftMs: num('FREE_CHAIN_TTFT_MS', 6000, 1000, 90000), cacheEnabled: !fixedOrder && flag('FREE_CHAIN_CACHE_ENABLED', true), cacheTtlS: num('FREE_CHAIN_CACHE_TTL_S', 86400, 60, 86400),
+    ttftMs: num('FREE_CHAIN_TTFT_MS', CHAT_FIRST_CONTENT_MS, 1000, 90000), cacheEnabled: !fixedOrder && flag('FREE_CHAIN_CACHE_ENABLED', true), cacheTtlS: num('FREE_CHAIN_CACHE_TTL_S', 86400, 60, 86400),
     paidCapNanoUsd: money('FREE_CHAIN_PAID_DAILY_CAP_USD', DEFAULT_PAID_CAP_NANO_USD / NANO_USD, 0, OWNER_PAID_DAILY_CEILING_NANO_USD / NANO_USD),
     queue: { maxActive: num('FREE_CHAIN_MAX_ACTIVE', 8, 1, 64), maxQueued: num('FREE_CHAIN_MAX_QUEUED', DEFAULT_ADMISSION_QUEUE_LIMITS.maxQueued, 0, 1024), maxWaitMs: num('FREE_CHAIN_MAX_WAIT_MS', DEFAULT_ADMISSION_QUEUE_LIMITS.maxWaitMs, 100, 10000), perUserActive: num('FREE_CHAIN_PER_USER_ACTIVE', 1, 1, 8), perUserQueued: num('FREE_CHAIN_PER_USER_QUEUED', 1, 0, 16) },
     paidPerUserDaily: num('FREE_CHAIN_PAID_PER_USER_DAILY', 20, 0, 1000), safetyMargin: num('FREE_CHAIN_QUOTA_MARGIN', .9, .1, .95, false),
     deepseekPrices: { input: num('FREE_CHAIN_DEEPSEEK_PRICE_IN_PER_MTOK', .30, .30, 1000, false), output: num('FREE_CHAIN_DEEPSEEK_PRICE_OUT_PER_MTOK', 1.20, 1.20, 1000, false), cached: num('FREE_CHAIN_DEEPSEEK_PRICE_CACHED_IN_PER_MTOK', .006, .006, 1000, false) },
     openRouterModels: list(env.FREE_CHAIN_OPENROUTER_MODELS), rungs, errors,
-    fixedOrder, maxAttempts: num('FREE_CHAIN_MAX_ATTEMPTS', fixedOrder ? FIXED_TEXT_CHAIN_MAX_ATTEMPTS : 4, 1, fixedOrder ? FIXED_TEXT_CHAIN_MAX_ATTEMPTS : 6), stickySpread: !fixedOrder && flag('FREE_CHAIN_STICKY_SPREAD'),
+    fixedOrder, maxAttempts: num('FREE_CHAIN_MAX_ATTEMPTS', fixedOrder ? FIXED_TEXT_CHAIN_MAX_ATTEMPTS : order.length, 1, fixedOrder ? FIXED_TEXT_CHAIN_MAX_ATTEMPTS : PROVIDER_IDS.length), stickySpread: !fixedOrder && flag('FREE_CHAIN_STICKY_SPREAD'),
     concurrency: { glm45: num('FREE_CHAIN_GLM45_MAX_CONCURRENT', 2, 0, 64), glm47: num('FREE_CHAIN_GLM47_MAX_CONCURRENT', 1, 0, 64) },
     features: { concurrency: flag('FREE_CHAIN_CONCURRENCY_ENABLED', true), router: flag('FREE_CHAIN_ROUTER_ENABLED', true), routeReorder: !fixedOrder && flag('FREE_CHAIN_ROUTE_REORDER_ENABLED'),
       stablePrefix: flag('FREE_CHAIN_STABLE_PREFIX_ENABLED', true), compactPrompt: flag('FREE_CHAIN_COMPACT_PROMPT_ENABLED', true),

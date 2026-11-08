@@ -141,6 +141,7 @@ describe('layer 1 — the key is withdrawn, and put back byte for byte', () => {
     applySwitchedOff(['not-a-provider'], {});
     expect(isProviderSwitchedOff('not-a-provider')).toBe(false);
   });
+
 });
 
 describe('layer 2 — which requests are refused', () => {

@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { assertLegacyInferenceAllowed } from '../../inferencePolicy';
 import 'dotenv/config';
-import { AIProvider, AIProviderResponse, readProviderUsage, type ProviderUsage } from '../ProviderTypes';
+import { AIProvider, AIProviderResponse, type ProviderUsage } from '../ProviderTypes';
 import { vertexStreamFinished, vertexStreamUsage } from '../streamUsage';
 import { vertexGenAI, vertexProjectId, vertexLocation } from '../../../lib/vertexGenAI';
 
@@ -58,7 +58,7 @@ export class VertexProvider implements AIProvider {
                     latencyMs: Date.now() - startTime,
                     provider: 'VERTEX',
                     model: modelName,
-                    usage: readProviderUsage(result.usageMetadata),
+                    usage: vertexStreamUsage(result.usageMetadata),
                 };
             } catch (error: any) {
                 signal?.throwIfAborted();

@@ -62,7 +62,7 @@ describe('🔒 the sweep skips a live build', () => {
     expect(at, 'the sweep method must exist').toBeGreaterThan(-1);
     const sweep = actuator.slice(at, at + 900);
     const holdAt = sweep.indexOf('_buildInFlight');
-    const idleAt = sweep.indexOf('now - last > limit');
+    const idleAt = sweep.indexOf('now - last <= limit');
     expect(holdAt).toBeGreaterThan(-1);
     expect(idleAt).toBeGreaterThan(holdAt);
     expect(sweep).toContain('continue');

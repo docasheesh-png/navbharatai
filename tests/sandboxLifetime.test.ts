@@ -295,8 +295,8 @@ describe('wiring — the actuator applies the decisions and nothing else decides
   });
 
   it('🔒 the two sweeps still exist and now say WHICH one paused a machine', () => {
-    expect(actuator).toContain("markPaused(workspaceId, 'idle-sweep')");
-    expect((actuator.match(/markPaused\(rec\.workspaceId, 'orphan-sweep'\)/g) ?? []).length).toBe(2);
+    expect(actuator).toContain("markPausedIfUnchanged(durable, 'idle-sweep')");
+    expect((actuator.match(/markPausedIfUnchanged\(current, 'orphan-sweep'\)/g) ?? []).length).toBe(1);
     expect(store).toContain('pausedBy?: PauseCause');
     expect(store).toMatch(/pausedAt: Date\.now\(\), \.\.\.\(by \? \{ pausedBy: by \} : \{\}\)/);
     expect(admin).toContain('tallyPauseCauses(sandboxes)');

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const m = vi.hoisted(() => ({ openai: vi.fn(), vertex: vi.fn() }));
+const m = vi.hoisted(() => ({ openai: vi.fn(), vertex: vi.fn(), vertexGenerate: vi.fn() }));
 vi.mock('openai', () => ({ default: class { chat = { completions: { create: m.openai } }; } }));
-vi.mock('../src/server/lib/vertexGenAI', () => ({ vertexGenAI: () => ({ models: { generateContentStream: m.vertex } }), vertexProjectId: () => 'offline-project', vertexLocation: () => 'offline-region' }));
+vi.mock('../src/server/lib/vertexGenAI', () => ({ vertexGenAI: () => ({ models: { generateContentStream: m.vertex, generateContent: m.vertexGenerate } }), vertexProjectId: () => 'offline-project', vertexLocation: () => 'offline-region' }));
 vi.mock('../src/server/lib/aiMaintenance', () => ({ assertAiAvailable: async () => {} }));
 vi.mock('../src/server/lib/ProviderCooldownStore', () => ({ providerCooldownStore: { startSync: vi.fn(), write: vi.fn() } }));
 import { AIRouterManager } from '../src/server/AI/AIRouterManager';
@@ -9,7 +9,7 @@ import { OpenAiChatProvider } from '../src/server/AI/Router/providers/OpenAiChat
 import { VertexProvider } from '../src/server/AI/Router/providers/VertexProvider';
 import type { AIProvider } from '../src/server/AI/Router/ProviderTypes';
 import { completeStreamUsage, openAiStreamUsage, vertexStreamUsage } from '../src/server/AI/Router/streamUsage';
-import { cappedFreeTierRung, setFreeTierPaidStoreForTests, settleFreeTierPaid } from '../src/server/lib/freeTierPaidCap';
+import { cappedFreeTierRung, geminiUsage, setFreeTierPaidStoreForTests, settleFreeTierPaid } from '../src/server/lib/freeTierPaidCap';
 import { FreeChainStore } from '../src/server/AI/FreeChain/store';
 
 async function* chunks(values: unknown[]) { for (const value of values) yield value; }
@@ -24,6 +24,7 @@ const vertexChunks = () => [
 ];
 beforeEach(() => {
   vi.clearAllMocks(); AIRouterManager.reset();
+  m.openai.mockReset(); m.vertex.mockReset(); m.vertexGenerate.mockReset();
   vi.stubEnv('STRICT_FREE_MODULES_ENABLED', 'off'); vi.stubEnv('INFERENCE_GATEWAY_ENABLED', 'off');
   vi.stubEnv('OPENAI_CHAT_MODEL', ''); vi.stubEnv('OPENAI_API_KEY', 'offline-test-only');
   vi.stubEnv('FREE_TIER_PAID_DAILY_CAP_USD', '10');
@@ -31,6 +32,43 @@ beforeEach(() => {
   vi.stubEnv('RATE_GPT_NANO_IN', '0.2'); vi.stubEnv('RATE_GPT_NANO_OUT', '1.25');
   m.openai.mockImplementation(async () => chunks(openAiChunks()));
   m.vertex.mockImplementation(async () => chunks(vertexChunks()));
+  m.vertexGenerate.mockResolvedValue({ text: 'Hello', usageMetadata: vertexChunks()[1].usageMetadata });
+});
+
+describe('non-streaming paid provider receipts and request compatibility', () => {
+  it.each(['gpt-5-nano', 'gpt-5-mini', 'gpt-5.1'])('uses the completion token bound for %s in both paths', async model => {
+    const provider = new OpenAiChatProvider();
+    m.openai.mockResolvedValueOnce({ choices: [{ message: { content: 'Hello' } }] });
+    await provider.execute('hi', undefined, model);
+    await provider.executeStream('hi', undefined, () => {}, model);
+    for (const [request] of m.openai.mock.calls) {
+      expect(request).toMatchObject({ model, max_completion_tokens: 8000 });
+      expect(request).not.toHaveProperty('max_tokens');
+    }
+  });
+  it('keeps non-GPT-5 compatible override request shape unchanged', async () => {
+    const provider = new OpenAiChatProvider();
+    m.openai.mockResolvedValueOnce({ choices: [{ message: { content: 'Hello' } }] });
+    await provider.execute('hi', undefined, 'gpt-4o-mini');
+    await provider.executeStream('hi', undefined, () => {}, 'gpt-4o-mini');
+    for (const [request] of m.openai.mock.calls) {
+      expect(request).toMatchObject({ max_tokens: 8000 });
+      expect(request).not.toHaveProperty('max_completion_tokens');
+    }
+  });
+  it.each([undefined, null, {}, { prompt_tokens: 100 }, { prompt_tokens: null, completion_tokens: 5 }, { prompt_tokens: '100', completion_tokens: 5 }])('OpenAI does not invent missing non-stream counters', async usage => {
+    m.openai.mockResolvedValueOnce({ choices: [{ message: { content: 'Hello' } }], usage });
+    expect((await new OpenAiChatProvider().execute('hi')).usage).toBeUndefined();
+  });
+  it.each([undefined, null, {}, { promptTokenCount: 100 }, { promptTokenCount: null, candidatesTokenCount: 5 }, { promptTokenCount: 100, candidatesTokenCount: 5, thoughtsTokenCount: '7' }])('Vertex and Gemini retain unknown non-stream accounting', async usageMetadata => {
+    m.vertexGenerate.mockResolvedValueOnce({ text: 'Hello', usageMetadata });
+    expect((await new VertexProvider().execute('hi')).usage).toBeUndefined();
+    expect(geminiUsage(usageMetadata)).toBeUndefined();
+  });
+  it('counts reported thinking but not cached prompt twice for non-streaming Vertex/Gemini', async () => {
+    expect((await new VertexProvider().execute('hi')).usage).toEqual({ inputTokens: 100, outputTokens: 12 });
+    expect(geminiUsage(vertexChunks()[1].usageMetadata)).toEqual({ inputTokens: 100, outputTokens: 12 });
+  });
 });
 afterEach(() => { setFreeTierPaidStoreForTests(undefined); vi.unstubAllEnvs(); });
 
@@ -129,6 +167,25 @@ class OfflineDb {
   }
 }
 describe('stream receipt reaches the original shared reservation', () => {
+  it.each([['VERTEX', 'gemini-2.5-flash-lite', 14_800], ['OPENAI', 'gpt-5-nano', 26_250]] as const)('%s settles a complete non-stream receipt without understating thinking', async (name, model, expected) => {
+    m.openai.mockResolvedValueOnce({ choices: [{ message: { content: 'Hello' } }], usage: { prompt_tokens: 100, completion_tokens: 5 } });
+    const store = new FreeChainStore(new OfflineDb() as never, { adminEmails: () => [] });
+    setFreeTierPaidStoreForTests(store);
+    const provider = ((AIRouterManager.getRouter('free') as any).providers as AIProvider[]).find(p => p.name === name && p.pinnedModel === model)!;
+    expect((await provider.execute('hi')).content).toBe('Hello');
+    expect(await store.spendSnapshot()).toMatchObject({ heldNanoUsd: 0, spentNanoUsd: expected, pending: 0, requests: 1 });
+  });
+  it.each([['VERTEX', 'gemini-2.5-flash-lite'], ['OPENAI', 'gpt-5-nano']] as const)('%s retains the original hold on partial non-stream usage', async (name, model) => {
+    m.openai.mockResolvedValueOnce({ choices: [{ message: { content: 'Hello' } }], usage: { prompt_tokens: 100 } });
+    m.vertexGenerate.mockResolvedValueOnce({ text: 'Hello', usageMetadata: { promptTokenCount: 100 } });
+    const store = new FreeChainStore(new OfflineDb() as never, { adminEmails: () => [] });
+    setFreeTierPaidStoreForTests(store);
+    const provider = ((AIRouterManager.getRouter('free') as any).providers as AIProvider[]).find(p => p.name === name && p.pinnedModel === model)!;
+    expect((await provider.execute('hi')).content).toBe('Hello');
+    const day = await store.spendSnapshot();
+    expect(day).toMatchObject({ spentNanoUsd: 0, pending: 1, requests: 1 });
+    expect(day.heldNanoUsd).toBeGreaterThan(0);
+  });
   it.each([['VERTEX', 'gemini-2.5-flash-lite', 14_800], ['OPENAI', 'gpt-5-nano', 26_250]] as const)('%s settles its pinned model after a successful SDK stream', async (name, model, expected) => {
     const db = new OfflineDb(); const store = new FreeChainStore(db as never, { adminEmails: () => [] });
     const held: any[] = [];

@@ -58,17 +58,18 @@ export function maximumReservation(rates: ComparisonRate[]): number {
 export async function comparisonStatus(): Promise<ComparisonStatus> {
   let catalog: Awaited<ReturnType<typeof readComparisonRates>> | null = null;
   try { catalog = await readComparisonRates(); } catch { /* Keep configured state distinct from catalog availability. */ }
-  const db = getServerDb(); let remaining: number | null = null, running = false, lastReport: ComparisonReport | null = null;
+  const db = getServerDb(); let remaining: number | null = null, uncapped = false, running = false, lastReport: ComparisonReport | null = null;
   if (db) {
     const [budget, stored] = await Promise.all([new FreeChainStore(db).spendSnapshot(), db.doc(STATE_PATH).get()]);
     remaining = budget.available ? budget.remainingNanoUsd : null;
+    uncapped = budget.available && budget.budgetMode === 'uncapped';
     const state = stored.data(); running = state?.status === 'running' && state.expiresAt > Date.now();
     lastReport = isComparisonReport(state?.report) ? state.report : null;
   }
   const maximum = catalog ? maximumReservation(catalog.rates) : null;
   return { configured: !!credential(), catalogAvailable: catalog !== null, catalogObservedAt: catalog?.observedAt ?? null,
     rates: catalog?.rates ?? [], maxRunUsd: COMPARISON_MAX_USD, maximumReservationUsd: maximum === null ? null : maximum / 1e9,
-    budgetAvailable: remaining !== null && maximum !== null && remaining >= maximum,
+    budgetAvailable: maximum !== null && (uncapped || (remaining !== null && remaining >= maximum)),
     remainingBudgetUsd: remaining === null ? null : remaining / 1e9, running, lastReport,
     tariffDigest: catalog ? comparisonTariffDigest(catalog.rates) : null };
 }
@@ -85,7 +86,7 @@ export async function runComparison(runId: string, actor: string, signal: AbortS
   const cfg = freeChainConfig();
   if (cfg.errors.some(e => /PAID_DAILY_CAP|MONTHLY_CAP|PAID_PER_USER/.test(e))) throw new ComparisonUnavailable('budget-configuration-invalid');
   const budget = new FreeChainStore(db), snapshot = await budget.spendSnapshot();
-  if (!snapshot.available || snapshot.remainingNanoUsd === null || snapshot.remainingNanoUsd < maximumReservation(catalog.rates)) throw new ComparisonUnavailable('shared-budget-unavailable');
+  if (!snapshot.available || (snapshot.budgetMode !== 'uncapped' && (snapshot.remainingNanoUsd === null || snapshot.remainingNanoUsd < maximumReservation(catalog.rates)))) throw new ComparisonUnavailable('shared-budget-unavailable');
   const startedAt = Date.now(), ownerHash = createHash('sha256').update(actor).digest('hex');
   const lease = await db.runTransaction(async tx => {
     const state = (await tx.get(stateRef)).data();

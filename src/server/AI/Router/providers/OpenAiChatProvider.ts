@@ -1,6 +1,6 @@
 import { assertLegacyInferenceAllowed } from '../../inferencePolicy';
 import OpenAI from 'openai';
-import { AIProvider, AIProviderResponse, readProviderUsage, type ProviderUsage } from '../ProviderTypes';
+import { AIProvider, AIProviderResponse, type ProviderUsage } from '../ProviderTypes';
 import { openAiStreamFinished, openAiStreamUsage } from '../streamUsage';
 
 /**
@@ -113,13 +113,13 @@ export class OpenAiChatProvider implements AIProvider {
     messages.push({ role: 'user', content: prompt });
 
     try {
-      const response = await this.client.chat.completions.create({ model, messages, max_tokens: 8000 }, signal ? { signal } : undefined);
+      const response = await this.client.chat.completions.create({ model, messages, ...completionLimit(model) }, signal ? { signal } : undefined);
       return {
         content: response.choices[0]?.message?.content || '',
         latencyMs: Date.now() - startTime,
         provider: 'OPENAI',
         model,
-        usage: readProviderUsage(response.usage),
+        usage: openAiStreamUsage(response.usage),
       };
     } catch (err) {
       OpenAiChatProvider.explain(err, model);
@@ -140,7 +140,7 @@ export class OpenAiChatProvider implements AIProvider {
       const stream = await this.client.chat.completions.create({
         model: pinned,
         messages,
-        max_tokens: 8000,
+        ...completionLimit(pinned),
         stream: true,
         stream_options: { include_usage: true },
       }, signal ? { signal } : undefined);
@@ -170,4 +170,9 @@ export class OpenAiChatProvider implements AIProvider {
   async healthCheck(): Promise<boolean> {
     return !!(process.env.OPENAI_API_KEY || '').trim();
   }
+}
+
+/** GPT-5 reasoning output shares the same bound as visible output. Keep legacy-compatible overrides unchanged. */
+function completionLimit(model: string): { max_completion_tokens: number } | { max_tokens: number } {
+  return /^gpt-5(?:[.-]|$)/i.test(model) ? { max_completion_tokens: 8000 } : { max_tokens: 8000 };
 }

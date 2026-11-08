@@ -19,7 +19,7 @@ import { FreeChainStore } from '../AI/FreeChain/store';
 import { NANO_USD, OWNER_PAID_DAILY_CEILING_NANO_USD, DEFAULT_PAID_CAP_NANO_USD, maximumCostNanoUsd, type PaidReservation } from '../AI/FreeChain/spendCap';
 import { realRateFor } from '../AgentV3/providerRates';
 import type { AIProvider, AIProviderResponse, ProviderUsage } from '../AI/Router/ProviderTypes';
-import { completeStreamUsage } from '../AI/Router/streamUsage';
+import { completeStreamUsage, vertexStreamUsage } from '../AI/Router/streamUsage';
 
 /** The surfaces whose Free-tier paid calls draw on the shared cap (telemetry only). */
 export type FreeTierPaidSurface = 'free-chat' | 'professional-free-fallback' | 'sda-free' | 'vision-free';
@@ -111,11 +111,11 @@ export async function reserveFreeTierPaid(input: { surface: FreeTierPaidSurface;
   const cap = freeTierPaidCapNanoUsd();
   const quote = quoteFreeTierPaidNanoUsd(input.model, input.inputTokens, input.outputTokens);
   const authority = store();
-  if (!authority || cap <= 0 || quote === null || quote > cap) {
+  if (!authority || quote === null) {
     console.warn(`[FREE_PAID_CAP] refused ${input.model} on ${input.surface} (cap/price/store unavailable)`);
     return null;
   }
-  const reservation = await authority.reservePaid({ requestId: `free-tier:${input.surface}:${randomUUID()}`,
+  const reservation = await authority.reservePaid({ uncappedRollout: true, requestId: `free-tier:${input.surface}:${randomUUID()}`,
     uid: `free-tier-shared:${input.surface}`, maxCostNanoUsd: quote, capNanoUsd: cap, perUserLimit: Number.MAX_SAFE_INTEGER })
     .catch(() => null);
   if (!reservation || !reservation.mayDispatch) {
@@ -138,8 +138,7 @@ export async function settleFreeTierPaid(hold: FreeTierPaidHold | null, usage?: 
 
 /** Gemini `usageMetadata` → usage (thinking tokens are billed as output). */
 export function geminiUsage(um: any): { inputTokens?: number; outputTokens?: number } | undefined {
-  if (!um || !Number.isInteger(um.promptTokenCount) || !Number.isInteger(um.candidatesTokenCount)) return undefined;
-  return { inputTokens: um.promptTokenCount, outputTokens: um.candidatesTokenCount + (Number.isInteger(um.thoughtsTokenCount) ? um.thoughtsTokenCount : 0) };
+  return vertexStreamUsage(um);
 }
 
 /** Output ceiling assumed for a hold when the call itself sets none (2.5 models may think). */

@@ -260,7 +260,7 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
       if (res.status === 401 || data?.code === 'login_required' || data?.code === 'guest_limit_reached') { setPaywall('login'); return; }
       if (!res.ok) throw new Error(data?.error || 'Request failed.');
       setMessages((m) => [...m, { role: 'assistant', content: data.reply || '(no reply)' }]);
-      refreshPass(); // update the "X/limit free today" counter
+      refreshPass(); // refresh exam-question status after a turn
     } catch (e: any) {
       // A deliberate Stop is not an error — stay silent (no reply bubble).
       if (!stoppedRef.current && e?.name !== 'AbortError') {
@@ -323,13 +323,6 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
           >
             <GraduationCap className="w-3 h-3" /> Exam mode
           </button>
-        )}
-        {pass?.enabled && pass?.signedIn && !pass.unlimited && (
-          <span className={`${config.skills?.exam ? '' : 'ml-auto'} text-[11px] font-semibold px-2.5 py-1 rounded-full bg-raised border border-line text-body`}>
-            {pass.remainingFree > 0 || !pass.paidAfterFree
-              ? <span className={pass.remainingFree <= 3 ? 'text-warn' : ''}>{pass.remainingFree}/{pass.freeDailyLimit} free today</span>
-              : <span className="text-warn">Free used · paid from balance</span>}
-          </span>
         )}
       </div>
 
@@ -539,7 +532,7 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
                 <h3 className="font-bold text-ink mb-1">{walletFreeUsedUp ? "That's today's free messages" : 'Your balance is empty'}</h3>
                 <p className="text-sm text-muted mb-4">
                   {walletFreeUsedUp
-                    ? `You've used all ${pass?.freeDailyLimit ?? 10} free messages for today, and answers after that are paid from your balance — which is empty. The free ones come back tomorrow, or add credit and carry on now, paying only for what you use.`
+                    ? "Today's shared allowance is used, and answers after that are paid from your balance — which is empty. The free ones come back tomorrow, or add credit and carry on now, paying only for what you use."
                     : 'The assistants use the same balance as your builds — you only pay for what you actually use. Add credit to carry on.'}
                 </p>
                 <button
@@ -553,7 +546,7 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
               <>
                 <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-indigo-500/15 text-accent-text flex items-center justify-center"><LogIn className="w-6 h-6" /></div>
                 <h3 className="font-bold text-ink mb-1">Sign in to continue</h3>
-                <p className="text-sm text-muted mb-4">Professionals need a free account. Sign in to get {pass?.freeDailyLimit ?? 10} free messages every day.</p>
+                <p className="text-sm text-muted mb-4">Professionals need a free account. Signed-in answers use the one shared daily allowance with AI chat.</p>
                 {/* A card that says "sign in" must be able to open sign-in (admin 2026-09-23 — until the
                     daily allowance was counted, a guest never reached this card at all). It rides the
                     existing `signIn` navigate event, the one App listens to for opening the sign-in
@@ -576,7 +569,7 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
                     with it on, an answer after the free ones is paid instead of refused. So credit would
                     not unblock this — the card says the one true thing, and offers nothing to buy. */}
                 <p className="text-sm text-muted">
-                  You've used all {pass?.freeDailyLimit ?? 10} of them. They come back tomorrow.
+                  Today's shared allowance is used. It comes back tomorrow.
                 </p>
               </>
             )}

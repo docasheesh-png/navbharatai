@@ -84,19 +84,18 @@ describe('the allowance is ON by default and is the admin\'s numbers', () => {
   });
 });
 
-describe('messages: the first 10 are free, every one after is paid', () => {
-  it('a free message is on the free chain and charged NOTHING', async () => {
+describe('messages: the independent 10 is not an admission limit', () => {
+  it('a professional turn stays on the free chain and does not burn the retired counter', async () => {
     state.used = 3;
     const g = await gateProfessionalTurn(UID, EMAIL);
     expect(g.allow).toBe(true);
     if (!g.allow) return;
     expect(g.tier).toBe('free');
-    expect(g.countsAgainstFree).toBe(true);
+    expect(g.countsAgainstFree).toBe(false);
     expect(g.billableFraction).toBe(0);
-    expect(g.remainingFree).toBe(6);
   });
 
-  it('an EMPTY wallet does not take away the free messages', async () => {
+  it('an EMPTY wallet does not take away the shared allowance', async () => {
     state.used = 0;
     state.balance = 0;
     const g = await gateProfessionalTurn(UID, EMAIL);
@@ -104,41 +103,42 @@ describe('messages: the first 10 are free, every one after is paid', () => {
     if (g.allow) expect(g.tier).toBe('free');
   });
 
-  it('the 11th answer is ALLOWED and charged its whole cost — not blocked', async () => {
-    state.used = 10;
-    const g = await gateProfessionalTurn(UID, EMAIL);
-    expect(g.allow).toBe(true);
-    if (!g.allow) return;
-    expect(g.tier).toBe('paid');
-    expect(g.countsAgainstFree).toBe(false);
-    expect(g.billableFraction).toBe(1);
-  });
-
-  it('past the allowance with an empty wallet: refused, and the refusal says the free ones are used', async () => {
+  it('the 11th professional answer is still allowed when the retired counter says 10 are used', async () => {
     state.used = 10;
     state.balance = 0;
     const g = await gateProfessionalTurn(UID, EMAIL);
-    expect(g.allow).toBe(false);
-    if (g.allow) return;
-    expect(g.status).toBe(402);
-    expect(g.body.code).toBe('wallet_empty');
-    expect(g.body.freeUsedUp).toBe(true);
-    expect(String(g.body.error)).toContain('10 free messages come back tomorrow');
+    expect(g.allow).toBe(true);
+    if (!g.allow) return;
+    expect(g.tier).toBe('free');
+    expect(g.countsAgainstFree).toBe(false);
+    expect(g.billableFraction).toBe(0);
   });
 
-  it('an unreadable balance past the allowance fails OPEN, like every other wallet gate', async () => {
+  it('the retired counter and an unreadable balance do not switch the turn onto the paid chain', async () => {
     state.used = 10;
     state.balance = null;
     const g = await gateProfessionalTurn(UID, EMAIL);
     expect(g.allow).toBe(true);
+    if (g.allow) expect(g.tier).toBe('free');
   });
 
-  it('without wallet spending, "then paid" cannot be charged — so it is the honest block, not a free answer', async () => {
+  it('turning wallet spending off does not restore the professional 10 block', async () => {
     delete process.env.AI_WALLET_SPEND;
     state.used = 10;
     const g = await gateProfessionalTurn(UID, EMAIL);
-    expect(g.allow).toBe(false);
-    if (!g.allow) expect(g.body.code).toBe('professional_paywall');
+    expect(g.allow).toBe(true);
+    if (g.allow) expect(g.countsAgainstFree).toBe(false);
+  });
+
+  it('PROFESSIONAL_FREE_DAILY_LIMIT no longer admits or blocks a professional turn', async () => {
+    process.env.PROFESSIONAL_FREE_DAILY_LIMIT = '1';
+    state.used = 10;
+    const g = await gateProfessionalTurn(UID, EMAIL);
+    expect(g.allow).toBe(true);
+    if (g.allow) {
+      expect(g.tier).toBe('free');
+      expect(g.countsAgainstFree).toBe(false);
+    }
   });
 
   it('an anonymous caller is asked to sign in (an anonymous allowance cannot be counted)', async () => {

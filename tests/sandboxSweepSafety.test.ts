@@ -64,6 +64,19 @@ afterEach(() => {
 });
 
 describe('sandbox sweeps preserve active work without provider traffic', () => {
+  it.each(['build', 'operation'] as const)('skips an already active %s before reading stale idle state', async (kind) => {
+    const f = fixture();
+    f.list.mockResolvedValue([]);
+    f.internal.sandboxes.set(WS, handle());
+    f.internal._lastActivity.set(WS, stale.updatedAt);
+    if (kind === 'build') f.internal._activeBuilds.set(WS, NOW);
+    else f.internal._opsInFlight.set(WS, 1);
+    await f.internal._sweepIdleSandboxes();
+    expect(f.current).not.toHaveBeenCalled();
+    expect(f.pause).not.toHaveBeenCalled();
+    expect(f.kill).not.toHaveBeenCalled();
+  });
+
   it.each(['build', 'operation', 'handle'] as const)('rechecks a %s appearing during the durable read', async (kind) => {
     const f = fixture();
     const read = deferred<SandboxRecord | null>();

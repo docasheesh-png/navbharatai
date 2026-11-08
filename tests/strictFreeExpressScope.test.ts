@@ -52,7 +52,7 @@ describe('real Express matching cannot bypass the mounted scope', () => {
     const source = readFileSync(`src/server/routes/${name}.ts`, 'utf8');
     expect(source).toMatch(/app\.post\('[^']+', freeModuleInferenceScope,/);
   });
-  it('actual paid SDA retains its original gate, independent audit and charge path, not Free middleware', () => {
+  it('actual SDA retains its entitlement gate, legacy audit and charge path alongside explicit fixed ingress', () => {
     const source = readFileSync('src/server/routes/sda.ts', 'utf8');
     const parsed = ts.createSourceFile('sda.ts', source, ts.ScriptTarget.Latest, true);
     const registration = postRegistration(parsed, '/api/sda-chat');
@@ -61,7 +61,9 @@ describe('real Express matching cannot bypass the mounted scope', () => {
     expect(calls).toContain('gateProfessionalTurn');
     expect(calls).toContain('auditSdaReply');
     expect(calls).toContain('chargeForAiTurn');
-    expect(source).not.toMatch(/freeModuleInferenceScope|runWithInferenceScope|InferenceGateway|strictFreeRequired/);
+    expect(source).not.toMatch(/freeModuleInferenceScope|runWithInferenceScope|strictFreeRequired/);
+    expect(source).toContain('if (fixedTextChainEnabled())'); expect(calls).toContain('withConversationalGateway');
+    expect(source.indexOf('await gateProfessionalTurn')).toBeLessThan(source.indexOf('await withConversationalGateway'));
     // Behavioral companion: doctorTextIngress.test.ts runs both flags ON and verifies actual
     // paid provider, independent audit and unchanged charging, not just these source boundaries.
   });

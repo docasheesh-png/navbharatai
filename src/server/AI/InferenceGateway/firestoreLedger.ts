@@ -1,3 +1,4 @@
+import { supplierFundingCollection, supplierFundingSurface, type ImplementedSupplierFunding } from './supplierFunding';
 import { FIXED_TEXT_CHAIN_MAX_ATTEMPTS } from '../fixedTextChain';
 import { modelSlotIdentity, modelSlotPath, modelSlotBinding, readModelSlotPolicy, readModelSlotState, readHeldModelSlot, type GatewayModelSlotPolicy, type GatewayModelSlotState, type HeldModelSlot } from './modelConcurrency';
 /**
@@ -115,6 +116,7 @@ interface HeldQuota {
   window: GatewayQuotaPolicy['window'];
 }
 interface LogicalState {
+  fundingBoundary?: ImplementedSupplierFunding;
   kind: 'gateway_logical'; version: 1; key: ExecutionKey; requestIdentity: string;
   cancellationId: string; cancelled: boolean; outputVisible: boolean; terminal: boolean; completed: boolean;
   activeAttemptId: string | null; attempts: AttemptRecord[]; queueWaitConsumedMs: number;
@@ -122,6 +124,7 @@ interface LogicalState {
   heldNanoUsd: number; spentNanoUsd: number; logicalLimitNanoUsd: number;
 }
 interface AttemptState {
+  fundingBoundary?: ImplementedSupplierFunding;
   kind: 'gateway_attempt'; version: 1; reservation: Reservation; intent: AdmissionIntent;
   phase: 'held' | 'claimed' | 'pending' | 'released' | 'settled';
   window: DayWindow; heldQuota: HeldQuota[]; heldNanoUsd: number; createdAtMs: number;
@@ -149,8 +152,9 @@ export interface FirestoreLedgerOptions {
   now(): number;
   /** Identity captured by authenticated server ingress, never taken from an ExecutionKey. */
   principal: { principalId: string; tenantId: string };
-  /** The only implemented spend authority. Funded builder and tenant BYOK fail closed. */
+  /** Selected reviewed platform supplier scope; funded builder and tenant BYOK still fail closed. */
   platformScope: { id: string; ownerId: string };
+  fundingBoundary?: ImplementedSupplierFunding;
   adminEmails(): string[];
   /** Same UID-wide counter as FreeChain; only server composition may choose a stricter policy. */
   perUserDailyLimit?: number;
@@ -161,7 +165,7 @@ export interface FirestoreLedgerOptions {
 type LedgerPort = ExecutionPorts['ledger'];
 export function readGatewayAttempt(value: unknown): AttemptState {
     const a = raw(value, 'gateway_attempt') as unknown as AttemptState;
-    demand(a.reservation && /^[a-f0-9]{64}$/.test(a.reservation.id) && a.intent
+    demand((a.fundingBoundary === undefined || ['platform-free-fallback', 'existing-professional'].includes(a.fundingBoundary)) && a.reservation && /^[a-f0-9]{64}$/.test(a.reservation.id) && a.intent
       && a.reservation.intentBinding === admissionBinding(a.intent)
       && a.reservation.id === hash(a.intent.binding.physicalAttemptId)
       && ['held', 'claimed', 'pending', 'released', 'settled'].includes(a.phase)
@@ -203,18 +207,27 @@ export class FirestoreInferenceLedger implements LedgerPort {
       && (options.perUserDailyLimit ?? DEFAULT_PAID_PER_USER_DAILY_LIMIT) <= DEFAULT_PAID_PER_USER_DAILY_LIMIT);
     this.options = { ...options, principal: { ...options.principal }, platformScope: { ...options.platformScope } };
   }
+  private get fundingBoundary(): ImplementedSupplierFunding { return this.options.fundingBoundary ?? 'platform-free-fallback'; }
+  private get fundingCollection() { return supplierFundingCollection(this.fundingBoundary); }
   private ref(kind: DocumentKind, id: string) { return this.db.doc(gatewayLedgerPath(kind, id)); }
   private async get(tx: Transaction, kind: DocumentKind, id: string): Promise<unknown> { return readData(await tx.get(this.ref(kind, id))); }
   private now(): number { const now = this.options.now(); validTime(now); return now; }
   private authorize(key: ExecutionKey): void {
     demand(validKey(key) && key.principalId === this.options.principal.principalId && key.tenantId === this.options.principal.tenantId);
   }
-  private parseAttempt(value: unknown): AttemptState { return readGatewayAttempt(value); }
+  private parseAttempt(value: unknown): AttemptState {
+    const attempt = readGatewayAttempt(value);
+    demand((attempt.fundingBoundary ?? 'platform-free-fallback') === this.fundingBoundary
+      && attempt.intent.binding.budgetScopeId === this.options.platformScope.id
+      && attempt.intent.binding.payer.kind === 'platform' && attempt.intent.binding.payer.ownerId === this.options.platformScope.ownerId);
+    return attempt;
+  }
   private logical(value: unknown, authority: GatewayAuthorityDocument): LogicalState {
     const r = authority.snapshot.request;
+    demand(authority.scope.kind === this.fundingBoundary && authority.scope.id === this.options.platformScope.id);
     if (value === undefined) {
       demand(r.attempts.length === 0 && nonnegativeInteger(r.queueWaitConsumedMs) && r.queueWaitConsumedMs <= r.maxQueueWaitMs && !r.outputVisible);
-      return { kind: 'gateway_logical', version: 1, key: authority.key, requestIdentity: logicalRequestBinding(r),
+      return { kind: 'gateway_logical', version: 1, fundingBoundary: this.fundingBoundary, key: authority.key, requestIdentity: logicalRequestBinding(r),
         ...(r.fixedTextChain === 'v1' ? { fixedTextChain: 'v1' as const } : {}),
         cancellationId: r.cancellation.id, cancelled: r.cancellation.cancelled, outputVisible: false, terminal: false, completed: false,
         activeAttemptId: null, attempts: [], queueWaitConsumedMs: r.queueWaitConsumedMs, heldNanoUsd: 0, spentNanoUsd: 0,
@@ -228,7 +241,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
     return l;
   }
   private validateLogical(l: LogicalState): void {
-    demand(validKey(l.key) && typeof l.requestIdentity === 'string' && isIdentifier(l.cancellationId)
+    demand((l.fundingBoundary ?? 'platform-free-fallback') === this.fundingBoundary && validKey(l.key) && typeof l.requestIdentity === 'string' && isIdentifier(l.cancellationId)
       && ['cancelled', 'outputVisible', 'terminal', 'completed'].every(k => typeof (l as unknown as Raw)[k] === 'boolean')
       && (l.activeAttemptId === null || isIdentifier(l.activeAttemptId))
       && (l.fixedTextChain === undefined || l.fixedTextChain === 'v1')
@@ -268,11 +281,11 @@ export class FirestoreInferenceLedger implements LedgerPort {
     const [a, l, attempt, policyRaw] = await Promise.all([
       this.get(tx, 'authority', key.logicalRequestId), this.get(tx, 'logical', key.logicalRequestId),
       this.get(tx, 'attempt', intent.binding.physicalAttemptId),
-      tx.get(this.db.doc(`${FREE_CHAIN_COLLECTION}/paid_budget_policy`)).then(readData),
+      tx.get(this.db.doc(`${this.fundingCollection}/paid_budget_policy`)).then(readData),
     ]);
     const authority = raw(a, 'gateway_authority') as unknown as GatewayAuthorityDocument;
     demand(same(authority.key, key) && authority.snapshot && isIdentifier(authority.snapshot.revision)
-      && authority.scope?.kind === 'platform-free-fallback' && authority.scope.id === this.options.platformScope.id
+      && authority.scope?.kind === this.fundingBoundary && supplierFundingSurface(this.fundingBoundary, authority.snapshot.request.surface) && authority.scope.id === this.options.platformScope.id
       && authority.snapshot.request.budgetScopeId === this.options.platformScope.id
       && authority.snapshot.request.payer.kind === 'platform'
       && authority.snapshot.request.payer.ownerId === this.options.platformScope.ownerId
@@ -320,9 +333,9 @@ export class FirestoreInferenceLedger implements LedgerPort {
     const window = civilDayWindow(now, PAID_BUDGET_TIME_ZONE);
     const profileQuarantineId = evidenceBinding([intent.binding.providerId, intent.binding.profileId]);
     const [dayRaw, profileQuarantine, userRaw, ...quotaPolicies] = await Promise.all([
-      tx.get(this.db.doc(`${FREE_CHAIN_COLLECTION}/paid_day_${window.key}`)).then(readData),
+      tx.get(this.db.doc(`${this.fundingCollection}/paid_day_${window.key}`)).then(readData),
       this.get(tx, 'profile-quarantine', profileQuarantineId),
-      intent.binding.budget ? tx.get(this.db.doc(paidUserDocumentPath(window.key, hash(key.principalId)))).then(readData) : Promise.resolve(undefined),
+      intent.binding.budget ? tx.get(this.db.doc(paidUserDocumentPath(window.key, hash(key.principalId), this.fundingCollection))).then(readData) : Promise.resolve(undefined),
       ...intent.binding.quota.map(q => this.get(tx, 'quota-policy', q.ledgerKey)),
     ]);
     demand(profileQuarantine === undefined, 'Profile remains quarantined until separate verified recovery');
@@ -413,7 +426,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
         const c = await this.current(tx, intent); const now = this.now(); const fresh = this.eligible(c, intent, false, now);
         const reservation: Reservation = { id: hash(fresh.binding.physicalAttemptId), intentBinding: admissionBinding(fresh) };
         const amount = fresh.binding.budget?.amountNanoUsd ?? 0;
-        const attempt: AttemptState = { kind: 'gateway_attempt', version: 1, reservation, intent: fresh, phase: 'held',
+        const attempt: AttemptState = { kind: 'gateway_attempt', version: 1, fundingBoundary: this.fundingBoundary, reservation, intent: fresh, phase: 'held',
           window: c.window, heldNanoUsd: amount, createdAtMs: now,
           ...(c.modelSlot ? { heldModelSlot: { identity: c.modelSlot.state.identity, policyRevision: c.modelSlot.policy.revision, intentBinding: modelSlotBinding(admissionBinding(fresh)) } } : {}),
           heldQuota: c.quotas.map((q, i) => ({ ...fresh.binding.quota[i], migrationId: q.policy.migrationId,
@@ -422,8 +435,8 @@ export class FirestoreInferenceLedger implements LedgerPort {
         if (c.modelSlot) tx.set(this.db.doc(modelSlotPath('state', c.modelSlot.state.identity)), { ...c.modelSlot.state, occupants: { ...c.modelSlot.state.occupants, [fresh.binding.physicalAttemptId]: { intentBinding: modelSlotBinding(admissionBinding(fresh)), acquiredAtMs: now } } });
         for (const [i, q] of c.quotas.entries()) tx.set(this.ref('quota-state', q.policy.ledgerKey), { ...q.state, held: checkedAdd(q.state.held, attempt.heldQuota[i].amount) });
         if (amount) writeSpendDay(tx, this.db, { ...c.day, heldNanoUsd: checkedAdd(c.day.heldNanoUsd, amount),
-          pending: checkedAdd(c.day.pending, 1), requests: checkedAdd(c.day.requests, 1) }, c.policy!.capNanoUsd, now, this.options.adminEmails);
-        if (amount) writePaidUser(tx, this.db, c.window, hash(fresh.binding.key.principalId), checkedAdd(c.paidUserCount, 1));
+          pending: checkedAdd(c.day.pending, 1), requests: checkedAdd(c.day.requests, 1) }, c.policy!.capNanoUsd, now, this.options.adminEmails, undefined, this.fundingCollection);
+        if (amount) writePaidUser(tx, this.db, c.window, hash(fresh.binding.key.principalId), checkedAdd(c.paidUserCount, 1), this.fundingCollection);
         tx.set(this.ref('logical', fresh.binding.key.logicalRequestId), { ...c.logical, activeAttemptId: fresh.binding.physicalAttemptId, heldNanoUsd: checkedAdd(c.logical.heldNanoUsd, amount) });
         tx.create(this.ref('attempt', fresh.binding.physicalAttemptId), attempt);
         return { kind: 'held' as const, reservation };
@@ -474,8 +487,8 @@ export class FirestoreInferenceLedger implements LedgerPort {
       demand(attempt.phase === 'held', 'Claimed attempts require authoritative non-invocation or usage reconciliation');
       const key = attempt.intent.binding.key;
       const [logicalRaw, dayRaw, policyRaw, ...quotaRaw] = await Promise.all([
-        this.get(tx, 'logical', key.logicalRequestId), tx.get(this.db.doc(`${FREE_CHAIN_COLLECTION}/paid_day_${attempt.window.key}`)).then(readData),
-        tx.get(this.db.doc(`${FREE_CHAIN_COLLECTION}/paid_budget_policy`)).then(readData),
+        this.get(tx, 'logical', key.logicalRequestId), tx.get(this.db.doc(`${this.fundingCollection}/paid_day_${attempt.window.key}`)).then(readData),
+        tx.get(this.db.doc(`${this.fundingCollection}/paid_budget_policy`)).then(readData),
         ...attempt.heldQuota.map(q => this.get(tx, 'quota-state', q.ledgerKey)),
       ]);
       const logical = raw(logicalRaw, 'gateway_logical') as unknown as LogicalState; this.validateLogical(logical);
@@ -499,7 +512,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
         day = { ...d, heldNanoUsd: subtract(d.heldNanoUsd, attempt.heldNanoUsd), pending: subtract(d.pending, 1) }; }
       if (releasedSlot) tx.set(this.db.doc(modelSlotPath('state', releasedSlot.identity)), releasedSlot);
       nextStates.forEach(s => tx.set(this.ref('quota-state', s.ledgerKey), s));
-      if (day) writeSpendDay(tx, this.db, day, policy?.capNanoUsd ?? 0, this.now(), this.options.adminEmails);
+      if (day) writeSpendDay(tx, this.db, day, policy?.capNanoUsd ?? 0, this.now(), this.options.adminEmails, undefined, this.fundingCollection);
       tx.set(this.ref('logical', key.logicalRequestId), nextLogical);
       tx.set(attemptRef, { ...attempt, phase: 'released' });
     });
@@ -610,8 +623,8 @@ export class FirestoreInferenceLedger implements LedgerPort {
       const { attempt, logical } = await this.owned(tx, claim);
       const [usageRaw, receiptRaw, dayRaw, policyRaw, ...resources] = await Promise.all([
         this.get(tx, 'usage', usage.evidenceRef), this.get(tx, 'receipt', usage.evidenceRef),
-        tx.get(this.db.doc(`${FREE_CHAIN_COLLECTION}/paid_day_${attempt.window.key}`)).then(readData),
-        tx.get(this.db.doc(`${FREE_CHAIN_COLLECTION}/paid_budget_policy`)).then(readData),
+        tx.get(this.db.doc(`${this.fundingCollection}/paid_day_${attempt.window.key}`)).then(readData),
+        tx.get(this.db.doc(`${this.fundingCollection}/paid_budget_policy`)).then(readData),
         ...attempt.heldQuota.flatMap(q => [this.get(tx, 'quota-state', q.ledgerKey),
           this.get(tx, 'quota-period', evidenceBinding([q.ledgerKey, q.window.id]))]),
       ]);
@@ -674,7 +687,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
       // This complete write set is atomic: no release window before quarantine/accounting.
       settledQuotas.forEach(({ state, period }) => { tx.set(this.ref('quota-state', state.ledgerKey), state);
         tx.set(this.ref('quota-period', evidenceBinding([period.ledgerKey, period.window.id])), period); });
-      if (day) writeSpendDay(tx, this.db, day, policy?.capNanoUsd ?? 0, now, this.options.adminEmails);
+      if (day) writeSpendDay(tx, this.db, day, policy?.capNanoUsd ?? 0, now, this.options.adminEmails, undefined, this.fundingCollection);
       if (quarantine) {
         tx.set(this.ref('profile-quarantine', evidenceBinding([claim.binding.providerId, claim.binding.profileId])), {
           kind: 'gateway_profile_quarantine', version: 1, providerId: claim.binding.providerId, profileId: claim.binding.profileId,
@@ -682,7 +695,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
         });
         tx.set(this.ref('incident', claim.binding.physicalAttemptId), { kind: 'gateway_accounting_incident', version: 1,
           attemptId: claim.binding.physicalAttemptId, evidenceRef: usage.evidenceRef, usageBinding, violation, unresolved: true, atMs: now });
-        if (violation.cost) tx.set(this.db.doc(`${FREE_CHAIN_COLLECTION}/paid_budget_policy`), {
+        if (violation.cost) tx.set(this.db.doc(`${this.fundingCollection}/paid_budget_policy`), {
           kind: 'paid_budget_policy', version: 1, revision: checkedAdd(policy?.revision ?? 0, 1), capNanoUsd: 0, updatedAt: now, source: 'safety',
         } satisfies PaidBudgetPolicy);
       }

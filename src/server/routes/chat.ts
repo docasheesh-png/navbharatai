@@ -1,4 +1,4 @@
-import { withFixedTextChainScope } from '../AI/fixedTextChain';
+import { fixedTextChainEnabled, withFixedTextChainScope } from '../AI/fixedTextChain';
 import { withMitrifyChatPrivacyBoundary } from '../lib/mitrify';
 import { chatAvailabilityMessage } from '../lib/chatAvailabilityMessage';
 import { resolveChatReplyLanguage, chatReplyLanguageCategory } from '../../lib/chatReplyLanguage';
@@ -84,7 +84,7 @@ async function withChatTextGateway<T>(req: Request, res: Response, handler: () =
     return;
   }
   const legacy = () => withFixedTextChainScope('chat', Array.isArray(req.body?.fileAttachments) && req.body.fileAttachments.length ? 'vision-pdf' : 'text', () => withFreeChainEntryAdmission(req, res, handler));
-  if (!inferenceGatewayEnabled('chat') && !wasGatewayGuestSelected(req)) return legacy();
+  if (!fixedTextChainEnabled() && !inferenceGatewayEnabled('chat') && !wasGatewayGuestSelected(req)) return legacy();
   const body = req.body;
   if (!body || (!body.message && !Array.isArray(body.fileAttachments))) return legacy();
   if (res.destroyed || res.writableEnded) return;

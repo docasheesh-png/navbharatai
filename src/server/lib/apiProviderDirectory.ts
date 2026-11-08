@@ -47,6 +47,7 @@ export interface ApiProviderEntry {
 
 export const API_PROVIDERS: readonly ApiProviderEntry[] = [
   // ── AI providers ──
+  { id: 'mitrify', name: 'Mitrify', group: 'ai', envKeys: ['MITRIFY_API_KEY'], usedFor: ['Reviewed conversational fallback (exact-payload approval required)'], billingUrl: null, billingHint: 'Supplier billing URL and balance API are not verified; ask the existing account operator. No balance is inferred.' },
   { id: 'router-one', name: 'Router One', group: 'ai', envKeys: ['ROUTER_ONE_API_KEY'], usedFor: ['Pro builds on Weak power (the builder after Surplus)'], billingUrl: 'https://router.one/dashboard', billingHint: 'Dashboard → balance' },
   { id: 'surplus', name: 'Surplus', group: 'ai', envKeys: ['SURPLUS_API_KEY'], usedFor: ['Pro builds on Weak power (first choice)'], billingUrl: 'https://www.surplusintelligence.ai/app/buy/funding', billingHint: 'Funding → credits' },
   { id: 'cheaperinference', name: 'CheaperInference', group: 'ai', envKeys: ['CHEAPERINFERENCE_API_KEY'], usedFor: ['Free Chat (free-chat chain)'], billingUrl: 'https://www.cheaperinference.com/dashboard/billing', billingHint: 'Billing' },

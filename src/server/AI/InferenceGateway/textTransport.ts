@@ -1,3 +1,6 @@
+import { executeGatewayMitrify } from './mitrifyTransport';
+import { mitrifyConfig } from '../../lib/mitrify';
+import { cheaperInferenceMode, cheaperInferenceSharedAccessPermitted } from '../../lib/cheaperInferencePolicy';
 /**
  * Server-only, single-dispatch text transport. This is NOT a public router or an
  * admission authority. Its caller must authenticate the exact durable claim and
@@ -21,9 +24,13 @@ export function gatewayTextCredentialBinding(credential: string): string {
   return createHash('sha256').update('navbharatai-inference-gateway-text-credential-v1\0').update(credential).digest('hex');
 }
 
-export type GatewayTextProvider = 'GLM' | 'GEMINI' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK';
+export type GatewayTextProvider = 'GLM' | 'GEMINI' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK' | 'OPENAI' | 'DEEPINFRA' | 'CHEAPERINFERENCE' | 'MITRIFY';
 export interface GatewayTextRateCard {
   readonly version: string;
+  readonly supplierPerHttpRequestCeilingNanoUsd?: number;
+  readonly supplierListInputNanoUsdPerMillion?: number;
+  readonly supplierListOutputNanoUsdPerMillion?: number;
+  readonly minimumDiscountBasisPoints?: number;
   readonly inputNanoUsdPerMillion: number;
   readonly outputNanoUsdPerMillion: number;
   /** Optional reviewed cache reservation bound; never an exact invoice-settlement rate. */
@@ -43,6 +50,15 @@ export interface GatewayTextTransportConfig {
   /** Non-secret generation binding reviewed with the actual account, not a quota identity. */
   readonly credentialBinding: string;
   readonly rateCard?: GatewayTextRateCard;
+}
+/** Reuse existing official server configuration; no secret alias is required. */
+export function gatewayCredentialEnvAllowed(transport: { provider: string; credentialEnv: string }): boolean {
+  if (/^INFERENCE_GATEWAY_[A-Z0-9_]+$/.test(transport.credentialEnv)) return true;
+  const official: Record<string, readonly string[]> = { MITRIFY: ['MITRIFY_API_KEY'], CHEAPERINFERENCE: ['CHEAPERINFERENCE_API_KEY'],
+    GLM: ['FREE_CHAIN_GLM_API_KEY', 'FREE_CHAIN_GLMX_API_KEY'], GROQ: ['FREE_CHAIN_GROQ_API_KEY'],
+    CLOUDFLARE: ['FREE_CHAIN_CF_API_TOKEN'], DEEPINFRA: ['FREE_CHAIN_DEEPINFRA_API_KEY'], OPENAI: ['FREE_CHAIN_OPENAI_API_KEY'],
+    GEMINI: ['FREE_CHAIN_GEMINIPAID_API_KEY'], OPENROUTER: ['OPENROUTER_API_KEY'] };
+  return official[transport.provider]?.includes(transport.credentialEnv) === true;
 }
 export interface GatewayTextPayload {
   readonly prompt: string;
@@ -120,10 +136,14 @@ const ENDPOINTS: Record<GatewayTextProvider, RegExp> = {
   GEMINI: /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/openai\/?$/,
   GROQ: /^https:\/\/api\.groq\.com\/openai\/v1\/?$/,
   CLOUDFLARE: /^https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/[a-fA-F0-9]{32}\/ai\/v1\/?$/,
+  OPENAI: /^https:\/\/api\.openai\.com\/v1\/?$/,
+  DEEPINFRA: /^https:\/\/api\.deepinfra\.com\/v1\/openai\/?$/,
+  CHEAPERINFERENCE: /^https:\/\/api\.cheaperinference\.com\/v1\/?$/,
+  MITRIFY: /^https:\/\//,
   DEEPSEEK: /^https:\/\/api\.deepseek\.com\/v1\/?$/,
 };
 const CONFIG_KEYS = ['provider', 'baseURL', 'model', 'maxOutputTokens', 'timeoutMs', 'streamUsage', 'credentialEnv', 'credentialBinding', 'rateCard'];
-const RATE_KEYS = ['version', 'inputNanoUsdPerMillion', 'outputNanoUsdPerMillion', 'cachedInputNanoUsdPerMillion', 'verifiedAtMs', 'expiresAtMs'];
+const RATE_KEYS = ['version', 'inputNanoUsdPerMillion', 'outputNanoUsdPerMillion', 'cachedInputNanoUsdPerMillion', 'supplierPerHttpRequestCeilingNanoUsd', 'supplierListInputNanoUsdPerMillion', 'supplierListOutputNanoUsdPerMillion', 'minimumDiscountBasisPoints', 'verifiedAtMs', 'expiresAtMs'];
 const SAFETY_REASONS = new Set(['content_filter', 'safety', 'blocklist', 'prohibited_content', 'spii', 'recitation', 'sensitive']);
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 const MAX_FRAME_BYTES = 2 * 1024 * 1024;
@@ -202,12 +222,43 @@ export function readGatewayTextRejection(error: unknown, claim: DispatchClaim): 
 function validRates(transport: GatewayTextTransportConfig, profile: ProviderProfile, now: number): boolean {
   const rate = transport.rateCard;
   if (profile.charging === 'verified-free-no-overage') return rate === undefined;
-  if (profile.charging !== 'metered' || transport.provider !== 'DEEPSEEK' || transport.model !== 'deepseek-flash'
+  if (profile.charging !== 'metered'
     || !rate || Object.keys(rate).some(key => !RATE_KEYS.includes(key)) || !isIdentifier(rate.version)
-    || !isCount(rate.verifiedAtMs) || !isCount(rate.expiresAtMs) || rate.verifiedAtMs > now || rate.expiresAtMs <= now
-    || !isPositiveCount(rate.inputNanoUsdPerMillion) || !isPositiveCount(rate.outputNanoUsdPerMillion)) return false;
+    || !isCount(rate.verifiedAtMs) || !isCount(rate.expiresAtMs) || rate.verifiedAtMs > now || rate.expiresAtMs <= now) return false;
   try {
-    const minimum = realRateFor('DEEPSEEK', transport.model);
+    if (transport.provider === 'MITRIFY') {
+      const cfg = mitrifyConfig();
+      return transport.baseURL === cfg.baseURL && transport.model === cfg.model
+        && typeof rate.supplierPerHttpRequestCeilingNanoUsd === 'number' && isPositiveCount(rate.supplierPerHttpRequestCeilingNanoUsd)
+        && rate.minimumDiscountBasisPoints === undefined && rate.supplierListInputNanoUsdPerMillion === undefined && rate.supplierListOutputNanoUsdPerMillion === undefined
+        && rate.inputNanoUsdPerMillion === 0 && rate.outputNanoUsdPerMillion === 0 && rate.cachedInputNanoUsdPerMillion === undefined;
+    }
+    if (!isPositiveCount(rate.inputNanoUsdPerMillion) || !isPositiveCount(rate.outputNanoUsdPerMillion)) return false;
+    const paidModels: Partial<Record<GatewayTextProvider, readonly string[]>> = { DEEPSEEK: ['deepseek-flash'],
+      GLM: ['glm-4.7-flashx'], OPENAI: ['gpt-5-nano'], GEMINI: ['gemini-2.5-flash-lite'],
+      DEEPINFRA: ['meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo', 'deepseek-ai/DeepSeek-V4-Flash-0731'],
+      CHEAPERINFERENCE: ['beam', 'beam-1.0-501b-a23b'] };
+    if (!paidModels[transport.provider]?.includes(transport.model) || rate.supplierPerHttpRequestCeilingNanoUsd !== undefined) return false;
+    if (transport.provider === 'CHEAPERINFERENCE') {
+      if (cheaperInferenceMode() !== 'all' || !cheaperInferenceSharedAccessPermitted()
+        || typeof rate.minimumDiscountBasisPoints !== 'number' || !isCount(rate.minimumDiscountBasisPoints) || rate.minimumDiscountBasisPoints > 9999
+        || typeof rate.supplierListInputNanoUsdPerMillion !== 'number' || !isPositiveCount(rate.supplierListInputNanoUsdPerMillion)
+        || typeof rate.supplierListOutputNanoUsdPerMillion !== 'number' || !isPositiveCount(rate.supplierListOutputNanoUsdPerMillion)) return false;
+      // These maker-list amounts MUST come from the reviewed supplier catalog, not a guessed discounted quote.
+      // The documented server-side minimum-discount field caps each settled rate, including supplier failover.
+      const ceiling = (list: number) => Number((BigInt(list) * BigInt(10000 - rate.minimumDiscountBasisPoints!) + 9999n) / 10000n);
+      return rate.inputNanoUsdPerMillion >= ceiling(rate.supplierListInputNanoUsdPerMillion)
+        && rate.outputNanoUsdPerMillion >= ceiling(rate.supplierListOutputNanoUsdPerMillion)
+        && (rate.cachedInputNanoUsdPerMillion === undefined || (isCount(rate.cachedInputNanoUsdPerMillion) && rate.cachedInputNanoUsdPerMillion <= rate.inputNanoUsdPerMillion));
+    }
+    if (rate.minimumDiscountBasisPoints !== undefined || rate.supplierListInputNanoUsdPerMillion !== undefined || rate.supplierListOutputNanoUsdPerMillion !== undefined) return false;
+    // Builder's family-level GPT/unknown-host prices are deliberately unchanged.
+    // These are exact API pairs, not inferred aliases or supplier ceilings.
+    const minimum = transport.provider === 'OPENAI' ? { inputPerMTok: 0.05, outputPerMTok: 0.40, cacheReadPerMTok: 0.005 }
+      : transport.provider === 'DEEPINFRA' ? (transport.model === 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'
+        ? { inputPerMTok: 0.02, outputPerMTok: 0.04, cacheReadPerMTok: undefined }
+        : { inputPerMTok: 0.06, outputPerMTok: 0.18, cacheReadPerMTok: undefined })
+      : realRateFor(transport.provider, transport.model);
     const ceiling = realRateFor('KIMI', 'kimi-k2.7');
     if (rate.inputNanoUsdPerMillion < usdToNanoUsd(minimum.inputPerMTok)
       || rate.outputNanoUsdPerMillion < usdToNanoUsd(minimum.outputPerMTok)) return false;
@@ -257,8 +308,8 @@ function validate(authorization: GatewayTextAuthorization, payload: GatewayTextP
     const rate = t.rateCard!;
     if (r.mode !== 'free-first-authorized-paid' || !b.budget || b.budget.rateCardVersion !== rate.version
       || !b.priceBinding || !b.budgetAuthorizationBinding
-      || b.budget.amountNanoUsd < maximumCostNanoUsd(capability.inputTokens, capability.outputTokens,
-        rate.inputNanoUsdPerMillion, rate.outputNanoUsdPerMillion)) fail('POLICY_BLOCKED');
+      || b.budget.amountNanoUsd < (t.provider === 'MITRIFY' ? rate.supplierPerHttpRequestCeilingNanoUsd! : maximumCostNanoUsd(capability.inputTokens, capability.outputTokens,
+        rate.inputNanoUsdPerMillion, rate.outputNanoUsdPerMillion))) fail('POLICY_BLOCKED');
   } else if (b.budget || b.priceBinding) fail('POLICY_BLOCKED');
 }
 
@@ -367,6 +418,7 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
     const payload = { prompt: input.prompt, systemPrompt: input.systemPrompt, schema: input.schema,
       images: input.images === undefined ? undefined : [...input.images], modelOverride: input.modelOverride, streaming: !!input.onChunk };
     validate(a, payload, Date.now());
+    if (a.transport.provider === 'MITRIFY') return await executeGatewayMitrify({ ...input, ...a, prompt: payload.prompt, systemPrompt: payload.systemPrompt }, () => { dispatchedClaim = a.claim; });
     const { transport: t, request } = a;
     controller = new AbortController();
     const signal = controller.signal;
@@ -395,10 +447,11 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
     };
     const messages = [...(payload.systemPrompt ? [{ role: 'system', content: payload.systemPrompt }] : []), { role: 'user', content: payload.prompt }];
     const body = JSON.stringify({ model: t.model, messages, stream: payload.streaming,
-      ...(t.provider === 'GROQ' ? { max_completion_tokens: request.capability.kind === 'text' ? request.capability.outputTokens : 0 }
+      ...(['GROQ', 'OPENAI'].includes(t.provider) ? { max_completion_tokens: request.capability.kind === 'text' ? request.capability.outputTokens : 0 }
         : { max_tokens: request.capability.kind === 'text' ? request.capability.outputTokens : 0 }),
       ...(['GLM', 'DEEPSEEK'].includes(t.provider) ? { thinking: { type: 'disabled' } } : {}),
-      ...(t.provider === 'GEMINI' ? { reasoning_effort: 'none' } : {}),
+      ...(t.provider === 'CHEAPERINFERENCE' ? { min_discount_percent: t.rateCard!.minimumDiscountBasisPoints! / 100, zdr: true } : {}),
+      ...(t.provider === 'GEMINI' ? { reasoning_effort: 'none' } : t.provider === 'OPENAI' ? { reasoning_effort: 'minimal' } : t.provider === 'CHEAPERINFERENCE' ? { reasoning_effort: 'low' } : {}),
       ...(payload.streaming && t.streamUsage ? { stream_options: { include_usage: true } } : {}) });
     // This callback is an exclusive durable dispatch gate, not a JSON boolean from ingress.
     if (await bounded(input.authorizeClaim(a)) !== true) fail('POLICY_BLOCKED');

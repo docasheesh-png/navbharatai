@@ -1,119 +1,225 @@
-# Requested universal conversational chain: implementation audit
+# Universal NavBharatAI text routing — rollout readiness
 
-Status: **not universally enabled; not deployment-ready**. This audit and the
-chat-local fallback fixes do not establish that the full owner request is done.
-Do not switch production to fixed-v1 just to make an ordering test pass.
+Code integration is implemented; **this work has not enabled or deployed production; its current state is unverified**.
+Do not enable `TEXT_CHAIN_POLICY=fixed-v1` before reviewing the catalog and funding below.
+This is eligibility-ordered fallback, not permission to bypass privacy, money, safety,
+quota, or cancellation gates. Ineligible/missing rungs are skipped, never substituted.
 
-## Existing exact order
+## Exact requested order
 
-`src/server/AI/fixedTextChain.ts` already defines:
+| Owner position | Exact text transport/model |
+|---|---|
+| 1 | Z.AI `glm-4.5-flash` — verified free |
+| 2 | Z.AI `glm-4.7-flash` — verified free |
+| 3 | Groq `openai/gpt-oss-120b` — verified free account/no overage |
+| 4 | Cloudflare `@cf/meta/llama-3.3-70b-instruct-fp8-fast` — verified free/no overage |
+| 5 | OpenRouter reviewed, verified-free model allowlist; suffix alone is insufficient |
+| 5.5 | Mitrify, the exact existing `MITRIFY_MODEL` alias bound to its reviewed gateway |
+| 6 | CheaperInference Beam: reviewed `beam` or `beam-1.0-501b-a23b`, no alias rewriting |
+| 7 | DeepInfra `meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo` |
+| 8 | DeepInfra `deepseek-ai/DeepSeek-V4-Flash-0731` |
+| 9 | OpenAI `gpt-5-nano` |
+| 10 | Z.AI `glm-4.7-flashx` |
+| 11 | Google `gemini-2.5-flash-lite` — metered |
 
-1. Z.AI `glm-4.5-flash`
-2. Z.AI `glm-4.7-flash`
-3. Groq `openai/gpt-oss-120b`, verified free account only
-4. Cloudflare `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, free allowance only
-5. OpenRouter reviewed/verified-free allowlist
-6. Mitrify (owner position 5.5), existing opaque `MITRIFY_MODEL`
-7. CheaperInference Beam
-8. DeepInfra `meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo`
-9. DeepInfra `deepseek-ai/DeepSeek-V4-Flash-0731`
-10. OpenAI `gpt-5-nano`
-11. Z.AI `glm-4.7-flashx`
-12. Google `gemini-2.5-flash-lite`, paid account
+The broad Groq/Cloudflare requests retain the repository's existing exact choices;
+no unverified smaller/newer model is substituted. GPT-5 nano's official page now
+marks it **deprecated**, but still documents this exact ID and Chat Completions/
+streaming. Do not silently upgrade it to GPT-5.4 nano or another model.
+Official Groq and Cloudflare pages also publish paid rates: these models are not
+intrinsically free. Their rungs require reviewed actual account free allowances and
+no-overage hard stops; a model name alone never authorizes free eligibility.
+Google's current official lifecycle page says `gemini-2.5-flash-lite` is not deprecated
+and has no announced shutdown date, but access to 2.5 models is restricted to prior
+active users. Confirm account access; do not substitute a newer Gemini model.
 
-This is an order of eligible candidates, not a claim that every candidate is
-configured, reviewed or usable. No different model/provider may silently replace
-a missing identifier. The owner's broad “Groq GPT” allows a GPT-OSS family, but
-fixed-v1 currently admits only 120B; 20B is allowed by legacy config, not fixed
-ranking. Confirm that intended model choice before expanding it.
+## Entry points and exclusions
 
-## Blocking application work (not just environment setup)
+With fixed-v1, old cohort/admin/role/surface rollouts cannot choose a different text
+ladder. The Gateway master switch, strict-free safety restrictions, verified identity,
+reviewed capability/quality/privacy, account ownership, budget and quotas remain gates.
+Turning off the master after selection fails closed, not through legacy routing.
 
-- Fixed selection defaults to legacy. Turning it on globally today can *remove*
-  working routes, rather than improve availability.
-- `professionals/engine.ts` explicitly rejects fixed professional text without
-  selected Gateway authority (`fixed-chain-professional-authority-unavailable`).
-  Paid professional ingress lacks its existing payer's predispatch funding bridge.
-  Do not borrow a different payer's budget or relabel private/health data public.
-- `InferenceGateway` has no Mitrify executor adapter/profile; its rank is absent
-  intentionally. Legacy FreeChain alone has a reviewed Mitrify adapter.
-- Guest authority, non-text chats, structured specialist workflows and the shared
-  professional helper have different admission/dispatch boundaries. These are
-  not covered by reordering FreeChain. Preserve tool/JSON/vision capability and
-  privacy checks when implementing a common conversational policy.
-- Existing reviewed Mitrify admission requires exact-payload, one-use server-owned
-  approval and supplier-enforced inclusive monetary ceiling. No automatic review,
-  approval writer or evidence was fabricated by this change.
-- Unknown paid liability and committed output remain terminal. Retaining a hold is
-  not evidence of zero billing or permission to repeat a potentially charged call.
+- `/api/chat/navbharat` and `/api/chat/navbharatai`: signed-in and durable signed-out
+  guests, streamed and buffered; ordinary API-version aliases retain the same handlers.
+- `/api/professional/:id/chat`: every registry specialist, free/paid/pass/exempt/admin
+  entitlements. The entry point enrolls before attachment/memory work; the engine retains
+  the verified principal, clinical/health classification and supplier funding boundary.
+- `/api/sda-chat`: Doctor primary text and independent audit use the same ordered policy.
+  Audit excludes the primary canonical model. Reports use separately reviewed vision
+  extraction, not a text-only pretend reading. Failed audit is explicitly disclosed.
+- `/api/repo-analyst/chat` and its improver: authenticated users and genuine durable
+  guests. Guest receipts are surface-scoped, one-use, expire, and do not confer account
+  memory access, another specialist's access, or paid-professional payer authority.
+- `/api/chat/completions` including `navbharatai/<expert>` and
+  `/api/professionals/:id/chat`: developer API keys retain their scopes, per-key spend
+  gate and after-answer charging. Fixed ingress independently reauthenticates the exact
+  key/owner/scopes and uses the separately reviewed paid conversational supplier pool.
+  A body UID or Firebase-only identity cannot enroll this boundary.
 
-## Missing/required configuration (names only, no credentials)
+**Pro app builder is not enrolled**: AgentV3, Surplus, Router One, z@ pin routing,
+provider watchdogs and builder implementation are unchanged. Retired `/api/pro-chat`
+is still retired. Exam/tool JSON, embeddings, search, vision, image generation and
+speech are distinct capability operations, not aliases for the requested text models.
+Their auxiliary policies remain separate; conversational final text uses the chain.
+Customer-built published-app assistants/BYOK remain under their independent app-owner
+contracts, not silently converted to NavBharatAI-owned product chat. Nova Sonic is a
+separate live speech-to-speech service; these text models do not implement its audio
+protocol. This change does not claim to reroute live voice or customer BYOK traffic.
 
-- GLM: `FREE_CHAIN_GLM_API_KEY`, current `FREE_CHAIN_GLM_FREE_VERIFIED_UNTIL`,
-  real account RPM/RPD/TPM/TPD (`FREE_CHAIN_GLM_*`); defaults are zero.
-- Groq: `FREE_CHAIN_GROQ_API_KEY`, current free-plan review and no-overage evidence.
-- Cloudflare: `FREE_CHAIN_CF_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, current free-plan
-  review, free-neuron accounting, and account enforcement against paid overage.
-- OpenRouter: `OPENROUTER_API_KEY`, `FREE_CHAIN_OPENROUTER_MODELS`, and current
-  verified-free registry evidence. A `:free` suffix by itself is not approval.
-- Mitrify: existing `MITRIFY_BASE_URL`, `MITRIFY_API_KEY`, `MITRIFY_MODEL`, valid
-  `MITRIFY_MAX_INFLIGHT`, `MITRIFY_CHAIN_ENABLED=1`, plus the reviewed approval and
-  supplier ceiling described in `docs/mitrify.md`. Do not assume auto-cheap resolves
-  to a particular model, price or data processor.
-- CheaperInference: `CHEAPERINFERENCE_API_KEY`, verified exact `CHEAPERINFERENCE_MODEL`,
-  `CHEAPERINFERENCE=all`, actual written shared-serving permission, current
-  `FREE_CHAIN_CHEAPINF_RATE_VERIFIED_UNTIL` and conservative current rates.
-  Existing code's $0.006/$0.022 rates are **not a new live attestation**. Search
-  results for the official versioned Beam page quoted $0.65/$1.95, while a direct
-  fetch returned “Model unavailable”; reconcile alias, availability and current
-  account-specific rate before any rollout. No production request was made.
-- Paid DeepInfra: `FREE_CHAIN_DEEPINFRA_API_KEY`, both per-rung rate attestations.
-- Paid OpenAI/Z.AI/Google: their existing `FREE_CHAIN_OPENAI_*`, `FREE_CHAIN_GLMX_*`,
-  `FREE_CHAIN_GEMINIPAID_*` credentials/rate attestations and approved funding.
-- All current rollout, provider shutdown, privacy, concurrency, quota and explicit
-  monetary policy remain authoritative. No deployed flag or environment was edited.
+## Funding bridge (no new money authorization)
 
-## Evidence and outage limits
+Provider liability is not the user's wallet debit. Existing entitlement gates and
+`chargeForAiTurn(s)` calls/billable fractions remain; no extra wallet debit is added.
+The existing billing-proof rule still refuses to invent invoice spend from an estimate:
+Gateway paid usage without actual billing proof remains unmeasured to the legacy wallet.
+Reservations and conservative ceiling bookings are not reported as supplier invoices.
 
-Verified in source and offline regressions:
+- Free product supplier money: existing `free_chat_chain/paid_budget_policy` and
+  `paid_day_<IST-day>` / `paid_user_<IST-day>_<uid-hash>` documents.
+- Paid professional/Doctor/developer conversational supplier money:
+  **`professional_inference/paid_budget_policy`** and the same day/user schemas in
+  **that collection**, never the free-chat money collection. Missing/zero authority
+  cannot borrow the free pool, infer allowance from a user wallet, or create a budget.
+- `free_chat_chain/gateway_catalog.professionalScope = { id, ownerId }` is required
+  for the paid boundary; `id` must differ from `platformScope.id`. The supplier owner
+  must match reviewed credential ownership. Catalog refresh preserves this scope.
+- Existing provider account quotas/model occupancy are still shared, not multiplied
+  by the funding split. Unknown paid liabilities retain their original holds.
+- No default budget, migration, deployed flag, secret or production record was written.
 
-- A malformed `MITRIFY_MAX_INFLIGHT` threw before the rung's try/catch and could
-  terminate the fixed ladder before later suppliers. It now records a safe skip.
-- Caller cancellation during a non-cooperative SDK stream could wait until the
-  watchdog and then emerge as all-failed, emit an outage notice and penalize the
-  provider. Observation now ends promptly, emits no outage notice, suppresses late
-  chunks and does not open a provider cooldown. Physical slots/paid holds remain
-  conservative until the original physical promise actually settles.
-- Each normal rung previously inherited a full independent hard cap, and Mitrify
-  could consume all remaining time. Fixed FreeChain now shares a 90-second
-  provider-observation deadline and reserves a first-token share for remaining
-  positions. Mitrify gets one HTTP attempt (not four hidden attempts counted as
-  one) and an idle bound after text begins. Database admission/settlement waits
-  are not claimed to have a new absolute wall-clock bound.
+The existing Gateway planner still enforces its finite USD10/day ceiling and per-user
+paid-attempt guard; a configured policy is not permission to exceed those limits.
+A timeout/ambiguous paid failure is **not proof of zero cost**: it remains pending
+reconciliation and may terminate the request. Only supported authenticated rejection
+proof permits a paid retry. Do not loosen that fence merely to demonstrate all rungs.
 
-These are reproducible code defects, **not proven causes of the owner's recent
-production incident**. No serving revision, production logs, account balances or
-actual incident request trace was available in this audit. PR #4115 records a
-separate paid-admission fix and manual coherent Cloud Run rollout requirement;
-merged source is not proof that the deployed service is restored.
+## Smallest operator/owner inputs before rollout
 
-## Boundary / validation / release
+First inspect the already-deployed records through an authorized service connection;
+production configuration was not accessible here. Do not assume every field is absent.
+Secrets belong in the existing server secret configuration, never chat or this document.
 
-Only `FreeChain` observation was changed; no AgentV3, Surplus, Router One, z@ pin,
-builder or shared router/watchdog implementation was edited. Existing nested
-builder exclusion tests must continue to pass. No paid benchmark was run.
+1. Confirm the existing server credential bindings for the exact suppliers. The Gateway
+   accepts `INFERENCE_GATEWAY_*` credential names or the existing provider-specific
+   names: `FREE_CHAIN_GLM_API_KEY`, `FREE_CHAIN_GLMX_API_KEY`,
+   `FREE_CHAIN_GROQ_API_KEY`, `FREE_CHAIN_CF_API_TOKEN`, `OPENROUTER_API_KEY`,
+   `MITRIFY_API_KEY`, `CHEAPERINFERENCE_API_KEY`, `FREE_CHAIN_DEEPINFRA_API_KEY`,
+   `FREE_CHAIN_OPENAI_API_KEY`, `FREE_CHAIN_GEMINIPAID_API_KEY`. No duplicate key is
+   required just because the transport now goes through the Gateway.
+2. Supply/renew **actual reviewed** catalog profiles and surface policies for the paths
+   above: exact endpoint/model/capabilities, quality/privacy/terms references, current
+   credential-account ownership fence and canonical quota/slot rules. Required policy
+   keys include `chat:text`, `professional:<id>`, `doctor:text`, `doctor:audit`,
+   `mode:repo-analyst:chat|generate`, `developer-api:text`, and
+   `developer-api:professional:<id>`, plus actually-used auxiliary keys. Do not invent
+   RPM/TPM, free-plan status, health-data consent or capacity from model names.
+3. For the paid supplier pool only, choose/approve the finite daily cap D (0 < D <=
+   USD10), distinct professional scope ID/supplier owner, and per-request limit within
+   that authority. `paid_budget_policy` uses the existing schema: kind
+   `paid_budget_policy`, version 1, positive revision, integer `capNanoUsd`, timestamp
+   `updatedAt`, source `admin`. No initial day balance needs to be fabricated. Confirm
+   the intended paid-product billing/reconciliation policy before commercial rollout;
+   a conservative provider reservation must never be sold as measured invoice spend.
+4. Mitrify-specific evidence and Beam-specific catalog/permission below. No blanket
+   owner checkbox can replace their required supplier/data-processing evidence.
+5. Only after review, deliberately configure `TEXT_CHAIN_POLICY=fixed-v1` and
+   `INFERENCE_GATEWAY_ENABLED=on`. Existing strict-free/emergency restrictions can
+   still exclude metered rungs; do not disable them without the appropriate review.
+   Deploy the reviewed revision via the established manual Cloud Run Console Run
+   process, and verify the actual serving revision and canary results before wider use.
 
-Run local targeted tests, all ingress-policy tests, frontend/server/benchmark
-checks and the entire CI matrix before considering merge. Report incomplete
-coverage/emulator checks as incomplete. CI is not assumed budget-exhausted:
-repository runs were active when inspected. Keep this partial hardening change
-separate from a claim of universal routing. Any later completed rollout requires
-review, manual Cloud Run Console Run and verification of the actual serving
-revision. No 100% uptime guarantee is possible.
+## Mitrify: what 401 does and does not prove
+
+Repository configuration already exists (`lib/mitrify.ts`, `docs/mitrify.md`, smoke
+script): defaults are `https://mitrify.com/v1`, `mitrify/auto-cheap`, server-only
+`MITRIFY_API_KEY`, `MITRIFY_MAX_INFLIGHT` default 200, opt-in `MITRIFY_CHAIN_ENABLED=1`.
+No replacement endpoint, account, credential or model was invented.
+
+An **unauthenticated public** GET of `https://mitrify.com/v1/models` returned 401.
+No configured production key was sent, so this is not evidence that its key is bad,
+expired or missing. The public root rendered “Fast Service, Instant Connect”, not an
+AI model catalog; it does not verify that the default opaque AI alias currently exists.
+The smallest remaining supplier input is an authorized read-only catalog/contract
+confirming the actual intended base URL and exact model alias (or confirmation that
+these existing values are correct), not a guess at a different URL.
+
+The dedicated Gateway adapter now reuses the existing exact-payload approval protocol.
+Before admission it skips an unapproved payload without reserving supplier money.
+At dispatch it transactionally claims/revalidates the approval and performs **one**
+HTTP request using the Gateway's existing atomic hold, not a second legacy reservation.
+
+`mitrify_chain_approvals/<binding-hash>` needs the existing independently reviewed v2
+record: UID, exact payload digest and gateway `{baseURL, model, credentialBinding}`;
+state `approved`, `reviewedAtMs`, `expiresAtMs` <= one hour after review;
+`dataReview.entirePayloadReviewed=true`, appropriate `approvedDataClasses` (health
+turns require both private and health), `gatewayAndAllDownstreamProcessorsReviewed=true`,
+nonempty `reviewRef`, `disclosureAuthorityRef`, `processorTermsRef`, `protectionsRef`;
+`supplierContract.currency=USD`, `hardCeilingEnforced=true`,
+`includesInternalRetriesFailoversAndFees=true`, independent `evidenceRef`, positive
+integer **supplier-enforced** `perHttpRequestCeilingNanoUsd`. Review covers the full
+wire prompt/history/system, not a user checkbox. The application creates no approval.
+
+Gateway catalog: adapter `gateway-mitrify-text-v1`, metered, exact existing URL/model;
+rate card's `supplierPerHttpRequestCeilingNanoUsd` must cover the actual reviewed
+inclusive ceiling. `inputNanoUsdPerMillion=0`, `outputNanoUsdPerMillion=0` are explicit
+unused placeholders for this ceiling-based adapter, **not a claim of free tokens**.
+No cached token tariff is admitted. A completion can book the reviewed inclusive
+ceiling conservatively; no actual supplier charge is fabricated.
+
+## Beam alias/pricing reconciliation
+
+Official documentation confirms the base URL `https://api.cheaperinference.com/v1`,
+Bearer authentication, and authenticated GET `/v1/models` as the current exact-ID/
+capability/pricing authority. IDs absent from that catalog return 404.
+
+Official indexed versioned Beam pages quote `beam-1.0-501b-a23b`, USD0.65 input /
+USD1.95 output per million (maker list USD1/USD3), but the live public page rendered
+“Model unavailable”. Neither the legacy `beam` alias nor current account availability
+is established by that conflict. Unauthenticated `/v1/models` also returned 401.
+**Do not copy the legacy USD0.006/USD0.022 indicative prices into a new review.**
+
+Smallest outstanding input: an authorized catalog row including exact ID/aliases,
+Chat Completions/streaming/reasoning capability and current `pricing_version` /
+`pricing_checked_at` / applicable maker list and ZDR rates, plus the existing required
+written shared-serving permission (`CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION`) and
+`CHEAPERINFERENCE=all`. Do not toggle that permission without the actual agreement.
+
+The adapter now requires reviewed rate-card `supplierListInputNanoUsdPerMillion`,
+`supplierListOutputNanoUsdPerMillion` and integer `minimumDiscountBasisPoints`
+(0..9999). Reserved rates must cover list * (1 - discount). It sends the documented
+`min_discount_percent` and `zdr:true`, so supplier internal fallback cannot raise the
+settled rate above that reviewed ceiling or silently drop the retention constraint.
+It does not opt into alternate-model routing. No supplier list or ceiling was invented.
+
+## Verified code defects versus the reported production incident
+
+Offline regressions verify/fix malformed optional Mitrify configuration terminating
+fallback before later rungs, cancellation becoming an all-failed/outage penalty, late
+stream chunks, and early providers exhausting observation time. FreeChain now shares
+a 90-second provider-observation deadline; fixed Gateway first-token slices reserve
+20% control-plane headroom across the 12 positions. Mitrify gets one HTTP attempt and
+bounded first-token/idle/total observation. Visible output is never replayed through
+another provider; a stalled prefix is explicitly incomplete, not clean success.
+Physical occupancy and uncertain supplier liabilities are not falsely released.
+
+These are **not verified causes of the recent production outage**. The sanctioned
+Cloud Run log connector returned “GCP credentials are not available”; no alternate
+credential extraction or signed-in browser workaround was attempted. Production
+logs, serving revision, actual credentials, balances and incident traces remain
+unverified. Merged PR #4115 is not proof that its fix reached production or restored it.
+Hosted CI was active when inspected, not assumed Actions-budget-exhausted.
+No paid benchmark, deployment, production environment change, merge, or uptime promise.
 
 Public references checked 2026-11-08 (IST):
 - https://docs.z.ai/guides/overview/pricing
 - https://deepinfra.com/deepseek-ai/DeepSeek-V4-Flash-0731/api
 - https://deepinfra.com/meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo/api
+- https://platform.openai.com/docs/models/gpt-5-nano
+- https://www.cheaperinference.com/docs
 - https://www.cheaperinference.com/models/beam-1.0-501b-a23b
-- https://mitrify.com/v1/models returned 401; no attempt to extract/use credentials.
+- https://mitrify.com/ and https://mitrify.com/v1/models
+- https://console.groq.com/docs/model/openai/gpt-oss-120b
+- https://developers.cloudflare.com/workers-ai/models/llama-3.3-70b-instruct-fp8-fast/
+- https://ai.google.dev/gemini-api/docs/pricing
+- https://ai.google.dev/gemini-api/docs/deprecations

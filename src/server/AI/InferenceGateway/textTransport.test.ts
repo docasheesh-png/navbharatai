@@ -11,7 +11,7 @@ import { executeGatewayText, gatewayTextCredentialBinding, gatewayTextPayloadDig
 
 const SECRET = 'fake-test-secret-never-retain';
 const ENV = 'GATEWAY_TEST_CREDENTIAL';
-const ENDPOINTS: Record<GatewayTextProvider, string> = {
+const ENDPOINTS: Record<Exclude<GatewayTextProvider, 'OPENAI' | 'DEEPINFRA' | 'CHEAPERINFERENCE' | 'MITRIFY'>, string> = {
   GLM: 'https://api.z.ai/api/paas/v4', GEMINI: 'https://generativelanguage.googleapis.com/v1beta/openai',
   GROQ: 'https://api.groq.com/openai/v1', DEEPSEEK: 'https://api.deepseek.com/v1',
   CLOUDFLARE: 'https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/v1',
@@ -55,7 +55,7 @@ function fixture(provider: GatewayTextProvider = 'GLM', paid = false): GatewayTe
     cancellation: { id: 'cancellation-1', cancelled: false }, outputVisible: false, maxPhysicalAttempts: 1, attempts: [], evidenceRef: 'request-evidence',
   };
   const rate = realRateFor('DEEPSEEK', 'deepseek-flash');
-  const transport: GatewayTextTransportConfig = { provider, baseURL: ENDPOINTS[provider], model, maxOutputTokens: 512,
+  const transport: GatewayTextTransportConfig = { provider, baseURL: ENDPOINTS[provider as keyof typeof ENDPOINTS], model, maxOutputTokens: 512,
     timeoutMs: 60000, streamUsage: true, credentialEnv: ENV, credentialBinding: gatewayTextCredentialBinding(SECRET),
     ...(paid ? { rateCard: { version: 'reviewed-rate-v1', inputNanoUsdPerMillion: usdToNanoUsd(rate.inputPerMTok),
       outputNanoUsdPerMillion: usdToNanoUsd(rate.outputPerMTok), cachedInputNanoUsdPerMillion: usdToNanoUsd(rate.cacheReadPerMTok!),
@@ -84,7 +84,7 @@ describe('gateway text endpoint and exact authority boundary', () => {
     fetchMock.mockImplementation(async () => { order.push('fetch'); return jsonResponse(completion()); });
     const result = await executeGatewayText(input);
     expect(order).toEqual(['authorize', 'fetch']); expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0]; expect(url).toBe(`${ENDPOINTS[provider]}/chat/completions`);
+    const [url, init] = fetchMock.mock.calls[0]; expect(url).toBe(`${ENDPOINTS[provider as keyof typeof ENDPOINTS]}/chat/completions`);
     expect(init).toMatchObject({ method: 'POST', redirect: 'error', headers: { Authorization: `Bearer ${SECRET}`, 'Content-Type': 'application/json', Accept: 'application/json' } });
     expect(Object.keys(init!.headers!)).toHaveLength(3); expect((init!.signal as AbortSignal).aborted).toBe(true);
     expect(JSON.parse(init!.body as string)).toMatchObject({ model: input.transport.model, stream: false, messages: [{ role: 'user', content: 'Hello' }] });
@@ -480,5 +480,37 @@ describe('private completed protocol occupancy evidence', () => {
     expect(readGatewayTextCompletion(error, input.claim)).toEqual({ receivedAtMs: expect.any(Number) });
     expect(readGatewayTextUsage(error, input.claim)).toBeUndefined();
     expect(readGatewayTextCompletion({ ...error }, input.claim)).toBeUndefined();
+  });
+});
+
+function namedPaid(provider: 'OPENAI' | 'DEEPINFRA' | 'CHEAPERINFERENCE', model: string, prices: [number, number]) {
+  const input = fixture(provider, true); const now = Date.now();
+  return bind({ ...input, profile: { ...input.profile, modelId: model }, transport: { ...input.transport, model,
+    baseURL: provider === 'OPENAI' ? 'https://api.openai.com/v1' : provider === 'DEEPINFRA' ? 'https://api.deepinfra.com/v1/openai' : 'https://api.cheaperinference.com/v1',
+    rateCard: { version: 'named-model-rate-v1', inputNanoUsdPerMillion: usdToNanoUsd(prices[0]), outputNanoUsdPerMillion: usdToNanoUsd(prices[1]), verifiedAtMs: now - 1, expiresAtMs: now + 60000,
+      ...(provider === 'CHEAPERINFERENCE' ? { supplierListInputNanoUsdPerMillion: 1000000000, supplierListOutputNanoUsdPerMillion: 3000000000, minimumDiscountBasisPoints: 3500 } : {}) } } });
+}
+describe('exact named paid transports never substitute models', () => {
+  it.each([
+    ['OPENAI', 'gpt-5-nano', 0.05, 0.40],
+    ['DEEPINFRA', 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo', 0.02, 0.04],
+    ['DEEPINFRA', 'deepseek-ai/DeepSeek-V4-Flash-0731', 0.06, 0.18],
+    ['CHEAPERINFERENCE', 'beam-1.0-501b-a23b', 0.65, 1.95],
+  ] as const)('sends the exact reviewed %s/%s model once', async (provider, model, pin, pout) => {
+    vi.stubEnv('CHEAPERINFERENCE', 'all'); vi.stubEnv('CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION', 'on');
+    fetchMock.mockResolvedValue(jsonResponse({ ...completion(), model })); const input = namedPaid(provider, model, [pin, pout]);
+    expect(await executeGatewayText(input)).toMatchObject({ model, provider, content: 'Hello back' }); expect(fetchMock).toHaveBeenCalledOnce();
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string); expect(body.model).toBe(model);
+    if (provider === 'OPENAI') expect(body).toMatchObject({ max_completion_tokens: 512, reasoning_effort: 'minimal' });
+    if (provider === 'CHEAPERINFERENCE') expect(body).toMatchObject({ min_discount_percent: 35, zdr: true, max_tokens: 512 });
+  });
+  it.each(['permission', 'ceiling', 'list-price', 'underpriced', 'invalid-alias'] as const)('refuses Beam before HTTP when %s is unreviewed', async kind => {
+    vi.stubEnv('CHEAPERINFERENCE', 'all'); vi.stubEnv('CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION', kind === 'permission' ? 'off' : 'on');
+    let input = namedPaid('CHEAPERINFERENCE', kind === 'invalid-alias' ? 'imaginary-beam' : 'beam-1.0-501b-a23b', [0.65, 1.95]);
+    const rate = { ...input.transport.rateCard! }; if (kind === 'ceiling') delete rate.minimumDiscountBasisPoints;
+    if (kind === 'list-price') delete rate.supplierListInputNanoUsdPerMillion;
+    if (kind === 'underpriced') rate.inputNanoUsdPerMillion = 1;
+    input = bind({ ...input, transport: { ...input.transport, rateCard: rate } });
+    await expect(executeGatewayText(input)).rejects.toMatchObject({ code: 'POLICY_BLOCKED' }); expect(fetchMock).not.toHaveBeenCalled();
   });
 });

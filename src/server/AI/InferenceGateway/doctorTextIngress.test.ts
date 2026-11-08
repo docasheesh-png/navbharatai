@@ -82,8 +82,29 @@ describe('Doctor AI retains its original routing, audit and billing', () => {
     expect(m.direct).not.toHaveBeenCalled(); expect(m.legacy).not.toHaveBeenCalled(); expect(m.gateway).not.toHaveBeenCalled();
     expect(m.charge).not.toHaveBeenCalled(); expect(m.burn).not.toHaveBeenCalled();
   });
-  it('has no Doctor gateway ingress, alternate text policy or audit selection in the route source', () => {
+  it('retains the legacy branch while explicitly enrolling fixed Doctor primary and independent audit', () => {
     const source = readFileSync(new URL('../../routes/sda.ts', import.meta.url), 'utf8');
-    expect(source).not.toMatch(/InferenceGateway|maybeGatewayText|doctor:text|doctor:audit|gatewaySelected|freeModuleInferenceScope|strictFreeRequired|strictFreeText|StrictFreeCapabilityError/);
+    expect(source).toContain('if (fixedTextChainEnabled())'); expect(source).toContain("policyKey: 'doctor:text'"); expect(source).toContain("policyKey: 'doctor:audit'"); expect(source).toContain('excludedModelIds: [result.model]');
+  });
+});
+
+describe('fixed Doctor ingress', () => {
+  it.each(['free', 'paid'] as const)('uses the exact chain for %s primary and independent audit; keeps wallet pricing', async tier => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); vi.stubEnv('INFERENCE_GATEWAY_ROLLOUT_MODE', 'off'); vi.stubEnv('INFERENCE_GATEWAY_SURFACES', 'chat');
+    m.gate.mockResolvedValue({ allow: true, tier, uid: 'verified-doctor', countsAgainstFree: tier === 'free', billableFraction: tier === 'free' ? 0 : 1 });
+    m.gateway.mockImplementation(async () => {
+      const c = currentInferenceGatewayContext(); expect(c).toMatchObject({ surface: 'doctor', principalId: 'verified-doctor', dataClass: 'health', qualityTier: 'clinical', funding: tier === 'paid' ? 'existing-professional' : 'platform-free-fallback' });
+      if (c?.policyKey === 'doctor:audit') { expect(c.excludedModelIds).toEqual(['glm-4.5-flash']); return { ok: true, content: 'OK', model: 'glm-4.7-flash', provider: 'GLM' }; }
+      expect(c?.policyKey).toBe('doctor:text'); return { ok: true, content: 'Assess urgently.', model: 'glm-4.5-flash', provider: 'GLM', usage: { inputTokens: 10, outputTokens: 5 } };
+    });
+    const res = mockRes(); await route()(request(), res);
+    expect(res.statusCode).toBe(200); expect(res.body.reply).toContain('Assess urgently.'); expect(m.gateway).toHaveBeenCalledTimes(2);
+    expect(m.direct).not.toHaveBeenCalled(); expect(m.legacy).not.toHaveBeenCalled(); expect(m.vertex).not.toHaveBeenCalled();
+    expect(m.charge.mock.calls[0][1].billableFraction).toBe(tier === 'free' ? 0 : 1);
+  });
+  it('does not bill or silently switch to legacy on selected all-fail', async () => {
+    vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1'); m.gateway.mockRejectedValue(new Error('unavailable'));
+    const res = mockRes(); await route()(request(), res); expect(res.statusCode).toBe(503);
+    expect(m.legacy).not.toHaveBeenCalled(); expect(m.direct).not.toHaveBeenCalled(); expect(m.charge).not.toHaveBeenCalled();
   });
 });

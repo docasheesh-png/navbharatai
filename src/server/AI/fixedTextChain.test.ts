@@ -10,7 +10,7 @@ describe('server-owned fixed text policy', () => {
     expect(() => fixedTextChainEnabled({ TEXT_CHAIN_POLICY: 'fixed' })).toThrow('configuration');
     expect(FIXED_TEXT_CHAIN.indexOf('mitrify')).toBe(5);
   });
-  it.each(['builder', 'pro', 'developer-api', 'published-app', 'image-generation'])('keeps %s excluded, including nested chat helpers', surface => {
+  it.each(['builder', 'pro', 'published-app', 'image-generation'])('keeps %s excluded, including nested chat helpers', surface => {
     vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');
     expect(fixedTextChainScope(surface, 'text')).toBe(false);
     withFixedTextChainScope(surface, 'text', () => withFixedTextChainScope('chat', 'text', () => expect(fixedTextChainSelected()).toBe(false)));
@@ -21,7 +21,7 @@ describe('server-owned fixed text policy', () => {
   });
   it('isolates concurrent requests and retains selection across async nested work', async () => {
     vi.stubEnv('TEXT_CHAIN_POLICY', 'fixed-v1');
-    await Promise.all(['chat', 'professional', 'builder'].map(surface => withFixedTextChainScope(surface, 'text', async () => {
+    await Promise.all(['chat', 'professional', 'developer-api', 'builder'].map(surface => withFixedTextChainScope(surface, 'text', async () => {
       await Promise.resolve(); expect(fixedTextChainSelected()).toBe(surface !== 'builder');
     })));
     expect(fixedTextChainSelected()).toBe(false);

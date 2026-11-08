@@ -819,3 +819,18 @@ describe('fixed-policy ledger history bounds', () => {
     }
   });
 });
+
+describe('persistent supplier funding identity prevents cross-pool replay', () => {
+  it.each(['output', 'retain', 'settle', 'cancel'] as const)('cannot %s a free-chat claim through a professional ledger, even with the same principal/scope labels', async operation => {
+    const f = fixture(); const { claim } = await f.claim();
+    const foreign = new FirestoreInferenceLedger(f.state.db, { now: () => NOW, principal: { principalId: f.key.principalId, tenantId: f.key.tenantId }, platformScope: { id: 'platform-free', ownerId: 'platform-owner' }, fundingBoundary: 'existing-professional', adminEmails: () => [] });
+    const before = structuredClone([...f.state.docs]);
+    const attempt = operation === 'output' ? foreign.markOutputVisible(claim)
+      : operation === 'retain' ? foreign.retain(claim, { physicalAttemptId: claim.binding.physicalAttemptId, profileId: claim.binding.profileId, outcome: 'uncertain', outputVisible: false }, 'uncertain')
+      : operation === 'cancel' ? foreign.cancel(f.key, f.authority.snapshot.request.cancellation.id)
+      : foreign.settle(claim, { evidenceRef: 'unissued', binding: claim.binding, final: true, outcome: { kind: 'completed' }, outputVisible: false, actualNanoUsd: 0, quotaUsage: [] });
+    await expect(attempt).rejects.toThrow(); expect([...f.state.docs]).toEqual(before);
+    // The rightful owner can still advance the same claim; no poisoning/refund took place.
+    await expect(f.ledger.markOutputVisible(claim)).resolves.toBeUndefined();
+  });
+});

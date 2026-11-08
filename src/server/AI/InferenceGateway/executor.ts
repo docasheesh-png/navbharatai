@@ -29,7 +29,7 @@ export interface ExecutionSnapshot {
 }
 export interface SpendScope {
   readonly id: string;
-  readonly kind: 'platform-free-fallback' | 'funded-builder' | 'tenant-byok';
+  readonly kind: 'platform-free-fallback' | 'existing-professional' | 'funded-builder' | 'tenant-byok';
 }
 export interface DispatchBinding {
   readonly key: ExecutionKey;
@@ -356,13 +356,13 @@ export function createInferenceExecutor(ports: ExecutionPorts) {
     const r = snapshot.request;
     const scopes = ports.scopes.filter(s => s.id === r.budgetScopeId);
     const scope = scopes[0];
-    const incompatible = scopes.length !== 1 || !['platform-free-fallback', 'funded-builder', 'tenant-byok'].includes(scope.kind)
+    const incompatible = scopes.length !== 1 || !['platform-free-fallback', 'existing-professional', 'funded-builder', 'tenant-byok'].includes(scope.kind)
       || ports.scopes.filter(s => s.kind === 'platform-free-fallback').length > 1
       || (scope.kind === 'tenant-byok' ? r.payer.kind !== 'tenant'
       : r.payer.kind !== 'platform') || (scope.kind === 'funded-builder' && r.surface !== 'builder');
     const b = snapshot.budget;
     if (incompatible || (r.surface === 'chat' && r.maxQueueWaitMs > 5000)
-      || (scope.kind === 'platform-free-fallback' && b && (b.periodLimitNanoUsd > PLATFORM_FREE_DAILY_LIMIT_NANO_USD
+      || ((scope.kind === 'platform-free-fallback' || scope.kind === 'existing-professional') && b && (b.periodLimitNanoUsd > PLATFORM_FREE_DAILY_LIMIT_NANO_USD
         || b.periodEndsAtMs - b.periodStartsAtMs !== DAY_MS))) return { kind: 'blocked', reason: 'budget', rejected: [] };
     return planInference({ ...snapshot, authority: ports.evidence, nowMs: ports.clock.now() });
   }

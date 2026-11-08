@@ -528,14 +528,19 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
       }
       return !!usage;
     };
+    // The official GPT-5 nano alias resolves to this documented default snapshot.
+    // Request the owner's exact alias; accept only that same documented identity,
+    // never a newer nano/model or an arbitrary dated-name prefix match.
+    const matchesRequestedModel = (model: unknown) => model === t.model
+      || (t.provider === 'OPENAI' && t.model === 'gpt-5-nano' && model === 'gpt-5-nano-2025-08-07');
     const processPacket = async (packet: unknown, stream: boolean) => {
       const obj = raw(packet); if (!obj) fail('NETWORK');
       const extension = raw(obj.x_groq);
       // Billing contradiction survives every coexisting response-error/model marker.
-      const hasUsage = await rememberUsage(obj.usage, obj.model === t.model); const hasExtensionUsage = await rememberUsage(extension?.usage, obj.model === t.model);
+      const hasUsage = await rememberUsage(obj.usage, matchesRequestedModel(obj.model)); const hasExtensionUsage = await rememberUsage(extension?.usage, matchesRequestedModel(obj.model));
       await rememberUsage(raw(obj.error)?.usage); await rememberUsage(raw(extension?.error)?.usage);
       if (obj.error) throw remoteError(obj, t.provider);
-      if (obj.model !== undefined && obj.model !== t.model) fail('POLICY_BLOCKED');
+      if (obj.model !== undefined && !matchesRequestedModel(obj.model)) fail('POLICY_BLOCKED');
       if (extension?.error) throw remoteError(extension, t.provider);
       if (!Array.isArray(obj.choices) || obj.choices.length > 1) fail('NETWORK');
       const choice = raw(obj.choices[0]); if (!choice) { if (!stream || !usage) fail('NETWORK'); return; }
@@ -546,7 +551,7 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
       catch (error) {
         // A complete non-streaming exact-model terminal refusal is finished work,
         // independently of missing financial usage. A streamed refusal without DONE is not.
-        if (!stream && obj.model === t.model && typeof choice.finish_reason === 'string'
+        if (!stream && matchesRequestedModel(obj.model) && typeof choice.finish_reason === 'string'
           && (SAFETY_REASONS.has(choice.finish_reason.toLowerCase()) || ['stop', 'length'].includes(choice.finish_reason)) && error && typeof error === 'object') {
           completedCalls.set(error, { claim: evidenceBinding(a.claim), receivedAtMs: Date.now() });
         }
@@ -561,7 +566,7 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
       const text = typeof message.content === 'string' ? message.content : '';
       if (finishReason && (text || (reason && reason !== finishReason))) fail('NETWORK');
       finishReason = reason ?? finishReason;
-      if (reason && obj.model === t.model) exactTerminalModel = true;
+      if (reason && matchesRequestedModel(obj.model)) exactTerminalModel = true;
       if (text) {
         if (!hasUsage && !hasExtensionUsage) usage = undefined;
         content += text;

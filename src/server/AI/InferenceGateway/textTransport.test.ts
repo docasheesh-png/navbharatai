@@ -504,6 +504,24 @@ describe('exact named paid transports never substitute models', () => {
     if (provider === 'OPENAI') expect(body).toMatchObject({ max_completion_tokens: 512, reasoning_effort: 'minimal' });
     if (provider === 'CHEAPERINFERENCE') expect(body).toMatchObject({ min_discount_percent: 35, zdr: true, max_tokens: 512 });
   });
+  it.each([false, true])('accepts the documented GPT-5 nano default snapshot, streaming=%s, without changing the requested alias', async stream => {
+    const base = namedPaid('OPENAI', 'gpt-5-nano', [0.05, 0.40]); const input = stream ? streaming(base) : base;
+    const model = 'gpt-5-nano-2025-08-07';
+    fetchMock.mockResolvedValue(stream ? streamResponse([{ ...chunk('Hello back', 'stop', { prompt_tokens: 100, completion_tokens: 20 }), model }]) : jsonResponse({ ...completion(), model }));
+    const result = await executeGatewayText(input);
+    expect(result).toMatchObject({ provider: 'OPENAI', model: 'gpt-5-nano', content: 'Hello back' });
+    expect(JSON.parse(fetchMock.mock.calls[0][1]!.body as string).model).toBe('gpt-5-nano');
+    expect(readGatewayTextCompletion(result, input.claim)).toBeDefined();
+    expect(result.usage).toMatchObject({ inputTokens: 100, outputTokens: 20 });
+    // Bare token totals are not proof of every billed meter or an invoice.
+    expect(readGatewayTextConservativeUsage(result, input.claim)).toBeUndefined();
+  });
+  it.each(['gpt-5.4-nano', 'gpt-5-nano-2099-01-01'])('never treats %s as the requested GPT-5 nano identity', async model => {
+    const input = namedPaid('OPENAI', 'gpt-5-nano', [0.05, 0.40]);
+    fetchMock.mockResolvedValue(jsonResponse({ ...completion(), model }));
+    await expect(executeGatewayText(input)).rejects.toMatchObject({ code: 'POLICY_BLOCKED' });
+    expect(input.markOutputVisible).not.toHaveBeenCalled();
+  });
   it.each(['permission', 'ceiling', 'list-price', 'underpriced', 'invalid-alias'] as const)('refuses Beam before HTTP when %s is unreviewed', async kind => {
     vi.stubEnv('CHEAPERINFERENCE', 'all'); vi.stubEnv('CHEAPERINFERENCE_KEAK_WRITTEN_PERMISSION', kind === 'permission' ? 'off' : 'on');
     let input = namedPaid('CHEAPERINFERENCE', kind === 'invalid-alias' ? 'imaginary-beam' : 'beam-1.0-501b-a23b', [0.65, 1.95]);

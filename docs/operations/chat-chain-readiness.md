@@ -25,7 +25,10 @@ quota, or cancellation gates. Ineligible/missing rungs are skipped, never substi
 The broad Groq/Cloudflare requests retain the repository's existing exact choices;
 no unverified smaller/newer model is substituted. GPT-5 nano's official page now
 marks it **deprecated**, but still documents this exact ID and Chat Completions/
-streaming. Do not silently upgrade it to GPT-5.4 nano or another model.
+streaming. The adapter requests `gpt-5-nano` and also recognizes only its officially
+documented default response snapshot `gpt-5-nano-2025-08-07`; this is the same
+identity, not a provider/model substitution. Arbitrary dated aliases and newer
+nano models remain rejected. Do not silently upgrade it to another model.
 Official Groq and Cloudflare pages also publish paid rates: these models are not
 intrinsically free. Their rungs require reviewed actual account free allowances and
 no-overage hard stops; a model name alone never authorizes free eligibility.

@@ -12,6 +12,8 @@ export function trimForRung(message: string, history: unknown[], systemPrompt: s
     const inputTokens = estimateInputTokens([{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }]);
     if (inputTokens <= maxInputTokens) return { prompt, systemPrompt, inputTokens };
     if (!kept.length) return null;
-    kept = kept.slice(1);
+    // Keep the earliest turns and the latest turn when a long thread is over budget.
+    // Two-turn overflow still drops the older turn, as before.
+    kept = kept.length > 3 ? [...kept.slice(0, 2), ...kept.slice(3)] : kept.slice(1);
   }
 }

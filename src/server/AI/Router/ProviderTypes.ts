@@ -30,7 +30,7 @@ export interface AIProviderResponse {
   pricingProof?: FreeTextResult['pricingProof'];
   /** Provenance only. Monetary liability is reconciled in the gateway ledger, not an invoice here. */
   inferenceGateway?: { version: 1; logicalRequestId: string; accounting: 'separate-ledger' };
-  gatewayPricingProof?: import('../InferenceGateway/pricingEvidence').GatewayFreePricingProof;
+  gatewayPricingProof?: import('../InferenceGateway/pricingEvidence').GatewayFreePricingProof | import('../InferenceGateway/pricingEvidence').GatewayMeteredPricingProof;
 }
 
 /**

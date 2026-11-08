@@ -392,13 +392,14 @@ export class FirestoreInferenceLedger implements LedgerPort {
       const userLimit = this.options.perUserDailyLimit ?? (this.fundingBoundary === 'platform-free-fallback' ? DEFAULT_PAID_PER_USER_DAILY_LIMIT : undefined);
       demand(claiming ? current.paidUserCount >= 1 && (userLimit === undefined || current.paidUserCount <= userLimit) : userLimit === undefined || current.paidUserCount < userLimit);
       const b = authority.snapshot.budget;
-      demand(policy && policy.revision === authority.paidPolicyRevision && policy.updatedAt <= now && policy.capNanoUsd > 0 && b
+      demand(policy && policy.revision === authority.paidPolicyRevision && policy.updatedAt <= now && (policy.budgetMode === 'uncapped' || policy.capNanoUsd > 0) && b
+        && (b.budgetMode ?? 'capped') === (policy.budgetMode ?? 'capped')
         && b.periodId === window.key && b.periodStartsAtMs === window.startAt && b.periodEndsAtMs === window.resetAt
         && b.periodLimitNanoUsd <= policy.capNanoUsd && (this.fundingBoundary === 'existing-professional' || b.periodLimitNanoUsd <= OWNER_PAID_DAILY_CEILING_NANO_USD)
         && b.remainingLogicalRequestNanoUsd <= authority.logicalLimitNanoUsd);
       const committed = checkedAdd(subtract(day.heldNanoUsd, own), day.spentNanoUsd);
       const allowedPeriod = Math.min(policy.capNanoUsd, b.periodLimitNanoUsd);
-      demand(committed <= allowedPeriod && amount <= allowedPeriod - committed);
+      demand(policy.budgetMode === 'uncapped' || (committed <= allowedPeriod && amount <= allowedPeriod - committed));
       if (claiming) demand(day.pending > 0);
     }
     return intent;
@@ -435,7 +436,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
         if (c.modelSlot) tx.set(this.db.doc(modelSlotPath('state', c.modelSlot.state.identity)), { ...c.modelSlot.state, occupants: { ...c.modelSlot.state.occupants, [fresh.binding.physicalAttemptId]: { intentBinding: modelSlotBinding(admissionBinding(fresh)), acquiredAtMs: now } } });
         for (const [i, q] of c.quotas.entries()) tx.set(this.ref('quota-state', q.policy.ledgerKey), { ...q.state, held: checkedAdd(q.state.held, attempt.heldQuota[i].amount) });
         if (amount) writeSpendDay(tx, this.db, { ...c.day, heldNanoUsd: checkedAdd(c.day.heldNanoUsd, amount),
-          pending: checkedAdd(c.day.pending, 1), requests: checkedAdd(c.day.requests, 1) }, c.policy!.capNanoUsd, now, this.options.adminEmails, undefined, this.fundingCollection);
+          pending: checkedAdd(c.day.pending, 1), requests: checkedAdd(c.day.requests, 1) }, c.policy!.capNanoUsd, now, this.options.adminEmails, c.policy?.budgetMode, this.fundingCollection);
         if (amount) writePaidUser(tx, this.db, c.window, hash(fresh.binding.key.principalId), checkedAdd(c.paidUserCount, 1), this.fundingCollection);
         tx.set(this.ref('logical', fresh.binding.key.logicalRequestId), { ...c.logical, activeAttemptId: fresh.binding.physicalAttemptId, heldNanoUsd: checkedAdd(c.logical.heldNanoUsd, amount) });
         tx.create(this.ref('attempt', fresh.binding.physicalAttemptId), attempt);
@@ -512,7 +513,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
         day = { ...d, heldNanoUsd: subtract(d.heldNanoUsd, attempt.heldNanoUsd), pending: subtract(d.pending, 1) }; }
       if (releasedSlot) tx.set(this.db.doc(modelSlotPath('state', releasedSlot.identity)), releasedSlot);
       nextStates.forEach(s => tx.set(this.ref('quota-state', s.ledgerKey), s));
-      if (day) writeSpendDay(tx, this.db, day, policy?.capNanoUsd ?? 0, this.now(), this.options.adminEmails, undefined, this.fundingCollection);
+      if (day) writeSpendDay(tx, this.db, day, policy?.capNanoUsd ?? 0, this.now(), this.options.adminEmails, policy?.budgetMode, this.fundingCollection);
       tx.set(this.ref('logical', key.logicalRequestId), nextLogical);
       tx.set(attemptRef, { ...attempt, phase: 'released' });
     });
@@ -687,7 +688,7 @@ export class FirestoreInferenceLedger implements LedgerPort {
       // This complete write set is atomic: no release window before quarantine/accounting.
       settledQuotas.forEach(({ state, period }) => { tx.set(this.ref('quota-state', state.ledgerKey), state);
         tx.set(this.ref('quota-period', evidenceBinding([period.ledgerKey, period.window.id])), period); });
-      if (day) writeSpendDay(tx, this.db, day, policy?.capNanoUsd ?? 0, now, this.options.adminEmails, undefined, this.fundingCollection);
+      if (day) writeSpendDay(tx, this.db, day, policy?.capNanoUsd ?? 0, now, this.options.adminEmails, policy?.budgetMode, this.fundingCollection);
       if (quarantine) {
         tx.set(this.ref('profile-quarantine', evidenceBinding([claim.binding.providerId, claim.binding.profileId])), {
           kind: 'gateway_profile_quarantine', version: 1, providerId: claim.binding.providerId, profileId: claim.binding.profileId,

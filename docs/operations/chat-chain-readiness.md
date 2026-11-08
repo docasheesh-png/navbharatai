@@ -1,6 +1,6 @@
 # Universal NavBharatAI text routing — rollout readiness
 
-Routing/adapters are implemented, but **universal activation is not engineering-complete**: metered Gateway wallet reconciliation and existing uncapped-budget semantics remain code gaps, not operator-only inputs. This work has not enabled or deployed production.
+Routing/adapters, authentic exact-tariff commercial pricing with durable idempotent wallet debit, and existing uncapped-budget compatibility are implemented. **Production is not enabled/deployed or verified.** Opaque supplier billing remains unpriced without authoritative exact-charge data; ceilings are not invoices.
 Do not enable `TEXT_CHAIN_POLICY=fixed-v1` before reviewing the catalog and funding below.
 This is eligibility-ordered fallback, not permission to bypass privacy, money, safety,
 quota, or cancellation gates. Ineligible/missing rungs are skipped, never substituted.
@@ -79,7 +79,9 @@ protocol. This change does not claim to reroute live voice or customer BYOK traf
 Provider liability is not the user's wallet debit. Existing entitlement gates and
 `chargeForAiTurn(s)` calls/billable fractions remain; no extra wallet debit is added.
 The existing billing-proof rule still refuses to invent invoice spend from an estimate:
-Gateway paid usage without actual billing proof remains unmeasured to the legacy wallet.
+Gateway usage with only a reservation ceiling remains unmeasured to the wallet.
+An authenticated complete-usage exact-token-tariff proof now uses the approved
+rate card, existing tiered markup and existing exemptions/fractions/master flag.
 Reservations and conservative ceiling bookings are not reported as supplier invoices.
 
 - Free product supplier money: existing `free_chat_chain/paid_budget_policy` and
@@ -99,11 +101,14 @@ The pre-existing Gateway USD10 planner bound was stale against the owner's exist
 FreeChain USD17 ceiling; the planner now reuses that existing ceiling and still
 requires the actual approved budget (no new allowance). The free per-user guard is
 pre-existing. Those free-pool restrictions are not
-borrowed for paid professionals: that pool follows its explicitly approved finite
-`capNanoUsd` and request limit, with no invented dollar or per-user-attempt default.
-The Gateway still interprets the FreeChain policy as finite even when its existing
-`budgetMode=uncapped` is set. Preserving that established mode is an engineering
-requirement before fixed-v1 activation; changing production flags is not a fix.
+borrowed for paid professionals: that pool follows its explicitly approved
+`capNanoUsd`/`budgetMode` and request limit, with no invented dollar or per-user-attempt default.
+Gateway now binds existing `budgetMode=uncapped` into budget evidence and rereads
+the durable mode at reserve, claim and dispatch. Only the daily money ceiling is
+removed; logical/request, per-user, quota, ownership, strict-free and integer
+accounting guards remain. No Infinity, fabricated dollar sentinel, automatic mode
+change or new spending permission is introduced. Nominal cap zero is valid only
+with already-explicit uncapped authority; capped zero still stops paid work.
 A timeout/ambiguous paid failure is **not proof of zero cost**: it remains pending
 reconciliation and may terminate the request. Only supported authenticated rejection
 proof permits a paid retry. Do not loosen that fence merely to demonstrate all rungs.
@@ -128,12 +133,11 @@ Secrets belong in the existing server secret configuration, never chat or this d
    `mode:repo-analyst:chat|generate`, `developer-api:text`, and
    `developer-api:professional:<id>`, plus actually-used auxiliary keys. Do not invent
    RPM/TPM, free-plan status, health-data consent or capacity from model names.
-3. For the paid supplier pool only, confirm the approved finite positive daily `capNanoUsd` (no invented USD10/17 cap), distinct professional scope ID/supplier owner, and per-request limit within
+3. For the paid supplier pool only, confirm the already-approved daily `capNanoUsd`/`budgetMode` (positive when capped; no invented USD10/17 cap), distinct professional scope ID/supplier owner, and per-request limit within
    that authority. `paid_budget_policy` uses the existing schema: kind
-   `paid_budget_policy`, version 1, positive revision, integer `capNanoUsd`, timestamp
-   `updatedAt`, source `admin`. No initial day balance needs to be fabricated. Confirm
-   the intended paid-product billing/reconciliation policy before commercial rollout;
-   a conservative provider reservation must never be sold as measured invoice spend.
+   `paid_budget_policy`, version 1, positive revision, integer nominal `capNanoUsd`, timestamp
+   `updatedAt`, source `admin`. No initial day balance needs to be fabricated. Exact-token commercial pricing follows the existing markup/wallet policy described
+   below; a conservative provider reservation must never be sold as measured invoice spend.
 4. Mitrify-specific evidence and Beam-specific catalog/permission below. No blanket
    owner checkbox can replace their required supplier/data-processing evidence.
 5. Only after review, deliberately configure `TEXT_CHAIN_POLICY=fixed-v1` and
@@ -293,10 +297,54 @@ prompts, patient data and credentials out. A safety refusal, auth/quota rejectio
 provider transport failure and interrupted partial stream are different outcomes.
 Existing safety refusals must not be bypassed to inflate an availability count.
 
-The separate commercial code work is deferred for this urgent availability review:
-`chatSpend.ts` still returns `unpriced-gateway` for metered Gateway responses and
-`aiTurnCharge.ts` cannot debit that unmeasured spend; idempotent reconciliation has
-not been implemented. Conservative supplier ceilings are not exact tariffs. Gateway
-uncapped-policy compatibility also remains unimplemented. Neither gap is cured by
-operator credentials, approvals, money amounts or enabling fixed-v1. Do not advertise
-the full owner request as complete or activate universal commercial routing yet.
+## Completed commercial/uncapped follow-up
+
+- The same reviewed `transport.rateCard` can explicitly declare
+  `billingBasis: "exact-token-tariff"` ONLY when its current numerical rates are
+  genuinely exact tariffs, not reservation maximums. This is a semantic distinction
+  required by the pre-existing ceiling-vs-invoice rule, not a new price, budget,
+  dollar limit, approval workflow or commercial markup. Existing rate numbers are
+  reused unchanged; no production record or flag is edited. Absent that fact the
+  old ceiling-only card remains ineligible for customer pricing, not silently exact.
+- Authentic final text usage, exact requested model, claim/principal, rate version,
+  total tokens and known cache/reasoning accounting mint process-local, non-forgeable
+  metered tariff evidence. Copies/JSON, altered identities/tokens, ambiguous usage,
+  unknown charge meters and missing required cache breakdown do not authorize billing.
+  Input/cache/output rates are applied to measured counts; `chatSpend` then uses the
+  existing `tieredMarkupUsd`, FX/rounding and one-total markup policy.
+- `aiTurnCharge` keeps `AI_WALLET_SPEND` default-off, admin/pass/free-allowance
+  exemptions, billable fractions and charge-after-answer behavior. A different UID
+  cannot debit against another principal's proof. Repeated calls in a batch are
+  deduplicated before markup.
+- Wallet debit and per-dispatch `wallet_ops` receipts commit in one transaction.
+  Concurrent retries, lost commit responses, new day/trimmed ledger and canonical
+  wallet migration cannot charge the same operation twice. Partial overlapping
+  groups fail explicitly rather than double-debit. Sub-token carry is retained
+  once; genuine failed transactions remain retryable. Other wallet/build callers
+  supply no operation IDs and retain their existing behavior.
+- Uncapped budget mode now propagates through issuer, refresh, planning, reserve,
+  claim, final dispatch and spend-day writers. Revisions/mode changes revoke stale
+  authority; uncapped day accounting/holds remain finite integers and day alerts
+  are suppressed, just as in the existing FreeChain store. Strict-free still
+  cannot spend money; logical and per-user limits remain.
+
+### Exact remaining supplier limits (not deferred plumbing)
+
+`validRates` explicitly rejects `billingBasis` for Mitrify and Beam: their current
+contracts/configuration prove only an inclusive maximum or minimum discount, NOT
+an exact charge. Mitrify's `supplierPerHttpRequestCeilingNanoUsd` can overstate a
+successful request's true charge; Beam's `minimumDiscountBasisPoints` bounds but
+cannot determine its variable actual supplier discount. These cannot truthfully
+be made exact token tariffs with an owner checkbox. An authoritative authenticated
+supplier final-charge/invoice schema or an actual fixed-tariff contract is needed
+before adding a supplier-specific charge reader; no undocumented field or fee is
+invented. Their answers remain honestly unpriced under the pre-existing policy
+that unprovable spend is not billed to the user; supplier holds/ceilings remain
+separately accounted, never relabeled customer invoice spend.
+
+For other text suppliers, the minimal catalog input is the existing approved
+current rate-card version/rates with `billingBasis: "exact-token-tariff"` only where
+its supporting pricing source establishes that exact basis. A conservative-only
+review cannot be upgraded automatically. No deployment values were inspected or
+changed. Literal active universal routing still depends on the existing catalog,
+credential/privacy/free-eligibility and supplier-availability requirements above.

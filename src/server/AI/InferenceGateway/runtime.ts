@@ -30,7 +30,7 @@ import { FirestoreInferenceLedger } from './firestoreLedger';
 import { GatewayAuthorityStore } from './authorityStore';
 import { executeGatewayText, gatewayTextPayloadDigest } from './textTransport';
 import { executeGatewayOpenRouter } from './openRouterTransport';
-import { createGatewayFreePricingProof } from './pricingEvidence';
+import { createGatewayMeteredPricingProof, createGatewayFreePricingProof } from './pricingEvidence';
 import { executeGatewayEmbedding, gatewayEmbeddingPayloadDigest, type GatewayEmbeddingResult } from './embeddingTransport';
 import { executeGatewayGrounding, gatewayGroundingPayloadDigest, type GatewayGroundingResult } from './groundingTransport';
 import { executeGatewayVision, gatewayVisionPayloadDigest, type GatewayVisionPayload } from './visionTransport';
@@ -314,7 +314,7 @@ async function runGatewayInvocation(input: GatewayInvocationInput): Promise<Gate
                   ...(onChunk ? { onChunk: (chunk: string) => { committed += chunk; onChunk(chunk); } } : {}) })
             : (() => { throw new InferenceGatewayTerminalError('capability-transport-mismatch'); })();
           await store.releaseTrustedModelSlot(result, claim);
-          const gatewayPricingProof = 'content' in result ? createGatewayFreePricingProof(result, claim) : undefined;
+          const gatewayPricingProof = 'content' in result ? (createGatewayFreePricingProof(result, claim) ?? createGatewayMeteredPricingProof(result, claim)) : undefined;
           response = gatewayPricingProof && 'content' in result ? { ...result, gatewayPricingProof } : result;
           const usageEvidenceRef = await store.recordTrustedUsage(result, claim);
           return { binding: claim.binding, outcome: { kind: 'completed' as const }, outputVisible: 'outputVisible' in result ? result.outputVisible : false,

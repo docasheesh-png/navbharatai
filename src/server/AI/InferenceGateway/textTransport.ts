@@ -27,6 +27,8 @@ export function gatewayTextCredentialBinding(credential: string): string {
 export type GatewayTextProvider = 'GLM' | 'GEMINI' | 'GROQ' | 'CLOUDFLARE' | 'DEEPSEEK' | 'OPENAI' | 'DEEPINFRA' | 'CHEAPERINFERENCE' | 'MITRIFY';
 export interface GatewayTextRateCard {
   readonly version: string;
+  /** Only a reviewed exact all-token tariff, never a reservation ceiling or variable supplier discount. */
+  readonly billingBasis?: 'exact-token-tariff';
   readonly supplierPerHttpRequestCeilingNanoUsd?: number;
   readonly supplierListInputNanoUsdPerMillion?: number;
   readonly supplierListOutputNanoUsdPerMillion?: number;
@@ -106,6 +108,16 @@ export interface GatewayTextUsage {
   readonly actualNanoUsd: number;
   readonly rateCardVersion?: string;
 }
+export interface GatewayTextTariffUsage {
+  readonly principalId: string; readonly logicalRequestId: string; readonly physicalAttemptId: string;
+  readonly tariffNanoUsd: number; readonly rateCardVersion: string;
+}
+const tariffUsage = new WeakMap<object, { claim: string; usage: GatewayTextTariffUsage }>();
+export function readGatewayTextTariffUsage(result: unknown, claim: DispatchClaim): GatewayTextTariffUsage | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const value = tariffUsage.get(result);
+  return value?.claim === evidenceBinding(claim) ? value.usage : undefined;
+}
 /** Complete authenticated usage priced at reviewed maximums, NOT actual billed money. */
 export interface GatewayTextConservativeUsage extends Omit<GatewayTextUsage, 'actualNanoUsd' | 'rateCardVersion'> {
   readonly chargeBasis: 'conservative-ceiling';
@@ -143,7 +155,7 @@ const ENDPOINTS: Record<GatewayTextProvider, RegExp> = {
   DEEPSEEK: /^https:\/\/api\.deepseek\.com\/v1\/?$/,
 };
 const CONFIG_KEYS = ['provider', 'baseURL', 'model', 'maxOutputTokens', 'timeoutMs', 'streamUsage', 'credentialEnv', 'credentialBinding', 'rateCard'];
-const RATE_KEYS = ['version', 'inputNanoUsdPerMillion', 'outputNanoUsdPerMillion', 'cachedInputNanoUsdPerMillion', 'supplierPerHttpRequestCeilingNanoUsd', 'supplierListInputNanoUsdPerMillion', 'supplierListOutputNanoUsdPerMillion', 'minimumDiscountBasisPoints', 'verifiedAtMs', 'expiresAtMs'];
+const RATE_KEYS = ['billingBasis', 'version', 'inputNanoUsdPerMillion', 'outputNanoUsdPerMillion', 'cachedInputNanoUsdPerMillion', 'supplierPerHttpRequestCeilingNanoUsd', 'supplierListInputNanoUsdPerMillion', 'supplierListOutputNanoUsdPerMillion', 'minimumDiscountBasisPoints', 'verifiedAtMs', 'expiresAtMs'];
 const SAFETY_REASONS = new Set(['content_filter', 'safety', 'blocklist', 'prohibited_content', 'spii', 'recitation', 'sensitive']);
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 const MAX_FRAME_BYTES = 2 * 1024 * 1024;
@@ -223,9 +235,10 @@ function validRates(transport: GatewayTextTransportConfig, profile: ProviderProf
   const rate = transport.rateCard;
   if (profile.charging === 'verified-free-no-overage') return rate === undefined;
   if (profile.charging !== 'metered'
-    || !rate || Object.keys(rate).some(key => !RATE_KEYS.includes(key)) || !isIdentifier(rate.version)
+    || !rate || (rate.billingBasis !== undefined && rate.billingBasis !== 'exact-token-tariff') || Object.keys(rate).some(key => !RATE_KEYS.includes(key)) || !isIdentifier(rate.version)
     || !isCount(rate.verifiedAtMs) || !isCount(rate.expiresAtMs) || rate.verifiedAtMs > now || rate.expiresAtMs <= now) return false;
   try {
+    if ((transport.provider === 'MITRIFY' || transport.provider === 'CHEAPERINFERENCE') && rate.billingBasis !== undefined) return false;
     if (transport.provider === 'MITRIFY') {
       const cfg = mitrifyConfig();
       return transport.baseURL === cfg.baseURL && transport.model === cfg.model
@@ -313,7 +326,7 @@ function validate(authorization: GatewayTextAuthorization, payload: GatewayTextP
   } else if (b.budget || b.priceBinding) fail('POLICY_BLOCKED');
 }
 
-interface UsageReading { usage: ProviderUsage; cachedInputTokens?: number; liabilityComplete: boolean; reasoningTokens?: number; }
+interface UsageReading { tokenTariffComplete: boolean; usage: ProviderUsage; cachedInputTokens?: number; liabilityComplete: boolean; reasoningTokens?: number; }
 function readUsage(value: unknown): UsageReading | undefined {
   const u = raw(value); const inputTokens = count(u?.prompt_tokens); const outputTokens = count(u?.completion_tokens);
   if (inputTokens === undefined || outputTokens === undefined || !isCount(inputTokens + outputTokens)) return undefined;
@@ -338,7 +351,12 @@ function readUsage(value: unknown): UsageReading | undefined {
     && Object.keys(promptDetails).every(k => k === 'cached_tokens')
     && (u.completion_tokens_details === undefined || (!!completionDetails
       && Object.keys(completionDetails).every(k => k === 'reasoning_tokens')));
-  return { usage: { inputTokens, outputTokens }, liabilityComplete,
+  const tokenTariffComplete = !!u && u.total_tokens === inputTokens + outputTokens
+    && Object.keys(u).every(k => ['prompt_tokens', 'completion_tokens', 'total_tokens', 'prompt_cache_hit_tokens',
+      'prompt_cache_miss_tokens', 'prompt_tokens_details', 'completion_tokens_details', 'cached_tokens'].includes(k))
+    && (!promptDetails || Object.keys(promptDetails).every(k => k === 'cached_tokens'))
+    && (!completionDetails || Object.keys(completionDetails).every(k => k === 'reasoning_tokens'));
+  return { tokenTariffComplete, usage: { inputTokens, outputTokens }, liabilityComplete,
     ...(reasoningTokens === undefined ? {} : { reasoningTokens }), ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }) };
 }
 /** Round explicit reporting UP, including sub-nanodollar decimal reports. */
@@ -518,6 +536,7 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
         paidUsageSeen = v;
         if (usage) {
           usage.liabilityComplete &&= exactModel && !paidUsageAmbiguous;
+          usage.tokenTariffComplete &&= exactModel && !paidUsageAmbiguous;
           const capability = a.request.capability;
           if (capability.kind !== 'text' || usage.usage.inputTokens > capability.inputTokens || usage.usage.outputTokens > capability.outputTokens) {
             return costAnomaly('paid-liability-contradiction');
@@ -629,6 +648,20 @@ export async function executeGatewayText(input: GatewayTextInput): Promise<Gatew
         ...(usage.cachedInputTokens === undefined ? {} : { cachedInputTokens: usage.cachedInputTokens }),
         chargeBasis: 'conservative-ceiling', conservativeCeilingNanoUsd: ceiling, rateCardVersion: t.rateCard!.version,
       }) });
+      // Commercial pricing follows the same measured-token tariff/markup policy as
+      // legacy chat. This proof NEVER settles the separate supplier ledger as an invoice.
+      if (usage?.tokenTariffComplete && (!sawReasoning || usage.reasoningTokens !== undefined) && t.rateCard?.billingBasis === 'exact-token-tariff'
+        && (t.rateCard.cachedInputNanoUsdPerMillion === undefined || usage.cachedInputTokens !== undefined)) {
+        const cached = usage.cachedInputTokens ?? 0;
+        if (cached === 0 || t.rateCard.cachedInputNanoUsdPerMillion !== undefined) {
+          const tariffNanoUsd = maximumCostNanoUsd(usage.usage.inputTokens - cached, usage.usage.outputTokens,
+            t.rateCard.inputNanoUsdPerMillion, t.rateCard.outputNanoUsdPerMillion)
+            + maximumCostNanoUsd(cached, 0, t.rateCard.cachedInputNanoUsdPerMillion ?? 0, 0);
+          if (isCount(tariffNanoUsd)) tariffUsage.set(result, { claim: evidenceBinding(a.claim), usage: Object.freeze({
+            principalId: a.claim.binding.key.principalId, logicalRequestId: a.claim.binding.key.logicalRequestId,
+            physicalAttemptId: a.claim.binding.physicalAttemptId, tariffNanoUsd, rateCardVersion: t.rateCard.version }) });
+        }
+      }
       if (terminalReceivedAtMs !== undefined) completedCalls.set(result, { claim: evidenceBinding(a.claim), receivedAtMs: terminalReceivedAtMs });
       return result;
     } finally {

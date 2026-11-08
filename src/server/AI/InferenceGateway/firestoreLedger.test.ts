@@ -834,3 +834,38 @@ describe('persistent supplier funding identity prevents cross-pool replay', () =
     await expect(f.ledger.markOutputVisible(claim)).resolves.toBeUndefined();
   });
 });
+
+describe('durable uncapped daily policy compatibility', () => {
+ it('admits and accounts above a zero nominal day cap without waiving logical limits', async () => {
+  const f = fixture();
+  f.state.seed('free_chat_chain/paid_budget_policy',{kind:'paid_budget_policy',version:1,revision:1,capNanoUsd:0,budgetMode:'uncapped',updatedAt:NOW,source:'admin'});
+  f.authority.snapshot={...f.authority.snapshot,budget:{...f.authority.snapshot.budget!,budgetMode:'uncapped',periodLimitNanoUsd:0,remainingPeriodNanoUsd:0}}; f.seal();
+  const h=await f.claim(); await f.ledger.settle(h.claim,f.usage(h.claim));
+  expect(f.day()).toMatchObject({heldNanoUsd:0,pending:0,spentNanoUsd:MONEY,alertedPercent:[]});
+ });
+ it('rejects a forged or revoked uncapped mode instead of ignoring the durable policy', async () => {
+  const f=fixture(); f.authority.snapshot={...f.authority.snapshot,budget:{...f.authority.snapshot.budget!,budgetMode:'uncapped'}}; f.seal();
+  expect(await f.ledger.reserve(f.intent())).toMatchObject({kind:'denied'});
+ });
+ it('still rejects exhausted logical request authority in uncapped mode', async () => {
+  const f=fixture(); f.authority.snapshot={...f.authority.snapshot,budget:{...f.authority.snapshot.budget!,budgetMode:'uncapped',remainingLogicalRequestNanoUsd:0}}; f.seal();
+  expect(()=>f.intent()).toThrow('ineligible');
+ });
+});
+
+describe('uncapped does not bypass non-daily safeguards',()=>{
+ function uncapped(){const f=fixture();f.state.seed('free_chat_chain/paid_budget_policy',{kind:'paid_budget_policy',version:1,revision:1,capNanoUsd:0,budgetMode:'uncapped',updatedAt:NOW,source:'admin'});f.authority.snapshot={...f.authority.snapshot,budget:{...f.authority.snapshot.budget!,budgetMode:'uncapped',periodLimitNanoUsd:0,remainingPeriodNanoUsd:0}};f.seal();return f;}
+ it('retains the existing free-pool per-user attempt limit',async()=>{
+  const f=uncapped();const uidHash=createHash('sha256').update(f.key.principalId).digest('hex');
+  f.state.seed(paidUserDocumentPath(f.window.key,uidHash),{kind:'paid_user',day:f.window.key,uidHash,requests:20});
+  expect(await f.ledger.reserve(f.intent())).toMatchObject({kind:'denied'});
+ });
+ it('never enrolls metered work in strict-free mode',()=>{
+  const f=uncapped();f.updateRequest({mode:'strict-free'});expect(()=>f.intent()).toThrow('ineligible');
+ });
+ it('rechecks revocation of uncapped authority between reservation and claim',async()=>{
+  const f=uncapped();const held=await f.reserve();
+  f.state.seed('free_chat_chain/paid_budget_policy',{kind:'paid_budget_policy',version:1,revision:2,capNanoUsd:0,budgetMode:'capped',updatedAt:NOW,source:'admin'});
+  expect(await f.ledger.claim(held.reservation,held.intent,0)).toMatchObject({kind:'denied'});
+ });
+});

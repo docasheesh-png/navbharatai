@@ -375,11 +375,12 @@ export class GatewayAuthorityStore {
       requireValue(candidates.length > 0);
       let budget: BudgetAuthorization | undefined;
       const paidIds = candidates.filter(c => c.profile.charging === 'metered').map(c => c.profile.id);
-      if (this.paidAuthorityObserved && !this.strictFree && paidIds.length && paid && paid.updatedAt <= now && paid.capNanoUsd > 0) {
+      if (this.paidAuthorityObserved && !this.strictFree && paidIds.length && paid && paid.updatedAt <= now && (paid.budgetMode === 'uncapped' || paid.capNanoUsd > 0)) {
         budget = { id: randomUUID(), principalId: r.principalId, tenantId: r.tenantId, logicalRequestId: r.logicalRequestId,
           payer: r.payer, surface: r.surface, allowedProfileIds: paidIds, budgetScopeId: r.budgetScopeId,
           periodId: window.key, periodStartsAtMs: window.startAt, periodEndsAtMs: window.resetAt,
           maxAttemptNanoUsd: p.logicalLimitNanoUsd, remainingLogicalRequestNanoUsd: p.logicalLimitNanoUsd,
+          budgetMode: paid.budgetMode ?? 'capped',
           remainingPeriodNanoUsd: Math.max(0, paid.capNanoUsd - day.heldNanoUsd - day.spentNanoUsd), periodLimitNanoUsd: paid.capNanoUsd,
           evidenceRef: randomUUID() };
         issueEvidence('budget', budget, window.resetAt);
@@ -491,11 +492,12 @@ export class GatewayAuthorityStore {
       const [paidRaw, dayRaw] = await Promise.all([this.get(tx, `${this.fundingCollection}/paid_budget_policy`), this.get(tx, `${this.fundingCollection}/paid_day_${window.key}`)]);
       const paid = readPaidPolicy(paidRaw, this.fundingCollection); const day = readSpendDay(dayRaw, window);
       let budget: BudgetAuthorization | undefined;
-      if (request.mode !== 'strict-free' && authority.snapshot.budget && paid && paid.updatedAt <= now && paid.capNanoUsd > 0) {
+      if (request.mode !== 'strict-free' && authority.snapshot.budget && paid && paid.updatedAt <= now && (paid.budgetMode === 'uncapped' || paid.capNanoUsd > 0)) {
         const previousBudget = authority.snapshot.budget;
         budget = { ...previousBudget, id: advancing ? randomUUID() : previousBudget.id,
           allowedProfileIds: candidates.filter(c => c.profile.charging === 'metered').map(c => c.profile.id),
           periodId: window.key, periodStartsAtMs: window.startAt, periodEndsAtMs: window.resetAt,
+          budgetMode: paid.budgetMode ?? 'capped',
           remainingPeriodNanoUsd: Math.max(0, paid.capNanoUsd - day.heldNanoUsd - day.spentNanoUsd), periodLimitNanoUsd: paid.capNanoUsd,
           remainingLogicalRequestNanoUsd: Math.max(0, authority.logicalLimitNanoUsd - Number(logical?.heldNanoUsd ?? 0) - Number(logical?.spentNanoUsd ?? 0)), evidenceRef: randomUUID() };
         if (budget.allowedProfileIds.length) issue('budget', budget, window.resetAt); else budget = undefined;
@@ -580,9 +582,10 @@ export class GatewayAuthorityStore {
           expiries.push(authority.snapshot.budget!.periodEndsAtMs, Number(object(attempt.window).resetAt));
           finalChecks.push(now => {
             const window = civilDayWindow(now, PAID_BUDGET_TIME_ZONE); const day = readSpendDay(dayRaw, window);
-            return !!policy && policy.revision === authority.paidPolicyRevision && policy.capNanoUsd > 0 && policy.updatedAt <= now
+            return !!policy && policy.revision === authority.paidPolicyRevision && (policy.budgetMode === 'uncapped' || policy.capNanoUsd > 0) && policy.updatedAt <= now
+              && (authority.snapshot.budget!.budgetMode ?? 'capped') === (policy.budgetMode ?? 'capped')
               && window.key === budget.periodId && same(attempt.window, window) && day.pending > 0
-              && day.heldNanoUsd >= budget.amountNanoUsd && day.heldNanoUsd + day.spentNanoUsd <= policy.capNanoUsd;
+              && day.heldNanoUsd >= budget.amountNanoUsd && (policy.budgetMode === 'uncapped' || day.heldNanoUsd + day.spentNanoUsd <= policy.capNanoUsd);
           });
         }
         // No time-sensitive decision uses a pre-read timestamp. Reads can span quota resets,

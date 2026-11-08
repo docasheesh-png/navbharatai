@@ -1143,3 +1143,24 @@ describe('developer API key authenticated chain boundary', () => {
     await expect(enter()).rejects.toMatchObject({ reason: 'context-unverified' }); expect(network).not.toHaveBeenCalled();
   });
 });
+
+describe('uncapped authority issuer through real dispatch', () => {
+ it('preserves explicitly uncapped professional authority even with a zero nominal day cap', async () => {
+  vi.stubEnv('TEXT_CHAIN_POLICY','fixed-v1'); const f=professionalSupplierFixture();
+  f.docs.set('professional_inference/paid_budget_policy',{...(f.docs.get('professional_inference/paid_budget_policy') as object),capNanoUsd:0,budgetMode:'uncapped'});
+  expect(await run(professionalContext())).toMatchObject({ok:true}); expect(network).toHaveBeenCalledOnce();
+ });
+});
+
+describe('professional exact-tariff proof survives real Gateway runtime',()=>{
+ it('uses approved catalog rates and authentic complete token usage, not the supplier hold',async()=>{
+  vi.stubEnv('TEXT_CHAIN_POLICY','fixed-v1');const f=professionalSupplierFixture();
+  f.catalog.profiles[0].transport.rateCard={...f.catalog.profiles[0].transport.rateCard!,billingBasis:'exact-token-tariff'};
+  network.mockResolvedValue(new Response(JSON.stringify({model:'gpt-5-nano',choices:[{message:{content:'Answer'},finish_reason:'stop'}],usage:{prompt_tokens:100,completion_tokens:20,total_tokens:120,prompt_tokens_details:{cached_tokens:0}}}),{headers:{'content-type':'application/json'}}));
+  const response=await run(professionalContext());expect(response).toMatchObject({ok:true,gatewayPricingProof:{kind:'gateway-metered-tariff'}});
+  const {chatTurnCost}=await import('../../lib/chatSpend');
+  const approved=f.catalog.profiles[0].transport.rateCard!;
+  const expected=(100*approved.inputNanoUsdPerMillion+20*approved.outputNanoUsdPerMillion)/1e15;
+  expect(chatTurnCost({...response,...response.usage},85)).toMatchObject({measured:true,costBasis:'metered-gateway',realUsd:expected});
+ });
+});

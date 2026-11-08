@@ -1,6 +1,6 @@
 # Universal NavBharatAI text routing — rollout readiness
 
-Code integration is implemented; **this work has not enabled or deployed production; its current state is unverified**.
+Routing/adapters are implemented, but **universal activation is not engineering-complete**: metered Gateway wallet reconciliation and existing uncapped-budget semantics remain code gaps, not operator-only inputs. This work has not enabled or deployed production.
 Do not enable `TEXT_CHAIN_POLICY=fixed-v1` before reviewing the catalog and funding below.
 This is eligibility-ordered fallback, not permission to bypass privacy, money, safety,
 quota, or cancellation gates. Ineligible/missing rungs are skipped, never substituted.
@@ -62,7 +62,11 @@ Turning off the master after selection fails closed, not through legacy routing.
 
 **Pro app builder is not enrolled**: AgentV3, Surplus, Router One, z@ pin routing,
 provider watchdogs and builder implementation are unchanged. Retired `/api/pro-chat`
-is still retired. Exam/tool JSON, embeddings, search, vision, image generation and
+is still retired. `/api/app-ai/preview-ask` is intentionally builder-owned: its
+handler in `routes/appAiOwner.ts` verifies workspace ownership, imports AgentV3
+`WorkspaceFileStore`, and invokes the generated-app `answerForApp` contract with
+its separate app-owner settings/preview allowance. It is not a missed product-chat
+entry point. Exam/tool JSON, embeddings, search, vision, image generation and
 speech are distinct capability operations, not aliases for the requested text models.
 Their auxiliary policies remain separate; conversational final text uses the chain.
 Customer-built published-app assistants/BYOK remain under their independent app-owner
@@ -97,8 +101,9 @@ requires the actual approved budget (no new allowance). The free per-user guard 
 pre-existing. Those free-pool restrictions are not
 borrowed for paid professionals: that pool follows its explicitly approved finite
 `capNanoUsd` and request limit, with no invented dollar or per-user-attempt default.
-The pre-existing free-pool bounds/uncapped-rollout compatibility still need checking
-against the actual deployed free policy before fixed-v1 activation.
+The Gateway still interprets the FreeChain policy as finite even when its existing
+`budgetMode=uncapped` is set. Preserving that established mode is an engineering
+requirement before fixed-v1 activation; changing production flags is not a fix.
 A timeout/ambiguous paid failure is **not proof of zero cost**: it remains pending
 reconciliation and may terminate the request. Only supported authenticated rejection
 proof permits a paid retry. Do not loosen that fence merely to demonstrate all rungs.
@@ -205,7 +210,8 @@ It does not opt into alternate-model routing. No supplier list or ceiling was in
 Offline regressions verify/fix malformed optional Mitrify configuration terminating
 fallback before later rungs, cancellation becoming an all-failed/outage penalty, late
 stream chunks, and early providers exhausting observation time. FreeChain now shares
-a 90-second provider-observation deadline; fixed Gateway first-token slices reserve
+a shared 240-second server deadline with a 90-second provider hard cap (merged
+from main); fixed Gateway first-token slices reserve
 20% control-plane headroom across the 12 positions. Mitrify gets one HTTP attempt and
 bounded first-token/idle/total observation. Visible output is never replayed through
 another provider; a stalled prefix is explicitly incomplete, not clean success.
@@ -251,3 +257,46 @@ Live connector review: both `get_service` and `get_service_log` were attempted
 through the READY connector for the named production project/region/service. Both
 returned "GCP credentials are not available". READY describes tool availability,
 not successful GCP authorization; no service/env values or logs were obtained.
+
+
+## Bounded reliability-incident follow-up
+
+The owner's roughly 50% success estimate is not measured telemetry and is not
+converted into an uptime guarantee. Production cause/restoration remain unknown.
+Both sanctioned service and log reads failed for unavailable GCP credentials; no
+credential extraction, alternate authentication, paid probes or deployment occurred.
+
+Verified **existing-path availability defect**: FreeChain returned all-failed before
+any provider if publication of the shared *paid* budget failed. That unnecessarily
+disabled independently reviewed free providers during a paid-policy write failure.
+The small incident fix continues only eligible free rungs, skips every paid rung
+(including Mitrify in fixed mode), preserves quotas/privacy/safety/master controls,
+and retries publication on a later request. Paid work is never authorized by this
+failure. All-free failure remains an honest failure. Publication already has a
+5-second observation timeout and a one-second retry backoff.
+
+Focused regressions exercise this actual failure, no paid reservation/dispatch,
+subsequent policy recovery, fixed-chain paid exclusions, cancellation, silent/late
+streams, terminal SSE settlement and shared deadline budgeting. The merged main
+deadline changed an older fake-clock assertion from 90s/12 to the shared deadline/12;
+the assertion is now tied to the shared constant, not a larger test timeout.
+
+This is a repository-proven failure mode, **not a proven cause of this incident**.
+A separate main-based two-file patch is prepared for independent incident review;
+it does not require Mitrify configuration, paid-routing activation or billing changes.
+
+Minimum production evidence needed: the actual serving revision and one sanitized
+failed-request correlation with HTTP status, route, terminal reason/provider-rung
+attempts, first-content/terminal timing and whether the client saw an SSE error,
+`[DONE]`, disconnect or timeout (plus a successful comparison if available). Keep
+prompts, patient data and credentials out. A safety refusal, auth/quota rejection,
+provider transport failure and interrupted partial stream are different outcomes.
+Existing safety refusals must not be bypassed to inflate an availability count.
+
+The separate commercial code work is deferred for this urgent availability review:
+`chatSpend.ts` still returns `unpriced-gateway` for metered Gateway responses and
+`aiTurnCharge.ts` cannot debit that unmeasured spend; idempotent reconciliation has
+not been implemented. Conservative supplier ceilings are not exact tariffs. Gateway
+uncapped-policy compatibility also remains unimplemented. Neither gap is cured by
+operator credentials, approvals, money amounts or enabling fixed-v1. Do not advertise
+the full owner request as complete or activate universal commercial routing yet.

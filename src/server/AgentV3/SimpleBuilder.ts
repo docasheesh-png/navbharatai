@@ -1,3 +1,5 @@
+import { manifestArchitectureProblem } from './manifestArchitecture';
+import { STEERING_YIELD_REASON, isSteeringYield } from './steeringHandoff';
 // AgentV3 — Simple Builder: "plan the files, then build each file in its OWN focused call".
 //
 // The single-call OneShot lane asks the model to emit an ENTIRE multi-file app in one response,
@@ -76,6 +78,9 @@ export function stoppedLaneSummary(filesSaved: number): string {
  * words, and "timed out" is said only about a timeout.
  */
 export function laneFallbackSummary(salvaged: number, handedOff: boolean, reason: string): string {
+  if (isSteeringYield(reason)) return salvaged > 0
+    ? 'Your new instruction is queued — carrying on from the files already saved.'
+    : 'Your new instruction is queued — continuing with it before building further.';
   if (handedOff) {
     // A lane that DECIDED to hand off can still end on another reason — its root component's call was the one
     // that carried the decision, or its time ran out while it waited for the calls already running. Both facts
@@ -1723,6 +1728,8 @@ export interface VerifyResult {
 
 export interface SimpleBuildDeps {
   prompt: string;
+  /** Original user words, before an English roadmap replaces the generation brief. */
+  originalRequest?: string;
   /**
    * NavBharatAI's own notes about the request — request scope, device, stack, third-party player limits —
    * kept APART from `prompt` (autopsy 9c612cdb, Q-991). Every model call the lane makes reads them, appended
@@ -1758,6 +1765,8 @@ export interface SimpleBuildDeps {
    * the last call; a lane that never falls never hears from it.
    */
   stopLane?: () => string | null;
+  /** A queued user steer is a scope change, not a Stop or a reasoning-rung optimization. */
+  yieldRequested?: () => boolean;
   /**
    * The BUILD's stop signal (Stop / Unsend / a lease stop). Read before every model call, tier,
    * verify and repair round and before the preview starts; a stopped lane saves the files it
@@ -2195,6 +2204,10 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // A stop wins over a late answer; the catch preserves the existing stop/salvage behavior.
       if (deps.signal?.aborted) throw new BuildStoppedError();
       const rawManifest = parseFileManifest(manifestText);
+      if (rawManifest.length && deps.originalRequest !== undefined) {
+        const disagreement = manifestArchitectureProblem(rawManifest.map((file) => file.path), deps.originalRequest);
+        if (disagreement) throw new Error(disagreement);
+      }
       // Accepted artifacts win BEFORE scaffold filters or an injected starter entry. A response in
       // file-block rather than manifest format still belongs to the existing recovery path.
       const initialDecline = readInitialLaneDecline(manifestText, rawManifest.length + parseFileBlocks(manifestText).length);
@@ -2258,6 +2271,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       }
       plannedFiles = manifest.length;
       plannedPaths = manifest.map((f) => f.path);
+      if (deps.yieldRequested?.()) throw new Error(STEERING_YIELD_REASON);
       try { deps.onPlanned?.(manifest.length); } catch { /* an ETA hook must never affect a build */ }
       if (manifest.length < minFiles) throw new Error('manifest_too_small');
       // P6 — a plan this large is past what isolated per-file calls do well; the agent loop builds it.
@@ -2864,7 +2878,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     // that carries the decision can be the root component's own, in the last tier: generation then finishes,
     // the root is missing, and the lane ends on "root component was not written" — which used to drop the
     // cause, so the report called a planned hand-off a lane that could not build the app.
-    const handedOff = handOffDecision !== null || isReasoningRungHandoff(e) || /reasons before every answer/i.test(reason);
+    const handedOff = isSteeringYield(reason) || handOffDecision !== null || isReasoningRungHandoff(e) || /reasons before every answer/i.test(reason);
     return {
       ok: false,
       ...(handedOff ? { handedOff: true } : {}),
@@ -2881,6 +2895,15 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       ...(contractEnumsAsConst.length ? { contractEnumsAsConst } : {}),
     };
   }
+
+  const steeringHandoff = (): SimpleBuildResult | null => !deps.signal?.aborted && deps.yieldRequested?.() ? {
+    ok: false, handedOff: true, reason: STEERING_YIELD_REASON,
+    filesWritten: files.length, salvagedPaths: files.map((file) => file.path),
+    summary: 'Your new instruction is queued — carrying on from the files already saved.',
+    plannedFiles, plannedPaths, phases: phasesNow(),
+  } : null;
+  const beforeVerifyYield = steeringHandoff();
+  if (beforeVerifyYield) return beforeVerifyYield;
 
   deps.log?.(`Built your app — ${files.length} file(s), each generated individually.`);
 
@@ -2994,7 +3017,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // reasoning rungs, and repair ran 560 s (77% of the lane) without fixing anything. Generation
       // consulted this; the repair loop — the lane's longest phase — never did.
       // No narration here: the hand-off line after the loop already says it, in the user's words.
-      if (deps.stopLane?.()) break;
+      if (deps.yieldRequested?.() || deps.stopLane?.()) break;
       attempt++;
       // GA-8: each attempt climbs the ordered strategy ladder so a retry is a genuinely DIFFERENT push
       // (contract-full → focus-offenders → contract-authority), not the identical prompt re-fired.
@@ -3150,6 +3173,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       typecheckRan, plannedFiles, phases: phasesNow(),
     };
   }
+  const beforePreviewYield = steeringHandoff();
+  if (beforePreviewYield) return beforePreviewYield;
   // VERIFIED (or verify not wired) → success; the preview is a best-effort bonus.
   if (deps.startPreview) {
     try { await withTimeout(deps.startPreview(), deps.previewTimeoutMs ?? 90_000, 'simple-preview'); }
@@ -3158,6 +3183,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // typecheckOk: true ONLY when the verify gate genuinely RAN and passed; null when verify wasn't
   // wired OR could not execute (an un-run check is "unknown", never a pass — no fake success).
   // previewOk is left unknown here — the route's preview self-check can upgrade BUILD_PARTIAL → BUILD_SUCCESS.
+  const afterPreviewYield = steeringHandoff();
+  if (afterPreviewYield) return afterPreviewYield;
   const outcome = classifyBuildOutcome({ filesWritten: files.length, typecheckOk: deps.verify && typecheckRan ? true : null });
   return { ok: true, filesWritten: files.length, summary: `Built your app file-by-file — ${files.length} file(s).`, outcome, typecheckRan, plannedFiles, phases: phasesNow() };
 }

@@ -1,3 +1,6 @@
+import { bindReplyLanguage } from './replyLanguageBinding';
+import type { PlatformVoice } from './platformVoice';
+import { createSandboxAdmissionBudget, SANDBOX_ADMISSION_BLOCKED, type SandboxAdmissionBudget } from './sandboxAdmissionBudget';
 import { NOT_READY_HEADLINE, NOT_READY_HEADLINE_CONTINUE } from './notReadyHeadline';
 import { resumeTruncatedEnabled } from './reliability/resumeWrite';
 import { compactForBudget, recentlyTouchedPaths, tokenCompactEnabled, withWorkingSet, workingSetBlock, workingSetConfig, workingSetEnabled } from './reliability/contextBudget';
@@ -66,6 +69,9 @@ import { runAsModelToolCall } from './modelToolWrites';
  * model as is_error results — never a fake "done".
  */
 export interface AgentRunnerOptions {
+  replyVoice?: () => PlatformVoice;
+  /** Shared across the build's primary/retry/heal runners; no repeated spending on proven admission exhaustion. */
+  sandboxAdmissionBudget?: SandboxAdmissionBudget;
   client: TurnRunner;
   /**
    * P4b (fix/build-reliability, AGENTV3_QUALITY_ESCALATE) — called when the quality monitor sees the
@@ -590,6 +596,7 @@ export class AgentRunner {
     const agentRole: AgentRole = this.opts.agentRole ?? 'architect';
     const toolConcurrency = Math.max(1, this.opts.toolConcurrency ?? 4);
     const expectsArtifacts = this.opts.expectsArtifacts === true;
+    const admission = expectsArtifacts ? this.opts.sandboxAdmissionBudget ?? createSandboxAdmissionBudget() : null;
     const readinessGate = this.opts.readinessGate === true;
     const lintGate = this.opts.lintGate === true;
     // P-PIPE — build-end dependency-health advisory (OSV/CVE + strong-copyleft). Default-OFF admin flag
@@ -948,6 +955,12 @@ export class AgentRunner {
         return { ok: false, summary, steps, usage, billedUsd: billed() };
       };
       while (steps < stepCap) {
+        if (admission?.exhausted && !this.opts.signal?.aborted) {
+          try { this.opts.onNote?.({ code: 'SANDBOX_ADMISSION_EXHAUSTED', message: SANDBOX_ADMISSION_BLOCKED }); } catch { /* observation only */ }
+          await persist('error');
+          events.emit({ type: 'done', ok: false, summary: SANDBOX_ADMISSION_BLOCKED, ts: Date.now() });
+          return { ok: false, summary: SANDBOX_ADMISSION_BLOCKED, steps, usage, billedUsd: billed() };
+        }
         steps++;
 
         // The build was aborted — end between turns, and say WHY it really stopped.
@@ -1016,7 +1029,7 @@ export class AgentRunner {
         //
         // The size is still reported exactly — it is summed rather than measured off a string that
         // no longer needs to exist.
-        const systemText = system ?? '';
+        const systemText = this.opts.replyVoice ? bindReplyLanguage(system, this.opts.replyVoice()) : system ?? '';
         const promptChars = systemText.length + SEPARATOR.length + lastMsgText.length;
         const promptPreview = `${systemText.slice(0, PROMPT_PREVIEW_HEAD)}${SEPARATOR}${lastMsgText.slice(0, PROMPT_PREVIEW_HEAD)}`;
         const llmStartedAt = Date.now();
@@ -1036,7 +1049,7 @@ export class AgentRunner {
             ? messages
             : tokenCompactEnabled()
               // P3a (AGENTV3_TOKEN_COMPACT) — verbatim until ~50% of the window, then gentle, then tight.
-              ? compactForBudget(messages, (system ?? '').length, compactTranscriptForModel).messages
+              ? compactForBudget(messages, systemText.length, compactTranscriptForModel).messages
               : compactTranscriptForModel(messages, { keepRecentMessages: modelKeepRecent, maxOldToolResultChars: modelMaxOldToolResultChars });
           // P3b (AGENTV3_WORKING_SET) — the fresh on-disk content of recently touched files, appended last.
           if (workingSetEnabled() && typeof dispatcher.readForWorkingSet === 'function') {
@@ -1059,7 +1072,7 @@ export class AgentRunner {
             : undefined;
           const turnCall = client.runTurn({
             model,
-            system,
+            system: systemText,
             messages: modelMessages,
             tools: toolsThisTurn(tools, todoWithdrawal),
             maxTokens: maxTokensPerTurn,
@@ -1624,7 +1637,7 @@ export class AgentRunner {
             try { return dispatcher.changeCount(); } catch { return null; }
           };
           const before = changes();
-          const result = await dispatchWithBudget(tu);
+          const result = await (admission ? admission.dispatch(tu, () => dispatchWithBudget(tu)) : dispatchWithBudget(tu));
           const after = changes();
           // BR1952: requesting bash/write is not evidence of saved work. Failed/refused/queued
           // tools count only if the real dispatcher observed a partial change before the error.

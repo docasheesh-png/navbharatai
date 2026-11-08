@@ -1,3 +1,4 @@
+import { isSteeringYield } from './steeringYield';
 // AgentV3 — the ONE exception to the architect's delegation rule, and the marker that turns it on.
 //
 // 🔴 WHY (autopsy 121c2431, 2026-09-26; admin approved the narrow exception the same day: "architect
@@ -93,6 +94,7 @@ export function contractRenameHandoffClause(renames: ReadonlyArray<{ from: strin
  */
 export function salvageWhyClause(reason: string | undefined, handedOff: boolean | undefined): string {
   const why = String(reason ?? '');
+  if (isSteeringYield(why)) return 'before yielding to a newly queued user instruction; continue the saved work under that instruction';
   if (why === 'verify_failed') return 'and they do not compile yet';
   if (handedOff) return 'and then handed the rest of the app to you on purpose (its next engine reasons before every answer, which that lane cannot carry), not because it ran out of time';
   if (/\btimed out\b/i.test(why)) return 'before running out of time';

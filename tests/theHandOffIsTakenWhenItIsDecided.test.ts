@@ -216,7 +216,7 @@ describe('Q-982 (A): the hand-off is taken when it is decided, whatever the tier
       .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     // A new call site that polls stopLane itself would decide without saving or stamping the ledger.
     expect(src.match(/deps\.stopLane\?\.\(\)/g)?.length).toBe(2);
-    expect(src).toContain('if (deps.stopLane?.()) break;');
+    expect(src).toContain('if (deps.yieldRequested?.() || deps.stopLane?.()) break;');
     // The decision is consulted where a call starts, where it returns a file, and where it fails.
     expect(src.match(/noteHandOffDecision\(\)/g)?.length).toBeGreaterThanOrEqual(3);
     expect(src).not.toContain('if (laneStopReason) saveForPreviewNow([file]);');

@@ -1,3 +1,5 @@
+import { manifestArchitectureProblem } from './manifestArchitecture';
+import { STEERING_YIELD_REASON } from './steeringHandoff';
 import { binaryTextGenerationProblem, BINARY_TEXT_GENERATION_PREFIX } from './binaryTextWrite';
 // AgentV3 — OneShot fast lane (additive; the agentic loop is untouched).
 //
@@ -253,10 +255,13 @@ export interface OneShotResult {
   summary: string;
   /** Why it did not succeed — used by the caller to fall back and by diagnostics. */
   reason?: string;
+  salvagedPaths?: string[];
 }
 
 export interface OneShotDeps {
   prompt: string;
+  originalRequest?: string;
+  yieldRequested?: () => boolean;
   framework: string;
   scaffoldPaths: string[];
   /** Read an existing project file (preview bridge stripped) — see existingConfig.ts. Absent → today's behaviour. */
@@ -336,10 +341,12 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
         for (const p of deps.scaffoldPaths.filter((x) => isProjectConfigPath(x) && !skip.has(x))) existingConfigs[p] = await deps.readExisting(p).catch(() => null);
       }
       if (lapsed) throw new Error('one-shot-cancelled');
+      if (deps.yieldRequested?.()) throw new Error(STEERING_YIELD_REASON);
       const text = await deps.generate(oneShotSystemPrompt(deps.framework), oneShotUserPrompt(deps.prompt, deps.scaffoldPaths, existingConfigs), { deadlineAt });
       // Checked BEFORE parsing as well as before writing: a lane that has already been handed off must
       // stop at the first opportunity, not merely stop short of the damage.
       if (lapsed) throw new Error('one-shot-cancelled');
+
       // Same lane shape as the fast lane's per-file calls: no tool loop to read a write-time note, so a
       // missing React import is added here (autopsy d382b398, see ensureReactValueImport).
       // The starter's compiler files and the error boundary are correct as shipped; a one-shot answer that
@@ -350,11 +357,16 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
       if (binaryProblem) throw new Error(binaryProblem);
       const initialDecline = readInitialLaneDecline(text, rawFiles.length);
       if (initialDecline) throw new InitialLaneDeclinedError(initialDecline);
+      if (rawFiles.length && deps.originalRequest !== undefined) {
+        const disagreement = manifestArchitectureProblem(rawFiles.map((file) => file.path), deps.originalRequest);
+        if (disagreement) throw new Error(disagreement);
+      }
       const parsed = rawFiles
         .filter((f) => !provided.has(f.path))
         .map((f) => ({ ...f, content: ensureReactValueImport(f.path, f.content) }));
       if (parsed.length < minFiles) throw new Error('no_files_parsed');
       if (lapsed) throw new Error('one-shot-cancelled');
+
       // 🔴 Q-982 (report 9c612cdb): the workspace reports a refused file as an outcome, not a throw, so a
       // resolved write is not a written app. The count and the success are what actually landed; a lane whose
       // files were refused did not build the app, however well it generated it.
@@ -367,7 +379,9 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
     if (e instanceof InitialLaneDeclinedError) return initialLaneDeclineResult(e.decline);
     // Generation / write failed or timed out → no app produced, fall back to the full builder.
     const reason = e instanceof Error ? e.message : String(e);
-    const summary = reason === 'no_files_parsed'
+    const summary = reason === STEERING_YIELD_REASON
+      ? 'Your new instruction is queued — continuing with it before building further.'
+      : reason === 'no_files_parsed'
       ? 'One-shot produced no usable files — switching to the full builder.'
       : reason === ONE_SHOT_FILES_REFUSED
         ? 'One-shot generated the app, but the workspace refused its files — switching to the full builder.'
@@ -379,12 +393,13 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
   // The preview is a best-effort BONUS, separately bounded: if it is slow or hangs we STILL return
   // ok:true, so the caller never discards a finished build to re-run the heavy loop.
   deps.log?.(`Generated ${files.length} file(s) in one shot.`);
-  if (deps.startPreview) {
+  if (!deps.yieldRequested?.() && deps.startPreview) {
     try {
       await withTimeout(deps.startPreview(), deps.previewTimeoutMs ?? 90_000, 'one-shot-preview');
     } catch {
       deps.log?.('Preview is still starting — your files are ready; opening the preview will reconnect it.');
     }
   }
+  if (deps.yieldRequested?.()) return { ok: false, filesWritten: files.length, salvagedPaths: files.map((file) => file.path), reason: STEERING_YIELD_REASON, summary: 'Your new instruction is queued — carrying on from the files already saved.' };
   return { ok: true, filesWritten: files.length, summary: `Built your app in one shot — ${files.length} file(s).` };
 }

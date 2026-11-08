@@ -1,3 +1,5 @@
+import { requiresSingleHtml } from '../../lib/singleHtmlConstraint';
+
 // MEGA-APP ROADMAP — Phase 2 of the mega-app system (admin 2026-08-14, the "PUBG / WhatsApp / Claude
 // jaisa banao" problem). When `appScopeAnalyzer` classifies a prompt as a MEGA app, this module turns it
 // into an HONEST, step-by-step roadmap: an achievable first slice small enough to preview in ~5-7 min,
@@ -323,9 +325,18 @@ const normTitle = (t: string): string => t.toLowerCase().replace(/[^a-z0-9]+/g, 
 export function roadmapGuardrail(
   parsed: { userMessage?: string; achievableSummary: string; note: string | null; steps: Array<{ title: string; goal: string; buildPrompt: string; needsInfra: string | null }> } | null,
   famousApp: string | null,
+  architecture?: { framework: string; originalRequest: string },
 ): { roadmap: MegaRoadmap | null; rejected: string[] } {
   const rejected: string[] = [];
   if (!parsed) return { roadmap: null, rejected: ['no parseable roadmap'] };
+
+  // BR1952: a planner's invented single-HTML policy must not override the selected Vite project.
+  // Reject the whole dependent roadmap rather than dropping a prerequisite and renumbering later steps.
+  if (architecture && architecture.framework !== 'static'
+    && !requiresSingleHtml(architecture.originalRequest)
+    && parsed.steps.some((step) => requiresSingleHtml(step.buildPrompt))) {
+    return { roadmap: null, rejected: [`roadmap architecture conflicts with selected ${architecture.framework}: single HTML is a planner choice, not a user constraint`] };
+  }
 
   const seen = new Set<string>();
   const kept: RoadmapStep[] = [];

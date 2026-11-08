@@ -165,6 +165,8 @@ export const PROCESS_ONLY_CODES = new Set([
   'RELEASE_GATE_UNPROVEN',       // "not evidence the app is broken — the absence of evidence that it works" (its own detail)
   'LAST_CHANCE_PROOF_UNAVAILABLE', // "an infrastructure limit here, never evidence about the app itself" (its own detail)
   'SANDBOX_UNAVAILABLE',         // "Infrastructure condition, not an app error." (its own message)
+  'SANDBOX_ADMISSION_EXHAUSTED',
+  'ONESHOT_SCOPE_YIELD',
   'RUNTIME_UNCHECKED',           // our console capture failed — the class `VERIFY_DID_NOT_RUN` above already names
   'CLAIM_UNSUPPORTED',           // OUR closing summary over-claimed, and the summary is corrected in place — the class of SUMMARY_OFF_TOPIC
   'TIMELINE_TRUNCATED',          // our diagnostics timeline hit its own entry cap

@@ -289,7 +289,7 @@ describe('the wiring — each fix reaches the place that was wrong', () => {
     expect(runner).not.toContain('turn.toolUses.filter(toolUseCouldProduceWork)');
     // Asking for a mutation is insufficient: only the post-dispatch observed change (or a
     // successful legacy receipt without an observer) can support the saved-work summary.
-    expect(runner).toContain('const result = await dispatchWithBudget(tu);');
+    expect(runner).toContain('const result = await (admission ? admission.dispatch(tu, () => dispatchWithBudget(tu)) : dispatchWithBudget(tu));');
     expect(runner).toContain('if (toolUseCouldProduceWork(tu) && (before !== null && after !== null ? after > before : result.is_error === false)) producingToolUses += 1;');
   });
 

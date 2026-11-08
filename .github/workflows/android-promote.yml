@@ -1,0 +1,67 @@
+name: Inspect or promote an exact Android internal version
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Offline is network-free. Inspect abandons its edit. Promote commits only a reviewed exact plan.'
+        type: choice
+        options: [offline, inspect, promote]
+        default: offline
+      version_code:
+        description: 'Exact already-uploaded internal versionCode; no latest-version selection or rebuild.'
+        type: string
+        required: false
+      expected_fingerprint:
+        description: 'For promote only: SHA-256 from a reviewed inspect run. Any changed track state stops promotion.'
+        type: string
+        required: false
+      console_clear:
+        description: 'I verified no other edits/pending Console changes and no outstanding legal/compliance blockers. Inspect creates then deletes an edit and can invalidate an existing edit by this account.'
+        type: boolean
+        default: false
+      data_safety_reviewed:
+        description: 'For promote only: I verified current Play Data safety declarations, including enabled Meta app events. This does not change any declaration.'
+        type: boolean
+        default: false
+      changes_not_sent_for_review:
+        description: 'Preserve the reviewed Play review-state requirement. Never toggle automatically to bypass a rejection.'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Shared with the existing internal uploader. Never cancel an in-flight commit.
+concurrency:
+  group: google-play-com-navbharat-ai
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - name: Offline plan (no credentials or network)
+        if: inputs.mode == 'offline'
+        run: node --experimental-strip-types scripts/playPromotion.mjs
+      - name: Install existing dependencies
+        if: inputs.mode != 'offline'
+        run: npm ci
+      - name: Inspect or commit reviewed exact-version promotion
+        if: inputs.mode != 'offline'
+        env:
+          PLAY_PROMOTION_MODE: ${{ inputs.mode }}
+          PLAY_VERSION_CODE: ${{ inputs.version_code }}
+          PLAY_EXPECTED_FINGERPRINT: ${{ inputs.expected_fingerprint }}
+          PLAY_CONSOLE_CLEAR: ${{ inputs.console_clear }}
+          PLAY_DATA_SAFETY_REVIEWED: ${{ inputs.data_safety_reviewed }}
+          PLAY_REVIEW_DEFERRED: ${{ inputs.changes_not_sent_for_review }}
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: node --experimental-strip-types scripts/playPromotion.mjs

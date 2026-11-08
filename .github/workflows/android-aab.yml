@@ -38,6 +38,11 @@
 
 name: Build Android App Bundle (.aab, signed)
 
+# Serialize Play edits with exact-version promotion; artifact-only builds remain independent.
+concurrency:
+  group: ${{ inputs.upload_to_play && 'google-play-com-navbharat-ai' || format('android-artifact-{0}', github.run_id) }}
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:

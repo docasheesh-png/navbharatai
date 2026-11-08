@@ -205,6 +205,7 @@ export function buildFreeChainRouter(db: Firestore, cfg: FreeChainConfig = freeC
       if (input.signal?.aborted || Date.now() >= deadlineAt) return done({ ...empty('aborted'), content: '' });
       if (id === 'mitrify') {
         const attempt = { provider: id, model: mitrifyConfig().model, reason: 'pending', entered: false }; trace.attempts.push(attempt);
+        if (!paidBudgetReady) { attempt.reason = 'paid-budget-unavailable'; continue; }
         if (trace.attempts.filter(a => a.entered).length >= cfg.maxAttempts) { attempt.reason = 'max-attempts'; break; }
         // Preserve classification; server review must cover the exact payload and all required data classes.
         const prepared = trimForRung(input.message, history, system, Number.MAX_SAFE_INTEGER)!;

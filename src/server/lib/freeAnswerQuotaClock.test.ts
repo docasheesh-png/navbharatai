@@ -123,7 +123,7 @@ it('preserves deterministic explicit-time fixtures even when the wall clock is d
 });
 
 
-it('refreshes the initial lease without moving its original ninety-second deadline', async () => {
+it('refreshes the initial lease without moving its original request deadline', async () => {
   const f = fixture(); f.plan({ readAt: [START + 85_000] });
   const reservation = await hold(f.store);
   expect(reservation).toMatchObject({ startedAt: START, deadlineAt: START + 90_000, leaseExpiresAt: START + 90_000 });

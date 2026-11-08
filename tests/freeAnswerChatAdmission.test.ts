@@ -52,7 +52,7 @@ describe('real chat ingress enforces shared answer admission without changing pr
     const res = response();
     m.detailed.mockImplementationOnce(async () => { expect(currentInferenceGatewayContext()).toBeUndefined(); return { ok: true, content: 'A useful answer.' }; });
     await route(path)(request({ uid: 'victim', userId: 'victim', tier: 'paid', freeAnswerQuota: false }), res);
-    expect(m.reserve).toHaveBeenCalledWith({ key: 'user:verified-user', limit: 50 }, requestId);
+    expect(m.reserve).toHaveBeenCalledWith({ key: 'user:verified-user', limit: 50 }, requestId, undefined, 240_000);
     expect(m.settle).toHaveBeenCalledWith(expect.any(Object), 'answered');
     expect(m.legacy).toHaveBeenCalledOnce(); expect(m.detailed).toHaveBeenCalledOnce();
     expect(res.body).toEqual({ reply: 'A useful answer.' });
@@ -60,7 +60,7 @@ describe('real chat ingress enforces shared answer admission without changing pr
   it('uses ten guest answers and trusted address backstop despite forged account metadata and old unlimited knob', async () => {
     m.verify.mockResolvedValue(null); m.identity.mockResolvedValue(null);
     const res = response(); await route()(request({ uid: 'victim', userId: 'victim', tenantId: 'victim' }), res);
-    expect(m.reserve).toHaveBeenCalledWith({ key: 'guest-device:22222222-2222-4222-8222-222222222222', limit: 10, ipKey: 'ip:203.0.113.9', guest: true }, requestId);
+    expect(m.reserve).toHaveBeenCalledWith({ key: 'guest-device:22222222-2222-4222-8222-222222222222', limit: 10, ipKey: 'ip:203.0.113.9', guest: true }, requestId, undefined, 240_000);
     expect(res.body.reply).toBe('A useful answer.');
   });
   it.each(['daily-limit', 'busy', 'duplicate', 'attempt-limit'])('stops %s before documents, prompt lookup and inference', async reason => {

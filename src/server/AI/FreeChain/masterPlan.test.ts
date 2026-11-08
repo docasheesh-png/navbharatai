@@ -146,8 +146,8 @@ describe('monthly cap', () => {
     const docs = new Map<string, any>();
     const ref = (path: string) => ({ path, get: async () => ({ data: () => docs.get(path) }) });
     const node: any = (path: string) => ({ collection: (c: string) => ({ doc: (d: string) => Object.assign(node(`${path}/${c}/${d}`), ref(`${path}/${c}/${d}`)) }) });
-    return { docs, collection: (c: string) => ({ doc: (d: string) => node(`${c}/${d}`) }),
-      runTransaction: async (fn: any) => fn({ get: async (r: any) => ({ data: () => docs.get(r.path) }), set: (r: any, v: any) => docs.set(r.path, { ...(docs.get(r.path) ?? {}), ...v }) }) } as any;
+    return { docs, doc: ref, collection: (c: string) => ({ doc: (d: string) => node(`${c}/${d}`) }),
+      runTransaction: async (fn: any) => fn({ get: async (r: any) => ({ exists: docs.has(r.path), data: () => docs.get(r.path) }), set: (r: any, v: any) => docs.set(r.path, { ...(docs.get(r.path) ?? {}), ...v }) }) } as any;
   }
   it('holds, refuses past the cap, settles actual cost and releases never-dispatched holds', async () => {
     const db = fakeDb(); const now = Date.parse('2026-10-24T00:00:00Z');
@@ -157,6 +157,19 @@ describe('monthly cap', () => {
     expect(await reserveMonthly(db, 10, 5, now)).toBe('2026-10');
     await settleMonthly(db, m!, 5, 0, now);
     expect([...db.docs.values()][0]).toMatchObject({ heldNanoUsd: 0, spentNanoUsd: 2 });
+  });
+  it('uncapped authority preserves monthly accounting beyond the limit and rejects invalid modes', async () => {
+    const db = fakeDb(); const now = Date.parse('2026-10-24T00:00:00Z');
+    const path = 'free_chat_chain/paid_budget_policy';
+    const policy = { kind: 'paid_budget_policy', version: 1, revision: 1, capNanoUsd: 0, budgetMode: 'uncapped', updatedAt: now, source: 'admin' };
+    db.docs.set(path, policy);
+    expect(await reserveMonthly(db, 0, 25, now)).toBe('2026-10');
+    expect(await reserveMonthly(db, 0, 25, now)).toBe('2026-10');
+    expect(db.docs.get('free_chat_chain/state/paid_month/2026-10')).toMatchObject({ heldNanoUsd: 50, spentNanoUsd: 0 });
+    db.docs.set(path, { ...policy, budgetMode: 'capped' });
+    expect(await reserveMonthly(db, 0, 1, now)).toBeNull();
+    db.docs.set(path, { ...policy, budgetMode: 'bogus' });
+    expect(await reserveMonthly(db, 0, 1, now)).toBeNull();
   });
   it('storage failure fails closed', async () => { expect(await reserveMonthly({ collection: () => { throw new Error('x'); } } as any, 10, 1)).toBeNull(); });
   it('month boundary follows IST', () => { expect(monthKey(Date.parse('2026-10-31T19:00:00Z'))).toBe('2026-11'); });

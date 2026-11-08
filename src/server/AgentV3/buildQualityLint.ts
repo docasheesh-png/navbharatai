@@ -27,6 +27,7 @@ import {
 import { lintA11y, type A11yLintResult } from '../AppMakerLab/intelligence/A11yLinter';
 import { stripCommentsForMarkup } from './stripCodeComments';
 import { blankOurMarkup } from './ourInjectedMarkup';
+import { isKnownKitVersion } from '../lib/gameRecipeLayers';
 
 /**
  * Source files worth linting. Everything else is noise the linters would only mis-read.
@@ -164,11 +165,12 @@ export interface BuildQualityLint {
  */
 export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | null {
   const parts: string[] = [];
+  const colorParts: string[] = [];
   let total = 0;
   let truncated = false;
   let fileCount = 0;
 
-  const selected: Array<[string, string]> = [];
+  const selected: Array<[string, string, string]> = [];
 
   for (const [path, content] of Object.entries(files || {})) {
     if (typeof path !== 'string' || typeof content !== 'string') continue;
@@ -179,7 +181,12 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
     // injected (autopsy 9c612cdb: our badge's `gap:6px` was the eighth off-grid value). Length-preserving.
     const shipped = shippedDesignText(path, content);
     parts.push(shipped);
-    selected.push([path, shipped]);
+    // BR1954/Q-2311: a byte-identical reviewed kit palette is not ad-hoc user UI colour.
+    // Only colour analysis uses this boundary. Accessibility, fonts and spacing still see every byte.
+    // Edited/unknown content, even at a kit path, remains fully judged.
+    const colorCode = isKnownKitVersion(path, content) ? '' : shipped;
+    colorParts.push(colorCode);
+    selected.push([path, shipped, colorCode]);
     total += content.length;
     fileCount++;
   }
@@ -189,10 +196,10 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
   if (fileCount === 0) return null;
 
   const joined = parts.join('\n');
-  const tokenModuleCode = selected.filter(([p]) => TOKEN_MODULE_PATH.test(p)).map(([, c]) => c).join('\n');
+  const tokenModuleCode = selected.filter(([p]) => TOKEN_MODULE_PATH.test(p)).map(([, , c]) => c).join('\n');
   const attributed = attributeOffenders(selected);
   return {
-    design: lintDesign(joined, { tokenModuleCode }),
+    design: lintDesign(joined, { tokenModuleCode, colorCode: colorParts.join('\n') }),
     a11y: lintA11y(joined),
     fileCount,
     truncated,
@@ -212,12 +219,12 @@ const OFF_GRID_TYPE = 'off-grid-spacing';
  * measured for. Total on its inputs: a linter that throws on one file costs that file's attribution,
  * never the whole result.
  */
-function attributeOffenders(selected: ReadonlyArray<readonly [string, string]>): { offenders: Record<string, FileOffence[]>; fileCount: Record<string, number> } {
+function attributeOffenders(selected: ReadonlyArray<readonly [string, string, string]>): { offenders: Record<string, FileOffence[]>; fileCount: Record<string, number> } {
   const byType = new Map<string, FileOffence[]>();
-  for (const [path, content] of selected) {
+  for (const [path, content, colorCode] of selected) {
     let found: Array<{ type: string; count: number }> = [];
     try {
-      found = [...lintDesign(content, { tokenModuleCode: TOKEN_MODULE_PATH.test(path) ? content : '' }).violations, ...lintA11y(content).violations]
+      found = [...lintDesign(content, { tokenModuleCode: TOKEN_MODULE_PATH.test(path) ? colorCode : '', colorCode }).violations, ...lintA11y(content).violations]
         .filter((v) => v.type !== OFF_GRID_TYPE)
         .map((v) => ({ type: v.type, count: v.count }));
       // 🔴 EVERY FILE THAT ADDS TO THE SPACING COUNT IS NAMED (autopsy 9c612cdb). The headline counts

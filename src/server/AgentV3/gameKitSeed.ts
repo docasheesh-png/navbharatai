@@ -49,6 +49,8 @@
 //
 // PURE — no I/O. The route supplies the outcomes; this module plans the run and words the handoff.
 
+import { buildGameContract, gameContractBlock, gameScopeContractEnabled, type GameScopeContract } from './gameIntent';
+import { kitTypeContract, KIT_CONTRACT_FILES } from '../lib/kitTypeContract';
 import { namedNonSmartphone } from './deviceTarget';
 import { analyzeRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { wantsSceneObjects, heroObjectContract } from '../lib/heroObjectSpec';
@@ -281,4 +283,28 @@ export function builderWrittenCount(written: ReadonlyMap<string, string>, kitSee
 /** L3 preparation is allowed only after this new-game seed actually installed its 3D recipe. */
 export function gameKitCanPrepareAssets(results: readonly GameKitSeedResult[]): boolean {
   return results.some(result => result.recipe === 'generate_game_3d' && result.ok);
+}
+
+/** BR1954: the game request/API contract is a build prerequisite, not a reward for a fresh seed.
+ * Pure snapshot handoff. No reads, writes, recipes, provider calls or continuation after Stop.
+ * Module/import scopes remain independent; the seed's preservation/refresh gates are untouched.
+ */
+export function gameTurnHandoff(
+  prompt: string,
+  files: Readonly<Record<string, string>>,
+  options: { writingRun: boolean; moduleTurn: boolean; importTurn: boolean; stopped: boolean },
+  env: NodeJS.ProcessEnv = process.env,
+): { contract: GameScopeContract | null; block: string } {
+  if (!options.writingRun || options.moduleTurn || options.importTurn || options.stopped
+    || analyzeRequirementGaps(prompt).domain !== 'game') return { contract: null, block: '' };
+  const contract = gameScopeContractEnabled(env) ? buildGameContract(prompt) : null;
+  // Only known producer paths; never dump arbitrary project files into the API block.
+  const producers = Object.fromEntries(KIT_CONTRACT_FILES.filter((p) => typeof files[p] === 'string').map((p) => [p, files[p]]));
+  const api = kitTypeContract(producers, 12_000);
+  return { contract, block: [
+    contract ? gameContractBlock(contract) : '',
+    api ? '[GAME KIT API SNAPSHOT — saved start-of-turn source plus acknowledged seed/refresh writes; '
+      + 'NOT a fresh sandbox read. If the compiler disagrees, read the current producer. '
+      + 'Match the consumer to the library; never add a guessed API to make it fit.]\n' + api : '',
+  ].filter(Boolean).join('\n\n') };
 }

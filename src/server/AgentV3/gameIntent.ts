@@ -24,6 +24,10 @@ export type GameFeature =
   | 'multiplayer' | 'sound' | 'restart' | 'pause' | 'health' | 'throttle' | 'braking';
 /** The vehicle the player drives or flies, when the request names one. */
 export type GameVehicle = 'train' | 'car' | 'bus' | 'truck' | 'motorcycle' | 'bicycle' | 'aircraft' | 'boat' | 'tractor' | 'rickshaw';
+/** Explicit runner requirements are not collapsed into a generic 'powerups' bucket. */
+export type RunnerMechanic = 'auto-run' | 'lane-change' | 'jump' | 'slide' | 'obstacles'
+  | 'currency-counters' | 'character-shop' | 'currency-unlocks' | 'high-score' | 'collision-game-over';
+export type GameCollectible = 'coins' | 'diamonds';
 export type GameCamera = 'third-person' | 'first-person' | 'top-down' | 'unspecified';
 
 export interface GameScopeContract {
@@ -50,6 +54,11 @@ export interface GameScopeContract {
   subjects?: string[];
   /** Did the request ask for real 3D models/assets rather than primitive placeholders? */
   externalAssets?: boolean;
+  /** BR1954: named actions/economy survive the contract, including on existing-game edits. */
+  runnerMechanics?: RunnerMechanic[];
+  collectibles?: GameCollectible[];
+  minimumUnlockableCharacters?: number;
+
 }
 
 export function gameScopeContractEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -67,7 +76,7 @@ const GENRES: ReadonlyArray<[GameGenre, RegExp]> = [
   ['card', /\b(card game|solitaire|poker|uno|teen ?patti|rummy)\b/i],
   ['board', /\b(chess|ludo|tic[- ]?tac[- ]?toe|checkers|carrom|board game|snakes? and ladders?)\b/i],
   ['puzzle', /\b(puzzle|sudoku|match[- ]?3|candy|2048|tetris|crossword|memory game)\b/i],
-  ['runner', /\b(endless runner|runner|subway surf)/i],
+  ['runner', /\b(endless\s+runn(?:er|ing)|runner|subway surf)|(?:एंडलेस|अंतहीन)\s*(?:रनर|रनिंग|दौड़)/i],
   ['platformer', /\b(platformer|mario|jump(ing)? game)\b/i],
   ['shooter', /\b(shoot(er|ing)|fps|gun|space invaders?|bullet)\b/i],
   ['fighting', /\b(fight(ing)?|god of war|combat|brawler|boxing)\b/i],
@@ -83,7 +92,7 @@ const FEATURES: ReadonlyArray<[GameFeature, RegExp]> = [
   ['lives', /\blives\b|\b\d+\s*li(fe|ves)\b/i],
   ['timer', /\b(timer|countdown|time limit|stopwatch)\b/i],
   ['enemies', /\b(enem(y|ies)|monsters?|zombies?|aliens?|bosse?s?)\b/i],
-  ['powerups', /\b(power[- ]?ups?|boosts?|coins?|collectibles?)\b/i],
+  ['powerups', /\b(power[- ]?ups?|boosts?)\b/i],
   ['leaderboard', /\b(leader ?board|rankings?)\b/i],
   ['multiplayer', /\b(multi-?player|online|pvp|co-?op|2 players?|two players?)\b/i],
   ['sound', /\b(sound|music|audio|sfx)\b/i],
@@ -128,6 +137,46 @@ const CONTROLS: ReadonlyArray<[GameControl, RegExp]> = [
   ['gamepad', /\b(gamepad|controller)\b/i],
 ];
 
+/** Precision-first, local clauses: a declined mechanic is never promoted to a requirement.
+ * Keep the shared reader, then recognize Devanagari declines without ASCII word boundaries.
+ */
+function runnerRequestText(text: string): string {
+  return withoutDeclinedSentences(text).split(/[.!?।\n;,]+/u).filter((clause) =>
+    !/(?:नहीं|नही|मत)\s*(?:चाहिए|चाहिये|चाहते|चाहता|होना|करना|करो|बनाओ|जोड़ो)|(?:हटाओ|हटाना|निकालो)/u.test(clause)
+      && !/^\s*(?:please\s+)?(?:remove|delete|drop|disable|hide)\b/i.test(clause)
+  ).join(' ');
+}
+
+const RUNNER_MECHANICS: ReadonlyArray<[RunnerMechanic, RegExp]> = [
+  ['auto-run', /\b(?:auto[- ]?run|continuous(?:ly)?\s+(?:forward|run)|endless\s+runn(?:er|ing))\b|लगातार[^।\n]{0,55}(?:दौड़|दौड़)/i],
+  ['lane-change', /\b(?:lane[- ]?(?:chang\w*|switch\w*)|switch\s+lanes?|change\s+lanes?)\b|\bswipe\s+left\b[^।\n]{0,65}\bright\b|रास्ता\s*बदल/i],
+  ['jump', /\bjump(?:ing)?\b|(?:कूद|जंप)/i],
+  ['slide', /\bslid(?:e|ing)\b|स्लाइड/i],
+  ['obstacles', /\bobstacles?\b|बाधा(?:एं|एँ|ओं)?/i],
+  ['currency-counters', /\b(?:coin|diamond|currency)s?\s*(?:counter|count|balance)s?\b|काउंटर|अलग[^।\n]{0,20}गिनती/i],
+  ['character-shop', /\bcharacter\s+shop\b|कैरेक्टर\s*(?:शॉप|दुकान)/i],
+  ['currency-unlocks', /\b(?:coin|diamond)s?\b[^।\n]{0,60}(?:\bspend\w*\b|खर्च)[^।\n]{0,80}\bunlock\w*\b|\b(?:spend|use)\b[^।\n]{0,30}\b(?:coin|diamond)s?\b[^।\n]{0,80}\bunlock\w*\b|(?:सिक्के|हीरे)[^।\n]{0,60}खर्च[^।\n]{0,80}अनलॉक/i],
+  ['high-score', /\bhigh\s*score\b|हाई\s*स्कोर|सर्वाधिक\s*स्कोर/i],
+  ['collision-game-over', /\b(?:collision|collid\w*|crash)\b[^।\n]{0,100}\bgame\s*over\b|टक्कर[^।\n]{0,80}\bgame\s*over\b/i],
+];
+
+function runnerRequirements(prompt: string): Pick<GameScopeContract, 'runnerMechanics' | 'collectibles' | 'minimumUnlockableCharacters'> {
+  const text = runnerRequestText(prompt);
+  const collectibles: GameCollectible[] = [];
+  if (/\bcoins?\b|सिक्के|सिक्कों/i.test(text)) collectibles.push('coins');
+  if (/\bdiamonds?\b|हीरे|हीरों/i.test(text)) collectibles.push('diamonds');
+  const runnerMechanics = RUNNER_MECHANICS.filter(([name, re]) => re.test(text)
+    && (name !== 'currency-counters' || collectibles.length > 0)).map(([name]) => name);
+  const digits = text.replace(/[०-९]/g, (d) => String(d.charCodeAt(0) - '०'.charCodeAt(0)));
+  const min = /(?:at\s+least|minimum|कम\s*से\s*कम)\s*(\d+)\s*(?:(?:different|अलग[- ]अलग)\s*)?(?:unlockable\s+|अनलॉक\s*करने\s*योग्य\s*)(?:characters?|कैरेक्टर)/i.exec(digits);
+  const minimumUnlockableCharacters = min ? Number(min[1]) : undefined;
+  return {
+    ...(runnerMechanics.length ? { runnerMechanics } : {}),
+    ...(collectibles.length ? { collectibles } : {}),
+    ...(minimumUnlockableCharacters && Number.isSafeInteger(minimumUnlockableCharacters) ? { minimumUnlockableCharacters } : {}),
+  };
+}
+
 /** The request's own words → the contract. PURE; never throws. */
 export function buildGameContract(prompt: string | null | undefined): GameScopeContract {
   // What the user DECLINED is not what they named (autopsy 958aa1ec: "no login, multiplayer, purchases" made
@@ -158,6 +207,7 @@ export function buildGameContract(prompt: string | null | undefined): GameScopeC
     vehicle,
     camera,
     subjects: SUBJECTS.filter(([, re]) => re.test(text)).map(([n]) => n),
+    ...(genre === 'runner' ? runnerRequirements(String(prompt ?? '')) : {}),
     externalAssets: !/\b(procedural (geometry )?only|no (external|downloaded|3d) (image\/)?(models?|assets?))\b/i.test(text) && /\b(external|free|real|realistic|cc0|downloaded?|glb|gltf)\b[^.]{0,40}\b(3d )?(assets?|models?)\b|\bnot (primitive|placeholder)|\bno (primitive|placeholder)s?\b/i.test(text),
   };
 }
@@ -175,6 +225,10 @@ export function gameContractBlock(c: GameScopeContract): string {
     c.externalAssets ? 'The user asked for real 3D models, not primitive placeholders — use the models already in src/game/three/assetModels.ts where they exist.' : '',
     c.controls.length ? `Controls the user asked for: ${c.controls.join(', ')} (keep touch working on a phone too).` : 'Controls: keyboard AND on-screen touch.',
     c.requiredFeatures.length ? `Features the user named — each must really work in the game: ${c.requiredFeatures.join(', ')}.` : '',
+    c.runnerMechanics?.length ? `Runner mechanics explicitly requested — implement every one, not just labels: ${c.runnerMechanics.join(', ')}.` : '',
+    c.collectibles?.length ? `Named collectibles: ${c.collectibles.join(', ')}. They are distinct currencies/collectibles, not permission to invent power-ups or real-money purchases.` : '',
+    c.minimumUnlockableCharacters ? `At least ${c.minimumUnlockableCharacters} distinct unlockable characters, with actual unlock conditions and selection behavior; never just a labelled roster.` : '',
+    c.runnerMechanics?.includes('currency-unlocks') ? 'Currency unlocks must really spend the named in-game balance, reject unaffordable purchases and allow selecting an unlocked character; not a shop mockup.' : '',
     c.winLoseNamed ? 'The request names a win/lose condition — the game must reach it and show it.' : 'Give the game a clear goal and a game-over / win screen with a way to play again.',
   ];
   return lines.filter(Boolean).join('\n');
@@ -198,7 +252,12 @@ const PRESENT: Readonly<Record<GameFeature, RegExp>> = {
   braking: /\b(brak\w*|decelerat\w*|driveVehicle)\b/i,
 };
 
-export interface ScopeMatch { present: GameFeature[]; missing: GameFeature[] }
+export interface ScopeMatch {
+  present: GameFeature[];
+  missing: GameFeature[];
+  /** Code tokens cannot prove movement, separate balances, affordable unlocks or character count. */
+  unverified?: string[];
+}
 
 /** Compare the contract with the game's own files (kit engine files excluded — they are not the game). PURE. */
 export function scopeMatch(c: GameScopeContract, files: Record<string, string>): ScopeMatch {
@@ -208,5 +267,10 @@ export function scopeMatch(c: GameScopeContract, files: Record<string, string>):
   const present: GameFeature[] = [];
   const missing: GameFeature[] = [];
   for (const f of c.requiredFeatures) (PRESENT[f].test(code) ? present : missing).push(f);
-  return { present, missing };
+  const unverified = [
+    ...(c.runnerMechanics ?? []),
+    ...(c.collectibles ?? []),
+    ...(c.minimumUnlockableCharacters ? [`${c.minimumUnlockableCharacters} unlockable characters`] : []),
+  ];
+  return { present, missing, ...(unverified.length ? { unverified } : {}) };
 }

@@ -45,6 +45,9 @@ describe('BR1952 D03: planner choices do not override original architecture cons
   it.each([['vite-react','Build the app as a Vite React project'],['vue','Build the app with Vue Single-File Components'],['vite-react','Do not use a single HTML file; keep the React project']])('preserves compatible or negated choices: %s %s',(framework,brief)=>{
     expect(roadmapGuardrail(roadmap(brief),null,{framework,originalRequest:original}).roadmap).not.toBeNull();
   });
+  it.each(['python-fastapi','node-express'])('does not invent an architecture conflict for a compatible backend-served HTML frontend: %s',framework=>{
+    expect(roadmapGuardrail(roadmap('Build the viewer frontend as a single HTML file served by the existing API'),null,{framework,originalRequest:'Build a video viewing API and frontend'}).roadmap).not.toBeNull();
+  });
   it('does not reject a genuinely requested one-file static app',()=>{
     expect(roadmapGuardrail(roadmap('Build a single HTML file video viewer'),null,{framework:'static',originalRequest:'single file HTML video app'}).roadmap).not.toBeNull();
   });

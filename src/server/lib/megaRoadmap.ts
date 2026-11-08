@@ -331,8 +331,9 @@ export function roadmapGuardrail(
   if (!parsed) return { roadmap: null, rejected: ['no parseable roadmap'] };
 
   // BR1952: a planner's invented single-HTML policy must not override the selected Vite project.
+  // A backend may legitimately serve one HTML frontend: non-static alone is not a contradiction.
   // Reject the whole dependent roadmap rather than dropping a prerequisite and renumbering later steps.
-  if (architecture && architecture.framework !== 'static'
+  if (architecture && architecture.framework === 'vite-react'
     && !requiresSingleHtml(architecture.originalRequest)
     && parsed.steps.some((step) => requiresSingleHtml(step.buildPrompt))) {
     return { roadmap: null, rejected: [`roadmap architecture conflicts with selected ${architecture.framework}: single HTML is a planner choice, not a user constraint`] };
